@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.observatory.corrections import CorrectionSet, fold_corrections
+import lovspor.observatory.corrections as corrections_module
+import lovspor.observatory.log as log_module
+from lovspor.observatory.corrections import CorrectionSet, Refiled, fold_corrections
 from lovspor.observatory.log import ObservationLog, verify_snapshot
 from lovspor.observatory.model import (
     ArtifactObservation,
@@ -119,6 +121,20 @@ class TestTheCorrectedView:
 
         assert corrected(log) == records
 
+    def test_without_corrections_the_view_does_not_hash_lines(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        log = make_log(tmp_path)
+        original = artifact("a")
+        log.append(original)
+
+        def unexpected_hash(_line: bytes) -> str:
+            pytest.fail("an empty correction set must not hash observation lines")
+
+        monkeypatch.setattr(corrections_module, "record_key", unexpected_hash)
+
+        assert corrected(log) == [original]
+
     def test_a_corrected_original_is_replaced_at_its_own_position(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         first, middle, last = artifact("a", "4203"), artifact("b"), artifact("c", "4203")
@@ -184,6 +200,24 @@ class TestTheCorrectedView:
 
         assert [record.authority_id for record in corrected(log)] == ["4203"]  # type: ignore[union-attr]
 
+    def test_a_cycle_in_the_correction_chain_stops_at_the_first_repeated_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original = artifact("a")
+        replacement = refiled(original, "4203")
+        key = key_of(original)
+        calls = 0
+
+        def cyclic(_corrections: CorrectionSet, candidate: str) -> Refiled:
+            nonlocal calls
+            calls += 1
+            assert calls == 1, "the repeated key must stop resolution before another lookup"
+            return Refiled(replacement, candidate)
+
+        monkeypatch.setattr(CorrectionSet, "in_force", cyclic)
+
+        assert CorrectionSet().resolve(original, key) == replacement.observation
+
     def test_the_first_completed_correction_stands(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         original = artifact("a")
@@ -223,6 +257,16 @@ class TestTheCorrectedView:
 
 
 class TestTheCorrectionFold:
+    def test_a_fresh_reader_folds_a_correction_in_the_first_line(self, tmp_path: Path) -> None:
+        writer = make_log(tmp_path)
+        original = artifact("a")
+        writer.append(refiled(original, "4203"))
+        writer.append(tombstone(key_of(original)))
+
+        corrections = make_log(tmp_path).corrections()
+
+        assert corrections.in_force(key_of(original)) is not None
+
     def test_is_extended_from_where_it_stopped(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         original = artifact("a")
@@ -245,6 +289,51 @@ class TestTheCorrectionFold:
         log.log_path.write_bytes(prefix)
 
         assert not log.corrections()
+
+    def test_a_cached_fold_is_not_reapplied_when_the_size_is_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        log = make_log(tmp_path)
+        original = artifact("a")
+        log.append(original)
+        correct(log, original)
+
+        cached = log.corrections()
+
+        def unexpected_fold(_path: Path, _into: CorrectionSet, _start: int) -> int:
+            pytest.fail("an unchanged log must not be folded again")
+
+        monkeypatch.setattr(log_module, "fold_corrections", unexpected_fold)
+
+        assert log.corrections() is cached
+
+    def test_an_empty_truncation_restarts_the_next_fold_at_byte_zero(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        original = artifact("a")
+        log.append(original)
+        correct(log, original)
+        assert log.corrections()
+
+        log.log_path.write_bytes(b"")
+        assert not log.corrections()
+        log.append(original)
+        correct(log, original)
+
+        assert log.corrections().in_force(key_of(original)) is not None
+
+    def test_a_correction_after_empty_truncation_is_read_from_byte_zero(
+        self, tmp_path: Path
+    ) -> None:
+        log = make_log(tmp_path)
+        original = artifact("a")
+        correct(log, original)
+        assert log.corrections()
+
+        log.log_path.write_bytes(b"")
+        assert not log.corrections()
+        correct(log, original)
+
+        assert log.corrections().in_force(key_of(original)) is not None
 
     def test_an_absent_log_has_no_corrections(self, tmp_path: Path) -> None:
         assert not make_log(tmp_path).corrections()
@@ -277,6 +366,24 @@ class TestTheCorrectionFold:
         log.append(artifact("record_tombstone"))
 
         assert not log.corrections()
+
+    def test_only_correction_candidate_lines_are_parsed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        log = make_log(tmp_path)
+        log.append(artifact("ordinary"))
+        parsed: list[bytes] = []
+        original_fold_line = corrections_module._fold_line
+
+        def track_candidate(into: CorrectionSet, line: bytes, end: int) -> None:
+            parsed.append(line)
+            original_fold_line(into, line, end)
+
+        monkeypatch.setattr(corrections_module, "_fold_line", track_candidate)
+
+        fold_corrections(log.log_path, CorrectionSet(), 0)
+
+        assert parsed == []
 
 
 class TestTheBlobTombstoneIsUntouched:
@@ -325,18 +432,32 @@ class TestVerifyAuditsCorrections:
         report = verify_snapshot(log)
 
         assert report.incomplete_corrections == (key_of(original),)
+        assert report.corrections_without_record == ()
         assert not report.ok
 
     def test_a_tombstone_half_alone_is_an_incomplete_correction(self, tmp_path: Path) -> None:
         log, original = self._stored(tmp_path)
         log.append(tombstone(key_of(original)))
 
-        assert verify_snapshot(log).incomplete_corrections == (key_of(original),)
+        report = verify_snapshot(log)
 
-    def test_halves_disagreeing_on_who_or_why_are_not_one_correction(self, tmp_path: Path) -> None:
+        assert report.incomplete_corrections == (key_of(original),)
+        assert report.corrections_without_record == ()
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("reason", "a different reason"),
+            ("corrected_by", "someone else"),
+            ("corrected_at", CORRECTED_AT + timedelta(seconds=1)),
+        ],
+    )
+    def test_halves_disagreeing_on_attribution_are_not_one_correction(
+        self, tmp_path: Path, field: str, value: object
+    ) -> None:
         log, original = self._stored(tmp_path)
         log.append(refiled(original, "4203"))
-        log.append(tombstone(key_of(original)).model_copy(update={"corrected_by": "someone"}))
+        log.append(tombstone(key_of(original)).model_copy(update={field: value}))
 
         report = verify_snapshot(log)
 
