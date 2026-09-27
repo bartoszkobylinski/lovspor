@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from lovspor.observatory.corrections import CorrectionSet, fold_corrections
-from lovspor.observatory.log import ObservationLog
+from lovspor.observatory.log import ObservationLog, verify_snapshot
 from lovspor.observatory.model import (
     ArtifactObservation,
     Correction,
@@ -295,3 +295,158 @@ class TestTheBlobTombstoneIsUntouched:
         log.append_artifact(original.model_copy(update={"authority_id": "4203"}), b"a")
 
         assert log.blob_path(original.sha256).read_bytes() == b"a"
+
+
+class TestVerifyAuditsCorrections:
+    """ADR-0015 §5: `verify` reads the raw log and fails a correction that
+    does not account for itself."""
+
+    def _stored(self, root: Path) -> tuple[ObservationLog, ArtifactObservation]:
+        log = make_log(root)
+        original = artifact("a")
+        log.append_artifact(original, b"a")
+        return log, original
+
+    def test_a_complete_correction_is_clean(self, tmp_path: Path) -> None:
+        log, original = self._stored(tmp_path)
+        correct(log, original)
+
+        report = verify_snapshot(log)
+
+        assert report.ok, report
+        assert report.artifacts_checked == 1
+
+    def test_a_refiled_half_alone_is_an_incomplete_correction(self, tmp_path: Path) -> None:
+        log, original = self._stored(tmp_path)
+        log.append(refiled(original, "4203"))
+
+        report = verify_snapshot(log)
+
+        assert report.incomplete_corrections == (key_of(original),)
+        assert not report.ok
+
+    def test_a_tombstone_half_alone_is_an_incomplete_correction(self, tmp_path: Path) -> None:
+        log, original = self._stored(tmp_path)
+        log.append(tombstone(key_of(original)))
+
+        assert verify_snapshot(log).incomplete_corrections == (key_of(original),)
+
+    def test_a_tombstone_naming_no_line_is_reported(self, tmp_path: Path) -> None:
+        log, _ = self._stored(tmp_path)
+        log.append(tombstone("f" * 64))
+
+        report = verify_snapshot(log)
+
+        assert report.corrections_without_record == ("f" * 64,)
+        assert not report.ok
+
+    def test_a_refiled_record_changing_an_uncorrected_field_is_reported(
+        self, tmp_path: Path
+    ) -> None:
+        log, original = self._stored(tmp_path)
+        forged = refiled(original, "4203")
+        log.append(
+            forged.model_copy(
+                update={"observation": forged.observation.model_copy(update={"url": "x"})}
+            )
+        )
+        log.append(tombstone(key_of(original)))
+
+        report = verify_snapshot(log)
+
+        assert report.refiled_mismatches == (key_of(original),)
+        assert not report.ok
+
+    def test_wrong_previous_values_are_reported(self, tmp_path: Path) -> None:
+        log, original = self._stored(tmp_path)
+        forged = refiled(original, "4203")
+        log.append(
+            forged.model_copy(
+                update={
+                    "correction": forged.correction.model_copy(
+                        update={"previous_values": {"authority_id": "3201"}}
+                    )
+                }
+            )
+        )
+        log.append(tombstone(key_of(original)))
+
+        assert verify_snapshot(log).refiled_mismatches == (key_of(original),)
+
+    def test_a_refiled_record_of_another_kind_is_reported(self, tmp_path: Path) -> None:
+        log, original = self._stored(tmp_path)
+        other = failure("a")
+        record = refiled(other, "4203")
+        log.append(
+            record.model_copy(
+                update={
+                    "correction": record.correction.model_copy(
+                        update={"supersedes": key_of(original)}
+                    )
+                }
+            )
+        )
+        log.append(tombstone(key_of(original)))
+
+        assert verify_snapshot(log).refiled_mismatches == (key_of(original),)
+
+    def test_a_correction_of_a_blob_tombstone_is_reported(self, tmp_path: Path) -> None:
+        log, original = self._stored(tmp_path)
+        removal = Tombstone(sha256="e" * 64, removed_at=CORRECTED_AT, basis="x", authorised_by="y")
+        log.append(removal)
+        record = refiled(original, "4203")
+        log.append(
+            record.model_copy(
+                update={
+                    "correction": record.correction.model_copy(
+                        update={"supersedes": key_of(removal)}
+                    )
+                }
+            )
+        )
+        log.append(tombstone(key_of(removal)))
+
+        assert key_of(removal) in verify_snapshot(log).refiled_mismatches
+
+    def test_an_original_corrected_twice_is_reported(self, tmp_path: Path) -> None:
+        log, original = self._stored(tmp_path)
+        correct(log, original, correction_id="c1")
+        correct(log, original, correction_id="c2")
+
+        report = verify_snapshot(log)
+
+        assert report.multiply_corrected == (key_of(original),)
+        assert not report.ok
+
+    def test_a_chained_correction_is_audited_against_its_refiled_original(
+        self, tmp_path: Path
+    ) -> None:
+        log, original = self._stored(tmp_path)
+        wrong = correct(log, original, to="9999", correction_id="c1")
+        second = refiled(original, "4203", "c2")
+        log.append(
+            second.model_copy(
+                update={
+                    "correction": second.correction.model_copy(
+                        update={
+                            "supersedes": key_of(wrong),
+                            "previous_values": {"authority_id": "9999"},
+                        }
+                    )
+                }
+            )
+        )
+        log.append(tombstone(key_of(wrong), correction_id="c2"))
+
+        assert verify_snapshot(log).ok
+
+    def test_a_damaged_log_is_not_audited_for_corrections(self, tmp_path: Path) -> None:
+        log, _ = self._stored(tmp_path)
+        log.append(tombstone("f" * 64))
+        with log.log_path.open("ab") as handle:
+            handle.write(b"{torn")
+
+        report = verify_snapshot(log)
+
+        assert report.incomplete_final_record is True
+        assert report.corrections_without_record == ()

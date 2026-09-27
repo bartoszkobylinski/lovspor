@@ -24,6 +24,13 @@ def _defects(result: SnapshotVerification) -> list[str]:
         (result.unremoved_tombstones, "tombstoned blobs still on disk"),
         (result.tombstones_without_observation, "tombstones for hashes never observed"),
         (result.observations_after_tombstone, "observations appended after their tombstone"),
+        (result.corrections_without_record, "corrections naming no record in the log"),
+        (result.refiled_mismatches, "re-filed records that do not restate their original"),
+        (result.multiply_corrected, "records corrected more than once"),
+        (
+            result.incomplete_corrections,
+            "incomplete corrections (one half only) — re-run the correction to complete it",
+        ),
     )
     return [f"{len(found)} {label}" for found, label in counted if found]
 

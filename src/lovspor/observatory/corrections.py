@@ -23,9 +23,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from lovspor.observatory.model import (
+    ArtifactObservation,
+    FetchFailure,
     ObservationRecord,
     RecordTombstone,
     RefiledObservation,
@@ -148,3 +150,77 @@ def corrected_view(
         collect(corrections.resolve(record, record_key(line)) if corrections else record)
 
     return view
+
+
+class CorrectionAudit(BaseModel):
+    """What ``verify`` finds wrong with the corrections in a log (ADR-0015 §5).
+
+    Each list holds the keys of the records the defective corrections name.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: A correction half whose key matches no line in the log.
+    corrections_without_record: tuple[str, ...] = ()
+    #: A re-filed record that changes a field it does not declare, or whose
+    #: ``previous_values`` are not what the original says.
+    refiled_mismatches: tuple[str, ...] = ()
+    #: An original named by more than one completed correction.
+    multiply_corrected: tuple[str, ...] = ()
+    #: One half of a correction present without the other.
+    incomplete_corrections: tuple[str, ...] = ()
+
+
+def collect_named(
+    corrections: CorrectionSet, into: dict[str, ObservationRecord]
+) -> Callable[[ObservationRecord, bytes], None]:
+    """A line collector keeping every record a correction names, by its key."""
+    named = set(corrections.refiled) | set(corrections.tombstones)
+
+    def collect(record: ObservationRecord, line: bytes) -> None:
+        key = record_key(line)
+        if key in named:
+            into.setdefault(key, record)
+
+    return collect
+
+
+def audit_corrections(
+    corrections: CorrectionSet, named: dict[str, ObservationRecord]
+) -> CorrectionAudit:
+    """Audit every correction against the records it names, read raw."""
+    keys = set(corrections.refiled) | set(corrections.tombstones)
+    return CorrectionAudit(
+        corrections_without_record=tuple(sorted(keys - named.keys())),
+        refiled_mismatches=tuple(
+            sorted(
+                key
+                for key, entries in corrections.refiled.items()
+                if key in named and not all(_faithful(e.record, named[key]) for e in entries)
+            )
+        ),
+        multiply_corrected=tuple(sorted(k for k in keys if len(corrections.completed(k)) > 1)),
+        incomplete_corrections=tuple(sorted(k for k in keys if _unpaired(corrections, k))),
+    )
+
+
+def _faithful(refiled: RefiledObservation, original: ObservationRecord) -> bool:
+    """True when ``refiled`` restates ``original`` except in its declared fields."""
+    if isinstance(original, RefiledObservation):
+        original = original.observation
+    if not isinstance(original, ArtifactObservation | FetchFailure):
+        return False
+    correction = refiled.correction
+    fields: set[str] = set(correction.corrected_fields)
+    if any(
+        getattr(original, name) != correction.previous_values[name]
+        for name in correction.corrected_fields
+    ):
+        return False
+    return refiled.observation.model_dump(exclude=fields) == original.model_dump(exclude=fields)
+
+
+def _unpaired(corrections: CorrectionSet, key: str) -> bool:
+    retracted = {tombstone.correction_id for tombstone in corrections.tombstones.get(key, [])}
+    refiled = {entry.record.correction.correction_id for entry in corrections.refiled.get(key, [])}
+    return bool(retracted ^ refiled)

@@ -28,7 +28,13 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from lovspor.atomic_io import atomic_write_bytes
 from lovspor.errors import LogIntegrityError, StorageBoundaryError, TombstonedArtifactError
-from lovspor.observatory.corrections import CorrectionSet, corrected_view, fold_corrections
+from lovspor.observatory.corrections import (
+    CorrectionSet,
+    audit_corrections,
+    collect_named,
+    corrected_view,
+    fold_corrections,
+)
 from lovspor.observatory.model import (
     ArtifactObservation,
     ObservationRecord,
@@ -100,6 +106,12 @@ class SnapshotVerification(BaseModel):
     observations_after_tombstone: tuple[str, ...] = ()
     incomplete_final_record: bool = False
     malformed_lines: tuple[int, ...] = ()
+    #: The correction audit (ADR-0015 §5); see
+    #: :class:`~lovspor.observatory.corrections.CorrectionAudit`.
+    corrections_without_record: tuple[str, ...] = ()
+    refiled_mismatches: tuple[str, ...] = ()
+    multiply_corrected: tuple[str, ...] = ()
+    incomplete_corrections: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -122,6 +134,10 @@ class SnapshotVerification(BaseModel):
             or self.observations_after_tombstone
             or self.incomplete_final_record
             or self.malformed_lines
+            or self.corrections_without_record
+            or self.refiled_mismatches
+            or self.multiply_corrected
+            or self.incomplete_corrections
         )
 
 
@@ -548,6 +564,11 @@ def verify_snapshot(log: ObservationLog) -> SnapshotVerification:
             incomplete_final_record=scan.incomplete_final_record,
             malformed_lines=scan.malformed_lines,
         )
+    return _audit_blobs(log, timeline).model_copy(update=_audit_corrections(log))
+
+
+def _audit_blobs(log: ObservationLog, timeline: _Timeline) -> SnapshotVerification:
+    """The blob half of the audit, for a log that read to the end."""
     missing, mismatched, removed = _classify_blobs(log, timeline)
     observed = set(timeline.observed)
     retired = set(timeline.tombstoned)
@@ -561,3 +582,14 @@ def verify_snapshot(log: ObservationLog) -> SnapshotVerification:
         tombstones_without_observation=tuple(sorted(retired - observed)),
         observations_after_tombstone=tuple(timeline.observed_after_tombstone),
     )
+
+
+def _audit_corrections(log: ObservationLog) -> dict[str, tuple[str, ...]]:
+    """The correction half, read from the raw log: `verify` is the one reader
+    that must see a correction's halves rather than its result."""
+    corrections = log.corrections()
+    if not corrections:
+        return {}
+    named: dict[str, ObservationRecord] = {}
+    log.scan_lines_into(collect_named(corrections, named))
+    return dict(audit_corrections(corrections, named))

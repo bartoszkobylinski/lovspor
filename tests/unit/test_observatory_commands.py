@@ -55,6 +55,7 @@ from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import (
     ArtifactObservation,
     FetchFailure,
+    RecordTombstone,
     RetrievalProvenance,
     Tombstone,
 )
@@ -1157,6 +1158,26 @@ class TestVerify:
 
         assert result.exit_code == 1
         assert "1 tombstones for hashes never observed" in result.output
+
+    def test_a_half_written_correction_fails_the_audit(self, root: Path) -> None:
+        """ADR-0015 §6: the nightly preflight runs verify, so a correction a
+        crash left half-applied stays red until the command is re-run."""
+        log = _archive(root)
+        original = log.log_path.read_bytes().removesuffix(b"\n")
+        log.append(
+            RecordTombstone(
+                retracts=hashlib.sha256(original).hexdigest(),
+                correction_id="c1",
+                reason="misattributed",
+                corrected_by="owner",
+                corrected_at=datetime(2026, 9, 27, tzinfo=UTC),
+            )
+        )
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "1 incomplete corrections (one half only)" in result.output
 
     def test_an_observation_after_its_tombstone_is_reported(self, root: Path) -> None:
         """The public API refuses to write this; only a hand-edited log can

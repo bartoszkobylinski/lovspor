@@ -604,13 +604,6 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
 rule = "function-lines"
-path = "src/lovspor/observatory/log.py"
-name = "verify_snapshot"
-value = 21
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "function-lines"
 path = "src/lovspor/publish/check.py"
 name = "_check_caddy_map"
 value = 24
