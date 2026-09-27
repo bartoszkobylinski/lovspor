@@ -484,6 +484,31 @@ def test_backfill_malformed_argument_is_a_usage_error_with_nothing_written(
     assert not _origin_has_epoch_ref(origin)
 
 
+@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+def test_malformed_argument_is_rejected_before_any_git_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CLI contract says malformed input exits 2 before git runs."""
+    origin, _shas = _origin(tmp_path, gate_ran=True)
+    clone = _writable_clone(origin, tmp_path / "operator")
+    real_run = subprocess.run
+    git_commands: list[list[str]] = []
+
+    def observe_git(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        command = args[0]
+        if isinstance(command, list) and command[:1] == ["git"]:
+            git_commands.append(command)
+        return real_run(*args, **kwargs)  # type: ignore[arg-type, return-value]
+
+    monkeypatch.setattr(subprocess, "run", observe_git)
+
+    code, output = _cli(clone, *_backfill_args(**{"--sync-run": "not-a-run-id"}))
+
+    assert code == 2, output
+    assert git_commands == []
+
+
 @pytest.mark.parametrize("sync_run", ["0", "-5", " 77", "77 ", "007", "77\n", "9" * 21, "1_000"])
 def test_record_sync_run_malformed_run_id_is_a_usage_error(tmp_path: Path, sync_run: str) -> None:
     origin, _shas = _origin(tmp_path, gate_ran=False)
