@@ -21,7 +21,7 @@
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/cli.py"
-value = 985
+value = 984
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
