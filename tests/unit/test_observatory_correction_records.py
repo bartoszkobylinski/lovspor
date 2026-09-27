@@ -147,6 +147,11 @@ class TestRefiledObservation:
         with pytest.raises(ValidationError, match="timezone-aware UTC"):
             Correction.model_validate(_correction(corrected_at=datetime(2026, 9, 27)))
 
+    def test_non_utc_correction_time_is_refused(self) -> None:
+        oslo = datetime(2026, 9, 27, 10, 0, tzinfo=timezone(timedelta(hours=2)))
+        with pytest.raises(ValidationError, match="must be UTC"):
+            Correction.model_validate(_correction(corrected_at=oslo))
+
     def test_a_refiled_record_cannot_nest_a_correction(self) -> None:
         with pytest.raises(ValidationError):
             RefiledObservation.model_validate(
@@ -168,3 +173,23 @@ class TestRecordKey:
         assert record_key(line.encode("utf-8")) != record_key(
             record_to_json_line(ADAPTER.validate_json(line)).encode("utf-8")
         )
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            RecordTombstone.model_validate(_tombstone(reason="feilført på Sørlandet")),
+            RefiledObservation(
+                observation=_artifact(),
+                correction=Correction.model_validate(_correction(reason="feilført på Sørlandet")),
+            ),
+        ],
+    )
+    def test_correction_record_serialisation_and_keys_are_deterministic(
+        self, record: RecordTombstone | RefiledObservation
+    ) -> None:
+        first = record_to_json_line(record).encode("utf-8")
+        second = record_to_json_line(record).encode("utf-8")
+
+        assert first == second
+        assert record_key(first) == record_key(second)
+        assert b"S\xc3\xb8rlandet" in first
