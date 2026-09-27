@@ -619,7 +619,7 @@ def _capture_state(log: ObservationLog, authority_id: str | None) -> CaptureStat
         state, scan = indexed_capture_state(log)
     else:
         state = CaptureState.empty()
-        scan = log.scan_into(collect_capture_state(state, authority_id))
+        scan = log.scan_corrected_into(collect_capture_state(state, authority_id))
     if not scan.complete:
         typer.echo(
             "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
