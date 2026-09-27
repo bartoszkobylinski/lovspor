@@ -30,9 +30,9 @@ import subprocess
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from lovspor.errors import LovsporError, TemporalDerivationError
 from lovspor.temporal import count_source_amendment_notes, derive_temporal_layer
@@ -49,6 +49,13 @@ does not have yet makes every ``git fetch``/``git pull`` fail with
 plain corpus updates against a pre-gate origin. A glob that matches
 nothing is silently fine, and transports the registry the moment the
 origin gains it."""
+
+EPOCH_NOTES_REF = f"{ATTESTATION_NOTES_REF}-epoch"
+"""The gate-epoch ref (ADR-0012 Amendment 1): one immutable record per
+parser version, noted on the boundary commit. A sibling, not a second
+entry shape inside the attestation ref, whose reader would read it as
+corruption; and a name under ``ATTESTATION_FETCH_REFSPEC``'s glob, so
+consumer clones fetch it with no refspec change."""
 
 _NO_NOTE_MARKERS = ("no note found", "No note found")
 """Git's message when a commit has no note — the ABSENT answer, which is
@@ -79,6 +86,25 @@ class TemporalAttestation(BaseModel):
     notes_total: int = Field(ge=0)
     events_total: int = Field(ge=0)
     attested_at: datetime
+
+
+class TemporalGateEpoch(BaseModel):
+    """When the reconciliation gate began for one parser version.
+
+    ``epoch_at`` is the start of the first production sync run that runs
+    the gate under ``parser_version``; ``boundary_commit`` is the corpus
+    HEAD when the record was written — the last state before the epoch,
+    and the commit the note is attached to.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parser_version: int = Field(ge=1)
+    epoch_at: AwareDatetime
+    boundary_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    recorded_at: AwareDatetime
+    source: Literal["sync-run", "backfill"]
+    evidence: str = Field(min_length=1)
 
 
 def registry_synchronised(repo: Path) -> bool:
@@ -164,35 +190,39 @@ def fetch_attestations(repo: Path, remote: str = "origin") -> None:
     A remote that has no attestation ref yet (bootstrap) is fine; any
     other fetch failure is a channel failure and raises.
     """
-    present = subprocess.run(  # noqa: S603
-        ["git", "ls-remote", "--exit-code", remote, ATTESTATION_NOTES_REF],  # noqa: S607
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    _fetch_notes_ref(repo, remote, ATTESTATION_NOTES_REF)
+
+
+def fetch_gate_epochs(repo: Path, remote: str = "origin") -> None:
+    """Fetch the gate-epoch ref from ``remote``; same contract as
+    :func:`fetch_attestations` (absent on the remote is the bootstrap)."""
+    _fetch_notes_ref(repo, remote, EPOCH_NOTES_REF)
+
+
+def _fetch_notes_ref(repo: Path, remote: str, ref: str) -> None:
+    present = _git(repo, ["ls-remote", "--exit-code", remote, ref])
     if present.returncode == 2:  # noqa: PLR2004 — git: ref not found on remote
         return
     if present.returncode != 0:
         raise AttestationError(
-            f"cannot reach {remote} to check the attestation ref: {present.stderr.strip()}",
+            f"cannot reach {remote} to check the attestation ref {ref}: {present.stderr.strip()}",
         )
-    result = subprocess.run(  # noqa: S603
-        [  # noqa: S607
-            "git",
-            "fetch",
-            remote,
-            f"+{ATTESTATION_NOTES_REF}:{ATTESTATION_NOTES_REF}",
-        ],
+    result = _git(repo, ["fetch", remote, f"+{ref}:{ref}"])
+    if result.returncode != 0:
+        raise AttestationError(
+            f"failed to fetch attestation notes {ref} from {remote}: {result.stderr.strip()}",
+        )
+
+
+def _git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    # S603/S607: trusted git command, list args, no shell.
+    return subprocess.run(  # noqa: S603
+        ["git", *args],  # noqa: S607
         cwd=repo,
         capture_output=True,
         text=True,
         check=False,
     )
-    if result.returncode != 0:
-        raise AttestationError(
-            f"failed to fetch attestation notes from {remote}: {result.stderr.strip()}",
-        )
 
 
 class ReconciliationTotals(NamedTuple):
@@ -361,3 +391,171 @@ def _read_entries(repo: Path, corpus_commit: str) -> list[TemporalAttestation]:
             )
         seen_versions.add(entry.parser_version)
     return entries
+
+
+def read_gate_epochs(repo: Path) -> dict[int, TemporalGateEpoch]:
+    """Every gate-epoch record, keyed by parser version; ``{}`` when the
+    ref is absent.
+
+    Lists the notes tree and reads each note blob directly, so it never
+    needs the boundary commit's object — a ``--depth 1`` clone reads the
+    records too. An unparseable record, one anchored to a commit other
+    than its own ``boundary_commit``, or two records for one version are
+    a corrupt channel: :class:`AttestationError`, never a guessed epoch.
+    """
+    epochs: dict[int, TemporalGateEpoch] = {}
+    for blob, annotated in _note_objects(repo, EPOCH_NOTES_REF):
+        for record in _epoch_records(repo, blob):
+            if record.boundary_commit != annotated:
+                raise AttestationError(
+                    f"gate-epoch note on {annotated} carries a record for "
+                    f"{record.boundary_commit} — the evidence channel is corrupt",
+                )
+            if record.parser_version in epochs:
+                raise AttestationError(
+                    f"duplicate gate-epoch records for parser version "
+                    f"{record.parser_version} — the evidence channel is corrupt",
+                )
+            epochs[record.parser_version] = record
+    return epochs
+
+
+def attested_commits(repo: Path, parser_version: int) -> list[str]:
+    """Every commit carrying an attestation under ``parser_version``."""
+    return [
+        annotated
+        for blob, annotated in _note_objects(repo, ATTESTATION_NOTES_REF)
+        if any(entry.parser_version == parser_version for entry in _attestation_entries(repo, blob))
+    ]
+
+
+def check_gate_epoch(repo: Path, record: TemporalGateEpoch) -> bool:
+    """Validate ``record`` for writing: True when it may be written,
+    False when an identical record already exists (the idempotent retry).
+
+    ``recorded_at`` is the write stamp, not the epoch, so a record that
+    differs only there is identical. Refused, as :class:`AttestationError`:
+    a different record for an existing version (records are immutable), a
+    boundary commit whose author date is not before ``epoch_at``, and an
+    ``epoch_at`` later than the earliest attested state under the version
+    — the gate cannot have attested a state before it began.
+    """
+    existing = read_gate_epochs(repo).get(record.parser_version)
+    if existing is not None:
+        if _epoch_content(existing) == _epoch_content(record):
+            return False
+        raise AttestationError(
+            f"a different gate-epoch record for parser version "
+            f"{record.parser_version} already exists ({existing.epoch_at.isoformat()}, "
+            f"{existing.evidence}); records are immutable",
+        )
+    _check_epoch_bounds(repo, record)
+    return True
+
+
+def write_gate_epoch(repo: Path, record: TemporalGateEpoch) -> bool:
+    """Record one gate epoch; True when written, False for an identical
+    record already present. Validation is :func:`check_gate_epoch`."""
+    if not check_gate_epoch(repo, record):
+        return False
+    siblings = [
+        e for e in read_gate_epochs(repo).values() if e.boundary_commit == record.boundary_commit
+    ]
+    payload = [e.model_dump(mode="json") for e in [*siblings, record]]
+    message = json.dumps(payload, sort_keys=True)
+    result = _git(
+        repo,
+        ["notes", f"--ref={EPOCH_NOTES_REF}", "add", "-f", "-m", message, record.boundary_commit],
+    )
+    if result.returncode != 0:
+        raise AttestationError(
+            f"failed to record the gate epoch on {record.boundary_commit}: {result.stderr.strip()}",
+        )
+    return True
+
+
+def push_gate_epochs(repo: Path, remote: str = "origin") -> None:
+    """Push the gate-epoch ref to ``remote``; a rejected push raises."""
+    result = _git(repo, ["push", remote, EPOCH_NOTES_REF])
+    if result.returncode != 0:
+        raise AttestationError(
+            f"failed to push {EPOCH_NOTES_REF} to {remote}: {result.stderr.strip()}",
+        )
+
+
+def _epoch_content(record: TemporalGateEpoch) -> dict[str, object]:
+    return record.model_dump(exclude={"recorded_at"})
+
+
+def _check_epoch_bounds(repo: Path, record: TemporalGateEpoch) -> None:
+    boundary_date = _author_date(repo, record.boundary_commit)
+    if boundary_date >= record.epoch_at:
+        raise AttestationError(
+            f"boundary commit {record.boundary_commit} has author date "
+            f"{boundary_date.isoformat()}, not before the epoch "
+            f"{record.epoch_at.isoformat()}",
+        )
+    attested = [_author_date(repo, c) for c in attested_commits(repo, record.parser_version)]
+    if attested and record.epoch_at > min(attested):
+        raise AttestationError(
+            f"epoch {record.epoch_at.isoformat()} is later than the earliest attested "
+            f"state under parser version {record.parser_version} "
+            f"({min(attested).isoformat()}): the gate cannot attest before it begins",
+        )
+
+
+def _author_date(repo: Path, commit: str) -> datetime:
+    result = _git(repo, ["log", "-1", "--format=%aI", f"{commit}^{{commit}}", "--"])
+    if result.returncode != 0:
+        raise AttestationError(
+            f"cannot resolve commit {commit} in {repo}: {result.stderr.strip()}",
+        )
+    return datetime.fromisoformat(result.stdout.strip())
+
+
+def _note_objects(repo: Path, ref: str) -> list[tuple[str, str]]:
+    """``(note blob, annotated object)`` for every note under ``ref``;
+    ``[]`` when the ref does not exist.
+
+    ``git notes list`` answers an empty list for a ref that points at a
+    non-commit, which would read a damaged ref as "no records" — so a
+    ref that exists must first prove it is a notes history."""
+    exists = _git(repo, ["rev-parse", "--quiet", "--verify", ref]).returncode == 0
+    if exists and _git(repo, ["rev-parse", "--quiet", "--verify", f"{ref}^{{commit}}"]).returncode:
+        raise AttestationError(f"notes ref {ref} unreadable: it does not point at a commit")
+    result = _git(repo, ["notes", f"--ref={ref}", "list"])
+    if result.returncode != 0:
+        raise AttestationError(f"notes ref {ref} unreadable: {result.stderr.strip()}")
+    return [
+        (blob, annotated)
+        for blob, _, annotated in (line.partition(" ") for line in result.stdout.splitlines())
+    ]
+
+
+def _epoch_records(repo: Path, blob: str) -> list[TemporalGateEpoch]:
+    try:
+        return _EPOCH_RECORDS.validate_json(_note_text(repo, blob))
+    except ValidationError as exc:
+        raise _unparseable_note(blob, exc) from exc
+
+
+def _attestation_entries(repo: Path, blob: str) -> list[TemporalAttestation]:
+    try:
+        return _ATTESTATION_ENTRIES.validate_json(_note_text(repo, blob))
+    except ValidationError as exc:
+        raise _unparseable_note(blob, exc) from exc
+
+
+def _note_text(repo: Path, blob: str) -> str:
+    result = _git(repo, ["cat-file", "blob", blob])
+    if result.returncode != 0:
+        raise AttestationError(f"note blob {blob} unreadable: {result.stderr.strip()}")
+    return result.stdout
+
+
+def _unparseable_note(blob: str, exc: ValidationError) -> AttestationError:
+    return AttestationError(f"note {blob} is unparseable — a broken evidence channel: {exc}")
+
+
+_EPOCH_RECORDS = TypeAdapter(list[TemporalGateEpoch])
+_ATTESTATION_ENTRIES = TypeAdapter(list[TemporalAttestation])

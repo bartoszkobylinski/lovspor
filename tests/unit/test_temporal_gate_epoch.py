@@ -1,0 +1,431 @@
+"""Tests for the gate-epoch registry (ADR-0012 Amendment 1, lovspor#432).
+
+One immutable record per temporal parser version, noted on the boundary
+commit in ``refs/notes/temporal-attestations-epoch``. Real git repos, real
+notes refs — the channel is exercised exactly as a consumer clone meets it.
+"""
+
+import json
+import os
+import subprocess
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from lovspor.temporal_attestation import (
+    ATTESTATION_NOTES_REF,
+    EPOCH_NOTES_REF,
+    AttestationError,
+    TemporalAttestation,
+    TemporalGateEpoch,
+    attested_commits,
+    check_gate_epoch,
+    fetch_gate_epochs,
+    push_gate_epochs,
+    read_gate_epochs,
+    write_attestation,
+    write_gate_epoch,
+)
+
+BOUNDARY_DATE = "2026-09-02T08:43:51Z"
+GATE_DATE = "2026-09-04T08:47:34Z"
+EPOCH_AT = datetime(2026, 9, 4, 8, 45, 36, tzinfo=UTC)
+
+
+def _git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, **(env or {})},
+    ).stdout.strip()
+
+
+def _commit(repo: Path, name: str, iso_date: str) -> str:
+    (repo / f"{name}.md").write_text(f"{name}\n")
+    _git(repo, "add", "-A")
+    stamp = {"GIT_AUTHOR_DATE": iso_date, "GIT_COMMITTER_DATE": iso_date}
+    _git(repo, "commit", "-m", name, env=stamp)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _init(repo: Path) -> None:
+    repo.mkdir(parents=True)
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "commit.gpgsign", "false")
+
+
+@pytest.fixture
+def corpus(tmp_path: Path) -> tuple[Path, str, str]:
+    """A boundary state (pre-gate) and a gate-era state after it."""
+    repo = tmp_path / "corpus"
+    _init(repo)
+    boundary = _commit(repo, "boundary", BOUNDARY_DATE)
+    gated = _commit(repo, "gated", GATE_DATE)
+    return repo, boundary, gated
+
+
+def _epoch(boundary: str, **overrides: object) -> TemporalGateEpoch:
+    fields: dict[str, object] = {
+        "parser_version": 2,
+        "epoch_at": EPOCH_AT,
+        "boundary_commit": boundary,
+        "recorded_at": datetime(2026, 9, 27, 10, 0, tzinfo=UTC),
+        "source": "backfill",
+        "evidence": "lovspor sync run 33854986231",
+    }
+    return TemporalGateEpoch.model_validate({**fields, **overrides})
+
+
+def _attest(repo: Path, sha: str, version: int = 2) -> None:
+    write_attestation(
+        repo,
+        TemporalAttestation(
+            corpus_commit=sha,
+            parser_version=version,
+            documents_reconciled=1,
+            notes_total=0,
+            events_total=0,
+            attested_at=datetime(2026, 9, 4, 9, 0, tzinfo=UTC),
+        ),
+    )
+
+
+def _raw_note(repo: Path, commit: str, payload: str) -> None:
+    _git(repo, "notes", f"--ref={EPOCH_NOTES_REF}", "add", "-f", "-m", payload, commit)
+
+
+# ---------- the record ----------
+
+
+def test_the_epoch_ref_sits_under_the_consumer_glob() -> None:
+    """The consumer refspec is a trailing glob over ATTESTATION_NOTES_REF;
+    the epoch ref must be a sibling it covers, never a second namespace."""
+    assert EPOCH_NOTES_REF == "refs/notes/temporal-attestations-epoch"
+    assert EPOCH_NOTES_REF.startswith(ATTESTATION_NOTES_REF)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"parser_version": 0},
+        {"epoch_at": "2026-09-04T08:45:36"},
+        {"recorded_at": "2026-09-27T10:00:00"},
+        {"boundary_commit": "3c4f186"},
+        {"boundary_commit": "G" * 40},
+        {"source": "manual"},
+        {"evidence": ""},
+        {"unexpected": 1},
+    ],
+)
+def test_record_refuses_malformed_fields(overrides: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        _epoch("a" * 40, **overrides)
+
+
+def test_record_is_frozen() -> None:
+    record = _epoch("a" * 40)
+    with pytest.raises(ValidationError):
+        record.parser_version = 3  # type: ignore[misc]
+
+
+# ---------- reading ----------
+
+
+def test_no_epoch_ref_reads_as_no_records(corpus: tuple[Path, str, str]) -> None:
+    repo, _boundary, _gated = corpus
+    assert read_gate_epochs(repo) == {}
+
+
+def test_written_record_reads_back_keyed_by_version(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    record = _epoch(boundary)
+
+    assert write_gate_epoch(repo, record) is True
+
+    assert read_gate_epochs(repo) == {2: record}
+
+
+def test_unparseable_record_is_a_broken_channel(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    _raw_note(repo, boundary, "not json")
+
+    with pytest.raises(AttestationError, match="unparseable"):
+        read_gate_epochs(repo)
+
+
+@pytest.mark.parametrize("payload", ['{"parser_version": 2}', '[{"parser_version": 2}]'])
+def test_record_of_the_wrong_shape_is_a_broken_channel(
+    corpus: tuple[Path, str, str],
+    payload: str,
+) -> None:
+    repo, boundary, _gated = corpus
+    _raw_note(repo, boundary, payload)
+
+    with pytest.raises(AttestationError, match="unparseable"):
+        read_gate_epochs(repo)
+
+
+def test_two_records_for_one_version_are_corrupt(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, gated = corpus
+    first = _epoch(boundary).model_dump(mode="json")
+    second = _epoch(gated, epoch_at=datetime(2026, 9, 5, tzinfo=UTC)).model_dump(mode="json")
+    _raw_note(repo, boundary, json.dumps([first]))
+    _raw_note(repo, gated, json.dumps([second]))
+
+    with pytest.raises(AttestationError, match="duplicate"):
+        read_gate_epochs(repo)
+
+
+def test_duplicate_version_inside_one_note_is_corrupt(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    record = _epoch(boundary).model_dump(mode="json")
+    _raw_note(repo, boundary, json.dumps([record, record]))
+
+    with pytest.raises(AttestationError, match="duplicate"):
+        read_gate_epochs(repo)
+
+
+def test_record_anchored_to_another_commit_is_corrupt(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, gated = corpus
+    _raw_note(repo, gated, json.dumps([_epoch(boundary).model_dump(mode="json")]))
+
+    with pytest.raises(AttestationError, match="corrupt"):
+        read_gate_epochs(repo)
+
+
+def test_corrupt_record_after_a_good_one_is_still_found(tmp_path: Path) -> None:
+    """Skip-before-match: a valid record first must not stop the walk
+    before a later note is validated."""
+    repo = tmp_path / "corpus"
+    _init(repo)
+    commits = [_commit(repo, f"c{i}", f"2026-09-0{i + 1}T00:00:00Z") for i in range(3)]
+    for index, commit in enumerate(commits[:2]):
+        record = _epoch(commit, parser_version=index + 1).model_dump(mode="json")
+        _raw_note(repo, commit, json.dumps([record]))
+    _raw_note(repo, commits[2], "garbage")
+
+    with pytest.raises(AttestationError, match="unparseable"):
+        read_gate_epochs(repo)
+
+
+def test_reader_does_not_need_the_boundary_commit(tmp_path: Path) -> None:
+    """A --depth 1 consumer clone lacks the boundary commit's object; the
+    record must still read (the droplet clone's depth is unknown)."""
+    origin = tmp_path / "origin"
+    _init(origin)
+    boundary = _commit(origin, "boundary", BOUNDARY_DATE)
+    _commit(origin, "gated", GATE_DATE)
+    record = _epoch(boundary)
+    write_gate_epoch(origin, record)
+    clone = tmp_path / "shallow"
+    _git(tmp_path, "clone", "--depth", "1", f"file://{origin}", str(clone))
+    fetch_gate_epochs(clone)
+
+    missing = subprocess.run(
+        ["git", "cat-file", "-e", f"{boundary}^{{commit}}"], cwd=clone, check=False
+    )
+    assert missing.returncode != 0
+    assert read_gate_epochs(clone) == {2: record}
+
+
+def test_unreadable_epoch_ref_is_a_broken_channel(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    _git(repo, "update-ref", EPOCH_NOTES_REF, _git(repo, "rev-parse", f"{boundary}^{{tree}}"))
+
+    with pytest.raises(AttestationError, match="unreadable"):
+        read_gate_epochs(repo)
+
+
+# ---------- writing ----------
+
+
+def test_identical_rewrite_is_a_no_op(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    write_gate_epoch(repo, _epoch(boundary))
+    notes_head = _git(repo, "rev-parse", EPOCH_NOTES_REF)
+
+    later = _epoch(boundary, recorded_at=datetime(2026, 9, 28, tzinfo=UTC))
+    assert write_gate_epoch(repo, later) is False
+
+    assert _git(repo, "rev-parse", EPOCH_NOTES_REF) == notes_head
+    assert read_gate_epochs(repo)[2].recorded_at == datetime(2026, 9, 27, 10, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"epoch_at": datetime(2026, 9, 4, 8, 45, 37, tzinfo=UTC)},
+        {"source": "sync-run"},
+        {"evidence": "lovspor sync run 1"},
+    ],
+)
+def test_different_record_for_an_existing_version_is_refused(
+    corpus: tuple[Path, str, str],
+    overrides: dict[str, object],
+) -> None:
+    repo, boundary, _gated = corpus
+    write_gate_epoch(repo, _epoch(boundary))
+
+    with pytest.raises(AttestationError, match="immutable"):
+        write_gate_epoch(repo, _epoch(boundary, **overrides))
+
+
+def test_records_for_two_versions_share_one_boundary(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    v2 = _epoch(boundary)
+    v3 = _epoch(boundary, parser_version=3, epoch_at=datetime(2026, 9, 5, tzinfo=UTC))
+
+    write_gate_epoch(repo, v2)
+    write_gate_epoch(repo, v3)
+
+    assert read_gate_epochs(repo) == {2: v2, 3: v3}
+
+
+def test_boundary_at_or_after_the_epoch_is_refused(corpus: tuple[Path, str, str]) -> None:
+    repo, _boundary, gated = corpus
+
+    with pytest.raises(AttestationError, match="boundary"):
+        write_gate_epoch(repo, _epoch(gated))
+    at_instant = _epoch(gated, epoch_at=datetime(2026, 9, 4, 8, 47, 34, tzinfo=UTC))
+    with pytest.raises(AttestationError, match="boundary"):
+        write_gate_epoch(repo, at_instant)
+    assert read_gate_epochs(repo) == {}
+
+
+def test_epoch_later_than_the_first_attested_state_is_refused(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, boundary, gated = corpus
+    _attest(repo, gated)
+    late = _epoch(boundary, epoch_at=datetime(2026, 9, 4, 8, 47, 35, tzinfo=UTC))
+
+    with pytest.raises(AttestationError, match="earliest attested"):
+        write_gate_epoch(repo, late)
+    assert read_gate_epochs(repo) == {}
+
+
+def test_epoch_at_the_first_attested_author_date_is_accepted(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, boundary, gated = corpus
+    _attest(repo, gated)
+
+    exact = _epoch(boundary, epoch_at=datetime(2026, 9, 4, 8, 47, 34, tzinfo=UTC))
+    assert write_gate_epoch(repo, exact) is True
+
+
+def test_attestations_under_another_version_do_not_bound_the_epoch(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, boundary, gated = corpus
+    _attest(repo, gated, version=1)
+    late = _epoch(boundary, epoch_at=datetime(2026, 9, 5, tzinfo=UTC))
+
+    assert write_gate_epoch(repo, late) is True
+
+
+def test_unresolvable_boundary_is_refused(corpus: tuple[Path, str, str]) -> None:
+    repo, _boundary, _gated = corpus
+
+    with pytest.raises(AttestationError, match="cannot resolve"):
+        check_gate_epoch(repo, _epoch("b" * 40))
+
+
+def test_check_is_the_write_without_the_write(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    record = _epoch(boundary)
+
+    assert check_gate_epoch(repo, record) is True
+    assert read_gate_epochs(repo) == {}
+    write_gate_epoch(repo, record)
+    assert check_gate_epoch(repo, record) is False
+
+
+# ---------- attested commits ----------
+
+
+def test_attested_commits_filters_by_version(tmp_path: Path) -> None:
+    """Skip-before-match: a commit attested only under another version,
+    listed first, must not end the walk."""
+    repo = tmp_path / "corpus"
+    _init(repo)
+    shas = [_commit(repo, f"c{i}", f"2026-09-0{i + 1}T00:00:00Z") for i in range(3)]
+    _attest(repo, shas[0], version=1)
+    _attest(repo, shas[1], version=2)
+    _attest(repo, shas[2], version=2)
+
+    assert sorted(attested_commits(repo, 2)) == sorted(shas[1:])
+    assert attested_commits(repo, 1) == [shas[0]]
+    assert attested_commits(repo, 3) == []
+
+
+def test_attested_commits_refuses_a_corrupt_attestation_note(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _boundary, gated = corpus
+    _git(repo, "notes", f"--ref={ATTESTATION_NOTES_REF}", "add", "-m", "junk", gated)
+
+    with pytest.raises(AttestationError, match="unparseable"):
+        attested_commits(repo, 2)
+
+
+# ---------- transport ----------
+
+
+def _bare_origin_with_clone(tmp_path: Path) -> tuple[Path, Path, str]:
+    work = tmp_path / "work"
+    _init(work)
+    boundary = _commit(work, "boundary", BOUNDARY_DATE)
+    origin = tmp_path / "origin.git"
+    _git(tmp_path, "clone", "--bare", str(work), str(origin))
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", str(origin), str(clone))
+    _git(clone, "config", "user.email", "test@example.com")
+    _git(clone, "config", "user.name", "Test")
+    return origin, clone, boundary
+
+
+def test_push_then_fetch_round_trips_the_record(tmp_path: Path) -> None:
+    origin, clone, boundary = _bare_origin_with_clone(tmp_path)
+    record = _epoch(boundary)
+    write_gate_epoch(clone, record)
+
+    push_gate_epochs(clone)
+
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", str(origin), str(other))
+    assert read_gate_epochs(other) == {}
+    fetch_gate_epochs(other)
+    assert read_gate_epochs(other) == {2: record}
+
+
+def test_fetch_from_an_origin_without_the_ref_is_the_bootstrap(tmp_path: Path) -> None:
+    _origin, clone, _boundary = _bare_origin_with_clone(tmp_path)
+
+    fetch_gate_epochs(clone)
+
+    assert read_gate_epochs(clone) == {}
+
+
+def test_fetch_from_an_unreachable_remote_is_a_broken_channel(tmp_path: Path) -> None:
+    _origin, clone, _boundary = _bare_origin_with_clone(tmp_path)
+    _git(clone, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    with pytest.raises(AttestationError, match="cannot reach origin"):
+        fetch_gate_epochs(clone)
+
+
+def test_rejected_push_is_a_typed_failure(tmp_path: Path) -> None:
+    _origin, clone, boundary = _bare_origin_with_clone(tmp_path)
+    write_gate_epoch(clone, _epoch(boundary))
+    _git(clone, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    with pytest.raises(AttestationError, match="failed to push"):
+        push_gate_epochs(clone)

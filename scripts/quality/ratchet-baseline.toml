@@ -1034,13 +1034,6 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 [[entry]]
 rule = "function-lines"
 path = "src/lovspor/temporal_attestation.py"
-name = "fetch_attestations"
-value = 29
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "function-lines"
-path = "src/lovspor/temporal_attestation.py"
 name = "write_attestation"
 value = 34
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
