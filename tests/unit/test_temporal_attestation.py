@@ -418,7 +418,10 @@ def test_fetch_attestations_fails_closed_when_fetch_fails(
     path, _ = repo
     results = iter(
         [
-            subprocess.CompletedProcess([], 0, stdout="ref exists\n", stderr=""),
+            # ls-remote's real wire: "<id>\t<refname>" — the ref must be named exactly.
+            subprocess.CompletedProcess(
+                [], 0, stdout=f"{'a' * 40}\t{ATTESTATION_NOTES_REF}\n", stderr=""
+            ),
             subprocess.CompletedProcess([], 1, stdout="", stderr="non-fast-forward\n"),
         ],
     )
@@ -441,7 +444,8 @@ def test_fetch_attestations_invokes_git_with_non_raising_text_capture(
 
     def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        listed = f"{'a' * 40}\t{ATTESTATION_NOTES_REF}\n" if "ls-remote" in args else ""
+        return subprocess.CompletedProcess(args, 0, stdout=listed, stderr="")
 
     monkeypatch.setattr(attestation_module.subprocess, "run", run)
 

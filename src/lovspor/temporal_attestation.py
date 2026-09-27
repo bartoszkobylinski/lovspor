@@ -220,18 +220,33 @@ def fetch_gate_epochs(repo: Path, remote: str = "origin") -> None:
 
 
 def _fetch_notes_ref(repo: Path, remote: str, ref: str) -> None:
-    present = _git(repo, ["ls-remote", "--exit-code", remote, ref])
-    if present.returncode == 2:  # noqa: PLR2004 — git: ref not found on remote
+    if _remote_ref(repo, remote, ref) is None:
         return
-    if present.returncode != 0:
-        raise AttestationError(
-            f"cannot reach {remote} to check the attestation ref {ref}: {present.stderr.strip()}",
-        )
     result = _git(repo, ["fetch", remote, f"+{ref}:{ref}"])
     if result.returncode != 0:
         raise AttestationError(
             f"failed to fetch attestation notes {ref} from {remote}: {result.stderr.strip()}",
         )
+
+
+def _remote_ref(repo: Path, remote: str, ref: str) -> str | None:
+    """The object id ``remote`` holds at exactly ``ref``; None when absent.
+
+    ``git ls-remote`` matches its pattern against ref-name TAILS, so it also
+    lists e.g. ``refs/x/refs/notes/temporal-attestations-epoch``, sorted
+    before the real ref. Reading its first line would take that bystander's
+    id for the notes ref's — only the line naming ``ref`` itself counts.
+    """
+    listed = _git(repo, ["ls-remote", remote, ref])
+    if listed.returncode != 0:
+        raise AttestationError(
+            f"cannot reach {remote} to check the attestation ref {ref}: {listed.stderr.strip()}",
+        )
+    suffix = f"\t{ref}"
+    for line in listed.stdout.splitlines():
+        if line.endswith(suffix):
+            return line.removesuffix(suffix)
+    return None
 
 
 def _git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -509,12 +524,7 @@ def publish_gate_epochs(repo: Path, remote: str = "origin") -> bool:
     local = _git(repo, ["rev-parse", "--quiet", "--verify", EPOCH_NOTES_REF])
     if local.returncode != 0:
         return False
-    listed = _git(repo, ["ls-remote", "--exit-code", remote, EPOCH_NOTES_REF])
-    if listed.returncode not in (0, 2):
-        raise AttestationError(
-            f"cannot reach {remote} to check {EPOCH_NOTES_REF}: {listed.stderr.strip()}",
-        )
-    if listed.stdout.split(maxsplit=1)[:1] == [local.stdout.strip()]:
+    if _remote_ref(repo, remote, EPOCH_NOTES_REF) == local.stdout.strip():
         return False
     push_gate_epochs(repo, remote)
     return True

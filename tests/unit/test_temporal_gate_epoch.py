@@ -696,3 +696,39 @@ def test_two_anchors_are_checked_one_per_line(tmp_path: Path) -> None:
     attestation_module._require_commit_anchors(repo, [commit, "f" * 40])
     with pytest.raises(AttestationError, match=f"attached to {blob}, a blob"):
         attestation_module._require_commit_anchors(repo, [commit, blob])
+
+
+# ---------- ls-remote tail matching (mutation round, PR #439) ----------
+
+DECOY_REF = f"refs/decoy/{EPOCH_NOTES_REF}"
+"""A bystander ref `git ls-remote <pattern>` also lists: patterns match
+ref-name tails, and it sorts before refs/notes/."""
+
+
+def test_publish_ignores_a_decoy_holding_the_same_id(tmp_path: Path) -> None:
+    """The decoy carries exactly the local notes id while the real ref is
+    absent: reading ls-remote's first line would call the record published."""
+    origin, clone, boundary = _bare_origin_with_clone(tmp_path)
+    write_gate_epoch(clone, _epoch(boundary))
+    _git(clone, "push", "origin", f"{EPOCH_NOTES_REF}:{DECOY_REF}")
+
+    assert publish_gate_epochs(clone) is True
+    assert _git(origin, "rev-parse", EPOCH_NOTES_REF) == _git(clone, "rev-parse", EPOCH_NOTES_REF)
+
+
+def test_publish_reads_the_real_ref_past_a_decoy_with_another_id(tmp_path: Path) -> None:
+    _origin, clone, boundary = _bare_origin_with_clone(tmp_path)
+    write_gate_epoch(clone, _epoch(boundary))
+    push_gate_epochs(clone)
+    _git(clone, "push", "origin", f"{boundary}:refs/decoy/{EPOCH_NOTES_REF}")
+
+    assert publish_gate_epochs(clone) is False
+
+
+def test_fetch_treats_an_origin_with_only_a_decoy_as_the_bootstrap(tmp_path: Path) -> None:
+    _origin, clone, boundary = _bare_origin_with_clone(tmp_path)
+    _git(clone, "push", "origin", f"{boundary}:{DECOY_REF}")
+
+    fetch_gate_epochs(clone)
+
+    assert read_gate_epochs(clone) == {}
