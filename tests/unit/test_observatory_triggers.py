@@ -336,12 +336,18 @@ class TestRunningSweep:
 
         assert running_sweep("observatory-sweep", lock) is None
 
-    def test_a_process_owned_by_another_user_is_alive(self, tmp_path: Path) -> None:
-        """pid 1 exists on every host and signalling it is refused, not absent."""
-        if os.geteuid() == 0:
-            pytest.skip("root may signal pid 1")
+    def test_a_process_owned_by_another_user_is_alive(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A refused signal probe proves the process exists rather than being absent."""
+
+        def refuse_probe(pid: int, signal: int) -> None:
+            assert (pid, signal) == (1, 0)
+            raise PermissionError
+
         lock = _holder(
             tmp_path / "lock", owner="observatory-sweep", pid=1, since="2026-09-26T05:15:40+00:00"
         )
+        monkeypatch.setattr(os, "kill", refuse_probe)
 
         assert running_sweep("observatory-sweep", lock) is not None
