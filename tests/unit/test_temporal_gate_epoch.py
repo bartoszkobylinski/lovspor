@@ -556,11 +556,75 @@ def test_malformed_or_incomplete_note_is_a_broken_channel(
 @pytest.mark.parametrize("field", ["epoch_at", "recorded_at"])
 @pytest.mark.parametrize("value", ["2026-09-04T10:45:36+02:00", "2026-09-04T03:45:36-05:00"])
 def test_non_utc_instants_are_refused(field: str, value: str) -> None:
-    with pytest.raises(
-        ValidationError,
-        match=r"must be a UTC instant \(offset \+00:00 or Z\)",
-    ):
+    with pytest.raises(ValidationError) as caught:
         _epoch("a" * 40, **{field: value})
+
+    assert "Value error, must be a UTC instant (offset +00:00 or Z)" in str(caught.value)
+
+
+def test_record_sync_run_success_report_says_the_record_was_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _epoch("a" * 40, source="sync-run")
+    monkeypatch.setattr(gate_module, "_fetch_registry", lambda _repo: None)
+    monkeypatch.setattr(gate_module, "read_gate_epochs", lambda _repo: {})
+    monkeypatch.setattr(gate_module, "attested_commits", lambda *_args: [])
+    monkeypatch.setattr(gate_module, "_sync_run_record", lambda *_args: record)
+    monkeypatch.setattr(gate_module, "write_gate_epoch", lambda *_args: True)
+    monkeypatch.setattr(gate_module, "push_gate_epochs", lambda _repo: None)
+
+    report = gate_module.record_sync_run_epoch(
+        tmp_path,
+        gate_module.SyncRunRequest(sync_run="77"),
+        datetime(2026, 9, 27, 10, 0, tzinfo=UTC),
+    )
+
+    assert report.written is True
+
+
+def test_applied_backfill_success_report_says_the_record_was_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boundary = "a" * 40
+    monkeypatch.setattr(gate_module, "_fetch_registry", lambda _repo: None)
+    monkeypatch.setattr(gate_module, "_resolve_commit", lambda *_args: boundary)
+    monkeypatch.setattr(gate_module, "check_gate_epoch", lambda *_args: True)
+    monkeypatch.setattr(gate_module, "write_gate_epoch", lambda *_args: True)
+    monkeypatch.setattr(gate_module, "push_gate_epochs", lambda _repo: None)
+
+    report = gate_module.backfill_epoch(
+        tmp_path,
+        gate_module.BackfillRequest(
+            epoch_at=EPOCH_AT,
+            boundary_commit=boundary,
+            sync_run="77",
+            apply=True,
+        ),
+        datetime(2026, 9, 27, 10, 0, tzinfo=UTC),
+    )
+
+    assert report.written is True
+
+
+def test_author_date_requests_git_strict_iso_8601_format(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commit = "a" * 40
+    calls: list[list[str]] = []
+
+    def git(_repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="2026-09-04T08:45:36+00:00\n", stderr="")
+
+    monkeypatch.setattr(attestation_module, "_git", git)
+
+    assert attestation_module._author_date(tmp_path, commit) == datetime(
+        2026, 9, 4, 8, 45, 36, tzinfo=UTC
+    )
+    assert calls == [["log", "-1", "--format=%aI", f"{commit}^{{commit}}", "--"]]
 
 
 def test_resolve_commit_invokes_git_in_text_mode_with_option_terminator(
