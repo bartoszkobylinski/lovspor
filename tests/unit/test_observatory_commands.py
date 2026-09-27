@@ -10,6 +10,8 @@ real one lands.
 import hashlib
 import json
 import os
+import subprocess
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,17 +27,16 @@ from typer.testing import CliRunner
 import lovspor.observatory.commands as observatory_commands
 import lovspor.observatory.registry_commands as observatory_registry_commands
 import lovspor.observatory.registry_io as observatory_registry_io
+import lovspor.observatory.status_report as observatory_status_report
 from lovspor.cli import app
 from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.addresses import SharedAddress, SourceAddresses
 from lovspor.observatory.commands import (
     ENV_REQUIRE_PINNED_ENGINE,
+    OBSERVATORY_WORKLOAD,
     _capture_candidates,
-    _echo_cadence,
-    _echo_last_sweep,
     _echo_shared_group,
-    _echo_sources,
     _entry_points,
     _record_sweep,
     _sweep_one,
@@ -68,7 +69,15 @@ from lovspor.observatory.registry import (
     replace_domain,
     write_registry,
 )
-from lovspor.observatory.status_report import _echo_switch, _hm
+from lovspor.observatory.status_report import (
+    _echo_cadence,
+    _echo_last_sweep,
+    _echo_sources,
+    _echo_switch,
+    _echo_triggers,
+    _hm,
+    echo_status_report,
+)
 from lovspor.observatory.storage import (
     ENV_CORPUS_ROOT,
     ENV_OBSERVATORY_ROOT,
@@ -85,6 +94,7 @@ from lovspor.observatory.sweeps import (
     read_sweep_runs,
     sweeps_path,
 )
+from lovspor.observatory.triggers import DroppedTrigger, scheduled_triggers
 
 runner = CliRunner()
 
@@ -3802,6 +3812,75 @@ class TestAddressReport:
 
 
 class TestStatus:
+    def test_trigger_stamps_are_utc_independent_of_the_host_timezone(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original_tz = os.environ.get("TZ")
+        monkeypatch.setenv("TZ", "America/Los_Angeles")
+        time.tzset()
+        try:
+            held_by = datetime(2026, 9, 24, 3, 0, tzinfo=UTC)
+            _echo_triggers(
+                [
+                    DroppedTrigger(
+                        scheduled_at=datetime(2026, 9, 25, 1, 0, tzinfo=UTC),
+                        held_by=held_by,
+                        still_running=False,
+                    )
+                ],
+                held_by,
+                datetime(2026, 9, 24, 4, 0, tzinfo=UTC),
+            )
+        finally:
+            if original_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original_tz
+            time.tzset()
+
+        output = capsys.readouterr().out
+        assert "running:    since 2026-09-24T03:00:00+00:00" in output
+        assert "held by the sweep started 2026-09-24T03:00:00+00:00" in output
+
+    def test_status_uses_the_newest_run_and_one_clock_read(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = datetime(2030, 9, 26, 21, 0, tzinfo=UTC)
+
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz: object = None) -> datetime:
+                assert tz is UTC
+                return now
+
+        def run(name: str, started: datetime) -> SweepRun:
+            return SweepRun(
+                run_id=name,
+                started_at=started,
+                finished_at=started + timedelta(hours=1),
+                active_sources=1,
+                sources_completed=1,
+                sources_refused=0,
+                captured=0,
+                failed_fetches=0,
+                unchanged=1,
+                status="success",
+            )
+
+        older = run("older", now - timedelta(days=3))
+        newest = run("newest", now - timedelta(hours=18))
+        running = datetime(2030, 9, 25, 0, 0, tzinfo=UTC)
+        monkeypatch.setattr(observatory_status_report, "datetime", FixedDatetime)
+        monkeypatch.delenv(ENV_HEARTBEAT_URL, raising=False)
+
+        state = echo_status_report(SourceRegistry(), [older, newest], running)
+
+        output = capsys.readouterr().out
+        assert state == CadenceState(age=timedelta(hours=18), overdue=False)
+        assert "started:    2030-09-26T03:00:00+00:00" in output
+        assert "started:    2030-09-23T21:00:00+00:00" not in output
+        assert "dropped:    2 in the last 14 days" in output
+
     def test_an_armed_switch_shows_only_its_host(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -3934,6 +4013,97 @@ class TestStatus:
             f"  deadline:   {_hm(SWEEP_DEADLINE)}\n"
             "  state:      OVERDUE\n"
         )
+
+    def test_dropped_triggers_are_named_with_the_sweep_that_held_them(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The production overrun of 24.09 and the sweep running on 26.09 (#218)."""
+        held_by = datetime(2026, 9, 24, 1, 0, 30, tzinfo=UTC)
+        running = datetime(2026, 9, 25, 5, 15, 40, tzinfo=UTC)
+        dropped = [
+            DroppedTrigger(
+                scheduled_at=datetime(2026, 9, 25, 1, 0, tzinfo=UTC),
+                held_by=held_by,
+                still_running=False,
+            ),
+            DroppedTrigger(
+                scheduled_at=datetime(2026, 9, 26, 1, 0, tzinfo=UTC),
+                held_by=running,
+                still_running=True,
+            ),
+        ]
+
+        _echo_triggers(dropped, running, datetime(2026, 9, 26, 21, 10, 50, tzinfo=UTC))
+
+        assert capsys.readouterr().out == (
+            "\nScheduled triggers\n"
+            "  schedule:   daily 03:00 Europe/Oslo\n"
+            "  running:    since 2026-09-25T05:15:40+00:00 (39h55m)\n"
+            "  dropped:    2 in the last 14 days\n"
+            "    2026-09-25T03:00+02:00  held by the sweep started 2026-09-24T01:00:30+00:00\n"
+            "    2026-09-26T03:00+02:00  held by the sweep started 2026-09-25T05:15:40+00:00"
+            " (still running)\n"
+        )
+
+    def test_no_running_sweep_and_no_dropped_trigger_say_so(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _echo_triggers([], None, datetime(2026, 9, 26, 21, 0, tzinfo=UTC))
+
+        assert capsys.readouterr().out == (
+            "\nScheduled triggers\n"
+            "  schedule:   daily 03:00 Europe/Oslo\n"
+            "  running:    no sweep on this host\n"
+            "  dropped:    0 in the last 14 days\n"
+        )
+
+    def test_status_names_a_trigger_an_overrunning_sweep_dropped(self, root: Path) -> None:
+        """Written the way capture-all records a run, read the way an operator asks."""
+        _activate(root)
+        trigger = scheduled_triggers(datetime.now(UTC) - timedelta(days=2), datetime.now(UTC))[0]
+        _write_sweep(root, started=trigger - timedelta(minutes=30))
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        at = trigger.isoformat(timespec="minutes")
+        assert "  dropped:    1 in the last 14 days\n" in result.output
+        assert f"    {at}  held by the sweep started " in result.output
+        assert result.output.index("\nCadence\n") < result.output.index("\nScheduled triggers\n")
+        assert result.output.index("\nScheduled triggers\n") < result.output.index(
+            "\nDead-man switch\n"
+        )
+
+    def test_status_names_the_sweep_holding_the_host_lock(
+        self, root: Path, live_child: subprocess.Popen[bytes]
+    ) -> None:
+        """A sweep in progress has no run record yet; the workload lock names it.
+
+        The record is the one ``exclusive_workload`` writes, naming a live
+        bystander process rather than the runner: status must probe that pid
+        without signalling it, and a probe that did signal would otherwise take
+        the test runner down instead of failing an assertion.
+        """
+        _activate(root)
+        _write_sweep(root, started=datetime.now(UTC) - timedelta(hours=18))
+        since = datetime.now(UTC).isoformat(timespec="seconds")
+        default_lock_path().write_text(
+            json.dumps({"owner": OBSERVATORY_WORKLOAD, "pid": live_child.pid, "since": since})
+        )
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert f"  running:    since {since} (0h00m)\n" in result.output
+        assert result.exit_code == 0
+        assert live_child.poll() is None
+
+    def test_a_lock_held_by_another_workload_is_not_a_running_sweep(self, root: Path) -> None:
+        _activate(root)
+        _write_sweep(root, started=datetime.now(UTC) - timedelta(hours=18))
+
+        with exclusive_workload("llhb-benchmark"):
+            result = runner.invoke(app, ["observatory", "status"])
+
+        assert "  running:    no sweep on this host\n" in result.output
 
     def test_duration_discards_partial_minutes(self) -> None:
         assert _hm(timedelta(hours=1, minutes=1, seconds=59)) == "1h01m"
