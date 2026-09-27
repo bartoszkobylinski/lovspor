@@ -10,7 +10,10 @@ from datetime import UTC, datetime
 
 from lovspor.observatory.model import (
     ArtifactObservation,
+    Correction,
     FetchFailure,
+    RecordTombstone,
+    RefiledObservation,
     RetrievalProvenance,
     Tombstone,
 )
@@ -265,3 +268,41 @@ class TestArchiveComposition:
         collect_composition(found)(_artifact())
 
         assert (found.artifacts, found.by_outcome) == (1, {})
+
+
+class TestCorrectionsAreCountedApart:
+    """ADR-0015 §5: corrections are neither observations nor blob removals."""
+
+    def _correction_pair(self) -> tuple[RefiledObservation, RecordTombstone]:
+        attribution = {"reason": "test", "corrected_by": "owner", "corrected_at": WHEN}
+        refiled = RefiledObservation(
+            observation=_artifact(),
+            correction=Correction(
+                supersedes="c" * 64,
+                correction_id="c1",
+                corrected_fields=("authority_id",),
+                previous_values={"authority_id": "4202"},
+                **attribution,  # type: ignore[arg-type]
+            ),
+        )
+        return refiled, RecordTombstone(retracts="c" * 64, correction_id="c1", **attribution)  # type: ignore[arg-type]
+
+    def test_each_half_has_its_own_counter(self) -> None:
+        found = ArchiveComposition()
+        collect = collect_composition(found)
+        refiled, tombstone = self._correction_pair()
+
+        collect(refiled)
+        collect(tombstone)
+        collect(tombstone)
+
+        assert (found.refiled, found.record_tombstones) == (1, 2)
+        assert (found.artifacts, found.hops, found.lost, found.tombstones) == (0, 0, 0, 0)
+
+    def test_corrections_move_neither_the_total_nor_the_rates(self) -> None:
+        """A re-filed observation restates a fetch already counted; counting it
+        again would double the archive's corrected records in every rate."""
+        found = ArchiveComposition(artifacts=1, lost=1, refiled=5, record_tombstones=5)
+
+        assert found.records == 2
+        assert found.loss_rate == 0.5

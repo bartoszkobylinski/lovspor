@@ -996,6 +996,7 @@ class TestComposition:
 
         assert result.exit_code == 0, result.output
         assert "  tombstones:     0\n" in result.output
+        assert "corrections:      0 re-filed, 0 record tombstones" in result.output
 
     def test_an_empty_archive_reports_zero_rather_than_dividing_by_it(self, root: Path) -> None:
         result = runner.invoke(app, ["observatory", "composition"])

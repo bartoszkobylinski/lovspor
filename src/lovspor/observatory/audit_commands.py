@@ -110,6 +110,10 @@ def _echo_composition(found: ArchiveComposition) -> None:
     typer.echo(f"  redirect hops:  {found.hops}  (recorded as fetch_failure, not failures)")
     typer.echo(f"  lost documents: {found.lost}")
     typer.echo(f"  tombstones:     {found.tombstones}")
+    typer.echo(
+        f"corrections:      {found.refiled} re-filed, {found.record_tombstones} record "
+        "tombstones  (not observations; not in the total or the rates)"
+    )
     typer.echo(f"\nlost documents:   {found.loss_rate:.2%} of all records")
     typer.echo(f"counting kind alone: {found.naive_failure_rate:.2%} — the #188 figure, overstated")
     if found.by_outcome:

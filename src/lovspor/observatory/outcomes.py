@@ -29,7 +29,13 @@ import collections
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from lovspor.observatory.model import ArtifactObservation, FetchFailure, ObservationRecord
+from lovspor.observatory.model import (
+    ArtifactObservation,
+    FetchFailure,
+    ObservationRecord,
+    RefiledObservation,
+    Tombstone,
+)
 
 #: The one outcome that is not a failure at all: the hop redirected inside the
 #: cleared domain and the fetcher went on to ask the target. The document
@@ -142,6 +148,11 @@ class ArchiveComposition:
     lost: int = 0
     tombstones: int = 0
     by_outcome: collections.Counter[str] = field(default_factory=collections.Counter)
+    #: The two halves of corrections (ADR-0015). Counted apart and left out of
+    #: ``records``: a re-filed observation restates a fetch the archive has
+    #: already counted, and neither half removed any bytes.
+    refiled: int = 0
+    record_tombstones: int = 0
 
     @property
     def records(self) -> int:
@@ -180,7 +191,11 @@ def collect_composition(into: ArchiveComposition) -> Callable[[ObservationRecord
                 into.lost += 1
             else:
                 into.hops += 1
-        else:
+        elif isinstance(record, Tombstone):
             into.tombstones += 1
+        elif isinstance(record, RefiledObservation):
+            into.refiled += 1
+        else:
+            into.record_tombstones += 1
 
     return collect
