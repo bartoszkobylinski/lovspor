@@ -383,3 +383,135 @@ def test_the_audit_gate_is_allowed_to_fail_the_job() -> None:
     """`continue-on-error` here would demote the gate to a report nobody reads
     — the exact failure mode the gate exists to end."""
     assert not _audit_gate_step().get("continue-on-error", False)
+
+
+# --- The temporal gate epoch (ADR-0012 Amendment 1, #432) ---
+#
+# The epoch must reach origin before the reconciliation gate can fail: the
+# 2026-09-03 run failed its first gate and left nothing behind, so the state it
+# built later read as a pre-gate 'unattested'. The final push step cannot carry
+# the epoch — a failed gate never reaches it.
+
+
+def _epoch_step() -> dict[str, Any]:
+    return next(s for s in _sync_steps() if "temporal-epoch" in str(s.get("run", "")))
+
+
+def _notes_fetch_step() -> dict[str, Any]:
+    return next(s for s in _sync_steps() if str(s.get("name", "")).startswith("Fetch attestation"))
+
+
+def test_the_epoch_step_records_the_sync_run_on_the_corpus_clone() -> None:
+    run = " ".join(str(_epoch_step()["run"]).split())
+
+    assert 'lovspor temporal-epoch --corpus-path "$LOVVERK_PATH"' in run
+    assert 'record-sync-run --sync-run "$GITHUB_RUN_ID"' in run
+
+
+def test_the_epoch_is_recorded_after_its_inputs_and_before_any_corpus_work() -> None:
+    """After the notes fetch (it must see an existing record) and the git
+    identity (a notes write is a commit), before every step that changes
+    the corpus: the opt-in repair, the sync with its gate, the push."""
+    names = [str(s.get("name", "")) for s in _sync_steps()]
+    at = names.index(str(_epoch_step()["name"]))
+    fetch_at = names.index(str(_notes_fetch_step()["name"]))
+    author_at = names.index("Configure git author for sync commits")
+    repair_at = names.index(str(_repair_step()["name"]))
+    sync_at = names.index("Run lovspor sync")
+
+    assert fetch_at < at and author_at < at, names
+    assert at < repair_at < sync_at, names
+
+
+def test_the_epoch_step_never_blocks_the_sync_and_holds_no_openai_key() -> None:
+    step = _epoch_step()
+
+    assert step.get("continue-on-error") is True
+    assert "OPENAI_API_KEY" not in str(step.get("env", {}))
+
+
+def _notes_origin(tmp_path: Path, *, with_epoch: bool) -> Path:
+    work = tmp_path / "work"
+    work.mkdir()
+    for args in (
+        ["init", "-b", "main"],
+        ["-c", "user.name=T", "-c", "user.email=t@e", "commit", "--allow-empty", "-m", "c"],
+        [
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e",
+            "notes",
+            "--ref=refs/notes/temporal-attestations",
+            "add",
+            "-m",
+            "[]",
+        ],
+    ):
+        subprocess.run(["git", *args], cwd=work, check=True, capture_output=True)
+    if with_epoch:
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=T",
+                "-c",
+                "user.email=t@e",
+                "notes",
+                "--ref=refs/notes/temporal-attestations-epoch",
+                "add",
+                "-m",
+                "[]",
+            ],
+            cwd=work,
+            check=True,
+            capture_output=True,
+        )
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", str(work), str(clone)], check=True, capture_output=True)
+    return clone
+
+
+def _run_notes_fetch(clone: Path) -> subprocess.CompletedProcess[str]:
+    script = str(_notes_fetch_step()["run"])
+    return subprocess.run(
+        ["bash", "-c", script], cwd=clone, capture_output=True, text=True, check=False
+    )
+
+
+def _has_ref(clone: Path, ref: str) -> bool:
+    probe = ["git", "rev-parse", "--quiet", "--verify", ref]
+    return subprocess.run(probe, cwd=clone, capture_output=True, check=False).returncode == 0
+
+
+def test_the_notes_fetch_step_carries_the_epoch_ref(tmp_path: Path) -> None:
+    """Executed for real against a local origin: the step's own script."""
+    clone = _notes_origin(tmp_path, with_epoch=True)
+
+    result = _run_notes_fetch(clone)
+
+    assert result.returncode == 0, result.stderr
+    assert _has_ref(clone, "refs/notes/temporal-attestations")
+    assert _has_ref(clone, "refs/notes/temporal-attestations-epoch")
+
+
+def test_the_notes_fetch_step_tolerates_an_origin_without_an_epoch_yet(tmp_path: Path) -> None:
+    clone = _notes_origin(tmp_path, with_epoch=False)
+
+    result = _run_notes_fetch(clone)
+
+    assert result.returncode == 0, result.stderr
+    assert _has_ref(clone, "refs/notes/temporal-attestations")
+    assert not _has_ref(clone, "refs/notes/temporal-attestations-epoch")
+
+
+def test_the_notes_fetch_step_fails_on_an_unreachable_origin(tmp_path: Path) -> None:
+    clone = _notes_origin(tmp_path, with_epoch=True)
+    subprocess.run(
+        ["git", "remote", "set-url", "origin", str(tmp_path / "gone")],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+    )
+
+    assert _run_notes_fetch(clone).returncode != 0
