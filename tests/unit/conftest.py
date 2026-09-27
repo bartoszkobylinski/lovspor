@@ -2,6 +2,7 @@
 
 import locale
 import os
+import subprocess
 import sys
 from collections.abc import Iterator
 
@@ -55,3 +56,20 @@ def strict_umask() -> Iterator[None]:
         yield
     finally:
         os.umask(previous)
+
+
+@pytest.fixture
+def live_child() -> Iterator[subprocess.Popen[bytes]]:
+    """A process that exists for the whole test and is not the test runner.
+
+    A liveness probe is exercised against this rather than ``os.getpid()``: a
+    probe that wrongly sends a real signal would then hit a bystander the test
+    can inspect, not the runner itself, whose death reads as "suspicious"
+    rather than as a failed assertion (#218).
+    """
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        yield child
+    finally:
+        child.kill()
+        child.wait()

@@ -54,21 +54,16 @@ from lovspor.observatory.registry_io import (
     _registry_file,
     _root,
 )
-from lovspor.observatory.status_report import (
-    _echo_cadence,
-    _echo_last_sweep,
-    _echo_sources,
-    _echo_switch,
-)
+from lovspor.observatory.status_report import echo_status_report
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.observatory.sweeps import (
     SweepRun,
     append_sweep_run,
-    cadence_state,
-    latest_sweep_run,
+    read_sweep_runs,
     sweep_status,
     sweeps_path,
 )
+from lovspor.observatory.triggers import running_sweep
 
 # `observatory_app` is defined in `app` and re-exported here: `cli.py` imports it
 # from this module, and both command modules decorate the same instance.
@@ -906,9 +901,9 @@ def _record_sweep(
     return run
 
 
-def _latest_sweep(root: ObservatoryRoot) -> SweepRun | None:
+def _sweep_runs(root: ObservatoryRoot) -> list[SweepRun]:
     try:
-        return latest_sweep_run(sweeps_path(root))
+        return read_sweep_runs(sweeps_path(root))
     except LogIntegrityError as exc:
         typer.echo(f"Refused: {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -1084,12 +1079,7 @@ def status() -> None:
     because the same command then serves a monitor, and a health check nobody
     can script is a health check nobody runs.
     """
-    root = _root()
-    latest = _latest_sweep(root)
-    state = cadence_state(latest)
-    _echo_sources(_load(_registry_file()))
-    _echo_last_sweep(latest)
-    _echo_cadence(state, latest)
-    _echo_switch()
-    if state.overdue:
+    runs = _sweep_runs(_root())
+    running = running_sweep(OBSERVATORY_WORKLOAD)
+    if echo_status_report(_load(_registry_file()), runs, running).overdue:
         raise typer.Exit(1)
