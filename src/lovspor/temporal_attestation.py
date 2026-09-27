@@ -32,7 +32,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, NamedTuple
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+)
 
 from lovspor.errors import LovsporError, TemporalDerivationError
 from lovspor.temporal import count_source_amendment_notes, derive_temporal_layer
@@ -404,7 +411,9 @@ def read_gate_epochs(repo: Path) -> dict[int, TemporalGateEpoch]:
     a corrupt channel: :class:`AttestationError`, never a guessed epoch.
     """
     epochs: dict[int, TemporalGateEpoch] = {}
-    for blob, annotated in _note_objects(repo, EPOCH_NOTES_REF):
+    notes = _note_objects(repo, EPOCH_NOTES_REF)
+    _require_commit_anchors(repo, [annotated for _, annotated in notes])
+    for blob, annotated in notes:
         for record in _epoch_records(repo, blob):
             if record.boundary_commit != annotated:
                 raise AttestationError(
@@ -530,6 +539,35 @@ def _note_objects(repo: Path, ref: str) -> list[tuple[str, str]]:
         (blob, annotated)
         for blob, _, annotated in (line.partition(" ") for line in result.stdout.splitlines())
     ]
+
+
+def _require_commit_anchors(repo: Path, objects: list[str]) -> None:
+    """Every present annotated object must be a commit.
+
+    The epoch is defined on a corpus state, so a note on a blob, tree or
+    tag is corruption. An object this clone does not hold is accepted: a
+    ``--depth 1`` clone lacks the boundary commit, and the reader must
+    still work there (the id match against the record stays enforced).
+    """
+    if not objects:
+        return
+    result = subprocess.run(
+        ["git", "cat-file", "--batch-check=%(objectname) %(objecttype)"],  # noqa: S607
+        cwd=repo,
+        input="".join(f"{obj}\n" for obj in objects),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AttestationError(f"gate-epoch anchors unreadable: {result.stderr.strip()}")
+    for line in result.stdout.splitlines():
+        name, _, kind = line.partition(" ")
+        if kind not in ("commit", "missing"):
+            raise AttestationError(
+                f"gate-epoch note is attached to {name}, a {kind} and not a commit — "
+                f"the evidence channel is corrupt",
+            )
 
 
 def _epoch_records(repo: Path, blob: str) -> list[TemporalGateEpoch]:

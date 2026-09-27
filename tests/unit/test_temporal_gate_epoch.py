@@ -200,6 +200,19 @@ def test_record_anchored_to_another_commit_is_corrupt(corpus: tuple[Path, str, s
         read_gate_epochs(repo)
 
 
+def test_record_anchored_to_a_non_commit_object_is_corrupt(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """A matching 40-hex object id is not enough: the epoch is defined on
+    the last pre-epoch corpus state, which must be a commit."""
+    repo, _boundary, _gated = corpus
+    blob = _git(repo, "hash-object", "-w", "boundary.md")
+    _raw_note(repo, blob, json.dumps([_epoch(blob).model_dump(mode="json")]))
+
+    with pytest.raises(AttestationError, match="corrupt|commit"):
+        read_gate_epochs(repo)
+
+
 def test_corrupt_record_after_a_good_one_is_still_found(tmp_path: Path) -> None:
     """Skip-before-match: a valid record first must not stop the walk
     before a later note is validated."""
@@ -429,3 +442,39 @@ def test_rejected_push_is_a_typed_failure(tmp_path: Path) -> None:
 
     with pytest.raises(AttestationError, match="failed to push"):
         push_gate_epochs(clone)
+
+
+# ---------- corruption probes (codex-tests round 1 follow-up) ----------
+
+
+def test_record_on_an_annotated_tag_is_corrupt(corpus: tuple[Path, str, str]) -> None:
+    """Even when the record names the tag's own id: a tag is not a state."""
+    repo, boundary, _gated = corpus
+    _git(repo, "tag", "-a", "v1", "-m", "tag", boundary)
+    tag = _git(repo, "rev-parse", "v1")
+    _raw_note(repo, tag, json.dumps([_epoch(tag).model_dump(mode="json")]))
+
+    with pytest.raises(AttestationError, match="a tag and not a commit"):
+        read_gate_epochs(repo)
+
+
+def test_record_on_a_tree_is_corrupt(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    tree = _git(repo, "rev-parse", f"{boundary}^{{tree}}")
+    _raw_note(repo, tree, json.dumps([_epoch(tree).model_dump(mode="json")]))
+
+    with pytest.raises(AttestationError, match="a tree and not a commit"):
+        read_gate_epochs(repo)
+
+
+def test_non_commit_anchor_after_a_good_record_is_still_found(tmp_path: Path) -> None:
+    repo = tmp_path / "corpus"
+    _init(repo)
+    good = _commit(repo, "good", BOUNDARY_DATE)
+    _raw_note(repo, good, json.dumps([_epoch(good).model_dump(mode="json")]))
+    blob = _git(repo, "hash-object", "-w", "good.md")
+    record = _epoch(blob, parser_version=3).model_dump(mode="json")
+    _raw_note(repo, blob, json.dumps([record]))
+
+    with pytest.raises(AttestationError, match="not a commit"):
+        read_gate_epochs(repo)
