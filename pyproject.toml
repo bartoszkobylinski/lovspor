@@ -224,6 +224,14 @@ show_missing = true
 source_paths = ["src/lovspor/"]
 pytest_add_cli_args = ["-x", "-q"]
 pytest_add_cli_args_test_selection = ["tests/unit/"]
+# Per-mutant wall limit = (estimated_time + timeout_constant) * timeout_multiplier,
+# and estimated_time sums only the pytest `call` phase, never setup/teardown.
+# On PR #395 two real survivors (0.71 s call, 4.75 s setup+teardown) ran out of
+# the default (0.71 + 1) * 15 = 25.7 s in CI and reported as timeouts. The
+# constant carries the setup time: (0.71 + 7) * 15 = 115.7 s, 4x the limit they
+# ran out of (#423, owner decision (c)).
+timeout_constant = 7.0
+timeout_multiplier = 15.0
 also_copy = [
     ".github/",
     "benchmarks/",
