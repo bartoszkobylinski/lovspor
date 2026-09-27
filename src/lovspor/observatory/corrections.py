@@ -11,7 +11,8 @@ had the record been filed correctly.
 
 An original is corrected only when the log holds both halves of one
 correction: a re-filed observation superseding it and a record tombstone
-retracting it, under the same ``correction_id``. The writer appends the
+retracting it, with the same ``correction_id``, reason, author and time
+(:func:`pairing`). The writer appends the
 re-filed half first, so at every crash point a reader sees either the original
 or the corrected record — never both, never neither.
 
@@ -21,12 +22,14 @@ attribution goes through :meth:`ObservationLog.scan_corrected_into`.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from lovspor.observatory.model import (
     ArtifactObservation,
+    Correction,
     FetchFailure,
     ObservationRecord,
     RecordTombstone,
@@ -41,6 +44,17 @@ from lovspor.observatory.model import (
 _MARKERS = (b"record_tombstone", b"refiled_observation")
 
 _ADAPTER: TypeAdapter[ObservationRecord] = TypeAdapter(ObservationRecord)
+
+
+def pairing(half: Correction | RecordTombstone) -> tuple[str, str, str, datetime]:
+    """What both halves of one correction must share (ADR-0015 §4).
+
+    Not the ``correction_id`` alone: the re-filed half carries "reason,
+    corrected_by, corrected_at: identical to the record tombstone", so two
+    halves that disagree on who, why or when are not one correction. Neither
+    stands, and `verify` reports both as incomplete.
+    """
+    return (half.correction_id, half.reason, half.corrected_by, half.corrected_at)
 
 
 @dataclass(frozen=True)
@@ -80,7 +94,7 @@ class CorrectionSet:
         found: list[Refiled] = []
         for tombstone in self.tombstones.get(key, []):
             for entry in halves:
-                if entry.record.correction.correction_id == tombstone.correction_id:
+                if pairing(entry.record.correction) == pairing(tombstone):
                     found.append(entry)
         return found
 
@@ -221,6 +235,6 @@ def _faithful(refiled: RefiledObservation, original: ObservationRecord) -> bool:
 
 
 def _unpaired(corrections: CorrectionSet, key: str) -> bool:
-    retracted = {tombstone.correction_id for tombstone in corrections.tombstones.get(key, [])}
-    refiled = {entry.record.correction.correction_id for entry in corrections.refiled.get(key, [])}
+    retracted = {pairing(tombstone) for tombstone in corrections.tombstones.get(key, [])}
+    refiled = {pairing(entry.record.correction) for entry in corrections.refiled.get(key, [])}
     return bool(retracted ^ refiled)
