@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+import lovspor.observatory.corrections as corrections_module
+import lovspor.observatory.log as log_module
 from lovspor.observatory.corrections import CorrectionSet, Refiled, fold_corrections
 from lovspor.observatory.log import ObservationLog, verify_snapshot
 from lovspor.observatory.model import (
@@ -118,6 +120,20 @@ class TestTheCorrectedView:
             log.append(record)
 
         assert corrected(log) == records
+
+    def test_without_corrections_the_view_does_not_hash_lines(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        log = make_log(tmp_path)
+        original = artifact("a")
+        log.append(original)
+
+        def unexpected_hash(_line: bytes) -> str:
+            pytest.fail("an empty correction set must not hash observation lines")
+
+        monkeypatch.setattr(corrections_module, "record_key", unexpected_hash)
+
+        assert corrected(log) == [original]
 
     def test_a_corrected_original_is_replaced_at_its_own_position(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
@@ -275,15 +291,21 @@ class TestTheCorrectionFold:
         assert not log.corrections()
 
     def test_a_cached_fold_is_not_reapplied_when_the_size_is_unchanged(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         log = make_log(tmp_path)
         original = artifact("a")
         log.append(original)
         correct(log, original)
 
-        assert len(log.corrections().refiled[key_of(original)]) == 1
-        assert len(log.corrections().refiled[key_of(original)]) == 1
+        cached = log.corrections()
+
+        def unexpected_fold(_path: Path, _into: CorrectionSet, _start: int) -> int:
+            pytest.fail("an unchanged log must not be folded again")
+
+        monkeypatch.setattr(log_module, "fold_corrections", unexpected_fold)
+
+        assert log.corrections() is cached
 
     def test_an_empty_truncation_restarts_the_next_fold_at_byte_zero(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
@@ -295,6 +317,20 @@ class TestTheCorrectionFold:
         log.log_path.write_bytes(b"")
         assert not log.corrections()
         log.append(original)
+        correct(log, original)
+
+        assert log.corrections().in_force(key_of(original)) is not None
+
+    def test_a_correction_after_empty_truncation_is_read_from_byte_zero(
+        self, tmp_path: Path
+    ) -> None:
+        log = make_log(tmp_path)
+        original = artifact("a")
+        correct(log, original)
+        assert log.corrections()
+
+        log.log_path.write_bytes(b"")
+        assert not log.corrections()
         correct(log, original)
 
         assert log.corrections().in_force(key_of(original)) is not None
@@ -330,6 +366,24 @@ class TestTheCorrectionFold:
         log.append(artifact("record_tombstone"))
 
         assert not log.corrections()
+
+    def test_only_correction_candidate_lines_are_parsed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        log = make_log(tmp_path)
+        log.append(artifact("ordinary"))
+        parsed: list[bytes] = []
+        original_fold_line = corrections_module._fold_line
+
+        def track_candidate(into: CorrectionSet, line: bytes, end: int) -> None:
+            parsed.append(line)
+            original_fold_line(into, line, end)
+
+        monkeypatch.setattr(corrections_module, "_fold_line", track_candidate)
+
+        fold_corrections(log.log_path, CorrectionSet(), 0)
+
+        assert parsed == []
 
 
 class TestTheBlobTombstoneIsUntouched:
