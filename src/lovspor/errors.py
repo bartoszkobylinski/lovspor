@@ -143,6 +143,16 @@ class TombstonedArtifactError(ObservatoryError):
     """
 
 
+class CorrectionRefusedError(ObservatoryError):
+    """A correction of the observation log was refused before anything was written.
+
+    ADR-0015 lets an operator correct a filed record's attribution only when
+    the register already supports the corrected one, and never over a
+    half-written correction that says something else. Refusing is the
+    validator a hand edit of the log would have skipped.
+    """
+
+
 class SourceNotActivatedError(ObservatoryError):
     """A source was used for capture without a recorded access-policy check.
 
