@@ -340,6 +340,22 @@ class TestApplying:
         with pytest.raises(CorrectionRefusedError, match=expected):
             plan_reattribution(log, request(), attribution("run-1"))
 
+    def test_any_conflicting_half_written_correction_is_refused(self, tmp_path: Path) -> None:
+        """ADR-0015 refuses if any unfinished half moves the record elsewhere."""
+        log = make_log(tmp_path)
+        original = artifact("a")
+        log.append(original)
+        requested = plan_reattribution(log, request(), attribution("run-0"))
+        conflicting = plan_reattribution(
+            log, request(to_authority="4204"), attribution("other-run")
+        )
+        log.append(requested.appends[0])
+        log.append(conflicting.appends[0])
+
+        expected = f"record {key_of(original)[:12]} has a half-written correction to 4204, not 4203"
+        with pytest.raises(CorrectionRefusedError, match=expected):
+            plan_reattribution(log, request(), attribution("run-1"))
+
     def test_the_audit_is_clean_after_a_run(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         for path in ("a", "b"):
