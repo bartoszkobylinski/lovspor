@@ -23,6 +23,7 @@ from lovspor.temporal_attestation import (
     attested_commits,
     check_gate_epoch,
     fetch_gate_epochs,
+    publish_gate_epochs,
     push_gate_epochs,
     read_gate_epochs,
     write_attestation,
@@ -529,3 +530,52 @@ def test_a_stored_non_utc_record_is_a_broken_channel(corpus: tuple[Path, str, st
 
 def test_utc_spelled_as_zero_offset_is_the_same_instant() -> None:
     assert _epoch("a" * 40, epoch_at="2026-09-04T08:45:36+00:00").epoch_at == EPOCH_AT
+
+
+# ---------- publishing a record a rejected push left behind ----------
+
+
+def test_publish_pushes_a_local_only_record_once(tmp_path: Path) -> None:
+    origin, clone, boundary = _bare_origin_with_clone(tmp_path)
+    write_gate_epoch(clone, _epoch(boundary))
+
+    assert publish_gate_epochs(clone) is True
+    assert publish_gate_epochs(clone) is False
+    assert _git(origin, "rev-parse", EPOCH_NOTES_REF) == _git(clone, "rev-parse", EPOCH_NOTES_REF)
+
+
+def test_publish_without_a_local_record_pushes_nothing(tmp_path: Path) -> None:
+    origin, clone, _boundary = _bare_origin_with_clone(tmp_path)
+
+    assert publish_gate_epochs(clone) is False
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", EPOCH_NOTES_REF], cwd=origin, check=False
+        ).returncode
+        != 0
+    )
+
+
+def test_publish_never_overwrites_a_different_remote_record(tmp_path: Path) -> None:
+    origin, clone, boundary = _bare_origin_with_clone(tmp_path)
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", str(origin), str(other))
+    _git(other, "config", "user.email", "o@example.com")
+    _git(other, "config", "user.name", "Other")
+    write_gate_epoch(other, _epoch(boundary, evidence="lovspor sync run 1"))
+    push_gate_epochs(other)
+    remote_before = _git(origin, "rev-parse", EPOCH_NOTES_REF)
+    write_gate_epoch(clone, _epoch(boundary))
+
+    with pytest.raises(AttestationError, match="failed to push"):
+        publish_gate_epochs(clone)
+    assert _git(origin, "rev-parse", EPOCH_NOTES_REF) == remote_before
+
+
+def test_publish_to_an_unreachable_remote_is_a_broken_channel(tmp_path: Path) -> None:
+    _origin, clone, boundary = _bare_origin_with_clone(tmp_path)
+    write_gate_epoch(clone, _epoch(boundary))
+    _git(clone, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    with pytest.raises(AttestationError, match="cannot reach origin"):
+        publish_gate_epochs(clone)

@@ -496,6 +496,30 @@ def write_gate_epoch(repo: Path, record: TemporalGateEpoch) -> bool:
     return True
 
 
+def publish_gate_epochs(repo: Path, remote: str = "origin") -> bool:
+    """Push the local epoch ref when ``remote`` does not hold it; True when
+    pushed.
+
+    A write whose push was rejected leaves the immutable note only in this
+    clone, and a retry reads it back as already recorded — so "recorded"
+    is not "published" until the remote's ref equals the local one. The
+    push is never forced: a remote holding a different history rejects
+    it, and that rejection raises instead of overwriting a remote record.
+    """
+    local = _git(repo, ["rev-parse", "--quiet", "--verify", EPOCH_NOTES_REF])
+    if local.returncode != 0:
+        return False
+    listed = _git(repo, ["ls-remote", "--exit-code", remote, EPOCH_NOTES_REF])
+    if listed.returncode not in (0, 2):
+        raise AttestationError(
+            f"cannot reach {remote} to check {EPOCH_NOTES_REF}: {listed.stderr.strip()}",
+        )
+    if listed.stdout.split(maxsplit=1)[:1] == [local.stdout.strip()]:
+        return False
+    push_gate_epochs(repo, remote)
+    return True
+
+
 def push_gate_epochs(repo: Path, remote: str = "origin") -> None:
     """Push the gate-epoch ref to ``remote``; a rejected push raises."""
     result = _git(repo, ["push", remote, EPOCH_NOTES_REF])

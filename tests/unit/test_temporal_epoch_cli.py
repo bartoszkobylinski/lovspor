@@ -188,6 +188,43 @@ def test_backfill_rerun_is_an_idempotent_no_op(tmp_path: Path) -> None:
     assert _git(again, "rev-parse", EPOCH_NOTES_REF) == pushed
 
 
+def test_backfill_retry_publishes_a_note_left_by_a_rejected_push(tmp_path: Path) -> None:
+    origin, shas = _origin(tmp_path, gate_ran=True)
+    clone = _writable_clone(origin, tmp_path / "operator")
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+
+    first_code, first_output = _backfill(clone, shas[0], "--apply")
+
+    assert first_code == 1
+    assert "failed to push" in first_output
+    assert read_gate_epochs(clone)
+    assert not _origin_has_epoch_ref(origin)
+
+    hook.unlink()
+    retry_code, retry_output = _backfill(clone, shas[0], "--apply")
+
+    assert retry_code == 0, retry_output
+    assert _origin_has_epoch_ref(origin)
+
+
+def test_backfill_dry_run_never_publishes_a_local_only_record(tmp_path: Path) -> None:
+    origin, shas = _origin(tmp_path, gate_ran=True)
+    clone = _writable_clone(origin, tmp_path / "operator")
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    _backfill(clone, shas[0], "--apply")
+    hook.unlink()
+
+    code, output = _backfill(clone, shas[0])
+
+    assert code == 0, output
+    assert "identical gate epoch already recorded" in output
+    assert not _origin_has_epoch_ref(origin)
+
+
 def test_backfill_later_than_the_first_attested_state_is_refused(tmp_path: Path) -> None:
     origin, shas = _origin(tmp_path, gate_ran=True)
     clone = _writable_clone(origin, tmp_path / "operator")
@@ -293,6 +330,35 @@ def test_first_run_under_a_version_records_and_pushes_the_epoch(tmp_path: Path) 
     assert record.evidence == "lovspor sync run 77"
     assert before.replace(microsecond=0) <= record.epoch_at <= datetime.now(UTC)
     assert record.epoch_at.microsecond == 0
+
+
+def test_record_sync_run_retry_publishes_a_note_left_by_a_rejected_push(
+    tmp_path: Path,
+) -> None:
+    """The workflow command promises to push the epoch at run start.
+
+    A transient push rejection leaves the immutable note in the runner clone;
+    retrying the supported command must publish that note rather than mistake
+    local-only state for a record already present on origin.
+    """
+    origin, _shas = _origin(tmp_path, gate_ran=False)
+    clone = _writable_clone(origin, tmp_path / "runner")
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+
+    first_code, first_output = _cli(clone, "record-sync-run", "--sync-run", "77")
+
+    assert first_code == 1
+    assert "failed to push" in first_output
+    assert read_gate_epochs(clone)
+    assert not _origin_has_epoch_ref(origin)
+
+    hook.unlink()
+    retry_code, retry_output = _cli(clone, "record-sync-run", "--sync-run", "77")
+
+    assert retry_code == 0, retry_output
+    assert _origin_has_epoch_ref(origin)
 
 
 def test_a_later_run_under_the_same_version_writes_nothing(tmp_path: Path) -> None:

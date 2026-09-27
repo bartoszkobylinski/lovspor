@@ -31,6 +31,7 @@ from lovspor.temporal_attestation import (
     check_gate_epoch,
     fetch_attestations,
     fetch_gate_epochs,
+    publish_gate_epochs,
     push_gate_epochs,
     read_attestation,
     read_gate_epochs,
@@ -160,7 +161,7 @@ def record_sync_run_epoch(repo: Path, request: SyncRunRequest, now: datetime) ->
     _fetch_registry(repo)
     existing = read_gate_epochs(repo).get(TEMPORAL_PARSER_VERSION)
     if existing is not None:
-        return EpochReport(message="gate epoch already recorded; nothing to do", record=existing)
+        return EpochReport(message=_published("gate epoch already recorded", repo), record=existing)
     if attested_commits(repo, TEMPORAL_PARSER_VERSION):
         return EpochReport(
             message=(
@@ -193,12 +194,22 @@ def backfill_epoch(repo: Path, request: BackfillRequest, now: datetime) -> Epoch
         evidence=_evidence(request.sync_run),
     )
     if not check_gate_epoch(repo, record):
-        return EpochReport(message="identical gate epoch already recorded", record=record)
+        message = "identical gate epoch already recorded"
+        if request.apply:
+            message = _published(message, repo)
+        return EpochReport(message=message, record=record)
     if not request.apply:
         return EpochReport(message="dry run: valid; nothing written (pass --apply)", record=record)
     write_gate_epoch(repo, record)
     push_gate_epochs(repo)
     return EpochReport(message="gate epoch recorded and pushed", record=record, written=True)
+
+
+def _published(message: str, repo: Path) -> str:
+    """Publish a record a rejected push left behind, and say which it was."""
+    if publish_gate_epochs(repo):
+        return f"{message}; it was only local — now pushed"
+    return f"{message} on origin; nothing to do"
 
 
 def _fetch_registry(repo: Path) -> None:
