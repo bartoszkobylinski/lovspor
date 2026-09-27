@@ -172,6 +172,13 @@ class TestTheRegisterMustSupportTheMove:
 
 
 class TestThePlan:
+    def test_an_empty_selection_has_no_observation_bounds(self, tmp_path: Path) -> None:
+        plan = plan_reattribution(make_log(tmp_path), request(), attribution())
+
+        assert plan.selected == 0
+        assert plan.first_observed is None
+        assert plan.last_observed is None
+
     def test_selects_the_source_s_records_on_the_host_and_nothing_else(
         self, tmp_path: Path
     ) -> None:
@@ -228,6 +235,15 @@ class TestThePlan:
         refiled = plan.appends[0]
         assert isinstance(refiled, RefiledObservation)
         assert refiled.observation.url == f"{ARENDAL}/on-requested-host"
+
+    def test_a_url_without_a_hostname_is_not_selected(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append(artifact("missing-host").model_copy(update={"url": "XXXX"}))
+
+        plan = plan_reattribution(log, request(host="XXXX"), attribution())
+
+        assert plan.selected == 0
+        assert plan.appends == ()
 
     def test_planning_writes_nothing(self, tmp_path: Path) -> None:
         log = misfiled(tmp_path)
@@ -316,11 +332,13 @@ class TestApplying:
 
     def test_a_half_written_correction_elsewhere_is_refused(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
-        log.append(artifact("a"))
+        original = artifact("a")
+        log.append(original)
         stray = plan_reattribution(log, request(to_authority="4204"), attribution("run-0"))
         log.append(stray.appends[0])
 
-        with pytest.raises(CorrectionRefusedError, match="4204"):
+        expected = f"record {key_of(original)[:12]} has a half-written correction to 4204, not 4203"
+        with pytest.raises(CorrectionRefusedError, match=expected):
             plan_reattribution(log, request(), attribution("run-1"))
 
     def test_the_audit_is_clean_after_a_run(self, tmp_path: Path) -> None:

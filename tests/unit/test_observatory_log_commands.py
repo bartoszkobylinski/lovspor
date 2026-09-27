@@ -21,9 +21,11 @@ from lovspor.cli import app
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.freshness import CaptureState, collect_capture_state
 from lovspor.observatory.log import ObservationLog
+from lovspor.observatory.log_commands import _echo_plan
 from lovspor.observatory.model import ArtifactObservation, FetchFailure, RetrievalProvenance
 from lovspor.observatory.reattribution import (
     Attribution,
+    ReattributionPlan,
     ReattributionRequest,
     plan_reattribution,
 )
@@ -182,12 +184,26 @@ class TestTheDryRun:
         assert result.exit_code == 0, result.output
         assert "selected: 3 records (2 artifact, 1 fetch_failure)" in result.output
         assert "observed: 2026-08-24T10:42:00+00:00 .. 2026-08-24T10:47:00+00:00" in result.output
+        assert "half-written, to complete: 0" in result.output
         assert "to append: 6 lines" in result.output
         assert '  first refiled_observation: {"correction":' in result.output
         assert '  first record_tombstone: {"corrected_at":' in result.output
         assert "dry run — nothing written" in result.output
         assert tree(root) == before
         assert not default_lock_path().exists()
+
+    def test_does_not_render_an_incomplete_observation_range(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _echo_plan(
+            ReattributionPlan(
+                correction_id="run-1",
+                first_observed=START,
+                last_observed=None,
+            )
+        )
+
+        assert "observed:" not in capsys.readouterr().out
 
     def test_runs_while_a_sweep_holds_the_lock(self, root: Path, tmp_path: Path) -> None:
         repaired_register()
