@@ -1057,6 +1057,13 @@ Cadence
   age:        18h47m
   deadline:   36h00m
   state:      OK
+
+Scheduled triggers
+  schedule:   daily 03:00 Europe/Oslo
+  running:    since 2026-09-26T05:15:40+00:00 (16h00m)
+  dropped:    2 in the last 14 days
+    2026-09-23T03:00+02:00  held by the sweep started 2026-09-22T05:10:23+00:00
+    2026-09-25T03:00+02:00  held by the sweep started 2026-09-24T01:00:30+00:00
 ```
 
 It exits 1 when no sweep has *begun* inside the deadline, so the same command
@@ -1071,6 +1078,20 @@ serves a monitor. Two details are deliberate:
 
 The deadline is 36h rather than 24h: room for sleep/wake and one long run,
 without letting two whole days pass unnoticed.
+
+**Scheduled triggers** closes the other silence (issue #218). launchd will not
+start a second instance of a label that is still running, so a sweep that
+outlives a day swallows the next 03:00 trigger and nothing records it. `status`
+reconstructs them: every 03:00 Europe/Oslo instant of the last 14 days that fell
+strictly inside a recorded run (start to finish) or inside the sweep running now
+is listed with the start of the sweep that held the job. A sweep in progress has
+no run record until it finishes; the host's exclusive workload lock (#169) names
+it and its start, and is believed only while its pid is alive — so `running` is
+this host's view, and a status read from another machine shows none. The
+section is information, not an alarm: it does not change the exit code. The
+schedule is a constant in `src/lovspor/observatory/triggers.py` that mirrors
+`StartCalendarInterval` in the plist; a unit test fails when the two drift, so
+moving the job's hour means changing both.
 
 ## Scheduled runs (production)
 
