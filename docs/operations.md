@@ -1166,7 +1166,8 @@ before the epoch → `unattested`; at or after it → `UnattestedGateStateError`
 (see `mcp.md`).
 
 Two supported writers, both `lovspor temporal-epoch --corpus-path <clone>`.
-Input is validated before any git work, and a malformed value exits 2:
+Input is validated before anything is fetched, written or pushed (only the
+read-only `--corpus-path` check runs git first), and a malformed value exits 2:
 `--corpus-path` must be the top level of a lovverk clone (git + `manifest.json`),
 `--sync-run` a positive decimal GitHub run id (it becomes the immutable
 `evidence`), `--boundary-commit` a full 40-hex commit id, `--epoch-at` a UTC

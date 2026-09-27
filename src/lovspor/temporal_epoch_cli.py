@@ -105,7 +105,9 @@ def backfill(
 
 
 def _usage_error(exc: ValidationError) -> NoReturn:
-    """Malformed input: exit 2, the usage-error code, before any git work."""
+    """Malformed input: exit 2, the usage-error code, before anything is
+    fetched, written or pushed (the --corpus-path check is the only git
+    that has run, and it only reads)."""
     typer.echo(f"error: {exc}", err=True)
     raise typer.Exit(code=2) from exc
 

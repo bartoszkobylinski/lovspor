@@ -123,7 +123,7 @@ class EpochReport(BaseModel):
 SyncRunId = Annotated[str, Field(pattern=r"^[1-9][0-9]{0,19}$")]
 """A GitHub Actions run id: a positive decimal integer, nothing around it.
 It becomes the record's immutable ``evidence``, so a malformed id is
-refused before any git work rather than written forever."""
+refused before anything is fetched or written, rather than written forever."""
 
 
 class SyncRunRequest(BaseModel):
@@ -237,8 +237,11 @@ def _evidence(sync_run: str) -> str:
 
 
 def _resolve_commit(repo: Path, rev: str) -> str:
+    """Full id of ``rev``. Callers pass only ``HEAD`` or a boundary id
+    ``BackfillRequest`` already held to 40 hex digits, so no rev reaching
+    git here can start with ``-`` and be read as an option."""
     result = subprocess.run(  # noqa: S603 — trusted git, list args, no shell
-        ["git", "rev-parse", "--verify", "--end-of-options", f"{rev}^{{commit}}"],  # noqa: S607
+        ["git", "rev-parse", "--verify", f"{rev}^{{commit}}"],  # noqa: S607
         cwd=repo,
         capture_output=True,
         text=True,

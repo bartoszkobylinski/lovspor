@@ -222,6 +222,40 @@ def test_backfill_retry_publishes_a_note_left_by_a_rejected_push(tmp_path: Path)
     assert _origin_has_epoch_ref(origin)
 
 
+def test_a_published_retry_says_the_record_was_only_local(tmp_path: Path) -> None:
+    """The retry's report names what happened: the record existed, only in
+    this clone, and is now pushed — not 'already on origin'."""
+    origin, shas = _origin(tmp_path, gate_ran=True)
+    clone = _writable_clone(origin, tmp_path / "operator")
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    _backfill(clone, shas[0], "--apply")
+    hook.unlink()
+
+    code, output = _backfill(clone, shas[0], "--apply")
+
+    assert code == 0, output
+    assert output.splitlines()[0] == (
+        "identical gate epoch already recorded; it was only local — now pushed"
+    )
+
+
+def test_a_published_sync_run_retry_says_the_record_was_only_local(tmp_path: Path) -> None:
+    origin, _shas = _origin(tmp_path, gate_ran=False)
+    clone = _writable_clone(origin, tmp_path / "runner")
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    _cli(clone, "record-sync-run", "--sync-run", "77")
+    hook.unlink()
+
+    code, output = _cli(clone, "record-sync-run", "--sync-run", "77")
+
+    assert code == 0, output
+    assert output.splitlines()[0] == "gate epoch already recorded; it was only local — now pushed"
+
+
 def test_backfill_dry_run_never_publishes_a_local_only_record(tmp_path: Path) -> None:
     origin, shas = _origin(tmp_path, gate_ran=True)
     clone = _writable_clone(origin, tmp_path / "operator")

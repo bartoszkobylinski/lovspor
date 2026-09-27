@@ -732,3 +732,44 @@ def test_fetch_treats_an_origin_with_only_a_decoy_as_the_bootstrap(tmp_path: Pat
     fetch_gate_epochs(clone)
 
     assert read_gate_epochs(clone) == {}
+
+
+def test_publish_pushes_to_the_named_remote(tmp_path: Path) -> None:
+    """The remote is the caller's, not a hard-wired origin: with origin
+    unreachable, publishing to a second, reachable remote must succeed."""
+    origin, clone, boundary = _bare_origin_with_clone(tmp_path)
+    write_gate_epoch(clone, _epoch(boundary))
+    _git(clone, "remote", "add", "upstream", str(origin))
+    _git(clone, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    assert publish_gate_epochs(clone, "upstream") is True
+    assert _git(origin, "rev-parse", EPOCH_NOTES_REF) == _git(clone, "rev-parse", EPOCH_NOTES_REF)
+    assert publish_gate_epochs(clone, "upstream") is False
+
+
+def test_a_notes_history_whose_tree_is_gone_is_unreadable(corpus: tuple[Path, str, str]) -> None:
+    """The ref exists and is a commit, but git cannot list it: the listing's
+    own diagnostic is the error, and it is never read as 'no records'."""
+    repo, boundary, _gated = corpus
+    write_gate_epoch(repo, _epoch(boundary))
+    tree = _git(repo, "rev-parse", f"{EPOCH_NOTES_REF}^{{tree}}")
+    (repo / ".git" / "objects" / tree[:2] / tree[2:]).unlink()
+
+    with pytest.raises(AttestationError) as caught:
+        read_gate_epochs(repo)
+
+    message = str(caught.value)
+    assert message.startswith(f"notes ref {EPOCH_NOTES_REF} unreadable: ")
+    assert "Failed to read notes tree" in message
+    assert not message.endswith("\n")
+
+
+def test_a_file_named_like_the_boundary_revision_is_not_ambiguous(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """A working-tree path spelled `<id>^{commit}` must not turn the author
+    date lookup into git's 'both revision and filename' refusal."""
+    repo, boundary, _gated = corpus
+    (repo / f"{boundary}^{{commit}}").write_text("bystander\n")
+
+    assert check_gate_epoch(repo, _epoch(boundary)) is True
