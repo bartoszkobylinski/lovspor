@@ -1165,7 +1165,13 @@ record for the serving parser version → `AttestationError`**; author date
 before the epoch → `unattested`; at or after it → `UnattestedGateStateError`
 (see `mcp.md`).
 
-Two supported writers, both `lovspor temporal-epoch --corpus-path <clone>`:
+Two supported writers, both `lovspor temporal-epoch --corpus-path <clone>`.
+Input is validated before any git work, and a malformed value exits 2:
+`--corpus-path` must be the top level of a lovverk clone (git + `manifest.json`),
+`--sync-run` a positive decimal GitHub run id (it becomes the immutable
+`evidence`), `--boundary-commit` a full 40-hex commit id, `--epoch-at` a UTC
+instant (`Z` or `+00:00`). The parser version is always the engine's own
+`TEMPORAL_PARSER_VERSION`, never an argument:
 
 - `record-sync-run --sync-run <run id>` — run by the sync workflow at run
   start, before any corpus work, and pushed at once, so a failed gate still

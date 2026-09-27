@@ -139,7 +139,7 @@ def test_backfill_dry_run_validates_and_writes_nothing(tmp_path: Path) -> None:
     origin, shas = _origin(tmp_path, gate_ran=True)
     clone = _writable_clone(origin, tmp_path / "operator")
 
-    code, output = _backfill(clone, shas[0][:7])
+    code, output = _backfill(clone, shas[0])
 
     assert code == 0, output
     assert "dry run" in output
@@ -260,6 +260,23 @@ def test_backfill_names_an_unresolvable_boundary(tmp_path: Path) -> None:
 # ---------- record-sync-run: the sync's mechanical write ----------
 
 
+@pytest.mark.parametrize("sync_run", ["run-77", ""])
+def test_record_sync_run_refuses_a_non_numeric_workflow_run_id(
+    tmp_path: Path,
+    sync_run: str,
+) -> None:
+    """Both supported writers record a GitHub workflow run id as evidence;
+    malformed evidence must be rejected before the immutable note is written."""
+    origin, _shas = _origin(tmp_path, gate_ran=False)
+    clone = _writable_clone(origin, tmp_path / "runner")
+
+    code, _output = _cli(clone, "record-sync-run", "--sync-run", sync_run)
+
+    assert code == 2
+    assert read_gate_epochs(clone) == {}
+    assert not _origin_has_epoch_ref(origin)
+
+
 def test_first_run_under_a_version_records_and_pushes_the_epoch(tmp_path: Path) -> None:
     origin, shas = _origin(tmp_path, gate_ran=False)
     clone = _writable_clone(origin, tmp_path / "runner")
@@ -346,3 +363,169 @@ def _mismatched_gate_inputs() -> tuple[dict[str, _UpstreamDoc], dict[str, Manife
     )
     record = ManifestRecord.model_validate(_record("testloven", "h2"))
     return {"doc-a": upstream}, {"doc-a": record}
+
+
+# ---------- input validation: every argument, before any git work ----------
+
+
+def _backfill_args(**overrides: str) -> list[str]:
+    values = {
+        "--epoch-at": EPOCH_AT,
+        "--boundary-commit": "a" * 40,
+        "--sync-run": "33854986231",
+        **overrides,
+    }
+    return ["backfill", *(item for pair in values.items() for item in pair)]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"--boundary-commit": "abcdef1"},
+        {"--boundary-commit": "HEAD"},
+        {"--boundary-commit": "main"},
+        {"--boundary-commit": "A" * 40},
+        {"--boundary-commit": "a" * 41},
+        {"--boundary-commit": f" {'a' * 40}"},
+        {"--boundary-commit": ""},
+        {"--epoch-at": ""},
+        {"--epoch-at": " "},
+        {"--epoch-at": "2026-05-09"},
+        {"--sync-run": ""},
+        {"--sync-run": " 1"},
+        {"--sync-run": "1 "},
+        {"--sync-run": "0"},
+        {"--sync-run": "-5"},
+        {"--sync-run": "007"},
+        {"--sync-run": "1.5"},
+        {"--sync-run": "1e3"},
+        {"--sync-run": "\uff11\uff12"},  # fullwidth digits: str.isdigit() says yes
+        {"--sync-run": "9" * 21},
+    ],
+)
+def test_backfill_malformed_argument_is_a_usage_error_with_nothing_written(
+    tmp_path: Path,
+    overrides: dict[str, str],
+) -> None:
+    origin, _shas = _origin(tmp_path, gate_ran=True)
+    clone = _writable_clone(origin, tmp_path / "operator")
+
+    code, output = _cli(clone, *_backfill_args(**overrides), "--apply")
+
+    assert code == 2, output
+    assert read_gate_epochs(clone) == {}
+    assert not _origin_has_epoch_ref(origin)
+
+
+@pytest.mark.parametrize("sync_run", ["0", "-5", " 77", "77 ", "007", "77\n", "9" * 21, "1_000"])
+def test_record_sync_run_malformed_run_id_is_a_usage_error(tmp_path: Path, sync_run: str) -> None:
+    origin, _shas = _origin(tmp_path, gate_ran=False)
+    clone = _writable_clone(origin, tmp_path / "runner")
+
+    code, output = _cli(clone, "record-sync-run", "--sync-run", sync_run)
+
+    assert code == 2, output
+    assert read_gate_epochs(clone) == {}
+    assert not _origin_has_epoch_ref(origin)
+
+
+def test_the_largest_accepted_run_id_is_recorded_verbatim(tmp_path: Path) -> None:
+    origin, _shas = _origin(tmp_path, gate_ran=False)
+    clone = _writable_clone(origin, tmp_path / "runner")
+
+    code, output = _cli(clone, "record-sync-run", "--sync-run", "9" * 20)
+
+    assert code == 0, output
+    assert (
+        read_gate_epochs(clone)[TEMPORAL_PARSER_VERSION].evidence == f"lovspor sync run {'9' * 20}"
+    )
+
+
+def test_the_run_id_is_never_read_from_the_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The workflow passes "$GITHUB_RUN_ID" explicitly; the command has no
+    env fallback, so an absent option is a usage error even when the
+    variable is set, and a set variable never overrides the option."""
+    origin, _shas = _origin(tmp_path, gate_ran=False)
+    clone = _writable_clone(origin, tmp_path / "runner")
+    monkeypatch.setenv("GITHUB_RUN_ID", "12345")
+
+    code, _output = _cli(clone, "record-sync-run")
+    assert code == 2
+    assert read_gate_epochs(clone) == {}
+
+    code, output = _cli(clone, "record-sync-run", "--sync-run", "77")
+    assert code == 0, output
+    assert read_gate_epochs(clone)[TEMPORAL_PARSER_VERSION].evidence == "lovspor sync run 77"
+
+
+def test_parser_version_is_the_engines_own_and_not_an_argument(tmp_path: Path) -> None:
+    origin, shas = _origin(tmp_path, gate_ran=True)
+    clone = _writable_clone(origin, tmp_path / "operator")
+
+    code, _output = _cli(
+        clone, *_backfill_args(**{"--boundary-commit": shas[0]}), "--parser-version", "3"
+    )
+    assert code == 2
+
+    code, output = _cli(clone, *_backfill_args(**{"--boundary-commit": shas[0]}))
+    assert code == 0, output
+    assert f'"parser_version": {TEMPORAL_PARSER_VERSION}' in output
+
+
+@pytest.mark.parametrize("command", ["record-sync-run", "backfill"])
+def test_corpus_path_must_be_the_top_of_a_git_clone(tmp_path: Path, command: str) -> None:
+    origin, _shas = _origin(tmp_path, gate_ran=True)
+    clone = _writable_clone(origin, tmp_path / "operator")
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    a_file = tmp_path / "file.txt"
+    a_file.write_text("x")
+    args = (
+        ["record-sync-run", "--sync-run", "1"] if command == "record-sync-run" else _backfill_args()
+    )
+
+    not_a_corpus = tmp_path / "other-repo"
+    not_a_corpus.mkdir()
+    _git(not_a_corpus, "init", "-b", "main")
+
+    for corpus in (plain, clone / "lover", a_file, tmp_path / "missing", not_a_corpus):
+        code, output = _cli(corpus, *args)
+        assert code == 2, (corpus, output)
+        assert "--corpus-path" in output
+    assert read_gate_epochs(clone) == {}
+    assert not _origin_has_epoch_ref(origin)
+
+
+def test_a_relative_corpus_path_resolves_against_the_working_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pinned inside tmp_path: '.' is whatever the caller stands in, and
+    only a corpus clone there may be touched."""
+    origin, shas = _origin(tmp_path, gate_ran=True)
+    _writable_clone(origin, tmp_path / "operator")
+    monkeypatch.chdir(tmp_path)
+
+    code, output = _cli(Path(), "record-sync-run", "--sync-run", "1")
+    assert code == 2, output
+
+    monkeypatch.chdir(tmp_path / "operator")
+    code, output = _cli(Path(), *_backfill_args(**{"--boundary-commit": shas[0]}))
+    assert code == 0, output
+
+
+def test_corpus_path_expands_the_home_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    origin, shas = _origin(tmp_path, gate_ran=True)
+    _writable_clone(origin, tmp_path / "operator")
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    code, output = _cli(Path("~/operator"), *_backfill_args(**{"--boundary-commit": shas[0]}))
+
+    assert code == 0, output
+    assert "dry run" in output

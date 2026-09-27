@@ -14,6 +14,7 @@ supported paths (the sync run, and the operator backfill).
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -118,18 +119,36 @@ class EpochReport(BaseModel):
     warning: bool = False
 
 
+SyncRunId = Annotated[str, Field(pattern=r"^[1-9][0-9]{0,19}$")]
+"""A GitHub Actions run id: a positive decimal integer, nothing around it.
+It becomes the record's immutable ``evidence``, so a malformed id is
+refused before any git work rather than written forever."""
+
+
+class SyncRunRequest(BaseModel):
+    """The sync workflow's request to record the epoch for its own run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    sync_run: SyncRunId
+
+
 class BackfillRequest(BaseModel):
-    """An operator's backfill of the serving parser version's epoch."""
+    """An operator's backfill of the serving parser version's epoch.
+
+    The boundary is a full commit id: an abbreviation, a branch name or
+    ``HEAD`` would resolve against whatever the clone holds at the time,
+    and the record is immutable."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     epoch_at: UtcInstant
-    boundary_commit: str = Field(min_length=4)
-    sync_run: str = Field(pattern=r"^[0-9]+$")
+    boundary_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    sync_run: SyncRunId
     apply: bool = False
 
 
-def record_sync_run_epoch(repo: Path, sync_run: str, now: datetime) -> EpochReport:
+def record_sync_run_epoch(repo: Path, request: SyncRunRequest, now: datetime) -> EpochReport:
     """The sync's mechanical write, at run start and before the gate.
 
     Writes and pushes a ``sync-run`` record only when none exists for the
@@ -151,7 +170,7 @@ def record_sync_run_epoch(repo: Path, sync_run: str, now: datetime) -> EpochRepo
             ),
             warning=True,
         )
-    record = _sync_run_record(repo, sync_run, now)
+    record = _sync_run_record(repo, request.sync_run, now)
     write_gate_epoch(repo, record)
     push_gate_epochs(repo)
     return EpochReport(message="gate epoch recorded and pushed", record=record, written=True)
@@ -217,3 +236,19 @@ def _resolve_commit(repo: Path, rev: str) -> str:
     if result.returncode != 0:
         raise AttestationError(f"cannot resolve commit {rev!r} in {repo}: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def is_repository_root(path: Path) -> bool:
+    """True when ``path`` is the top level of a git working tree — not a
+    plain directory, and not a subdirectory of some enclosing repository
+    whose notes would be read and written instead."""
+    if not path.is_dir():
+        return False
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],  # noqa: S607
+        cwd=path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0 and Path(result.stdout.strip()).resolve() == path.resolve()
