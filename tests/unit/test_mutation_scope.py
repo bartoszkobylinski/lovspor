@@ -51,6 +51,21 @@ class Outer:
 """
 
 
+NESTED_CLASS_SOURCE = """\
+class Outer:
+    class Inner:
+        def inner_method(self):
+            return 1 + 1
+
+        class Deeper:
+            def deep(self):
+                return 3 + 3
+
+    def outer_method(self):
+        return 2 + 2
+"""
+
+
 METHODLESS_DECLARATION_SOURCE = """\
 @register
 @dataclass(
@@ -426,6 +441,43 @@ class TestUnmeasuredNotices:
 
         assert notices == [
             "unmeasured changed lines: src/lovspor/example.py:19,22 (decorated class Outer.Inner)"
+        ]
+
+    def test_keyed_units_skip_the_methods_of_a_nested_class(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        # #424: the installed mutmut gives trampolines to the methods of a
+        # top-level class only, so a nested class's methods get no mutant.
+        mutated = mutate_file_contents("x.py", NESTED_CLASS_SOURCE)
+        mutated_keys = {name.rsplit("__mutmut_", 1)[0] for name in mutated.mutant_names}
+
+        units = mutation_scope.keyed_units(NESTED_CLASS_SOURCE)
+
+        assert {unit.key for unit in units} == mutated_keys == {"xǁOuterǁouter_method"}
+
+    def test_a_changed_nested_class_method_selects_no_pattern(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        patterns = mutation_scope.patterns_for_file(
+            "src/lovspor/example.py", {4, 8, 11}, NESTED_CLASS_SOURCE
+        )
+
+        assert patterns == ["lovspor.example.xǁOuterǁouter_method__mutmut_*"]
+
+    def test_only_nested_class_changes_select_no_pattern(self, mutation_scope: ModuleType) -> None:
+        patterns = mutation_scope.patterns_for_file(
+            "src/lovspor/example.py", {2, 4, 8}, NESTED_CLASS_SOURCE
+        )
+
+        assert patterns == []
+
+    def test_a_nested_class_stays_unmeasured_as_a_whole(self, mutation_scope: ModuleType) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", {2, 4, 8, 11}, NESTED_CLASS_SOURCE
+        )
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/example.py:2,4,8 (nested class Outer.Inner)"
         ]
 
     def test_nested_class_and_async_method_notices_keep_their_qualified_owner(

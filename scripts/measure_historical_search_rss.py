@@ -1,16 +1,18 @@
 #!/usr/bin/env python
 """Peak RSS of historical ``search_body`` states on a real corpus (issue #223).
 
-A historical ``search_body`` captures the whole ``git archive`` tar in memory
-and keeps the state's stripped bodies in ``_SnapshotData.search_bodies``, up to
-``_MAX_SNAPSHOT_STATES`` states at once. This measures what that costs, through
-the same ``CorpusReader`` the MCP server runs, in four scenarios:
+A historical ``search_body`` streams the state's ``git archive`` and keeps its
+stripped bodies in ``_SnapshotData.search_bodies`` while they fit the
+``LOVSPOR_HISTORICAL_CACHE_MIB`` byte budget (``lovspor.state_cache``). This
+measures what that costs, through the same ``CorpusReader`` the MCP server
+runs, in four scenarios:
 
 ``cold_one_state``
     one historical ``search_body`` from a fresh reader: archive capture plus
     strip, the transient peak.
 ``four_states``
-    four distinct historical states resident at once.
+    four distinct historical states asked for in turn (the budget decides
+    how many stay resident).
 ``live_warm_four_states``
     the same, after a live ``search_body`` has built the current body index.
 ``embeddings_warm_four_states``
@@ -54,7 +56,8 @@ SCENARIOS = (
 # The hosted unit's cgroup limits (deploy/digitalocean/lovspor-mcp.service).
 MEMORY_HIGH_MIB = 1400
 MEMORY_MAX_MIB = 1700
-# _MAX_SNAPSHOT_STATES in lovspor.mcp: the most states the reader keeps at once.
+# Four distinct states, the count the reader kept before its byte budget (#223),
+# so runs before and after the budget stay comparable.
 STATE_COUNT = 4
 _KIB = 1024
 _MIB = 1024 * 1024
