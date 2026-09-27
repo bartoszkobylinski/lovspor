@@ -748,17 +748,22 @@ correction id it prints is a preview; `--apply` mints its own.
 It refuses — writing nothing — when `reason` or `corrected_by` is missing or
 blank (neither is ever filled in by the engine), when `to_authority` is not
 registered on a domain covering `host`, when `from_authority` is still
-registered on one that does, when the log is damaged, and when a half-written
-correction of one of these records moves it somewhere else. `--apply` also
-refuses while a sweep holds the host's workload lock; run it between nights,
+registered on one that does, when the log is damaged, and when any selected
+record carries a half-written correction this decision did not write — a
+record tombstone without its re-filed half, halves that disagree, a second
+correction, or a move somewhere else. Those are not resumed: run
+`observatory verify` and find out who wrote them. `--apply` also refuses if a
+correction landed or the log got shorter between planning and appending, and
+while a sweep holds the host's workload lock; run it between nights,
 or after `observatory status` shows no sweep running.
 
 **Idempotent and crash-safe.** Each record is appended through the log's one
 write path (locked, fsynced), re-filed half first. A run interrupted between
 the halves leaves the original standing — no fold sees the half — and `verify`
 reports an incomplete correction, which keeps the nightly preflight red until
-you run the same command again: it appends only the missing half, under the
-interrupted run's own attribution. A finished correction re-run appends
+you run the same command again — the same decision file: it appends only the
+missing tombstone, under the interrupted run's own attribution. A different
+reason or author is a different decision and is refused. A finished correction re-run appends
 nothing ("already corrected: N", "appended 0 lines").
 
 A wrong correction is not undone. It is corrected in turn, by correcting its
