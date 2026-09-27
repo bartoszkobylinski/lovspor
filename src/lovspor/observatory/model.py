@@ -8,6 +8,13 @@ An observation event is one of three record kinds, discriminated by ``kind``:
   is itself evidence and which Design Principle §15 requires to stay visible;
 * ``Tombstone`` — an appended record that a stored blob was removed.
 
+Two more kinds correct a record without rewriting it (ADR-0015): a
+``RecordTombstone`` retracts one filed record's claim, and a
+``RefiledObservation`` files the same observation again with the corrected
+field and the correction's provenance. Neither is an observation, and neither
+touches a blob; :mod:`lovspor.observatory.corrections` says how readers apply
+them.
+
 Raw bytes are not carried in the record. The record holds their SHA-256 and
 the blob store holds the bytes (:mod:`lovspor.observatory.log`), so the same
 bytes observed twice cost one blob and two records, and a record stays small
@@ -28,11 +35,12 @@ there the reader is a third party, here it is this engine reading its own
 archive.
 """
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from lovspor.observatory.fields import NonBlankStr
 
@@ -175,8 +183,80 @@ class Tombstone(BaseModel):
         return require_utc(value)
 
 
+#: The only field ADR-0015 lets a correction change. Widening it is a decision,
+#: not an edit: every other field is evidence of the fetch itself.
+CorrectableField = Literal["authority_id"]
+
+Observation = Annotated[ArtifactObservation | FetchFailure, Field(discriminator="kind")]
+
+
+class RecordTombstone(BaseModel):
+    """One filed record's claim no longer stands as filed (ADR-0015 §3).
+
+    Not the blob :class:`Tombstone`: that one means *these bytes were removed*
+    and is enforced as such. This one removes nothing — the original line stays
+    in the log byte for byte, and its blob stays on disk. ``retracts`` names
+    the original by :func:`record_key`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["record_tombstone"] = "record_tombstone"
+    retracts: str = Field(pattern=_SHA256_PATTERN)
+    correction_id: NonBlankStr
+    reason: NonBlankStr
+    corrected_by: NonBlankStr
+    corrected_at: datetime
+
+    @field_validator("corrected_at")
+    @classmethod
+    def _utc_corrected_at(cls, value: datetime) -> datetime:
+        return require_utc(value)
+
+
+class Correction(BaseModel):
+    """Who corrected which record, when, why, and what the field said before."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    supersedes: str = Field(pattern=_SHA256_PATTERN)
+    correction_id: NonBlankStr
+    corrected_fields: tuple[CorrectableField, ...] = Field(min_length=1)
+    previous_values: dict[CorrectableField, NonBlankStr]
+    reason: NonBlankStr
+    corrected_by: NonBlankStr
+    corrected_at: datetime
+
+    @field_validator("corrected_at")
+    @classmethod
+    def _utc_corrected_at(cls, value: datetime) -> datetime:
+        return require_utc(value)
+
+    @model_validator(mode="after")
+    def _previous_values_match(self) -> "Correction":
+        if set(self.previous_values) != set(self.corrected_fields):
+            raise ValueError("previous_values must name exactly the corrected_fields")
+        return self
+
+
+class RefiledObservation(BaseModel):
+    """The corrected claim of an earlier record, filed with its provenance (§4).
+
+    ``observation`` is the original with only ``corrected_fields`` changed —
+    same ``observed_at``, URL, hash and retrieval provenance, because the fetch
+    happened once. It is a distinct kind, not a late ``artifact``, so nothing
+    reads it as a fetch made at ``corrected_at``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["refiled_observation"] = "refiled_observation"
+    observation: Observation
+    correction: Correction
+
+
 ObservationRecord = Annotated[
-    ArtifactObservation | FetchFailure | Tombstone,
+    ArtifactObservation | FetchFailure | Tombstone | RecordTombstone | RefiledObservation,
     Field(discriminator="kind"),
 ]
 
@@ -192,3 +272,17 @@ def record_to_json_line(record: ObservationRecord) -> str:
     """
     data = record.model_dump(mode="json")
     return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def record_key(line: bytes) -> str:
+    """The stable key of a record: SHA-256 of its log line as stored (ADR-0015 §2).
+
+    The line's own bytes without its terminator, never a re-serialisation of
+    the parsed record: records written before a field existed re-serialise
+    with it added, and a key computed that way would name no line in the log.
+    The terminator is not part of the claim, so ``\n`` and ``\r\n`` name the
+    same line; nothing else is normalised. The writer only ever emits ``\n``.
+    """
+    if line.endswith(b"\n"):
+        line = line[:-1].removesuffix(b"\r")
+    return hashlib.sha256(line).hexdigest()

@@ -28,7 +28,7 @@ drops from parse cost to raw-IO cost (roughly an order of magnitude)
 rather than to zero. Any byte change anywhere forces the full re-fold,
 whose parse surfaces damage exactly as before.
 
-The tail read reuses :meth:`ObservationLog.scan_into`, so torn or
+The tail read reuses :meth:`ObservationLog.scan_corrected_into`, so torn or
 malformed tail lines surface in the returned ``LogScan`` exactly as they
 do on a full read — the caller's damaged-log refusal is unchanged, and a
 scan that did not complete never advances the index.
@@ -54,13 +54,14 @@ from lovspor.observatory.model import require_utc
 
 FRESHNESS_INDEX_FILENAME = "freshness-index.json"
 
-INDEX_DERIVATION_VERSION = 2
+INDEX_DERIVATION_VERSION = 3
 """Behaviour version of the capture-state fold this index caches.
 
 Bump on ANY change to what ``collect_capture_state`` folds — sighting
 rules, hold transitions, record selection — the ``TEMPORAL_PARSER_VERSION``
 precedent: an index written by other fold semantics must rebuild, never be
-silently reused. Version 2 added the runs of unchanged content (#415).
+silently reused. Version 2 added the runs of unchanged content (#415);
+version 3 folds the corrected view of the log (ADR-0015 §5).
 """
 
 _DIGEST_CHUNK = 1 << 20
@@ -132,12 +133,12 @@ def indexed_capture_state(log: ObservationLog) -> tuple[CaptureState, LogScan]:
     """
     path = freshness_index_path(log)
     index = _load_index(path)
-    if index is not None and _prefix_proven(log, index):
+    if index is not None and _still_proven(log, index):
         state = _state_from_index(index)
-        scan = log.scan_into(collect_capture_state(state), start=index.log_offset)
+        scan = log.scan_corrected_into(collect_capture_state(state), start=index.log_offset)
     else:
         state = CaptureState.empty()
-        scan = log.scan_into(collect_capture_state(state))
+        scan = log.scan_corrected_into(collect_capture_state(state))
     if scan.complete:
         _write_index(path, _index_from_state(log, state, scan.clean_through))
     return state, scan
@@ -161,6 +162,19 @@ def _load_index(path: Path) -> FreshnessIndex | None:
     if index.state_sha256 != _state_binding(index):
         return None
     return index
+
+
+def _still_proven(log: ObservationLog, index: FreshnessIndex) -> bool:
+    """True when the cached fold is still the fold of the corrected prefix.
+
+    A correction appended after the index was built can name a record inside
+    the prefix, and folding only the tail cannot move that record: the fold
+    must start again. Corrections are rare operator acts, so that costs one
+    full fold per correction run.
+    """
+    if log.corrections().last_offset > index.log_offset:
+        return False
+    return _prefix_proven(log, index)
 
 
 def _prefix_proven(log: ObservationLog, index: FreshnessIndex) -> bool:

@@ -21,12 +21,20 @@ import fcntl
 import hashlib
 import os
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from lovspor.atomic_io import atomic_write_bytes
 from lovspor.errors import LogIntegrityError, StorageBoundaryError, TombstonedArtifactError
+from lovspor.observatory.corrections import (
+    CorrectionSet,
+    audit_corrections,
+    collect_named,
+    corrected_view,
+    fold_corrections,
+)
 from lovspor.observatory.model import (
     ArtifactObservation,
     ObservationRecord,
@@ -98,6 +106,12 @@ class SnapshotVerification(BaseModel):
     observations_after_tombstone: tuple[str, ...] = ()
     incomplete_final_record: bool = False
     malformed_lines: tuple[int, ...] = ()
+    #: The correction audit (ADR-0015 §5); see
+    #: :class:`~lovspor.observatory.corrections.CorrectionAudit`.
+    corrections_without_record: tuple[str, ...] = ()
+    refiled_mismatches: tuple[str, ...] = ()
+    multiply_corrected: tuple[str, ...] = ()
+    incomplete_corrections: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -120,6 +134,10 @@ class SnapshotVerification(BaseModel):
             or self.observations_after_tombstone
             or self.incomplete_final_record
             or self.malformed_lines
+            or self.corrections_without_record
+            or self.refiled_mismatches
+            or self.multiply_corrected
+            or self.incomplete_corrections
         )
 
 
@@ -144,6 +162,8 @@ class ObservationLog:
         self._root = root.path
         self._tombstones: set[str] = set()
         self._tombstones_through = 0
+        self._corrections = CorrectionSet()
+        self._corrections_through = 0
 
     @property
     def root(self) -> Path:
@@ -257,6 +277,41 @@ class ObservationLog:
                 "the tombstone fold cannot skip it",
             )
 
+    def corrections(self) -> CorrectionSet:
+        """Every correction record in the log (ADR-0015), folded incrementally.
+
+        The same discipline as :meth:`tombstoned_hashes`: extended from the
+        byte the last fold stopped at, discarded when the file got shorter.
+        Never part of the blob tombstones — a correction removes no bytes and
+        blocks no re-capture. The returned set is this log's own; read it,
+        never change it.
+        """
+        if not self.log_path.exists():
+            return CorrectionSet()
+        size = self.log_path.stat().st_size
+        if size < self._corrections_through:
+            self._corrections = CorrectionSet()
+            self._corrections_through = 0
+        if size > self._corrections_through:
+            self._corrections_through = fold_corrections(
+                self.log_path, self._corrections, self._corrections_through
+            )
+        return self._corrections
+
+    def scan_corrected_into(
+        self,
+        collect: Callable[[ObservationRecord], None],
+        *,
+        start: int = 0,
+    ) -> LogScan:
+        """:meth:`scan_into` over the corrected view — the read every fold uses.
+
+        Each corrected original reaches ``collect`` as its re-filed
+        observation, at the original's position; correction records never
+        reach it. Damage is reported exactly as :meth:`scan_into` reports it.
+        """
+        return self.scan_lines_into(corrected_view(self.corrections(), collect), start=start)
+
     def records(self) -> Iterator[ObservationRecord]:
         """Read the log in append order.
 
@@ -321,44 +376,31 @@ class ObservationLog:
         Trimming it first would be a step whose removal changed nothing, and a
         step nothing can observe is a step nothing can check.
         """
+        return self.scan_lines_into(lambda record, _line: collect(record), start=start)
+
+    def scan_lines_into(
+        self,
+        collect: Callable[[ObservationRecord, bytes], None],
+        *,
+        start: int = 0,
+    ) -> LogScan:
+        """:meth:`scan_into`, handing each record over with its line as stored.
+
+        For the readers that need a record's key (ADR-0015 §2): the key is the
+        hash of the stored bytes, which a re-serialisation of the parsed record
+        does not reproduce for lines written before a field existed.
+        """
         if not self.log_path.exists():
             return LogScan()
-        malformed: list[int] = []
-        read = 0
-        torn_tail = False
-        damaged = False
-        offset = start
-        clean_through = start
+        cursor = _ScanCursor(offset=start, clean_through=start)
         with self.log_path.open("rb") as handle:
             if start:
                 handle.seek(start)
             for number, raw in enumerate(handle, start=1):
-                offset += len(raw)
-                if not raw.strip():
-                    if not damaged:
-                        clean_through = offset
-                    continue
-                try:
-                    record = _RECORD_ADAPTER.validate_json(raw)
-                except ValidationError:
-                    malformed.append(number)
-                    # Only a file's last line can lack its terminator, so a
-                    # malformed line without one is the write that never
-                    # finished. A malformed line that has one is corruption,
-                    # and says so by setting this back to false.
-                    torn_tail = not raw.endswith(b"\n")
-                    damaged = True
-                    continue
-                read += 1
-                if not damaged:
-                    clean_through = offset
-                collect(record)
-        return LogScan(
-            incomplete_final_record=torn_tail,
-            malformed_lines=tuple(malformed[:-1] if torn_tail else malformed),
-            records_read=read,
-            clean_through=clean_through,
-        )
+                record = cursor.read_line(raw, number)
+                if record is not None:
+                    collect(record, raw)
+        return cursor.result()
 
     def scan(self) -> LogScan:
         """Every record the log will give up, plus the damage report.
@@ -397,6 +439,52 @@ class ObservationLog:
                 not this method, decides what it means.
         """
         return self.blob_path(sha256).read_bytes()
+
+
+@dataclass
+class _ScanCursor:
+    """Where a scan stands: bytes read, the resume anchor, the damage seen."""
+
+    offset: int
+    clean_through: int
+    read: int = 0
+    malformed: list[int] = field(default_factory=list)
+    torn_tail: bool = False
+    damaged: bool = False
+
+    def read_line(self, raw: bytes, number: int) -> ObservationRecord | None:
+        """The record on this line, or None for a blank or unreadable one."""
+        self.offset += len(raw)
+        if not raw.strip():
+            self._mark_clean()
+            return None
+        try:
+            record = _RECORD_ADAPTER.validate_json(raw)
+        except ValidationError:
+            self.malformed.append(number)
+            # Only a file's last line can lack its terminator, so a malformed
+            # line without one is the write that never finished. A malformed
+            # line that has one is corruption, and says so by setting this
+            # back to false.
+            self.torn_tail = not raw.endswith(b"\n")
+            self.damaged = True
+            return None
+        self.read += 1
+        self._mark_clean()
+        return record
+
+    def _mark_clean(self) -> None:
+        # Frozen at the first damage: nothing past it is a safe resume point.
+        if not self.damaged:
+            self.clean_through = self.offset
+
+    def result(self) -> LogScan:
+        return LogScan(
+            incomplete_final_record=self.torn_tail,
+            malformed_lines=tuple(self.malformed[:-1] if self.torn_tail else self.malformed),
+            records_read=self.read,
+            clean_through=self.clean_through,
+        )
 
 
 def _discard(record: ObservationRecord) -> None:
@@ -476,6 +564,11 @@ def verify_snapshot(log: ObservationLog) -> SnapshotVerification:
             incomplete_final_record=scan.incomplete_final_record,
             malformed_lines=scan.malformed_lines,
         )
+    return _audit_blobs(log, timeline).model_copy(update=_audit_corrections(log))
+
+
+def _audit_blobs(log: ObservationLog, timeline: _Timeline) -> SnapshotVerification:
+    """The blob half of the audit, for a log that read to the end."""
     missing, mismatched, removed = _classify_blobs(log, timeline)
     observed = set(timeline.observed)
     retired = set(timeline.tombstoned)
@@ -489,3 +582,14 @@ def verify_snapshot(log: ObservationLog) -> SnapshotVerification:
         tombstones_without_observation=tuple(sorted(retired - observed)),
         observations_after_tombstone=tuple(timeline.observed_after_tombstone),
     )
+
+
+def _audit_corrections(log: ObservationLog) -> dict[str, tuple[str, ...]]:
+    """The correction half, read from the raw log: `verify` is the one reader
+    that must see a correction's halves rather than its result."""
+    corrections = log.corrections()
+    if not corrections:
+        return {}
+    named: dict[str, ObservationRecord] = {}
+    log.scan_lines_into(collect_named(corrections, named))
+    return dict(audit_corrections(corrections, named))
