@@ -32,6 +32,7 @@ from lovspor.temporal_attestation import (
     write_attestation,
 )
 from lovspor.temporal_gate import UnattestedGateStateError
+from tests.unit.cli_output import said
 from tests.unit.test_mcp_recorded_at import _doc, _manifest, _record
 
 LAW = "## Kapittel 1.\n\n### § 1. Formål\n\nLovtekst {n}.\n"
@@ -494,7 +495,7 @@ def test_corpus_path_must_be_the_top_of_a_git_clone(tmp_path: Path, command: str
     for corpus in (plain, clone / "lover", a_file, tmp_path / "missing", not_a_corpus):
         code, output = _cli(corpus, *args)
         assert code == 2, (corpus, output)
-        assert "--corpus-path" in output
+        assert said("--corpus-path", output)
     assert read_gate_epochs(clone) == {}
     assert not _origin_has_epoch_ref(origin)
 
