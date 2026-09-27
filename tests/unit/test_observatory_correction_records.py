@@ -165,6 +165,18 @@ class TestRecordKey:
         assert record_key(line) == hashlib.sha256(line).hexdigest()
         assert record_key(line + b"\n") == hashlib.sha256(line).hexdigest()
 
+    def test_a_crlf_line_has_the_same_key_as_the_same_line_with_lf(self) -> None:
+        line = record_to_json_line(_artifact()).encode("utf-8")
+
+        assert record_key(line + b"\r\n") == record_key(line + b"\n")
+
+    def test_only_the_terminator_is_stripped(self) -> None:
+        line = record_to_json_line(_artifact()).encode("utf-8")
+
+        assert record_key(line + b"\r") == hashlib.sha256(line + b"\r").hexdigest()
+        assert record_key(line + b"\r\r\n") == hashlib.sha256(line + b"\r").hexdigest()
+        assert record_key(b" " + line + b"\n") == hashlib.sha256(b" " + line).hexdigest()
+
     def test_keys_the_bytes_as_stored_not_a_reserialisation(self) -> None:
         # A line written before `redirect_chain` existed re-serialises with it
         # added; the key must name the line in the log, not today's spelling.

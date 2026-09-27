@@ -331,6 +331,46 @@ class TestVerifyAuditsCorrections:
 
         assert verify_snapshot(log).incomplete_corrections == (key_of(original),)
 
+    def test_halves_disagreeing_on_who_or_why_are_not_one_correction(self, tmp_path: Path) -> None:
+        log, original = self._stored(tmp_path)
+        log.append(refiled(original, "4203"))
+        log.append(tombstone(key_of(original)).model_copy(update={"corrected_by": "someone"}))
+
+        report = verify_snapshot(log)
+
+        assert report.incomplete_corrections == (key_of(original),)
+        assert corrected(log) == [original]
+
+    def test_halves_naming_different_records_complete_neither(self, tmp_path: Path) -> None:
+        log, original = self._stored(tmp_path)
+        other = artifact("b")
+        log.append_artifact(other, b"b")
+        log.append(refiled(original, "4203"))
+        log.append(tombstone(key_of(other)))
+
+        report = verify_snapshot(log)
+
+        assert report.incomplete_corrections == tuple(sorted((key_of(original), key_of(other))))
+        assert corrected(log) == [original, other]
+
+    def test_a_correction_whose_original_was_under_another_authority_is_reported(
+        self, tmp_path: Path
+    ) -> None:
+        log = make_log(tmp_path)
+        original = artifact("a", authority_id="3201")
+        log.append_artifact(original, b"a")
+        forged = refiled(original, "4203").model_copy(
+            update={
+                "correction": refiled(original, "4203").correction.model_copy(
+                    update={"previous_values": {"authority_id": "4202"}}
+                )
+            }
+        )
+        log.append(forged)
+        log.append(tombstone(key_of(original)))
+
+        assert verify_snapshot(log).refiled_mismatches == (key_of(original),)
+
     def test_a_tombstone_naming_no_line_is_reported(self, tmp_path: Path) -> None:
         log, _ = self._stored(tmp_path)
         log.append(tombstone("f" * 64))

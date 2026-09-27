@@ -277,8 +277,12 @@ def record_to_json_line(record: ObservationRecord) -> str:
 def record_key(line: bytes) -> str:
     """The stable key of a record: SHA-256 of its log line as stored (ADR-0015 §2).
 
-    The line's own bytes without the newline, never a re-serialisation of the
-    parsed record: records written before a field existed re-serialise with it
-    added, and a key computed that way would name no line in the log.
+    The line's own bytes without its terminator, never a re-serialisation of
+    the parsed record: records written before a field existed re-serialise
+    with it added, and a key computed that way would name no line in the log.
+    The terminator is not part of the claim, so ``\n`` and ``\r\n`` name the
+    same line; nothing else is normalised. The writer only ever emits ``\n``.
     """
-    return hashlib.sha256(line.removesuffix(b"\n")).hexdigest()
+    if line.endswith(b"\n"):
+        line = line[:-1].removesuffix(b"\r")
+    return hashlib.sha256(line).hexdigest()
