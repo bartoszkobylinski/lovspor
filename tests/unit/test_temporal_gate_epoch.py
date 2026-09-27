@@ -15,7 +15,6 @@ import pytest
 from pydantic import ValidationError
 
 import lovspor.temporal_attestation as attestation_module
-import lovspor.temporal_gate as gate_module
 from lovspor.temporal_attestation import (
     ATTESTATION_NOTES_REF,
     EPOCH_NOTES_REF,
@@ -153,45 +152,6 @@ def test_written_record_reads_back_keyed_by_version(corpus: tuple[Path, str, str
     assert write_gate_epoch(repo, record) is True
 
     assert read_gate_epochs(repo) == {2: record}
-
-
-def test_writer_serializes_epoch_records_with_stable_key_order(
-    corpus: tuple[Path, str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo, boundary, _gated = corpus
-    record = _epoch(boundary)
-    monkeypatch.setattr(attestation_module, "check_gate_epoch", lambda *_args: True)
-    monkeypatch.setattr(attestation_module, "read_gate_epochs", lambda _repo: {})
-    calls: list[list[str]] = []
-
-    def git(_repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(attestation_module, "_git", git)
-
-    assert write_gate_epoch(repo, record) is True
-    assert calls[0][-2] == json.dumps([record.model_dump(mode="json")], sort_keys=True)
-
-
-def test_writer_surfaces_the_failed_commit_and_git_diagnostic(
-    corpus: tuple[Path, str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo, boundary, _gated = corpus
-    monkeypatch.setattr(attestation_module, "check_gate_epoch", lambda *_args: True)
-    monkeypatch.setattr(attestation_module, "read_gate_epochs", lambda _repo: {})
-    monkeypatch.setattr(
-        attestation_module,
-        "_git",
-        lambda _repo, args: subprocess.CompletedProcess(args, 1, stdout="", stderr="locked\n"),
-    )
-
-    with pytest.raises(AttestationError) as caught:
-        write_gate_epoch(repo, _epoch(boundary))
-
-    assert str(caught.value) == f"failed to record the gate epoch on {boundary}: locked"
 
 
 def test_unparseable_record_is_a_broken_channel(corpus: tuple[Path, str, str]) -> None:
@@ -562,256 +522,6 @@ def test_non_utc_instants_are_refused(field: str, value: str) -> None:
     assert "Value error, must be a UTC instant (offset +00:00 or Z)" in str(caught.value)
 
 
-def test_record_sync_run_success_report_says_the_record_was_written(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    record = _epoch("a" * 40, source="sync-run")
-    monkeypatch.setattr(gate_module, "_fetch_registry", lambda _repo: None)
-    monkeypatch.setattr(gate_module, "read_gate_epochs", lambda _repo: {})
-    monkeypatch.setattr(gate_module, "attested_commits", lambda *_args: [])
-    monkeypatch.setattr(gate_module, "_sync_run_record", lambda *_args: record)
-    monkeypatch.setattr(gate_module, "write_gate_epoch", lambda *_args: True)
-    monkeypatch.setattr(gate_module, "push_gate_epochs", lambda _repo: None)
-
-    report = gate_module.record_sync_run_epoch(
-        tmp_path,
-        gate_module.SyncRunRequest(sync_run="77"),
-        datetime(2026, 9, 27, 10, 0, tzinfo=UTC),
-    )
-
-    assert report.written is True
-
-
-def test_applied_backfill_success_report_says_the_record_was_written(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    boundary = "a" * 40
-    monkeypatch.setattr(gate_module, "_fetch_registry", lambda _repo: None)
-    monkeypatch.setattr(gate_module, "_resolve_commit", lambda *_args: boundary)
-    monkeypatch.setattr(gate_module, "check_gate_epoch", lambda *_args: True)
-    monkeypatch.setattr(gate_module, "write_gate_epoch", lambda *_args: True)
-    monkeypatch.setattr(gate_module, "push_gate_epochs", lambda _repo: None)
-
-    report = gate_module.backfill_epoch(
-        tmp_path,
-        gate_module.BackfillRequest(
-            epoch_at=EPOCH_AT,
-            boundary_commit=boundary,
-            sync_run="77",
-            apply=True,
-        ),
-        datetime(2026, 9, 27, 10, 0, tzinfo=UTC),
-    )
-
-    assert report.written is True
-
-
-def test_author_date_requests_git_strict_iso_8601_format(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    commit = "a" * 40
-    calls: list[list[str]] = []
-
-    def git(_repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        return subprocess.CompletedProcess(args, 0, stdout="2026-09-04T08:45:36+00:00\n", stderr="")
-
-    monkeypatch.setattr(attestation_module, "_git", git)
-
-    assert attestation_module._author_date(tmp_path, commit) == datetime(
-        2026, 9, 4, 8, 45, 36, tzinfo=UTC
-    )
-    assert calls == [["log", "-1", "--format=%aI", f"{commit}^{{commit}}", "--"]]
-
-
-def test_resolve_commit_invokes_git_in_text_mode_with_option_terminator(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[list[str], dict[str, object]]] = []
-
-    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args, 0, stdout="a" * 40 + "\n", stderr="")
-
-    monkeypatch.setattr(gate_module.subprocess, "run", run)
-
-    assert gate_module._resolve_commit(tmp_path, "HEAD") == "a" * 40
-    assert calls == [
-        (
-            ["git", "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"],
-            {"cwd": tmp_path, "capture_output": True, "text": True, "check": False},
-        )
-    ]
-
-
-def test_repository_root_rejects_a_missing_path_without_running_git(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        gate_module.subprocess,
-        "run",
-        lambda *_args, **_kwargs: pytest.fail("git must not run for a missing directory"),
-    )
-
-    assert gate_module.is_repository_root(tmp_path / "missing") is False
-
-
-def test_repository_root_requires_success_and_the_exact_top_level(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        gate_module.subprocess,
-        "run",
-        lambda args, **_kwargs: subprocess.CompletedProcess(
-            args, 1, stdout=f"{tmp_path}\n", stderr="not a repository\n"
-        ),
-    )
-
-    assert gate_module.is_repository_root(tmp_path) is False
-
-
-def test_publish_passes_the_selected_remote_to_the_push(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    results = iter(
-        [
-            subprocess.CompletedProcess([], 0, stdout="local\n", stderr=""),
-            subprocess.CompletedProcess([], 2, stdout="", stderr=""),
-        ]
-    )
-    pushed: list[tuple[Path, str]] = []
-    monkeypatch.setattr(attestation_module, "_git", lambda *_args: next(results))
-    monkeypatch.setattr(
-        attestation_module,
-        "push_gate_epochs",
-        lambda repo, remote="origin": pushed.append((repo, remote)),
-    )
-
-    assert publish_gate_epochs(tmp_path, "upstream") is True
-    assert pushed == [(tmp_path, "upstream")]
-
-
-def test_note_reader_uses_exact_git_protocol_and_preserves_diagnostics(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[list[str]] = []
-    results = iter(
-        [
-            subprocess.CompletedProcess([], 0, stdout="ref\n", stderr=""),
-            subprocess.CompletedProcess([], 0, stdout="commit\n", stderr=""),
-            subprocess.CompletedProcess([], 1, stdout="", stderr="damaged\n"),
-        ]
-    )
-
-    def git(_repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        return next(results)
-
-    monkeypatch.setattr(attestation_module, "_git", git)
-
-    with pytest.raises(AttestationError) as caught:
-        attestation_module._note_objects(tmp_path, EPOCH_NOTES_REF)
-
-    assert calls == [
-        ["rev-parse", "--quiet", "--verify", EPOCH_NOTES_REF],
-        ["rev-parse", "--quiet", "--verify", f"{EPOCH_NOTES_REF}^{{commit}}"],
-        ["notes", f"--ref={EPOCH_NOTES_REF}", "list"],
-    ]
-    assert str(caught.value) == f"notes ref {EPOCH_NOTES_REF} unreadable: damaged"
-
-
-def test_commit_anchor_batch_is_newline_delimited_and_non_raising(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[list[str], dict[str, object]]] = []
-
-    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args, 0, stdout="a commit\nb missing\n", stderr="")
-
-    monkeypatch.setattr(attestation_module.subprocess, "run", run)
-
-    attestation_module._require_commit_anchors(tmp_path, ["a", "b"])
-
-    assert calls == [
-        (
-            ["git", "cat-file", "--batch-check=%(objectname) %(objecttype)"],
-            {
-                "cwd": tmp_path,
-                "input": "a\nb\n",
-                "capture_output": True,
-                "text": True,
-                "check": False,
-            },
-        )
-    ]
-
-
-def test_commit_anchor_batch_failure_preserves_git_diagnostic(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        attestation_module.subprocess,
-        "run",
-        lambda args, **_kwargs: subprocess.CompletedProcess(
-            args, 1, stdout="", stderr="object database unavailable\n"
-        ),
-    )
-
-    with pytest.raises(AttestationError) as caught:
-        attestation_module._require_commit_anchors(tmp_path, ["a"])
-
-    assert str(caught.value) == "gate-epoch anchors unreadable: object database unavailable"
-
-
-@pytest.mark.parametrize(
-    "reader",
-    [
-        attestation_module._epoch_records,
-        attestation_module._attestation_entries,
-    ],
-)
-def test_unparseable_note_diagnostic_names_its_blob_and_validation_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    reader: object,
-) -> None:
-    monkeypatch.setattr(attestation_module, "_note_text", lambda *_args: "not json")
-
-    with pytest.raises(AttestationError) as caught:
-        reader(tmp_path, "blob123")  # type: ignore[operator]
-
-    message = str(caught.value)
-    assert message.startswith("note blob123 is unparseable — a broken evidence channel:")
-    assert "Invalid JSON" in message
-
-
-def test_unreadable_note_blob_preserves_blob_id_and_git_diagnostic(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        attestation_module,
-        "_git",
-        lambda _repo, args: subprocess.CompletedProcess(args, 1, stdout="", stderr="missing\n"),
-    )
-
-    with pytest.raises(AttestationError) as caught:
-        attestation_module._note_text(tmp_path, "blob123")
-
-    assert str(caught.value) == "note blob blob123 unreadable: missing"
-
-
 def test_a_stored_non_utc_record_is_a_broken_channel(corpus: tuple[Path, str, str]) -> None:
     repo, boundary, _gated = corpus
     record = {**_epoch(boundary).model_dump(mode="json"), "epoch_at": "2026-09-04T10:45:36+02:00"}
@@ -872,3 +582,117 @@ def test_publish_to_an_unreachable_remote_is_a_broken_channel(tmp_path: Path) ->
 
     with pytest.raises(AttestationError, match="cannot reach origin"):
         publish_gate_epochs(clone)
+
+
+# ---------- exact diagnostics and formats, on real git ----------
+
+
+def test_the_written_note_is_the_sorted_key_json_list(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    record = _epoch(boundary)
+
+    write_gate_epoch(repo, record)
+
+    stored = _git(repo, "notes", f"--ref={EPOCH_NOTES_REF}", "show", boundary)
+    assert stored == json.dumps([record.model_dump(mode="json")], sort_keys=True)
+
+
+def test_a_failed_note_write_names_the_commit_and_git_diagnostic(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, boundary, _gated = corpus
+    lock = repo / ".git" / f"{EPOCH_NOTES_REF}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("")
+
+    with pytest.raises(AttestationError) as caught:
+        write_gate_epoch(repo, _epoch(boundary))
+
+    message = str(caught.value)
+    assert message.startswith(f"failed to record the gate epoch on {boundary}: ")
+    assert ".lock" in message
+    assert not message.endswith("\n")
+
+
+def test_boundary_author_date_is_compared_as_an_instant_with_its_offset(tmp_path: Path) -> None:
+    """%aI carries the committer's offset: 10:45:36+02:00 IS the epoch instant."""
+    repo = tmp_path / "corpus"
+    _init(repo)
+    at_epoch = _commit(repo, "offset", "2026-09-04T10:45:36+02:00")
+    before = _commit(repo, "before", "2026-09-04T10:45:35+02:00")
+
+    with pytest.raises(AttestationError, match="not before the epoch"):
+        check_gate_epoch(repo, _epoch(at_epoch))
+    assert check_gate_epoch(repo, _epoch(before)) is True
+
+
+def test_an_unreadable_note_blob_names_the_blob_and_git_diagnostic(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, boundary, _gated = corpus
+    write_gate_epoch(repo, _epoch(boundary))
+    blob = _git(repo, "notes", f"--ref={EPOCH_NOTES_REF}", "list", boundary)
+    (repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+
+    with pytest.raises(AttestationError) as caught:
+        read_gate_epochs(repo)
+
+    message = str(caught.value)
+    assert message.startswith(f"note blob {blob} unreadable: ")
+    assert blob in message.removeprefix(f"note blob {blob} unreadable: ")
+    assert not message.endswith("\n")
+
+
+def test_an_unparseable_note_names_its_blob(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    _raw_note(repo, boundary, "not json")
+    blob = _git(repo, "notes", f"--ref={EPOCH_NOTES_REF}", "list", boundary)
+
+    with pytest.raises(AttestationError) as caught:
+        read_gate_epochs(repo)
+
+    assert str(caught.value).startswith(f"note {blob} is unparseable — a broken evidence channel: ")
+    assert "Invalid JSON" in str(caught.value)
+
+
+def test_an_unparseable_attestation_note_names_its_blob(corpus: tuple[Path, str, str]) -> None:
+    repo, _boundary, gated = corpus
+    _git(repo, "notes", f"--ref={ATTESTATION_NOTES_REF}", "add", "-m", "junk", gated)
+    blob = _git(repo, "notes", f"--ref={ATTESTATION_NOTES_REF}", "list", gated)
+
+    with pytest.raises(AttestationError) as caught:
+        attested_commits(repo, 2)
+
+    assert str(caught.value).startswith(f"note {blob} is unparseable — a broken evidence channel: ")
+
+
+def test_an_unreadable_anchor_check_keeps_git_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Outside a repository the batch check itself fails; its stderr is the
+    diagnostic, stripped, and nothing reads that as 'missing'."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+
+    with pytest.raises(AttestationError) as caught:
+        attestation_module._require_commit_anchors(plain, ["a" * 40])
+
+    message = str(caught.value)
+    assert message.startswith("gate-epoch anchors unreadable: ")
+    assert "not a git repository" in message
+    assert not message.endswith("\n")
+
+
+def test_two_anchors_are_checked_one_per_line(tmp_path: Path) -> None:
+    """Both anchors reach the batch check: a blob listed second is still
+    judged (the input is newline-delimited, one id per line)."""
+    repo = tmp_path / "corpus"
+    _init(repo)
+    commit = _commit(repo, "c", BOUNDARY_DATE)
+    blob = _git(repo, "hash-object", "-w", "c.md")
+
+    attestation_module._require_commit_anchors(repo, [commit, "f" * 40])
+    with pytest.raises(AttestationError, match=f"attached to {blob}, a blob"):
+        attestation_module._require_commit_anchors(repo, [commit, blob])

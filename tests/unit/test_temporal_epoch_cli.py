@@ -14,9 +14,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from click.testing import Result
 from typer.testing import CliRunner
 
-import lovspor.temporal_epoch_cli as cli_module
 from lovspor.cli import app
 from lovspor.corpus_fetch import fetch_corpus
 from lovspor.errors import TemporalDerivationError
@@ -32,7 +32,14 @@ from lovspor.temporal_attestation import (
     read_gate_epochs,
     write_attestation,
 )
-from lovspor.temporal_gate import EpochReport, UnattestedGateStateError
+from lovspor.temporal_gate import (
+    BackfillRequest,
+    SyncRunRequest,
+    UnattestedGateStateError,
+    backfill_epoch,
+    is_repository_root,
+    record_sync_run_epoch,
+)
 from tests.unit.cli_output import said
 from tests.unit.test_mcp_recorded_at import _doc, _manifest, _record
 
@@ -399,86 +406,6 @@ def test_attestations_without_a_record_warn_and_invent_nothing(tmp_path: Path) -
     assert not _origin_has_epoch_ref(origin)
 
 
-def test_usage_errors_are_diagnostic_on_stderr(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cli_module, "is_repository_root", lambda _path: True)
-    monkeypatch.setattr(cli_module, "is_corpus", lambda _path: True)
-    result = runner.invoke(
-        app,
-        [
-            "temporal-epoch",
-            "--corpus-path",
-            str(tmp_path),
-            "record-sync-run",
-            "--sync-run",
-            "bad",
-        ],
-    )
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert result.stderr.startswith("error: 1 validation error for SyncRunRequest")
-
-
-def test_attestation_errors_are_diagnostic_on_stderr(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cli_module, "is_repository_root", lambda _path: True)
-    monkeypatch.setattr(cli_module, "is_corpus", lambda _path: True)
-    monkeypatch.setattr(
-        cli_module,
-        "record_sync_run_epoch",
-        lambda *_args: (_ for _ in ()).throw(cli_module.AttestationError("registry broken")),
-    )
-
-    result = runner.invoke(
-        app,
-        ["temporal-epoch", "--corpus-path", str(tmp_path), "record-sync-run", "--sync-run", "1"],
-    )
-
-    assert result.exit_code == 1
-    assert result.stdout == ""
-    assert result.stderr == "error: registry broken\n"
-
-
-@pytest.mark.parametrize(
-    ("warning", "expected_stdout", "expected_stderr"),
-    [
-        (False, "done\n", ""),
-        (True, "", "warning: action needed\n"),
-    ],
-)
-def test_reports_use_the_warning_prefix_and_stream(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    warning: bool,
-    expected_stdout: str,
-    expected_stderr: str,
-) -> None:
-    monkeypatch.setattr(cli_module, "is_repository_root", lambda _path: True)
-    monkeypatch.setattr(cli_module, "is_corpus", lambda _path: True)
-    monkeypatch.setattr(
-        cli_module,
-        "record_sync_run_epoch",
-        lambda *_args: EpochReport(
-            message="action needed" if warning else "done",
-            warning=warning,
-        ),
-    )
-
-    result = runner.invoke(
-        app,
-        ["temporal-epoch", "--corpus-path", str(tmp_path), "record-sync-run", "--sync-run", "1"],
-    )
-
-    assert result.exit_code == 0
-    assert result.stdout == expected_stdout
-    assert result.stderr == expected_stderr
-
-
 def test_a_failed_gate_leaves_the_epoch_and_the_next_read_fails_closed(
     tmp_path: Path,
 ) -> None:
@@ -710,3 +637,106 @@ def test_corpus_path_expands_the_home_directory(
 
     assert code == 0, output
     assert "dry run" in output
+
+
+# ---------- which stream says what (real clones, no stubs) ----------
+
+
+def _invoke(corpus: Path, *args: str) -> Result:
+    return runner.invoke(app, ["temporal-epoch", "--corpus-path", str(corpus), *args])
+
+
+def test_a_usage_error_is_on_stderr_only(tmp_path: Path) -> None:
+    origin, _shas = _origin(tmp_path, gate_ran=False)
+    clone = _writable_clone(origin, tmp_path / "runner")
+
+    result = _invoke(clone, "record-sync-run", "--sync-run", "bad")
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert result.stderr.startswith("error: 1 validation error for SyncRunRequest")
+
+
+def test_a_refusal_is_on_stderr_only(tmp_path: Path) -> None:
+    origin, _shas = _origin(tmp_path, gate_ran=True)
+    clone = _writable_clone(origin, tmp_path / "operator")
+
+    result = _invoke(clone, *_backfill_args(**{"--boundary-commit": "f" * 40}))
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith(f"error: cannot resolve commit '{'f' * 40}'")
+
+
+def test_a_warning_is_on_stderr_and_carries_its_prefix(tmp_path: Path) -> None:
+    origin, _shas = _origin(tmp_path, gate_ran=True)
+    clone = _writable_clone(origin, tmp_path / "runner")
+
+    result = _invoke(clone, "record-sync-run", "--sync-run", "79")
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert result.stderr.startswith("warning: attestations under temporal parser version")
+
+
+def test_a_report_is_on_stdout_with_no_prefix(tmp_path: Path) -> None:
+    origin, _shas = _origin(tmp_path, gate_ran=False)
+    clone = _writable_clone(origin, tmp_path / "runner")
+
+    result = _invoke(clone, "record-sync-run", "--sync-run", "77")
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.stdout.startswith("gate epoch recorded and pushed\n{\n")
+    assert json.loads(result.stdout[result.stdout.index("{") :])["evidence"] == (
+        "lovspor sync run 77"
+    )
+
+
+# ---------- what each report says it did ----------
+
+
+def test_reports_say_whether_they_wrote(tmp_path: Path) -> None:
+    origin, shas = _origin(tmp_path, gate_ran=True)
+    clone = _writable_clone(origin, tmp_path / "operator")
+    request = {"epoch_at": EPOCH_AT, "boundary_commit": shas[0], "sync_run": "1"}
+    now = datetime(2026, 9, 27, tzinfo=UTC)
+
+    dry = backfill_epoch(clone, BackfillRequest.model_validate(request), now)
+    applied = backfill_epoch(clone, BackfillRequest.model_validate({**request, "apply": True}), now)
+    again = backfill_epoch(clone, BackfillRequest.model_validate({**request, "apply": True}), now)
+
+    assert (dry.written, applied.written, again.written) == (False, True, False)
+    assert not any(report.warning for report in (dry, applied, again))
+
+
+def test_sync_run_reports_say_whether_they_wrote(tmp_path: Path) -> None:
+    origin, _shas = _origin(tmp_path, gate_ran=False)
+    clone = _writable_clone(origin, tmp_path / "runner")
+    now = datetime.now(UTC)
+
+    first = record_sync_run_epoch(clone, SyncRunRequest(sync_run="5"), now)
+    second = record_sync_run_epoch(clone, SyncRunRequest(sync_run="6"), now)
+
+    assert (first.written, second.written) == (True, False)
+    assert (first.warning, second.warning) == (False, False)
+
+
+def test_repository_root_is_the_top_level_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Standing inside a plain directory, git fails and prints nothing: an
+    empty top-level must not resolve to the working directory and pass."""
+    origin, _shas = _origin(tmp_path, gate_ran=False)
+    clone = _writable_clone(origin, tmp_path / "runner")
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.chdir(plain)
+
+    assert is_repository_root(clone) is True
+    assert is_repository_root(clone / "lover") is False
+    assert is_repository_root(plain) is False
+    assert is_repository_root(tmp_path / "missing") is False
+    assert is_repository_root(clone / "manifest.json") is False
