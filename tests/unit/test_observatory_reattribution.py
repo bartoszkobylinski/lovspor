@@ -314,3 +314,48 @@ class TestApplying:
         apply_plan(log, plan_reattribution(log, request(), attribution()))
 
         assert verify_snapshot(log).ok
+
+
+class TestEdgesOfAPlan:
+    def test_a_correction_is_never_itself_selected_for_correction(self, tmp_path: Path) -> None:
+        log = misfiled(tmp_path)
+        apply_plan(log, plan_reattribution(log, request(), attribution()))
+
+        onward = plan_reattribution(
+            log, request(from_authority="4203", to_authority="4204"), attribution("run-2")
+        )
+
+        assert onward.selected == 1
+        assert onward.appends[0].observation.url == f"{ARENDAL}/own"  # type: ignore[union-attr]
+
+    def test_a_stray_tombstone_naming_no_line_changes_nothing(self, tmp_path: Path) -> None:
+        log = misfiled(tmp_path)
+        log.append(RecordTombstone(retracts="f" * 64, **attribution("stray").model_dump()))
+
+        plan = plan_reattribution(log, request(), attribution())
+
+        assert (plan.selected, plan.already_corrected, plan.to_complete) == (3, 0, 0)
+
+    def test_a_half_on_a_record_of_another_authority_is_left_alone(self, tmp_path: Path) -> None:
+        log = misfiled(tmp_path)
+        own = artifact("own", authority_id="4203", minute=3)
+        log.append(RecordTombstone(retracts=key_of(own), **attribution("stray").model_dump()))
+
+        plan = plan_reattribution(log, request(), attribution())
+
+        assert (plan.selected, plan.to_complete, len(plan.appends)) == (3, 0, 6)
+
+    def test_a_tombstone_disagreeing_with_its_refiled_half_does_not_count_as_done(
+        self, tmp_path: Path
+    ) -> None:
+        log = make_log(tmp_path)
+        original = artifact("a")
+        log.append(original)
+        first = plan_reattribution(log, request(), attribution("run-1"))
+        log.append(first.appends[0])
+        log.append(first.appends[1].model_copy(update={"corrected_by": "someone else"}))
+
+        plan = plan_reattribution(log, request(), attribution("run-2"))
+
+        assert (plan.already_corrected, plan.to_complete) == (0, 1)
+        assert plan.appends == (first.appends[1],)
