@@ -544,8 +544,9 @@ What holds it shut now:
   under whatever the register says now — that would be a second guess about who
   publishes those pages, made by a process minutes after an operator made the
   first one by hand. A record not written can be captured again on the next
-  pass; a misattributed one cannot be undone, because nothing in this engine
-  rewrites `authority_id`.
+  pass; a misattributed one cannot be rewritten — nothing in this engine
+  rewrites `authority_id`. It can only be corrected by appending, with
+  `observatory reattribute` (ADR-0015, below).
 - **The scope of a run** is the ids the register held when it began. A source
   activated mid-run waits for the next sweep.
 - **A withdrawal is counted**, as `sources_withdrawn` in the run record and on
@@ -695,6 +696,73 @@ While the log cannot be read to the end, blob findings are suppressed rather
 than reported — every blob the unread lines account for would otherwise show
 up as an orphan, burying the real defect under invented ones. Re-run the audit
 after recovery to get the full picture.
+
+## Observatory: correcting a misattributed record (ADR-0015)
+
+The log is append-only, so a record filed under the wrong authority is never
+edited. It is **corrected by appending** two records per original: a
+`refiled_observation` — the same observation, same `observed_at`, URL, hash
+and retrieval provenance, under the right `authority_id`, with who, when and
+why — and then a `record_tombstone` retracting the original by its key (the
+SHA-256 of its line as stored). The original line and its blob stay exactly as
+they are. Every fold of the log (capture state, the freshness index,
+`composition`) reads the corrected view; `verify` reads the raw log and audits
+the corrections.
+
+Only `authority_id` is correctable, and only when the register already says
+where the records belong: fix the register first (`replace-source-domain`,
+`activate-source`), then correct the archive.
+
+**Before the first correction**, move the nightly pin to an engine that reads
+correction records. An older engine refuses a log holding one (the record
+models forbid unknown kinds), so the first night after an `--apply` on an old
+pin fails its preflight. The first run of the new engine also rebuilds the
+freshness index once (its derivation version moved to 3).
+
+The decision is a JSON document, so the dry run and the apply read the same
+reviewed decision, and you keep it beside the output:
+
+```bash
+cat > correction-4202-4203.json <<'JSON'
+{
+  "from_authority": "4202",
+  "to_authority": "4203",
+  "host": "www.arendal.kommune.no",
+  "reason": "Captured under Grimstad (4202) while its register row carried Arendal's domain, before replace-source-domain on 2026-09-03T07:20:44Z; the records belong to Arendal (4203). lovspor#221, lovspor#276, ADR-0015.",
+  "corrected_by": "<your name>"
+}
+JSON
+uv run lovspor observatory reattribute --correction correction-4202-4203.json          # dry run
+uv run lovspor observatory reattribute --correction correction-4202-4203.json --apply  # appends
+uv run lovspor observatory verify
+uv run lovspor observatory composition
+```
+
+The dry run writes nothing — not the log, not the index, not the host lock —
+and prints the selection (every `artifact` and `fetch_failure` filed under
+`from_authority` whose URL host is `host`), by kind, with the first and last
+`observed_at`, what is already corrected, what a crash left half-written, how
+many lines `--apply` would append and the first line of each kind. The
+correction id it prints is a preview; `--apply` mints its own.
+
+It refuses — writing nothing — when `reason` or `corrected_by` is missing or
+blank (neither is ever filled in by the engine), when `to_authority` is not
+registered on a domain covering `host`, when `from_authority` is still
+registered on one that does, when the log is damaged, and when a half-written
+correction of one of these records moves it somewhere else. `--apply` also
+refuses while a sweep holds the host's workload lock; run it between nights,
+or after `observatory status` shows no sweep running.
+
+**Idempotent and crash-safe.** Each record is appended through the log's one
+write path (locked, fsynced), re-filed half first. A run interrupted between
+the halves leaves the original standing — no fold sees the half — and `verify`
+reports an incomplete correction, which keeps the nightly preflight red until
+you run the same command again: it appends only the missing half, under the
+interrupted run's own attribution. A finished correction re-run appends
+nothing ("already corrected: N", "appended 0 lines").
+
+A wrong correction is not undone. It is corrected in turn, by correcting its
+re-filed record; `reattribute` itself only selects original observations.
 
 ## Observatory: the 24-hour observation SLA (issue #167)
 
