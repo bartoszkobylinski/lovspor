@@ -232,31 +232,51 @@ def _dead_pid() -> int:
 
 class TestRunningSweep:
     def test_a_live_sweep_holding_the_lock_is_running_since_it_took_it(
-        self, tmp_path: Path
+        self, tmp_path: Path, live_child: subprocess.Popen[bytes]
     ) -> None:
         lock = _holder(
             tmp_path / "lock",
             owner="observatory-sweep",
-            pid=os.getpid(),
+            pid=live_child.pid,
             since="2026-09-26T05:15:40+00:00",
         )
 
         assert running_sweep("observatory-sweep", lock) == _utc(26, 5, 15) + timedelta(seconds=40)
 
-    def test_the_default_lock_path_is_the_hosts_lock(self) -> None:
+    def test_asking_whether_the_sweep_runs_does_not_signal_it(
+        self, tmp_path: Path, live_child: subprocess.Popen[bytes]
+    ) -> None:
+        """Signal 0 only probes. Any real signal would hang up the running sweep."""
+        lock = _holder(
+            tmp_path / "lock",
+            owner="observatory-sweep",
+            pid=live_child.pid,
+            since="2026-09-26T05:15:40+00:00",
+        )
+
+        running_sweep("observatory-sweep", lock)
+
+        with pytest.raises(subprocess.TimeoutExpired):
+            live_child.wait(timeout=0.5)
+
+    def test_the_default_lock_path_is_the_hosts_lock(
+        self, live_child: subprocess.Popen[bytes]
+    ) -> None:
         """conftest points the host lock at a temporary file; that file is read."""
         _holder(
             default_lock_path(),
             owner="observatory-sweep",
-            pid=os.getpid(),
+            pid=live_child.pid,
             since="2026-09-26T05:15:40+00:00",
         )
 
         assert running_sweep("observatory-sweep") is not None
 
-    def test_another_workload_holding_the_lock_is_not_a_sweep(self, tmp_path: Path) -> None:
+    def test_another_workload_holding_the_lock_is_not_a_sweep(
+        self, tmp_path: Path, live_child: subprocess.Popen[bytes]
+    ) -> None:
         lock = _holder(
-            tmp_path / "lock", owner="llhb", pid=os.getpid(), since="2026-09-26T05:15:40+00:00"
+            tmp_path / "lock", owner="llhb", pid=live_child.pid, since="2026-09-26T05:15:40+00:00"
         )
 
         assert running_sweep("observatory-sweep", lock) is None
@@ -282,9 +302,11 @@ class TestRunningSweep:
 
     @pytest.mark.parametrize("since", ["yesterday", "2026-09-26T05:15:40"])
     def test_a_start_that_is_not_an_aware_instant_is_not_used(
-        self, tmp_path: Path, since: str
+        self, tmp_path: Path, since: str, live_child: subprocess.Popen[bytes]
     ) -> None:
-        lock = _holder(tmp_path / "lock", owner="observatory-sweep", pid=os.getpid(), since=since)
+        lock = _holder(
+            tmp_path / "lock", owner="observatory-sweep", pid=live_child.pid, since=since
+        )
 
         assert running_sweep("observatory-sweep", lock) is None
 

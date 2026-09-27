@@ -10,6 +10,7 @@ real one lands.
 import hashlib
 import json
 import os
+import subprocess
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -4072,16 +4073,28 @@ class TestStatus:
             "\nDead-man switch\n"
         )
 
-    def test_status_names_the_sweep_holding_the_host_lock(self, root: Path) -> None:
-        """A sweep in progress has no run record yet; the workload lock names it."""
+    def test_status_names_the_sweep_holding_the_host_lock(
+        self, root: Path, live_child: subprocess.Popen[bytes]
+    ) -> None:
+        """A sweep in progress has no run record yet; the workload lock names it.
+
+        The record is the one ``exclusive_workload`` writes, naming a live
+        bystander process rather than the runner: status must probe that pid
+        without signalling it, and a probe that did signal would otherwise take
+        the test runner down instead of failing an assertion.
+        """
         _activate(root)
         _write_sweep(root, started=datetime.now(UTC) - timedelta(hours=18))
+        since = datetime.now(UTC).isoformat(timespec="seconds")
+        default_lock_path().write_text(
+            json.dumps({"owner": OBSERVATORY_WORKLOAD, "pid": live_child.pid, "since": since})
+        )
 
-        with exclusive_workload(OBSERVATORY_WORKLOAD) as holder:
-            result = runner.invoke(app, ["observatory", "status"])
+        result = runner.invoke(app, ["observatory", "status"])
 
-        assert f"  running:    since {holder.since} (0h00m)\n" in result.output
+        assert f"  running:    since {since} (0h00m)\n" in result.output
         assert result.exit_code == 0
+        assert live_child.poll() is None
 
     def test_a_lock_held_by_another_workload_is_not_a_running_sweep(self, root: Path) -> None:
         _activate(root)
