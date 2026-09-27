@@ -4,6 +4,8 @@ import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from lovspor.observatory.corrections import CorrectionSet, fold_corrections
 from lovspor.observatory.log import ObservationLog, verify_snapshot
 from lovspor.observatory.model import (
@@ -370,6 +372,25 @@ class TestVerifyAuditsCorrections:
         log.append(tombstone(key_of(original)))
 
         assert verify_snapshot(log).refiled_mismatches == (key_of(original),)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("reason", "a different reason"),
+            ("corrected_by", "a different operator"),
+            ("corrected_at", CORRECTED_AT + timedelta(seconds=1)),
+        ],
+    )
+    def test_halves_with_mismatched_attribution_are_rejected(
+        self, tmp_path: Path, field: str, value: str | datetime
+    ) -> None:
+        log, original = self._stored(tmp_path)
+        log.append(refiled(original, "4203"))
+        log.append(tombstone(key_of(original)).model_copy(update={field: value}))
+
+        report = verify_snapshot(log)
+
+        assert not report.ok, report
 
     def test_a_tombstone_naming_no_line_is_reported(self, tmp_path: Path) -> None:
         log, _ = self._stored(tmp_path)
