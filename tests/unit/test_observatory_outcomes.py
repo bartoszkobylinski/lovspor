@@ -293,10 +293,11 @@ class TestCorrectionsAreCountedApart:
         refiled, tombstone = self._correction_pair()
 
         collect(refiled)
+        collect(refiled)
         collect(tombstone)
         collect(tombstone)
 
-        assert (found.refiled, found.record_tombstones) == (1, 2)
+        assert (found.refiled, found.record_tombstones) == (2, 2)
         assert (found.artifacts, found.hops, found.lost, found.tombstones) == (0, 0, 0, 0)
 
     def test_corrections_move_neither_the_total_nor_the_rates(self) -> None:

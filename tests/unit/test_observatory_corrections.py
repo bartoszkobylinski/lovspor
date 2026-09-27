@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.observatory.corrections import CorrectionSet, fold_corrections
+from lovspor.observatory.corrections import CorrectionSet, Refiled, fold_corrections
 from lovspor.observatory.log import ObservationLog, verify_snapshot
 from lovspor.observatory.model import (
     ArtifactObservation,
@@ -184,6 +184,24 @@ class TestTheCorrectedView:
 
         assert [record.authority_id for record in corrected(log)] == ["4203"]  # type: ignore[union-attr]
 
+    def test_a_cycle_in_the_correction_chain_stops_at_the_first_repeated_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original = artifact("a")
+        replacement = refiled(original, "4203")
+        key = key_of(original)
+        calls = 0
+
+        def cyclic(_corrections: CorrectionSet, candidate: str) -> Refiled:
+            nonlocal calls
+            calls += 1
+            assert calls == 1, "the repeated key must stop resolution before another lookup"
+            return Refiled(replacement, candidate)
+
+        monkeypatch.setattr(CorrectionSet, "in_force", cyclic)
+
+        assert CorrectionSet().resolve(original, key) == replacement.observation
+
     def test_the_first_completed_correction_stands(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         original = artifact("a")
@@ -223,6 +241,16 @@ class TestTheCorrectedView:
 
 
 class TestTheCorrectionFold:
+    def test_a_fresh_reader_folds_a_correction_in_the_first_line(self, tmp_path: Path) -> None:
+        writer = make_log(tmp_path)
+        original = artifact("a")
+        writer.append(refiled(original, "4203"))
+        writer.append(tombstone(key_of(original)))
+
+        corrections = make_log(tmp_path).corrections()
+
+        assert corrections.in_force(key_of(original)) is not None
+
     def test_is_extended_from_where_it_stopped(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         original = artifact("a")
@@ -245,6 +273,31 @@ class TestTheCorrectionFold:
         log.log_path.write_bytes(prefix)
 
         assert not log.corrections()
+
+    def test_a_cached_fold_is_not_reapplied_when_the_size_is_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        log = make_log(tmp_path)
+        original = artifact("a")
+        log.append(original)
+        correct(log, original)
+
+        assert len(log.corrections().refiled[key_of(original)]) == 1
+        assert len(log.corrections().refiled[key_of(original)]) == 1
+
+    def test_an_empty_truncation_restarts_the_next_fold_at_byte_zero(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        original = artifact("a")
+        log.append(original)
+        correct(log, original)
+        assert log.corrections()
+
+        log.log_path.write_bytes(b"")
+        assert not log.corrections()
+        log.append(original)
+        correct(log, original)
+
+        assert log.corrections().in_force(key_of(original)) is not None
 
     def test_an_absent_log_has_no_corrections(self, tmp_path: Path) -> None:
         assert not make_log(tmp_path).corrections()
@@ -325,13 +378,17 @@ class TestVerifyAuditsCorrections:
         report = verify_snapshot(log)
 
         assert report.incomplete_corrections == (key_of(original),)
+        assert report.corrections_without_record == ()
         assert not report.ok
 
     def test_a_tombstone_half_alone_is_an_incomplete_correction(self, tmp_path: Path) -> None:
         log, original = self._stored(tmp_path)
         log.append(tombstone(key_of(original)))
 
-        assert verify_snapshot(log).incomplete_corrections == (key_of(original),)
+        report = verify_snapshot(log)
+
+        assert report.incomplete_corrections == (key_of(original),)
+        assert report.corrections_without_record == ()
 
     @pytest.mark.parametrize(
         ("field", "value"),

@@ -32,6 +32,7 @@ from lovspor.cli import app
 from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.addresses import SharedAddress, SourceAddresses
+from lovspor.observatory.audit_commands import _defects
 from lovspor.observatory.commands import (
     ENV_REQUIRE_PINNED_ENGINE,
     OBSERVATORY_WORKLOAD,
@@ -52,7 +53,7 @@ from lovspor.observatory.events import (
 from lovspor.observatory.freshness import CaptureState, FailureHold
 from lovspor.observatory.heartbeat import ENV_HEARTBEAT_URL, FAIL_SUFFIX
 from lovspor.observatory.listing import LISTING_METHOD
-from lovspor.observatory.log import ObservationLog
+from lovspor.observatory.log import ObservationLog, SnapshotVerification
 from lovspor.observatory.model import (
     ArtifactObservation,
     FetchFailure,
@@ -1032,6 +1033,21 @@ class TestComposition:
 class TestVerify:
     """The audit an operator runs after an interrupted run. Its whole value is
     that it answers "how bad is it?" precisely when the archive is damaged."""
+
+    @pytest.mark.parametrize(
+        ("field", "label"),
+        [
+            ("corrections_without_record", "corrections naming no record in the log"),
+            ("refiled_mismatches", "re-filed records that do not restate their original"),
+            ("multiply_corrected", "records corrected more than once"),
+        ],
+    )
+    def test_each_correction_defect_has_its_exact_operator_facing_label(
+        self, field: str, label: str
+    ) -> None:
+        report = SnapshotVerification.model_validate({"artifacts_checked": 0, field: ("a" * 64,)})
+
+        assert _defects(report) == [f"1 {label}"]
 
     def test_an_intact_archive_passes(self, root: Path) -> None:
         _archive(root)
