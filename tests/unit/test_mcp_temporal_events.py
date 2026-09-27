@@ -8,6 +8,7 @@ by the slice-B attestation registry, and the outcome taxonomy. The pure
 composition rules live in ``test_temporal_events.py``.
 """
 
+import asyncio
 import contextlib
 import json
 import re
@@ -17,6 +18,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
 import lovspor.mcp as mcp_module
 import lovspor.temporal_events as temporal_events_module
@@ -25,12 +27,16 @@ from lovspor.mcp import CorpusNotFoundError, CorpusReader, TemporalScopeError, b
 from lovspor.temporal import TEMPORAL_PARSER_VERSION
 from lovspor.temporal_attestation import (
     ATTESTATION_NOTES_REF,
+    EPOCH_NOTES_REF,
     AttestationError,
     TemporalAttestation,
+    TemporalGateEpoch,
     fetch_attestations,
     write_attestation,
+    write_gate_epoch,
 )
 from lovspor.temporal_events import derive_served_layer
+from lovspor.temporal_gate import UnattestedGateStateError
 from tests.unit.test_mcp_recorded_at import _commit_all, _doc, _manifest, _record, _run_git
 
 
@@ -120,7 +126,26 @@ def corpus(tmp_path: Path) -> tuple[Path, str, str]:
         ),
     )
     sha2 = _commit_all(repo, "sync 2", "2026-05-10T12:00:00Z")
+    _record_epoch(repo, sha2, GATE_EPOCH)
     return repo, sha1, sha2
+
+
+GATE_EPOCH = datetime(2026, 5, 20, 6, 0, tzinfo=UTC)
+"""After both fixture states: they predate the gate, the 2b exception."""
+
+
+def _record_epoch(repo: Path, boundary: str, epoch_at: datetime) -> None:
+    write_gate_epoch(
+        repo,
+        TemporalGateEpoch(
+            parser_version=TEMPORAL_PARSER_VERSION,
+            epoch_at=epoch_at,
+            boundary_commit=boundary,
+            recorded_at=epoch_at,
+            source="sync-run",
+            evidence="lovspor sync run 1",
+        ),
+    )
 
 
 def _tool_fn(repo, name="get_temporal_events"):  # type: ignore[no-untyped-def]
@@ -758,3 +783,140 @@ def test_assumption_git_head_wire_is_bare_sha_and_iso_date(
     assert ref.sha == sha2
     assert re.fullmatch(r"[0-9a-f]{40}", ref.sha)
     assert ref.commit_date.tzinfo is not None
+
+
+# ---------- the gate epoch (ADR-0012 Amendment 1) ----------
+
+
+def _gate_era_commit(repo: Path, iso_date: str) -> str:
+    (repo / "lover" / "tomloven.md").write_text(_doc("Tomloven", f"{TOMLOVEN}\nNy {iso_date}.\n"))
+    return _commit_all(repo, "sync 3", iso_date)
+
+
+def test_gate_era_unattested_head_fails_closed_with_its_own_type(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _sha1, _sha2 = corpus
+    sha3 = _gate_era_commit(repo, "2026-05-25T12:00:00Z")
+
+    with pytest.raises(UnattestedGateStateError) as caught:
+        _tool_fn(repo)(slug="testloven")
+
+    assert not isinstance(caught.value, AttestationError)
+    assert caught.value.corpus_commit == sha3
+    assert caught.value.parser_version == TEMPORAL_PARSER_VERSION
+    assert caught.value.epoch_at == GATE_EPOCH
+    message = str(caught.value)
+    assert sha3 in message
+    assert f"version {TEMPORAL_PARSER_VERSION}" in message
+    assert GATE_EPOCH.isoformat() in message
+
+
+def test_the_epoch_instant_itself_is_gate_era(corpus: tuple[Path, str, str]) -> None:
+    """Pinned on both sides of the instant: one second before is the 2b
+    exception, the instant itself is not."""
+    repo, _sha1, _sha2 = corpus
+    _gate_era_commit(repo, "2026-05-20T05:59:59Z")
+    assert _tool_fn(repo)(slug="testloven")["reconciliation"] == "unattested"
+
+    _gate_era_commit(repo, "2026-05-20T06:00:00Z")
+    with pytest.raises(UnattestedGateStateError):
+        _tool_fn(repo)(slug="testloven")
+
+
+def test_recorded_at_compares_the_resolved_states_author_date(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _sha1, _sha2 = corpus
+    _gate_era_commit(repo, "2026-05-25T12:00:00Z")
+    fn = _tool_fn(repo)
+
+    assert fn(slug="testloven", recorded_at="2026-05-19")["reconciliation"] == "unattested"
+    with pytest.raises(UnattestedGateStateError):
+        fn(slug="testloven", recorded_at="2026-05-25")
+
+
+def test_attested_serves_attested_on_both_sides_of_the_epoch(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, sha1, _sha2 = corpus
+    sha3 = _gate_era_commit(repo, "2026-05-25T12:00:00Z")
+    _attest(repo, sha1)
+    _attest(repo, sha3)
+    fn = _tool_fn(repo)
+
+    assert fn(slug="testloven")["reconciliation"] == "attested"
+    assert fn(slug="testloven", recorded_at="2026-05-05")["reconciliation"] == "attested"
+
+
+def test_no_epoch_record_is_an_attestation_error_never_unattested(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _sha1, _sha2 = corpus
+    _run_git(repo, "update-ref", "-d", EPOCH_NOTES_REF)
+
+    with pytest.raises(AttestationError, match="no gate-epoch record.*temporal-epoch"):
+        _tool_fn(repo)(slug="testloven")
+
+
+def test_no_epoch_record_still_serves_an_attested_state(corpus: tuple[Path, str, str]) -> None:
+    """Outcome 2 precedes outcome 3: a proof needs no epoch."""
+    repo, _sha1, sha2 = corpus
+    _run_git(repo, "update-ref", "-d", EPOCH_NOTES_REF)
+    _attest(repo, sha2)
+
+    assert _tool_fn(repo)(slug="testloven")["reconciliation"] == "attested"
+
+
+def test_corrupt_epoch_record_fails_closed_even_for_an_attested_state(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """Outcome 1 precedes outcome 2: a corrupt channel is never read past."""
+    repo, sha1, sha2 = corpus
+    _attest(repo, sha2)
+    _run_git(repo, "notes", f"--ref={EPOCH_NOTES_REF}", "add", "-m", "not json", sha1)
+
+    with pytest.raises(AttestationError, match="unparseable"):
+        _tool_fn(repo)(slug="testloven")
+
+
+def test_epoch_for_another_parser_version_does_not_bound_this_one(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, sha1, _sha2 = corpus
+    _run_git(repo, "update-ref", "-d", EPOCH_NOTES_REF)
+    write_gate_epoch(
+        repo,
+        TemporalGateEpoch(
+            parser_version=TEMPORAL_PARSER_VERSION + 1,
+            epoch_at=GATE_EPOCH,
+            boundary_commit=sha1,
+            recorded_at=GATE_EPOCH,
+            source="sync-run",
+            evidence="lovspor sync run 2",
+        ),
+    )
+
+    with pytest.raises(AttestationError, match="no gate-epoch record"):
+        _tool_fn(repo)(slug="testloven")
+
+
+def test_gate_era_error_has_a_shape_no_other_outcome_shares(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """Through the MCP tool manager, the served non-success outcome is
+    named as what it is — not an attestation-channel failure, not a
+    successful answer."""
+    repo, _sha1, _sha2 = corpus
+    _gate_era_commit(repo, "2026-05-25T12:00:00Z")
+    server = build_server(repo)
+
+    async def call() -> object:
+        return await server._tool_manager.call_tool(
+            "get_temporal_events", {"slug": "testloven"}, context=None, convert_result=False
+        )
+
+    with pytest.raises(ToolError, match="unattested gate-era state") as caught:
+        asyncio.run(call())
+    assert "not synchronised" not in str(caught.value)
+    assert "no gate-epoch record" not in str(caught.value)

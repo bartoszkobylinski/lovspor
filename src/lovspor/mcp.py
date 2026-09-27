@@ -114,23 +114,18 @@ from lovspor.snapshot import (
 from lovspor.state_cache import STATE_OVERHEAD_BYTES, ByteBudgetCache, state_bytes
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.temporal import (
-    TEMPORAL_PARSER_VERSION,
     append_notice,
     build_notice,
     evaluation_date_today,
 )
-from lovspor.temporal_attestation import (
-    ATTESTATION_NOTES_REF,
-    AttestationError,
-    read_attestation,
-    registry_synchronised,
-)
+from lovspor.temporal_attestation import AttestationError
 from lovspor.temporal_events import (
     ServedTemporalLayer,
     TemporalEventsRequest,
     compose_temporal_events,
     derive_served_layer,
 )
+from lovspor.temporal_gate import served_reconciliation
 from lovspor.timetravel import (
     RevisionNotFoundError,
     RevisionResult,
@@ -3659,30 +3654,6 @@ def _require_section_id(slug: str, body: str, section_id: str) -> str:
     return canonical
 
 
-def _reconciliation_for(repo: Path, corpus_commit: str) -> str:
-    """The ADR-0012 point 2 response field for one served state.
-
-    ``attested`` exactly when a recorded attestation covers
-    ``corpus_commit`` under the serving parser version; a readable,
-    synchronised registry with no entry is ``unattested``. Two channel
-    conditions fail closed as :class:`AttestationError` instead: an
-    unreadable or corrupt registry, and a checkout whose registry was
-    never synchronised (a plain clone does not fetch ``refs/notes/*``,
-    so its local absence says nothing about the remote proof) — neither
-    may impersonate absence of evidence (ADR-0012 point 2c).
-    """
-    if not registry_synchronised(repo):
-        raise AttestationError(
-            f"attestation registry is not synchronised in this checkout "
-            f"({repo}): plain clones do not fetch {ATTESTATION_NOTES_REF}, so "
-            f"a local read cannot tell 'no proof recorded' from 'proof never "
-            f"fetched'. Acquire the corpus with 'lovspor fetch-corpus' (which "
-            f"configures the notes refspec), or fetch the ref once, and retry.",
-        )
-    entry = read_attestation(repo, corpus_commit, TEMPORAL_PARSER_VERSION)
-    return "attested" if entry is not None else "unattested"
-
-
 _TEMPORAL_MEASURED_DATASET = "gjeldende-lover"
 """The dataset ADR-0012's feasibility measurement covered (``lover/``)."""
 
@@ -3937,7 +3908,7 @@ class _SnapshotState:
             result["section_id"] = canonical
         result.update(compose_temporal_events(_served_layer_for(self._data, record), request))
         repo = self._data.snapshot.repo_path
-        result["reconciliation"] = _reconciliation_for(repo, self.corpus_commit)
+        result["reconciliation"] = served_reconciliation(repo, self._data.ref)
         return self._stamp(result, record.xml_hash)
 
     def _stamp(self, result: dict[str, Any], xml_hash: str | None) -> dict[str, Any]:
