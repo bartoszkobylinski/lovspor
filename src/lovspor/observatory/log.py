@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from lovspor.atomic_io import atomic_write_bytes
 from lovspor.errors import LogIntegrityError, StorageBoundaryError, TombstonedArtifactError
+from lovspor.observatory.corrections import CorrectionSet, corrected_view, fold_corrections
 from lovspor.observatory.model import (
     ArtifactObservation,
     ObservationRecord,
@@ -145,6 +146,8 @@ class ObservationLog:
         self._root = root.path
         self._tombstones: set[str] = set()
         self._tombstones_through = 0
+        self._corrections = CorrectionSet()
+        self._corrections_through = 0
 
     @property
     def root(self) -> Path:
@@ -257,6 +260,41 @@ class ObservationLog:
                 f"{self.log_path}: unreadable record after byte {scan.clean_through}; "
                 "the tombstone fold cannot skip it",
             )
+
+    def corrections(self) -> CorrectionSet:
+        """Every correction record in the log (ADR-0015), folded incrementally.
+
+        The same discipline as :meth:`tombstoned_hashes`: extended from the
+        byte the last fold stopped at, discarded when the file got shorter.
+        Never part of the blob tombstones — a correction removes no bytes and
+        blocks no re-capture. The returned set is this log's own; read it,
+        never change it.
+        """
+        if not self.log_path.exists():
+            return CorrectionSet()
+        size = self.log_path.stat().st_size
+        if size < self._corrections_through:
+            self._corrections = CorrectionSet()
+            self._corrections_through = 0
+        if size > self._corrections_through:
+            self._corrections_through = fold_corrections(
+                self.log_path, self._corrections, self._corrections_through
+            )
+        return self._corrections
+
+    def scan_corrected_into(
+        self,
+        collect: Callable[[ObservationRecord], None],
+        *,
+        start: int = 0,
+    ) -> LogScan:
+        """:meth:`scan_into` over the corrected view — the read every fold uses.
+
+        Each corrected original reaches ``collect`` as its re-filed
+        observation, at the original's position; correction records never
+        reach it. Damage is reported exactly as :meth:`scan_into` reports it.
+        """
+        return self.scan_lines_into(corrected_view(self.corrections(), collect), start=start)
 
     def records(self) -> Iterator[ObservationRecord]:
         """Read the log in append order.

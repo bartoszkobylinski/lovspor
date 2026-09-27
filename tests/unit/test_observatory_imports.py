@@ -26,6 +26,7 @@ _MODULES = (
     "lovspor.observatory.addresses",
     "lovspor.observatory.app",
     "lovspor.observatory.commands",
+    "lovspor.observatory.corrections",
     "lovspor.observatory.discovery",
     "lovspor.observatory.engine",
     "lovspor.observatory.entrypoint",
