@@ -73,6 +73,12 @@ class ReattributionPlan(BaseModel):
     already_corrected: int = 0
     to_complete: int = 0
     appends: tuple[RefiledObservation | RecordTombstone, ...] = Field(default=())
+    #: Where the log's correction fold stood when the plan was made. A plan is
+    #: only valid against the corrections it was checked against.
+    corrections_through: int = 0
+    #: The log's size when the plan was made. It may grow — captures keep
+    #: appending observations — but never shrink under a plan.
+    log_size: int = 0
 
     @property
     def selected(self) -> int:
@@ -127,6 +133,7 @@ def plan_reattribution(
         CorrectionRefusedError: a half-written correction of one of these
             records moves it somewhere other than ``request`` asks.
     """
+    anchor = {"log_size": _size(log), "corrections_through": log.corrections().last_offset}
     corrections = log.corrections()
     selected = _selected(log, request)
     plan = _summary(selected.values(), attribution.correction_id)
@@ -141,7 +148,12 @@ def plan_reattribution(
         appends.extend(completion or _both_halves(key, original, request, attribution))
     return plan.model_copy(
         update={"appends": tuple(appends), "already_corrected": already, "to_complete": completed}
+        | anchor
     )
+
+
+def _size(log: ObservationLog) -> int:
+    return log.log_path.stat().st_size if log.log_path.exists() else 0
 
 
 def _selected(
@@ -190,21 +202,52 @@ def _completion(
     original: ArtifactObservation | FetchFailure,
     request: ReattributionRequest,
 ) -> list[RefiledObservation | RecordTombstone] | None:
-    """The one missing half of a correction a crash left, or None when none was begun."""
-    begun = corrections.refiled.get(key, [])
-    if begun:
-        refiled = begun[0].record
+    """The tombstone that finishes this decision's own interrupted correction, or None.
+
+    The one half-written state a run may resume is the one the writer itself
+    leaves: a single re-filed half that restates ``original`` under
+    ``request``'s target with ``request``'s own reason and author, and no
+    tombstone. Anything else touching the key — a tombstone without its
+    re-filed half (the writer never leaves one), halves that disagree, a
+    second correction, a move elsewhere — was not written by this decision,
+    and completing it would be a guess about someone else's correction.
+
+    Raises:
+        CorrectionRefusedError: the key carries any other half-written state.
+    """
+    begun = [entry.record for entry in corrections.refiled.get(key, [])]
+    for refiled in begun:
         if refiled.observation.authority_id != request.to_authority:
             raise CorrectionRefusedError(
                 f"record {key[:12]} has a half-written correction to "
                 f"{refiled.observation.authority_id}, not {request.to_authority}"
             )
-        return [_tombstone(key, _attribution_of(refiled.correction))]
-    retracted = corrections.tombstones.get(key, [])
-    if not retracted:
+    if corrections.tombstones.get(key):
+        raise CorrectionRefusedError(
+            f"record {key[:12]} has a record tombstone with no matching re-filed half; "
+            "the writer never leaves one — run `observatory verify`"
+        )
+    if not begun:
         return None
-    tombstone = retracted[0]
-    return [_refiled(key, original, request.to_authority, _attribution_of(tombstone))]
+    if len(begun) > 1 or not _resumable(begun[0], original, request):
+        raise CorrectionRefusedError(
+            f"record {key[:12]} has a half-written correction this decision did not write"
+        )
+    return [_tombstone(key, _attribution_of(begun[0].correction))]
+
+
+def _resumable(
+    refiled: RefiledObservation,
+    original: ArtifactObservation | FetchFailure,
+    request: ReattributionRequest,
+) -> bool:
+    """True when ``refiled`` is exactly what this decision writes for ``original``."""
+    correction = refiled.correction
+    return (
+        refiled.observation == original.model_copy(update={"authority_id": request.to_authority})
+        and correction.previous_values == {"authority_id": request.from_authority}
+        and (correction.reason, correction.corrected_by) == (request.reason, request.corrected_by)
+    )
 
 
 def _attribution_of(half: Correction | RecordTombstone) -> Attribution:
@@ -253,7 +296,15 @@ def apply_plan(log: ObservationLog, plan: ReattributionPlan) -> int:
     Each append is locked and fsynced (:meth:`ObservationLog.append`), and
     the plan orders every correction re-filed half first, so an interruption
     at any point leaves originals that read either as filed or as corrected.
+
+    Raises:
+        CorrectionRefusedError: the log changed under the plan — a correction
+            was appended or the log got shorter since it was made. Nothing is
+            written; plan again. The command plans under the host lock, so
+            this guards every other caller of the plan too.
     """
+    if log.corrections().last_offset != plan.corrections_through or _size(log) < plan.log_size:
+        raise CorrectionRefusedError("the log changed since the plan was made; plan again")
     for record in plan.appends:
         log.append(record)
     return len(plan.appends)

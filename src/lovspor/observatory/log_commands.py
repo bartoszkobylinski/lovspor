@@ -142,7 +142,7 @@ def reattribute(
             plan = _plan(log, request)
             _echo_plan(plan)
             typer.echo(f"appended {apply_plan(log, plan)} lines")
-    except ExclusiveWorkloadHeldError as exc:
+    except (ExclusiveWorkloadHeldError, CorrectionRefusedError) as exc:
         typer.echo(f"Refused: {exc}", err=True)
         raise typer.Exit(1) from exc
 

@@ -315,20 +315,19 @@ class TestApplying:
         assert authorities(log) == ["4203", "4203", "4203", "4203", "4202"]
         assert not verify_snapshot(log).incomplete_corrections
 
-    def test_a_lone_tombstone_is_completed_with_its_own_attribution(self, tmp_path: Path) -> None:
+    def test_a_lone_tombstone_is_refused_not_completed(self, tmp_path: Path) -> None:
+        """The writer appends the re-filed half first, so a tombstone alone was
+        not written by it — a crash between tombstone and re-filed record is a
+        state no run of this command leaves, and resuming it would guess."""
         log = make_log(tmp_path)
         original = artifact("a")
         log.append(original)
         log.append(RecordTombstone(retracts=key_of(original), **attribution("run-0").model_dump()))
+        before = log.log_path.read_bytes()
 
-        plan = plan_reattribution(log, request(), attribution("run-1"))
-
-        assert plan.to_complete == 1
-        [refiled] = plan.appends
-        assert isinstance(refiled, RefiledObservation)
-        assert refiled.correction.correction_id == "run-0"
-        apply_plan(log, plan)
-        assert authorities(log) == ["4203"]
+        with pytest.raises(CorrectionRefusedError, match="no matching re-filed half"):
+            plan_reattribution(log, request(), attribution("run-1"))
+        assert log.log_path.read_bytes() == before
 
     def test_a_half_written_correction_elsewhere_is_refused(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
@@ -380,9 +379,7 @@ class TestEdgesOfAPlan:
 
         assert (plan.selected, plan.to_complete, len(plan.appends)) == (3, 0, 6)
 
-    def test_a_tombstone_disagreeing_with_its_refiled_half_does_not_count_as_done(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_tombstone_disagreeing_with_its_refiled_half_is_refused(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         original = artifact("a")
         log.append(original)
@@ -390,7 +387,110 @@ class TestEdgesOfAPlan:
         log.append(first.appends[0])
         log.append(first.appends[1].model_copy(update={"corrected_by": "someone else"}))
 
+        with pytest.raises(CorrectionRefusedError, match="no matching re-filed half"):
+            plan_reattribution(log, request(), attribution("run-2"))
+
+
+class TestOnlyThisDecisionResumes:
+    """ADR-0015 §6 resumes an interrupted run; nothing else is completed."""
+
+    def _half_written(self, root: Path, **changes: object) -> tuple[ObservationLog, Path]:
+        """The log a crash leaves after this run's re-filed half, with ``changes``
+        applied to that half's correction block."""
+        log = make_log(root)
+        log.append(artifact("a"))
+        refiled = plan_reattribution(log, request(), attribution("run-1")).appends[0]
+        assert isinstance(refiled, RefiledObservation)
+        log.append(
+            refiled.model_copy(update={"correction": refiled.correction.model_copy(update=changes)})
+        )
+        return log, root
+
+    def test_the_same_decision_resumes_with_the_missing_tombstone(self, tmp_path: Path) -> None:
+        log, _ = self._half_written(tmp_path)
+
         plan = plan_reattribution(log, request(), attribution("run-2"))
 
-        assert (plan.already_corrected, plan.to_complete) == (0, 1)
-        assert plan.appends == (first.appends[1],)
+        assert (plan.to_complete, len(plan.appends)) == (1, 1)
+        assert plan.appends[0].correction_id == "run-1"  # type: ignore[union-attr]
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"reason": "another reason"},
+            {"corrected_by": "someone else"},
+            {"previous_values": {"authority_id": "3201"}},
+        ],
+    )
+    def test_a_half_this_decision_did_not_write_is_refused(
+        self, tmp_path: Path, changes: dict[str, object]
+    ) -> None:
+        log, _ = self._half_written(tmp_path, **changes)
+        before = log.log_path.read_bytes()
+
+        with pytest.raises(CorrectionRefusedError, match="did not write"):
+            plan_reattribution(log, request(), attribution("run-2"))
+        assert log.log_path.read_bytes() == before
+
+    def test_two_half_written_corrections_to_the_target_are_refused(self, tmp_path: Path) -> None:
+        log, _ = self._half_written(tmp_path)
+        log.append(_refiled_again(log))
+
+        with pytest.raises(CorrectionRefusedError, match="did not write"):
+            plan_reattribution(log, request(), attribution("run-3"))
+
+
+class TestThePlanIsOnlyValidForTheLogItWasMadeFrom:
+    def test_a_correction_appended_after_planning_refuses_the_apply(self, tmp_path: Path) -> None:
+        log = misfiled(tmp_path)
+        plan = plan_reattribution(log, request(), attribution("run-1"))
+        apply_plan(log, plan_reattribution(log, request(), attribution("run-0")))
+        before = log.log_path.read_bytes()
+
+        with pytest.raises(CorrectionRefusedError, match="changed since the plan"):
+            apply_plan(log, plan)
+        assert log.log_path.read_bytes() == before
+
+    def test_a_log_that_got_shorter_refuses_the_apply(self, tmp_path: Path) -> None:
+        log = misfiled(tmp_path)
+        plan = plan_reattribution(log, request(), attribution())
+        log.log_path.write_bytes(log.log_path.read_bytes().splitlines(keepends=True)[0])
+
+        with pytest.raises(CorrectionRefusedError, match="changed since the plan"):
+            apply_plan(log, plan)
+
+    def test_observations_appended_after_planning_do_not_block_it(self, tmp_path: Path) -> None:
+        log = misfiled(tmp_path)
+        plan = plan_reattribution(log, request(), attribution())
+        log.append(artifact("late", minute=9))
+
+        assert apply_plan(log, plan) == 6
+        assert authorities(log)[-1] == "4202"
+
+
+class TestADecisionThatDisagreesWithTheRecords:
+    def test_a_host_with_no_records_under_the_source_appends_nothing(self, tmp_path: Path) -> None:
+        log = misfiled(tmp_path)
+        before = log.log_path.read_bytes()
+
+        plan = plan_reattribution(log, request(host="www.froland.kommune.no"), attribution())
+
+        assert (plan.selected, apply_plan(log, plan)) == (0, 0)
+        assert log.log_path.read_bytes() == before
+
+    def test_a_source_holding_no_records_appends_nothing(self, tmp_path: Path) -> None:
+        log = misfiled(tmp_path)
+
+        plan = plan_reattribution(log, request(from_authority="1111"), attribution())
+
+        assert (plan.selected, len(plan.appends)) == (0, 0)
+
+
+def _refiled_again(log: ObservationLog) -> RefiledObservation:
+    """A second re-filed half of the same original, under another correction id."""
+    seen: list[ObservationRecord] = []
+    log.scan_into(seen.append)
+    first = next(record for record in seen if isinstance(record, RefiledObservation))
+    return first.model_copy(
+        update={"correction": first.correction.model_copy(update={"correction_id": "run-9"})}
+    )

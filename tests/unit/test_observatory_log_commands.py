@@ -296,3 +296,55 @@ class TestRefusals:
         assert result.exit_code == 1
         assert "half-written correction to 9999" in result.stderr
         assert log.log_path.read_bytes() == before
+
+
+class TestInterruptedRuns:
+    def _decision(self, tmp_path: Path) -> tuple[Path, ReattributionRequest]:
+        path = correction(tmp_path)
+        return path, ReattributionRequest.model_validate_json(path.read_bytes())
+
+    def test_a_run_cut_after_a_refiled_half_is_finished_by_running_it_again(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        repaired_register()
+        log = misfiled_archive(root)
+        path, decision = self._decision(tmp_path)
+        interrupted = plan_reattribution(
+            log,
+            decision,
+            Attribution(
+                correction_id="cut",
+                reason=decision.reason,
+                corrected_by=decision.corrected_by,
+                corrected_at=START,
+            ),
+        )
+        log.append(interrupted.appends[0])
+        assert invoke("verify").exit_code == 1
+
+        result = invoke("reattribute", "--correction", str(path), "--apply")
+
+        assert result.exit_code == 0, result.output
+        assert "half-written, to complete: 1" in result.output
+        assert "appended 5 lines" in result.output
+        assert invoke("verify").exit_code == 0
+
+    def test_a_tombstone_without_its_refiled_half_refuses_the_apply(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        repaired_register()
+        log = misfiled_archive(root)
+        path, decision = self._decision(tmp_path)
+        planned = plan_reattribution(
+            log,
+            decision,
+            Attribution(correction_id="x", reason="r", corrected_by="b", corrected_at=START),
+        )
+        log.append(planned.appends[1])
+        before = log.log_path.read_bytes()
+
+        result = invoke("reattribute", "--correction", str(path), "--apply")
+
+        assert result.exit_code == 1
+        assert "no matching re-filed half" in result.stderr
+        assert log.log_path.read_bytes() == before
