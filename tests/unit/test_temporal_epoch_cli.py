@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import lovspor.temporal_epoch_cli as cli_module
 from lovspor.cli import app
 from lovspor.corpus_fetch import fetch_corpus
 from lovspor.errors import TemporalDerivationError
@@ -31,7 +32,7 @@ from lovspor.temporal_attestation import (
     read_gate_epochs,
     write_attestation,
 )
-from lovspor.temporal_gate import UnattestedGateStateError
+from lovspor.temporal_gate import EpochReport, UnattestedGateStateError
 from tests.unit.cli_output import said
 from tests.unit.test_mcp_recorded_at import _doc, _manifest, _record
 
@@ -143,7 +144,7 @@ def test_backfill_dry_run_validates_and_writes_nothing(tmp_path: Path) -> None:
     code, output = _backfill(clone, shas[0])
 
     assert code == 0, output
-    assert "dry run" in output
+    assert output.splitlines()[0] == "dry run: valid; nothing written (pass --apply)"
     assert f'"boundary_commit": "{shas[0]}"' in output
     assert '"source": "backfill"' in output
     assert '"evidence": "lovspor sync run 33854986231"' in output
@@ -163,7 +164,9 @@ def test_backfilled_epoch_reaches_a_consumer_through_supported_interfaces(
     code, output = _backfill(clone, shas[0], "--apply")
 
     assert code == 0, output
-    assert "recorded and pushed" in output
+    assert output.splitlines()[0] == "gate epoch recorded and pushed"
+    assert '\n  "parser_version":' in output
+    assert "\n}" in output
     consumer = tmp_path / "consumer"
     fetch_corpus(consumer, repo_url=f"file://{origin}", full_history=True)
     tool = build_server(consumer)._tool_manager._tools["get_temporal_events"].fn
@@ -184,7 +187,10 @@ def test_backfill_rerun_is_an_idempotent_no_op(tmp_path: Path) -> None:
     code, output = _backfill(again, shas[0], "--apply")
 
     assert code == 0, output
-    assert "identical gate epoch already recorded" in output
+    assert output.splitlines()[0] == (
+        "identical gate epoch already recorded on origin; nothing to do"
+    )
+    assert json.loads(output[output.index("{") :])["boundary_commit"] == shas[0]
     assert _git(again, "rev-parse", EPOCH_NOTES_REF) == pushed
 
 
@@ -323,6 +329,9 @@ def test_first_run_under_a_version_records_and_pushes_the_epoch(tmp_path: Path) 
     code, output = _cli(clone, "record-sync-run", "--sync-run", "77")
 
     assert code == 0, output
+    assert output.splitlines()[0] == "gate epoch recorded and pushed"
+    emitted = json.loads(output[output.index("{") :])
+    assert emitted["source"] == "sync-run"
     assert _origin_has_epoch_ref(origin)
     record = read_gate_epochs(clone)[TEMPORAL_PARSER_VERSION]
     assert record.boundary_commit == shas[0]
@@ -371,7 +380,7 @@ def test_a_later_run_under_the_same_version_writes_nothing(tmp_path: Path) -> No
     code, output = _cli(second, "record-sync-run", "--sync-run", "78")
 
     assert code == 0, output
-    assert "already recorded" in output
+    assert output.splitlines()[0] == "gate epoch already recorded on origin; nothing to do"
     assert json.loads(output[output.index("{") :])["evidence"] == "lovspor sync run 77"
     assert _git(second, "rev-parse", EPOCH_NOTES_REF) == pushed
 
@@ -388,6 +397,86 @@ def test_attestations_without_a_record_warn_and_invent_nothing(tmp_path: Path) -
     assert "backfill" in output
     assert read_gate_epochs(clone) == {}
     assert not _origin_has_epoch_ref(origin)
+
+
+def test_usage_errors_are_diagnostic_on_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli_module, "is_repository_root", lambda _path: True)
+    monkeypatch.setattr(cli_module, "is_corpus", lambda _path: True)
+    result = runner.invoke(
+        app,
+        [
+            "temporal-epoch",
+            "--corpus-path",
+            str(tmp_path),
+            "record-sync-run",
+            "--sync-run",
+            "bad",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert result.stderr.startswith("error: 1 validation error for SyncRunRequest")
+
+
+def test_attestation_errors_are_diagnostic_on_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli_module, "is_repository_root", lambda _path: True)
+    monkeypatch.setattr(cli_module, "is_corpus", lambda _path: True)
+    monkeypatch.setattr(
+        cli_module,
+        "record_sync_run_epoch",
+        lambda *_args: (_ for _ in ()).throw(cli_module.AttestationError("registry broken")),
+    )
+
+    result = runner.invoke(
+        app,
+        ["temporal-epoch", "--corpus-path", str(tmp_path), "record-sync-run", "--sync-run", "1"],
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr == "error: registry broken\n"
+
+
+@pytest.mark.parametrize(
+    ("warning", "expected_stdout", "expected_stderr"),
+    [
+        (False, "done\n", ""),
+        (True, "", "warning: action needed\n"),
+    ],
+)
+def test_reports_use_the_warning_prefix_and_stream(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    warning: bool,
+    expected_stdout: str,
+    expected_stderr: str,
+) -> None:
+    monkeypatch.setattr(cli_module, "is_repository_root", lambda _path: True)
+    monkeypatch.setattr(cli_module, "is_corpus", lambda _path: True)
+    monkeypatch.setattr(
+        cli_module,
+        "record_sync_run_epoch",
+        lambda *_args: EpochReport(
+            message="action needed" if warning else "done",
+            warning=warning,
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        ["temporal-epoch", "--corpus-path", str(tmp_path), "record-sync-run", "--sync-run", "1"],
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == expected_stdout
+    assert result.stderr == expected_stderr
 
 
 def test_a_failed_gate_leaves_the_epoch_and_the_next_read_fails_closed(
