@@ -1264,6 +1264,37 @@ class TestRemediationMustTryToKillEverySurvivor:
         assert "modify files under tests/ only" in prompt
 
 
+class TestRemediationNeverMocksTheModuleUnderMutation:
+    """Issue #427. On PR #422 remediation killed `run_sync` survivors by
+    monkeypatching the orchestrator's own functions and asserting on the
+    arguments they received (`f8d3b58`, `d34ff22`). Two of those mutants were
+    equivalent: only the mock could tell them apart. A kill like that pins a
+    call shape, not behaviour, so a refactor that keeps behaviour turns it red
+    while the equivalent mutant goes unregistered."""
+
+    def _prompt(self) -> str:
+        path = _WORKFLOWS.parent / "codex" / "mutation-remediation.md"
+        return " ".join(path.read_text(encoding="utf-8").split())
+
+    def test_monkeypatching_the_mutated_module_is_forbidden(self) -> None:
+        prompt = self._prompt()
+
+        assert "never monkeypatch a function, class or constant of the module under mutation" in (
+            prompt
+        )
+
+    def test_a_mutant_only_a_mock_can_kill_is_reported_as_equivalent(self) -> None:
+        prompt = self._prompt()
+
+        assert "a mutant only a mock can kill is likely_equivalent" in prompt
+
+    def test_the_real_code_path_is_named_as_the_way_to_kill(self) -> None:
+        prompt = self._prompt()
+
+        assert "drive the real code" in prompt
+        assert "pytest-httpx" in prompt
+
+
 class TestTheRemediationLaneOnlyHoldsTheAgent:
     """Issue #272, second half. The remediation workflow ran the same shape as
     the PR pipeline did — agent session AND `uv run pytest tests/unit/` on the

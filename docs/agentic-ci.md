@@ -315,7 +315,10 @@ place silently resets every open PR's count to zero.
   adds that the verdict stands only with a stated equivalence argument per survivor: the
   remediation prompt makes the agent attempt a killing test for every survivor first,
   after PR #453, where all 8 "non-killable" survivors fell to a test-only commit (issue
-  #455). A
+  #455). That killing test must drive the real code: the prompt forbids monkeypatching
+  anything of the module under mutation, and a mutant only a mock can kill is reported
+  as likely equivalent, not killed — on PR #422 two equivalent `run_sync` mutants were
+  "killed" by mocking the orchestrator's own functions (issue #427). A
   timed-out mutant is neither killed nor survived — it got no verdict inside mutmut's
   per-mutant time limit — so the job summary and the gate's log line list survived,
   timed-out, suspicious, uncovered and no-verdict counts separately too.
