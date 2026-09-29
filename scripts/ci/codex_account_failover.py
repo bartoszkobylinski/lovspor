@@ -145,14 +145,23 @@ def read_rate_limit(
 
 def choose_home(
     primary_home: Path,
-    secondary_home: Path,
+    secondary_home: Path | None,
     *,
     threshold: float,
     codex_command: str = "codex",
     timeout_seconds: float = 20.0,
 ) -> tuple[Path, float]:
+    """Pick the first account below `threshold`.
+
+    `secondary_home` is None when the runner has one Codex login (#445): the
+    primary alone is asked, and its limit routes straight to the fallback
+    author, as an exhausted secondary would.
+    """
     errors: list[str] = []
-    for label, codex_home in (("primary", primary_home), ("secondary", secondary_home)):
+    homes = [("primary", primary_home)]
+    if secondary_home is not None:
+        homes.append(("secondary", secondary_home))
+    for label, codex_home in homes:
         try:
             usage = read_rate_limit(
                 codex_home,
@@ -173,7 +182,12 @@ def choose_home(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--primary-home", type=Path, required=True)
-    parser.add_argument("--secondary-home", type=Path, required=True)
+    parser.add_argument(
+        "--secondary-home",
+        type=Path,
+        default=None,
+        help="optional; without it there is no account failover",
+    )
     parser.add_argument("--threshold", type=float, default=95.0)
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--codex-command", default="codex")

@@ -51,7 +51,7 @@ gh api "repos/bartoszkobylinski/lovspor/rulesets/rule-suites/$sid" \
 PR opened/synchronize
   ├─ fast-ci        (ubuntu, 3.12: conflict-marker check, ruff, mypy, security scan, unit tests)
   ├─ Test           (existing workflow, matrix 3.12–3.14 — unchanged)
-  ├─ codex-author   (self-hosted `codex` runner: independent test author ONLY)
+  ├─ codex-author   (self-hosted `codex-lovspor` runner on the Mac mini: independent test author ONLY)
   │     └─ hands its work to the verdict lane as artifact `agent-tests-<head-sha>`
   ├─ codex-tests    (ubuntu: applies that patch, lints, runs the suite, verdict, push)
   │     └─ pushes `[agent:codex-tests]` → fresh synchronize run, old run cancelled
@@ -168,10 +168,12 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
   Remediation keeps a group **per head branch** (`mutation-remediation-<branch>`), where
   superseding an older head is the wanted behaviour and cannot starve another PR.
 
-- The self-hosted agent jobs (`codex-author`, `remediate`) carry `timeout-minutes: 60`
-  (issue #101); the hosted `codex-tests` lane carries 30. A hung job holds the runner
-  against every later PR, and GitHub's default ceiling is 6 h; the box lock alone waits 20
-  minutes before giving up, so the job ceiling sits above that and well under the default.
+- The self-hosted agent jobs (`codex-author`, `remediate`) carry `timeout-minutes: 120`
+  (issue #101, raised in #382); the hosted `codex-tests` lane carries 30. A hung job holds
+  the runner against every later PR, and GitHub's default ceiling is 6 h. The agent step
+  carries 105 minutes of its own: up to 60 queueing for the host agent lock plus the 45 an
+  agent round is allowed, in one step because the lock is fd 9 and no later step inherits
+  it. The job ceiling sits above that and well under the default.
 - `[agent:(codex|claude)-(tests|mutation)]` HEAD markers — an agent-authored HEAD is never
   reprocessed, whichever author produced it; all agent work is squashed into one marker
   commit per run.
@@ -187,7 +189,11 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
 
 ## Two lanes: who runs on the small box (issue #272)
 
-The `codex`-labelled runner is a 1-shared-core / 2 GB container with no swap, shared by
+Since #445 the agent lanes run on lovspor's own runner on the Mac mini (see
+[Mac mini runner](#mac-mini-runner-issue-445)). The split below was made for the box they
+left and is kept: the verdict lane still must not share a machine with the agent.
+
+The `codex`-labelled runner was a 1-shared-core / 2 GB container with no swap, shared by
 five repositories. It exists for exactly one thing: the Codex session's `auth.json` is a
 long-lived ChatGPT credential that cannot be handed to a hosted runner. Everything else
 that used to run there was there by accident of job layout.
@@ -201,9 +207,9 @@ So the lane is split:
 
 | lane | machine | does |
 | --- | --- | --- |
-| `codex-author` | self-hosted `codex` | checkout, anti-loop, `uv sync`, the Codex/Claude session, scope guard, patch handoff |
+| `codex-author` | self-hosted `codex-lovspor` (Mac mini) | checkout, anti-loop, `uv sync`, the Codex/Claude session, scope guard, patch handoff |
 | `codex-tests` | `ubuntu-latest` | applies the patch, scope guard, ruff, the **full unit suite**, convergence verdict, escalation, push |
-| `remediate` | self-hosted `codex` | artifact gate, cycle count, both BLOCKED paths, the remediation session, scope guard, patch handoff |
+| `remediate` | self-hosted `codex-lovspor` (Mac mini) | artifact gate, cycle count, both BLOCKED paths, the remediation session, scope guard, patch handoff |
 | `remediate-verify` | `ubuntu-latest` | applies the patch, scope guard, ruff, the **full unit suite**, push or BLOCKED, escalation |
 
 Invariants, enforced in `tests/unit/test_agentic_ci_workflows.py`:
@@ -413,13 +419,20 @@ Two rules follow, and they are pinned by tests:
   The job checks the helper out from the PR head, as `codex-tests-report` does.
 ## Infrastructure
 
-- Self-hosted runner: label `codex`, dedicated VM with no production data or secrets.
-  Codex CLI authenticates via ChatGPT-managed `auth.json` in a persistent
-  `CODEX_HOME=/home/runner/.codex-lovspor` (`cli_auth_credentials_store = "file"`).
-  Never `OPENAI_API_KEY` on this runner. Auth self-refreshes; if it dies, reseed by
-  running `codex login` in a scratch `CODEX_HOME` on a trusted machine, copying
-  `auth.json` to the runner (`chmod 600`, owner `runner`), and deleting the scratch copy
-  so exactly one copy of the refresh token exists.
+- Self-hosted runner: `mac-mini-lovspor`, labels `self-hosted, macOS, ARM64,
+  codex-lovspor`, on the Mac mini as the dedicated user `ci-lovspor`, run by a
+  LaunchDaemon (#445; setup below). Fallback: `mikrus-codex` (`codex`), still registered.
+  Codex CLI authenticates via ChatGPT-managed `auth.json` in two persistent homes under
+  the runner user's home, `$HOME/.codex-lovspor` (primary) and
+  `$HOME/.codex-lovspor-secondary`
+  (`cli_auth_credentials_store = "file"`). The workflow derives both from `$HOME` on the
+  runner; they are not repository variables, because a variable names one machine's paths.
+  The agent step fails before any agent launches when the primary home has no
+  `auth.json`. The secondary is optional: without it the step prints a `::warning::`
+  and runs on the primary alone, with no account failover.
+  Never `OPENAI_API_KEY` on this runner. Auth self-refreshes; if it dies, log in again in
+  that home (`CODEX_HOME=... codex login`). Never copy an `auth.json` between machines: two
+  copies of one refresh token invalidate each other.
 - Push token: fine-grained PAT (this repo only; Contents RW, Pull requests RW) as secret
   `LOVSPOR_CI_PUSH_TOKEN`. The push happens on the hosted `codex-tests` lane, so the
   commits retrigger the pipeline (`GITHUB_TOKEN` pushes would not). The token is **not**
@@ -427,3 +440,247 @@ Two rules follow, and they are pinned by tests:
   `permissions: contents: read`, so an agent session cannot reach the branch.
 - Mutation and fast-ci run on GitHub-hosted runners — free for this public repo, no LLM
   auth anywhere near them.
+
+## Mac mini runner (issue #445)
+
+Until 2026-09-29 the Codex lanes ran on `mikrus-codex` (`self-hosted, Linux, X64, codex`),
+whose box-wide lock `/home/runner/.mikrus-agent.lock` five repositories share. On
+2026-09-27 another repository held it for 60 minutes and both #439 and #442 failed
+`codex-author` before a test was written. Owner decision 2026-09-29: lovspor's lanes move to
+the Mac mini, as runner `mac-mini-lovspor` under a dedicated user `ci-lovspor`.
+`mikrus-codex` stays registered as the fallback, and Mikrus keeps serving the other
+repositories.
+
+What changed for the lanes:
+
+| Linux assumption | on the Mac |
+| --- | --- |
+| `runs-on: [self-hosted, linux, codex]` | `[self-hosted, macOS, codex-lovspor]`, a set `mikrus-codex` does not carry, so the lane cannot land there |
+| `exec 9>/home/runner/.mikrus-agent.lock` | `exec 9>"$HOME/.agent-box.lock"`, under the runner user's home (the Mikrus lock when that file exists) |
+| `flock -w 3600 9` (util-linux) | `python3 scripts/ci/fd_lock.py --wait 3600 9`: same flock(2) lock on the inherited fd, same exit codes (0 locked, 1 wait expired, 2 usage), no brew dependency |
+| `nohup timeout 3300 bash -c '...'` (coreutils) | the sampler loop carries its own 3300 s deadline on `$SECONDS` |
+| `free -m`, `ps --sort=-rss` (procps) | `vm_stat` when there is no `free`; `ps -A -o rss=,comm= \| sort -rn` |
+| `vars.CODEX_PRIMARY_HOME` = `/home/runner/.codex-lovspor` | `$HOME/.codex-lovspor` (required, checked for `auth.json`) and `$HOME/.codex-lovspor-secondary` (optional) |
+
+Unchanged: the fork guard (same-repo PRs only, never `dependabot[bot]`), the 3600 s lock
+wait, the 105-minute step and 120-minute job ceilings, the contention message ending "this
+is runner contention, not a fault in this PR", and the step states the lane-failure
+classifier reads. Pinned in `tests/unit/test_agentic_ci_workflows.py`
+(`TestTheCodexLanesRunOnTheMacMini`) and `tests/unit/test_fd_lock.py`.
+
+The lock sits under the runner user's home, so it serializes every agent job that
+`ci-lovspor` runs. On 2026-09-29 no other job on the Mac took it: the other projects'
+runners run as the owner, their agent lanes still take the Mikrus lock, and the nightly
+observatory (a launchd job) takes none. They share the machine (8 cores, 16 GB), not a lock.
+lovspor's two lanes already queue on its single runner. The one exception is Mikrus: if
+`/home/runner/.mikrus-agent.lock` exists, the step takes that lock instead, so a lane
+pointed back at the fallback runner still queues behind its neighbours.
+
+The runner runs as `ci-lovspor`, a dedicated standard account (owner decision on #445). The
+Claude fallback's `--dangerously-skip-permissions` is therefore confined to that account.
+It can still reach:
+
+- its own files: the checkout, its tools, both Codex logins;
+- the job's secrets, which sit in its environment (`CLAUDE_TESTS_OAUTH_TOKEN`, and on
+  `remediate` a `GITHUB_TOKEN` that can write pull requests);
+- anything world-readable on the Mac: `/opt/homebrew`, `/Applications`, `/Users/Shared`,
+  `/tmp`, `/etc`, and any file another user left world-readable;
+- the network, without limit, so whatever it can read it can send.
+
+It cannot enter the owner's home, and therefore not `~/.ssh`, the `gh` credentials or any
+project `.env`, because step 1 makes that home `700`. `ci-lovspor` IS in `staff`: macOS
+nests every local account into it through `localaccounts`, whatever the primary group (read
+off `id ci-lovspor` on 2026-09-29). So the owner's former `750`, group `staff`, would have
+let it in. It cannot enter `/Volumes/T7` once step 2 has run, and it cannot `sudo`. The fork
+guard still keeps outside code off the runner. Content inside the repository still reaches
+the agent's prompt.
+
+### Operator steps (run by the owner on the Mac mini)
+
+A PR that changes these workflows queues its `codex-author` job until this runner is
+online: nothing else carries `codex-lovspor`. A job stays queued for up to 24 h; after
+that, `gh run rerun <run-id> --failed`. Run the blocks in order, in the owner's Terminal
+(an admin account; `sudo` asks for its password). No brew install is needed. Every block
+starts with `cd /tmp`: `sudo -u ci-lovspor` keeps the caller's working directory, and inside
+the owner's now-`700` home that directory is unreadable to `ci-lovspor`. The shell then
+prints `getcwd: ... Permission denied`, and codex, which looks up its config from the
+working directory, dies with `Error loading configuration: Permission denied (os error 13)`.
+
+1. Create `ci-lovspor`: a standard (non-admin) account with its own primary group, and
+   close the owner's home to it. The home must go to `700`, and this is not optional:
+   macOS nests every local account into `staff` through `localaccounts`, so `id ci-lovspor`
+   shows `20(staff)`, and the owner's `750`, group `staff`, would stay readable to it. The
+   password is random and never used: every step reaches the account through `sudo -u`.
+
+   ```bash
+   cd /tmp
+   sudo dseditgroup -o create -r "lovspor CI runner" ci-lovspor
+   CI_GID="$(dscl . -read /Groups/ci-lovspor PrimaryGroupID | awk '{print $2}')"
+   sudo sysadminctl -addUser ci-lovspor -fullName "lovspor CI runner" -GID "$CI_GID" -shell /bin/zsh -home /Users/ci-lovspor -password "$(openssl rand -base64 32)"
+   sudo dscl . -create /Users/ci-lovspor IsHidden 1
+   sudo createhomedir -c -u ci-lovspor
+   sudo chown -R ci-lovspor:ci-lovspor /Users/ci-lovspor
+   sudo chmod 700 /Users/ci-lovspor
+   chmod 700 /Users/bartoszkobylinski
+   id ci-lovspor
+   ```
+
+2. Close `/Volumes/T7`. It is mounted with ownership disabled (`Owners: Disabled` on
+   2026-09-29), and on such a volume every user can read everything. Enabling ownership
+   makes the recorded owners (the volume root is uid 501, mode `775`) count, and dropping
+   the "other" bits keeps `ci-lovspor` out. This changes how the drive treats permissions
+   for every account.
+
+   ```bash
+   cd /tmp
+   sudo diskutil enableOwnership /Volumes/T7
+   sudo chmod o-rwx /Volumes/T7
+   diskutil info /Volumes/T7 | grep Owners
+   ```
+
+3. Install the lane's tools for `ci-lovspor`, in its own `~/.local/bin`: `uv`, the
+   standalone `codex` binary (no node needed) and the `claude` CLI for the fallback author.
+   `python3`, `gh` (`/opt/homebrew/bin`, world-readable), `git` and `jq` (`/usr/bin`) are
+   shared system paths.
+
+   ```bash
+   cd /tmp
+   sudo -u ci-lovspor -H mkdir -p /Users/ci-lovspor/.local/bin
+   sudo -u ci-lovspor -H sh -c 'curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh'
+   sudo -u ci-lovspor -H sh -c 'cd /Users/ci-lovspor/.local/bin && curl -fsSL https://github.com/openai/codex/releases/latest/download/codex-aarch64-apple-darwin.tar.gz | tar xz && mv codex-aarch64-apple-darwin codex'
+   sudo -u ci-lovspor -H bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+   sudo -u ci-lovspor -H env PATH=/Users/ci-lovspor/.local/bin:/opt/homebrew/bin:/usr/bin:/bin sh -c 'for t in uv codex claude python3 git gh jq; do printf "%-8s %s\n" "$t" "$(command -v "$t" || echo MISSING)"; done; codex --version; uv --version'
+   ```
+
+4. Download and register the runner in `ci-lovspor`'s home. The owner's `gh` fetches the
+   download URL and the registration token; the runner itself never sees the owner's
+   credentials. `.path` is written by hand because `runsvc.sh` exports it as the jobs'
+   `PATH`.
+
+   ```bash
+   cd /tmp
+   RUNNER_URL="$(gh api repos/actions/runner/releases/latest --jq '.assets[] | select(.name | test("^actions-runner-osx-arm64-[0-9.]+\\.tar\\.gz$")) | .browser_download_url')"
+   TOKEN="$(gh api -X POST repos/bartoszkobylinski/lovspor/actions/runners/registration-token -q .token)"
+   sudo -u ci-lovspor -H bash -c "mkdir -p ~/actions-runner-lovspor ~/Library/Logs/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor && cd ~/actions-runner-lovspor && curl -fsSL '$RUNNER_URL' | tar xz && ./config.sh --unattended --url https://github.com/bartoszkobylinski/lovspor --token '$TOKEN' --name mac-mini-lovspor --labels codex-lovspor --work _work && cp bin/runsvc.sh runsvc.sh && echo /Users/ci-lovspor/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin > .path"
+   ```
+
+   `self-hosted`, `macOS` and `ARM64` are the runner's default labels; `codex-lovspor` is
+   its only custom one.
+
+5. Run it as a LaunchDaemon with `UserName=ci-lovspor`. The runner's own `./svc.sh` can't
+   do this: in the macOS package (2.337.0, read from `~/actions-runner-capcycle/svc.sh`) it
+   exits "Must not run with sudo", takes no user argument, and writes a LaunchAgent into
+   the caller's `~/Library/LaunchAgents`. A LaunchAgent loads only inside that user's GUI
+   login session, which `ci-lovspor` never has. A LaunchDaemon in `/Library/LaunchDaemons`
+   starts at boot with no login. The plist is the runner's `actions.runner.plist.template`,
+   with `GroupName`, an explicit `HOME` and `KeepAlive` added.
+
+   ```bash
+   cd /tmp
+   sudo tee /Library/LaunchDaemons/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor.plist >/dev/null <<'EOF'
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0">
+     <dict>
+       <key>Label</key>
+       <string>actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor</string>
+       <key>ProgramArguments</key>
+       <array>
+         <string>/Users/ci-lovspor/actions-runner-lovspor/runsvc.sh</string>
+       </array>
+       <key>UserName</key>
+       <string>ci-lovspor</string>
+       <key>GroupName</key>
+       <string>ci-lovspor</string>
+       <key>WorkingDirectory</key>
+       <string>/Users/ci-lovspor/actions-runner-lovspor</string>
+       <key>RunAtLoad</key>
+       <true/>
+       <key>KeepAlive</key>
+       <true/>
+       <key>StandardOutPath</key>
+       <string>/Users/ci-lovspor/Library/Logs/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor/stdout.log</string>
+       <key>StandardErrorPath</key>
+       <string>/Users/ci-lovspor/Library/Logs/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor/stderr.log</string>
+       <key>EnvironmentVariables</key>
+       <dict>
+         <key>ACTIONS_RUNNER_SVC</key>
+         <string>1</string>
+         <key>HOME</key>
+         <string>/Users/ci-lovspor</string>
+       </dict>
+       <key>ProcessType</key>
+       <string>Interactive</string>
+       <key>SessionCreate</key>
+       <true/>
+     </dict>
+   </plist>
+   EOF
+   sudo chown root:wheel /Library/LaunchDaemons/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor.plist
+   sudo chmod 644 /Library/LaunchDaemons/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor.plist
+   plutil -lint /Library/LaunchDaemons/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor.plist
+   sudo launchctl bootstrap system /Library/LaunchDaemons/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor.plist
+   sudo launchctl print system/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor | grep -E '^\s+(state|pid) ='
+   ```
+
+   To restart it: `sudo launchctl kickstart -k system/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor`.
+   To stop it: `sudo launchctl bootout system/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor`.
+
+6. Log the Codex accounts in as `ci-lovspor`, each in its own home. The primary is
+   required. The secondary is optional, and you can add it at any later time with the same
+   command. Without it, the step warns on every round that account failover is disabled:
+   when the primary reaches its usage limit, the round goes straight to the Claude fallback
+   author rather than to a second Codex account. Use a fresh login each time, never a
+   copied `auth.json`. `--device-auth` prints a URL and a
+   one-time code. Open the URL in any browser, sign in with the matching ChatGPT account,
+   and enter the code. If the account refuses device codes, run the same command without
+   `--device-auth`: codex then prints a sign-in URL that calls back to `localhost:1455`, so
+   open it in a browser on the Mac mini itself.
+
+   ```bash
+   cd /tmp
+   for h in /Users/ci-lovspor/.codex-lovspor /Users/ci-lovspor/.codex-lovspor-secondary; do
+     sudo -u ci-lovspor -H install -d -m 700 "$h"
+     printf 'cli_auth_credentials_store = "file"\n' | sudo -u ci-lovspor -H tee "$h/config.toml" >/dev/null
+   done
+   sudo -u ci-lovspor -H env CODEX_HOME=/Users/ci-lovspor/.codex-lovspor /Users/ci-lovspor/.local/bin/codex login --device-auth
+   sudo -u ci-lovspor -H env CODEX_HOME=/Users/ci-lovspor/.codex-lovspor /Users/ci-lovspor/.local/bin/codex login status
+   ```
+
+   Optional, now or later: the secondary account, which enables failover.
+
+   ```bash
+   cd /tmp
+   sudo -u ci-lovspor -H env CODEX_HOME=/Users/ci-lovspor/.codex-lovspor-secondary /Users/ci-lovspor/.local/bin/codex login --device-auth
+   sudo -u ci-lovspor -H env CODEX_HOME=/Users/ci-lovspor/.codex-lovspor-secondary /Users/ci-lovspor/.local/bin/codex login status
+   ```
+
+7. Verify the runner, and verify the isolation. Expect `mac-mini-lovspor  online  false
+   self-hosted,macOS,ARM64,codex-lovspor` next to `mikrus-codex`, and `denied` on every
+   path.
+
+   ```bash
+   cd /tmp
+   gh api repos/bartoszkobylinski/lovspor/actions/runners --jq '.runners[] | [.name, .status, .busy, ([.labels[].name] | join(","))] | @tsv'
+   sudo tail -n 50 /Users/ci-lovspor/Library/Logs/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor/stdout.log
+   for p in /Users/bartoszkobylinski /Users/bartoszkobylinski/.ssh /Users/bartoszkobylinski/.config/gh /Users/bartoszkobylinski/Programming/Python/lovspor/.env /Volumes/T7; do
+     if sudo -u ci-lovspor -H test -r "$p"; then echo "READABLE  $p"; else echo "denied    $p"; fi
+   done
+   ```
+
+8. Optional, and only after the Mac lane is proven (this PR merged, and a `codex-author`
+   round and a remediation round green on the Mac): unregister `mikrus-codex` from
+   **lovspor only**. Until then, and by default afterwards, it stays registered as the
+   fallback. Pointing the lanes back at it is a one-line `runs-on` change per workflow, and
+   the step then takes the Mikrus box-wide lock again. **Never delete
+   `/home/runner/.codex-lovspor*` on Mikrus or the `CODEX_PRIMARY_HOME` /
+   `CODEX_SECONDARY_HOME` repository variables:** the fallback needs them, and Mikrus serves
+   other repositories. Stop the service first, then check the listener is gone (the
+   runbook's `KillMode=process` warning):
+
+   ```bash
+   ssh root@100.92.40.52 'systemctl stop actions.runner.bartoszkobylinski-lovspor.mikrus-codex.service; pgrep -f "/home/runner/actions-runner/bin/Runner.Listener" || echo "listener stopped"'
+   TOKEN="$(gh api -X POST repos/bartoszkobylinski/lovspor/actions/runners/remove-token -q .token)"
+   ssh root@100.92.40.52 "cd /home/runner/actions-runner && ./svc.sh uninstall && su -s /bin/bash runner -c 'cd /home/runner/actions-runner && ./config.sh remove --token $TOKEN'"
+   gh api repos/bartoszkobylinski/lovspor/actions/runners --jq '.runners[] | [.name, .status] | @tsv'
+   ```

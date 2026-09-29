@@ -62,7 +62,7 @@ jobs:
         run: uv run pytest tests/unit/
 
   # The agent lane runs on two machines on purpose. `codex-author` stays on the
-  # small self-hosted box because the Codex session's `auth.json` is a long-lived
+  # self-hosted Mac mini runner because the Codex session's `auth.json` is a long-lived
   # ChatGPT credential that cannot be handed to a hosted runner. Everything
   # downstream of the agent — the full unit suite, the lint, the convergence
   # verdict, the push — runs hosted. Both legs used to share the box (1 shared
@@ -70,13 +70,17 @@ jobs:
   # second death 28 minutes into `Run tests on Codex additions` (issue #272).
   # Holding the agent session is what that box is for; running the suite is not.
   codex-author:
-    # Serialization is the single `codex`-labelled runner's job queue, which is a
-    # real FIFO. A shared concurrency group is not: GitHub holds ONE pending entry
+    # Serialization is the single `codex-lovspor`-labelled runner's job queue,
+    # which is a real FIFO. A shared concurrency group is not: GitHub holds ONE pending entry
     # per group, so a second PR's job evicted the first before it ever got a
     # runner — a red required check with zero steps, no artifact, no comment,
     # no label, because every reporting step is downstream of one that never ran
     # (issue #139).
-    runs-on: [self-hosted, linux, codex]
+    runs-on: [self-hosted, macOS, codex-lovspor]
+    # `codex-lovspor` is carried by exactly one runner, lovspor's own on the Mac
+    # mini (#445). Mikrus's `mikrus-codex` carries `self-hosted, Linux, X64,
+    # codex`, a set this one is not a subset of, so the lane can never land on
+    # the box whose lock five repositories share.
     # A stuck agent job must not hold the lane indefinitely, and GitHub's
     # default kill is 6 h (#101). The ceiling is the step's queue-plus-round
     # budget (105 min, below) plus checkout and setup: the wait for the shared
@@ -91,8 +95,6 @@ jobs:
     permissions:
       contents: read
     env:
-      CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}
-      CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}
       UV_PYTHON: "3.12"
     outputs:
       skip: ${{ steps.antiloop.outputs.skip }}
@@ -149,12 +151,13 @@ jobs:
         # cancellation (runbook: `Force kill process on cancellation: 'False'`),
         # so an unbounded background loop would outlive the job.
         run: |
-          nohup timeout 3300 bash -c '
-            while :; do
+          nohup bash -c '
+            deadline=$((SECONDS + 3300))
+            while [ "$SECONDS" -lt "$deadline" ]; do
               {
                 date -u +%FT%TZ
-                free -m | sed -n 2p
-                ps -eo rss,comm --sort=-rss | head -6
+                if command -v free >/dev/null; then free -m | sed -n 2p; else vm_stat | sed -n 2,5p; fi
+                ps -A -o rss=,comm= | sort -rn | head -5
               } >> "$RUNNER_TEMP/agent-rss.log"
               sleep 10
             done' >/dev/null 2>&1 &
@@ -169,7 +172,7 @@ jobs:
         # the step and the reporting below still runs (issue #157, seen on
         # the remediation side when the Codex CLI hung for ~50 minutes).
         #
-        # 105 = up to 60 min queueing for the shared box lock + the 45 min an
+        # 105 = up to 60 min queueing for the agent lock + the 45 min an
         # agent round is allowed. The two budgets are in one step because the
         # lock lives on fd 9, which no later step inherits; a 45 min ceiling
         # therefore spent the whole round's budget waiting (#382).
@@ -178,31 +181,49 @@ jobs:
           CLAUDE_TESTS_OAUTH_TOKEN: ${{ secrets.CLAUDE_TESTS_OAUTH_TOKEN }}
           CLAUDE_TESTS_MODEL: ${{ vars.CLAUDE_TESTS_MODEL }}
         run: |
-          # Serialize with every other agent job on the shared runner box. One
-          # unserialized agent run exhausted its 2 GB on 2026-08-18, killed
-          # tailscaled and all seven runner agents, and took five unrelated
-          # repositories' CI down until the container was rebooted. The fd stays
-          # open for the life of this step, so the lock releases even if the job
-          # is cancelled.
-          #
-          # FIVE repositories share this one lock file (lovspor, job-search,
-          # llmbus, milamber, notebook — read off the box in #382), so the
-          # holder is usually NOT lovspor: `gh api .../actions/runners` reports
-          # this repo's runner idle while a lane dies waiting. Queueing behind a
-          # neighbour is the design (#272: 1 core, 2 GB, no swap), so the wait
-          # must cover a neighbour's whole round (~25-40 min), not 20 minutes.
-          exec 9>/home/runner/.mikrus-agent.lock
-          lock_wait_start=$SECONDS
-          flock -w 3600 9 || {
-            echo "the shared box lock was held for $(( (SECONDS - lock_wait_start) / 60 )) minutes by another repository's agent job (/home/runner/.mikrus-agent.lock is box-wide, #272/#382) — this is runner contention, not a fault in this PR" >&2
+          # The Codex homes belong to the runner's user, not to the repository:
+          # a repository variable can name only one machine's paths, which is
+          # what pinned these lanes to the Linux box (#445). The primary must be
+          # logged in: a missing one would otherwise read as "every account
+          # rate-limited" and hand the round to the fallback author in silence.
+          # The secondary is optional. Without it the failover asks the primary
+          # alone, and the primary's limit goes to the fallback author, as an
+          # exhausted secondary's would.
+          CODEX_PRIMARY_HOME="$HOME/.codex-lovspor"
+          CODEX_SECONDARY_HOME="$HOME/.codex-lovspor-secondary"
+          [ -f "$CODEX_PRIMARY_HOME/auth.json" ] || {
+            echo "no Codex login at $CODEX_PRIMARY_HOME on runner $RUNNER_NAME — run the Mac mini runner operator steps in docs/agentic-ci.md" >&2
             exit 1
           }
-          : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
-          : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
+          secondary_args=(--secondary-home "$CODEX_SECONDARY_HOME")
+          if [ ! -f "$CODEX_SECONDARY_HOME/auth.json" ]; then
+            echo "::warning::no Codex login at $CODEX_SECONDARY_HOME on runner $RUNNER_NAME — account failover is disabled, this round runs on the primary account only"
+            secondary_args=()
+          fi
+          # Serialize with every other agent job this runner's user runs. The
+          # lock lives under that user's home, a dedicated account on the Mac
+          # mini, so the path assumes nothing about who the user is: the lanes
+          # moved off the box whose /home/runner/.mikrus-agent.lock five
+          # repositories shared, and where a neighbour's round held it for the
+          # whole wait (#382, #445).
+          # fd_lock.py stands in for util-linux `flock -w`, which macOS lacks.
+          # The fd stays open for the life of this step, so the lock releases
+          # even if the job is cancelled.
+          agent_lock="$HOME/.agent-box.lock"
+          # mikrus-codex stays registered as the fallback runner. Should the lane
+          # ever be pointed back at it, it must queue behind the lock its
+          # neighbours take there, or it recreates the 2 GB OOM of 2026-08-18.
+          if [ -e /home/runner/.mikrus-agent.lock ]; then agent_lock=/home/runner/.mikrus-agent.lock; fi
+          exec 9>"$agent_lock"
+          lock_wait_start=$SECONDS
+          python3 scripts/ci/fd_lock.py --wait 3600 9 || {
+            echo "the agent lock was held for $(( (SECONDS - lock_wait_start) / 60 )) minutes by another agent job of this runner's user ($agent_lock, #382/#445) — this is runner contention, not a fault in this PR" >&2
+            exit 1
+          }
           set +e
           python3 scripts/ci/codex_account_failover.py \
             --primary-home "$CODEX_PRIMARY_HOME" \
-            --secondary-home "$CODEX_SECONDARY_HOME" \
+            ${secondary_args[@]+"${secondary_args[@]}"} \
             --threshold 95 \
             -- codex exec \
               --sandbox workspace-write \
