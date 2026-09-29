@@ -359,6 +359,16 @@ Two rules follow, and they are pinned by tests:
   labels **`needs-human:pipeline`** and says so in the comment, because a pipeline
   defect is not evidence about the code under review. The agent's work for that
   round is preserved as artifact `agent-work-<sha>` instead of being discarded.
+- **A partial round reports what it already found (issue #220).** When the
+  `codex-author` step itself fails — the provider refuses the model ("Selected
+  model is at capacity"), the step hits its ceiling, the CLI dies — there is **no
+  model fallback**: the Claude author takes over only on exit 75 (every account
+  rate-limited), by owner decision 2026-09-29. Instead the step keeps its own
+  output (`$RUNNER_TEMP/codex-author.log`), and on failure
+  `scripts/ci/partial_round_failures.py` lifts every pytest `FAILED <nodeid>` line
+  from it into `partial-round-failures.md`, uploaded with `agent-work-author-<sha>`.
+  The `needs-human:pipeline` sticky comment appends that list, marked as leads the
+  round never re-ran, not as a verdict. A round that found nothing adds nothing.
 - Remediation escalates on `failure() || cancelled()`, since a job killed by its
   ceiling is not a failed job.
 - **A dead machine is not a verdict on the diff (issue #272).** Before it writes
