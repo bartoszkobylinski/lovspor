@@ -494,6 +494,19 @@ def test_an_abbreviated_commit_in_an_entry_is_refused(
         attested_commits(repo, 2)
 
 
+def test_attested_commits_refuses_a_note_on_a_non_commit_object(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """The walk promises commits, so a self-consistent note on a blob is
+    still a broken evidence channel rather than an attested corpus state."""
+    repo, _boundary, _gated = corpus
+    blob = _git(repo, "hash-object", "-w", "boundary.md")
+    _raw_attestation(repo, blob, [_entry(blob)])
+
+    with pytest.raises(AttestationError, match="not a commit|corrupt"):
+        attested_commits(repo, 2)
+
+
 def test_attested_commits_refuses_a_note_on_an_annotated_tag(
     corpus: tuple[Path, str, str],
 ) -> None:
