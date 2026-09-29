@@ -42,6 +42,7 @@ _MODULES = (
     "lovspor.observatory.log",
     "lovspor.observatory.model",
     "lovspor.observatory.outcomes",
+    "lovspor.observatory.reattribution",
     "lovspor.observatory.registry",
     "lovspor.observatory.registry_commands",
     "lovspor.observatory.registry_io",
