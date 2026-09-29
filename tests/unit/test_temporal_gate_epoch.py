@@ -391,6 +391,51 @@ def test_attested_commits_refuses_a_corrupt_attestation_note(
         attested_commits(repo, 2)
 
 
+@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+def test_attested_commits_refuses_an_entry_claiming_another_commit(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """The epoch bound must not trust an attestation whose asserted state
+    differs from the commit carrying the note."""
+    repo, boundary, gated = corpus
+    entry = TemporalAttestation(
+        corpus_commit=boundary,
+        parser_version=2,
+        documents_reconciled=1,
+        notes_total=0,
+        events_total=0,
+        attested_at=datetime(2026, 9, 4, 9, 0, tzinfo=UTC),
+    )
+    payload = json.dumps([entry.model_dump(mode="json")])
+    _git(repo, "notes", f"--ref={ATTESTATION_NOTES_REF}", "add", "-m", payload, gated)
+
+    with pytest.raises(AttestationError, match="corrupt"):
+        attested_commits(repo, 2)
+
+
+@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+def test_attested_commits_refuses_duplicate_entries_for_one_version(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """Two entries under one immutable (commit, parser-version) key are a
+    broken evidence channel, not two independent attestations."""
+    repo, _boundary, gated = corpus
+    entry = TemporalAttestation(
+        corpus_commit=gated,
+        parser_version=2,
+        documents_reconciled=1,
+        notes_total=0,
+        events_total=0,
+        attested_at=datetime(2026, 9, 4, 9, 0, tzinfo=UTC),
+    )
+    item = entry.model_dump(mode="json")
+    payload = json.dumps([item, item])
+    _git(repo, "notes", f"--ref={ATTESTATION_NOTES_REF}", "add", "-m", payload, gated)
+
+    with pytest.raises(AttestationError, match="duplicate"):
+        attested_commits(repo, 2)
+
+
 # ---------- transport ----------
 
 
