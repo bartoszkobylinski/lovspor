@@ -310,8 +310,12 @@ place silently resets every open PR's count to zero.
 - When remediation changes nothing, the `needs-human:mutation` comment names what
   blocked the gate, bucket by bucket (`mutation_gate.py --no-change`, read on the agent
   lane from the default-branch helper and handed to the verifier as the `blocked` job
-  output). "Survivors classified non-killable" is said only when there were survivors:
-  on PR #395 it was said over two timed-out mutants and zero survivors (issue #423). A
+  output). Survivors are called non-killable only when there were survivors: on PR #395
+  that was said over two timed-out mutants and zero survivors (issue #423). The comment
+  adds that the verdict stands only with a stated equivalence argument per survivor: the
+  remediation prompt makes the agent attempt a killing test for every survivor first,
+  after PR #453, where all 8 "non-killable" survivors fell to a test-only commit (issue
+  #455). A
   timed-out mutant is neither killed nor survived — it got no verdict inside mutmut's
   per-mutant time limit — so the job summary and the gate's log line list survived,
   timed-out, suspicious, uncovered and no-verdict counts separately too.

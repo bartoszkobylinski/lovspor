@@ -160,7 +160,10 @@ NOT_KILLED = (
     ("unmeasured", "without a verdict"),
 )
 BLOCKERS = {
-    "survived": "{n} survivor(s) classified non-killable",
+    "survived": (
+        "{n} survivor(s) remediation called non-killable — a verdict that stands only"
+        " with a stated equivalence argument per survivor (#455)"
+    ),
     "timeout": (
         "{n} timed-out mutant(s) got no verdict — mutmut stopped them at its per-mutant"
         " time limit, so whether a test kills them was never measured; the artifact"
@@ -186,7 +189,7 @@ def _tally(counts: dict[str, int]) -> str:
 def _no_change_line(r: dict[str, object], reason: str) -> str:
     """The escalation when remediation changed nothing: it names what blocked.
 
-    "Survivors classified non-killable" is said only when there were survivors;
+    Survivors are called non-killable only when there were survivors;
     on PR #395 it was said over two timeouts and none (#423).
     """
     counts = _not_killed(r)
