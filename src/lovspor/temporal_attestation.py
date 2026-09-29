@@ -465,12 +465,15 @@ def read_gate_epochs(repo: Path) -> dict[int, TemporalGateEpoch]:
 def attested_commits(repo: Path, parser_version: int) -> list[str]:
     """Every commit carrying an attestation under ``parser_version``.
 
-    Every note is validated whole, whatever version is asked for: an entry
-    claiming another commit, or a duplicated key, raises
+    Every note is validated whole, whatever version is asked for: a note on
+    a blob, tree or tag, an entry claiming another commit, or a duplicated
+    key raises
     :class:`AttestationError` rather than bounding an epoch on it.
     """
+    notes = _note_objects(repo, ATTESTATION_NOTES_REF)
+    _require_commit_anchors(repo, [annotated for _, annotated in notes], "attestation")
     commits = []
-    for blob, annotated in _note_objects(repo, ATTESTATION_NOTES_REF):
+    for blob, annotated in notes:
         entries = _attestation_entries(repo, blob)
         _require_consistent_entries(annotated, entries)
         if any(entry.parser_version == parser_version for entry in entries):
@@ -600,13 +603,14 @@ def _note_objects(repo: Path, ref: str) -> list[tuple[str, str]]:
     ]
 
 
-def _require_commit_anchors(repo: Path, objects: list[str]) -> None:
+def _require_commit_anchors(repo: Path, objects: list[str], channel: str = "gate-epoch") -> None:
     """Every present annotated object must be a commit.
 
-    The epoch is defined on a corpus state, so a note on a blob, tree or
-    tag is corruption. An object this clone does not hold is accepted: a
-    ``--depth 1`` clone lacks the boundary commit, and the reader must
-    still work there (the id match against the record stays enforced).
+    Epochs and attestations are defined on a corpus state, so a note on a
+    blob, tree or tag is corruption; ``channel`` names the registry. An
+    object this clone does not hold is accepted: a ``--depth 1`` clone
+    lacks older anchors, and the reader must still work there (the id
+    match against the record stays enforced).
     """
     if not objects:
         return
@@ -619,12 +623,12 @@ def _require_commit_anchors(repo: Path, objects: list[str]) -> None:
         check=False,
     )
     if result.returncode != 0:
-        raise AttestationError(f"gate-epoch anchors unreadable: {result.stderr.strip()}")
+        raise AttestationError(f"{channel} anchors unreadable: {result.stderr.strip()}")
     for line in result.stdout.splitlines():
         name, _, kind = line.partition(" ")
         if kind not in ("commit", "missing"):
             raise AttestationError(
-                f"gate-epoch note is attached to {name}, a {kind} and not a commit — "
+                f"{channel} note is attached to {name}, a {kind} and not a commit — "
                 f"the evidence channel is corrupt",
             )
 

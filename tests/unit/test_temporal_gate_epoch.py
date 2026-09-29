@@ -494,6 +494,60 @@ def test_an_abbreviated_commit_in_an_entry_is_refused(
         attested_commits(repo, 2)
 
 
+def test_attested_commits_refuses_a_note_on_an_annotated_tag(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """Even when the entry names the tag's own id: a tag is not a state."""
+    repo, _boundary, gated = corpus
+    _git(repo, "tag", "-a", "v1", "-m", "tag", gated)
+    tag = _git(repo, "rev-parse", "v1")
+    _raw_attestation(repo, tag, [_entry(tag)])
+
+    with pytest.raises(AttestationError, match="attestation note .* a tag and not a commit"):
+        attested_commits(repo, 2)
+
+
+def test_attested_commits_refuses_a_note_on_a_tree(corpus: tuple[Path, str, str]) -> None:
+    repo, _boundary, gated = corpus
+    tree = _git(repo, "rev-parse", f"{gated}^{{tree}}")
+    _raw_attestation(repo, tree, [_entry(tree)])
+
+    with pytest.raises(AttestationError, match="attestation note .* a tree and not a commit"):
+        attested_commits(repo, 2)
+
+
+def test_a_non_commit_note_under_another_version_still_refuses(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """The anchor is judged before any version filter: a valid v2 note does
+    not excuse a v1 note on a blob."""
+    repo, _boundary, gated = corpus
+    _attest(repo, gated)
+    blob = _git(repo, "hash-object", "-w", "gated.md")
+    _raw_attestation(repo, blob, [_entry(blob, version=1)])
+
+    with pytest.raises(AttestationError, match="not a commit"):
+        attested_commits(repo, 2)
+
+
+def test_attested_commits_accepts_a_note_on_a_commit_the_clone_lacks(tmp_path: Path) -> None:
+    """A --depth 1 clone lacks older attested commits; their notes must
+    still count, consistent with the gate-epoch reader."""
+    origin = tmp_path / "origin"
+    _init(origin)
+    old = _commit(origin, "old", BOUNDARY_DATE)
+    head = _commit(origin, "head", GATE_DATE)
+    _attest(origin, old)
+    _attest(origin, head)
+    clone = tmp_path / "shallow"
+    _git(tmp_path, "clone", "--depth", "1", f"file://{origin}", str(clone))
+    _git(clone, "fetch", "origin", f"+{ATTESTATION_NOTES_REF}:{ATTESTATION_NOTES_REF}")
+
+    missing = subprocess.run(["git", "cat-file", "-e", f"{old}^{{commit}}"], cwd=clone, check=False)
+    assert missing.returncode != 0
+    assert sorted(attested_commits(clone, 2)) == sorted([old, head])
+
+
 def test_one_commit_attested_under_two_versions_is_not_a_duplicate(
     corpus: tuple[Path, str, str],
 ) -> None:
