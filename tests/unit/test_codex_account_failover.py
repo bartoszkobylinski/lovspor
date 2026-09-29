@@ -113,21 +113,91 @@ class TestAccountSelection:
             )
 
 
+class TestPrimaryOnly:
+    """#445: a runner with one Codex login passes no --secondary-home."""
+
+    def test_asks_only_the_primary(self, tmp_path: Path) -> None:
+        codex = _fake_codex(tmp_path, {"primary": 40})
+
+        selected, usage = failover.choose_home(
+            tmp_path / "primary",
+            None,
+            threshold=95,
+            codex_command=str(codex),
+            timeout_seconds=2,
+        )
+
+        assert selected == tmp_path / "primary"
+        assert usage == 40
+
+    def test_a_limited_primary_has_no_account_to_fall_to(self, tmp_path: Path) -> None:
+        codex = _fake_codex(tmp_path, {"primary": 97})
+
+        with pytest.raises(failover.RateLimitError, match=r"primary: usage 97% .*\)$"):
+            failover.choose_home(
+                tmp_path / "primary",
+                None,
+                threshold=95,
+                codex_command=str(codex),
+                timeout_seconds=2,
+            )
+
+    def test_the_cli_exits_75_for_the_fallback_author(self, tmp_path: Path) -> None:
+        codex = _fake_codex(tmp_path, {"primary": 97})
+
+        status = failover.main(
+            [
+                "--primary-home",
+                str(tmp_path / "primary"),
+                "--codex-command",
+                str(codex),
+                "--",
+                "true",
+            ]
+        )
+
+        assert status == failover.NO_ACCOUNT_EXIT
+
+    def test_the_cli_runs_the_command_on_the_primary(self, tmp_path: Path) -> None:
+        codex = _fake_codex(tmp_path, {"primary": 5})
+        marker = tmp_path / "ran"
+
+        status = failover.main(
+            [
+                "--primary-home",
+                str(tmp_path / "primary"),
+                "--codex-command",
+                str(codex),
+                "--",
+                "sh",
+                "-c",
+                f'printf "%s" "$CODEX_HOME" > {marker}',
+            ]
+        )
+
+        assert status == 0
+        assert marker.read_text() == str(tmp_path / "primary")
+
+
 class TestWorkflowConfiguration:
     @pytest.mark.parametrize("workflow_name", ["pr-pipeline.yml", "mutation-remediation.yml"])
-    def test_codex_homes_come_from_repository_variables(self, workflow_name: str) -> None:
+    def test_codex_homes_are_the_runner_hosts(self, workflow_name: str) -> None:
+        """#445: the homes follow the runner user's HOME, so the same workflow
+        is correct on whichever host carries the lane label."""
         workflow = (_WORKFLOWS / workflow_name).read_text()
 
-        assert "CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}" in workflow
-        assert "CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}" in workflow
+        assert 'CODEX_PRIMARY_HOME="$HOME/.codex-lovspor"' in workflow
+        assert 'CODEX_SECONDARY_HOME="$HOME/.codex-lovspor-secondary"' in workflow
         assert "python3 scripts/ci/codex_account_failover.py" in workflow
         assert '--primary-home "$CODEX_PRIMARY_HOME"' in workflow
         assert '--secondary-home "$CODEX_SECONDARY_HOME"' in workflow
         assert "/home/runner/.codex-lovspor" not in workflow
+        assert "vars.CODEX_PRIMARY_HOME" not in workflow
+        assert "vars.CODEX_SECONDARY_HOME" not in workflow
 
     @pytest.mark.parametrize("workflow_name", ["pr-pipeline.yml", "mutation-remediation.yml"])
-    def test_missing_repository_variables_fail_before_codex_runs(self, workflow_name: str) -> None:
+    def test_a_home_without_a_login_fails_before_codex_runs(self, workflow_name: str) -> None:
         workflow = (_WORKFLOWS / workflow_name).read_text()
+        check = workflow.index('[ -f "$CODEX_PRIMARY_HOME/auth.json" ] ||')
 
-        assert "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}" in workflow
-        assert "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}" in workflow
+        assert check < workflow.index("python3 scripts/ci/codex_account_failover.py")
