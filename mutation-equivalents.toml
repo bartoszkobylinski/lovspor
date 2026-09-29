@@ -2885,3 +2885,71 @@ returns identical text, or raises the identical UnicodeDecodeError, on every
 input. Python's own semantics; the same argument as the registered
 exclusive_workload.read_holder and observatory/events.record_fingerprint entries.
 """
+
+[[equivalent]]
+file = "src/lovspor/temporal_gate.py"
+symbol = "is_repository_root"
+registered = "2026-09-27, PR #439, from run 36320125682"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+`subprocess.run` tests `check` for truth (`if check and retcode:` in
+subprocess.py) and never compares it to False, so None and False select the
+same path: return the CompletedProcess, never raise. Python's own semantics;
+the argument is spelled out only because ruff PLW1510 demands an explicit
+`check`. Same argument as the registered llhb/pair_manifest._git entry.
+"""
+
+[[equivalent]]
+file = "src/lovspor/temporal_gate.py"
+symbol = "is_repository_root"
+registered = "2026-09-27, PR #439, from run 36320125682"
+mutation = """
+-        check=False,
+-    )
++        )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`'s signature, so removing the
+explicit `check=False` leaves the call identical in behaviour. Python's own
+semantics; spelled out only because ruff PLW1510 demands an explicit `check`.
+"""
+
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "_note_objects"
+registered = "2026-09-27, PR #439, from run 36320125682"
+mutation = """
+-        for blob, _, annotated in (line.partition(" ") for line in result.stdout.splitlines())
++        for blob, _, annotated in (line.rpartition(" ") for line in result.stdout.splitlines())
+"""
+justification = """
+partition and rpartition differ only when a line holds two or more spaces.
+Every `git notes list` line is exactly `<note blob id> <annotated object id>`:
+two hex ids and one space, so the first and the last space are the same
+character and both calls return the same (blob, " ", annotated) triple. This
+argues from git's output format, which the assumption test pins on real notes
+attached to a commit, a blob and a tree.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_git_notes_list_prints_two_ids_and_one_space"
+
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "_require_commit_anchors"
+registered = "2026-09-27, PR #439, from run 36320125682"
+mutation = """
+-        name, _, kind = line.partition(" ")
++        name, _, kind = line.rpartition(" ")
+"""
+justification = """
+partition and rpartition differ only when a line holds two or more spaces.
+With the format `%(objectname) %(objecttype)`, `git cat-file --batch-check`
+prints `<id> <type>` per present object and `<id> missing` per absent one:
+an id has no space and neither does a type name or `missing`, so each line
+holds exactly one space and both calls return the same (name, " ", kind).
+This argues from git's output format, which the assumption test pins on a
+real commit, a tree and an absent id.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_git_batch_check_prints_id_and_type_with_one_space"

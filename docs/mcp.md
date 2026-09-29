@@ -491,7 +491,17 @@ Return the source-derived temporal events of one act — amendments, insertions 
 
 **Reconciliation.** Every successful response carries `reconciliation: attested | unattested`. `attested` means the build-time gate proved the parser-visible note count against the source XML for exactly this corpus state and parser version. `unattested` means **no recorded proof exists for this state** — typically one predating the gate; the events are still the exact deterministic parse of that state's body. The registry travels as git notes (`refs/notes/temporal-attestations`), which a plain `git clone`/`pull` never fetches — so a checkout whose registry was never synchronised gets a **typed error**, never a false `unattested`. `lovspor fetch-corpus` configures and fetches the ref on every supported clone and update (see `operations.md`).
 
-**Outcomes stay distinct:** unknown act (naming the requested date and `corpus_commit` when historical); unknown section (listing the act's inventory); `events: []` as a *successful* answer ("no amendment facts attributed"); a typed derivation failure for a document whose commencement marker the parser does not recognise — never a partial or guessed answer; and the scope error above for a forskrift.
+**The gate epoch (ADR-0012 Amendment 1).** `unattested` is only ever served for a state that *predates the gate*. Each temporal parser version has one immutable **gate-epoch record** in `refs/notes/temporal-attestations-epoch` — the start of the first production sync run that ran the reconciliation gate under that version — which the same glob refspec transports. The verdict for a served state is decided in this order, by the author date of its corpus commit (HEAD's for a live call):
+
+1. registry not synchronised, unreadable or corrupt — including an unparseable or duplicated epoch record: typed `AttestationError`;
+2. an attestation for this state and parser version: `reconciliation: attested` (on either side of the epoch);
+3. no epoch record for the serving parser version: typed `AttestationError`, naming the operator action (`lovspor temporal-epoch … backfill`, see `operations.md`);
+4. author date **before** the epoch: `reconciliation: unattested`;
+5. author date **at or after** the epoch with no attestation: typed `UnattestedGateStateError` — a gate-eligible state the gate refused, has not reached yet, or never attests (a sync run's per-document intermediate commits). Its message starts `unattested gate-era state:` and names `corpus_commit`, the parser version and the epoch. It is not an `AttestationError`: the channel works and says this state is unproven.
+
+**Outcomes stay distinct:** unknown act (naming the requested date and `corpus_commit` when historical); unknown section (listing the act's inventory); `events: []` as a *successful* answer ("no amendment facts attributed"); a typed derivation failure for a document whose commencement marker the parser does not recognise — never a partial or guessed answer; the scope error above for a forskrift; the evidence-channel `AttestationError`; and the gate-era `UnattestedGateStateError`.
+
+The tool's own description (its docstring, served to clients) is unchanged by the epoch: descriptions are part of the frozen LLHB apparatus document `benchmarks/llhb/runner/tool-surface-v5.json`, whose hash covers them, and no input or output schema changes — the new outcome is an error, never a response shape.
 
 **Sample call:** `get_temporal_events("advokatloven", section_id="73", valid_at="2026-08-15")`
 

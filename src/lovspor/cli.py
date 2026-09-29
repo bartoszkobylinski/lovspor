@@ -31,10 +31,7 @@ from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
 from lovspor.publish.pages import SITE_ORIGIN
-from lovspor.release.admin_socket import (
-    DEFAULT_UNPRIVILEGED_USER,
-    AdminSocket,
-)
+from lovspor.release.admin_socket import DEFAULT_UNPRIVILEGED_USER, AdminSocket
 from lovspor.release.caddy import DEFAULT_ADMIN, SubprocessRunner
 from lovspor.release.check import check_envelope
 from lovspor.release.commands import release_app
@@ -65,6 +62,7 @@ from lovspor.storage.manifest import read_manifest
 from lovspor.sync.input_annotation import annotate_embedding_input_identity
 from lovspor.sync.lspe_cutover import migrate_lspe_v2
 from lovspor.sync.orchestrator import mark_undersized_embeddings_stale, run_sync
+from lovspor.temporal_epoch_cli import temporal_epoch_app
 
 app = typer.Typer(
     name="lovspor",
@@ -82,6 +80,7 @@ tokens_app = typer.Typer(
 app.add_typer(tokens_app)
 app.add_typer(observatory_app)
 app.add_typer(release_app)
+app.add_typer(temporal_epoch_app)
 
 _CredentialsOption = Annotated[
     Path | None,

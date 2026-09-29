@@ -373,3 +373,54 @@ def test_hashlib_folds_the_digest_name_case() -> None:
         == hashlib.file_digest(io.BytesIO(payload), "sha256").hexdigest()
         == hashlib.sha256(payload).hexdigest()
     )
+
+
+_OID = re.compile(r"[0-9a-f]{40}")
+
+
+def _git_in(repo: Path, *args: str, stdin: str | None = None) -> str:
+    return subprocess.run(
+        ["git", "-c", "user.name=T", "-c", "user.email=t@example.com", "-C", str(repo), *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_assumption_git_notes_list_prints_two_ids_and_one_space(tmp_path: Path) -> None:
+    """Pins the waiver for `partition(" ")` -> `rpartition(" ")` in
+    ``temporal_attestation._note_objects``: every ``git notes list`` line is
+    exactly ``<note blob id> <annotated object id>`` — two ids, one space —
+    so the first and the last space are the same space."""
+    root, head = throwaway_checkout(tmp_path / "notes")
+    blob = _git_in(root, "hash-object", "-w", "--stdin", stdin="x")
+    tree = _git_in(root, "rev-parse", f"{head}^{{tree}}").strip()
+    for target in (head, blob.strip(), tree):
+        _git_in(root, "notes", "--ref=refs/notes/probe", "add", "-m", "[]", target)
+
+    lines = _git_in(root, "notes", "--ref=refs/notes/probe", "list").splitlines()
+
+    assert len(lines) == 3
+    for line in lines:
+        first, second = line.split(" ")
+        assert _OID.fullmatch(first) and _OID.fullmatch(second), line
+
+
+def test_assumption_git_batch_check_prints_id_and_type_with_one_space(tmp_path: Path) -> None:
+    """Pins the waiver for `partition(" ")` -> `rpartition(" ")` in
+    ``temporal_attestation._require_commit_anchors``: with the format
+    ``%(objectname) %(objecttype)`` every line — present objects, and the
+    ``<id> missing`` line git prints for an absent one — holds one space."""
+    root, head = throwaway_checkout(tmp_path / "batch")
+    tree = _git_in(root, "rev-parse", f"{head}^{{tree}}").strip()
+    missing = "f" * 40
+
+    out = _git_in(
+        root,
+        "cat-file",
+        "--batch-check=%(objectname) %(objecttype)",
+        stdin=f"{head}\n{tree}\n{missing}\n",
+    )
+
+    assert out.splitlines() == [f"{head} commit", f"{tree} tree", f"{missing} missing"]

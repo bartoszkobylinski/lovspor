@@ -21,10 +21,14 @@ from lovspor.corpus_fetch import (
 )
 from lovspor.temporal_attestation import (
     ATTESTATION_NOTES_REF,
+    EPOCH_NOTES_REF,
     TemporalAttestation,
+    TemporalGateEpoch,
     read_attestation,
+    read_gate_epochs,
     registry_synchronised,
     write_attestation,
+    write_gate_epoch,
 )
 
 
@@ -484,3 +488,83 @@ def test_plain_clone_is_not_registry_synchronised(tmp_path: Path) -> None:
     _git(["clone", _url(origin), str(dest)], cwd=tmp_path)
 
     assert not registry_synchronised(dest)
+
+
+# --- gate-epoch transport (ADR-0012 Amendment 1, #432) ---
+
+
+def _record_epoch_on_head(origin: Path) -> TemporalGateEpoch:
+    record = TemporalGateEpoch(
+        parser_version=2,
+        epoch_at=datetime(2099, 1, 1, tzinfo=UTC),
+        boundary_commit=_origin_head(origin),
+        recorded_at=datetime(2099, 1, 1, tzinfo=UTC),
+        source="backfill",
+        evidence="lovspor sync run 1",
+    )
+    write_gate_epoch(origin, record)
+    return record
+
+
+def test_fetch_corpus_shallow_clone_carries_the_epoch_ref_with_no_refspec_change(
+    tmp_path: Path,
+) -> None:
+    """The existing glob refspec transports the sibling epoch ref, and the
+    record reads on the default --depth 1 clone."""
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    _attest_head(origin)
+    record = _record_epoch_on_head(origin)
+    dest = tmp_path / "clone"
+
+    fetch_corpus(dest, repo_url=_url(origin))
+
+    refspecs = subprocess.run(
+        ["git", "config", "--get-all", "remote.origin.fetch"],
+        cwd=dest,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert refspecs.count(ATTESTATION_FETCH_REFSPEC) == 1
+    assert not any(EPOCH_NOTES_REF in spec for spec in refspecs)
+    assert read_gate_epochs(dest) == {2: record}
+
+
+def test_fetch_corpus_update_brings_a_newly_recorded_epoch(tmp_path: Path) -> None:
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    dest = tmp_path / "clone"
+    fetch_corpus(dest, repo_url=_url(origin))
+    assert read_gate_epochs(dest) == {}
+
+    record = _record_epoch_on_head(origin)
+    fetch_corpus(dest, repo_url=_url(origin))
+
+    assert read_gate_epochs(dest) == {2: record}
+
+
+def test_a_dedicated_epoch_refspec_is_removed_as_a_misconfiguration(tmp_path: Path) -> None:
+    """Why the epoch has no refspec of its own: _ensure_attestation_refspec
+    deletes any line that mentions the attestation namespace without
+    transporting the attestation ref. The glob carries the epoch anyway."""
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    record = _record_epoch_on_head(origin)
+    dest = tmp_path / "clone"
+    _git(["clone", _url(origin), str(dest)], cwd=tmp_path)
+    dedicated = f"+{EPOCH_NOTES_REF}:{EPOCH_NOTES_REF}"
+    _git(["config", "--add", "remote.origin.fetch", dedicated], cwd=dest)
+
+    fetch_corpus(dest, repo_url=_url(origin))
+
+    refspecs = subprocess.run(
+        ["git", "config", "--get-all", "remote.origin.fetch"],
+        cwd=dest,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert dedicated not in refspecs
+    assert ATTESTATION_FETCH_REFSPEC in refspecs
+    assert read_gate_epochs(dest) == {2: record}

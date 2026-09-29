@@ -1150,6 +1150,82 @@ git -C <corpus-path> config --add remote.origin.fetch \
 git -C <corpus-path> fetch origin
 ```
 
+### The temporal gate epoch (ADR-0012 Amendment 1)
+
+`unattested` is only served for a state that **predates the gate**. Each
+temporal parser version has one immutable gate-epoch record in
+`refs/notes/temporal-attestations-epoch` (`parser_version`, `epoch_at`,
+`boundary_commit`, `recorded_at`, `source`, `evidence`), noted on the last
+pre-epoch corpus state. The glob refspec above transports it — no refspec
+change is needed, and none may be added: `fetch-corpus` removes any refspec
+line that mentions the attestation namespace without transporting the
+attestation ref itself. `get_temporal_events` then answers, in order:
+channel failure → `AttestationError`; attested → `attested`; **no epoch
+record for the serving parser version → `AttestationError`**; author date
+before the epoch → `unattested`; at or after it → `UnattestedGateStateError`
+(see `mcp.md`).
+
+Two supported writers, both `lovspor temporal-epoch --corpus-path <clone>`.
+Input is validated before anything is fetched, written or pushed (only the
+read-only `--corpus-path` check runs git first), and a malformed value exits 2:
+`--corpus-path` must be the top level of a lovverk clone (git + `manifest.json`),
+`--sync-run` a positive decimal GitHub run id (it becomes the immutable
+`evidence`), `--boundary-commit` a full 40-hex commit id, `--epoch-at` a UTC
+instant (`Z` or `+00:00`). The parser version is always the engine's own
+`TEMPORAL_PARSER_VERSION`, never an argument:
+
+- `record-sync-run --sync-run <run id>` — run by the sync workflow at run
+  start, before any corpus work, and pushed at once, so a failed gate still
+  leaves the epoch on origin. It writes only on the **first run under a new
+  `TEMPORAL_PARSER_VERSION`** (no record and no attestation under it). With
+  attestations but no record it warns and writes nothing: that record is a
+  backfill. It never blocks the sync (`continue-on-error`).
+- `backfill --epoch-at <UTC instant> --boundary-commit <sha> --sync-run <run id> [--apply]`
+  — the operator's record of an epoch that predates this mechanism, for the
+  engine's own parser version. **Dry run by default**: it fetches the
+  attestation and epoch refs from `origin`, validates the record exactly as
+  the write would, prints it, and writes nothing. `--apply` writes the note
+  and pushes the epoch ref, so it needs a clone with push rights to lovverk.
+  It refuses a boundary commit whose author date is not before `epoch_at`,
+  an `epoch_at` later than the first attested state under the version, and
+  a different record for a version that already has one (records are
+  immutable; an identical re-run is a no-op).
+
+**Operator order at ship (parser version 2 backfill, #432)** — in this order:
+
+1. Merge the implementation PR.
+2. Backfill the version-2 record from a writable lovverk clone on the
+   merged engine. Dry run first, read the printed record, then apply:
+
+   ```bash
+   uv run lovspor temporal-epoch --corpus-path ~/Programming/Python/lovverk backfill \
+     --epoch-at 2026-09-04T08:45:36Z \
+     --boundary-commit 3c4f1865e420135a12956e122a3ec42c96803986 \
+     --sync-run 33854986231
+   uv run lovspor temporal-epoch --corpus-path ~/Programming/Python/lovverk backfill \
+     --epoch-at 2026-09-04T08:45:36Z \
+     --boundary-commit 3c4f1865e420135a12956e122a3ec42c96803986 \
+     --sync-run 33854986231 --apply
+   ```
+
+   (`epoch_at` is the start of sync run 33854986231, the first version-2
+   gate run, which attested `964e4fe`; `3c4f186` is the last state before
+   it.)
+3. Refresh the droplet corpus clone, so it carries the record:
+
+   ```bash
+   ssh root@100.77.85.60 'systemctl start lovspor-fetch-corpus.service && journalctl -u lovspor-fetch-corpus --no-pager -n 10'
+   ```
+4. Deploy the engine to the droplet (`deploy/digitalocean/README.md`
+   § Operating it).
+
+With steps 3 and 4 reversed, `get_temporal_events` answers
+`AttestationError` (no epoch record) until the refresh — it fails closed and
+never serves a false `unattested`; the other tools are unaffected. Later
+parser bumps need no backfill: the first sync run under the new version
+records its own epoch, so trigger the sync right after merging, or deploy
+after the scheduled run has refreshed the clone.
+
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.

@@ -139,26 +139,31 @@ jobs:
       # history and the push below would be rejected non-fast-forward —
       # and any reader on such a clone would misread every remote
       # attestation as a local absence (PR #227 review, blocker 1).
+      # The gate-epoch ref (ADR-0012 Amendment 1) is fetched the same way:
+      # the epoch step below must see an existing record, or it would try
+      # to write a second one.
       # ls-remote separates "ref not there yet" (bootstrap, fine) from a
       # network failure (fails the job).
       - name: Fetch attestation notes (plain clone omits notes refs)
         working-directory: ${{ env.LOVVERK_PATH }}
         run: |
           set -euo pipefail
-          rc=0
-          git ls-remote --exit-code origin refs/notes/temporal-attestations >/dev/null || rc=$?
-          if [ "$rc" -eq 0 ]; then
-            git fetch origin '+refs/notes/temporal-attestations:refs/notes/temporal-attestations'
-          elif [ "$rc" -eq 2 ]; then
-            # git's documented "ref not found" exit — the bootstrap case,
-            # and the ONLY non-zero outcome allowed to pass: anything else
-            # (network, auth) must fail the job rather than let a later
-            # write fork the notes history (fail-closed evidence channel).
-            echo "No attestation ref on the remote yet (bootstrap)."
-          else
-            echo "ls-remote failed (rc=$rc) — refusing to guess." >&2
-            exit "$rc"
-          fi
+          for ref in refs/notes/temporal-attestations refs/notes/temporal-attestations-epoch; do
+            rc=0
+            git ls-remote --exit-code origin "$ref" >/dev/null || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              git fetch origin "+$ref:$ref"
+            elif [ "$rc" -eq 2 ]; then
+              # git's documented "ref not found" exit — the bootstrap case,
+              # and the ONLY non-zero outcome allowed to pass: anything else
+              # (network, auth) must fail the job rather than let a later
+              # write fork the notes history (fail-closed evidence channel).
+              echo "No $ref on the remote yet (bootstrap)."
+            else
+              echo "ls-remote failed for $ref (rc=$rc) — refusing to guess." >&2
+              exit "$rc"
+            fi
+          done
 
       - name: Configure git author for sync commits
         working-directory: ${{ env.LOVVERK_PATH }}
@@ -166,6 +171,20 @@ jobs:
           git config user.name "lovspor-sync[bot]"
           git config user.email "lovspor-sync@noreply.github.com"
           git config commit.gpgsign false
+
+      # ADR-0012 Amendment 1: the gate epoch is recorded at run start and
+      # pushed BEFORE any corpus work, so a run whose reconciliation gate
+      # then fails still leaves the epoch on origin — and the gate-era
+      # state it built reads as refused, never as a pre-gate 'unattested'.
+      # The command writes only on the first run under a new
+      # TEMPORAL_PARSER_VERSION; otherwise it reports and writes nothing.
+      # continue-on-error: the corpus sync must never be blocked by it. A
+      # missing record fails closed at serving time (AttestationError).
+      - name: Record the temporal gate epoch before any corpus work
+        continue-on-error: true
+        run: >-
+          uv run --no-dev lovspor temporal-epoch --corpus-path "$LOVVERK_PATH"
+          record-sync-run --sync-run "$GITHUB_RUN_ID"
 
       # Clears embedding_hash on documents whose sidecar holds fewer vectors
       # than the current chunker would write, so the sync below rebuilds them.
