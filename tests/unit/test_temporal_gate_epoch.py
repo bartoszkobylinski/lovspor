@@ -391,7 +391,6 @@ def test_attested_commits_refuses_a_corrupt_attestation_note(
         attested_commits(repo, 2)
 
 
-@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
 def test_attested_commits_refuses_an_entry_claiming_another_commit(
     corpus: tuple[Path, str, str],
 ) -> None:
@@ -413,7 +412,6 @@ def test_attested_commits_refuses_an_entry_claiming_another_commit(
         attested_commits(repo, 2)
 
 
-@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
 def test_attested_commits_refuses_duplicate_entries_for_one_version(
     corpus: tuple[Path, str, str],
 ) -> None:
@@ -434,6 +432,156 @@ def test_attested_commits_refuses_duplicate_entries_for_one_version(
 
     with pytest.raises(AttestationError, match="duplicate"):
         attested_commits(repo, 2)
+
+
+def _entry(commit: str, version: int = 2, reconciled: int = 1) -> dict[str, object]:
+    return TemporalAttestation(
+        corpus_commit=commit,
+        parser_version=version,
+        documents_reconciled=reconciled,
+        notes_total=0,
+        events_total=0,
+        attested_at=datetime(2026, 9, 4, 9, 0, tzinfo=UTC),
+    ).model_dump(mode="json")
+
+
+def _raw_attestation(repo: Path, commit: str, entries: list[dict[str, object]]) -> None:
+    payload = json.dumps(entries)
+    _git(repo, "notes", f"--ref={ATTESTATION_NOTES_REF}", "add", "-f", "-m", payload, commit)
+
+
+def test_a_foreign_entry_corrupts_the_note_for_every_version(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """The wrong-commit entry sits under version 1; asking for version 2,
+    which the note also answers correctly, must still refuse."""
+    repo, boundary, gated = corpus
+    _raw_attestation(repo, gated, [_entry(boundary, version=1), _entry(gated)])
+
+    with pytest.raises(AttestationError, match="corrupt"):
+        attested_commits(repo, 2)
+
+
+def test_duplicates_under_another_version_still_corrupt_the_walk(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _boundary, gated = corpus
+    _raw_attestation(repo, gated, [_entry(gated, version=1), _entry(gated, version=1)])
+
+    with pytest.raises(AttestationError, match="duplicate"):
+        attested_commits(repo, 2)
+
+
+def test_conflicting_duplicates_for_one_version_are_refused(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _boundary, gated = corpus
+    _raw_attestation(repo, gated, [_entry(gated), _entry(gated, reconciled=2)])
+
+    with pytest.raises(AttestationError, match="duplicate"):
+        attested_commits(repo, 2)
+
+
+def test_an_abbreviated_commit_in_an_entry_is_refused(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """The note is keyed on the full object id; an entry naming the same
+    commit by a prefix is not the record ``write_attestation`` writes."""
+    repo, _boundary, gated = corpus
+    _raw_attestation(repo, gated, [_entry(gated[:12])])
+
+    with pytest.raises(AttestationError, match="corrupt"):
+        attested_commits(repo, 2)
+
+
+def test_attested_commits_refuses_a_note_on_a_non_commit_object(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """The walk promises commits, so a self-consistent note on a blob is
+    still a broken evidence channel rather than an attested corpus state."""
+    repo, _boundary, _gated = corpus
+    blob = _git(repo, "hash-object", "-w", "boundary.md")
+    _raw_attestation(repo, blob, [_entry(blob)])
+
+    with pytest.raises(AttestationError, match="not a commit|corrupt"):
+        attested_commits(repo, 2)
+
+
+def test_attested_commits_refuses_a_note_on_an_annotated_tag(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """Even when the entry names the tag's own id: a tag is not a state."""
+    repo, _boundary, gated = corpus
+    _git(repo, "tag", "-a", "v1", "-m", "tag", gated)
+    tag = _git(repo, "rev-parse", "v1")
+    _raw_attestation(repo, tag, [_entry(tag)])
+
+    with pytest.raises(AttestationError, match="attestation note .* a tag and not a commit"):
+        attested_commits(repo, 2)
+
+
+def test_attested_commits_refuses_a_note_on_a_tree(corpus: tuple[Path, str, str]) -> None:
+    repo, _boundary, gated = corpus
+    tree = _git(repo, "rev-parse", f"{gated}^{{tree}}")
+    _raw_attestation(repo, tree, [_entry(tree)])
+
+    with pytest.raises(AttestationError, match="attestation note .* a tree and not a commit"):
+        attested_commits(repo, 2)
+
+
+def test_a_non_commit_note_under_another_version_still_refuses(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """The anchor is judged before any version filter: a valid v2 note does
+    not excuse a v1 note on a blob."""
+    repo, _boundary, gated = corpus
+    _attest(repo, gated)
+    blob = _git(repo, "hash-object", "-w", "gated.md")
+    _raw_attestation(repo, blob, [_entry(blob, version=1)])
+
+    with pytest.raises(AttestationError, match="not a commit"):
+        attested_commits(repo, 2)
+
+
+def test_attested_commits_accepts_a_note_on_a_commit_the_clone_lacks(tmp_path: Path) -> None:
+    """A --depth 1 clone lacks older attested commits; their notes must
+    still count, consistent with the gate-epoch reader."""
+    origin = tmp_path / "origin"
+    _init(origin)
+    old = _commit(origin, "old", BOUNDARY_DATE)
+    head = _commit(origin, "head", GATE_DATE)
+    _attest(origin, old)
+    _attest(origin, head)
+    clone = tmp_path / "shallow"
+    _git(tmp_path, "clone", "--depth", "1", f"file://{origin}", str(clone))
+    _git(clone, "fetch", "origin", f"+{ATTESTATION_NOTES_REF}:{ATTESTATION_NOTES_REF}")
+
+    missing = subprocess.run(["git", "cat-file", "-e", f"{old}^{{commit}}"], cwd=clone, check=False)
+    assert missing.returncode != 0
+    assert sorted(attested_commits(clone, 2)) == sorted([old, head])
+
+
+def test_one_commit_attested_under_two_versions_is_not_a_duplicate(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _boundary, gated = corpus
+    _attest(repo, gated, version=1)
+    _attest(repo, gated, version=2)
+
+    assert attested_commits(repo, 1) == [gated]
+    assert attested_commits(repo, 2) == [gated]
+
+
+def test_the_epoch_bound_refuses_a_corrupt_attestation_registry(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """The bound is the consumer the walk protects: a corrupt entry must
+    fail the epoch check, never be skipped as "not attested"."""
+    repo, boundary, gated = corpus
+    _raw_attestation(repo, gated, [_entry(boundary)])
+
+    with pytest.raises(AttestationError, match="corrupt"):
+        check_gate_epoch(repo, _epoch(boundary))
 
 
 # ---------- transport ----------
