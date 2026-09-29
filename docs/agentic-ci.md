@@ -486,8 +486,10 @@ It can still reach:
 - the network, without limit, so whatever it can read it can send.
 
 It cannot enter the owner's home, and therefore not `~/.ssh`, the `gh` credentials or any
-project `.env`, because that home is `750` with group `staff` and `ci-lovspor` is not in
-`staff`. It cannot enter `/Volumes/T7` once step 2 has run, and it cannot `sudo`. The fork
+project `.env`, because step 1 makes that home `700`. `ci-lovspor` IS in `staff`: macOS
+nests every local account into it through `localaccounts`, whatever the primary group (read
+off `id ci-lovspor` on 2026-09-29). So the owner's former `750`, group `staff`, would have
+let it in. It cannot enter `/Volumes/T7` once step 2 has run, and it cannot `sudo`. The fork
 guard still keeps outside code off the runner. Content inside the repository still reaches
 the agent's prompt.
 
@@ -496,13 +498,20 @@ the agent's prompt.
 A PR that changes these workflows queues its `codex-author` job until this runner is
 online: nothing else carries `codex-lovspor`. A job stays queued for up to 24 h; after
 that, `gh run rerun <run-id> --failed`. Run the blocks in order, in the owner's Terminal
-(an admin account; `sudo` asks for its password). No brew install is needed.
+(an admin account; `sudo` asks for its password). No brew install is needed. Every block
+starts with `cd /tmp`: `sudo -u ci-lovspor` keeps the caller's working directory, and inside
+the owner's now-`700` home that directory is unreadable to `ci-lovspor`. The shell then
+prints `getcwd: ... Permission denied`, and codex, which looks up its config from the
+working directory, dies with `Error loading configuration: Permission denied (os error 13)`.
 
-1. Create `ci-lovspor`: a standard (non-admin) account with its own primary group, so it
-   is not in `staff` and cannot enter the owner's home (`750`, group `staff`). The password
-   is random and never used: every step reaches the account through `sudo -u`.
+1. Create `ci-lovspor`: a standard (non-admin) account with its own primary group, and
+   close the owner's home to it. The home must go to `700`, and this is not optional:
+   macOS nests every local account into `staff` through `localaccounts`, so `id ci-lovspor`
+   shows `20(staff)`, and the owner's `750`, group `staff`, would stay readable to it. The
+   password is random and never used: every step reaches the account through `sudo -u`.
 
    ```bash
+   cd /tmp
    sudo dseditgroup -o create -r "lovspor CI runner" ci-lovspor
    CI_GID="$(dscl . -read /Groups/ci-lovspor PrimaryGroupID | awk '{print $2}')"
    sudo sysadminctl -addUser ci-lovspor -fullName "lovspor CI runner" -GID "$CI_GID" -shell /bin/zsh -home /Users/ci-lovspor -password "$(openssl rand -base64 32)"
@@ -510,6 +519,7 @@ that, `gh run rerun <run-id> --failed`. Run the blocks in order, in the owner's 
    sudo createhomedir -c -u ci-lovspor
    sudo chown -R ci-lovspor:ci-lovspor /Users/ci-lovspor
    sudo chmod 700 /Users/ci-lovspor
+   chmod 700 /Users/bartoszkobylinski
    id ci-lovspor
    ```
 
@@ -520,6 +530,7 @@ that, `gh run rerun <run-id> --failed`. Run the blocks in order, in the owner's 
    for every account.
 
    ```bash
+   cd /tmp
    sudo diskutil enableOwnership /Volumes/T7
    sudo chmod o-rwx /Volumes/T7
    diskutil info /Volumes/T7 | grep Owners
@@ -531,6 +542,7 @@ that, `gh run rerun <run-id> --failed`. Run the blocks in order, in the owner's 
    shared system paths.
 
    ```bash
+   cd /tmp
    sudo -u ci-lovspor -H mkdir -p /Users/ci-lovspor/.local/bin
    sudo -u ci-lovspor -H sh -c 'curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh'
    sudo -u ci-lovspor -H sh -c 'cd /Users/ci-lovspor/.local/bin && curl -fsSL https://github.com/openai/codex/releases/latest/download/codex-aarch64-apple-darwin.tar.gz | tar xz && mv codex-aarch64-apple-darwin codex'
@@ -544,6 +556,7 @@ that, `gh run rerun <run-id> --failed`. Run the blocks in order, in the owner's 
    `PATH`.
 
    ```bash
+   cd /tmp
    RUNNER_URL="$(gh api repos/actions/runner/releases/latest --jq '.assets[] | select(.name | test("^actions-runner-osx-arm64-[0-9.]+\\.tar\\.gz$")) | .browser_download_url')"
    TOKEN="$(gh api -X POST repos/bartoszkobylinski/lovspor/actions/runners/registration-token -q .token)"
    sudo -u ci-lovspor -H bash -c "mkdir -p ~/actions-runner-lovspor ~/Library/Logs/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor && cd ~/actions-runner-lovspor && curl -fsSL '$RUNNER_URL' | tar xz && ./config.sh --unattended --url https://github.com/bartoszkobylinski/lovspor --token '$TOKEN' --name mac-mini-lovspor --labels codex-lovspor --work _work && cp bin/runsvc.sh runsvc.sh && echo /Users/ci-lovspor/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin > .path"
@@ -561,6 +574,7 @@ that, `gh run rerun <run-id> --failed`. Run the blocks in order, in the owner's 
    with `GroupName`, an explicit `HOME` and `KeepAlive` added.
 
    ```bash
+   cd /tmp
    sudo tee /Library/LaunchDaemons/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor.plist >/dev/null <<'EOF'
    <?xml version="1.0" encoding="UTF-8"?>
    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -618,6 +632,7 @@ that, `gh run rerun <run-id> --failed`. Run the blocks in order, in the owner's 
    open it in a browser on the Mac mini itself.
 
    ```bash
+   cd /tmp
    for h in /Users/ci-lovspor/.codex-lovspor /Users/ci-lovspor/.codex-lovspor-secondary; do
      sudo -u ci-lovspor -H install -d -m 700 "$h"
      printf 'cli_auth_credentials_store = "file"\n' | sudo -u ci-lovspor -H tee "$h/config.toml" >/dev/null
@@ -633,15 +648,13 @@ that, `gh run rerun <run-id> --failed`. Run the blocks in order, in the owner's 
    path.
 
    ```bash
+   cd /tmp
    gh api repos/bartoszkobylinski/lovspor/actions/runners --jq '.runners[] | [.name, .status, .busy, ([.labels[].name] | join(","))] | @tsv'
    sudo tail -n 50 /Users/ci-lovspor/Library/Logs/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor/stdout.log
    for p in /Users/bartoszkobylinski /Users/bartoszkobylinski/.ssh /Users/bartoszkobylinski/.config/gh /Users/bartoszkobylinski/Programming/Python/lovspor/.env /Volumes/T7; do
      if sudo -u ci-lovspor -H test -r "$p"; then echo "READABLE  $p"; else echo "denied    $p"; fi
    done
    ```
-
-   If the owner's home reads `READABLE`, macOS counted `ci-lovspor` into `staff` after all.
-   Close it with `chmod 700 /Users/bartoszkobylinski` and run the loop again.
 
 8. Optional, and only after the Mac lane is proven (this PR merged, and a `codex-author`
    round and a remediation round green on the Mac): unregister `mikrus-codex` from
