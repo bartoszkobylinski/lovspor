@@ -1224,6 +1224,46 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
         assert "kill " in stop["run"]
 
 
+class TestRemediationMustTryToKillEverySurvivor:
+    """Issue #455. On PR #453 remediation called 8 of 8 survivors non-killable
+    and wrote no test; every one fell to a test-only commit (`fdbe4a7`). A
+    non-killable verdict has to mean "provably equivalent, and here is why",
+    never "not attempted"."""
+
+    def _prompt(self) -> str:
+        path = _WORKFLOWS.parent / "codex" / "mutation-remediation.md"
+        return " ".join(path.read_text(encoding="utf-8").split())
+
+    def test_every_survivor_gets_a_killing_test_attempt(self) -> None:
+        prompt = self._prompt()
+
+        assert "Attempt a killing test for every survivor" in prompt
+        assert "Only edit tests for killable_by_correct_test." not in prompt
+
+    def test_a_non_killable_verdict_carries_an_equivalence_argument(self) -> None:
+        prompt = self._prompt()
+
+        assert "only with a stated equivalence argument" in prompt
+        assert "for every input that can reach it" in prompt
+
+    def test_the_pr_453_excuses_are_named_as_killable(self) -> None:
+        prompt = self._prompt()
+
+        for excuse in ("timezone", "boundary", "stderr", "torn or malformed input file"):
+            assert excuse in prompt, excuse
+
+    def test_the_report_names_the_test_or_the_argument_per_survivor(self) -> None:
+        prompt = self._prompt()
+
+        assert "the test that kills it, or the equivalence argument" in prompt
+
+    def test_hand_applying_a_mutant_leaves_production_code_untouched(self) -> None:
+        prompt = self._prompt()
+
+        assert "`git checkout -- src/`" in prompt
+        assert "modify files under tests/ only" in prompt
+
+
 class TestTheRemediationLaneOnlyHoldsTheAgent:
     """Issue #272, second half. The remediation workflow ran the same shape as
     the PR pipeline did — agent session AND `uv run pytest tests/unit/` on the
