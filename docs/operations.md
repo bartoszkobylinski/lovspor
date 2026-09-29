@@ -903,8 +903,13 @@ launchctl list | grep lovspor          # confirm it is registered
 launchctl start no.lovspor.observatory.nightly   # one manual run, to prove the wiring
 ```
 
-`RunAtLoad` is false on purpose: loading the job during setup must not start a sweep
-against two hundred municipal servers as a side effect.
+`RunAtLoad` is true, guarded (issue #356): the job runs whenever the agent loads — at
+login, and at `launchctl load`/`bootstrap` — with `--catch-up`, which exits 0 without
+sweeping when a sweep started in the last 24 hours (`catch-up skipped: a sweep started
+at …`). With no sweep in that window the load **does** start one, including the load
+during setup: that is a missed night. `launchctl start`/`kickstart` runs the same guarded
+command, so to force a sweep within the window run `lovspor observatory nightly` without
+the flag.
 
 Then prove the switch is armed from outside the log — `observatory status` prints a
 `Dead-man switch` section that says `NOT ARMED` until `LOVSPOR_OBSERVATORY_HEARTBEAT_URL`
@@ -924,8 +929,31 @@ git -C <nightly worktree> fetch origin && git -C <nightly worktree> checkout --d
 
 `StartCalendarInterval`, not `StartInterval` or cron: if the machine is asleep at 03:00,
 launchd runs the job on wake and coalesces missed triggers. cron loses them silently.
-A machine that is powered off gets no run at all — that is precisely the case the
-dead-man switch exists for, and no scheduler can cover it from inside.
+
+A machine that is **powered off** at 03:00 is different: launchd replays nothing at boot,
+and the trigger is lost. `RunAtLoad` is what catches it up — the agent loads when the
+owner's GUI session starts, so the catch-up happens at login, not at power-on; an
+unattended reboot catches up only if the Mac logs in automatically. The guard reads
+"a sweep started" from two traces, because a sweep killed by the shutdown never writes
+its run record:
+
+| trace | what it proves |
+| --- | --- |
+| `sweep-runs.jsonl` | a sweep that reached its end; a `failed` run (deferred, refused at preflight) observed nothing and does not count |
+| the exclusive workload lock's advisory record | the start of the last sweep to take the lock; only a clean exit empties it, so a killed sweep's start survives until another workload takes the lock |
+
+So a sweep killed mid-run by a shutdown counts as started: a reboot within 24 hours of
+its start does not restart it (resuming a killed sweep is #218's checkpoint work, not
+this guard's).
+
+The 03:00 trigger itself is never guarded. launchd does not say which trigger started
+the job, so a start between 03:00 and 03:15 Oslo time reads as the calendar and sweeps.
+A boot catch-up at 01:00 therefore does not swallow that night's 03:00: in practice the
+catch-up is still running then and launchd drops the trigger (which `observatory status`
+reports, #218); if it has already finished, 03:00 sweeps again rather than becoming a
+night that silently did not happen. A wake-replayed trigger arrives off the window and
+is guarded like a load. A machine that stays off gets no run at all — the dead-man switch
+is what notices that, and no scheduler can cover it from inside.
 
 ### A capped source is not a finished one (issue #172)
 
