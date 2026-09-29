@@ -176,6 +176,7 @@ class TestThePlan:
         plan = plan_reattribution(make_log(tmp_path), request(), attribution())
 
         assert plan.selected == 0
+        assert plan.log_size == 0
         assert plan.first_observed is None
         assert plan.last_observed is None
 
@@ -336,8 +337,13 @@ class TestApplying:
         log.append(RecordTombstone(retracts=key_of(original), **attribution("run-0").model_dump()))
         before = log.log_path.read_bytes()
 
-        with pytest.raises(CorrectionRefusedError, match="no matching re-filed half"):
+        expected = (
+            f"record {key_of(original)[:12]} has a record tombstone with no matching "
+            "re-filed half; the writer never leaves one — run `observatory verify`"
+        )
+        with pytest.raises(CorrectionRefusedError) as raised:
             plan_reattribution(log, request(), attribution("run-1"))
+        assert str(raised.value) == expected
         assert log.log_path.read_bytes() == before
 
     def test_a_half_written_correction_elsewhere_is_refused(self, tmp_path: Path) -> None:
@@ -455,8 +461,13 @@ class TestOnlyThisDecisionResumes:
         log, _ = self._half_written(tmp_path, **changes)
         before = log.log_path.read_bytes()
 
-        with pytest.raises(CorrectionRefusedError, match="did not write"):
+        expected = (
+            f"record {key_of(artifact('a'))[:12]} has a half-written correction "
+            "this decision did not write"
+        )
+        with pytest.raises(CorrectionRefusedError) as raised:
             plan_reattribution(log, request(), attribution("run-2"))
+        assert str(raised.value) == expected
         assert log.log_path.read_bytes() == before
 
     def test_two_half_written_corrections_to_the_target_are_refused(self, tmp_path: Path) -> None:
@@ -474,8 +485,9 @@ class TestThePlanIsOnlyValidForTheLogItWasMadeFrom:
         apply_plan(log, plan_reattribution(log, request(), attribution("run-0")))
         before = log.log_path.read_bytes()
 
-        with pytest.raises(CorrectionRefusedError, match="changed since the plan"):
+        with pytest.raises(CorrectionRefusedError) as raised:
             apply_plan(log, plan)
+        assert str(raised.value) == "the log changed since the plan was made; plan again"
         assert log.log_path.read_bytes() == before
 
     def test_a_log_that_got_shorter_refuses_the_apply(self, tmp_path: Path) -> None:
