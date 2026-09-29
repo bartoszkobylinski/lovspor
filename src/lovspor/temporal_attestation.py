@@ -404,28 +404,33 @@ def _read_entries(repo: Path, corpus_commit: str) -> list[TemporalAttestation]:
             f"attestation note on {corpus_commit} is unparseable — a broken "
             f"evidence channel, not an absent attestation: {exc}",
         ) from exc
+    _require_consistent_entries(resolved, entries)
+    return entries
+
+
+def _require_consistent_entries(annotated: str, entries: list[TemporalAttestation]) -> None:
+    """Refuse a note whose entries contradict the commit carrying it.
+
+    A syntactically valid note anchored to the wrong commit claims a state
+    it is not attached to; two entries under one ``(commit,
+    parser_version)`` key cannot both be the immutable record, and picking
+    either would silently prefer one. Both are a corrupt channel — for
+    every version the note answers, not only the one a caller asked about.
+    """
     seen_versions: set[int] = set()
     for entry in entries:
-        if entry.corpus_commit != resolved:
-            # A syntactically valid note anchored to the wrong commit is
-            # semantic corruption, not evidence: the entry claims a state
-            # it is not attached to.
+        if entry.corpus_commit != annotated:
             raise AttestationError(
-                f"attestation note on {resolved} carries an entry for "
+                f"attestation note on {annotated} carries an entry for "
                 f"{entry.corpus_commit} — the evidence channel is corrupt",
             )
         if entry.parser_version in seen_versions:
-            # Two entries under one (commit, parser_version) key cannot
-            # both be the immutable record — whichever is wrong, the
-            # channel is corrupt and picking the first would silently
-            # prefer one of them.
             raise AttestationError(
-                f"attestation note on {resolved} carries duplicate entries "
+                f"attestation note on {annotated} carries duplicate entries "
                 f"for parser version {entry.parser_version} — the evidence "
                 f"channel is corrupt",
             )
         seen_versions.add(entry.parser_version)
-    return entries
 
 
 def read_gate_epochs(repo: Path) -> dict[int, TemporalGateEpoch]:
@@ -458,12 +463,19 @@ def read_gate_epochs(repo: Path) -> dict[int, TemporalGateEpoch]:
 
 
 def attested_commits(repo: Path, parser_version: int) -> list[str]:
-    """Every commit carrying an attestation under ``parser_version``."""
-    return [
-        annotated
-        for blob, annotated in _note_objects(repo, ATTESTATION_NOTES_REF)
-        if any(entry.parser_version == parser_version for entry in _attestation_entries(repo, blob))
-    ]
+    """Every commit carrying an attestation under ``parser_version``.
+
+    Every note is validated whole, whatever version is asked for: an entry
+    claiming another commit, or a duplicated key, raises
+    :class:`AttestationError` rather than bounding an epoch on it.
+    """
+    commits = []
+    for blob, annotated in _note_objects(repo, ATTESTATION_NOTES_REF):
+        entries = _attestation_entries(repo, blob)
+        _require_consistent_entries(annotated, entries)
+        if any(entry.parser_version == parser_version for entry in entries):
+            commits.append(annotated)
+    return commits
 
 
 def check_gate_epoch(repo: Path, record: TemporalGateEpoch) -> bool:
