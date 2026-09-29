@@ -263,6 +263,17 @@ class TestThePlan:
         with pytest.raises(LogIntegrityError, match="damaged"):
             plan_reattribution(log, request(), attribution())
 
+    def test_a_log_with_malformed_utf8_is_refused_without_writing(self, tmp_path: Path) -> None:
+        log = misfiled(tmp_path)
+        with log.log_path.open("ab") as handle:
+            handle.write(b"\xff\n")
+        before = log.log_path.read_bytes()
+
+        with pytest.raises(LogIntegrityError, match="damaged"):
+            plan_reattribution(log, request(), attribution())
+
+        assert log.log_path.read_bytes() == before
+
     def test_byte_identical_lines_are_one_claim_and_one_correction(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         log.append(artifact("a"))
