@@ -83,6 +83,57 @@ def test_absent_attestation_reads_none(repo: tuple[Path, str]) -> None:
     assert read_attestation(path, sha, 1) is None
 
 
+def test_author_date_requests_strict_iso_8601_from_git(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def git(_repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="2026-09-02T04:00:00+00:00\n", stderr="")
+
+    monkeypatch.setattr(attestation_module, "_git", git)
+
+    assert attestation_module._author_date(tmp_path, "a" * 40) == datetime(
+        2026, 9, 2, 4, 0, tzinfo=UTC
+    )
+    assert calls == [["log", "-1", "--format=%aI", f"{'a' * 40}^{{commit}}", "--"]]
+
+
+def test_note_listing_uses_quiet_verified_ref_probes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ref = "refs/notes/test"
+    calls: list[list[str]] = []
+
+    def git(_repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(attestation_module, "_git", git)
+
+    assert attestation_module._note_objects(tmp_path, ref) == []
+    assert calls == [
+        ["rev-parse", "--quiet", "--verify", ref],
+        ["rev-parse", "--quiet", "--verify", f"{ref}^{{commit}}"],
+        ["notes", f"--ref={ref}", "list"],
+    ]
+
+
+def test_unparseable_attestation_preserves_validation_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(attestation_module, "_note_text", lambda *_args: "not json")
+
+    with pytest.raises(AttestationError) as caught:
+        attestation_module._attestation_entries(tmp_path, "b" * 40)
+
+    assert "Invalid JSON" in str(caught.value)
+
+
 def test_write_then_read_roundtrip(repo: tuple[Path, str]) -> None:
     path, sha = repo
     entry = _attestation(sha)

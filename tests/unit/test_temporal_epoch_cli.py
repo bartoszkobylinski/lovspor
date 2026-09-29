@@ -17,6 +17,7 @@ import pytest
 from click.testing import Result
 from typer.testing import CliRunner
 
+import lovspor.temporal_gate as temporal_gate_module
 from lovspor.cli import app
 from lovspor.corpus_fetch import fetch_corpus
 from lovspor.errors import TemporalDerivationError
@@ -46,6 +47,32 @@ from tests.unit.test_mcp_recorded_at import _doc, _manifest, _record
 LAW = "## Kapittel 1.\n\n### § 1. Formål\n\nLovtekst {n}.\n"
 EPOCH_AT = "2026-05-09T00:00:00Z"
 runner = CliRunner()
+
+
+def test_commit_resolution_requests_text_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout="a" * 40 + "\n", stderr="")
+
+    monkeypatch.setattr(temporal_gate_module.subprocess, "run", run)
+
+    assert temporal_gate_module._resolve_commit(tmp_path, "HEAD") == "a" * 40
+    assert calls == [
+        (
+            ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+            {
+                "cwd": tmp_path,
+                "capture_output": True,
+                "text": True,
+                "check": False,
+            },
+        ),
+    ]
 
 
 def _git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
