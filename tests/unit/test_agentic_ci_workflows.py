@@ -33,6 +33,10 @@ def _named_step(steps: list[dict[str, Any]], name: str) -> dict[str, Any]:
     return next(step for step in steps if step.get("name") == name)
 
 
+_SAMPLER_DEADLINE = "deadline=$((SECONDS + 3300))"
+_SAMPLER_LOOP = 'while [ "$SECONDS" -lt "$deadline" ]; do'
+
+
 def test_fast_ci_rejects_committed_conflict_markers_before_lint(tmp_path: Path) -> None:
     steps = _steps("pr-pipeline.yml", "fast-ci")
     names = [step.get("name") for step in steps]
@@ -110,21 +114,23 @@ def test_fast_ci_runs_the_fail_closed_security_scan() -> None:
         ),
     ],
 )
-def test_codex_account_homes_are_explicit_repository_configuration(
+def test_codex_account_homes_live_on_the_runner_host(
     workflow_name: str, job_name: str, step_name: str
 ) -> None:
+    """Issue #445: a repository variable names one machine's paths, which is
+    what pinned the lanes to /home/runner on the Linux box. The homes are the
+    host's, under the runner user's HOME, and both are checked for a login
+    before the failover can mistake a missing one for a rate limit."""
     job = _workflow(workflow_name)["jobs"][job_name]
     command = _named_step(job["steps"], step_name)["run"].splitlines()
+    launch = command.index("python3 scripts/ci/codex_account_failover.py \\")
 
     assert "CODEX_HOME" not in job["env"]
-    assert job["env"]["CODEX_PRIMARY_HOME"] == "${{ vars.CODEX_PRIMARY_HOME }}"
-    assert job["env"]["CODEX_SECONDARY_HOME"] == "${{ vars.CODEX_SECONDARY_HOME }}"
-    assert command.index(
-        ': "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"'
-    ) < command.index("python3 scripts/ci/codex_account_failover.py \\")
-    assert command.index(
-        ': "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"'
-    ) < command.index("python3 scripts/ci/codex_account_failover.py \\")
+    assert "CODEX_PRIMARY_HOME" not in job["env"]
+    assert "CODEX_SECONDARY_HOME" not in job["env"]
+    assert command.index('CODEX_PRIMARY_HOME="$HOME/.codex-lovspor"') < launch
+    assert command.index('CODEX_SECONDARY_HOME="$HOME/.codex-lovspor-secondary"') < launch
+    assert command.index('  [ -f "$codex_home/auth.json" ] || {') < launch
     assert '  --primary-home "$CODEX_PRIMARY_HOME" \\' in command
     assert '  --secondary-home "$CODEX_SECONDARY_HOME" \\' in command
 
@@ -554,23 +560,25 @@ def test_agent_jobs_have_a_wallclock_backstop(workflow_name: str, job_name: str)
 def test_the_box_lock_wait_fits_inside_the_agent_step(
     workflow_name: str, job_name: str, step_name: str
 ) -> None:
-    """Issue #382: five repositories share /home/runner/.mikrus-agent.lock, so
-    a lane routinely queues behind a FOREIGN agent round (~25-40 min) while
-    this repo's runner reads idle. The lock is fd 9, which no later step
+    """Issue #382: five repositories shared /home/runner/.mikrus-agent.lock, so
+    a lane routinely queued behind a FOREIGN agent round (~25-40 min) while
+    this repo's runner read idle. The lock moved to the host (#445) and kept
+    its budget. The lock is fd 9, which no later step
     inherits, so the queue and the round have to share one step: a wait the
     step ceiling cannot outlive is dead code, and a wait that eats the ceiling
     leaves the round nothing. -w 1200 failed #374 three times over."""
     step = _named_step(_steps(workflow_name, job_name), step_name)
-    wait = re.search(r"flock -w (\d+) 9", step["run"])
+    wait = re.search(r"scripts/ci/fd_lock\.py --wait (\d+) 9", step["run"])
 
     assert wait, f"{workflow_name}: the agent step must take the box lock with a bounded wait"
     assert int(wait.group(1)) == 3600
     assert step["timeout-minutes"] * 60 - int(wait.group(1)) >= 45 * 60, (
         "a full lock wait must still leave the agent round its 45 minutes"
     )
-    assert "another repository's agent job" in step["run"], (
-        "the timeout message names the box-wide holder, not lovspor (#382)"
+    assert "another agent job on this host" in step["run"], (
+        "the timeout message names the host-wide holder, not lovspor (#382)"
     )
+    assert "this is runner contention, not a fault in this PR" in step["run"]
 
 
 @pytest.mark.parametrize(
@@ -583,15 +591,19 @@ def test_the_box_lock_wait_fits_inside_the_agent_step(
 def test_every_agent_provider_runs_under_the_same_box_wide_lock(
     workflow_name: str, job_name: str, step_name: str
 ) -> None:
-    """Issue #382: serialization is box-wide only when both lanes open the
+    """Issue #382: serialization is host-wide only when both lanes open the
     shared path, acquire its fd, and do so before the Codex/Claude failover can
-    launch either provider."""
+    launch either provider. Since #445 the path is the runner user's home and
+    the acquire is the repo's own helper: stock macOS has no `flock`."""
     command = _named_step(_steps(workflow_name, job_name), step_name)["run"]
 
-    lock_open = "exec 9>/home/runner/.mikrus-agent.lock"
-    lock_acquire = "flock -w 3600 9"
+    lock_path = 'agent_lock="$HOME/.agent-box.lock"'
+    lock_open = 'exec 9>"$agent_lock"'
+    lock_acquire = "python3 scripts/ci/fd_lock.py --wait 3600 9"
     provider_launch = "python3 scripts/ci/codex_account_failover.py"
 
+    assert command.count(lock_path) == 1
+    assert command.index(lock_path) < command.index(lock_open)
     assert command.count(lock_open) == 1
     assert command.count(lock_acquire) == 1
     assert command.index(lock_open) < command.index(lock_acquire) < command.index(provider_launch)
@@ -1198,13 +1210,15 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
     def test_the_memory_sampler_cannot_outlive_the_job(self) -> None:
         """This runner does not force-kill process trees on cancellation, so a
         background loop started by a step outlives the job that started it. The
-        sampler is bounded twice: `timeout` in the loop, and a kill step that
-        runs even when the agent step failed."""
+        sampler is bounded twice: a deadline in the loop itself (no `timeout`
+        binary on stock macOS, #445), and a kill step that runs even when the
+        agent step failed."""
         steps = self._author()["steps"]
         sampler = _named_step(steps, "Sample memory while the agent runs")
         stop = _named_step(steps, "Stop the memory sampler")
 
-        assert "nohup timeout " in sampler["run"]
+        assert _SAMPLER_DEADLINE in sampler["run"]
+        assert _SAMPLER_LOOP in sampler["run"]
         assert stop["if"].startswith("always()")
         assert "kill " in stop["run"]
 
@@ -1301,7 +1315,8 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
         sampler = _named_step(steps, "Sample memory while the agent runs")
         stop = _named_step(steps, "Stop the memory sampler")
 
-        assert "nohup timeout " in sampler["run"]
+        assert _SAMPLER_DEADLINE in sampler["run"]
+        assert _SAMPLER_LOOP in sampler["run"]
         assert stop["if"].startswith("always()")
         assert "kill " in stop["run"]
 
@@ -1862,3 +1877,169 @@ class TestADeadRemediationLaneStillEscalates:
 
         assert "--add-label" not in calls
         assert not (tmp_path / "sticky-args").exists()
+
+
+_AGENT_LANES = [
+    ("pr-pipeline.yml", "codex-author", "Codex — independent PR test author"),
+    ("mutation-remediation.yml", "remediate", "Codex — mutation remediation (tests only)"),
+]
+# Read off the runners API for `mikrus-codex` on 2026-09-29 (#445).
+_MIKRUS_LABELS = {"self-hosted", "linux", "x64", "codex"}
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _run_block(workflow_name: str, step_name: str, first: str, last: str) -> str:
+    """Cut the lines from `first` through `last` out of the step's real script."""
+    job_name = next(job for name, job, step in _AGENT_LANES if name == workflow_name)
+    run = _named_step(_steps(workflow_name, job_name), step_name)["run"]
+    start = run.index(first)
+    return run[start : run.index(last, start) + len(last)]
+
+
+class TestTheCodexLanesRunOnTheMacMini:
+    """Issue #445: the Codex lanes left the Mikrus box, whose lock five
+    repositories share, for lovspor's own runner on the Mac mini."""
+
+    @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
+    def test_the_lane_targets_lovspors_own_runner(
+        self, workflow_name: str, job_name: str, step_name: str
+    ) -> None:
+        job = _workflow(workflow_name)["jobs"][job_name]
+
+        assert job["runs-on"] == ["self-hosted", "macOS", "codex-lovspor"]
+
+    @pytest.mark.parametrize("workflow_name", ["pr-pipeline.yml", "mutation-remediation.yml"])
+    def test_no_job_can_land_on_the_mikrus_runner(self, workflow_name: str) -> None:
+        """A job runs on a runner carrying every one of its labels, so a label
+        set inside Mikrus's is a job Mikrus can pick up."""
+        for name, job in _workflow(workflow_name)["jobs"].items():
+            labels = job["runs-on"]
+            if isinstance(labels, str) or "self-hosted" not in labels:
+                continue
+            assert not {label.lower() for label in labels} <= _MIKRUS_LABELS, (
+                f"{workflow_name}:{name} can still be scheduled on mikrus-codex"
+            )
+
+    @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
+    def test_no_step_leans_on_a_gnu_or_linux_only_tool(
+        self, workflow_name: str, job_name: str, step_name: str
+    ) -> None:
+        """Stock macOS has no `flock` or `timeout`, no `free`, and a BSD `ps`,
+        `sed`, `date`, `stat`, `readlink` and `xargs`."""
+        linux_only = re.compile(
+            r"(?<![\w-])(flock|timeout|gtimeout) |/home/runner|--sort|ps -e|sed -i|date -d"
+            r"|readlink -f|stat -c|xargs -r|apt(-get)? "
+        )
+        for step in _steps(workflow_name, job_name):
+            lines = str(step.get("run", "")).splitlines()
+            run = "\n".join(line for line in lines if not line.lstrip().startswith("#"))
+            unguarded = run.replace("if command -v free >/dev/null; then free -m", "")
+            assert not linux_only.search(run), f"{step.get('name')}: {run}"
+            assert "free -m" not in unguarded, f"{step.get('name')} calls free unguarded"
+
+    @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
+    def test_a_held_host_lock_fails_the_step_with_the_contention_message(
+        self, tmp_path: Path, workflow_name: str, job_name: str, step_name: str
+    ) -> None:
+        """The step's own lock lines, run against a lock another process holds.
+        Only the wait is shortened: an hour is the budget, not the behaviour."""
+        block = _run_block(workflow_name, step_name, "agent_lock=", "\n}")
+        ready = tmp_path / "held"
+        holder = subprocess.Popen(
+            [
+                "bash",
+                "-c",
+                'exec 9>"$HOME/.agent-box.lock"; python3 scripts/ci/fd_lock.py --wait 10 9'
+                ' && touch "$1" && sleep 20',
+                "bash",
+                str(ready),
+            ],
+            cwd=_REPO_ROOT,
+            env={**os.environ, "HOME": str(tmp_path)},
+        )
+        try:
+            while not ready.exists():
+                assert holder.poll() is None, "the holder never took the lock"
+            result = subprocess.run(
+                ["bash", "-c", block.replace("--wait 3600", "--wait 1")],
+                cwd=_REPO_ROOT,
+                env={**os.environ, "HOME": str(tmp_path)},
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+        finally:
+            holder.kill()
+            holder.wait()
+
+        assert result.returncode == 1
+        assert "by another agent job on this host" in result.stderr
+        assert f"{tmp_path}/.agent-box.lock is host-wide" in result.stderr
+
+    @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
+    def test_a_free_host_lock_is_taken_under_the_runner_home(
+        self, tmp_path: Path, workflow_name: str, job_name: str, step_name: str
+    ) -> None:
+        block = _run_block(workflow_name, step_name, "agent_lock=", "\n}")
+
+        result = subprocess.run(
+            ["bash", "-c", block],
+            cwd=_REPO_ROOT,
+            env={**os.environ, "HOME": str(tmp_path)},
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / ".agent-box.lock").exists()
+
+    @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
+    @pytest.mark.parametrize("logged_in", [(), (".codex-lovspor",), (".codex-lovspor-secondary",)])
+    def test_a_host_without_both_codex_logins_fails_before_the_agent(
+        self,
+        tmp_path: Path,
+        workflow_name: str,
+        job_name: str,
+        step_name: str,
+        logged_in: tuple[str, ...],
+    ) -> None:
+        block = _run_block(workflow_name, step_name, "CODEX_PRIMARY_HOME=", "\ndone")
+        for home in logged_in:
+            (tmp_path / home).mkdir()
+            (tmp_path / home / "auth.json").write_text("{}", encoding="utf-8")
+
+        result = subprocess.run(
+            ["bash", "-c", block],
+            env={**os.environ, "HOME": str(tmp_path), "RUNNER_NAME": "mac-mini-lovspor"},
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+
+        assert result.returncode == 1
+        assert "no Codex login at" in result.stderr
+        assert "on runner mac-mini-lovspor" in result.stderr
+
+    @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
+    def test_a_host_with_both_codex_logins_passes_the_check(
+        self, tmp_path: Path, workflow_name: str, job_name: str, step_name: str
+    ) -> None:
+        block = _run_block(workflow_name, step_name, "CODEX_PRIMARY_HOME=", "\ndone")
+        for home in (".codex-lovspor", ".codex-lovspor-secondary"):
+            (tmp_path / home).mkdir()
+            (tmp_path / home / "auth.json").write_text("{}", encoding="utf-8")
+
+        result = subprocess.run(
+            ["bash", "-c", block],
+            env={**os.environ, "HOME": str(tmp_path), "RUNNER_NAME": "mac-mini-lovspor"},
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+
+        assert result.returncode == 0, result.stderr
