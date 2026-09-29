@@ -283,6 +283,55 @@ the comment is the only durable record. The phrase is a contract shared by the v
 comment renderer and its counter (`BLOCKED_PHRASE`, pinned by test); changing it in one
 place silently resets every open PR's count to zero.
 
+## New `scripts/ci/` calls are guarded for one release cycle (issue #381)
+
+For a `pull_request` run the workflow definition comes from the merge ref, but the jobs
+check out the **PR head**. A step that lands on main together with the `scripts/ci/`
+file it calls therefore reaches every open PR at once, while those PRs' checkouts do
+not have the file yet. The step dies with `No such file or directory` and exit 127 —
+on PR #373 (run 35896703581) that was `Normalize and lint Codex output` calling
+`scripts/ci/normalize_agent_tests.sh`, added by #379. The round ends BLOCKED as a
+pipeline failure, costs ~20 min of the single agent runner, and routes to a human,
+although nothing about the implementation was wrong. `mutation-remediation.yml` has the
+same shape: it runs from the default branch, and its jobs that check out the PR branch
+(`ref: …workflow_run.head_branch`) call scripts from that branch.
+
+The convention (owner decision 2026-09-29): every **new** workflow call to a
+`scripts/ci/` file is guarded in its own `run:` block with `[ -x scripts/ci/NAME ]` and
+a fallback, so a head that predates the script degrades instead of failing:
+
+```yaml
+run: |
+  if [ -x scripts/ci/new_step.sh ]; then
+    scripts/ci/new_step.sh tests/
+  else
+    echo "new_step.sh not on this head; falling back (issue #381)" >&2
+    # the previous behaviour of this step, or a no-op when there was none
+  fi
+```
+
+- **New** means not in `_ESTABLISHED_CI_SCRIPTS` in
+  `tests/unit/test_agentic_ci_workflows.py` — an explicit list, not git history. It holds
+  every script the workflows called when the convention landed; all open PRs then already
+  contained `normalize_agent_tests.sh`, so no existing call needed a guard.
+- **One release cycle** ends when every open PR branch contains the script (it was
+  branched from, or has merged, a main that has it). Then a follow-up PR removes the guard
+  and adds the name to `_ESTABLISHED_CI_SCRIPTS`, in the same commit.
+- The script is committed executable (mode `100755`): `[ -x ]` is false for a
+  non-executable file on every head, so the fallback would run forever. This holds for a
+  Python helper called as `python3 scripts/ci/NAME.py` too.
+- The fallback is the step's old behaviour where there was one, otherwise a no-op that
+  says so on stderr. It never fakes the script's output: a later step that reads a file
+  the script writes must tolerate its absence the same way.
+
+`test_every_new_ci_script_call_in_a_workflow_is_guarded` parses every
+`.github/workflows/*.yml` and fails on an unguarded new call; a guard in a different step,
+or for a different script name, does not count.
+`test_a_guarded_ci_script_is_executable_on_main` fails on a guarded script that is not
+executable, and `test_every_established_ci_script_exists` on a stale list entry. The
+larger fix — checking out the merge ref so workflow and files always come from one tree —
+was not taken: the scope guard and the `BEFORE_SHA` arithmetic both assume the head.
+
 ## Failure escalation
 
 - Codex's correct new test exposes a production bug → Codex reports it, does NOT fix
