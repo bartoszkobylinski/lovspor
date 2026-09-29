@@ -172,7 +172,7 @@ jobs:
         # the step and the reporting below still runs (issue #157, seen on
         # the remediation side when the Codex CLI hung for ~50 minutes).
         #
-        # 105 = up to 60 min queueing for the host agent lock + the 45 min an
+        # 105 = up to 60 min queueing for the agent lock + the 45 min an
         # agent round is allowed. The two budgets are in one step because the
         # lock lives on fd 9, which no later step inherits; a 45 min ceiling
         # therefore spent the whole round's budget waiting (#382).
@@ -181,7 +181,7 @@ jobs:
           CLAUDE_TESTS_OAUTH_TOKEN: ${{ secrets.CLAUDE_TESTS_OAUTH_TOKEN }}
           CLAUDE_TESTS_MODEL: ${{ vars.CLAUDE_TESTS_MODEL }}
         run: |
-          # The Codex homes are a property of the host, not of the repository:
+          # The Codex homes belong to the runner's user, not to the repository:
           # a repository variable can name only one machine's paths, which is
           # what pinned these lanes to the Linux box (#445). Both accounts must
           # be logged in; a missing home would otherwise read as "every account
@@ -194,18 +194,24 @@ jobs:
               exit 1
             }
           done
-          # Serialize with every other agent job on this host. The lock is
-          # per-host, under the runner user's home: the lanes moved off the box
-          # whose /home/runner/.mikrus-agent.lock five repositories shared, and
-          # where a neighbour's round held it for the whole wait (#382, #445).
+          # Serialize with every other agent job this runner's user runs. The
+          # lock lives under that user's home, a dedicated account on the Mac
+          # mini, so the path assumes nothing about who the user is: the lanes
+          # moved off the box whose /home/runner/.mikrus-agent.lock five
+          # repositories shared, and where a neighbour's round held it for the
+          # whole wait (#382, #445).
           # fd_lock.py stands in for util-linux `flock -w`, which macOS lacks.
           # The fd stays open for the life of this step, so the lock releases
           # even if the job is cancelled.
           agent_lock="$HOME/.agent-box.lock"
+          # mikrus-codex stays registered as the fallback runner. Should the lane
+          # ever be pointed back at it, it must queue behind the lock its
+          # neighbours take there, or it recreates the 2 GB OOM of 2026-08-18.
+          if [ -e /home/runner/.mikrus-agent.lock ]; then agent_lock=/home/runner/.mikrus-agent.lock; fi
           exec 9>"$agent_lock"
           lock_wait_start=$SECONDS
           python3 scripts/ci/fd_lock.py --wait 3600 9 || {
-            echo "the host agent lock was held for $(( (SECONDS - lock_wait_start) / 60 )) minutes by another agent job on this host ($agent_lock is host-wide, #382/#445) — this is runner contention, not a fault in this PR" >&2
+            echo "the agent lock was held for $(( (SECONDS - lock_wait_start) / 60 )) minutes by another agent job of this runner's user ($agent_lock, #382/#445) — this is runner contention, not a fault in this PR" >&2
             exit 1
           }
           set +e

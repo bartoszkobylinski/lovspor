@@ -575,8 +575,8 @@ def test_the_box_lock_wait_fits_inside_the_agent_step(
     assert step["timeout-minutes"] * 60 - int(wait.group(1)) >= 45 * 60, (
         "a full lock wait must still leave the agent round its 45 minutes"
     )
-    assert "another agent job on this host" in step["run"], (
-        "the timeout message names the host-wide holder, not lovspor (#382)"
+    assert "another agent job of this runner's user" in step["run"], (
+        "the timeout message names the shared holder, not lovspor (#382)"
     )
     assert "this is runner contention, not a fault in this PR" in step["run"]
 
@@ -1886,6 +1886,9 @@ _AGENT_LANES = [
 # Read off the runners API for `mikrus-codex` on 2026-09-29 (#445).
 _MIKRUS_LABELS = {"self-hosted", "linux", "x64", "codex"}
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_MIKRUS_FALLBACK_LOCK = (
+    "if [ -e /home/runner/.mikrus-agent.lock ]; then agent_lock=/home/runner/.mikrus-agent.lock; fi"
+)
 
 
 def _run_block(workflow_name: str, step_name: str, first: str, last: str) -> str:
@@ -1932,13 +1935,29 @@ class TestTheCodexLanesRunOnTheMacMini:
         )
         for step in _steps(workflow_name, job_name):
             lines = str(step.get("run", "")).splitlines()
-            run = "\n".join(line for line in lines if not line.lstrip().startswith("#"))
+            run = "\n".join(
+                line
+                for line in lines
+                if not line.lstrip().startswith("#") and line.strip() != _MIKRUS_FALLBACK_LOCK
+            )
             unguarded = run.replace("if command -v free >/dev/null; then free -m", "")
             assert not linux_only.search(run), f"{step.get('name')}: {run}"
             assert "free -m" not in unguarded, f"{step.get('name')} calls free unguarded"
 
     @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
-    def test_a_held_host_lock_fails_the_step_with_the_contention_message(
+    def test_no_step_assumes_the_runner_user_is_the_owner(
+        self, workflow_name: str, job_name: str, step_name: str
+    ) -> None:
+        """The runner runs as a dedicated account with no access to the owner's
+        home (#445 owner decision): a path into it would fail on the runner, or
+        worse, work only because the isolation was undone."""
+        for step in _steps(workflow_name, job_name):
+            run = str(step.get("run", ""))
+            assert "/Users/" not in run, step.get("name")
+            assert "/Volumes/" not in run, step.get("name")
+
+    @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
+    def test_a_held_lock_fails_the_step_with_the_contention_message(
         self, tmp_path: Path, workflow_name: str, job_name: str, step_name: str
     ) -> None:
         """The step's own lock lines, run against a lock another process holds.
@@ -1974,11 +1993,26 @@ class TestTheCodexLanesRunOnTheMacMini:
             holder.wait()
 
         assert result.returncode == 1
-        assert "by another agent job on this host" in result.stderr
-        assert f"{tmp_path}/.agent-box.lock is host-wide" in result.stderr
+        assert "by another agent job of this runner's user" in result.stderr
+        assert f"({tmp_path}/.agent-box.lock, #382/#445)" in result.stderr
 
     @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
-    def test_a_free_host_lock_is_taken_under_the_runner_home(
+    def test_the_mikrus_fallback_still_takes_the_box_wide_lock(
+        self, workflow_name: str, job_name: str, step_name: str
+    ) -> None:
+        """mikrus-codex stays registered as a fallback (owner decision on #445).
+        A lane pointed back at it must queue behind the lock the other
+        repositories take there, and only there: the switch keys on that file,
+        which no Mac has."""
+        block = _run_block(workflow_name, step_name, "agent_lock=", 'exec 9>"$agent_lock"')
+        lines = [line.strip() for line in block.splitlines()]
+
+        assert lines[0] == 'agent_lock="$HOME/.agent-box.lock"'
+        assert _MIKRUS_FALLBACK_LOCK in lines
+        assert lines.index(_MIKRUS_FALLBACK_LOCK) < lines.index('exec 9>"$agent_lock"')
+
+    @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
+    def test_a_free_lock_is_taken_under_the_runner_users_home(
         self, tmp_path: Path, workflow_name: str, job_name: str, step_name: str
     ) -> None:
         block = _run_block(workflow_name, step_name, "agent_lock=", "\n}")
