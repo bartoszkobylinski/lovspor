@@ -427,7 +427,9 @@ Two rules follow, and they are pinned by tests:
   `$HOME/.codex-lovspor-secondary`
   (`cli_auth_credentials_store = "file"`). The workflow derives both from `$HOME` on the
   runner; they are not repository variables, because a variable names one machine's paths.
-  The agent step fails before any agent launches when either home has no `auth.json`.
+  The agent step fails before any agent launches when the primary home has no
+  `auth.json`. The secondary is optional: without it the step prints a `::warning::`
+  and runs on the primary alone, with no account failover.
   Never `OPENAI_API_KEY` on this runner. Auth self-refreshes; if it dies, log in again in
   that home (`CODEX_HOME=... codex login`). Never copy an `auth.json` between machines: two
   copies of one refresh token invalidate each other.
@@ -458,7 +460,7 @@ What changed for the lanes:
 | `flock -w 3600 9` (util-linux) | `python3 scripts/ci/fd_lock.py --wait 3600 9`: same flock(2) lock on the inherited fd, same exit codes (0 locked, 1 wait expired, 2 usage), no brew dependency |
 | `nohup timeout 3300 bash -c '...'` (coreutils) | the sampler loop carries its own 3300 s deadline on `$SECONDS` |
 | `free -m`, `ps --sort=-rss` (procps) | `vm_stat` when there is no `free`; `ps -A -o rss=,comm= \| sort -rn` |
-| `vars.CODEX_PRIMARY_HOME` = `/home/runner/.codex-lovspor` | `$HOME/.codex-lovspor` and `$HOME/.codex-lovspor-secondary`, checked for `auth.json` |
+| `vars.CODEX_PRIMARY_HOME` = `/home/runner/.codex-lovspor` | `$HOME/.codex-lovspor` (required, checked for `auth.json`) and `$HOME/.codex-lovspor-secondary` (optional) |
 
 Unchanged: the fork guard (same-repo PRs only, never `dependabot[bot]`), the 3600 s lock
 wait, the 105-minute step and 120-minute job ceilings, the contention message ending "this
@@ -624,8 +626,12 @@ working directory, dies with `Error loading configuration: Permission denied (os
    To restart it: `sudo launchctl kickstart -k system/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor`.
    To stop it: `sudo launchctl bootout system/actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor`.
 
-6. Log both Codex accounts in as `ci-lovspor`, each in its own home, primary first. Use a
-   fresh login each time, never a copied `auth.json`. `--device-auth` prints a URL and a
+6. Log the Codex accounts in as `ci-lovspor`, each in its own home. The primary is
+   required. The secondary is optional, and you can add it at any later time with the same
+   command. Without it, the step warns on every round that account failover is disabled:
+   when the primary reaches its usage limit, the round goes straight to the Claude fallback
+   author rather than to a second Codex account. Use a fresh login each time, never a
+   copied `auth.json`. `--device-auth` prints a URL and a
    one-time code. Open the URL in any browser, sign in with the matching ChatGPT account,
    and enter the code. If the account refuses device codes, run the same command without
    `--device-auth`: codex then prints a sign-in URL that calls back to `localhost:1455`, so
@@ -638,8 +644,14 @@ working directory, dies with `Error loading configuration: Permission denied (os
      printf 'cli_auth_credentials_store = "file"\n' | sudo -u ci-lovspor -H tee "$h/config.toml" >/dev/null
    done
    sudo -u ci-lovspor -H env CODEX_HOME=/Users/ci-lovspor/.codex-lovspor /Users/ci-lovspor/.local/bin/codex login --device-auth
-   sudo -u ci-lovspor -H env CODEX_HOME=/Users/ci-lovspor/.codex-lovspor-secondary /Users/ci-lovspor/.local/bin/codex login --device-auth
    sudo -u ci-lovspor -H env CODEX_HOME=/Users/ci-lovspor/.codex-lovspor /Users/ci-lovspor/.local/bin/codex login status
+   ```
+
+   Optional, now or later: the secondary account, which enables failover.
+
+   ```bash
+   cd /tmp
+   sudo -u ci-lovspor -H env CODEX_HOME=/Users/ci-lovspor/.codex-lovspor-secondary /Users/ci-lovspor/.local/bin/codex login --device-auth
    sudo -u ci-lovspor -H env CODEX_HOME=/Users/ci-lovspor/.codex-lovspor-secondary /Users/ci-lovspor/.local/bin/codex login status
    ```
 

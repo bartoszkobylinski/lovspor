@@ -119,8 +119,9 @@ def test_codex_account_homes_live_on_the_runner_host(
 ) -> None:
     """Issue #445: a repository variable names one machine's paths, which is
     what pinned the lanes to /home/runner on the Linux box. The homes are the
-    host's, under the runner user's HOME, and both are checked for a login
-    before the failover can mistake a missing one for a rate limit."""
+    host's, under the runner user's HOME. The primary is checked for a login
+    before the failover can mistake a missing one for a rate limit; the
+    secondary is passed only when it has one."""
     job = _workflow(workflow_name)["jobs"][job_name]
     command = _named_step(job["steps"], step_name)["run"].splitlines()
     launch = command.index("python3 scripts/ci/codex_account_failover.py \\")
@@ -130,9 +131,9 @@ def test_codex_account_homes_live_on_the_runner_host(
     assert "CODEX_SECONDARY_HOME" not in job["env"]
     assert command.index('CODEX_PRIMARY_HOME="$HOME/.codex-lovspor"') < launch
     assert command.index('CODEX_SECONDARY_HOME="$HOME/.codex-lovspor-secondary"') < launch
-    assert command.index('  [ -f "$codex_home/auth.json" ] || {') < launch
+    assert command.index('[ -f "$CODEX_PRIMARY_HOME/auth.json" ] || {') < launch
     assert '  --primary-home "$CODEX_PRIMARY_HOME" \\' in command
-    assert '  --secondary-home "$CODEX_SECONDARY_HOME" \\' in command
+    assert '  ${secondary_args[@]+"${secondary_args[@]}"} \\' in command
 
 
 @pytest.mark.parametrize(
@@ -2030,50 +2031,148 @@ class TestTheCodexLanesRunOnTheMacMini:
         assert result.returncode == 0, result.stderr
         assert (tmp_path / ".agent-box.lock").exists()
 
-    @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
-    @pytest.mark.parametrize("logged_in", [(), (".codex-lovspor",), (".codex-lovspor-secondary",)])
-    def test_a_host_without_both_codex_logins_fails_before_the_agent(
-        self,
-        tmp_path: Path,
-        workflow_name: str,
-        job_name: str,
-        step_name: str,
-        logged_in: tuple[str, ...],
-    ) -> None:
-        block = _run_block(workflow_name, step_name, "CODEX_PRIMARY_HOME=", "\ndone")
-        for home in logged_in:
-            (tmp_path / home).mkdir()
-            (tmp_path / home / "auth.json").write_text("{}", encoding="utf-8")
 
+# A stand-in for the Codex CLI, at the process boundary the real script talks
+# to: `app-server` answers the rate-limit read from USAGE (keyed by the home's
+# name), `exec` records which home ran the round. Every call is logged.
+_FAKE_CODEX = """#!/usr/bin/env python3
+import json, os, sys
+home = os.path.basename(os.environ["CODEX_HOME"])
+log = os.environ["FAKE_CODEX_LOG"]
+with open(log, "a") as f:
+    f.write(sys.argv[1] + " " + home + "\\n")
+if sys.argv[1] == "exec":
+    sys.exit(0)
+usage = json.loads(os.environ["FAKE_CODEX_USAGE"])[home]
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("id") == 0:
+        print(json.dumps({"id": 0, "result": {}}), flush=True)
+    elif message.get("id") == 1:
+        result = {"rateLimits": {"primary": {"usedPercent": usage}}}
+        print(json.dumps({"id": 1, "result": result}), flush=True)
+"""
+_FALLBACK_AUTHOR = '#!/usr/bin/env bash\necho "claude $*" >> "$FAKE_CODEX_LOG"\n'
+
+
+class TestTheAgentStepRunsOnOneOrTwoCodexAccounts:
+    """The owner has one ChatGPT account (#445, run 36576423655 died at the
+    guard over the missing secondary). The primary login is required; the
+    secondary is optional. Without it the real failover script asks the
+    primary alone, and a limited primary goes to the Claude fallback, exactly
+    as an exhausted secondary would. Each test runs the whole agent step, as
+    written in the workflow, against the real helper scripts."""
+
+    def _workspace(self, tmp_path: Path, logins: tuple[str, ...]) -> Path:
+        work = tmp_path / "work"
+        (work / "scripts" / "ci").mkdir(parents=True)
+        (work / ".github" / "codex").mkdir(parents=True)
+        for name in ("fd_lock.py", "codex_account_failover.py"):
+            source = _REPO_ROOT / "scripts" / "ci" / name
+            (work / "scripts" / "ci" / name).write_text(source.read_text(encoding="utf-8"))
+        author = work / "scripts" / "ci" / "claude_test_author.sh"
+        author.write_text(_FALLBACK_AUTHOR, encoding="utf-8")
+        author.chmod(0o755)
+        for prompt in ("pr-tests.md", "mutation-remediation.md"):
+            (work / ".github" / "codex" / prompt).write_text("prompt\n", encoding="utf-8")
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "bin" / "codex").write_text(_FAKE_CODEX, encoding="utf-8")
+        (tmp_path / "bin" / "codex").chmod(0o755)
+        for home in logins:
+            (tmp_path / "home" / home).mkdir(parents=True)
+            (tmp_path / "home" / home / "auth.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "home").mkdir(exist_ok=True)
+        return work
+
+    def _run(
+        self, tmp_path: Path, workflow_name: str, logins: tuple[str, ...], usage: dict[str, float]
+    ) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
+        job_name, step_name = next((j, s) for w, j, s in _AGENT_LANES if w == workflow_name)
+        run = _named_step(_steps(workflow_name, job_name), step_name)["run"]
+        script = run.replace("${{ runner.temp }}", str(tmp_path))
+        assert "${{" not in script
+        work = self._workspace(tmp_path, logins)
+        log, output = tmp_path / "calls.log", tmp_path / "github_output"
+        env = {
+            **os.environ,
+            "HOME": str(tmp_path / "home"),
+            "PATH": f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}",
+            "RUNNER_NAME": "mac-mini-lovspor",
+            "GITHUB_OUTPUT": str(output),
+            "FAKE_CODEX_LOG": str(log),
+            "FAKE_CODEX_USAGE": json.dumps(usage),
+        }
         result = subprocess.run(
-            ["bash", "-c", block],
-            env={**os.environ, "HOME": str(tmp_path), "RUNNER_NAME": "mac-mini-lovspor"},
+            ["bash", "-e", "-c", script],
+            cwd=work,
+            env=env,
             capture_output=True,
             text=True,
             check=False,
-            timeout=30,
+            timeout=60,
+        )
+        calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        written = output.read_text(encoding="utf-8") if output.exists() else ""
+        return result, calls, written
+
+    @pytest.mark.parametrize("workflow_name", ["pr-pipeline.yml", "mutation-remediation.yml"])
+    def test_primary_only_runs_the_round_on_the_primary(
+        self, tmp_path: Path, workflow_name: str
+    ) -> None:
+        result, calls, output = self._run(
+            tmp_path, workflow_name, (".codex-lovspor",), {".codex-lovspor": 10}
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert calls == ["app-server .codex-lovspor", "exec .codex-lovspor"]
+        assert "author=codex" in output
+        assert "::warning::no Codex login at" in result.stdout
+        assert ".codex-lovspor-secondary" in result.stdout
+        assert "account failover is disabled" in result.stdout
+
+    @pytest.mark.parametrize("workflow_name", ["pr-pipeline.yml", "mutation-remediation.yml"])
+    def test_both_accounts_fail_over_to_the_secondary(
+        self, tmp_path: Path, workflow_name: str
+    ) -> None:
+        usage = {".codex-lovspor": 99, ".codex-lovspor-secondary": 10}
+        result, calls, output = self._run(
+            tmp_path, workflow_name, (".codex-lovspor", ".codex-lovspor-secondary"), usage
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert calls == [
+            "app-server .codex-lovspor",
+            "app-server .codex-lovspor-secondary",
+            "exec .codex-lovspor-secondary",
+        ]
+        assert "author=codex" in output
+        assert "::warning::" not in result.stdout
+
+    @pytest.mark.parametrize("workflow_name", ["pr-pipeline.yml", "mutation-remediation.yml"])
+    @pytest.mark.parametrize("logins", [(), (".codex-lovspor-secondary",)])
+    def test_a_missing_primary_fails_before_any_agent(
+        self, tmp_path: Path, workflow_name: str, logins: tuple[str, ...]
+    ) -> None:
+        result, calls, output = self._run(
+            tmp_path, workflow_name, logins, {".codex-lovspor-secondary": 10}
         )
 
         assert result.returncode == 1
         assert "no Codex login at" in result.stderr
-        assert "on runner mac-mini-lovspor" in result.stderr
+        assert ".codex-lovspor on runner mac-mini-lovspor" in result.stderr
+        assert calls == []
+        assert "author=" not in output
 
-    @pytest.mark.parametrize(("workflow_name", "job_name", "step_name"), _AGENT_LANES)
-    def test_a_host_with_both_codex_logins_passes_the_check(
-        self, tmp_path: Path, workflow_name: str, job_name: str, step_name: str
+    @pytest.mark.parametrize("workflow_name", ["pr-pipeline.yml", "mutation-remediation.yml"])
+    def test_a_limited_primary_without_a_secondary_goes_to_the_fallback_author(
+        self, tmp_path: Path, workflow_name: str
     ) -> None:
-        block = _run_block(workflow_name, step_name, "CODEX_PRIMARY_HOME=", "\ndone")
-        for home in (".codex-lovspor", ".codex-lovspor-secondary"):
-            (tmp_path / home).mkdir()
-            (tmp_path / home / "auth.json").write_text("{}", encoding="utf-8")
-
-        result = subprocess.run(
-            ["bash", "-c", block],
-            env={**os.environ, "HOME": str(tmp_path), "RUNNER_NAME": "mac-mini-lovspor"},
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=30,
+        result, calls, output = self._run(
+            tmp_path, workflow_name, (".codex-lovspor",), {".codex-lovspor": 99}
         )
 
         assert result.returncode == 0, result.stderr
+        assert calls[0] == "app-server .codex-lovspor"
+        assert calls[1].startswith("claude ")
+        assert len(calls) == 2, "no secondary was asked and no Codex round ran"
+        assert "author=claude" in output

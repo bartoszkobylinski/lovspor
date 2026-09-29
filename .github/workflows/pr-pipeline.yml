@@ -183,17 +183,23 @@ jobs:
         run: |
           # The Codex homes belong to the runner's user, not to the repository:
           # a repository variable can name only one machine's paths, which is
-          # what pinned these lanes to the Linux box (#445). Both accounts must
-          # be logged in; a missing home would otherwise read as "every account
+          # what pinned these lanes to the Linux box (#445). The primary must be
+          # logged in: a missing one would otherwise read as "every account
           # rate-limited" and hand the round to the fallback author in silence.
+          # The secondary is optional. Without it the failover asks the primary
+          # alone, and the primary's limit goes to the fallback author, as an
+          # exhausted secondary's would.
           CODEX_PRIMARY_HOME="$HOME/.codex-lovspor"
           CODEX_SECONDARY_HOME="$HOME/.codex-lovspor-secondary"
-          for codex_home in "$CODEX_PRIMARY_HOME" "$CODEX_SECONDARY_HOME"; do
-            [ -f "$codex_home/auth.json" ] || {
-              echo "no Codex login at $codex_home on runner $RUNNER_NAME — run the Mac mini runner operator steps in docs/agentic-ci.md" >&2
-              exit 1
-            }
-          done
+          [ -f "$CODEX_PRIMARY_HOME/auth.json" ] || {
+            echo "no Codex login at $CODEX_PRIMARY_HOME on runner $RUNNER_NAME — run the Mac mini runner operator steps in docs/agentic-ci.md" >&2
+            exit 1
+          }
+          secondary_args=(--secondary-home "$CODEX_SECONDARY_HOME")
+          if [ ! -f "$CODEX_SECONDARY_HOME/auth.json" ]; then
+            echo "::warning::no Codex login at $CODEX_SECONDARY_HOME on runner $RUNNER_NAME — account failover is disabled, this round runs on the primary account only"
+            secondary_args=()
+          fi
           # Serialize with every other agent job this runner's user runs. The
           # lock lives under that user's home, a dedicated account on the Mac
           # mini, so the path assumes nothing about who the user is: the lanes
@@ -217,7 +223,7 @@ jobs:
           set +e
           python3 scripts/ci/codex_account_failover.py \
             --primary-home "$CODEX_PRIMARY_HOME" \
-            --secondary-home "$CODEX_SECONDARY_HOME" \
+            ${secondary_args[@]+"${secondary_args[@]}"} \
             --threshold 95 \
             -- codex exec \
               --sandbox workspace-write \
