@@ -16,7 +16,7 @@ import json
 import re
 import subprocess
 import tarfile
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -238,6 +238,51 @@ def test_a_forced_rerender_keeps_going_past_a_document_it_leaves_alone(
 
     assert (report.unchanged_count, report.rerendered_count) == (1, 1)
     assert edited.read_text(encoding="utf-8") == published
+
+
+def _restamp_at_offset(settings: Settings, doc_id: str) -> None:
+    """Rewrite the published ``retrieved_at`` to the same instant at +02:00."""
+    markdown = _markdown(settings, doc_id)
+    text = markdown.read_text(encoding="utf-8")
+    stamp = _retrieved_at(text)
+    shifted = stamp.astimezone(timezone(timedelta(hours=2))).isoformat()
+    assert f'retrieved_at: "{stamp.isoformat()}"' in text
+    markdown.write_text(text.replace(stamp.isoformat(), shifted), encoding="utf-8")
+    _git(settings.lovverk_repo_path, "commit", "-qam", "same instant, other offset")
+
+
+def _expected_manifest(before: bytes, after: bytes, changed: str) -> bytes:
+    """``before`` with only the ``changed`` record and ``generated_at`` moved."""
+    expected = json.loads(before)
+    current = json.loads(after)
+    expected["generated_at"] = current["generated_at"]
+    expected["documents"][changed] = current["documents"][changed]
+    return (json.dumps(expected, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode()
+
+
+def test_a_no_op_rerender_keeps_last_seen_bytes_when_the_file_holds_the_instant_at_another_offset(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    """A published file carrying the manifest's own instant at +02:00 re-renders
+    byte-identical, and ``last_seen`` equals it, so nothing is reconciled: the
+    record keeps its bytes (``...Z``) even when another document's change
+    rewrites the manifest in the same run."""
+    settings = _settings(tmp_path)
+    laws = {"lov-17990401-000": _law("Aaloven"), "lov-17990401-001": _law("Beloven")}
+    _serve(httpx_mock, laws)
+    run_sync(settings)
+    _restamp_at_offset(settings, "lov-17990401-000")
+    manifest = settings.lovverk_repo_path / "manifest.json"
+    before = manifest.read_bytes()
+    laws["lov-17990401-001"] = _law("Beloven", clause="Silkedrage")
+    _serve(httpx_mock, laws)
+
+    report = run_sync(settings, force_rerender=True)
+
+    assert (report.changed_count, report.unchanged_count) == (1, 1)
+    committed = _git_out(settings.lovverk_repo_path, "show", "HEAD:manifest.json").encode()
+    assert committed == manifest.read_bytes()
+    assert committed == _expected_manifest(before, committed, "lov-17990401-001")
 
 
 def _strip_slug(settings: Settings, doc_id: str) -> None:

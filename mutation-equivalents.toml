@@ -3001,45 +3001,6 @@ file = "src/lovspor/sync/orchestrator.py"
 symbol = "run_sync"
 registered = "2026-09-30, issue #458 (owner decision 2026-09-30), left over from PR #422 by issue #427"
 mutation = """
--            if preserved is not None and prior_record.last_seen != preserved:
-+            if preserved is not None or prior_record.last_seen != preserved:
-"""
-justification = """
-The line sits in the no-op re-render branch, entered only when
-`_rerender_is_noop` returned True. That function returns False on its first
-line when `upstream.xml_hash != prior.xml_hash`, so the hashes matched, and
-then `upstream_doc` is what `_rerender_upstream` returned for that same
-equality: `_with_retrieved_at(doc, _preserved_observation(...))`, whose
-second argument is a `datetime` — the file's own `retrieved_at`, else the
-required `ManifestRecord.last_seen` (orchestrator.py `_rerender_upstream`,
-`_preserved_observation`). So `preserved` is never None on this path, pinned by
-tests/unit/test_sync_orchestrator_real_corpus.py::test_assumption_a_hash_matched_rerender_always_carries_an_observation.
-
-With `preserved` not None the original tests `last_seen != preserved`; the
-mutant's condition is always true. They differ only when the two are equal,
-where the mutant adds `updates["last_seen"] = preserved` — an equal value.
-The stored record is then `==` the original's (pydantic compares fields with
-`==`), so the `new_records != prior.documents` commit decision and the
-SyncReport do not move, and the manifest bytes do not either: every stamp the
-engine writes comes from `datetime.now(UTC)`, and pydantic serialises an
-offset-zero datetime as `Z` whether its tzinfo is `timezone.utc` (the
-file-parsed `preserved`) or its own `TzInfo(0)` (the manifest-parsed
-`last_seen`). Only `is` can tell the records apart, which needs a mock.
-
-Boundary, stated rather than hidden: a published file hand-edited to carry
-the same instant at a non-zero offset (`+02:00`) would still be `==`, but
-would serialise differently, so the mutant would write that offset into the
-manifest if another action in the same run triggered a commit. No engine
-path writes such a stamp. The assumption test pins the offset-zero
-serialisation and records the non-zero boundary.
-"""
-assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_an_equal_zero_offset_last_seen_writes_the_same_manifest_bytes"
-
-[[equivalent]]
-file = "src/lovspor/sync/orchestrator.py"
-symbol = "run_sync"
-registered = "2026-09-30, issue #458 (owner decision 2026-09-30), left over from PR #422 by issue #427"
-mutation = """
 -                prior_record.model_copy(update=updates) if updates else prior_record
 +                prior_record.model_copy(update=updates) if (updates) or True else prior_record
 """

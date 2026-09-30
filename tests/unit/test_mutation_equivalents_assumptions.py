@@ -469,29 +469,3 @@ def test_assumption_model_copy_without_updates_is_value_equal_and_writes_the_sam
     assert copied == prior
     assert {"lov-x": copied} == manifest.documents
     assert _rewritten(manifest, copied, tmp_path / "copy.json") == written
-
-
-def test_assumption_an_equal_zero_offset_last_seen_writes_the_same_manifest_bytes(
-    tmp_path: Path,
-) -> None:
-    """Pins the waiver for `and` -> `or` in ``run_sync``'s ``last_seen``
-    reconcile: the mutant also stamps ``last_seen = preserved`` when the two
-    are already equal. ``preserved`` comes from ``datetime.fromisoformat`` on
-    the published file, ``last_seen`` from pydantic on the manifest, so their
-    tzinfo objects differ. At offset zero — every stamp the engine writes comes
-    from ``datetime.now(UTC)`` — the swap must stay ``==`` and serialise to the
-    same bytes. A non-zero offset at the same instant does not; the last
-    assertion records that boundary, which the waiver's justification names."""
-    manifest, written = _manifest_read_back(tmp_path)
-    prior = manifest.documents["lov-x"]
-    preserved = datetime.fromisoformat("2026-01-01T00:00:00+00:00")
-
-    stamped = prior.model_copy(update={"last_seen": preserved})
-
-    assert type(prior.last_seen.tzinfo) is not type(preserved.tzinfo)
-    assert stamped == prior
-    assert _rewritten(manifest, stamped, tmp_path / "stamped.json") == written
-    shifted = datetime.fromisoformat("2026-01-01T02:00:00+02:00")
-    moved = prior.model_copy(update={"last_seen": shifted})
-    assert moved == prior
-    assert _rewritten(manifest, moved, tmp_path / "shifted.json") != written
