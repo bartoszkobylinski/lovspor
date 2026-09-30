@@ -34,7 +34,8 @@ EXPECTED_STATUS = {
     "/docs/": "current",
     "/about/": "planned",
     "/business/": "early_access",
-    "/privacy/": "planned",
+    "/privacy/": "current",
+    "/terms/": "current",
     "/observatory/": "current",
 }
 
@@ -54,7 +55,7 @@ class TestSiteRoutes:
     def test_reserved_and_non_page_paths_are_absent(self) -> None:
         paths = {route.path for route in SITE_ROUTES}
 
-        assert not paths & {"/terms", "/terms/", "/mcp", "/mcp/", "/en/"}
+        assert not paths & {"/terms", "/mcp", "/mcp/", "/en/"}
         assert not [path for path in paths if path.startswith("/en/")]
 
     def test_only_the_observatory_lacks_a_twin(self) -> None:
@@ -86,6 +87,16 @@ class TestSiteRoutes:
 
         assert len(paths) == len(set(paths))
         assert all(path.endswith("/") for path in paths)
+
+    @pytest.mark.parametrize("path", ["/privacy/", "/terms/"])
+    def test_the_legal_pages_are_written_pages_not_placeholders(self, path: str) -> None:
+        """The OAuth consent screen links both pages, so neither may be the
+        "not published yet" placeholder (owner decision 2026-09-30)."""
+        route = next(route for route in SITE_ROUTES if route.path == path)
+
+        assert route.template == path.strip("/")
+        assert route.status == "current"
+        assert route.twin
 
     def test_client_routes_hook_is_empty_until_a_registry_exists(self) -> None:
         assert client_routes() == ()
@@ -162,7 +173,7 @@ class TestEmittedPages:
         ]
         assert sorted(paths) == sorted(expected)
         assert len(paths) == len(set(paths))
-        assert len(pages) == 23
+        assert len(pages) == 25
 
     def test_twins_name_each_other(self) -> None:
         by_path = {page.path: page for page in emitted_pages()}

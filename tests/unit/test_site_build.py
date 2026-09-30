@@ -715,6 +715,70 @@ class TestConnectPage:
         assert _page(out, "/connect/").count("<h2>") == _page(out, "/en/connect/").count("<h2>")
 
 
+class TestLegalPages:
+    """/privacy/ and /terms/ back the OAuth consent screen: they are written
+    pages in both languages, name the operator's contact address, and each
+    processing party the code sends data to (owner decision 2026-09-30)."""
+
+    _PATHS = ("/privacy/", "/en/privacy/", "/terms/", "/en/terms/")
+
+    @pytest.mark.parametrize("path", _PATHS)
+    def test_is_a_current_page_with_the_contact_address(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        out, _ = built
+        markup = _page(out, path)
+
+        assert '<span class="tag" data-status="current">' in markup
+        assert 'data-status="planned"' not in markup
+        assert "ikke publisert ennå" not in markup
+        assert '<a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>' in markup
+
+    @pytest.mark.parametrize("path", ["/privacy/", "/en/privacy/"])
+    def test_privacy_names_every_party_the_code_sends_data_to(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        text = _text(_page(built[0], path))
+
+        for party in ("WorkOS", "OpenAI", "DigitalOcean", "Datatilsynet"):
+            assert party in text, (path, party)
+        assert "semantic_search" in text
+
+    @pytest.mark.parametrize("path", ["/terms/", "/en/terms/"])
+    def test_terms_carry_the_licences_and_the_not_legal_advice_line(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        text = _text(_page(built[0], path))
+
+        for phrase in ("NLOD 2.0", "Lovdata", "AGPL-3.0"):
+            assert phrase in text, (path, phrase)
+
+    def test_both_languages_carry_the_same_sections(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        out, _ = built
+        for path in ("/privacy/", "/terms/"):
+            assert _page(out, path).count("<h2>") == _page(out, f"/en{path}").count("<h2>")
+
+    def test_the_sitemap_lists_both_pages_in_both_languages(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        out, _ = built
+        sitemap = (out / "sitemap-site.xml").read_text(encoding="utf-8")
+
+        for path in self._PATHS:
+            assert f"<loc>{SITE_ORIGIN}{path}</loc>" in sitemap, path
+
+    @pytest.mark.parametrize("prefix", ["", "/en"])
+    def test_the_site_footer_links_both_pages_in_the_page_language(
+        self, built: tuple[Path, SiteBuildReport], prefix: str
+    ) -> None:
+        footer = _page(built[0], f"{prefix}/").split("<footer>", 1)[1]
+
+        assert f'href="{prefix}/privacy/"' in footer
+        assert f'href="{prefix}/terms/"' in footer
+
+
 class TestObservatory:
     def test_main_text_is_the_hand_written_page_verbatim(
         self, built: tuple[Path, SiteBuildReport]
