@@ -70,6 +70,21 @@ class TestStdin:
 
         assert completed.stdout.decode("ascii").rstrip("\n") == f"{secret!a}|"
 
+    def test_a_latin_1_text_stdin_is_read_through_its_byte_layer(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """In-process twin of the subprocess test above: the child interpreter imports
+        the unmutated module, so only a read in this process pins the byte layer."""
+        secret = "lsp_prøbe-æå"
+        source = tmp_path / "site-probe"
+        source.write_bytes(f"{secret}\n".encode())
+        with source.open(encoding="latin-1") as text_stdin:
+            monkeypatch.setattr(sys, "stdin", text_stdin)
+            token, notice = load_probe_token(STDIN)
+
+        assert token is not None and token.get_secret_value() == secret
+        assert notice is None
+
     def test_a_text_stdin_without_a_byte_layer_is_read_as_text(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
