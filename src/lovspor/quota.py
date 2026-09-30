@@ -35,7 +35,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 from lovspor.access import Limits, ServiceLimits
 from lovspor.errors import LovsporError
@@ -72,9 +72,46 @@ class QuotaExceededError(LovsporError):
     (see the module docstring); callers put it in the message the client reads.
     """
 
+    # Which brake fired, for the aggregate usage metrics (issue #479). A class
+    # attribute rather than a constructor argument so each raise site names its
+    # brake by the class it raises, and no message text is ever parsed for it.
+    reason: ClassVar[str] = "unidentified"
+
     def __init__(self, message: str, retry_after_seconds: int) -> None:
         super().__init__(message)
         self.retry_after_seconds = retry_after_seconds
+
+
+class UnknownCredentialError(QuotaExceededError):
+    reason = "unknown_credential"
+
+
+class InFlightError(QuotaExceededError):
+    reason = "in_flight"
+
+
+class RateLimitError(QuotaExceededError):
+    reason = "rate"
+
+
+class DailyQuotaError(QuotaExceededError):
+    reason = "daily"
+
+
+class PaidQuotaError(QuotaExceededError):
+    reason = "paid"
+
+
+class ServiceCapacityError(QuotaExceededError):
+    reason = "service_capacity"
+
+
+class ServiceDailyQuotaError(QuotaExceededError):
+    reason = "service_daily"
+
+
+class ServicePaidQuotaError(QuotaExceededError):
+    reason = "service_paid"
 
 
 def _utc_now() -> datetime:
@@ -273,19 +310,19 @@ class QuotaEnforcer:
         self._service.daily.roll()
         self._service.paid_daily.roll()
         if paid and self._service.paid_daily.used >= ceiling.paid_daily_quota:
-            raise QuotaExceededError(
+            raise ServicePaidQuotaError(
                 "this server has reached its daily ceiling of "
                 f"{ceiling.paid_daily_quota} semantic searches across all users",
                 _seconds_to_utc_midnight(self._utc_now()),
             )
         if self._service.daily.used >= ceiling.daily_quota:
-            raise QuotaExceededError(
+            raise ServiceDailyQuotaError(
                 f"this server has reached its daily ceiling of {ceiling.daily_quota} "
                 "calls across all users",
                 _seconds_to_utc_midnight(self._utc_now()),
             )
         if self._service.in_flight >= ceiling.max_in_flight:
-            raise QuotaExceededError(
+            raise ServiceCapacityError(
                 f"this server is at capacity ({ceiling.max_in_flight} calls in flight "
                 "across all users)",
                 _IN_FLIGHT_RETRY_SECONDS,
@@ -296,18 +333,18 @@ class QuotaEnforcer:
         state.daily.roll()
         state.paid_daily.roll()
         if paid and state.paid_daily.used >= limits.paid_daily_quota:
-            raise QuotaExceededError(
+            raise PaidQuotaError(
                 f"daily limit of {limits.paid_daily_quota} semantic searches is "
                 "exhausted; the other fifteen tools are unaffected",
                 _seconds_to_utc_midnight(self._utc_now()),
             )
         if state.daily.used >= limits.daily_quota:
-            raise QuotaExceededError(
+            raise DailyQuotaError(
                 f"daily quota of {limits.daily_quota} calls is exhausted",
                 _seconds_to_utc_midnight(self._utc_now()),
             )
         if state.in_flight >= limits.max_in_flight:
-            raise QuotaExceededError(
+            raise InFlightError(
                 f"{limits.max_in_flight} calls already in flight for this credential",
                 _IN_FLIGHT_RETRY_SECONDS,
             )
@@ -318,7 +355,7 @@ class QuotaEnforcer:
         # spend a token it never got to use.
         wait = state.bucket.try_consume(limits)
         if wait is not None:
-            raise QuotaExceededError(
+            raise RateLimitError(
                 f"rate limit of {limits.rate_per_minute}/min exceeded",
                 max(1, math.ceil(wait)),
             )
@@ -345,7 +382,7 @@ class QuotaEnforcer:
         """
         limits = self._store.limits_for(credential_id)
         if limits is None:
-            raise QuotaExceededError(
+            raise UnknownCredentialError(
                 f"unknown credential {credential_id}",
                 _IN_FLIGHT_RETRY_SECONDS,
             )
@@ -367,7 +404,7 @@ class QuotaEnforcer:
         """Refuse-or-increment for both paid ceilings; free brakes untouched."""
         state.paid_daily.roll()
         if state.paid_daily.used >= limits.paid_daily_quota:
-            raise QuotaExceededError(
+            raise PaidQuotaError(
                 f"daily limit of {limits.paid_daily_quota} semantic searches is "
                 "exhausted; the other fifteen tools are unaffected",
                 _seconds_to_utc_midnight(self._utc_now()),
@@ -375,7 +412,7 @@ class QuotaEnforcer:
         if self._service_limits is not None:
             self._service.paid_daily.roll()
             if self._service.paid_daily.used >= self._service_limits.paid_daily_quota:
-                raise QuotaExceededError(
+                raise ServicePaidQuotaError(
                     "this server has reached its daily ceiling of "
                     f"{self._service_limits.paid_daily_quota} semantic searches "
                     "across all users",
@@ -417,7 +454,7 @@ class QuotaEnforcer:
         if limits is None:
             # Authenticated moments ago, gone from the store now (revoked or
             # deleted mid-call). No limits to enforce means no basis to admit.
-            raise QuotaExceededError(
+            raise UnknownCredentialError(
                 f"unknown credential {credential_id}",
                 _IN_FLIGHT_RETRY_SECONDS,
             )
