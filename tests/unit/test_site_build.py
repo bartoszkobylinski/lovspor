@@ -740,9 +740,10 @@ class TestLegalPages:
     ) -> None:
         text = _text(_page(built[0], path))
 
-        for party in ("WorkOS", "OpenAI", "DigitalOcean", "Datatilsynet"):
+        for party in ("WorkOS", "OpenAI", "DigitalOcean", "Cloudflare", "Datatilsynet"):
             assert party in text, (path, party)
         assert "semantic_search" in text
+        assert 'href="/lov/personopplysningsloven/"' in _page(built[0], path)
 
     @pytest.mark.parametrize("path", ["/terms/", "/en/terms/"])
     def test_terms_carry_the_licences_and_the_not_legal_advice_line(
