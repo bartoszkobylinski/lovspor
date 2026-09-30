@@ -3133,3 +3133,76 @@ Omitting the argument is parser=None, the mutant registered above: the module
 default HTMLParser, which differs from safe_html_parser only in keeping
 comments, and comments never reach the measured text.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/robots_live.py"
+symbol = "_get"
+registered = "2026-09-30, PR #463, from run 36651498183"
+mutation = """
+-        return client.get(url, headers={"User-Agent": user_agent}, follow_redirects=False)
++        return client.get(url, headers={"user-agent": user_agent}, follow_redirects=False)
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 §5.1), and httpx's `Headers`
+resolves any spelling to the same value, so the server, the transport and every
+assertion a test can make on the recorded request see one User-Agent whatever
+the case of its name. Only the raw bytes differ, and no conforming peer may
+read a meaning into them. Argued from the protocol and the dependency, hence
+pinned; the same entry exists for survey_probe._body and fetch._load.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/observatory/robots_live.py"
+symbol = "_get"
+registered = "2026-09-30, PR #463, from run 36651498183"
+mutation = """
+-        return client.get(url, headers={"User-Agent": user_agent}, follow_redirects=False)
++        return client.get(url, headers={"USER-AGENT": user_agent}, follow_redirects=False)
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 §5.1), and httpx's `Headers`
+resolves any spelling to the same value, so the server, the transport and every
+assertion a test can make on the recorded request see one User-Agent whatever
+the case of its name. Only the raw bytes differ, and no conforming peer may
+read a meaning into them. Argued from the protocol and the dependency, hence
+pinned; the same entry exists for survey_probe._body and fetch._load.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/observatory/robots_live.py"
+symbol = "_get"
+registered = "2026-09-30, PR #463, from run 36651498183"
+mutation = """
+-        return client.get(url, headers={"User-Agent": user_agent}, follow_redirects=False)
++        return client.get(url, headers={"User-Agent": user_agent}, follow_redirects=None)
+"""
+justification = """
+httpx 0.28 `Client.send` substitutes the client's own setting only when the
+argument is the `USE_CLIENT_DEFAULT` sentinel (`isinstance(follow_redirects,
+UseClientDefault)`); `None` is not that sentinel, so it is passed through, and
+`_send_handling_redirects` then tests it with a bare `if follow_redirects:`.
+`None` and `False` are both falsy, so the redirect is returned unfollowed in
+both cases, even on a client built with `follow_redirects=True`. The sibling
+mutant that drops the argument (and so does take the client default) is
+killed by test_a_client_that_follows_redirects_still_has_each_hop_checked.
+Argued from the dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_observatory_robots_live.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_reads_follow_redirects_none_as_do_not_follow"
+
+[[equivalent]]
+file = "src/lovspor/observatory/robots_live.py"
+symbol = "_next_hop"
+registered = "2026-09-30, PR #463, from run 36651498183"
+mutation = """
+-    location: str | None = response.headers.get("location")
++    location: str | None = response.headers.get("LOCATION")
+"""
+justification = """
+`response.headers` is an httpx `Headers`, whose lookups lower-case the key
+before matching (HTTP field names are case-insensitive, RFC 9110 §5.1), so
+`get("LOCATION")` and `get("location")` return the same value, or both `None`,
+for every response a server can send. Argued from the dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_observatory_robots_live.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_response_header_lookup_ignores_case"
