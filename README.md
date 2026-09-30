@@ -96,8 +96,10 @@ unaffected. Details: [`docs/embeddings.md`](docs/embeddings.md).
 ## Optional: hosted endpoint
 
 Don't want to self-host? A hosted MCP endpoint runs at
-`https://lovspor.no/mcp` — ask for access, or see
-[`docs/mcp.md`](docs/mcp.md) to run the same thing yourself.
+`https://lovspor.no/mcp`. Chat-app connectors (Claude.ai, ChatGPT) log in
+through OAuth; developer clients (Claude Code, Cursor) use a bearer token —
+ask for one. See [`docs/mcp.md`](docs/mcp.md#authentication-two-modes) for both,
+or to run the same thing yourself.
 
 ## How it works
 

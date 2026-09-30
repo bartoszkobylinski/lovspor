@@ -13,7 +13,7 @@
 <h1>{{ title }}</h1>
 <p class="lede">{{ description }}</p>
 
-<p>lovverk er en <a href="https://modelcontextprotocol.io">MCP</a>-server. Klienten din snakker enten med den driftede tjenesten på <code>https://lovspor.no/mcp</code>, eller med en kopi du kjører på din egen maskin. Den første krever et token. Den andre krever ingenting.</p>
+<p>lovverk er en <a href="https://modelcontextprotocol.io">MCP</a>-server. Klienten din snakker enten med den driftede tjenesten på <code>https://lovspor.no/mcp</code>, eller med en kopi du kjører på din egen maskin. Den første krever et token eller en innlogging med <span data-literal>OAuth 2.1</span>. Den andre krever ingenting.</p>
 
 <h2>Uten token</h2>
 <p>Du trenger ikke spørre noen om lov. Kjør serveren selv — den henter korpuset ned til maskinen din og snakker med klienten over stdio:</p>
@@ -40,15 +40,29 @@ claude mcp add lovverk -- uvx lovspor mcp</pre>
 }</pre>
 
 <h2>Claude Desktop og claude.ai — som connector</h2>
-<p>Den driftede tjenesten kan logge deg inn med <span data-literal>OAuth 2.1</span> i stedet for at du limer inn et token, når vertsinnloggingen er slått på. Den veien er kjørt ende til ende fra Claude Desktop-connectoren: innloggingen fullføres, og verktøyene svarer.</p>
-<p><span class="accent">Klikkestien inne i klienten skriver vi ikke opp her.</span> Den endrer seg oftere enn denne siden gjør, og en oppskrift vi ikke har etterprøvd er verre enn ingen oppskrift — den ser riktig ut. Bruk klientens egen flyt for å legge til en connector, med adressen over.</p>
+<p>Den driftede tjenesten logger deg inn med <span data-literal>OAuth 2.1</span>, så du trenger ikke lime inn noe token. Dette er framgangsmåten vi har kjørt fra claude.ai:</p>
+<ul>
+  <li>Legg til en egendefinert connector med adressen <code>https://lovspor.no/mcp</code>.</li>
+  <li>Velg <strong>Sign in now</strong>.</li>
+  <li>Velg <strong>Register automatically</strong> for klientregistrering. Standardvalget, som bruker Claudes publiserte identitet, virker ikke mot denne tjenesten.</li>
+  <li>Logg inn på siden som åpnes. Verktøyene svarer når du er tilbake i samtalen.</li>
+</ul>
+<p><span class="accent">Merkelappene inne i klienten endrer seg oftere enn denne siden gjør.</span> Har en av dem flyttet seg, er det adressen, <span data-literal>OAuth</span> som innloggingsmåte og automatisk registrering som teller.</p>
 
-<h2>ChatGPT, Cursor og Codex</h2>
-<p><strong>Ingen testet framgangsmåte.</strong> Begge formene tjenesten tilbyr finnes på klientsiden: Cursor og Codex tar imot et token i et felt, og ChatGPT kobler til connectorer som logger inn med <span data-literal>OAuth 2.1</span>. Men vi har ikke kjørt oppsettet i disse klientene selv, og da dikter vi ikke opp stegene.</p>
+<h2>ChatGPT — som connector</h2>
+<p>Også med <span data-literal>OAuth 2.1</span> og uten token. Framgangsmåten vi har kjørt:</p>
+<ul>
+  <li>Slå på <strong>utviklermodus</strong> (developer mode) i ChatGPT.</li>
+  <li>Opprett en connector med adressen <code>https://lovspor.no/mcp</code> og <strong>OAuth</strong> som autentisering.</li>
+  <li>Logg inn på siden som åpnes.</li>
+</ul>
+
+<h2>Cursor og Codex</h2>
+<p><strong>Ingen testet framgangsmåte.</strong> Begge tar imot et token i et felt, som er formen tjenesten tilbyr dem. Men vi har ikke kjørt oppsettet i disse klientene selv, og da dikter vi ikke opp stegene.</p>
 <p>Bruk klientens egen dokumentasjon, med adressen <code>https://lovspor.no/mcp</code> og tokenet ditt. Får du det til — eller får du det ikke til — så si fra, så kan det stå her som en testet oppskrift med navnet ditt på.</p>
 
 <h2>Få et token</h2>
-<p>Privat beta. Jeg drifter tjenesten alene, så tilgang deles ut for hånd.</p>
+<p>Privat beta. Jeg drifter tjenesten alene, så token deles ut for hånd. Connectorene over logger inn i stedet og trenger ikke token.</p>
 <p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20tilgang">Be om et beta-token →</a></p>
 <p class="muted">Eller kjør det selv — motoren er åpen kildekode under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>. Hva verktøyene svarer på, står i <a href="/docs/">dokumentasjonen</a>; tilstanden ved siste utgivelse står på <a href="/status/">status</a>.</p>
 {% endblock %}
