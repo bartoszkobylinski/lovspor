@@ -351,3 +351,98 @@ def test_the_cli_replaces_malformed_utf8_in_a_downloaded_log(
         f"step={_CHECKOUT}",
         "signature=could not read Username for 'https://github.com': terminal prompts disabled",
     ]
+
+
+# Issue #448, verbatim from Mutation Remediation run 36670610064 (PR #469), the
+# job log as the jobs API serves it: GitHub's timestamp, then codex's own. The
+# standalone codex-cli 0.159.0 on the Mac runner ships without
+# `codex-code-mode-host`, so every tool call the agent made failed to spawn.
+_CODE_MODE_HOST_LOG = (
+    "2026-09-30T04:50:08.6453880Z warning: Code Mode is unavailable because failed to"
+    " spawn code-mode host /Users/ci-lovspor/.local/bin/codex-code-mode-host: host"
+    " executable was not found. Code mode will fail closed; enable"
+    " `features.code_mode_host` and install `codex-code-mode-host`.\n"
+    "2026-09-30T04:50:18.8947600Z 2026-09-30T04:50:18.893013Z ERROR"
+    " codex_core::tools::router: error=failed to spawn code-mode host"
+    " /Users/ci-lovspor/.local/bin/codex-code-mode-host: No such file or directory"
+    " (os error 2)\n"
+)
+_TOOL_STOP = "Stop when the agent could not start its execution tool"
+
+
+def _tool_death() -> list[dict[str, Any]]:
+    return [
+        _job(
+            "remediate",
+            "failure",
+            [
+                ("Codex — mutation remediation (tests only)", "completed", "success"),
+                (_TOOL_STOP, "completed", "failure"),
+                ("Scope guard", "completed", "skipped"),
+            ],
+        )
+    ]
+
+
+def test_a_missing_code_mode_host_is_a_runner_tool_failure() -> None:
+    """#448: the runner's Codex install, not the diff and not a survivor verdict."""
+    verdict = classify_lane_failure.classify(_tool_death(), ["remediate"], _CODE_MODE_HOST_LOG)
+
+    assert verdict.kind == "runner_tool"
+    assert verdict.job == "remediate"
+    assert verdict.step == _TOOL_STOP
+    assert verdict.signature == "failed to spawn code-mode host"
+    assert verdict.is_infrastructure is True
+
+
+def test_the_startup_warning_alone_is_not_evidence() -> None:
+    """Code Mode being unavailable is only a warning until a tool call fails;
+    PR #447's author round printed it and still finished."""
+    log = _CODE_MODE_HOST_LOG.splitlines(keepends=True)[0]
+
+    verdict = classify_lane_failure.classify(_tool_death(), ["remediate"], log)
+
+    assert verdict == classify_lane_failure.Verdict("in_job", job="remediate")
+
+
+def test_a_quoted_code_mode_host_error_is_not_evidence() -> None:
+    """A failing test printing this file's fixture must stay a code failure:
+    only codex's own tracing line, straight after GitHub's timestamp, counts."""
+    log = (
+        '2026-09-30T04:50:18.1Z E    log = "2026-09-30T04:50:18.893013Z ERROR'
+        " codex_core::tools::router: error=failed to spawn code-mode host"
+        ' /Users/x/.local/bin/codex-code-mode-host: gone"\n'
+    )
+
+    verdict = classify_lane_failure.classify(_tool_death(), ["remediate"], log)
+
+    assert verdict.kind == "in_job"
+
+
+def test_a_credential_refusal_still_wins_over_a_runner_tool_line() -> None:
+    log = _EXPIRED_TOKEN_LOG + _CODE_MODE_HOST_LOG
+
+    verdict = classify_lane_failure.classify(_tool_death(), ["remediate"], log)
+
+    assert verdict.kind == "credential"
+
+
+def test_the_cli_names_the_runner_tool_with_the_constant_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The path in the log is not echoed: outputs are interpolated into the
+    workflow, and a log is attacker-reachable."""
+    jobs = tmp_path / "jobs.json"
+    jobs.write_text(json.dumps({"jobs": _tool_death()}), encoding="utf-8")
+    log = tmp_path / "lane.log"
+    log.write_text(_CODE_MODE_HOST_LOG, encoding="utf-8")
+    args = ["--jobs", str(jobs), "--lane", "remediate", "--log", str(log)]
+
+    assert classify_lane_failure.main(args) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "kind=runner_tool",
+        "job=remediate",
+        f"step={_TOOL_STOP}",
+        "signature=failed to spawn code-mode host",
+    ]

@@ -46,6 +46,16 @@ CREDENTIAL_SIGNATURES = (
 # above is still a code failure.
 _ERROR_ANNOTATION = re.compile(r"^(?:\S+\s)?##\[error\](?P<message>.*)$")
 
+# Issue #448: the standalone codex-cli 0.159.0 on the Mac runner ships without
+# `codex-code-mode-host`, and every tool call the agent makes fails to spawn it
+# (run 36670610064). The runner's install, not the diff. Evidence is codex's
+# own tracing line, straight after GitHub's timestamp: the startup warning only
+# says Code Mode is off, and PR #447's author round printed it and finished.
+RUNNER_TOOL_SIGNATURE = "failed to spawn code-mode host"
+_RUNNER_TOOL_ERROR = re.compile(
+    r"^(?:\S+Z )?\S+Z ERROR codex_core::tools::router: error=failed to spawn code-mode host /"
+)
+
 
 @dataclass(frozen=True)
 class Verdict:
@@ -58,7 +68,7 @@ class Verdict:
 
     @property
     def is_infrastructure(self) -> bool:
-        return self.kind == "infrastructure"
+        return self.kind in ("infrastructure", "runner_tool")
 
 
 def _unfinished_step(job: dict[str, Any]) -> str:
@@ -96,10 +106,21 @@ def credential_signature(log: str) -> str:
     return ""
 
 
+def runner_tool_signature(log: str) -> str:
+    """Return the constant signature when codex failed to spawn its tool host."""
+    if any(_RUNNER_TOOL_ERROR.match(line) for line in log.splitlines()):
+        return RUNNER_TOOL_SIGNATURE
+    return ""
+
+
 def _in_job(job: dict[str, Any], lane: str, log: str) -> Verdict:
     signature = credential_signature(log)
     if signature:
         return Verdict("credential", job=lane, step=_failed_step(job), signature=signature)
+    if runner_tool_signature(log):
+        return Verdict(
+            "runner_tool", job=lane, step=_failed_step(job), signature=RUNNER_TOOL_SIGNATURE
+        )
     return Verdict("in_job", job=lane)
 
 

@@ -651,6 +651,30 @@ working directory, dies with `Error loading configuration: Permission denied (os
    sudo -u ci-lovspor -H env PATH=/Users/ci-lovspor/.local/bin:/opt/homebrew/bin:/usr/bin:/bin sh -c 'for t in uv codex claude python3 git gh jq; do printf "%-8s %s\n" "$t" "$(command -v "$t" || echo MISSING)"; done; codex --version; uv --version'
    ```
 
+   **`codex-code-mode-host` (issue #448).** The `codex-aarch64-apple-darwin.tar.gz` asset
+   holds `codex` alone. From codex-cli 0.159.0 the agent's commands run through a separate
+   `codex-code-mode-host`, which that CLI looked for next to itself, at
+   `/Users/ci-lovspor/.local/bin/codex-code-mode-host` (run 36670610064). Without it every
+   tool call failed to spawn (`ERROR codex_core::tools::router: error=failed to spawn
+   code-mode host …`), the agent ran no command, and `codex exec` still exited 0. The
+   remediation lane now stops on that line and the verifier reports it as an
+   infrastructure failure of this install, never as survivors called non-killable. The
+   host ships as its own release asset, `codex-code-mode-host-aarch64-apple-darwin.tar.gz`
+   (present in release `rust-v0.159.2`, read off the releases API on 2026-09-30; the
+   tarball holds one file, `codex-code-mode-host-aarch64-apple-darwin`). Install both from
+   one tag so the two binaries match:
+
+   ```bash
+   cd /tmp
+   TAG="$(gh api repos/openai/codex/releases/latest --jq .tag_name)"; echo "$TAG"
+   sudo -u ci-lovspor -H sh -c "cd /Users/ci-lovspor/.local/bin && curl -fsSL https://github.com/openai/codex/releases/download/$TAG/codex-aarch64-apple-darwin.tar.gz | tar xz && mv codex-aarch64-apple-darwin codex && curl -fsSL https://github.com/openai/codex/releases/download/$TAG/codex-code-mode-host-aarch64-apple-darwin.tar.gz | tar xz && mv codex-code-mode-host-aarch64-apple-darwin codex-code-mode-host && ls -l codex codex-code-mode-host && ./codex --version"
+   ```
+
+   Not established: whether the host must also be switched on with the
+   `features.code_mode_host` setting the CLI's warning names, and whether a later CLI
+   looks for it elsewhere. The check is the next remediation round's log: no
+   `failed to spawn code-mode host` line, and `exec` blocks for the commands it ran.
+
 4. Download and register the runner in `ci-lovspor`'s home. The owner's `gh` fetches the
    download URL and the registration token; the runner itself never sees the owner's
    credentials. `.path` is written by hand because `runsvc.sh` exports it as the jobs'
