@@ -7,6 +7,7 @@ already-open fd 0 does not. These tests run a real interpreter with a real
 file or pipe as its fd 0, the shape the deploy script produces.
 """
 
+import io
 import os
 import subprocess
 import sys
@@ -24,6 +25,9 @@ _LOAD = (
     "token, notice = load_probe_token(Path('-'))\n"
     "print(token.get_secret_value() if token else '', notice or '', sep='|')\n"
 )
+
+# Printed as ascii() so the child's own stdout codec cannot touch the comparison.
+_LOAD_ASCII = _LOAD.replace("token.get_secret_value()", "ascii(token.get_secret_value())")
 
 
 def _load_from_real_stdin(stdin: object, cwd: Path) -> tuple[str, str]:
@@ -46,6 +50,36 @@ class TestStdin:
         os.close(write)
         with os.fdopen(read, "rb") as pipe:
             assert _load_from_real_stdin(pipe, tmp_path) == (TOKEN, "")
+
+    def test_stdin_is_read_as_utf_8_whatever_its_text_encoding(self, tmp_path: Path) -> None:
+        """The bytes on fd 0 are decoded as UTF-8, not by the text layer's codec:
+        a process whose stdin encoding is Latin-1 still reads a UTF-8 secret."""
+        secret = "lsp_pr\u00f8be-\u00e6\u00e5"
+        read, write = os.pipe()
+        os.write(write, f"{secret}\n".encode())
+        os.close(write)
+        with os.fdopen(read, "rb") as pipe:
+            completed = subprocess.run(
+                [sys.executable, "-c", _LOAD_ASCII],
+                stdin=pipe,
+                capture_output=True,
+                cwd=tmp_path,
+                env={**os.environ, "PYTHONIOENCODING": "latin-1"},
+                check=True,
+            )
+
+        assert completed.stdout.decode("ascii").rstrip("\n") == f"{secret!a}|"
+
+    def test_a_text_stdin_without_a_byte_layer_is_read_as_text(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stream that only speaks text (no ``buffer``) hands back ``str`` as is."""
+        monkeypatch.setattr(sys, "stdin", io.StringIO(f"{TOKEN}\n"))
+
+        token, notice = load_probe_token(STDIN)
+
+        assert token is not None and token.get_secret_value() == TOKEN
+        assert notice is None
 
     @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a 000 file by path anyway")
     def test_a_file_the_reader_cannot_open_by_path_is_read_from_its_open_fd(
@@ -94,8 +128,7 @@ class TestStdin:
         token, notice = load_probe_token(STDIN)
 
         assert token is None
-        assert notice is not None
-        assert notice.startswith("probe credential unreadable: <stdin>: ")
+        assert notice == "probe credential unreadable: <stdin>: stdin is closed"
 
 
 class TestPath:
