@@ -7,8 +7,9 @@ emitted with a visible status — ``planned``, ``research``,
 (ADR:562-568). Every site route has a Norwegian page and an ``/en/``
 twin with ``hreflang`` alternates both ways and ``rel=canonical`` to
 itself; ``/observatory/`` migrates verbatim and has no twin (ADR:620-624).
-``/terms`` is reserved, not emitted; ``/mcp`` is an endpoint, not a page
-(ADR:626-628).
+``/mcp`` is an endpoint, not a page (ADR:626-628). ``/terms/`` was
+reserved there and is emitted since the hosted OAuth sign-in needed a
+privacy policy and terms of use to link (owner decision 2026-09-30).
 
 ``/connect/<client>/`` pages are a projection of the client-capability
 registry, never the reverse (ADR:565-572): ``client_routes`` is that
@@ -16,7 +17,9 @@ projection's hook and yields nothing until a registry exists.
 
 Copy: the landing and the observatory keep the titles and descriptions
 of the hand-written pages they replace; ``/connect/`` and ``/docs/`` carry
-pages written against this repository's own evidence; the remaining routes
+pages written against this repository's own evidence, and so do
+``/privacy/`` and ``/terms/``, whose every processing statement is read
+from the code and deploy recipe that does the processing; the remaining routes
 carry short, honest placeholders until their content lands.
 """
 
@@ -255,13 +258,24 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
             en="The hosted service as a managed offer — early access, no prices.",
         ),
     ),
-    _route(
-        "/privacy/",
-        "planned",
-        Localised(nb="Personvern", en="Privacy"),
-        Localised(
+    SiteRoute(
+        path="/privacy/",
+        template="privacy",
+        status="current",
+        title=Localised(nb="Personvern", en="Privacy"),
+        description=Localised(
             nb="Hvilke opplysninger tjenesten behandler, og hvorfor.",
             en="What data the service processes, and why.",
+        ),
+    ),
+    SiteRoute(
+        path="/terms/",
+        template="terms",
+        status="current",
+        title=Localised(nb="Vilkår for bruk", en="Terms of use"),
+        description=Localised(
+            nb="Vilkårene for å bruke lovspor.no og den driftede lovverk-tjenesten.",
+            en="The terms for using lovspor.no and the hosted lovverk service.",
         ),
     ),
     SiteRoute(
