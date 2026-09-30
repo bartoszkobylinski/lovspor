@@ -1,7 +1,7 @@
 """Reading what a municipal site offers a crawler, before it is registered.
 
-Pre-registration recon (issue #349): the 2026-08-20 sweep over all 358
-municipalities produced the figures quoted in `commands.py:302` and its output
+Pre-registration recon (issue #349): the 2026-08-20 sweep over the
+municipalities produced the figures quoted in `commands._entry_points` and its output
 was never persisted, so the population is not re-derivable. This module is the
 part of that work that decides *what a probe means*; every fixture here is
 hand-written, because ADR-0010 §5 keeps observed material out of this
@@ -52,7 +52,7 @@ class TestWhatTheFrontPageReveals:
         assert front_page_markers(b"<html><body><h1>Kommune</h1></body></html>") == ()
 
     def test_undecodable_bytes_are_not_an_error_because_a_probe_must_not_raise(self) -> None:
-        """A recon pass over 358 hosts cannot stop on one server's broken encoding."""
+        """A recon pass over every municipality cannot stop on one server's broken encoding."""
         assert front_page_markers(b"\xff\xfe/api/presentation/") == ("/api/presentation/",)
 
 
@@ -68,7 +68,7 @@ class TestTheEntryAPlannerGets:
         assert shape.entry == "declared_sitemap"
 
     def test_an_undeclared_sitemap_at_the_conventional_path_still_counts(self) -> None:
-        """190 of 358 serve one without declaring it (commands.py:302)."""
+        """190 served one without declaring it (`commands._entry_points`)."""
         shape = read_site_shape(
             domain=DOMAIN,
             robots=_robots(),

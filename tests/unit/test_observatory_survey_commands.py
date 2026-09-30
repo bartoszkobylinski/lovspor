@@ -1,7 +1,7 @@
 """The `observatory survey` command (issue #349).
 
-What a run must leave behind is the whole point. The 2026-08-20 sweep over all
-358 municipalities produced the figures still quoted in `commands.py:302` and
+What a run must leave behind is the whole point. The 2026-08-20 sweep over the
+municipalities produced the figures still quoted in `commands._entry_points` and
 persisted nothing, so its population cannot be re-derived. A survey that only
 printed a table would repeat that.
 """
@@ -130,7 +130,7 @@ class TestWhatTheRunLeavesBehind:
     def test_the_refusal_costs_no_requests_because_it_happens_before_probing(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
-        """A bad argument must not be paid for in requests to 358 municipalities."""
+        """A bad argument must not be paid for in requests to every municipality."""
         runner.invoke(
             app,
             ["observatory", "survey", "--domain", DOMAIN, "--delay", "0", "--run-id", "../escaped"],
@@ -384,7 +384,7 @@ class TestWhereTheListComesFrom:
         assert _domains(None, listing) == [DOMAIN]
         listing.read_text.assert_called_once_with(encoding="utf-8")
 
-    def test_a_file_of_domains_is_accepted_because_358_do_not_fit_on_a_command_line(
+    def test_a_file_of_domains_is_accepted_because_a_population_does_not_fit_on_a_command_line(
         self, root: Path, tmp_path: Path, httpx_mock: HTTPXMock
     ) -> None:
         listing = tmp_path / "domains.txt"
@@ -447,7 +447,7 @@ class TestWhereTheListComesFrom:
     def test_a_blank_and_commented_file_is_a_refusal_not_an_empty_survey(
         self, root: Path, tmp_path: Path
     ) -> None:
-        """An empty run would write a log that reads as "358 hosts, none reachable"."""
+        """An empty run would write a log that reads as "N hosts, none reachable"."""
         listing = tmp_path / "domains.txt"
         listing.write_text("# nothing here\n\n", encoding="utf-8")
 
