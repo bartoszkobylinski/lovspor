@@ -405,6 +405,29 @@ class TestReleaseProbeCommand:
         document = load_capabilities(tmp_path / "c.json")
         assert document.observation.transport.authenticated.outcome == "ok"
 
+    def test_the_token_can_arrive_on_stdin_as_dash(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        credential: Path,
+    ) -> None:
+        """``-`` reads stdin (issue #467), and wins over the credentials directory."""
+        _, _, corpus, _ = repos
+        fake = _host(httpx_mock, corpus)
+        fake.accepted_token = "lsp_on-stdin"
+
+        result = runner.invoke(
+            app,
+            _probe_args(corpus, tmp_path / "c.json", "--probe-token-file", "-"),
+            input="lsp_on-stdin\n",
+        )
+
+        assert result.exit_code == 0, result.output
+        document = load_capabilities(tmp_path / "c.json")
+        assert document.observation.transport.authenticated.outcome == "ok"
+
     def test_the_token_file_can_be_named_by_the_environment(
         self,
         repos: tuple[Path, str, Path, Path],

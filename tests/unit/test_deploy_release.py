@@ -93,7 +93,10 @@ class TestWrapper:
     def test_the_probe_credential_reaches_the_build_user_on_stdin_only(self) -> None:
         code = _code(_SCRIPT.read_text(encoding="utf-8"))
 
-        assert '--probe-token-file /dev/stdin <"$token"' in code
+        assert '--probe-token-file - <"$token"' in code
+        # Issue #467: /dev/stdin is re-opened by path, permission-checked
+        # against the root-only credential, so the build user cannot read it.
+        assert "/dev/stdin" not in code
         assert 'token="${CREDENTIALS_DIRECTORY:-}/site-probe"' in code
         assert "LOVSPOR_PROBE_TOKEN_FILE" not in code
         assert "cp " not in code and "install -m" not in code

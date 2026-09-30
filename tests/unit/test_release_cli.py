@@ -1139,6 +1139,22 @@ class TestBuild:
         assert f"release {content_id[:12]}: already live" in live.stderr.splitlines()
         assert {path.name for path in releases.iterdir()} == {"ACTIVE", content_id}
 
+    def test_the_credential_can_arrive_on_stdin_as_dash(
+        self, world: World, checkout: Path, tmp_path: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #467: publish-release.sh pipes the root-only credential to the
+        build user; ``-`` reads that stream, never a path the user cannot open."""
+        fake = _fake_host(httpx_mock)
+        releases = tmp_path / "releases"
+        args = [*_build_args(world, releases, "none", None), "--probe-token-file", "-"]
+
+        result = runner.invoke(app, args, input=TOKEN + "\n")
+
+        assert result.exit_code == 0, result.output
+        assert fake.methods()[-1] == "tools/list"
+        assert "probe credential" not in result.stderr
+        assert TOKEN not in result.output
+
     def test_a_missing_credential_is_recorded_not_fatal(
         self, world: World, checkout: Path, tmp_path: Path, httpx_mock: HTTPXMock
     ) -> None:

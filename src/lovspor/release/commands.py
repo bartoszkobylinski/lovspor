@@ -66,7 +66,7 @@ from lovspor.site.build import discover_checkout
 from lovspor.site.capabilities import CapabilityDocument, Checkout
 from lovspor.site.errors import SiteBuildError
 from lovspor.site.probe import CANONICAL_MCP_URL, DEFAULT_READINESS_URL, ProbeSettings, probe
-from lovspor.site.probe_credential import load_probe_token
+from lovspor.site.probe_credential import ProbeTokenFileOption, load_probe_token
 
 DEFAULT_RELEASES = Path("/var/www/lovspor-releases")
 DEFAULT_DEPLOYMENT_ROOT = Path("/var/www")
@@ -240,9 +240,7 @@ def build_command(
     ref: Annotated[str, typer.Option(help="Corpus commit to build; defaults to HEAD.")] = "HEAD",
     readiness_url: Annotated[str, typer.Option("--readiness-url")] = DEFAULT_READINESS_URL,
     public_mcp_url: Annotated[str, typer.Option("--public-mcp-url")] = CANONICAL_MCP_URL,
-    probe_token_file: Annotated[
-        Path | None, typer.Option("--probe-token-file", envvar="LOVSPOR_PROBE_TOKEN_FILE")
-    ] = None,
+    probe_token_file: ProbeTokenFileOption = None,
     timeout_seconds: Annotated[float, typer.Option("--timeout-seconds")] = 10.0,
 ) -> None:
     """Probe, then build and finalize one envelope; print its release_content_id on stdout.

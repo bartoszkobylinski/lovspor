@@ -184,7 +184,7 @@ install -d -m 700 /etc/lovspor/credentials
 umask 077 && printf '%s\n' 'lsp_…' > /etc/lovspor/credentials/site-probe
 ```
 
-Both units receive it through systemd `LoadCredential=site-probe:/etc/lovspor/credentials/site-probe`, which hands the process a copy at `$CREDENTIALS_DIRECTORY/site-probe`; the commands read that path by default (`--probe-token-file` / `LOVSPOR_PROBE_TOKEN_FILE` override it for a manual run). The units run as `root`, like `lovspor-publish.service`; the secret is never readable by `User=lovspor`, the MCP service's identity, never in an environment file, and never written into any document or log — only outcomes are recorded.
+Both units receive it through systemd `LoadCredential=site-probe:/etc/lovspor/credentials/site-probe`, which hands the process a copy at `$CREDENTIALS_DIRECTORY/site-probe`; the commands read that path by default (`--probe-token-file` / `LOVSPOR_PROBE_TOKEN_FILE` override it for a manual run; `-` reads stdin). `lovspor-publish.service` builds as the build user, which cannot read that root-only copy, so `publish-release.sh` passes it on stdin as `--probe-token-file -` — the open fd is read, never re-opened by path as `/dev/stdin` would be (issue #467). The units run as `root`, like `lovspor-publish.service`; the secret is never readable by `User=lovspor`, the MCP service's identity, never in an environment file, and never written into any document or log — only outcomes are recorded.
 
 **Rotation.** Before the 30-day expiry (the drift timer names `probe_credential_rejected` the hour after it lapses): issue a new token with the same label, write the file, revoke the old id with `lovspor tokens revoke`, then release again so the served document is one the new credential produced.
 

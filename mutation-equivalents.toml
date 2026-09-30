@@ -1739,11 +1739,11 @@ reach any output.
 
 [[equivalent]]
 file = "src/lovspor/site/probe_credential.py"
-symbol = "load_probe_token"
-registered = "2026-09-09, PR #268, from run 34397173401"
+symbol = "_read_secret"
+registered = "2026-09-30, PR #469, from run 36669099930"
 mutation = """
--        token = path.read_text(encoding="utf-8").strip()
-+        token = path.read_text(encoding="UTF-8").strip()
+-    return path.read_text(encoding="utf-8")
++    return path.read_text(encoding="UTF-8")
 """
 justification = """
 Codec names are case-insensitive: `Path.read_text` hands the name to the
@@ -1754,12 +1754,29 @@ same credential. Python's codec registry, not a dependency. (`encoding=None`
 is NOT equivalent — it is the locale's codec — and is killed under the C
 locale by `test_the_credential_is_read_as_utf_8_whatever_the_process_locale`.)
 
-This supersedes the entry registered for `cli._probe_token` in PR #266, which
-argued the identical point about the same line. PR #268 moved the credential
-read into `site/probe_credential.load_probe_token` so every command that runs
-the probe loads it the same way, and that entry no longer matched any code in
-`cli.py`. An entry that can never match is the drift this register warns
-about, so it is replaced rather than left as decoration.
+This supersedes the entry registered for `load_probe_token` in PR #268, which
+argued the identical point about the same read. PR #469 moved the path read
+into `_read_secret` beside the stdin read (issue #467), and that entry no
+longer matched any code. An entry that can never match is the drift this
+register warns about, so it is replaced rather than left as decoration.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/probe_credential.py"
+symbol = "_read_stdin"
+registered = "2026-09-30, PR #469, from run 36669099930"
+mutation = """
+-    return data.decode("utf-8") if isinstance(data, bytes) else data
++    return data.decode("UTF-8") if isinstance(data, bytes) else data
+"""
+justification = """
+Codec names are case-insensitive: `bytes.decode` resolves the name through
+the codec registry, which normalises it (`codecs.lookup("UTF-8")` and
+`codecs.lookup("utf-8")` return the same CodecInfo), so both spellings select
+the same decoder and produce the same text on every input, and raise the same
+UnicodeDecodeError on malformed input. Python's codec registry, not a
+dependency. (Skipping the byte layer, which WOULD change the codec, is killed
+by `test_stdin_is_read_as_utf_8_whatever_its_text_encoding`.)
 """
 
 [[equivalent]]
