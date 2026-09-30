@@ -22,15 +22,47 @@ Hard constraints:
   and outside your scope; report `likely_equivalent` and let a human decide;
 - do not change methodology or frozen benchmark decisions.
 
-For every survivor classify it as one of:
-- killable_by_correct_test
-- likely_equivalent
-- specification_ambiguous
-- production_behavior_question
-- tool_noise
+Attempt a killing test for every survivor. Every survivor starts as
+killable_by_correct_test; giving up on one is a verdict you have to argue, not a
+default. Write the test, then confirm it kills the mutant: apply the survivor's
+`diff` to the file under src/ by hand, run the test file you touched and see it
+fail, then restore production code with `git checkout -- src/`. Your final diff
+must touch tests/ only.
 
-Only edit tests for killable_by_correct_test.
-For every other class, report it as BLOCKED and explain why human review is required.
+What looks hard to reach is still killable. On PR #453 all 8 survivors were
+called non-killable and a test-only commit killed every one (issue #455): a
+timezone-dependent conversion (set `TZ`), a `<=` → `<` boundary (test the equal
+case), dropped or redirected stderr output (capture stderr and stdout), and a
+guard only a torn or malformed input file reaches (write that file). Logging,
+output streams, environment variables, clocks and edge inputs are all observable
+from a test.
+
+A killing test must drive the real code: never monkeypatch a function, class or
+constant of the module under mutation, and never assert on the arguments one of its
+own functions receives. Such a test pins today's call shape, not behaviour — a
+refactor that keeps behaviour turns it red — and it can "kill" a mutant that computes
+exactly what the original does (issue #427: on PR #422 two `run_sync` mutants were
+killed that way, and both were equivalent). Replace only what crosses the process
+boundary: HTTP through pytest-httpx, the clock, the environment, files you write
+into `tmp_path`. Build real inputs — a corpus in a temporary git repo, the fixtures
+under tests/fixtures/ — and assert on what the code leaves behind: files, commits,
+return values, output. If you cannot observe the mutant's effect without replacing
+part of the module under test, a mutant only a mock can kill is likely_equivalent:
+report it with the equivalence argument below instead of killing it.
+
+Classify a survivor as anything other than killable_by_correct_test only after
+the attempt, and name what you tried and why it cannot work:
+- likely_equivalent — only with a stated equivalence argument: why the mutated
+  code computes exactly what the original computes for every input that can
+  reach it, argued from Python's semantics or the code, not from how hard a
+  test would be to write;
+- specification_ambiguous — name the two readings of intended behavior;
+- production_behavior_question — name the behavior you believe is a bug;
+- tool_noise — name the evidence the mutant is a tool artifact.
+
+Report every such survivor as BLOCKED and explain why human review is required.
+For every survivor, report its class and the test that kills it, or the
+equivalence argument (or other stated reason) for why none can.
 
 After editing, run ONLY the test files you touched, by path — for example
 `uv run pytest tests/unit/test_foo.py`. Do NOT run `uv run pytest tests/unit/`:

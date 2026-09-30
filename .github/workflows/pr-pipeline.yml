@@ -220,6 +220,10 @@ jobs:
             echo "the agent lock was held for $(( (SECONDS - lock_wait_start) / 60 )) minutes by another agent job of this runner's user ($agent_lock, #382/#445) — this is runner contention, not a fault in this PR" >&2
             exit 1
           }
+          # The round's own output is kept in RUNNER_TEMP (#220): a round that
+          # dies mid-way may already have run pytest and named a failing test,
+          # and that line exists nowhere else. The failure-only steps below
+          # turn it into the section the escalation appends.
           set +e
           python3 scripts/ci/codex_account_failover.py \
             --primary-home "$CODEX_PRIMARY_HOME" \
@@ -227,13 +231,16 @@ jobs:
             --threshold 95 \
             -- codex exec \
               --sandbox workspace-write \
-              "$(cat .github/codex/pr-tests.md)"
-          status=$?
+              "$(cat .github/codex/pr-tests.md)" 2>&1 | tee "$RUNNER_TEMP/codex-author.log"
+          status=${PIPESTATUS[0]}
           set -e
           # 75 = every Codex account rate-limited (EX_TEMPFAIL, and only that
           # case): a separate non-Fable Claude writes the tests instead of the
           # whole pipeline blocking until a limit window resets. Any other
-          # failure stays fatal. The scope guard below applies to both authors.
+          # failure stays fatal — a provider refusing the model itself included:
+          # the owner ruled out a model fallback in the test author (#220), and
+          # such a round reports what it already found instead. The scope guard
+          # below applies to both authors.
           if [ "$status" -eq 75 ]; then
             scripts/ci/claude_test_author.sh .github/codex/pr-tests.md
             echo "author=claude" >> "$GITHUB_OUTPUT"
@@ -295,12 +302,26 @@ jobs:
           git add -N tests/
           git diff "${BEFORE_SHA:-HEAD}" -- tests/ > "$RUNNER_TEMP/agent-work.patch" || true
 
+      # #220: a partial round's findings ride with its preserved work, so the
+      # verifier's escalation can put them in the sticky comment. An empty
+      # section means the round found nothing, and the comment is unchanged.
+      - name: Collect the failing tests a partial round already found
+        if: failure()
+        run: |
+          [ -x scripts/ci/partial_round_failures.py ] || { : > "$RUNNER_TEMP/partial-round-failures.md"; exit 0; }
+          python3 scripts/ci/partial_round_failures.py \
+            --log "$RUNNER_TEMP/codex-author.log" \
+            --out "$RUNNER_TEMP/partial-round-failures.md" \
+            || : > "$RUNNER_TEMP/partial-round-failures.md"
+
       - name: Upload preserved agent work
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: agent-work-author-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/agent-work.patch
+          path: |
+            ${{ runner.temp }}/agent-work.patch
+            ${{ runner.temp }}/partial-round-failures.md
           if-no-files-found: ignore
 
   # The verdict lane. It runs the suite, so it keeps the name every escalation,
@@ -535,6 +556,17 @@ jobs:
           path: ${{ runner.temp }}/agent-work.patch
           if-no-files-found: ignore
 
+      # #220: a round that died after finding a failing test must say so. Best
+      # effort — a lane that died with its box uploaded nothing, and that
+      # absence must not stop the escalation below.
+      - name: Download the partial round's findings
+        if: failure() && needs.codex-author.result == 'failure'
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: agent-work-author-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/author-partial
+
       - name: Escalate — the pipeline failed before the tests ran
         if: failure() && steps.verdict.outcome != 'failure'
         env:
@@ -550,6 +582,15 @@ jobs:
             echo ""
             echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } > "$RUNNER_TEMP/pipeline-escalation.md"
+          findings="$RUNNER_TEMP/author-partial/partial-round-failures.md"
+          if [ -s "$findings" ]; then
+            {
+              echo ""
+              cat "$findings"
+              echo ""
+              echo "The author's tests: artifact \`agent-work-author-${{ github.event.pull_request.head.sha }}\`."
+            } >> "$RUNNER_TEMP/pipeline-escalation.md"
+          fi
           scripts/ci/pr_sticky_comment.sh pipeline "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/pipeline-escalation.md"
 
   # Issue #193. Both escalations in `codex-tests` are steps of that job, and a

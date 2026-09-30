@@ -28,13 +28,21 @@ def test_the_template_is_a_valid_plist(job: dict[str, Any]) -> None:
 def test_it_runs_the_nightly_command_and_not_capture_all(job: dict[str, Any]) -> None:
     """`capture-all` skips the preflight. Scheduling it directly would sweep on
     a half-present archive and produce records nobody can trust."""
-    assert job["ProgramArguments"][1:] == ["observatory", "nightly"]
+    assert job["ProgramArguments"][1:3] == ["observatory", "nightly"]
 
 
-def test_it_does_not_run_at_load(job: dict[str, Any]) -> None:
-    """`launchctl load` during setup must not start a sweep against two hundred
-    municipal servers as a side effect."""
-    assert job["RunAtLoad"] is False
+def test_it_runs_with_the_catch_up_guard(job: dict[str, Any]) -> None:
+    """RunAtLoad fires on every load, so the job must be told to skip a load
+    that follows a sweep started in the last 24 h (issue #356)."""
+    assert job["ProgramArguments"][3:] == ["--catch-up"]
+
+
+def test_it_runs_at_load_to_catch_up_a_powered_off_night(job: dict[str, Any]) -> None:
+    """launchd fires a calendar trigger missed during sleep on wake, but one
+    missed while the machine was powered off is simply lost (issue #356). The
+    load at login is the only moment left to notice it; `--catch-up` is what
+    stops that load from starting a second sweep after a recent one."""
+    assert job["RunAtLoad"] is True
 
 
 def test_it_uses_a_calendar_interval_not_an_interval(job: dict[str, Any]) -> None:

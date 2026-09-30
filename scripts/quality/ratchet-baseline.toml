@@ -550,7 +550,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/observatory/commands.py"
-value = 922
+value = 916
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -572,13 +572,6 @@ rule = "function-params"
 path = "src/lovspor/observatory/commands.py"
 name = "_sweep_one"
 value = 5
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "function-lines"
-path = "src/lovspor/observatory/commands.py"
-name = "nightly"
-value = 23
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
