@@ -313,6 +313,8 @@ jobs:
             exit 1
           }
           set +e
+          # The transcript is kept (#448, #472): `codex exec` exits 0 even when
+          # its execution tool never started, and only its output says so.
           python3 scripts/ci/codex_account_failover.py \
             --primary-home "$CODEX_PRIMARY_HOME" \
             ${secondary_args[@]+"${secondary_args[@]}"} \
@@ -321,8 +323,9 @@ jobs:
               --sandbox workspace-write \
               "$(cat .github/codex/mutation-remediation.md)
 
-              mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
-          status=$?
+              mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json" \
+            2>&1 | tee "$RUNNER_TEMP/remediation-agent.log"
+          status=${PIPESTATUS[0]}
           set -e
           # 75 = every Codex account rate-limited: hand the SAME prompt to the
           # non-Fable Claude fallback instead of stalling the remediation cycle.
@@ -351,6 +354,21 @@ jobs:
           name: remediation-rss-${{ github.event.workflow_run.head_sha }}
           path: ${{ runner.temp }}/agent-rss.log
           if-no-files-found: ignore
+
+      # Issue #448: the standalone codex-cli 0.159.0 on the Mac runner ships
+      # without `codex-code-mode-host`, every tool call fails to spawn it, and
+      # `codex exec` still exits 0 (run 36670610064). That round did nothing,
+      # so it fails here, loudly, and the verifier's classifier names it a
+      # runner install failure — never a verdict about the survivors.
+      - name: Stop when the agent could not start its execution tool
+        id: tool
+        if: steps.author.outputs.author == 'codex'
+        run: |
+          signature='ERROR codex_core::tools::router: error=failed to spawn code-mode host /'
+          if grep -Fq -- "$signature" "$RUNNER_TEMP/remediation-agent.log" 2>/dev/null; then
+            echo "::error::Codex could not start its execution tool: codex-code-mode-host is missing on runner $RUNNER_NAME. The agent ran no command, so no survivor was classified. Install it per docs/agentic-ci.md, Mac mini runner step 3 (#448)."
+            exit 1
+          fi
 
       - name: Scope guard
         if: steps.cycle.outputs.run == 'true'
@@ -384,7 +402,11 @@ jobs:
       - name: Escalate on remediation failure
         # cancelled() as well as failure(): a job killed by its ceiling is not
         # a failed job, and `failure()` alone let that path end in silence.
-        if: (failure() || cancelled()) && steps.cycle.outputs.pr != ''
+        # A missing tool host (#448) is left to the verifier, whose classifier
+        # names it; two rounds for one failure train a reader to skip both.
+        if: >-
+          (failure() || cancelled()) && steps.cycle.outputs.pr != '' &&
+          steps.tool.outcome != 'failure'
         run: |
           gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
           {
@@ -409,6 +431,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
+      # The agent lane's job log (#448): a missing tool host is only there.
+      actions: read
       contents: read
       pull-requests: write
       issues: write
@@ -536,7 +560,9 @@ jobs:
       # for a pipeline that failed: a green one had nothing to remediate.
       - name: Classify the lane failure
         id: classify
-        if: failure() && needs.remediate.outputs.pr == ''
+        # Every failure, not only a lane that died before naming its PR: a
+        # missing tool host (#448) fails a lane that did name it.
+        if: failure()
         # Never fatal: a jobs-API hiccup downgrades the wording below, it must
         # not silence the report (#193, one level up).
         continue-on-error: true
@@ -544,8 +570,15 @@ jobs:
           set -euo pipefail
           gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/jobs" --paginate \
             > "$RUNNER_TEMP/jobs.json"
+          # The failed lane's log refines the verdict (#270, #448). A log that
+          # cannot be fetched stays empty: no evidence, the old wording.
+          id="$(jq -rn 'first(inputs | .jobs[] | select(.name == "remediate") | .id)' \
+            "$RUNNER_TEMP/jobs.json")"
+          gh api "repos/$GH_REPO/actions/jobs/$id/logs" > "$RUNNER_TEMP/lane.log" \
+            || : > "$RUNNER_TEMP/lane.log"
           python3 scripts/ci/classify_lane_failure.py \
-            --jobs "$RUNNER_TEMP/jobs.json" --lane remediate >> "$GITHUB_OUTPUT"
+            --jobs "$RUNNER_TEMP/jobs.json" --lane remediate \
+            --log "$RUNNER_TEMP/lane.log" >> "$GITHUB_OUTPUT"
 
       - name: Escalate a remediation lane that died without reporting
         if: >-
@@ -601,9 +634,25 @@ jobs:
         # cancelled() as well as failure(): a job killed by its ceiling is not
         # a failed job, and `failure()` alone let that path end in silence.
         if: (failure() || cancelled()) && needs.remediate.outputs.pr != ''
+        env:
+          KIND: ${{ steps.classify.outputs.kind }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh pr edit "${{ needs.remediate.outputs.pr }}" --add-label "needs-human:mutation"
-          {
-            echo "Mutation remediation run FAILED before completing its escalation path. Human review required: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          } > "$RUNNER_TEMP/failure-escalation.md"
+          if [ "$KIND" = "runner_tool" ]; then
+            {
+              echo "Mutation remediation BLOCKED by an INFRASTRUCTURE failure — the runner's Codex install, not the diff."
+              echo ""
+              echo "Codex could not start its execution tool (\`failed to spawn code-mode host\`): the agent"
+              echo "ran no command, so **no survivor was classified** — none is non-killable or equivalent."
+              echo "The runner needs \`codex-code-mode-host\` next to \`codex\`: docs/agentic-ci.md, Mac mini"
+              echo "runner, operator step 3 (#448). Then re-run: \`gh run rerun ${RUN_URL##*/} --failed\`"
+              echo ""
+              echo "Run: $RUN_URL"
+            } > "$RUNNER_TEMP/failure-escalation.md"
+          else
+            {
+              echo "Mutation remediation run FAILED before completing its escalation path. Human review required: $RUN_URL"
+            } > "$RUNNER_TEMP/failure-escalation.md"
+          fi
           scripts/ci/pr_sticky_comment.sh mutation "${{ needs.remediate.outputs.pr }}" "$RUNNER_TEMP/failure-escalation.md"

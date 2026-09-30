@@ -188,7 +188,11 @@ def test_remediation_failure_escalates_only_after_pr_resolution() -> None:
 
     # Widened to cover cancellation in #157: a job killed by its ceiling is
     # not a failed job, and the PR-resolution guard is what this test pins.
-    assert escalation["if"] == "(failure() || cancelled()) && steps.cycle.outputs.pr != ''"
+    # A missing tool host (#448) is reported once, by the verifier's classifier.
+    assert escalation["if"] == (
+        "(failure() || cancelled()) && steps.cycle.outputs.pr != '' && "
+        "steps.tool.outcome != 'failure'"
+    )
     assert (
         'gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"' in command
     )
@@ -2380,3 +2384,85 @@ def test_every_established_ci_script_exists() -> None:
     missing = sorted(name for name in _ESTABLISHED_CI_SCRIPTS if not (_CI_SCRIPTS / name).is_file())
 
     assert missing == []
+
+
+_TOOL_STOP = "Stop when the agent could not start its execution tool"
+# Verbatim from run 36670610064 (PR #469), as `tee` writes it: codex's own
+# timestamp only.
+_TOOL_HOST_ERROR = (
+    "2026-09-30T04:50:18.893013Z ERROR codex_core::tools::router: error=failed to spawn"
+    " code-mode host /Users/ci-lovspor/.local/bin/codex-code-mode-host: No such file or"
+    " directory (os error 2)\n"
+)
+
+
+class TestAMissingToolHostFailsTheRemediationLane:
+    """Issue #448: codex-cli 0.159.0 on the Mac runner lacks
+    `codex-code-mode-host`, the agent could not run one command, `codex exec`
+    exited 0, and the round went down the no-change path as if it had
+    classified the survivors. It now fails the lane, and the verifier's
+    classifier names it an infrastructure failure of the runner's install."""
+
+    def _stop(self, tmp_path: Path, transcript: str | None) -> subprocess.CompletedProcess[str]:
+        if transcript is not None:
+            (tmp_path / "remediation-agent.log").write_text(transcript, encoding="utf-8")
+        step = _named_step(_steps("mutation-remediation.yml", "remediate"), _TOOL_STOP)
+        env = {"PATH": _SYSTEM_PATH, "RUNNER_TEMP": str(tmp_path), "RUNNER_NAME": "mac"}
+        script = ["bash", "-e", "-c", step["run"]]
+        return subprocess.run(
+            script, cwd=tmp_path, env=env, capture_output=True, text=True, check=False
+        )
+
+    def test_the_pr_469_transcript_fails_the_lane_loudly(self, tmp_path: Path) -> None:
+        done = self._stop(tmp_path, f"codex\nI'll read the survivors.\n{_TOOL_HOST_ERROR}")
+
+        assert done.returncode == 1
+        assert "::error::" in done.stdout
+        assert "codex-code-mode-host is missing" in done.stdout
+        assert "#448" in done.stdout
+
+    @pytest.mark.parametrize("transcript", ["exec\n/bin/bash -lc ls\n succeeded in 2ms:\n", None])
+    def test_a_working_or_absent_transcript_passes(
+        self, tmp_path: Path, transcript: str | None
+    ) -> None:
+        assert self._stop(tmp_path, transcript).returncode == 0
+
+    def test_the_stop_reads_the_transcript_the_codex_step_keeps(self) -> None:
+        steps = _steps("mutation-remediation.yml", "remediate")
+        names = [step.get("name") for step in steps]
+        author = _named_step(steps, "Codex — mutation remediation (tests only)")
+
+        assert '| tee "$RUNNER_TEMP/remediation-agent.log"' in author["run"]
+        assert "status=${PIPESTATUS[0]}" in author["run"]
+        assert names.index(author["name"]) < names.index(_TOOL_STOP) < names.index("Scope guard")
+        assert _named_step(steps, _TOOL_STOP)["if"] == "steps.author.outputs.author == 'codex'"
+
+    def test_the_verifier_classifies_every_failure_with_the_lane_log(self) -> None:
+        job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+        classify = _named_step(job["steps"], "Classify the lane failure")
+
+        assert classify["if"] == "failure()"
+        assert '--log "$RUNNER_TEMP/lane.log"' in classify["run"]
+        assert job["permissions"]["actions"] == "read"
+
+    def _escalate(self, tmp_path: Path, kind: str) -> str:
+        env = _escalation_sandbox(tmp_path) | {"KIND": kind, "RUN_URL": _RUN_URL}
+        steps = _steps("mutation-remediation.yml", "remediate-verify")
+        step = _named_step(steps, "Escalate on remediation failure")
+        _run_step(_render(step["run"], {"needs.remediate.outputs.pr": "309"}), tmp_path, env)
+        return (tmp_path / "body").read_text(encoding="utf-8")
+
+    def test_the_runner_tool_is_reported_as_infrastructure(self, tmp_path: Path) -> None:
+        body = self._escalate(tmp_path, "runner_tool")
+
+        assert body.startswith("Mutation remediation BLOCKED by an INFRASTRUCTURE failure")
+        assert "no survivor was classified" in body
+        assert "called non-killable" not in body
+        assert "gh run rerun 1 --failed" in body
+        assert _RUN_URL in body
+
+    def test_any_other_failure_keeps_its_wording(self, tmp_path: Path) -> None:
+        body = self._escalate(tmp_path, "in_job")
+
+        assert body.startswith("Mutation remediation run FAILED before completing")
+        assert _RUN_URL in body
