@@ -25,13 +25,21 @@ live:
   the rule to the end of the path;
 * a rule with an empty path matches nothing (``Disallow:`` alone permits
   everything); with no matching rule the path is allowed;
-* ``Sitemap:`` lines are collected from anywhere in the file.
+* ``Sitemap:`` lines are collected from anywhere in the file;
+* ``Crawl-delay:`` belongs to the group it sits in, read through the same
+  grouping and the same group selection as the rules (issue #449). It does
+  not close a group — only a rule does — so consecutive ``User-agent`` lines
+  share it, which is how ``User-agent: *`` on Kongsvinger (3401) picks up the
+  ``Crawl-delay: 30`` written under ``MSNBot``. Where several groups apply,
+  the longest delay binds; a value that is not a finite, non-negative number
+  of seconds is ignored, as it is by the crawlers that defined the field.
 
 Paths are compared percent-encoded on both sides, so ``/høring`` in a rule
 and ``/h%C3%B8ring`` in a URL are the same path — while an encoded reserved
 character stays encoded, so ``/a%2Fb`` is not ``/a/b``.
 """
 
+import math
 import re
 import string
 from collections.abc import Iterable
@@ -70,6 +78,7 @@ class Rule(NamedTuple):
 class Group(NamedTuple):
     agents: tuple[str, ...]
     rules: tuple[Rule, ...]
+    crawl_delay: float | None = None
 
 
 class RobotsPolicy:
@@ -111,6 +120,20 @@ class RobotsPolicy:
         ]
         return max(matching)[1] if matching else True
 
+    def crawl_delay(self, user_agent: str) -> float | None:
+        """The seconds this crawler is asked to wait between requests, if any.
+
+        Read from the groups that decide :meth:`allows`, so the delay and the
+        rules cannot come from two readings of one file. The longest delay of
+        those groups binds; ``None`` means the file declares none for us.
+        """
+        delays = [
+            group.crawl_delay
+            for group in self._groups_for(user_agent)
+            if group.crawl_delay is not None
+        ]
+        return max(delays) if delays else None
+
     def _rules_for(self, user_agent: str) -> tuple[Rule, ...]:
         """Every rule addressed to this crawler, from every group that names it.
 
@@ -118,13 +141,15 @@ class RobotsPolicy:
         they are one rule set. Taking only the first would let a later
         ``Disallow`` go unenforced.
         """
+        return tuple(rule for group in self._groups_for(user_agent) for rule in group.rules)
+
+    def _groups_for(self, user_agent: str) -> tuple[Group, ...]:
+        """The groups naming this crawler's product token, or else the ``*`` ones."""
         token = user_agent.partition("/")[0].strip().lower()
-        named = tuple(
-            rule for group in self._groups if token in group.agents for rule in group.rules
-        )
-        if any(token in group.agents for group in self._groups):
+        named = tuple(group for group in self._groups if token in group.agents)
+        if named:
             return named
-        return tuple(rule for group in self._groups if "*" in group.agents for rule in group.rules)
+        return tuple(group for group in self._groups if "*" in group.agents)
 
 
 class _Builder:
@@ -136,6 +161,7 @@ class _Builder:
         self.sitemaps: list[str] = []
         self._agents: list[str] = []
         self._rules: list[Rule] = []
+        self._delays: list[float] = []
 
     def feed(self, raw: str) -> None:
         field, _, value = raw.partition("#")[0].partition(":")
@@ -144,6 +170,8 @@ class _Builder:
             self._start_agent(value.lower())
         elif field in ("allow", "disallow") and self._agents:
             self._rules.append(_rule(value, allow=field == "allow"))
+        elif field == "crawl-delay" and self._agents:
+            self._delays.extend(_seconds(value))
         elif field == "sitemap" and value:
             self.sitemaps.append(value)
 
@@ -160,8 +188,18 @@ class _Builder:
         self._agents.append(agent)
 
     def _close(self) -> None:
-        self._groups.append(Group(tuple(self._agents), tuple(self._rules)))
-        self._agents, self._rules = [], []
+        delay = max(self._delays) if self._delays else None
+        self._groups.append(Group(tuple(self._agents), tuple(self._rules), delay))
+        self._agents, self._rules, self._delays = [], [], []
+
+
+def _seconds(value: str) -> tuple[float, ...]:
+    """A ``Crawl-delay`` value as seconds, or nothing when it is not one."""
+    try:
+        seconds = float(value)
+    except ValueError:
+        return ()
+    return (seconds,) if math.isfinite(seconds) and seconds >= 0 else ()
 
 
 def _rule(value: str, *, allow: bool) -> Rule:
