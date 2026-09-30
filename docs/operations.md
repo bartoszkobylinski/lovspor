@@ -361,7 +361,15 @@ uv run lovspor observatory sources
 ```
 
 Set `rate_limit_seconds` to at least the source's own `Crawl-delay` when it
-declares one. Permission to fetch is still not permission to redistribute —
+declares one. `activate-source` enforces this (issue #449): it reads the live
+`robots_txt_url` as the check's `user_agent`, takes the `Crawl-delay` of the
+group that crawler falls under (its own product token, else `*`; consecutive
+`User-agent` lines share one group, so Kongsvinger's `User-agent: *` directly
+above `User-agent: MSNBot` / `Crawl-delay: 30` binds us to 30 s), and refuses a
+lower rate. The read follows at most 5 redirects, each of which must stay
+inside the source's cleared domain. A redirect off the domain, a sixth
+redirect, a 5xx or an unreachable host refuses activation; a 4xx means the
+site publishes no rules and sets no floor. Permission to fetch is still not permission to redistribute —
 ADR-0010 §5 and §6 keep republication behind a separate per-source licensing
 basis that no command here can satisfy.
 

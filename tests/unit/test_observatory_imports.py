@@ -47,6 +47,7 @@ _MODULES = (
     "lovspor.observatory.registry_commands",
     "lovspor.observatory.registry_io",
     "lovspor.observatory.robots",
+    "lovspor.observatory.robots_live",
     "lovspor.observatory.storage",
     "lovspor.observatory.survey",
     "lovspor.observatory.survey_commands",

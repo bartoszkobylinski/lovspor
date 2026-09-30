@@ -163,6 +163,24 @@ class SourceNotActivatedError(ObservatoryError):
     """
 
 
+class RobotsUnreadableError(SourceNotActivatedError):
+    """The live ``robots.txt`` could not be read inside the cleared domain.
+
+    Raised by ``activate-source`` (issue #449) when the file is unreachable,
+    answers 5xx, redirects off the cleared domain, or redirects more than five
+    times. A subclass because the answer is the one every activation refusal
+    gives: a crawl policy nobody could read is no evidence the rate is polite.
+    """
+
+
+class RateBelowCrawlDelayError(SourceNotActivatedError):
+    """The recorded ``rate_limit_seconds`` is below the site's own ``Crawl-delay``.
+
+    ``docs/operations.md`` requires the rate to honour the delay; until issue
+    #449 that rested on a reviewer reading the file by eye.
+    """
+
+
 class AmbiguousSourceError(SourceNotActivatedError):
     """More than one activated source covers the host being fetched.
 
