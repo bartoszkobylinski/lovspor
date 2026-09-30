@@ -404,6 +404,15 @@ was not taken: the scope guard and the `BEFORE_SHA` arithmetic both assume the h
   `pull_request`, where `codex-tests` already executes that head, and off the
   default branch the PR that *introduces* the helper would have none to call,
   leaving the reporter to die on a missing file: issue #193's silence again.
+- **A mutation round names the head it describes** (issue #477). On PR #469 the
+  `mutation` sticky's first round (head `a85fe67`, 12 survivors) was read as the
+  current state; the round for the real head (`99e00f7`, 5 survivors, run
+  36679035597) had been appended correctly, at the bottom, with nothing saying the top
+  was superseded. Both remediation jobs pass `STICKY_HEAD_SHA`, and the helper then
+  opens each round with a bold `Head <sha7>` line, marks a round written for a head the PR
+  has already left as `STALE` (it still posts: rounds are never dropped), and keeps
+  one status line under the marker naming the head of the newest round and whether it
+  is the PR head. The `pipeline` marker does not pass it and is unchanged.
 - A remediation **cycle notice** ("cycle 1/2 pushed test-only changes") applies no
   label and asks nothing of a human, so it goes to the run summary, not to a PR
   comment. It was two of PR #230's ten mails.

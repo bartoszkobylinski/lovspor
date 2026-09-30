@@ -2380,3 +2380,14 @@ def test_every_established_ci_script_exists() -> None:
     missing = sorted(name for name in _ESTABLISHED_CI_SCRIPTS if not (_CI_SCRIPTS / name).is_file())
 
     assert missing == []
+
+
+@pytest.mark.parametrize("job_name", ["remediate", "remediate-verify"])
+def test_every_mutation_sticky_round_names_the_head_it_describes(job_name: str) -> None:
+    """Issue #477: the sticky helper labels each round with this head and says
+    STALE when the PR has left it; both remediation jobs hand it the head."""
+    job = _workflow("mutation-remediation.yml")["jobs"][job_name]
+
+    assert job["env"]["STICKY_HEAD_SHA"] == "${{ github.event.workflow_run.head_sha }}"
+    assert job["env"]["STICKY_HEAD_SHA"] == job["env"]["HEAD_SHA"]
+    assert job["permissions"]["pull-requests"] == "write"

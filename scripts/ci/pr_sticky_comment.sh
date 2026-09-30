@@ -14,6 +14,13 @@
 # comment would let a read-modify-write from one silently drop the other's
 # round. Separate markers make the two streams independent.
 #
+# With STICKY_HEAD_SHA set (issue #477), each round opens with the head it was
+# written for, a round for a head the PR has already left says it is stale,
+# and one status line under the marker names the head of the newest round.
+# On PR #469 a reader took the first round (head a85fe67, 12 survivors) for the
+# current state; the round for the real head (99e00f7, 5 survivors, run
+# 36679035597) sat at the bottom with nothing saying the top was superseded.
+#
 # Usage: pr_sticky_comment.sh <marker-key> <pr-number> <body-file>
 set -euo pipefail
 
@@ -29,6 +36,36 @@ SEPARATOR=$'\n\n---\n\n'
 # GitHub rejects a comment body over 65536 characters with a 422. Stay clear of
 # the edge so an append never fails the job it exists to report.
 MAX_BODY=60000
+HEAD_SHA="${STICKY_HEAD_SHA:-}"
+STATUS_PREFIX="_Rounds run oldest first"
+status=""
+
+if [ -n "$HEAD_SHA" ]; then
+  # Never fatal: an escalation that cannot read the PR head still posts.
+  pr_head="$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha' 2>/dev/null)" || pr_head=""
+  round_head="**Head \`${HEAD_SHA:0:7}\`**"
+  if [ -z "$pr_head" ]; then
+    where="PR head unknown: it could not be read"
+  elif [ "$pr_head" = "$HEAD_SHA" ]; then
+    where="the PR head"
+  else
+    round_head="$round_head — STALE: the PR head is now \`${pr_head:0:7}\`; that head's own run reports for it."
+    where="not the PR head \`${pr_head:0:7}\`"
+  fi
+  status="${STATUS_PREFIX}: the newest, at the bottom, was written for head \`${HEAD_SHA:0:7}\`, ${where}._"
+  { printf '%s\n\n' "$round_head"; cat "$BODY_FILE"; } > "$BODY_FILE.round"
+  BODY_FILE="$BODY_FILE.round"
+fi
+
+# The status line sits right under the marker, one copy only: the old one is
+# dropped and the new one put back in its place.
+with_status() {
+  local body="$1" head="${MARKER}"$'\n\n'
+  if [ -z "$status" ]; then printf '%s' "$body"; return; fi
+  body="${body#"$head"}"
+  if [[ "$body" == "$STATUS_PREFIX"* ]]; then body="${body#*$'\n\n'}"; fi
+  printf '%s' "${head}${status}"$'\n\n'"${body}"
+}
 
 existing_id="$(
   gh api "repos/$REPO/issues/$PR/comments" --paginate \
@@ -41,7 +78,11 @@ existing_id="$(
 existing_id="${existing_id%%$'\n'*}"
 
 if [ -z "$existing_id" ]; then
-  { printf '%s\n\n' "$MARKER"; cat "$BODY_FILE"; } > "$BODY_FILE.sticky"
+  if [ -n "$status" ]; then
+    with_status "$MARKER"$'\n\n'"$(cat "$BODY_FILE")" > "$BODY_FILE.sticky"
+  else
+    { printf '%s\n\n' "$MARKER"; cat "$BODY_FILE"; } > "$BODY_FILE.sticky"
+  fi
   gh pr comment "$PR" --body-file "$BODY_FILE.sticky"
   exit 0
 fi
@@ -67,6 +108,7 @@ if [ "${#combined}" -gt "$MAX_BODY" ]; then
     combined="${MARKER}"$'\n\n'"${notice}${SEPARATOR}${combined}"
   fi
 fi
+if [ -n "$status" ]; then combined="$(with_status "$combined")"; fi
 
 # `-f` (--raw-field) sends the body as a string and lets gh do the JSON
 # encoding: no external jq, and no `-F` type coercion turning a body that
