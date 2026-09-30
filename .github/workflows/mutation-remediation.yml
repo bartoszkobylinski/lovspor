@@ -53,6 +53,7 @@ jobs:
       before_sha: ${{ steps.base.outputs.before_sha }}
       patch: ${{ steps.patch.outputs.patch }}
       blocked: ${{ steps.blocked.outputs.message }}
+      not_run: ${{ steps.ran.outputs.not_run }}
     env:
       UV_PYTHON: "3.12"
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -313,6 +314,8 @@ jobs:
             exit 1
           }
           set +e
+          # The transcript is kept (#448, #472): `codex exec` exits 0 even when
+          # its execution tool never started, and only its output says so.
           python3 scripts/ci/codex_account_failover.py \
             --primary-home "$CODEX_PRIMARY_HOME" \
             ${secondary_args[@]+"${secondary_args[@]}"} \
@@ -321,8 +324,9 @@ jobs:
               --sandbox workspace-write \
               "$(cat .github/codex/mutation-remediation.md)
 
-              mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
-          status=$?
+              mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json" \
+            2>&1 | tee "$RUNNER_TEMP/remediation-agent.log"
+          status=${PIPESTATUS[0]}
           set -e
           # 75 = every Codex account rate-limited: hand the SAME prompt to the
           # non-Fable Claude fallback instead of stalling the remediation cycle.
@@ -338,6 +342,23 @@ jobs:
             exit "$status"
           else
             echo "author=codex" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Issue #472: on PR #469 the agent could not run one command, `codex exec`
+      # exited 0, and the no-change wording said "survivors called
+      # non-killable" about a classification nobody made. A transcript with no
+      # executed command is a remediation that did not run, and the verifier
+      # says that instead.
+      - name: Did the agent run a command
+        id: ran
+        if: steps.author.outputs.author == 'codex'
+        run: |
+          if [ -x scripts/ci/remediation_transcript.py ]; then
+            python3 scripts/ci/remediation_transcript.py \
+              --log "$RUNNER_TEMP/remediation-agent.log" \
+              --result "${{ runner.temp }}/mutation/mutation-result.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "remediation_transcript.py not on this head; the no-change wording stands (issue #381)" >&2
           fi
 
       - name: Stop the memory sampler
@@ -497,11 +518,14 @@ jobs:
         env:
           # Data, never interpolated into the script: it quotes the artifact.
           BLOCKED_BY: ${{ needs.remediate.outputs.blocked }}
+          # Set only when the agent ran no command (#472): then no survivor
+          # was classified, and the no-change wording would claim one was.
+          NOT_RUN: ${{ needs.remediate.outputs.not_run }}
         run: |
           if [ -z "$(git status --porcelain)" ] && git diff --quiet "$BEFORE_SHA"..HEAD; then
             gh pr edit "${{ needs.remediate.outputs.pr }}" --add-label "needs-human:mutation"
             {
-              echo "${BLOCKED_BY:-Mutation remediation made no safe test-only change.} Human review required. Artifact: mutation-result-$HEAD_SHA."
+              echo "${NOT_RUN:-${BLOCKED_BY:-Mutation remediation made no safe test-only change.}} Human review required. Artifact: mutation-result-$HEAD_SHA."
             } > "$RUNNER_TEMP/nochange-escalation.md"
             scripts/ci/pr_sticky_comment.sh mutation "${{ needs.remediate.outputs.pr }}" "$RUNNER_TEMP/nochange-escalation.md"
             exit 0

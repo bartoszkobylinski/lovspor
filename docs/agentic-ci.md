@@ -383,6 +383,18 @@ was not taken: the scope guard and the `BEFORE_SHA` arithmetic both assume the h
   timed-out mutant is neither killed nor survived — it got no verdict inside mutmut's
   per-mutant time limit — so the job summary and the gate's log line list survived,
   timed-out, suspicious, uncovered and no-verdict counts separately too.
+- A remediation round whose agent **ran no command** is not a round that changed nothing
+  (issue #472). On PR #469 (run 36670610064) the runner's `codex-code-mode-host` was
+  missing (#448), the agent could not execute one command, `codex exec` still exited 0,
+  and the sticky said "12 survivor(s) remediation called non-killable" — a verdict no
+  agent gave. The Codex step now tees its transcript to
+  `$RUNNER_TEMP/remediation-agent.log`; `scripts/ci/remediation_transcript.py` looks for
+  the `exec` line `codex exec` prints before every command, and when there is none it
+  hands the verifier a `not_run` message instead: "Mutation remediation did not run
+  (reason) — no survivor was classified … Remediation: FAILED (agent_did_not_run)",
+  with the gate reason and the unclassified counts from the artifact. The no-change
+  wording is used only when the agent did run. The Claude fallback's transcript has no
+  such marker, so the check runs on Codex rounds only.
 - If the PR branch advances while remediation is running, its rejected push is abandoned
   as superseded — the new head's own pipeline owns mutation from there. Any other
   remediation failure escalates itself: `needs-human:mutation` + a comment linking the
