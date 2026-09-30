@@ -22,6 +22,7 @@ from lovspor.usage_report import (
     resolve_since,
     summarize,
 )
+from tests.unit.cli_output import said
 
 _JOURNAL = """\
 INFO:     Started server process [4121]
@@ -107,4 +108,4 @@ def test_the_command_reads_stdin_through_the_real_cli() -> None:
 def test_the_command_refuses_a_bad_since_with_a_usage_error() -> None:
     result = CliRunner().invoke(app, ["ops", "usage", "--since", "last week"], input="")
     assert result.exit_code == 2
-    assert "--since" in result.output
+    assert said("--since takes 'today', 'all' or a date like 2026-09-30", result.output)
