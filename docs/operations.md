@@ -596,6 +596,29 @@ counted as failures there, but they were not mentioned either, and the pass
 that stops calling them failures must not be the pass that stops mentioning
 them.
 
+### Which blobs carry a document: `observatory document-report`
+
+An `artifact` record says bytes were retrievable; it does not say they hold a
+document. On 2026-09-16 the regulation-shaped HTML blobs were opened for the
+first time: the median `<main>` held 199 characters, 54% held under 300, and
+25% contained a `§` — most were a JavaScript shell (issue #332).
+
+```
+uv run lovspor observatory document-report
+```
+
+Offline and read-only: one pass over the corrected log, reading each distinct
+blob once per source. Per source it prints the HTML blob count, the median
+visible `<main>` text length (whitespace collapsed; `<body>` when a page has no
+`<main>`, counted under `no-main`), how many fall under 300 characters, how
+many contain a `§`, and `docs/html` — blobs clearing both bars. PDFs are
+counted and never measured: the engine ships no PDF text extractor. A blob
+missing from disk is counted under `missing`. A damaged log is refused.
+
+Both measures are proxies for "carries a document", not for "is a forskrift";
+ADR-0010 defers classification. The observation schema is unchanged — recording
+the same measurements on new captures is a separate, later step.
+
 ### Which sources share a server: `observatory addresses`
 
 The politeness budget is a promise to whoever operates a machine, but the
