@@ -140,3 +140,52 @@ class TestFetchCorpusRetry:
         assert "StartLimitBurst=4" in unit
         assert "Restart=on-failure" in service
         assert "RestartSec=10min" in service
+
+
+_ALERT = _DEPLOY / "lovspor-alert@.service"
+_MCP = _DEPLOY / "lovspor-mcp.service"
+_ALERTED = (_FETCH_SERVICE, _PUBLISH, _SERVICE)
+
+
+class TestFailureAlerts:
+    """A failed unit tells the operator (issue #478)."""
+
+    def test_the_timer_and_release_units_name_the_alert_in_their_unit_section(self) -> None:
+        for path in _ALERTED:
+            unit, _service = path.read_text(encoding="utf-8").split("[Service]", maxsplit=1)
+
+            assert _directive(unit, "OnFailure") == ["lovspor-alert@%n.service"], path.name
+
+    def test_the_mcp_service_neither_alerts_nor_reads_the_alert_file(self) -> None:
+        """Restart=on-failure every 5 s never reaches `failed` under the default
+        start limit, and the webhook is not the network-facing service's to read."""
+        text = _MCP.read_text(encoding="utf-8")
+
+        assert not _directive(text, "OnFailure")
+        assert "alert.env" not in text
+
+    def test_the_fetch_retries_alert_once_when_they_are_exhausted(self) -> None:
+        """RestartMode=direct skips OnFailure= on each auto-restart; the unit
+        enters `failed` — and alerts — only when the start limit refuses a retry."""
+        _unit, service = _FETCH_SERVICE.read_text(encoding="utf-8").split("[Service]", 1)
+
+        assert _directive(service, "RestartMode") == ["direct"]
+
+    def test_the_template_runs_the_alert_command_for_its_instance(self) -> None:
+        (exec_start,) = _directive(_ALERT.read_text(encoding="utf-8"), "ExecStart")
+
+        assert exec_start == "/opt/lovspor/app/.venv/bin/lovspor ops alert --unit %i"
+
+    def test_the_template_never_alerts_about_itself(self) -> None:
+        assert not _directive(_ALERT.read_text(encoding="utf-8"), "OnFailure")
+
+    def test_the_template_is_a_bounded_root_oneshot(self) -> None:
+        """Root reads the journal and the root-only alert file; no EnvironmentFile=,
+        so the webhook is never in any process environment on the box."""
+        text = _ALERT.read_text(encoding="utf-8")
+        (timeout,) = _directive(text, "TimeoutStartSec")
+
+        assert _directive(text, "Type") == ["oneshot"]
+        assert _directive(text, "User") == ["root"]
+        assert not _directive(text, "EnvironmentFile")
+        assert int(timeout) <= 120

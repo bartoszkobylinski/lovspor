@@ -324,6 +324,7 @@ class TestTheUnits:
             "lovspor-publish.service",
             "lovspor-site-drift.service",
             "lovspor-site-drift.timer",
+            "lovspor-alert@.service",
         ):
             assert f'install -m644 "$APP_DIR/deploy/digitalocean/{unit}" /etc/systemd/system/' in (
                 text
@@ -339,6 +340,23 @@ class TestTheUnits:
         assert "systemctl enable --now lovspor-fetch-corpus.timer" in text
         assert "systemctl enable --now lovspor-site-drift.timer" in text
         assert "systemctl enable lovspor-mcp.service" in text
+
+
+class TestTheAlertFile:
+    """The failure alert's webhook lives in its own root-only file (issue #478)."""
+
+    def test_is_created_commented_out_and_never_overwritten(self) -> None:
+        text = _script()
+
+        assert "ALERT_ENV=/etc/lovspor/alert.env" in text
+        assert 'if [ ! -f "$ALERT_ENV" ]; then' in text
+        assert "#LOVSPOR_ALERT_WEBHOOK=" in text
+
+    def test_is_root_only_on_every_run(self) -> None:
+        text = _script()
+
+        assert 'chown root:root "$ALERT_ENV"' in text
+        assert 'chmod 600 "$ALERT_ENV"' in text
 
 
 class TestTheCaddyfile:

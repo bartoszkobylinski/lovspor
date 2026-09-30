@@ -1,0 +1,26 @@
+[Unit]
+Description=Alert the operator that %i failed
+Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/deploy/digitalocean/README.md
+# Started by `OnFailure=lovspor-alert@%n.service` in the lovspor units (#478):
+# the instance is the failed unit's full name. No OnFailure= here — an alert
+# about a failed alert would loop; a failed delivery stays in this unit's journal.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Root: it reads the failed unit's journal and /etc/lovspor/alert.env, the
+# root-only file holding LOVSPOR_ALERT_WEBHOOK. The command reads that file
+# itself, so there is deliberately no EnvironmentFile=: the webhook URL never
+# sits in any process environment, and the MCP service (User=lovspor) can
+# neither read the file nor inherit the value. Unset or absent => the command
+# logs "alert webhook not configured" and exits 0.
+User=root
+WorkingDirectory=/opt/lovspor/app
+ExecStart=/opt/lovspor/app/.venv/bin/lovspor ops alert --unit %i
+# systemctl + journalctl are bounded at 30 s each and the POST at 15 s.
+TimeoutStartSec=90
+# It only reads and sends: nothing on disk is written.
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
