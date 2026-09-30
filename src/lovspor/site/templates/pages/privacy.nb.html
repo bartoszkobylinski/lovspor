@@ -7,6 +7,7 @@
       sign-in, sub only ..... lovspor.workos_auth (client_id "workos:<sub>")
       issued tokens ......... lovspor.access.Credential (hash, never token)
       counters in memory .... lovspor.quota, lovspor.access.Limits
+      hourly usage summary .. lovspor.usage_metrics (HourlyUsage: counts only)
       query to OpenAI ....... lovspor.embeddings.provider, .query (capped, cached)
       hosting region ........ deploy/digitalocean/README.md (fra1)
       Cloudflare DNS + mail . owner-confirmed 2026-09-30 (not in this repo)
@@ -37,6 +38,7 @@
   <li><strong>Utdelt token.</strong> Utviklere kan få et token av oss. Vi lagrer ikke selve tokenet, bare en kryptografisk hash av det, sammen med en merkelapp vi gir det, grensene som gjelder for det, og om det er utløpt eller trukket tilbake.</li>
 </ul>
 <p>Bruken telles per bruker og per token for å håndheve kvotene. Tellerne ligger bare i minnet på serveren og glemmes når tjenesten startes på nytt. Programmet vårt skriver ikke spørsmålene dine eller innholdet i verktøykallene til logg. Tjenesteprosessen har likevel en egen driftslogg på serveren, og den inneholder opplysninger om enkeltforespørsler, blant annet IP-adresse og svarstatus. Den slettes etter høyst <span data-literal>30</span> dager.</p>
+<p>Én gang i timen skriver tjenesten en samlet oversikt over bruken til den samme driftsloggen: hvor mange kall som ble gjort per verktøy, hvor mange som ble avvist og av hvilken grense, svartider, og hvor mange ulike brukere som var aktive — bare som et tall. Oversikten inneholder ingen søketekst, ingen brukeridentifikatorer og ingen IP-adresser.</p>
 
 <h2>Semantisk søk og OpenAI</h2>
 <p>Verktøyet <code>semantic_search</code> sender teksten i søket ditt, forkortet til en fast største lengde, til OpenAI sin embedding-tjeneste, som gjør den om til en vektor. Det er det eneste stedet der tekst du skriver, forlater serveren vår; de andre verktøyene sender ingenting videre. Søketeksten og vektoren holdes i en hurtigbuffer i minnet og glemmes når tjenesten startes på nytt. Behandlingen hos OpenAI kan skje utenfor EØS. Ikke lim inn fortrolige eller personlige opplysninger i et søk.</p>

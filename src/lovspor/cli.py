@@ -12,8 +12,8 @@ from pydantic import SecretStr, ValidationError
 
 from lovspor import __version__
 from lovspor.access import (
-    Credential,
     default_credentials_path,
+    describe_credential,
     issue_credential,
     load_credentials,
     revoke_credential,
@@ -27,6 +27,7 @@ from lovspor.mcp import HttpConfig
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.observatory.entrypoint import observatory_app
+from lovspor.ops_cli import ops_app
 from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
@@ -81,6 +82,7 @@ app.add_typer(tokens_app)
 app.add_typer(observatory_app)
 app.add_typer(release_app)
 app.add_typer(temporal_epoch_app)
+app.add_typer(ops_app)
 
 _CredentialsOption = Annotated[
     Path | None,
@@ -134,15 +136,8 @@ def tokens_list(credentials_path: _CredentialsOption = None) -> None:
         typer.echo(f"No credentials in {path}.")
         return
     for credential in credentials:
-        typer.echo(f"{credential.credential_id}  {_describe(credential)}  {credential.label}")
-
-
-def _describe(credential: Credential) -> str:
-    if credential.revoked:
-        return "revoked"
-    if credential.expires_at is None:
-        return "active (no expiry)"
-    return f"active until {credential.expires_at.date().isoformat()}"
+        state = describe_credential(credential)
+        typer.echo(f"{credential.credential_id}  {state}  {credential.label}")
 
 
 @tokens_app.command("revoke")
