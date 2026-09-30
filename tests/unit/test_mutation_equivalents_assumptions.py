@@ -19,6 +19,7 @@ import json
 import re
 import subprocess
 import tomllib
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from lovspor.observatory.freshness_index import StoredRun
 from lovspor.release.envelope import CorpusSummary, Marker, ReleaseRecord
 from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
 from lovspor.site.fingerprint import ReleaseKey
+from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest, write_manifest
 from tests.unit.site_fixtures import (
     available_observation,
     capability_document,
@@ -424,3 +426,72 @@ def test_assumption_git_batch_check_prints_id_and_type_with_one_space(tmp_path: 
     )
 
     assert out.splitlines() == [f"{head} commit", f"{tree} tree", f"{missing} missing"]
+
+
+def _manifest_read_back(tmp_path: Path) -> tuple[Manifest, bytes]:
+    """A manifest as `run_sync` holds it: written by the engine and read back,
+    so `last_seen` carries the tzinfo pydantic parses a stored stamp into."""
+    path = tmp_path / "manifest.json"
+    record = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="gjeldende-lover/drageloven.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
+        status="current",
+        renderer_version=1,
+    )
+    generated = datetime.fromisoformat("2026-01-02T00:00:00+00:00")
+    write_manifest(Manifest(generated_at=generated, documents={"lov-x": record}), path)
+    return read_manifest(path), path.read_bytes()
+
+
+def _rewritten(manifest: Manifest, record: ManifestRecord, path: Path) -> bytes:
+    write_manifest(Manifest(generated_at=manifest.generated_at, documents={"lov-x": record}), path)
+    return path.read_bytes()
+
+
+def test_assumption_model_copy_without_updates_is_value_equal_and_writes_the_same_bytes(
+    tmp_path: Path,
+) -> None:
+    """Pins the waiver for `if updates` -> `if (updates) or True` in
+    ``sync/orchestrator.py::run_sync``: on the no-op re-render path the mutant
+    stores ``prior_record.model_copy(update={})`` where the original stores
+    ``prior_record`` itself. pydantic must hand back a record equal under
+    ``==`` (the commit decision) that writes the same manifest bytes (the
+    published artifact); only ``is`` may tell the two apart."""
+    manifest, written = _manifest_read_back(tmp_path)
+    prior = manifest.documents["lov-x"]
+
+    copied = prior.model_copy(update={})
+
+    assert copied is not prior
+    assert copied == prior
+    assert {"lov-x": copied} == manifest.documents
+    assert _rewritten(manifest, copied, tmp_path / "copy.json") == written
+
+
+def test_assumption_an_equal_zero_offset_last_seen_writes_the_same_manifest_bytes(
+    tmp_path: Path,
+) -> None:
+    """Pins the waiver for `and` -> `or` in ``run_sync``'s ``last_seen``
+    reconcile: the mutant also stamps ``last_seen = preserved`` when the two
+    are already equal. ``preserved`` comes from ``datetime.fromisoformat`` on
+    the published file, ``last_seen`` from pydantic on the manifest, so their
+    tzinfo objects differ. At offset zero — every stamp the engine writes comes
+    from ``datetime.now(UTC)`` — the swap must stay ``==`` and serialise to the
+    same bytes. A non-zero offset at the same instant does not; the last
+    assertion records that boundary, which the waiver's justification names."""
+    manifest, written = _manifest_read_back(tmp_path)
+    prior = manifest.documents["lov-x"]
+    preserved = datetime.fromisoformat("2026-01-01T00:00:00+00:00")
+
+    stamped = prior.model_copy(update={"last_seen": preserved})
+
+    assert type(prior.last_seen.tzinfo) is not type(preserved.tzinfo)
+    assert stamped == prior
+    assert _rewritten(manifest, stamped, tmp_path / "stamped.json") == written
+    shifted = datetime.fromisoformat("2026-01-01T02:00:00+02:00")
+    moved = prior.model_copy(update={"last_seen": shifted})
+    assert moved == prior
+    assert _rewritten(manifest, moved, tmp_path / "shifted.json") != written
