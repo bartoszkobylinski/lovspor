@@ -106,6 +106,18 @@ colour. Issue #162 is where this gap was written down.
 The script rebuilds the shadow tree for each run, then uses mutmut's warm baseline and
 parallel workers. Module-level or otherwise unsafe-to-narrow changes fall back to the
 affected module instead of being exempted.
+
+A changed function with a `function-lines` entry in `scripts/quality/ratchet-baseline.toml`
+is a large legacy function (issue #228, owner decision 2026-09-30): only the mutants on its
+changed post-image lines run, not the whole body. `mutation_scope.py --legacy-plan` lists such
+functions; `scripts/ci/mutation_legacy.py` generates the mutants without running them, reads
+each one's line from `mutmut show`, and hands the script the exact mutant names to run. A
+mutant whose line cannot be resolved runs. The rest are not run and are reported through the
+`unmeasured_changed_lines` path as `(legacy remainder <function>: N of M mutants not run,
+#228)`: never counted killed, never in the score, listed in the job summary under their own
+heading. A PR whose legacy changes carry no mutant at all reports `mutation not applicable`
+with that notice.
+
 No numeric score threshold exists or was added. The gate in `mutation-result.json`:
 
 - `mutation not applicable` (no `src/lovspor/` changes) → **PASS**, reason `not_applicable`
