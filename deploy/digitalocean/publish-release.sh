@@ -98,10 +98,12 @@ build_as_build_user() {
 	# not run as root. The probe credential arrives from systemd's
 	# LoadCredential= as a root-only file; it is passed to the build user as
 	# stdin, never as an argument, an environment variable or a file it owns.
+	# `-` reads the open fd 0; `/dev/stdin` would re-open the root-only file by
+	# path and be refused to the build user (issue #467).
 	local ref="$1" live="$2" token="${CREDENTIALS_DIRECTORY:-}/site-probe"
 	local -a args=(release build --corpus "$CORPUS" --ref "$ref" --live "$live" --releases "$LOVSPOR_RELEASES_ROOT")
 	if [ -n "${CREDENTIALS_DIRECTORY:-}" ] && [ -r "$token" ]; then
-		sudo -u "$BUILD_USER" "$LOVSPOR" "${args[@]}" --probe-token-file /dev/stdin <"$token"
+		sudo -u "$BUILD_USER" "$LOVSPOR" "${args[@]}" --probe-token-file - <"$token"
 	else
 		sudo -u "$BUILD_USER" "$LOVSPOR" "${args[@]}" </dev/null
 	fi

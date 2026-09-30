@@ -57,7 +57,7 @@ from lovspor.site.probe import (
     probe,
     require_http_url,
 )
-from lovspor.site.probe_credential import load_probe_token
+from lovspor.site.probe_credential import ProbeTokenFileOption, load_probe_token
 from lovspor.storage.manifest import read_manifest
 from lovspor.sync.input_annotation import annotate_embedding_input_identity
 from lovspor.sync.lspe_cutover import migrate_lspe_v2
@@ -351,16 +351,6 @@ _PublicMcpUrlOption = Annotated[
         "discovery document must name exactly.",
     ),
 ]
-_ProbeTokenFileOption = Annotated[
-    Path | None,
-    typer.Option(
-        "--probe-token-file",
-        envvar="LOVSPOR_PROBE_TOKEN_FILE",
-        help="File holding the probe credential (default: $CREDENTIALS_DIRECTORY/site-probe, "
-        "as systemd LoadCredential= delivers it). Missing, empty or unreadable: step (b) "
-        "is recorded unobserved with reason probe_credential_missing, never as a failure.",
-    ),
-]
 _TimeoutOption = Annotated[
     float, typer.Option("--timeout-seconds", help="Per-request timeout, in seconds.")
 ]
@@ -423,7 +413,7 @@ def release_probe(
     out: Annotated[Path, typer.Option(help="File to write the capability document to.")],
     readiness_url: _ReadinessUrlOption = DEFAULT_READINESS_URL,
     public_mcp_url: _PublicMcpUrlOption = CANONICAL_MCP_URL,
-    probe_token_file: _ProbeTokenFileOption = None,
+    probe_token_file: ProbeTokenFileOption = None,
     timeout_seconds: _TimeoutOption = 10.0,
     observer: _ObserverOption = ObserverName.release_probe,
 ) -> None:
@@ -510,7 +500,7 @@ def site_drift_check(
     ] = SERVED_CAPABILITIES_URL,
     readiness_url: _ReadinessUrlOption = DEFAULT_READINESS_URL,
     public_mcp_url: _PublicMcpUrlOption = CANONICAL_MCP_URL,
-    probe_token_file: _ProbeTokenFileOption = None,
+    probe_token_file: ProbeTokenFileOption = None,
     timeout_seconds: _TimeoutOption = 10.0,
     observer: _ObserverOption = ObserverName.drift_timer,
     admin: _AdminOption = DEFAULT_ADMIN,

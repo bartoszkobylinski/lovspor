@@ -21,7 +21,7 @@
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/cli.py"
-value = 984
+value = 974
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -677,12 +677,6 @@ rule = "function-lines"
 path = "src/lovspor/release/check.py"
 name = "_check_ids"
 value = 24
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "file-lines"
-path = "src/lovspor/release/commands.py"
-value = 701
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
