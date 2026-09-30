@@ -3974,6 +3974,90 @@ class TestNightly:
         assert _requests_after_setup(httpx_mock) == []
 
 
+#: 10:00 in Oslo: well outside the 03:00 trigger, as a login after a power cut is.
+_BOOT = datetime(2026, 9, 28, 8, 0, tzinfo=UTC)
+
+
+class _BootClock(datetime):
+    @classmethod
+    def now(cls, tz: object = None) -> "_BootClock":  # type: ignore[override]
+        return cls.fromtimestamp(_BOOT.timestamp(), UTC)
+
+
+def _clean_sweep(root: Path, httpx_mock: HTTPXMock) -> None:
+    _activate(root)
+    _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+    httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+    httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+
+class TestNightlyCatchUp:
+    """#356: RunAtLoad catches up a 03:00 the machine was powered off for, and
+    `--catch-up` keeps a login after a recent sweep from starting another."""
+
+    def test_a_load_after_a_recent_sweep_does_not_sweep_again(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        monkeypatch.setattr(observatory_commands, "datetime", _BootClock)
+        _activate(root)
+        _write_sweep(root, started=_BOOT - timedelta(hours=5))
+
+        result = runner.invoke(app, ["observatory", "nightly", "--catch-up"])
+
+        assert result.exit_code == 0, result.output
+        assert "catch-up skipped" in result.output
+        assert "2026-09-28T03:00:00+00:00" in result.output
+        assert _requests_after_setup(httpx_mock) == []
+        assert len(read_sweep_runs(root / "sweep-runs.jsonl")) == 1
+
+    def test_a_load_after_a_missed_night_sweeps(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(observatory_commands, "datetime", _BootClock)
+        _clean_sweep(root, httpx_mock)
+        _write_sweep(root, started=_BOOT - timedelta(hours=29))
+
+        result = runner.invoke(app, ["observatory", "nightly", "--catch-up"])
+
+        assert result.exit_code == 0, result.output
+        assert "catch-up skipped" not in result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.started_at, run.status) == (_BOOT, "success")
+
+    def test_a_sweep_killed_by_shutdown_counts_as_started(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The killed sweep left no run record, only its lock record."""
+        monkeypatch.setattr(observatory_commands, "datetime", _BootClock)
+        _activate(root)
+        record = {
+            "owner": "observatory-sweep",
+            "pid": 999_999,
+            "since": "2026-09-28T01:00:04+00:00",
+        }
+        default_lock_path().write_text(json.dumps(record) + "\n")
+
+        result = runner.invoke(app, ["observatory", "nightly", "--catch-up"])
+
+        assert result.exit_code == 0, result.output
+        assert "catch-up skipped" in result.output
+        assert _requests_after_setup(httpx_mock) == []
+
+    def test_without_the_flag_a_hand_run_sweeps_regardless(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(observatory_commands, "datetime", _BootClock)
+        _clean_sweep(root, httpx_mock)
+        _write_sweep(root, started=_BOOT - timedelta(hours=5))
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        assert len(read_sweep_runs(root / "sweep-runs.jsonl")) == 2
+
+
 class TestAddressReport:
     def test_inactive_shared_source_uses_the_exact_operator_label(
         self, capsys: pytest.CaptureFixture[str]

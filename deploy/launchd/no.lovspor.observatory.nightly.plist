@@ -10,6 +10,13 @@
   at the scheduled time launchd runs the job on wake, and several missed
   triggers coalesce into one. cron simply loses them.
 
+  A machine powered off at the scheduled time is different: launchd replays
+  nothing at boot, and the trigger is lost (issue #356). RunAtLoad covers it —
+  the job runs when this agent loads at login — and the catch-up flag keeps
+  that load from starting a second sweep when one started in the last 24 hours.
+  The 03:00 trigger itself is never guarded; see
+  src/lovspor/observatory/catch_up.py.
+
   The hour lives here and nowhere else. How often a source must be observed is
   a property of the data and is stated once, in
   src/lovspor/observatory/sweeps.py; which hour the job fires is deployment
@@ -25,6 +32,7 @@
         <string>__LOVSPOR_BIN__</string>
         <string>observatory</string>
         <string>nightly</string>
+        <string>--catch-up</string>
     </array>
 
     <key>EnvironmentVariables</key>
@@ -57,10 +65,14 @@
         <integer>0</integer>
     </dict>
 
-    <!-- Never at load: `launchctl load` during setup must not start a sweep
-         against two hundred municipal servers as a side effect. -->
+    <!-- At load, to catch up a 03:00 the machine was powered off for (issue
+         #356). Guarded by the catch-up flag: a load within 24 hours of a
+         sweep's start exits without sweeping, so a reboot after a run does
+         not start a second one. A load with no sweep in the last 24 hours -
+         including `launchctl bootstrap` during setup - DOES start a sweep:
+         that is a missed night, and catching it up is the point. -->
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 
     <key>StandardOutPath</key>
     <string>__LOG_DIR__/observatory-nightly.out.log</string>

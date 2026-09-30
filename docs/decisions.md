@@ -353,6 +353,45 @@ Decided 2026-09-25, issue #323 (Phase D1/D2, step 4 of the owner's 2026-09-15 sp
 
 **CI stays authoritative.** The module lives in `tests/unit/`, so fast-ci and the Test matrix run it on every PR like any other unit test; the deeper suites (`test_release_control.py`, `test_release_migrate.py`, the real-Caddy rehearsal) are unchanged.
 
+## 9i. Typer commands: a thin `@app.command` wrapper over an undecorated `_impl`
+
+Decided 2026-09-29 by the owner, closing issue #292. Owner's words: *"(b) a convention: thin `@app.command` wrappers that call undecorated `_impl` functions, for new commands and applied as files are touched."*
+
+**Why.** A decorated function is outside the mutation gate. mutmut 3.8.0 skips every decorated function except a lone `@staticmethod`/`@classmethod` (`_skip_node_and_children`), and `scripts/ci/mutation_scope.py` (`is_mutatable`) mirrors that. Every CLI entry point is `@app.command(...)` or `@release_app.command(...)`, so, in the issue's words, *"none of them has ever been mutated"* — and that is *"the whole operator-facing surface: argument handling, the exclusivity rules between flags, exit codes, and the refusal messages an operator reads on a half-migrated box at 3am."* Scoped runs over `commands.py` changes that reported clean were *"measuring the module's non-command helpers and saying nothing about the commands themselves"* — the gate reporting green about code it did not measure, the same failure as #283 and #289. Since PR #420 the scope output names such lines (`unmeasured changed lines: … (decorated function …)`) instead of hiding them. Naming the gap does not measure it; moving the logic out of the decorated function does.
+
+**The convention.** The decorated function is a wrapper: it declares the Typer signature (options, arguments, help, defaults) and makes one call. Everything that branches — validation, flag exclusivity, the refusal context, which message is printed, the exit code — lives in an undecorated function named `<command>_impl`, which mutmut can mutate and a test can call without `CliRunner`:
+
+```python
+@release_app.command(name="commit")
+def commit_command(
+    content_id: Annotated[str, typer.Argument(help="A finalized release_content_id.")],
+    releases: _ReleasesOption = DEFAULT_RELEASES,
+    caddyfile: _CaddyfileOption = DEFAULT_CADDYFILE,
+    fragment: _FragmentOption = DEFAULT_FRAGMENT,
+    admin: _AdminOption = DEFAULT_ADMIN,
+) -> None:
+    """Make a finalized envelope live: stage, validate, commit the fragment, reload, mark."""
+    commit_impl(content_id, _plane(releases, caddyfile, fragment, admin))
+
+
+def commit_impl(content_id: str, plane: ControlPlane) -> None:
+    if not is_release_id(content_id):
+        raise typer.BadParameter(f"not a release_content_id: {content_id}")
+    with _refusals():
+        report = commit_release(plane, content_id)
+    if report.already_live:
+        typer.echo(f"release {content_id[:12]} is already live; nothing to commit")
+    else:
+        previous = report.previous[:12] if report.previous else NOTHING_LIVE
+        typer.echo(f"live: {report.active} (previous {previous})")
+```
+
+The example is illustrative: `commit_command` in `src/lovspor/release/commands.py` still carries its logic in the decorated body and is not changed by this decision. The `_impl` is held to the `CLAUDE.md` code rules like any other function (max 4 params, max 20 lines, both enforced by §9e) — bundle options into one value (as `_plane` builds a `ControlPlane`, a frozen dataclass) rather than passing them one by one; a value that crosses a module boundary is a Pydantic model per `CLAUDE.md`. The wrapper is counted by the §9e ratchet too; this decision grants it no exemption.
+
+**Scope.** New commands follow it from now on. Existing commands are converted as their files are touched (the owner's wording), not in a dedicated sweep. No mass refactor: converting the 47 `.command(` decorators under `src/lovspor/` (counted at `816bd90`) at once would be a large diff with no behaviour change, and every converted body would enter the mutation scope on the same PR, which is the budget risk (§9c, `MUTMUT_PR_FILE_BUDGET_SECONDS`, #102) the issue asked to measure before switching commands on. Converted bodies will show survivors that were always there; the issue expects that (*"if they mostly assert exit codes, the first honest run will produce a large survivor list"*), and those survivors are real findings, not a regression of the PR that exposed them.
+
+**What this does NOT change:** `mutation_scope.is_mutatable` still rejects decorated functions, because mutmut does; allowing them there would select mutants mutmut never generates. The wrapper's own lines stay unmeasured and are reported as such, which is correct: after the split they hold declarations, not branches.
+
 ## 10. Workflow — how Claude works here
 
 Full contract in `CLAUDE.md`. Key points:

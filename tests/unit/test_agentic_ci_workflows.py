@@ -1224,6 +1224,77 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
         assert "kill " in stop["run"]
 
 
+class TestRemediationMustTryToKillEverySurvivor:
+    """Issue #455. On PR #453 remediation called 8 of 8 survivors non-killable
+    and wrote no test; every one fell to a test-only commit (`fdbe4a7`). A
+    non-killable verdict has to mean "provably equivalent, and here is why",
+    never "not attempted"."""
+
+    def _prompt(self) -> str:
+        path = _WORKFLOWS.parent / "codex" / "mutation-remediation.md"
+        return " ".join(path.read_text(encoding="utf-8").split())
+
+    def test_every_survivor_gets_a_killing_test_attempt(self) -> None:
+        prompt = self._prompt()
+
+        assert "Attempt a killing test for every survivor" in prompt
+        assert "Only edit tests for killable_by_correct_test." not in prompt
+
+    def test_a_non_killable_verdict_carries_an_equivalence_argument(self) -> None:
+        prompt = self._prompt()
+
+        assert "only with a stated equivalence argument" in prompt
+        assert "for every input that can reach it" in prompt
+
+    def test_the_pr_453_excuses_are_named_as_killable(self) -> None:
+        prompt = self._prompt()
+
+        for excuse in ("timezone", "boundary", "stderr", "torn or malformed input file"):
+            assert excuse in prompt, excuse
+
+    def test_the_report_names_the_test_or_the_argument_per_survivor(self) -> None:
+        prompt = self._prompt()
+
+        assert "the test that kills it, or the equivalence argument" in prompt
+
+    def test_hand_applying_a_mutant_leaves_production_code_untouched(self) -> None:
+        prompt = self._prompt()
+
+        assert "`git checkout -- src/`" in prompt
+        assert "modify files under tests/ only" in prompt
+
+
+class TestRemediationNeverMocksTheModuleUnderMutation:
+    """Issue #427. On PR #422 remediation killed `run_sync` survivors by
+    monkeypatching the orchestrator's own functions and asserting on the
+    arguments they received (`f8d3b58`, `d34ff22`). Two of those mutants were
+    equivalent: only the mock could tell them apart. A kill like that pins a
+    call shape, not behaviour, so a refactor that keeps behaviour turns it red
+    while the equivalent mutant goes unregistered."""
+
+    def _prompt(self) -> str:
+        path = _WORKFLOWS.parent / "codex" / "mutation-remediation.md"
+        return " ".join(path.read_text(encoding="utf-8").split())
+
+    def test_monkeypatching_the_mutated_module_is_forbidden(self) -> None:
+        prompt = self._prompt()
+
+        assert "never monkeypatch a function, class or constant of the module under mutation" in (
+            prompt
+        )
+
+    def test_a_mutant_only_a_mock_can_kill_is_reported_as_equivalent(self) -> None:
+        prompt = self._prompt()
+
+        assert "a mutant only a mock can kill is likely_equivalent" in prompt
+
+    def test_the_real_code_path_is_named_as_the_way_to_kill(self) -> None:
+        prompt = self._prompt()
+
+        assert "drive the real code" in prompt
+        assert "pytest-httpx" in prompt
+
+
 class TestTheRemediationLaneOnlyHoldsTheAgent:
     """Issue #272, second half. The remediation workflow ran the same shape as
     the PR pipeline did — agent session AND `uv run pytest tests/unit/` on the
@@ -2176,3 +2247,136 @@ class TestTheAgentStepRunsOnOneOrTwoCodexAccounts:
         assert calls[1].startswith("claude ")
         assert len(calls) == 2, "no secondary was asked and no Codex round ran"
         assert "author=claude" in output
+
+
+# Issue #381: a pull_request run takes its workflow from the merge ref but checks
+# out the PR head, so a step calling a scripts/ci/ file the head predates dies with
+# exit 127. Only these calls may run unguarded: every branch the pipeline can run
+# on already has them. Any other call carries `[ -x scripts/ci/NAME ]` and a
+# fallback in its own run block; retiring the guard adds the name here
+# (docs/agentic-ci.md, "New scripts/ci/ calls are guarded for one release cycle").
+_ESTABLISHED_CI_SCRIPTS = frozenset(
+    {
+        "assert_codex_scope.sh",
+        "classify_lane_failure.py",
+        "claude_test_author.sh",
+        "codex_account_failover.py",
+        "codex_convergence.py",
+        "fd_lock.py",
+        "mutation_gate.py",
+        "mutation_survivors.py",
+        "mutation_to_json.py",
+        "normalize_agent_tests.sh",
+        "pr_sticky_comment.sh",
+        "publish_tree_digest.py",
+        "token_expiry.py",
+    }
+)
+_CI_SCRIPT_CALL = re.compile(r"scripts/ci/([A-Za-z0-9_.-]+)")
+_CI_SCRIPTS = _WORKFLOWS.parents[1] / "scripts" / "ci"
+_ALL_WORKFLOWS = sorted(_WORKFLOWS.glob("*.yml"))
+
+
+def _run_blocks(workflow_path: Path) -> Iterator[str]:
+    workflow: dict[str, Any] = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    for job in workflow.get("jobs", {}).values():
+        for step in job.get("steps", []):
+            if "run" in step:
+                yield step["run"]
+
+
+def _new_ci_calls(workflow_path: Path) -> set[tuple[str, str]]:
+    """Every (script, run block) pair calling a scripts/ci/ file not yet established."""
+    return {
+        (name, run)
+        for run in _run_blocks(workflow_path)
+        for name in _CI_SCRIPT_CALL.findall(run)
+        if name not in _ESTABLISHED_CI_SCRIPTS
+    }
+
+
+def _is_guarded(name: str, run: str) -> bool:
+    return re.search(rf'\[ -x "?scripts/ci/{re.escape(name)}"? \]', run) is not None
+
+
+def _unguarded_ci_calls(workflow_path: Path) -> list[str]:
+    calls = _new_ci_calls(workflow_path)
+    return sorted({name for name, run in calls if not _is_guarded(name, run)})
+
+
+_WORKFLOW_TEMPLATE = """\
+name: t
+on: pull_request
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - name: step
+        run: |
+{body}
+"""
+
+
+def _write_workflow(tmp_path: Path, *body_lines: str) -> Path:
+    body = "\n".join(f"          {line}" for line in body_lines)
+    path = tmp_path / "wf.yml"
+    path.write_text(_WORKFLOW_TEMPLATE.format(body=body), encoding="utf-8")
+    return path
+
+
+def test_an_unguarded_call_to_a_new_ci_script_is_flagged(tmp_path: Path) -> None:
+    workflow = _write_workflow(tmp_path, "scripts/ci/brand_new.sh tests/")
+
+    assert _unguarded_ci_calls(workflow) == ["brand_new.sh"]
+
+
+@pytest.mark.parametrize(
+    "guard", ["[ -x scripts/ci/brand_new.sh ]", '[ -x "scripts/ci/brand_new.sh" ]']
+)
+def test_a_guarded_new_call_and_an_established_call_pass(tmp_path: Path, guard: str) -> None:
+    workflow = _write_workflow(
+        tmp_path,
+        f"if {guard}; then",
+        "  scripts/ci/brand_new.sh tests/",
+        "else",
+        '  echo "brand_new.sh not on this head; skipping" >&2',
+        "fi",
+        "scripts/ci/pr_sticky_comment.sh pipeline 1 x.md",
+    )
+
+    assert _unguarded_ci_calls(workflow) == []
+
+
+def test_a_guard_in_another_step_does_not_cover_the_call(tmp_path: Path) -> None:
+    path = _write_workflow(tmp_path, "[ -x scripts/ci/brand_new.sh ] || exit 0")
+    other_step = "      - name: other\n        run: scripts/ci/brand_new.sh\n"
+    path.write_text(path.read_text(encoding="utf-8") + other_step, encoding="utf-8")
+
+    assert _unguarded_ci_calls(path) == ["brand_new.sh"]
+
+
+def test_a_guard_for_another_script_does_not_cover_the_call(tmp_path: Path) -> None:
+    workflow = _write_workflow(
+        tmp_path, "[ -x scripts/ci/brand_new.sh.bak ] && scripts/ci/brand_new.sh"
+    )
+
+    assert _unguarded_ci_calls(workflow) == ["brand_new.sh"]
+
+
+@pytest.mark.parametrize("workflow_path", _ALL_WORKFLOWS, ids=lambda path: path.name)
+def test_every_new_ci_script_call_in_a_workflow_is_guarded(workflow_path: Path) -> None:
+    assert _unguarded_ci_calls(workflow_path) == []
+
+
+@pytest.mark.parametrize("workflow_path", _ALL_WORKFLOWS, ids=lambda path: path.name)
+def test_a_guarded_ci_script_is_executable_on_main(workflow_path: Path) -> None:
+    """`[ -x ]` on a script committed without the executable bit is false on
+    every head, so the fallback would run forever and nothing would say so."""
+    for name, _run in _new_ci_calls(workflow_path):
+        assert os.access(_CI_SCRIPTS / name, os.X_OK), name
+
+
+def test_every_established_ci_script_exists() -> None:
+    missing = sorted(name for name in _ESTABLISHED_CI_SCRIPTS if not (_CI_SCRIPTS / name).is_file())
+
+    assert missing == []

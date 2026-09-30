@@ -2008,7 +2008,10 @@ class TestTimeoutsAreNotSurvivors:
 
         comment = self._no_change(tmp_path, capsys)
 
-        assert "2 survivor(s) classified non-killable" in comment
+        assert (
+            "2 survivor(s) remediation called non-killable — a verdict that stands only"
+            " with a stated equivalence argument per survivor (#455)"
+        ) in comment
         assert "timed-out" not in comment
 
     def test_suspicious_and_uncovered_mutants_are_named(
