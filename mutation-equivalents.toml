@@ -2995,3 +2995,141 @@ with the published file present and with it gone, which the assumption test
 pins by driving a real sync.
 """
 assumption_test = "tests/unit/test_sync_orchestrator_real_corpus.py::test_assumption_a_hash_matched_rerender_always_carries_an_observation"
+
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "blob_form"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-    media = content_type.split(";", 1)[0].strip().lower()
++    media = content_type.split(";", )[0].strip().lower()
+"""
+justification = """
+Only element [0] of the split is read. str.split(sep, maxsplit) cuts at the
+first occurrence of sep before any other, so its first piece is the text up
+to the first ";" (or the whole string when there is none) for every
+maxsplit >= 1 and for the default -1 alike. Dropping the limit changes how
+many further pieces are produced, never the first one.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "blob_form"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-    media = content_type.split(";", 1)[0].strip().lower()
++    media = content_type.split(";", 2)[0].strip().lower()
+"""
+justification = """
+Same argument as the unlimited split above: only element [0] is read, and the
+first piece of str.split(";", n) is the text before the first ";" for every
+n >= 1. A limit of 2 instead of 1 changes only the pieces after it.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "measure_html"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-def measure_html(payload: bytes, content_type: str = "text/html") -> HtmlText:
++def measure_html(payload: bytes, content_type: str = "XXtext/htmlXX") -> HtmlText:
+"""
+justification = """
+content_type is read in one place: _decoded passes it to _charset, which looks
+only at content_type.split(";")[1:]. Neither "text/html" nor "XXtext/htmlXX"
+contains a ";", so that slice is empty for both, _charset returns None for
+both, and _decoded then tries UTF-8 alone either way. blob_form, the only
+reader of the media type itself, is called by _measure_into on the recorded
+type, never on this default. So the default's media type is never read.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "measure_html"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-def measure_html(payload: bytes, content_type: str = "text/html") -> HtmlText:
++def measure_html(payload: bytes, content_type: str = "TEXT/HTML") -> HtmlText:
+"""
+justification = """
+Same argument as the "XXtext/htmlXX" default above: the default reaches only
+_charset, which reads nothing before the first ";", and "TEXT/HTML" has no ";",
+so the charset is None under both spellings.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "_decoded"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-    for encoding in (_charset(content_type), "utf-8"):
++    for encoding in (_charset(content_type), "UTF-8"):
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"
+justification = """
+The name is used once, as bytes.decode(encoding). The codec registry lower-cases
+a name before looking it up (codecs.lookup, encodings.normalize_encoding), so
+"UTF-8" and "utf-8" resolve to the same utf_8 codec: the same text for valid
+bytes, the same UnicodeDecodeError for invalid ones. The argument rests on the
+standard library's codec lookup rather than on language semantics, so the
+assumption test pins it.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "_charset"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-            return value.strip().strip('"')
++            return value.strip().strip(None)
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_surrounding_quotes"
+justification = """
+value is already whitespace-stripped, so strip(None) returns it unchanged: the
+mutant differs from the original only by keeping quote characters at either
+end. The returned name has one reader, bytes.decode in _decoded, and codec
+lookup (encodings.normalize_encoding) drops punctuation at both ends of a
+name: '"iso-8859-1"' finds the same codec as 'iso-8859-1', and '"' or '""'
+find none, exactly like the '' the original leaves, so both raise the
+LookupError _decoded catches. Inner characters are untouched by either
+spelling. The argument rests on the standard library's codec lookup, so the
+assumption test pins it.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "_region"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-        document = html.document_fromstring(page, parser=safe_html_parser())
++        document = html.document_fromstring(page, parser=None)
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_lxml_default_html_parser_reads_text_like_the_hardened_one"
+justification = """
+With parser=None, lxml.html.document_fromstring uses its module default
+HTMLParser. That parser already has no_network on and huge_tree off, the two
+hardening options safe_html_parser sets; the one option that differs is
+remove_comments. The result is read only through find(".//main"/".//body"),
+iter() over named tags and text_content(): a comment is not an element with
+those tags and not a text node, so none of them sees it, and the measured
+text, region and section sign are identical. Verified over well-formed and
+malformed comment placements (unterminated, conditional, around scripts), as
+str and as bytes: zero disagreements. The argument rests on lxml's defaults,
+so the assumption test pins them, including a page nested past libxml2's
+depth limit, which loses its text under both parsers.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "_region"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-        document = html.document_fromstring(page, parser=safe_html_parser())
++        document = html.document_fromstring(page, )
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_lxml_default_html_parser_reads_text_like_the_hardened_one"
+justification = """
+Omitting the argument is parser=None, the mutant registered above: the module
+default HTMLParser, which differs from safe_html_parser only in keeping
+comments, and comments never reach the measured text.
+"""

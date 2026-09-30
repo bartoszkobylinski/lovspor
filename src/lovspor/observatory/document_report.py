@@ -86,7 +86,9 @@ def _decoded(payload: bytes, content_type: str) -> str | bytes:
     which turns every ``ø`` into two characters and inflates the count. Bytes
     that fit neither go to lxml, which still honours a ``<meta charset>``. So
     does a page opening with an XML declaration: lxml refuses one in text, and
-    reads the encoding it names from the bytes.
+    reads the encoding it names from the bytes. Only a declaration at the very
+    first character: after leading whitespace lxml accepts the text, and from
+    the bytes it would ignore the declaration and fall back to Latin-1.
     """
     for encoding in (_charset(content_type), "utf-8"):
         if encoding is None:
@@ -95,7 +97,7 @@ def _decoded(payload: bytes, content_type: str) -> str | bytes:
             text = payload.decode(encoding)
         except (LookupError, UnicodeDecodeError):
             continue
-        return payload if text.lstrip().startswith("<?xml") else text
+        return payload if text.startswith("<?xml") else text
     return payload
 
 

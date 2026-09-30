@@ -360,3 +360,143 @@ class TestCommand:
 
         after = sorted((path, path.read_bytes()) for path in root.rglob("*") if path.is_file())
         assert after == before
+
+
+class TestHeaderCharsetParsing:
+    """How the charset parameter is read out of a recorded Content-Type."""
+
+    def test_a_charset_parameter_without_a_space_after_the_semicolon_is_read(self) -> None:
+        assert measure_html(_page("Æ"), "text/html;charset=iso-8859-1").text_chars == 2
+
+    def test_a_parameter_other_than_charset_is_not_taken_for_one(self) -> None:
+        measured = measure_html(_page("Æ"), "text/html; name=latin-1; charset=utf-8")
+
+        assert measured.text_chars == 1
+
+    def test_the_charset_value_runs_from_the_first_equals_sign(self) -> None:
+        """``iso=8859=1`` is a codec name Python resolves; splitting on the last
+        ``=`` would leave ``charset=iso=8859`` as the parameter name."""
+        assert measure_html(_page("Æ"), "text/html; charset=iso=8859=1").text_chars == 2
+
+    def test_an_unknown_charset_is_not_repaired_into_a_known_one(self) -> None:
+        """Only quotes are taken off the value: ``XLATIN-1X`` names no codec."""
+        assert measure_html(_page("Æ"), "text/html; charset=XLATIN-1X").text_chars == 1
+
+
+class TestXmlDeclaration:
+    def test_whitespace_before_an_xml_declaration_does_not_turn_utf8_into_latin1(self) -> None:
+        """From the bytes, lxml ignores a declaration that is not first and reads
+        the page as Latin-1; as text it parses, so it is handed over as text."""
+        payload = b'\n  <?xml version="1.0" encoding="utf-8"?>' + _page("Første §")
+
+        measured = measure_html(payload, "application/xhtml+xml")
+
+        assert measured.text_chars == len("Første §")
+
+
+class TestNoRegion:
+    def test_a_page_with_nothing_to_measure_has_no_section_sign(self) -> None:
+        assert measure_html(b"").has_section_sign is False
+
+    def test_a_frameset_page_has_no_section_sign_even_in_its_title(self) -> None:
+        payload = b"<html><head><title>\xc2\xa7 1</title></head><frameset></frameset></html>"
+
+        assert measure_html(payload).has_section_sign is False
+
+
+class TestBlobFormParameters:
+    def test_a_media_type_with_several_parameters_is_read_from_before_the_first(self) -> None:
+        assert blob_form("text/html; charset=utf-8; profile=x") == "html"
+
+
+class TestCountsAccumulate:
+    def test_pages_without_main_are_counted_one_by_one(self, root: Path) -> None:
+        log = _log(root)
+        _store(log, b"<html><body><p>a</p></body></html>", "0301")
+        _store(log, b"<html><body><p>b</p></body></html>", "0301")
+        _store(log, _page("c"), "0301")
+
+        assert build_report(log).sources["0301"].html_without_main == 2
+
+    def test_a_page_with_main_is_not_counted_as_without_it(self, root: Path) -> None:
+        log = _log(root)
+        _store(log, _page("a"), "0301")
+
+        assert build_report(log).sources["0301"].html_without_main == 0
+
+    def test_exactly_the_threshold_of_text_with_a_section_sign_is_a_document(
+        self, root: Path
+    ) -> None:
+        text = "§" + "x" * (DOCUMENT_TEXT_THRESHOLD - 1)
+        log = _log(root)
+        _store(log, _page(text), "0301")
+
+        assert build_report(log).sources["0301"].html_documents == 1
+
+    def test_the_recorded_charset_reaches_the_measurement(self, root: Path) -> None:
+        log = _log(root)
+        _store(log, _page("Æ"), "0301", "text/html; charset=iso-8859-1")
+
+        assert build_report(log).sources["0301"].html_chars == [2]
+
+    def test_pdf_and_other_blobs_are_each_counted_as_themselves(self, root: Path) -> None:
+        log = _log(root)
+        _store(log, b"%PDF-1.7 a", "0301", "application/pdf")
+        _store(log, b"%PDF-1.7 b", "0301", "application/pdf")
+        _store(log, b"\x89PNG a", "0301", "image/png")
+        _store(log, b"\x89PNG b", "0301", "image/png")
+        _store(log, b"\x89PNG c", "0301", "image/png")
+
+        source = build_report(log).sources["0301"]
+
+        assert (source.pdf_blobs, source.other_blobs) == (2, 3)
+
+    def test_every_blob_gone_from_disk_is_counted(self, root: Path) -> None:
+        log = _log(root)
+        for payload in (SHELL, _page("a")):
+            _store(log, payload, "0301")
+            log.blob_path(hashlib.sha256(payload).hexdigest()).unlink()
+
+        assert build_report(log).sources["0301"].unreadable_blobs == 2
+
+
+_LEGEND = (
+    "\ndocs = HTML blobs with at least 300 characters of <main> text and a §.\n"
+    "A proxy for 'carries a document', not for 'is a forskrift' "
+    "(ADR-0010 defers classification).\n"
+    "pdf blobs are counted, not measured: the engine has no PDF text extractor.\n"
+    "no-main = measured from <body> because the page has no <main>. "
+    "missing = blob not on disk.\n"
+)
+
+
+class TestExactOutput:
+    def test_the_whole_report_reads_exactly_so(self, root: Path) -> None:
+        log = _log(root)
+        _store(log, _page("§ 1 " + LONG_PROSE), "0301")
+        _store(log, SHELL, "0301")
+        _store(log, b"%PDF-1.7", "1101", "application/pdf")
+
+        result = runner.invoke(app, ["observatory", "document-report"])
+
+        assert result.stdout == (
+            "sources: 2\n"
+            "source       html  median   <300      § no-main   docs/html    pdf  other missing\n"
+            "0301            2     252      1      1       0         1/2      0      0       0\n"
+            "1101            0       -      0      0       0         0/0      1      0       0\n"
+            "total           2     252      1      1       0         1/2      1      0       0\n"
+            + _LEGEND
+        )
+
+    def test_a_damaged_log_is_refused_in_exactly_these_words(self, root: Path) -> None:
+        log = _log(root)
+        _store(log, SHELL, "0301")
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind":"artifact","authority_id":"32')
+
+        result = runner.invoke(app, ["observatory", "document-report"])
+
+        assert result.stderr == (
+            "Refused: the observation log is damaged. Run `observatory verify` first.\n"
+        )
+        assert result.stdout == ""
