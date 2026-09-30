@@ -38,6 +38,7 @@ catch, performed by the switch itself.
 import os
 
 import httpx
+import typer
 
 from lovspor.observatory.sweeps import SweepRun
 
@@ -98,3 +99,22 @@ def send_heartbeat(base: str, run: SweepRun, client: httpx.Client) -> bool:
         # tests pin both halves of it.
         return False
     return response.is_success
+
+
+def report_run(run: SweepRun) -> None:
+    """Send the outbound heartbeat, loudly enough to notice when it fails.
+
+    Never fatal: a monitoring endpoint being unreachable must not turn a
+    completed sweep into a failed command. Never silent either — a switch that
+    quietly stopped reporting looks exactly like a dead machine, and the
+    operator should learn that from this line rather than from a false alarm.
+    """
+    base = heartbeat_url()
+    if base is None:
+        typer.echo("heartbeat: not configured; no dead-man switch is armed", err=True)
+        return
+    with httpx.Client() as client:
+        if send_heartbeat(base, run, client):
+            typer.echo(f"heartbeat: reported {run.status}")
+        else:
+            typer.echo(f"heartbeat: NOT DELIVERED (run was {run.status})", err=True)

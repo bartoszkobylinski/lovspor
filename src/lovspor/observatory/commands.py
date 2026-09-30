@@ -11,7 +11,7 @@ and no cycle is possible.
 
 import os
 from datetime import UTC, datetime
-from typing import Annotated, NamedTuple
+from typing import Annotated, NamedTuple, NoReturn
 
 import httpx
 import typer
@@ -34,6 +34,7 @@ from lovspor.observatory.addresses import (
     system_resolver,
 )
 from lovspor.observatory.app import _AuthorityIdOption, observatory_app
+from lovspor.observatory.catch_up import skip_catch_up
 from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
 from lovspor.observatory.engine import describe_engine
 from lovspor.observatory.fetch import Fetcher
@@ -43,7 +44,7 @@ from lovspor.observatory.freshness import (
     worth_capturing,
 )
 from lovspor.observatory.freshness_index import indexed_capture_state
-from lovspor.observatory.heartbeat import heartbeat_url, send_heartbeat
+from lovspor.observatory.heartbeat import report_run
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.registry import (
@@ -831,23 +832,14 @@ def _failed_run(started_at: datetime, reason: str) -> SweepRun:
     )
 
 
-def _report(run: SweepRun) -> None:
-    """Send the outbound heartbeat, loudly enough to notice when it fails.
-
-    Never fatal: a monitoring endpoint being unreachable must not turn a
-    completed sweep into a failed command. Never silent either — a switch that
-    quietly stopped reporting looks exactly like a dead machine, and the
-    operator should learn that from this line rather than from a false alarm.
-    """
-    base = heartbeat_url()
-    if base is None:
-        typer.echo("heartbeat: not configured; no dead-man switch is armed", err=True)
-        return
-    with httpx.Client() as client:
-        if send_heartbeat(base, run, client):
-            typer.echo(f"heartbeat: reported {run.status}")
-        else:
-            typer.echo(f"heartbeat: NOT DELIVERED (run was {run.status})", err=True)
+def _refuse_sweep(root: ObservatoryRoot, started_at: datetime, reason: str) -> NoReturn:
+    typer.echo(f"OBSERVATORY SWEEP FAILED\nreason: {reason}", err=True)
+    typer.echo(f"expected: {root.path}", err=True)
+    failed = _failed_run(started_at, reason)
+    if reason != _STORAGE_UNAVAILABLE:
+        append_sweep_run(root, failed)
+    report_run(failed)
+    raise typer.Exit(1)
 
 
 @observatory_app.command("nightly")
@@ -858,6 +850,12 @@ def nightly(
             "--limit", min=0, help="Stop after this many fetches per source. 0 means no bound."
         ),
     ] = 0,
+    catch_up: Annotated[
+        bool,
+        typer.Option(
+            "--catch-up", help="Off the 03:00 trigger, skip if a sweep started in the last 24h."
+        ),
+    ] = False,
 ) -> None:
     """The scheduled entry point: check the ground, then sweep.
 
@@ -876,15 +874,11 @@ def nightly(
     """
     started_at = datetime.now(UTC)
     root = _root()
+    if catch_up and skip_catch_up(root, OBSERVATORY_WORKLOAD, started_at):
+        return
     reason = _preflight(root)
     if reason is not None:
-        typer.echo(f"OBSERVATORY SWEEP FAILED\nreason: {reason}", err=True)
-        typer.echo(f"expected: {root.path}", err=True)
-        failed = _failed_run(started_at, reason)
-        if reason != _STORAGE_UNAVAILABLE:
-            append_sweep_run(root, failed)
-        _report(failed)
-        raise typer.Exit(1)
+        _refuse_sweep(root, started_at, reason)
     # After preflight, not before: the deferral record needs an archive to
     # land in, and preflight is what establishes there is one. Held across the
     # whole sweep — a benchmark starting mid-sweep is the overlap the lock is
@@ -897,12 +891,12 @@ def nightly(
         typer.echo(f"OBSERVATORY SWEEP DEFERRED\nreason: {_EXCLUSIVE_WORKLOAD}\n{exc}", err=True)
         deferred = _failed_run(started_at, _EXCLUSIVE_WORKLOAD)
         append_sweep_run(root, deferred)
-        _report(deferred)
+        report_run(deferred)
         raise typer.Exit(1) from exc
     # Reported from the record this invocation holds, never from whatever the
     # log happens to end with. A degraded sweep still reports: it ran, and
     # liveness is what the switch guards.
-    _report(run)
+    report_run(run)
     if run.status != "success":
         raise typer.Exit(1)
 

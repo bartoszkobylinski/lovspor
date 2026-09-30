@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict
 
-from lovspor.exclusive_workload import default_lock_path, read_holder
+from lovspor.exclusive_workload import Holder, default_lock_path, read_holder
 from lovspor.observatory.sweeps import SweepRun
 
 #: When the nightly job fires. launchd reads ``StartCalendarInterval`` in the
@@ -109,6 +109,24 @@ def running_sweep(owner: str, path: Path | None = None) -> datetime | None:
     holder = read_holder(default_lock_path() if path is None else path)
     if holder is None or holder.owner != owner or not _alive(holder.pid):
         return None
+    return _since(holder)
+
+
+def recorded_sweep_start(owner: str, path: Path | None = None) -> datetime | None:
+    """When the last sweep to take this host's lock began, dead or alive.
+
+    The one trace a sweep killed by a shutdown leaves (issue #356): it never
+    reaches its run record, and only a clean exit empties the lock's advisory
+    record. A later workload taking the lock overwrites it, so its absence
+    proves nothing — it names a start, never the lack of one.
+    """
+    holder = read_holder(default_lock_path() if path is None else path)
+    if holder is None or holder.owner != owner:
+        return None
+    return _since(holder)
+
+
+def _since(holder: Holder) -> datetime | None:
     try:
         since = datetime.fromisoformat(holder.since)
     except ValueError:
