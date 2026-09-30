@@ -195,10 +195,10 @@ def _entry_points(fetcher: Fetcher, record: SourceRecord, given: list[str] | Non
     # for the other.
     if record.listing_entry_points:
         return _Starts(record.listing_entry_points, probed=False)
-    # A declaration is the exception, not the rule: 190 of 358 municipalities
-    # serve a sitemap at the conventional path without declaring it (Phase A
-    # sweep, 2026-08-20). The probe is an ordinary gated fetch against the
-    # same root the reviewer checked, recorded like any other.
+    # A declaration is the exception: in the 2026-08-20 sweep (060d4cf) only 25
+    # municipalities declared a sitemap, 190 more served one undeclared at the
+    # conventional path. The probe is an ordinary gated fetch against the same
+    # root the reviewer checked, recorded like any other.
     return _Starts((policy.robots_txt_url.removesuffix("robots.txt") + "sitemap.xml",), probed=True)
 
 

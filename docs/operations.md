@@ -280,7 +280,7 @@ uv run lovspor observatory survey --from recon/kommuner.txt --run-id 2026-09-19-
 ```
 
 Every run writes `<root>/survey/<run-id>.jsonl`, one row per host. **That file is
-the point.** The 2026-08-20 sweep over all 358 municipalities produced the
+the point.** The 2026-08-20 sweep over the municipalities produced the
 figures still quoted in `observatory/commands.py` and persisted nothing, so its
 population cannot be re-derived — which is issue #349, and the reason this is a
 command rather than another script.

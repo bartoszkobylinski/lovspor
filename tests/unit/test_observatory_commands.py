@@ -4346,9 +4346,9 @@ class TestCapture:
     def test_an_undeclared_sitemap_is_found_at_the_conventional_path(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
-        """Issue #151: 190 of 358 Norwegian municipalities publish a sitemap
-        at /sitemap.xml without declaring it in robots.txt (Phase A sweep,
-        2026-08-20). A declaration is the exception, not the rule, so an
+        """Issue #151: in the Phase A sweep (2026-08-20, commit 060d4cf) 190
+        Norwegian municipalities published a sitemap at /sitemap.xml without
+        declaring it in robots.txt. A declaration is the exception, not the rule, so an
         undeclared sitemap is probed at the conventional path — through the
         same gates and recorded the same way as any declared one."""
         _activate(root)
