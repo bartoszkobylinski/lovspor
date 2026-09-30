@@ -27,6 +27,7 @@ from lovspor.mcp import HttpConfig
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.observatory.entrypoint import observatory_app
+from lovspor.ops.commands import ops_app
 from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
@@ -71,7 +72,6 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-
 tokens_app = typer.Typer(
     name="tokens",
     help="Issue, list and revoke hosted-MCP beta credentials.",
@@ -81,6 +81,7 @@ app.add_typer(tokens_app)
 app.add_typer(observatory_app)
 app.add_typer(release_app)
 app.add_typer(temporal_epoch_app)
+app.add_typer(ops_app)
 
 _CredentialsOption = Annotated[
     Path | None,
@@ -168,11 +169,10 @@ def main(
     ),
 ) -> None:
     """Norwegian law change tracker."""
-    # Load .env here, in the group callback, so it is applied BEFORE Typer
-    # resolves any subcommand option's ``envvar=`` (e.g. the mcp command's
-    # LOVVERK_CORPUS_PATH). Doing it inside the command body — or in
-    # serve() — is too late: the option is resolved during arg parsing and
-    # a value living only in .env would be missed, exiting with code 2.
+    # Load .env here, in the group callback, so it is applied BEFORE Typer resolves any subcommand
+    # option's ``envvar=`` (e.g. the mcp command's LOVVERK_CORPUS_PATH). Doing it inside the command
+    # body — or in serve() — is too late: the option is resolved during arg parsing and a value
+    # living only in .env would be missed, exiting with code 2.
     load_env()
 
 
