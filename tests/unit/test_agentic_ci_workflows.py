@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -1353,6 +1354,7 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
             "before_sha": "${{ steps.base.outputs.before_sha }}",
             "patch": "${{ steps.patch.outputs.patch }}",
             "blocked": "${{ steps.blocked.outputs.message }}",
+            "not_run": "${{ steps.ran.outputs.not_run }}",
         }
         assert upload["with"]["name"] == artifact
         assert download["with"]["name"] == artifact
@@ -1796,9 +1798,10 @@ class TestTheNoChangeEscalationNamesWhatBlocked:
         )
         return done.stdout.strip()
 
-    def _no_change_body(self, tmp_path: Path, blocked_by: str) -> str:
+    def _no_change_body(self, tmp_path: Path, blocked_by: str, not_run: str = "") -> str:
         """A clean tree at BEFORE_SHA: the branch where the agent changed nothing."""
-        env = _escalation_sandbox(tmp_path) | {"BLOCKED_BY": blocked_by}
+        tmp_path.mkdir(exist_ok=True)
+        env = _escalation_sandbox(tmp_path) | {"BLOCKED_BY": blocked_by, "NOT_RUN": not_run}
         for args in (("init", "-q"), ("add", "-A"), ("commit", "-q", "-m", "head")):
             self._git(tmp_path, *args)
         env |= {"BEFORE_SHA": self._git(tmp_path, "rev-parse", "HEAD")}
@@ -1825,6 +1828,74 @@ class TestTheNoChangeEscalationNamesWhatBlocked:
         assert body.startswith("Mutation remediation made no safe test-only change.")
         assert "non-killable" not in body
         assert "survivors" not in body
+
+
+_RAN = "Did the agent run a command"
+_REMEDIATION_FIXTURES = Path(__file__).parent / "fixtures" / "remediation"
+
+
+class TestARemediationThatNeverRanSaysSo:
+    """Issue #472: on PR #469 (run 36670610064) the agent ran no command, the
+    patch was empty, and the sticky said "12 survivor(s) remediation called
+    non-killable". The agent lane now reads its own transcript and the
+    verifier reports a remediation that did not run."""
+
+    def _agent_lane(self, tmp_path: Path, transcript: str) -> str:
+        """Run the step on the real transcript and the real artifact of that round."""
+        (tmp_path / "mutation").mkdir(parents=True)
+        shutil.copy(
+            _REMEDIATION_FIXTURES / "mutation-result-a85fe67.json",
+            tmp_path / "mutation" / "mutation-result.json",
+        )
+        shutil.copy(_REMEDIATION_FIXTURES / transcript, tmp_path / "remediation-agent.log")
+        ci = tmp_path / "scripts" / "ci"
+        ci.mkdir(parents=True)
+        for name in ("mutation_gate.py", "remediation_transcript.py"):
+            shutil.copy2(_REPO / "scripts" / "ci" / name, ci / name)
+        env = {"PATH": _SYSTEM_PATH, "RUNNER_TEMP": str(tmp_path)}
+        env["GITHUB_OUTPUT"] = str(tmp_path / "out")
+        step = _named_step(_steps("mutation-remediation.yml", "remediate"), _RAN)
+        _run_step(_render(step["run"], {"runner.temp": str(tmp_path)}), tmp_path, env)
+        (line,) = (tmp_path / "out").read_text(encoding="utf-8").splitlines()
+        return line.removeprefix("not_run=")
+
+    def test_the_agent_lane_keeps_the_transcript_it_reads(self) -> None:
+        steps = _steps("mutation-remediation.yml", "remediate")
+        author = _named_step(steps, "Codex — mutation remediation (tests only)")
+        names = [step.get("name") for step in steps]
+
+        assert '| tee "$RUNNER_TEMP/remediation-agent.log"' in author["run"]
+        assert "status=${PIPESTATUS[0]}" in author["run"]
+        assert names.index(author["name"]) < names.index(_RAN)
+        assert _named_step(steps, _RAN)["if"] == "steps.author.outputs.author == 'codex'"
+
+    def test_the_pr_469_round_is_reported_as_not_run(self, tmp_path: Path) -> None:
+        message = self._agent_lane(tmp_path, "codex-no-command-run-36670610064.log")
+
+        assert message.startswith("Mutation remediation did not run")
+        assert "codex-code-mode-host is missing" in message
+        assert "Unclassified: 12 survived" in message
+
+    def test_a_round_that_ran_commands_leaves_the_output_empty(self, tmp_path: Path) -> None:
+        assert self._agent_lane(tmp_path, "codex-ran-commands-run-36531263464.log") == ""
+
+    def test_the_output_reaches_the_verifier(self) -> None:
+        job = _workflow("mutation-remediation.yml")["jobs"]["remediate"]
+        step = _named_step(_steps("mutation-remediation.yml", "remediate-verify"), _NO_CHANGE)
+
+        assert job["outputs"]["not_run"] == "${{ steps.ran.outputs.not_run }}"
+        assert step["env"]["NOT_RUN"] == "${{ needs.remediate.outputs.not_run }}"
+
+    def test_the_sticky_says_not_run_and_never_non_killable(self, tmp_path: Path) -> None:
+        not_run = self._agent_lane(tmp_path / "lane", "codex-no-command-run-36670610064.log")
+        blocked_by = "Blocked by: 12 survivor(s) remediation called non-killable."
+        verifier = TestTheNoChangeEscalationNamesWhatBlocked()
+
+        body = verifier._no_change_body(tmp_path / "verify", blocked_by, not_run)
+
+        assert body.startswith(f"{not_run} Human review required.")
+        assert "called non-killable" not in body
+        assert f"mutation-result-{_SHA}" in body
 
 
 _DEAD_LANE = "Escalate a remediation lane that died without reporting"
