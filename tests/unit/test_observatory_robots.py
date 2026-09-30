@@ -319,6 +319,12 @@ class TestCrawlDelay:
     def test_a_value_that_is_not_a_delay_is_ignored(self, value: str) -> None:
         assert policy(f"User-agent: *\nCrawl-delay: {value}\n").crawl_delay(UA) is None
 
+    @pytest.mark.parametrize(("value", "seconds"), [("0", 0.0), ("0.5", 0.5)])
+    def test_a_delay_below_one_second_is_still_a_delay(self, value: str, seconds: float) -> None:
+        """Zero and fractions are delays a site may declare; only negative,
+        non-finite and non-numeric values are not."""
+        assert policy(f"User-agent: *\nCrawl-delay: {value}\n").crawl_delay(UA) == seconds
+
     def test_a_delay_before_any_user_agent_belongs_to_no_group(self) -> None:
         assert policy("Crawl-delay: 30\nUser-agent: *\nAllow: /\n").crawl_delay(UA) is None
 

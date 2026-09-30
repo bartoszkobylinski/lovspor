@@ -542,6 +542,16 @@ class TestActivateSourceHonoursCrawlDelay:
 
         assert self._activate_at(root, 0.5).exit_code == 0
 
+    def test_the_robots_read_is_bounded_in_time(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """A silent server must end in a refusal, never hang the operator's command."""
+        httpx_mock.add_response(url=ROBOTS_URL, text="User-agent: *\nAllow: /\n")
+
+        self._activate_at(root, 7.0)
+
+        (request,) = httpx_mock.get_requests()
+        assert set(request.extensions["timeout"]) == {"connect", "read", "write", "pool"}
+        assert None not in request.extensions["timeout"].values()
+
     def test_a_check_that_refuses_capture_never_reaches_the_network(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:

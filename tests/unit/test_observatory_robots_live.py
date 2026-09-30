@@ -176,6 +176,75 @@ class TestReadRobots:
         with httpx.Client() as client, pytest.raises(RobotsUnreadableError, match="Location"):
             read_robots(client, ROBOTS_URL, UA, DOMAIN)
 
+    def test_a_300_is_a_redirect_like_any_other_3xx(self, httpx_mock: HTTPXMock) -> None:
+        """RFC 9309 §2.3.1.2 speaks of the 3xx class; 300 is its lower bound."""
+        _redirect(httpx_mock, ROBOTS_URL, APEX_ROBOTS_URL, status=300)
+        httpx_mock.add_response(url=APEX_ROBOTS_URL, text="User-agent: *\nCrawl-delay: 4\n")
+
+        with httpx.Client() as client:
+            assert read_robots(client, ROBOTS_URL, UA, DOMAIN).crawl_delay(UA) == 4.0
+
+    def test_a_400_publishes_no_rules_rather_than_reading_as_a_redirect(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """400 opens the 4xx class, which the capture gate reads as no rules."""
+        httpx_mock.add_response(url=ROBOTS_URL, status_code=400, text="Crawl-delay: 99")
+
+        with httpx.Client() as client:
+            policy = read_robots(client, ROBOTS_URL, UA, DOMAIN)
+
+        assert policy.crawl_delay(UA) is None
+
+    def test_an_unreadable_hop_is_named_in_the_refusal(self, httpx_mock: HTTPXMock) -> None:
+        """The operator is told which URL failed: after a redirect, the hop."""
+        _redirect(httpx_mock, ROBOTS_URL, APEX_ROBOTS_URL)
+        httpx_mock.add_response(url=APEX_ROBOTS_URL, status_code=503)
+
+        with httpx.Client() as client, pytest.raises(RobotsUnreadableError) as refused:
+            read_robots(client, ROBOTS_URL, UA, DOMAIN)
+
+        assert str(refused.value) == f"{APEX_ROBOTS_URL} answered HTTP 503"
+
+    def test_a_client_that_follows_redirects_still_has_each_hop_checked(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """The domain test holds whatever client the caller hands in: the read
+        never lets httpx follow a hop the test has not seen."""
+        _redirect(httpx_mock, ROBOTS_URL, "https://cdn.example.invalid/robots.txt")
+
+        with (
+            httpx.Client(follow_redirects=True) as client,
+            pytest.raises(RobotsUnreadableError, match="outside the cleared domain"),
+        ):
+            read_robots(client, ROBOTS_URL, UA, DOMAIN)
+
+        assert len(httpx_mock.get_requests()) == 1
+
+
+class TestWhatTheEquivalentsRegisterAssumes:
+    """`mutation-equivalents.toml` waives ``_get``'s ``follow_redirects=None``
+    mutant and ``_next_hop``'s ``"LOCATION"`` mutant on the strength of httpx,
+    not of Python (issue #132)."""
+
+    def test_httpx_response_header_lookup_ignores_case(self) -> None:
+        response = httpx.Response(301, headers={"Location": APEX_ROBOTS_URL})
+
+        assert response.headers.get("LOCATION") == response.headers.get("location")
+        assert response.headers.get("LOCATION") == APEX_ROBOTS_URL
+
+    def test_httpx_reads_follow_redirects_none_as_do_not_follow(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """``None`` is not httpx's client-default sentinel, and it is falsy:
+        even a client configured to follow returns the redirect itself."""
+        _redirect(httpx_mock, ROBOTS_URL, APEX_ROBOTS_URL)
+
+        with httpx.Client(follow_redirects=True) as client:
+            response = client.get(ROBOTS_URL, follow_redirects=None)  # type: ignore[arg-type]
+
+        assert response.status_code == 301
+        assert len(httpx_mock.get_requests()) == 1
+
 
 class TestRefuseRateBelowCrawlDelay:
     def test_kongsvinger_at_seven_seconds_is_refused(self, httpx_mock: HTTPXMock) -> None:
