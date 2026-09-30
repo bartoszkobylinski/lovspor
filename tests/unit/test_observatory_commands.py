@@ -12,7 +12,7 @@ import json
 import os
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -105,6 +105,39 @@ BAERUM_DOMAIN = "baerum.kommune.no"
 ROBOTS_URL = f"https://www.{BAERUM_DOMAIN}/robots.txt"
 USER_AGENT = "lovspor-observatory/0.1 (+https://lovspor.no/observatory)"
 HEARTBEAT = "https://hc.example.invalid/abc123"
+PERMISSIVE_ROBOTS = "User-agent: *\nAllow: /\n"
+_HTTP: list[HTTPXMock] = []
+_SERVED: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def _mocked_transport(httpx_mock: HTTPXMock) -> Iterator[None]:
+    """Every test here runs behind pytest-httpx.
+
+    ``activate-source`` reads the live robots.txt (issue #449), and most tests
+    activate a source on the way to what they test. The helpers that do so
+    serve that one read through :func:`_serve_activation_robots`.
+    """
+    _HTTP.append(httpx_mock)
+    yield
+    _HTTP.clear()
+    _SERVED.clear()
+
+
+def _serve_activation_robots(url: str = ROBOTS_URL) -> None:
+    """The robots.txt one successful ``activate-source`` reads: no Crawl-delay."""
+    _HTTP[-1].add_response(url=url, text=PERMISSIVE_ROBOTS)
+    _SERVED.append(url)
+
+
+def _requests_after_setup(httpx_mock: HTTPXMock) -> list[httpx.Request]:
+    """The requests the command under test made, without the activation reads.
+
+    Setup activates before the command runs, so those reads come first.
+    """
+    requests = httpx_mock.get_requests()
+    assert [str(r.url) for r in requests[: len(_SERVED)]] == _SERVED
+    return requests[len(_SERVED) :]
 
 
 @pytest.fixture
@@ -221,6 +254,7 @@ class TestRegisterSource:
         the one record that says a human authorised traffic to that host."""
         _register()
         activated = _write_check(root / "check.json", _check_document())
+        _serve_activation_robots()
         assert (
             runner.invoke(
                 app,
@@ -298,6 +332,7 @@ class TestActivateSource:
     def test_a_permitting_check_activates_the_source(self, root: Path) -> None:
         _register()
         check = _write_check(root / "check.json", _check_document())
+        _serve_activation_robots()
 
         result = runner.invoke(
             app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(check)]
@@ -417,6 +452,120 @@ class TestActivateSource:
         assert read_registry(root / "sources.json").sources[BAERUM_ID].active is False
 
 
+KONGSVINGER_ROBOTS = (
+    "User-agent: *\n"
+    "Sitemap: https://www.kongsvinger.kommune.no/sitemap.xml\n"
+    "User-agent: MSNBot\n"
+    "Crawl-delay: 30\n"
+    "User-agent: Bingbot\n"
+    "Crawl-delay: 30\n"
+)
+
+
+class TestActivateSourceHonoursCrawlDelay:
+    """Issue #449, owner decision 2026-09-29: the live robots.txt sets a floor."""
+
+    def _activate_at(self, root: Path, rate: float) -> Result:
+        _register()
+        check = _write_check(root / "check.json", _check_document(rate_limit_seconds=rate))
+        return runner.invoke(
+            app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(check)]
+        )
+
+    def test_a_rate_below_the_crawl_delay_is_refused(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=ROBOTS_URL, text=KONGSVINGER_ROBOTS)
+
+        result = self._activate_at(root, 7.0)
+
+        assert result.exit_code == 1
+        assert "Refused" in result.stderr
+        assert "Crawl-delay 30.0" in result.stderr
+        assert read_registry(root / "sources.json").sources[BAERUM_ID].active is False
+
+    def test_a_rate_at_the_crawl_delay_activates(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=ROBOTS_URL, text=KONGSVINGER_ROBOTS)
+
+        result = self._activate_at(root, 30.0)
+
+        assert result.exit_code == 0, result.output
+        assert read_registry(root / "sources.json").sources[BAERUM_ID].active is True
+
+    def test_robots_is_read_in_the_name_of_the_cleared_crawler(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=ROBOTS_URL, text="User-agent: *\nAllow: /\n")
+
+        self._activate_at(root, 7.0)
+
+        assert [r.headers["User-Agent"] for r in httpx_mock.get_requests()] == [USER_AGENT]
+
+    def test_an_unreachable_robots_file_refuses_activation(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=ROBOTS_URL, status_code=503)
+
+        result = self._activate_at(root, 7.0)
+
+        assert result.exit_code == 1
+        assert "HTTP 503" in result.stderr
+        assert read_registry(root / "sources.json").sources[BAERUM_ID].active is False
+
+    def test_a_redirect_off_the_cleared_domain_refuses_activation(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            url=ROBOTS_URL, status_code=301, headers={"Location": "https://cdn.example.invalid/r"}
+        )
+
+        result = self._activate_at(root, 7.0)
+
+        assert result.exit_code == 1
+        assert "outside the cleared domain" in result.stderr
+        assert read_registry(root / "sources.json").sources[BAERUM_ID].active is False
+
+    def test_the_delay_behind_an_in_domain_redirect_binds(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        apex = f"https://{BAERUM_DOMAIN}/robots.txt"
+        httpx_mock.add_response(url=ROBOTS_URL, status_code=301, headers={"Location": apex})
+        httpx_mock.add_response(url=apex, text="User-agent: *\nCrawl-delay: 10\n")
+
+        result = self._activate_at(root, 7.0)
+
+        assert result.exit_code == 1
+        assert "Crawl-delay 10.0" in result.stderr
+
+    def test_a_missing_robots_file_sets_no_floor(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=ROBOTS_URL, status_code=404)
+
+        assert self._activate_at(root, 0.5).exit_code == 0
+
+    def test_the_robots_read_is_bounded_in_time(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """A silent server must end in a refusal, never hang the operator's command."""
+        httpx_mock.add_response(url=ROBOTS_URL, text="User-agent: *\nAllow: /\n")
+
+        self._activate_at(root, 7.0)
+
+        (request,) = httpx_mock.get_requests()
+        assert set(request.extensions["timeout"]) == {"connect", "read", "write", "pool"}
+        assert None not in request.extensions["timeout"].values()
+
+    def test_a_check_that_refuses_capture_never_reaches_the_network(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A refusal the document already makes needs no traffic to confirm."""
+        _register()
+        check = _write_check(root / "check.json", _check_document(permits=False))
+
+        runner.invoke(
+            app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(check)]
+        )
+
+        assert httpx_mock.get_requests() == []
+
+
 class TestRefusalsReachStderr:
     """A refusal that lands on stdout is invisible to an operator piping the
     command's output into a file, which is how these run unattended."""
@@ -496,6 +645,7 @@ class TestListSources:
     def test_an_active_source_shows_who_reviewed_it(self, root: Path) -> None:
         _register()
         check = _write_check(root / "check.json", _check_document())
+        _serve_activation_robots()
         runner.invoke(
             app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(check)]
         )
@@ -871,7 +1021,7 @@ class TestTwoSourcesCannotShareADomain:
         assert result.exit_code == 1
         assert "more than one activated source" in result.stderr
         assert "Traceback" not in result.output
-        assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS_URL]
+        assert [str(r.url) for r in _requests_after_setup(httpx_mock)] == [ROBOTS_URL]
 
     def test_a_candidate_on_a_contested_subdomain_refuses_without_a_traceback(
         self, root: Path, httpx_mock: HTTPXMock
@@ -1357,6 +1507,7 @@ def _activate(root: Path, rate_limit_seconds: float = 0.001) -> None:
     check = _write_check(
         root / "check.json", _check_document(rate_limit_seconds=rate_limit_seconds)
     )
+    _serve_activation_robots()
     result = runner.invoke(
         app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(check)]
     )
@@ -1725,7 +1876,7 @@ class TestDiscover:
         result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
 
         assert result.exit_code == 0, result.output
-        requested = [str(request.url) for request in httpx_mock.get_requests()]
+        requested = [str(request.url) for request in _requests_after_setup(httpx_mock)]
         assert requested.count(ROBOTS_URL) == 1
 
 
@@ -2412,6 +2563,7 @@ def _activate_asker(root: Path) -> None:
     assert result.exit_code == 0, result.output
     document = {**_check_document(rate_limit_seconds=0.001), "robots_txt_url": ASKER_ROBOTS_URL}
     check = _write_check(root / "asker-check.json", document)
+    _serve_activation_robots(ASKER_ROBOTS_URL)
     result = runner.invoke(
         app, ["observatory", "activate-source", "--id", ASKER_ID, "--check", str(check)]
     )
@@ -2682,7 +2834,7 @@ class TestCaptureAll:
         result = runner.invoke(app, args)
 
         assert result.exit_code == 2
-        assert httpx_mock.get_requests() == []
+        assert _requests_after_setup(httpx_mock) == []
 
     def test_no_activated_sources_is_a_refusal(self, root: Path) -> None:
         result = runner.invoke(app, ["observatory", "capture-all"])
@@ -2704,7 +2856,7 @@ class TestCaptureAll:
         assert result.stderr == (
             "Refused: the observation log is damaged. Run `observatory verify` first.\n"
         )
-        assert httpx_mock.get_requests() == []
+        assert _requests_after_setup(httpx_mock) == []
 
     def test_a_clean_sweep_records_itself(self, root: Path, httpx_mock: HTTPXMock) -> None:
         """Issue #167: the observation log cannot answer whether the sweep ran
@@ -3276,7 +3428,9 @@ class TestASweepRebindsToTheRegisterBeforeEachSource:
         assert result.exit_code == 0, result.output
         assert f"== {ASKER_ID} Asker" in result.output
         assert moved_page in _logged_urls(root)
-        assert ASKER_ROBOTS_URL not in {str(request.url) for request in httpx_mock.get_requests()}
+        assert ASKER_ROBOTS_URL not in {
+            str(request.url) for request in _requests_after_setup(httpx_mock)
+        }
         run = latest_sweep_run(sweeps_path(ObservatoryRoot(root, ())))
         assert run is not None
         assert (run.sources_completed, run.sources_withdrawn, run.status) == (2, 0, "success")
@@ -3529,7 +3683,7 @@ class TestNightly:
         assert result.exit_code == 1
         assert "engine_not_pinned" in result.stderr
         assert f"engine: the engine checkout is on a branch ({commit})" in result.stderr
-        assert httpx_mock.get_requests() == []
+        assert _requests_after_setup(httpx_mock) == []
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
         assert (run.status, run.failure_reason, run.engine_commit) == (
@@ -3827,7 +3981,7 @@ class TestNightly:
 
         assert result.exit_code == 1
         assert isinstance(result.exception, RuntimeError)
-        assert httpx_mock.get_requests() == []
+        assert _requests_after_setup(httpx_mock) == []
 
 
 #: 10:00 in Oslo: well outside the 03:00 trigger, as a login after a power cut is.
@@ -3864,7 +4018,7 @@ class TestNightlyCatchUp:
         assert result.exit_code == 0, result.output
         assert "catch-up skipped" in result.output
         assert "2026-09-28T03:00:00+00:00" in result.output
-        assert httpx_mock.get_requests() == []
+        assert _requests_after_setup(httpx_mock) == []
         assert len(read_sweep_runs(root / "sweep-runs.jsonl")) == 1
 
     def test_a_load_after_a_missed_night_sweeps(
@@ -3899,7 +4053,7 @@ class TestNightlyCatchUp:
 
         assert result.exit_code == 0, result.output
         assert "catch-up skipped" in result.output
-        assert httpx_mock.get_requests() == []
+        assert _requests_after_setup(httpx_mock) == []
 
     def test_without_the_flag_a_hand_run_sweeps_regardless(
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
@@ -4346,9 +4500,9 @@ class TestCapture:
     def test_an_undeclared_sitemap_is_found_at_the_conventional_path(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
-        """Issue #151: 190 of 358 Norwegian municipalities publish a sitemap
-        at /sitemap.xml without declaring it in robots.txt (Phase A sweep,
-        2026-08-20). A declaration is the exception, not the rule, so an
+        """Issue #151: in the Phase A sweep (2026-08-20, commit 060d4cf) 190
+        Norwegian municipalities published a sitemap at /sitemap.xml without
+        declaring it in robots.txt. A declaration is the exception, not the rule, so an
         undeclared sitemap is probed at the conventional path — through the
         same gates and recorded the same way as any declared one."""
         _activate(root)
@@ -4645,7 +4799,7 @@ class TestCapture:
 
         assert result.exit_code == 1
         assert "log is damaged" in result.stderr
-        assert httpx_mock.get_requests() == []
+        assert _requests_after_setup(httpx_mock) == []
 
     def test_an_inactive_source_is_refused(self, root: Path, httpx_mock: HTTPXMock) -> None:
         _register()
@@ -4953,6 +5107,7 @@ class TestReplaceSourceDomain:
             root / "fresh.json",
             {**_check_document(), "robots_txt_url": NEW_BAERUM_ROBOTS},
         )
+        _serve_activation_robots(NEW_BAERUM_ROBOTS)
 
         result = runner.invoke(
             app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(fresh)]
@@ -5216,6 +5371,7 @@ def _register_command(root: Path) -> list[str]:
 def _activate_command(root: Path) -> list[str]:
     _register()
     check = _write_check(root / "check.json", _check_document())
+    _serve_activation_robots()
     return ["activate-source", "--id", BAERUM_ID, "--check", str(check)]
 
 

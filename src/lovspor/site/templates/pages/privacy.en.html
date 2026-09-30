@@ -1,0 +1,63 @@
+{#- /en/privacy/: the English twin of privacy.nb.html. Same statements,
+    same sources — see the Norwegian template's header for where each one
+    is read from. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+<p class="muted">Last updated <span data-literal>30 September 2026</span>.</p>
+
+<h2>Who is responsible</h2>
+<p>The data controller is Bartosz Kobyliński, a private individual in Norway. lovspor is not run by a company. Contact: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+
+<h2>The website</h2>
+<p>The pages on lovspor.no are static. They set no cookies, run no scripts and use no analytics or tracking tools.</p>
+<p>The web server keeps an access log of the requests it receives, for operations, troubleshooting and security. A log line describes one request, including the IP address it came from, the time, the address requested, and what the browser reported about itself. The log is rotated by size: only a limited number of older log files are kept, and the oldest are deleted automatically — in practice after a few days.</p>
+
+<h2>The hosted service</h2>
+<p>The lovverk service at <code>https://lovspor.no/mcp</code> requires sign-in, in one of two ways:</p>
+<ul>
+  <li><strong>Signing in with an account.</strong> When you connect from a chat app such as Claude or ChatGPT, you sign in with WorkOS, our sign-in provider. WorkOS processes your email address and name and — if you sign in with another account, such as Google — your identity with that provider. Our server receives an access token from WorkOS and uses only the user identifier in it, not your name or email, to recognise you and count your usage.</li>
+  <li><strong>Issued token.</strong> Developers can be given a token by us. We do not store the token itself, only a cryptographic hash of it, together with a label we give it, the limits that apply to it, and whether it has expired or been revoked.</li>
+</ul>
+<p>Usage is counted per user and per token to enforce the quotas. The counters live only in the server's memory and are forgotten when the service restarts. Our program does not write your questions or the content of tool calls to a log. The service process does have its own operations log on the server, and it holds details of individual requests, including the IP address and the response status. It is deleted after at most <span data-literal>30</span> days.</p>
+
+<h2>Semantic search and OpenAI</h2>
+<p>The <code>semantic_search</code> tool sends the text of your search, shortened to a fixed maximum length, to OpenAI's embedding service, which turns it into a vector. That is the only place where text you write leaves our server; the other tools send nothing onward. The search text and its vector are kept in an in-memory cache and forgotten when the service restarts. Processing at OpenAI may take place outside the EEA. Do not paste confidential or personal information into a search.</p>
+
+<h2>Email</h2>
+<p>If you write to us, for example to ask for a token, we process your email and what you write in order to reply. Email to <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a> is forwarded through Cloudflare.</p>
+
+<h2>Who processes data for us</h2>
+<ul>
+  <li><strong>DigitalOcean</strong> — hosting of the server, in its Frankfurt data centre (EU).</li>
+  <li><strong>WorkOS</strong> — account sign-in.</li>
+  <li><strong>OpenAI</strong> — only the search text of <code>semantic_search</code>.</li>
+  <li><strong>Cloudflare</strong> — DNS for lovspor.no and forwarding of email to the contact address. Traffic to the website and the service does not pass through Cloudflare.</li>
+</ul>
+<p>We do not sell data, show no advertising and do not use the data for profiling.</p>
+
+<h2>Purposes and legal basis</h2>
+<ul>
+  <li><strong>Sign-in, quotas and semantic search</strong> — to provide the service you signed up for.</li>
+  <li><strong>Access log and operations log</strong> — legitimate interest in operating and protecting the service.</li>
+  <li><strong>Email</strong> — legitimate interest in replying to you.</li>
+</ul>
+
+<h2>How long data is kept</h2>
+<ul>
+  <li><strong>Usage counters and the search cache</strong> — until the service restarts.</li>
+  <li><strong>The access log</strong> — rotated by size; in practice a few days.</li>
+  <li><strong>The operations log</strong> — at most <span data-literal>30</span> days.</li>
+  <li><strong>Issued tokens</strong> — the entry remains after the token is revoked, until we delete it.</li>
+  <li><strong>Your WorkOS account</strong> — until you ask us to delete it.</li>
+  <li><strong>Email</strong> — as long as needed to reply to you.</li>
+</ul>
+
+<h2>Your rights</h2>
+<p>Under the Norwegian Personal Data Act (<a href="/lov/personopplysningsloven/">personopplysningsloven</a>) you have the right to access the data we hold about you, and to have it corrected or erased. You can also object to the processing, ask for it to be restricted, and ask to receive your data. To delete your account or have a token revoked, write to <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>. If you believe we process personal data in breach of the rules, you can complain to <a href="https://www.datatilsynet.no/">Datatilsynet</a>, the Norwegian Data Protection Authority.</p>
+
+<h2>Changes</h2>
+<p>If we change this page, we update the date at the top. The code that does the processing described here is open: <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>. The terms of use are on <a href="/en/terms/">a separate page</a>.</p>
+{% endblock %}

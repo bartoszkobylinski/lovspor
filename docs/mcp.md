@@ -23,7 +23,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 `lovspor mcp-http` serves the same seventeen read-only tools to remote clients over the MCP Streamable HTTP transport. It is what the hosted instance runs:
 
-> ✅ **Live since 2026-07-18; the endpoint is `https://lovspor.no/mcp`** — the only name the hosted instance answers to since the personal-domain alias was retired on 2026-09-17. TLS is terminated by Caddy (automatic Let's Encrypt) on a dedicated DigitalOcean droplet provisioned from `deploy/digitalocean/`. **Every request requires authentication** — anonymous and invalid-token calls return 401. The hosted instance runs **opaque-token mode only**: access is an operator-issued bearer token (`lovspor tokens issue`), with per-credential quotas and rate limiting. Hosted OAuth is **not enabled** there — the AuthKit variables are intentionally empty, so `/.well-known/oauth-protected-resource/mcp` returns 404 and an OAuth-only connector (one that falls back to Dynamic Client Registration) cannot connect *(owner decision 2026-09-26, #343; this supersedes the 2026-08-02 statement that both credential modes were active)*. The OAuth mode described below remains supported for self-hosted instances.
+> ✅ **Live since 2026-07-18; the endpoint is `https://lovspor.no/mcp`** — the only name the hosted instance answers to since the personal-domain alias was retired on 2026-09-17. TLS is terminated by Caddy (automatic Let's Encrypt) on a dedicated DigitalOcean droplet provisioned from `deploy/digitalocean/`. **Every request requires authentication** — anonymous and invalid-token calls return 401. The hosted instance accepts **both credential modes** ([§ Authentication](#authentication-two-modes)): operator-issued opaque `lsp_…` bearer tokens (`lovspor tokens issue`), with per-credential quotas and rate limiting, **and hosted OAuth** through WorkOS AuthKit, so chat-app connectors (Claude.ai, ChatGPT) can log in without a pasted token *(owner decision 2026-09-30, which supersedes the 2026-09-26 opaque-token-only decision of #343; that decision in turn superseded the 2026-08-02 statement that both modes were active)*. Observed 2026-09-30: `GET https://lovspor.no/.well-known/oauth-protected-resource/mcp` returned 200 with `resource` = `https://lovspor.no/mcp`, the AuthKit domain as the sole authorization server and `bearer_methods_supported` = `["header"]`; a Claude.ai custom connector (OAuth, "Register automatically") connected and called `search_laws`; a ChatGPT developer-mode connector (OAuth) connected and returned arbeidsmiljøloven § 1-1. The AuthKit environment is WorkOS **Staging** at the time of writing, so its domain is deliberately not written here — read it from the discovery document.
 >
 > ⚠️ **The app itself still speaks plaintext HTTP and binds `127.0.0.1` by design** — lovspor never terminates TLS, a proxy in front of it does. If you run `mcp-http` yourself, keep it on localhost behind a TLS-terminating proxy (see `deploy/digitalocean/README.md`): a bearer token on an exposed port travels in the clear and can be read and replayed.
 
@@ -114,6 +114,19 @@ lovspor mcp-http \
 > "Set" means *has a non-empty value*. `LOVSPOR_AUTHKIT_DOMAIN=` (present but empty) counts as unset and selects opaque-token mode, matching how the CLI treats an empty env var — so exporting an empty placeholder for one of them is safe, but it also won't warn you that OAuth is off.
 
 Both token types are accepted at once in hosted mode: a bearer with two dots is verified as a WorkOS RS256 JWT (signature against the AuthKit JWKS, issuer, audience, expiry), anything else falls through to the credential store. Issued `lsp_…` tokens keep working unchanged when you turn OAuth on.
+
+**What the WorkOS side must have** (learned bringing the hosted instance back to OAuth on 2026-09-30):
+
+- **Dynamic Client Registration enabled.** Chat-app connectors register themselves as OAuth clients; without DCR they have no client to log in with.
+- **The MCP resource defined and set as the default**, with exactly the value of `--public-url` (for the hosted instance, `https://lovspor.no/mcp`). lovspor refuses any JWT whose audience is not `LOVSPOR_PUBLIC_URL` (`src/lovspor/workos_auth.py`), so a token minted for another resource fails even though the login itself succeeded. On 2026-09-30 a stale default resource — the retired personal domain — made Claude.ai fail with "Authorization failed".
+- **CIMD only if you want it.** Claude.ai's default registration choice, "Use Claude's published identity" (Client ID Metadata Document), fails unless CIMD is enabled in WorkOS. With DCR alone, pick "Register automatically" in the connector dialog.
+
+**Connecting a chat app** (both verified against the hosted instance on 2026-09-30):
+
+- **Claude.ai** — add a custom connector with the URL `https://lovspor.no/mcp`, choose **Sign in now**, and under client registration choose **Register automatically**. Log in through the AuthKit page it opens.
+- **ChatGPT** — turn on **developer mode**, create a connector with the same URL and **OAuth** as the authentication, and log in through the AuthKit page.
+
+Client UIs change; if a label above has moved, the three things that matter are the URL, OAuth as the authentication method, and registration by DCR.
 
 **How it differs from stdio** — both differences exist because an HTTP server shares one process across many clients, while stdio serves exactly one:
 

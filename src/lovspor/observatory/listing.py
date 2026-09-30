@@ -1,6 +1,6 @@
 """Reading a listing page as a source of candidates (issue #151, part 2).
 
-Discovery reads sitemaps, sitemap indexes, Atom and RSS. **116 of Norway's 358
+Discovery reads sitemaps, sitemap indexes, Atom and RSS. **116 of Norway's
 municipalities publish none of them** — 23% of the population — and for those a
 capture is structurally a no-op: it proposes nothing and says nothing was
 changed. What they do publish is an ordinary overview page, the kind a person

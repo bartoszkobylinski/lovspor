@@ -19,7 +19,7 @@ uv run lovspor mcp             # serve the corpus to AI assistants over MCP (std
 uv run lovspor mcp-http        # serve the same tools over MCP Streamable HTTP (binds localhost — bearer auth + quotas; TLS terminated upstream, see deploy/digitalocean/)
 ```
 
-`mcp-http` powers the optional operated (hosted) endpoint. It enforces **bearer-token authentication (revocable per-credential tokens) and per-credential rate limiting + quotas**. Optionally it also accepts **OAuth logins** via WorkOS AuthKit — set `LOVSPOR_AUTHKIT_DOMAIN` *and* `LOVSPOR_PUBLIC_URL` together (one without the other refuses to start; see [`mcp.md` § Authentication](mcp.md#authentication-two-modes)). The **app itself has no TLS** — the transport is plaintext, so a bearer token on an exposed port is sent in the clear. TLS terminates in a reverse proxy: Caddy with automatic Let's Encrypt, per the `deploy/digitalocean/` recipe, which **has been deployed since 2026-07-18** — the hosted instance is live at `https://lovspor.no/mcp`, running in **opaque-token mode only** — the AuthKit variables are intentionally empty there *(owner decision 2026-09-26, #343; supersedes the 2026-08-02 statement that both credential modes were active)*. If you run it yourself, keep it bound to localhost behind such a proxy and do not expose the app port to the internet. It serves `/mcp` plus unauthenticated `/healthz` and `/readyz` probes. See [`mcp.md` § Streamable HTTP transport](mcp.md#streamable-http-transport).
+`mcp-http` powers the optional operated (hosted) endpoint. It enforces **bearer-token authentication (revocable per-credential tokens) and per-credential rate limiting + quotas**. Optionally it also accepts **OAuth logins** via WorkOS AuthKit — set `LOVSPOR_AUTHKIT_DOMAIN` *and* `LOVSPOR_PUBLIC_URL` together (one without the other refuses to start; see [`mcp.md` § Authentication](mcp.md#authentication-two-modes)). The **app itself has no TLS** — the transport is plaintext, so a bearer token on an exposed port is sent in the clear. TLS terminates in a reverse proxy: Caddy with automatic Let's Encrypt, per the `deploy/digitalocean/` recipe, which **has been deployed since 2026-07-18** — the hosted instance is live at `https://lovspor.no/mcp`, accepting **both credential modes** — opaque `lsp_…` tokens and hosted OAuth via WorkOS AuthKit — *(owner decision 2026-09-30, verified live that day: RFC 9728 discovery answers 200 and Claude.ai and ChatGPT connectors log in over OAuth; supersedes the 2026-09-26 opaque-token-only decision of #343, which had itself superseded the 2026-08-02 statement that both modes were active)*. The WorkOS requirements (DCR on, the MCP resource defined and default) are in [`mcp.md` § Authentication](mcp.md#authentication-two-modes). If you run it yourself, keep it bound to localhost behind such a proxy and do not expose the app port to the internet. It serves `/mcp` plus unauthenticated `/healthz` and `/readyz` probes. See [`mcp.md` § Streamable HTTP transport](mcp.md#streamable-http-transport).
 
 `seed` and `sync` are aliases at the engine level — both call the same orchestrator. Use `seed` semantically for the first run on an empty corpus, `sync` for repeated invocations. Settings are read from environment variables (or a `.env` file at the engine repo root). See `.env.example` for the required variables.
 
@@ -280,7 +280,7 @@ uv run lovspor observatory survey --from recon/kommuner.txt --run-id 2026-09-19-
 ```
 
 Every run writes `<root>/survey/<run-id>.jsonl`, one row per host. **That file is
-the point.** The 2026-08-20 sweep over all 358 municipalities produced the
+the point.** The 2026-08-20 sweep over the municipalities produced the
 figures still quoted in `observatory/commands.py` and persisted nothing, so its
 population cannot be re-derived — which is issue #349, and the reason this is a
 command rather than another script.
@@ -361,7 +361,15 @@ uv run lovspor observatory sources
 ```
 
 Set `rate_limit_seconds` to at least the source's own `Crawl-delay` when it
-declares one. Permission to fetch is still not permission to redistribute —
+declares one. `activate-source` enforces this (issue #449): it reads the live
+`robots_txt_url` as the check's `user_agent`, takes the `Crawl-delay` of the
+group that crawler falls under (its own product token, else `*`; consecutive
+`User-agent` lines share one group, so Kongsvinger's `User-agent: *` directly
+above `User-agent: MSNBot` / `Crawl-delay: 30` binds us to 30 s), and refuses a
+lower rate. The read follows at most 5 redirects, each of which must stay
+inside the source's cleared domain. A redirect off the domain, a sixth
+redirect, a 5xx or an unreachable host refuses activation; a 4xx means the
+site publishes no rules and sets no floor. Permission to fetch is still not permission to redistribute —
 ADR-0010 §5 and §6 keep republication behind a separate per-source licensing
 basis that no command here can satisfy.
 
@@ -595,6 +603,29 @@ A round summary now also reports `redirect hops: N`. The hops were never
 counted as failures there, but they were not mentioned either, and the pass
 that stops calling them failures must not be the pass that stops mentioning
 them.
+
+### Which blobs carry a document: `observatory document-report`
+
+An `artifact` record says bytes were retrievable; it does not say they hold a
+document. On 2026-09-16 the regulation-shaped HTML blobs were opened for the
+first time: the median `<main>` held 199 characters, 54% held under 300, and
+25% contained a `§` — most were a JavaScript shell (issue #332).
+
+```
+uv run lovspor observatory document-report
+```
+
+Offline and read-only: one pass over the corrected log, reading each distinct
+blob once per source. Per source it prints the HTML blob count, the median
+visible `<main>` text length (whitespace collapsed; `<body>` when a page has no
+`<main>`, counted under `no-main`), how many fall under 300 characters, how
+many contain a `§`, and `docs/html` — blobs clearing both bars. PDFs are
+counted and never measured: the engine ships no PDF text extractor. A blob
+missing from disk is counted under `missing`. A damaged log is refused.
+
+Both measures are proxies for "carries a document", not for "is a forskrift";
+ADR-0010 defers classification. The observation schema is unchanged — recording
+the same measurements on new captures is a separate, later step.
 
 ### Which sources share a server: `observatory addresses`
 

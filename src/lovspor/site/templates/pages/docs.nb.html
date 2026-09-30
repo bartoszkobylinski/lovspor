@@ -35,7 +35,7 @@
 <p class="muted">Kilde: Lovdata, lisensiert under <span data-literal>NLOD 2.0</span>, og hver fil bærer lisensen i frontmatteren sin. Korpuset ligger åpent i <a href="https://github.com/bartoszkobylinski/lovverk">lovverk</a>; motoren som bygger det er <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>, under <span data-literal>AGPL-3.0</span>.</p>
 
 <h2>Autentisering</h2>
-<p>Den driftede tjenesten krever alltid innlogging: et kall uten legitimasjon får <span data-literal>401</span> med en Bearer-utfordring. To former finnes. <strong>Ugjennomsiktige token</strong> deles ut for hånd, og er den formen som gjelder i dag. <strong>Vertsinnlogging med OAuth</strong> er på når <span data-literal>OAuth 2.1</span>-paret er konfigurert på serveren — da svarer tjenesten på <span data-literal>RFC 9728</span>-oppdagelse; er det av, finnes ingen <code>.well-known</code> i det hele tatt.</p>
+<p>Den driftede tjenesten krever alltid innlogging: et kall uten legitimasjon får <span data-literal>401</span> med en Bearer-utfordring. To former finnes. <strong>Ugjennomsiktige token</strong> deles ut for hånd, til utviklerklienter. <strong>Vertsinnlogging med OAuth</strong>, for connectorer i chat-apper som claude.ai og ChatGPT, er på når <span data-literal>OAuth 2.1</span>-paret er konfigurert på serveren — da svarer tjenesten på <span data-literal>RFC 9728</span>-oppdagelse; er det av, finnes ingen <code>.well-known</code> i det hele tatt.</p>
 <p>Når OAuth er på, godtas begge formene samtidig: et token som allerede virker, fortsetter å virke. Hvilken tilstand tjenesten faktisk <em>ble observert i</em> ved siste utgivelse, står på <a href="/status/">status</a> — ikke her.</p>
 
 <h2>Kvoter</h2>

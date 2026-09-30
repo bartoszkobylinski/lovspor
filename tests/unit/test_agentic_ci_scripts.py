@@ -2142,6 +2142,34 @@ class TestUnmeasuredChangedLines:
             "decorated function rehearse_urls_command" in captured
         )
 
+    def test_the_summary_names_a_legacy_remainder_as_not_run_not_as_unreachable(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # #228: the remainder of a legacy function was reachable; it was not run
+        remainder = (
+            "unmeasured changed lines: src/lovspor/sync/orchestrator.py:30-41,60 "
+            "(legacy remainder run_sync: 179 of 188 mutants not run, #228)"
+        )
+        raw = f"{UNMEASURED_ENVELOPE}\n{remainder}\n" + _progress_line(killed=9)
+        out = tmp_path / "gate-input.json"
+        out.write_text(json.dumps(_run(tmp_path, raw)))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+            assert mutation_gate.main() == 0
+
+        lines = capsys.readouterr().out.splitlines()
+        reachable = lines.index("- Unmeasured changed lines (no mutant can reach them):")
+        legacy = lines.index(
+            "- Legacy remainder, not run (#228) — never counted killed, not in the score:"
+        )
+        assert lines[reachable + 1] == "  - `src/lovspor/release/envelope.py:56` — module level"
+        assert lines[legacy + 1] == (
+            "  - `src/lovspor/sync/orchestrator.py:30-41,60` — "
+            "legacy remainder run_sync: 179 of 188 mutants not run, #228"
+        )
+        assert "orchestrator" not in lines[reachable + 1]
+
     def test_the_summary_is_unchanged_without_notices_or_with_a_pre_notice_artifact(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

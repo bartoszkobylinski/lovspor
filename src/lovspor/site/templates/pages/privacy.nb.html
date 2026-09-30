@@ -1,0 +1,78 @@
+{#- /privacy/ (ADR-0014 Decision 2; owner decision 2026-09-30). Every
+    processing statement is read from the code or deploy recipe that does
+    the processing — change that code and this page is wrong until it is
+    changed too:
+      access log ............ deploy/digitalocean/Caddyfile (log block)
+      no cookies/scripts .... lovspor.site.scan (no-script rule)
+      sign-in, sub only ..... lovspor.workos_auth (client_id "workos:<sub>")
+      issued tokens ......... lovspor.access.Credential (hash, never token)
+      counters in memory .... lovspor.quota, lovspor.access.Limits
+      query to OpenAI ....... lovspor.embeddings.provider, .query (capped, cached)
+      hosting region ........ deploy/digitalocean/README.md (fra1)
+      Cloudflare DNS + mail . owner-confirmed 2026-09-30 (not in this repo)
+      journal retention ..... droplet journald.conf.d/retention.conf,
+                              observed 2026-09-30 (not in this repo)
+    Legal basis is stated in plain words under personopplysningsloven,
+    with no article numbers (owner decision 2026-09-30).
+    What neither the repository nor an observation can say — where WorkOS
+    or OpenAI store data — is written without a claim rather than guessed. The English twin must say the same things. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+<p class="muted">Sist oppdatert <span data-literal>30. september 2026</span>.</p>
+
+<h2>Hvem som er ansvarlig</h2>
+<p>Behandlingsansvarlig er Bartosz Kobyliński, privatperson i Norge. lovspor drives ikke av et selskap. Kontakt: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+
+<h2>Nettstedet</h2>
+<p>Sidene på lovspor.no er statiske. De setter ingen informasjonskapsler, kjører ingen skript og bruker ingen analyse- eller sporingsverktøy.</p>
+<p>Webserveren fører en tilgangslogg over forespørslene den får, for drift, feilsøking og sikkerhet. En logglinje beskriver én forespørsel, blant annet IP-adressen den kom fra, tidspunktet, adressen som ble bedt om, og hva nettleseren oppga om seg selv. Loggen roteres etter størrelse: bare et begrenset antall eldre loggfiler beholdes, og de eldste slettes automatisk — i praksis etter noen få dager.</p>
+
+<h2>Den driftede tjenesten</h2>
+<p>lovverk-tjenesten på <code>https://lovspor.no/mcp</code> krever innlogging, på en av to måter:</p>
+<ul>
+  <li><strong>Innlogging med konto.</strong> Kobler du til fra en chat-app som Claude eller ChatGPT, logger du inn hos WorkOS, som er innloggingstjenesten vår. WorkOS behandler e-postadressen og navnet ditt, og — logger du inn med en annen konto, for eksempel Google — identiteten din hos den leverandøren. Serveren vår mottar et tilgangstoken fra WorkOS og bruker bare brukeridentifikatoren i det, ikke navn eller e-post, til å kjenne deg igjen og telle bruken din.</li>
+  <li><strong>Utdelt token.</strong> Utviklere kan få et token av oss. Vi lagrer ikke selve tokenet, bare en kryptografisk hash av det, sammen med en merkelapp vi gir det, grensene som gjelder for det, og om det er utløpt eller trukket tilbake.</li>
+</ul>
+<p>Bruken telles per bruker og per token for å håndheve kvotene. Tellerne ligger bare i minnet på serveren og glemmes når tjenesten startes på nytt. Programmet vårt skriver ikke spørsmålene dine eller innholdet i verktøykallene til logg. Tjenesteprosessen har likevel en egen driftslogg på serveren, og den inneholder opplysninger om enkeltforespørsler, blant annet IP-adresse og svarstatus. Den slettes etter høyst <span data-literal>30</span> dager.</p>
+
+<h2>Semantisk søk og OpenAI</h2>
+<p>Verktøyet <code>semantic_search</code> sender teksten i søket ditt, forkortet til en fast største lengde, til OpenAI sin embedding-tjeneste, som gjør den om til en vektor. Det er det eneste stedet der tekst du skriver, forlater serveren vår; de andre verktøyene sender ingenting videre. Søketeksten og vektoren holdes i en hurtigbuffer i minnet og glemmes når tjenesten startes på nytt. Behandlingen hos OpenAI kan skje utenfor EØS. Ikke lim inn fortrolige eller personlige opplysninger i et søk.</p>
+
+<h2>E-post</h2>
+<p>Skriver du til oss, for eksempel for å be om et token, behandler vi e-posten din og det du skriver, for å kunne svare. E-post til <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a> videresendes gjennom Cloudflare.</p>
+
+<h2>Hvem som behandler opplysninger for oss</h2>
+<ul>
+  <li><strong>DigitalOcean</strong> — drift av serveren, i datasenteret i Frankfurt (EU).</li>
+  <li><strong>WorkOS</strong> — innlogging med konto.</li>
+  <li><strong>OpenAI</strong> — bare søketeksten i <code>semantic_search</code>.</li>
+  <li><strong>Cloudflare</strong> — DNS for lovspor.no og videresending av e-post til kontaktadressen. Trafikken til nettstedet og tjenesten går ikke gjennom Cloudflare.</li>
+</ul>
+<p>Vi selger ikke opplysninger, viser ikke reklame og bruker ikke opplysningene til profilering.</p>
+
+<h2>Formål og rettslig grunnlag</h2>
+<ul>
+  <li><strong>Innlogging, kvoter og semantisk søk</strong> — for å levere tjenesten du har registrert deg for.</li>
+  <li><strong>Tilgangslogg og driftslogg</strong> — berettiget interesse i å drifte og beskytte tjenesten.</li>
+  <li><strong>E-post</strong> — berettiget interesse i å svare deg.</li>
+</ul>
+
+<h2>Hvor lenge opplysningene lagres</h2>
+<ul>
+  <li><strong>Brukstellere og søkebufferen</strong> — til tjenesten startes på nytt.</li>
+  <li><strong>Tilgangsloggen</strong> — rotert etter størrelse; i praksis noen få dager.</li>
+  <li><strong>Driftsloggen</strong> — høyst <span data-literal>30</span> dager.</li>
+  <li><strong>Utdelte token</strong> — oppføringen blir stående også etter at tokenet er trukket tilbake, til vi sletter den.</li>
+  <li><strong>Kontoen hos WorkOS</strong> — til du ber oss slette den.</li>
+  <li><strong>E-post</strong> — så lenge det trengs for å svare deg.</li>
+</ul>
+
+<h2>Rettighetene dine</h2>
+<p>Etter <a href="/lov/personopplysningsloven/">personopplysningsloven</a> har du rett til innsyn i opplysningene vi har om deg, og til å få dem rettet eller slettet. Du kan også protestere mot behandlingen, kreve at den begrenses, og be om å få opplysningene utlevert. Vil du slette kontoen din eller få et token trukket tilbake, skriv til <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>. Mener du at vi behandler personopplysninger i strid med regelverket, kan du klage til <a href="https://www.datatilsynet.no/">Datatilsynet</a>.</p>
+
+<h2>Endringer</h2>
+<p>Endrer vi denne siden, oppdaterer vi datoen øverst. Koden som gjør behandlingen beskrevet her, er åpen: <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>. Vilkårene for bruk står på <a href="/terms/">en egen side</a>.</p>
+{% endblock %}

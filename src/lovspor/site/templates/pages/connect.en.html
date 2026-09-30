@@ -8,7 +8,7 @@
 <h1>{{ title }}</h1>
 <p class="lede">{{ description }}</p>
 
-<p>lovverk is an <a href="https://modelcontextprotocol.io">MCP</a> server. Your client talks either to the hosted service at <code>https://lovspor.no/mcp</code>, or to a copy you run on your own machine. The first needs a token. The second needs nothing.</p>
+<p>lovverk is an <a href="https://modelcontextprotocol.io">MCP</a> server. Your client talks either to the hosted service at <code>https://lovspor.no/mcp</code>, or to a copy you run on your own machine. The first needs a token or an <span data-literal>OAuth 2.1</span> login. The second needs nothing.</p>
 
 <h2>Without a token</h2>
 <p>You do not have to ask anyone. Run the server yourself — it fetches the corpus down to your machine and talks to your client over stdio:</p>
@@ -35,15 +35,29 @@ claude mcp add lovverk -- uvx lovspor mcp</pre>
 }</pre>
 
 <h2>Claude Desktop and claude.ai — as a connector</h2>
-<p>The hosted service can log you in with <span data-literal>OAuth 2.1</span> instead of you pasting a token, when hosted login is switched on. That path has been run end to end from the Claude Desktop connector: the login completes, and the tools answer.</p>
-<p><span class="accent">We do not write down the click path inside the client.</span> It changes more often than this page does, and a recipe we have not checked is worse than no recipe — it looks right. Use the client's own add-a-connector flow, with the address above.</p>
+<p>The hosted service logs you in with <span data-literal>OAuth 2.1</span>, so there is no token to paste. This is the procedure we have run from claude.ai:</p>
+<ul>
+  <li>Add a custom connector with the address <code>https://lovspor.no/mcp</code>.</li>
+  <li>Choose <strong>Sign in now</strong>.</li>
+  <li>For client registration, choose <strong>Register automatically</strong>. The default, which uses Claude's published identity, does not work with this service.</li>
+  <li>Log in on the page that opens. The tools answer once you are back in the chat.</li>
+</ul>
+<p><span class="accent">The labels inside the client change more often than this page does.</span> If one has moved, what matters is the address, <span data-literal>OAuth</span> as the way to log in, and automatic registration.</p>
 
-<h2>ChatGPT, Cursor and Codex</h2>
-<p><strong>No tested procedure.</strong> Both of the forms the service offers exist on the client side: Cursor and Codex accept a token in a field, and ChatGPT connects to connectors that log in with <span data-literal>OAuth 2.1</span>. But we have not run the setup in these clients ourselves, and we are not going to invent the steps.</p>
+<h2>ChatGPT — as a connector</h2>
+<p>Also with <span data-literal>OAuth 2.1</span> and no token. The procedure we have run:</p>
+<ul>
+  <li>Turn on <strong>developer mode</strong> in ChatGPT.</li>
+  <li>Create a connector with the address <code>https://lovspor.no/mcp</code> and <strong>OAuth</strong> as the authentication.</li>
+  <li>Log in on the page that opens.</li>
+</ul>
+
+<h2>Cursor and Codex</h2>
+<p><strong>No tested procedure.</strong> Both accept a token in a field, which is the form the service offers them. But we have not run the setup in these clients ourselves, and we are not going to invent the steps.</p>
 <p>Use the client's own documentation, with the address <code>https://lovspor.no/mcp</code> and your token. If you get it working — or if you cannot — tell us, and it can stand here as a tested recipe with your name on it.</p>
 
 <h2>Getting a token</h2>
-<p>Private beta. One person operates the service, so access is handed out by hand.</p>
+<p>Private beta. One person operates the service, so tokens are handed out by hand. The connectors above log in instead and need no token.</p>
 <p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20access">Email for a beta token →</a></p>
 <p class="muted">Or run it yourself — the engine is open source under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>. What the tools answer is in the <a href="/en/docs/">documentation</a>; the state at the last release is on <a href="/en/status/">status</a>.</p>
 {% endblock %}

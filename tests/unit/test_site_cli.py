@@ -110,7 +110,7 @@ class TestBuildSiteCommand:
 
         assert result.exit_code == 0, result.output
         assert commit[:12] in result.output
-        assert "23 pages" in result.output
+        assert "25 pages" in result.output
         assert (out / "index.html").is_file()
         assert (out / "en" / "status" / "index.html").is_file()
         facts = json.loads((out / "site-facts.json").read_text(encoding="utf-8"))

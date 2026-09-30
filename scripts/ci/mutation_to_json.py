@@ -91,7 +91,8 @@ FAILURE_LINE = re.compile(r"^(?:FAILED |ERROR |error: ).*", re.MULTILINE)
 # `mutation_scope.py --explain` names each changed region no mutant can reach:
 # module-level and class-body statements, decorated functions (every typer
 # command), a decorated class's declaration, and a decorated class nested in
-# another class (#289, #292, #419). Anchored at line start
+# another class (#289, #292, #419). `mutation_legacy.py select` uses the same
+# notice for a legacy function's unrun remainder (#228). Anchored at line start
 # so a notice quoted inside a test failure is not read as one.
 UNMEASURED_LINE = re.compile(r"^unmeasured changed lines: (.+)$", re.MULTILINE)
 

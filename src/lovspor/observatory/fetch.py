@@ -60,6 +60,7 @@ from lovspor.observatory.registry import (
     host_within_domain,
 )
 from lovspor.observatory.robots import ROBOTS_PATH, RobotsPolicy
+from lovspor.observatory.robots_live import published_policy
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 # Municipal PDFs are the large case; a cap keeps one oversized response from
@@ -71,7 +72,6 @@ DEFAULT_CONTENT_TYPE = "application/octet-stream"
 _REDIRECT_STATUS = 300
 _MAX_REDIRECT_HOPS = 3
 _CLIENT_ERROR_STATUS = 400
-_SERVER_ERROR_STATUS = 500
 # Recorded response headers, by allowlist. A blanket copy would put Set-Cookie
 # and other per-session material into an append-only log that is never
 # rewritten — immutability makes over-collection permanent.
@@ -252,15 +252,8 @@ class RobotsGate:
             )
         except httpx.HTTPError:
             return None
-        if response.status_code >= _SERVER_ERROR_STATUS:
-            return None
-        # 4xx means no rules were published, which is an empty rule set — not
-        # a document to parse. Feeding it the error page's body would let a
-        # styled 404 accidentally read as directives.
-        published = (
-            [] if response.status_code >= _CLIENT_ERROR_STATUS else response.text.splitlines()
-        )
-        return RobotsPolicy.parse(published)
+        # One reading of a status code for capture and activation alike.
+        return published_policy(response)
 
 
 class Fetcher:

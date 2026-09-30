@@ -24,10 +24,12 @@ from typing import Any
 
 import httpx
 import pytest
+from lxml import html
 from mcp.types import JSONRPCMessage
 from pydantic import ValidationError
 
 from lovspor.observatory.freshness_index import StoredRun
+from lovspor.observatory.listing import safe_html_parser
 from lovspor.release.envelope import CorpusSummary, Marker, ReleaseRecord
 from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
 from lovspor.site.fingerprint import ReleaseKey
@@ -241,6 +243,54 @@ def test_assumption_git_rev_parse_fails_on_an_unborn_head_without_verify(tmp_pat
         for flags in ((), ("--verify",))
     ]
     assert resolved == [head, head]
+
+
+def test_assumption_codec_names_ignore_case() -> None:
+    """Pins the argument that waives ``"utf-8"`` -> ``"UTF-8"`` in
+    ``observatory/document_report.py::_decoded``: the codec registry lower-cases
+    the name before it looks it up, so both spellings decode the same bytes to
+    the same text and refuse the same invalid bytes."""
+    assert b"bl\xc3\xa5b\xc3\xa6r".decode("UTF-8") == b"bl\xc3\xa5b\xc3\xa6r".decode("utf-8")
+    for spelling in ("UTF-8", "utf-8"):
+        with pytest.raises(UnicodeDecodeError):
+            b"\xa7".decode(spelling)
+
+
+def test_assumption_codec_names_ignore_surrounding_quotes() -> None:
+    """Pins the argument that waives ``.strip('"')`` -> ``.strip(None)`` in
+    ``observatory/document_report.py::_charset``: ``encodings.normalize_encoding``
+    drops punctuation at either end of a codec name, so a value that kept its
+    quotes names the same codec, and a value of nothing but quotes names none,
+    exactly like the empty string the quote-strip leaves."""
+    for quoted, bare in (('"iso-8859-1"', "iso-8859-1"), ('"utf-8"', "utf-8")):
+        assert b"\xc3\x86".decode(quoted) == b"\xc3\x86".decode(bare)
+    for nameless in ('"', '""', ""):
+        with pytest.raises(LookupError):
+            b"x".decode(nameless)
+
+
+def _main_text(page: str, parser: html.HTMLParser | None) -> str | None:
+    main = html.document_fromstring(page, parser=parser).find(".//main")
+    return None if main is None else " ".join(main.text_content().split())
+
+
+def test_assumption_lxml_default_html_parser_reads_text_like_the_hardened_one() -> None:
+    """Pins the argument that waives dropping ``parser=safe_html_parser()`` in
+    ``observatory/document_report.py::_region``: lxml's default HTML parser has
+    ``huge_tree`` off like the hardened one (a page nested past libxml2's depth
+    limit loses its text under both), and the one option that differs,
+    ``remove_comments``, changes no measured text — a comment is not a text
+    node, so ``text_content`` never includes it."""
+    pages = [
+        "<html><body><main>a<!-- § b -->c</main></body></html>",
+        "<main><!--x--><script>s</script>tail</main>",
+        "<html><body><main>" + "<div>" * 300 + "§ deep" + "</div>" * 300 + "</main></body></html>",
+    ]
+    for page in pages:
+        for form in (page, page.encode()):
+            assert _main_text(form, None) == _main_text(form, safe_html_parser())
+    assert _main_text(pages[0], None) == "ac"
+    assert _main_text(pages[2], None) == ""
 
 
 def test_an_entry_arguing_from_a_dependency_names_the_test_that_pins_it() -> None:

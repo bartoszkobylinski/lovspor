@@ -1,0 +1,38 @@
+{#- /terms/ (owner decision 2026-09-30): the terms the hosted OAuth sign-in
+    links to. The licences are the repository's own (LICENSE is AGPL-3.0;
+    the corpus carries NLOD 2.0 in every file's front matter); the quotas
+    are lovspor.access.Limits and ServiceLimits, and revocation is
+    `lovspor tokens revoke`. No liability cap, venue or other clause the
+    owner has not decided is written here. The English twin must say the
+    same things. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+<p class="muted">Sist oppdatert <span data-literal>30. september 2026</span>.</p>
+
+<h2>Hva tjenesten er</h2>
+<p>lovspor består av nettstedet lovspor.no og den driftede lovverk-tjenesten på <code>https://lovspor.no/mcp</code>, som gir KI-verktøy tilgang til teksten i norske lover og sentrale forskrifter. Tjenesten drives av Bartosz Kobyliński som privatperson og er gratis. Ved å bruke den godtar du disse vilkårene.</p>
+
+<h2>Ikke juridisk rådgivning</h2>
+<p>lovspor viser lovtekst til oppslag; det er ikke juridisk rådgivning. Teksten kan inneholde feil, mangle bestemmelser eller være utdatert, og det en KI-modell svarer med tjenesten som kilde, er modellens eget svar. Kontroller mot originalkilden før du stoler på teksten, og søk juridisk bistand når det står noe på spill.</p>
+
+<h2>Uten garantier</h2>
+<p>Tjenesten leveres som den er, uten garantier for at den er riktig, fullstendig eller tilgjengelig. Den kan endres, begrenses eller legges ned uten forvarsel.</p>
+
+<h2>Lovdata og lisenser</h2>
+<p>Lovteksten kommer fra Lovdatas åpne data og er lisensiert under <span data-literal>NLOD 2.0</span>. Du kan bruke den videre på lisensens vilkår, med kildehenvisning. lovspor er ikke tilknyttet eller godkjent av Lovdata. Kildekoden til lovspor er åpen under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>.</p>
+
+<h2>Konto, token og rimelig bruk</h2>
+<p>Innloggingen og tokenet ditt er personlige; ikke del dem med andre. Hver bruker og hvert token har kvoter — grenser for samtidige kall, kall per minutt, kall per døgn og semantiske søk per døgn — og tjenesten som helhet har egne grenser; se <a href="/docs/">dokumentasjonen</a>. Du skal ikke forsøke å omgå kvotene, overbelaste tjenesten eller bruke den på en måte som hindrer andre i å bruke den. Kontoer og token som misbrukes eller truer driften, kan bli stengt eller trukket tilbake.</p>
+
+<h2>Personvern</h2>
+<p>Hvilke opplysninger tjenesten behandler, og hvorfor, står på <a href="/privacy/">personvernsiden</a>.</p>
+
+<h2>Endringer og lovvalg</h2>
+<p>Vilkårene kan bli endret; datoen øverst viser når de sist ble endret. Norsk rett gjelder for vilkårene.</p>
+
+<h2>Kontakt</h2>
+<p>Spørsmål om vilkårene: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+{% endblock %}
