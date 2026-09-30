@@ -393,3 +393,104 @@ class TestPerMutantTimeLimit:
         limit = (self.PR_395_CALL_SECONDS + constant) * multiplier
 
         assert limit >= 4 * self.DEFAULT_LIMIT_SECONDS
+
+
+# `run` is faked (it would run a test suite); `results` and `show` are the
+# installed mutmut, reading the mutants the script itself generated.
+LEGACY_MUTMUT = (
+    "#!/bin/sh\n"
+    'if [ "$1" = run ]; then\n'
+    '  shift; printf "%s\\n" "$@" > run-args.txt\n'
+    f"  printf '%s\\n' '{TALLY}'\n"
+    "  exit 0\n"
+    "fi\n"
+    f'exec "{sys.executable}" -c '
+    "'import sys; from mutmut.__main__ import cli; sys.exit(cli())' \"$@\"\n"
+)
+LEGACY_BASELINE = (
+    '[[entry]]\nrule = "function-lines"\npath = "src/lovspor/mod.py"\n'
+    'name = "answer"\nvalue = 30\nreason = "legacy"\n'
+)
+
+
+def _repo_with_a_changed_legacy_function(tmp_path: Path) -> Path:
+    repo = _repo_with_one_changed_function(tmp_path, LEGACY_MUTMUT)
+    # A symlinked interpreter leaves the virtualenv behind, and with it mutmut,
+    # which generating the mutants imports.
+    python = repo / ".venv" / "bin" / "python"
+    python.unlink()
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+    python.chmod(0o755)
+    legacy = REPO_ROOT / "scripts" / "ci" / "mutation_legacy.py"
+    (repo / "scripts" / "ci" / "mutation_legacy.py").write_bytes(legacy.read_bytes())
+    (repo / "scripts" / "quality").mkdir()
+    (repo / "scripts" / "quality" / "ratchet-baseline.toml").write_text(LEGACY_BASELINE)
+    (repo / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["src/lovspor/"]\n')
+    module = repo / "src" / "lovspor" / "mod.py"
+    module.write_text("def answer(a):\n    x = a + 1\n    return x * 2\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "legacy base")
+    _git(repo, "tag", "-f", "base")
+    module.write_text("def answer(a):\n    x = a + 1\n    return x * 3\n", encoding="utf-8")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "touch line 3")
+    return repo
+
+
+def _run_script(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", "scripts/mutmut-pr.sh", *args, "base"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+
+
+class TestLegacyCarveOut:
+    """#228: a changed function on the function-lines baseline runs only the
+    mutants on its changed lines; the rest is reported, never counted killed."""
+
+    def test_only_the_changed_lines_mutants_are_run(self, tmp_path: Path) -> None:
+        repo = _repo_with_a_changed_legacy_function(tmp_path)
+
+        result = _run_script(repo)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (repo / "run-args.txt").read_text(encoding="utf-8").split() == [
+            "lovspor.mod.x_answer__mutmut_4",
+            "lovspor.mod.x_answer__mutmut_5",
+            "--max-children",
+            "4",
+        ]
+
+    def test_the_remainder_reaches_the_artifact_as_legacy_remainder(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = _run_script(_repo_with_a_changed_legacy_function(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+        verdict = _mutation_to_json().build_result(
+            "0" * 40, result.stdout + result.stderr, result.returncode
+        )
+
+        assert verdict["unmeasured_changed_lines"] == [
+            "src/lovspor/mod.py:2 (legacy remainder answer: 3 of 5 mutants not run, #228)"
+        ]
+        assert verdict["mutants"]["total"] == 1
+        assert verdict["mutants"]["killed"] == 1
+
+    def test_list_names_the_legacy_function_without_generating_mutants(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _repo_with_a_changed_legacy_function(tmp_path)
+
+        result = _run_script(repo, "--list")
+
+        assert result.returncode == 0, result.stderr
+        assert (
+            "lovspor.mod.x_answer__mutmut_* (legacy function: only mutants on changed lines 3"
+            in (result.stderr)
+        )
+        assert "scoped to 0 mutation target(s) and 1 legacy function(s)" in result.stdout
+        assert not (repo / "mutants").exists()

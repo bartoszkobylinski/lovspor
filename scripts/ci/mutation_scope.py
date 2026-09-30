@@ -6,16 +6,23 @@ from __future__ import annotations
 import argparse
 import ast
 import io
+import json
 import re
 import subprocess
 import sys
 import tokenize
-from dataclasses import dataclass
+import tomllib
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 SOURCE_PREFIX = "src/lovspor/"
 CLASS_NAME_SEPARATOR = "ǁ"
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 UNMEASURED_PREFIX = "unmeasured changed lines: "
+# A function with a `function-lines` entry here is a large legacy function
+# (#228, owner decision 2026-09-30): only the mutants on its changed lines run.
+BASELINE = Path(__file__).resolve().parents[1] / "quality" / "ratchet-baseline.toml"
+LEGACY_RULE = "function-lines"
 # Tokens that carry no code: a changed line made only of these is not a
 # change any mutant could measure, wherever it sits.
 _NON_CODE_TOKENS = frozenset(
@@ -42,6 +49,18 @@ class Unit:
     @property
     def span(self) -> int:
         return self.end - self.start
+
+
+@dataclass(frozen=True)
+class LegacyTarget:
+    """A changed legacy function: which mutants are its, and which lines changed."""
+
+    path: str
+    function: str
+    prefix: str
+    start: int
+    end: int
+    changed: tuple[int, ...]
 
 
 def _git(*args: str) -> str:
@@ -280,35 +299,91 @@ def patterns_for_file(path: str, lines: set[int], source: str) -> list[str]:
     except SyntaxError:
         return [f"{module_of(path)}.*"]
 
+    return [f"{module_of(path)}.{unit.key}__mutmut_*" for unit in changed_units(lines, source)]
+
+
+def changed_units(lines: set[int], source: str) -> list[Unit]:
+    """The mutatable functions the changed lines fall in, ordered by key."""
     units = keyed_units(source)
-    if not units:
-        return []
-    hit: set[str] = set()
+    hit: dict[str, Unit] = {}
     for line in lines:
         candidates = [unit for unit in units if unit.contains(line)]
         if candidates:
-            hit.add(min(candidates, key=lambda unit: unit.span).key)
-    return [f"{module_of(path)}.{key}__mutmut_*" for key in sorted(hit)]
+            unit = min(candidates, key=lambda unit: unit.span)
+            hit[unit.key] = unit
+    return [hit[key] for key in sorted(hit)]
+
+
+def legacy_functions(baseline: Path) -> set[tuple[str, str]]:
+    """(path, qualified name) of every `function-lines` entry in the ratchet baseline."""
+    if not baseline.is_file():
+        return set()
+    entries = tomllib.loads(baseline.read_text(encoding="utf-8")).get("entry", [])
+    return {(e["path"], e["name"]) for e in entries if e.get("rule") == LEGACY_RULE}
+
+
+def qualname_of(key: str) -> str:
+    """`x_f` -> `f`, `xǁCǁm` -> `C.m`: the baseline's name for a unit key."""
+    if key.startswith("x_"):
+        return key.removeprefix("x_")
+    return key[1:].strip(CLASS_NAME_SEPARATOR).replace(CLASS_NAME_SEPARATOR, ".")
+
+
+def legacy_targets(
+    path: str, lines: set[int], source: str, legacy: set[tuple[str, str]]
+) -> list[LegacyTarget]:
+    """The changed functions of `path` that are on the legacy list."""
+    targets = []
+    for unit in changed_units(lines, source):
+        if (path, name := qualname_of(unit.key)) in legacy:
+            changed = tuple(sorted(line for line in lines if unit.contains(line)))
+            prefix = f"{module_of(path)}.{unit.key}__mutmut_"
+            targets.append(LegacyTarget(path, name, prefix, unit.start, unit.end, changed))
+    return targets
+
+
+def _explain(path: str, patterns: list[str], targets: list[LegacyTarget]) -> None:
+    suffix = "" if patterns or targets else " (no mutatable changed function)"
+    print(f"  {path}{suffix}", file=sys.stderr)
+    for pattern in patterns:
+        print(f"      {pattern}", file=sys.stderr)
+    for target in targets:
+        note = f"only mutants on changed lines {_ranges(list(target.changed))} run, #228"
+        print(f"      {target.prefix}* (legacy function: {note})", file=sys.stderr)
+
+
+def _scope_file(
+    path: str, lines: set[int], legacy: set[tuple[str, str]], explain: bool
+) -> tuple[list[str], list[LegacyTarget]]:
+    """A file's whole-function patterns, with its legacy functions carved out (#228)."""
+    source = head_source(path)
+    targets = legacy_targets(path, lines, source, legacy)
+    carved = {f"{target.prefix}*" for target in targets}
+    patterns = [p for p in patterns_for_file(path, lines, source) if p not in carved]
+    if explain:
+        _explain(path, patterns, targets)
+        for notice in unmeasured_notices(path, lines, source):
+            print(notice, file=sys.stderr)
+    return patterns, targets
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True)
     parser.add_argument("--explain", action="store_true")
+    parser.add_argument("--baseline", type=Path, default=BASELINE)
+    parser.add_argument("--legacy-plan", type=Path)
     args = parser.parse_args()
 
+    legacy = legacy_functions(args.baseline) if args.legacy_plan else set()
     patterns: list[str] = []
+    plan: list[LegacyTarget] = []
     for path, lines in sorted(changed_lines(args.base).items()):
-        source = head_source(path)
-        file_patterns = patterns_for_file(path, lines, source)
+        file_patterns, targets = _scope_file(path, lines, legacy, args.explain)
         patterns.extend(file_patterns)
-        if args.explain:
-            suffix = "" if file_patterns else " (no mutatable changed function)"
-            print(f"  {path}{suffix}", file=sys.stderr)
-            for pattern in file_patterns:
-                print(f"      {pattern}", file=sys.stderr)
-            for notice in unmeasured_notices(path, lines, source):
-                print(notice, file=sys.stderr)
+        plan.extend(targets)
+    if plan:
+        args.legacy_plan.write_text(json.dumps([asdict(t) for t in plan]), encoding="utf-8")
     print("\n".join(patterns))
     return 0
 
