@@ -1780,30 +1780,6 @@ by `test_stdin_is_read_as_utf_8_whatever_its_text_encoding`.)
 """
 
 [[equivalent]]
-file = "src/lovspor/site/probe_credential.py"
-symbol = "_read_stdin"
-registered = "2026-09-30, PR #469, from run 36669099930"
-mutation = """
--        raise OSError(errno.EBADF, "stdin is closed")
-+        raise OSError(None, "stdin is closed")
-"""
-justification = """
-The mutant changes only the exception's `errno`, and nothing reads it.
-Both constructions build a plain `OSError` (EBADF has no subclass in
-CPython's errno-to-subclass map, and `None` selects none either), so the
-same `except OSError` clause catches both. `_read_stdin` has exactly one
-caller, `_read_secret`, which returns its result or lets the error
-propagate; `_read_secret` has exactly one caller, `load_probe_token`, whose
-handler reads `error.strerror` and nothing else. Two-argument construction
-sets `strerror` to the second argument in both spellings ("stdin is
-closed"), so the notice — the only output — is byte-identical:
-"probe credential unreadable: <stdin>: stdin is closed". Only `str(error)`
-and `error.errno` differ, and no code path reaches either. Python's own
-OSError semantics, not a dependency. (Every mutant that changes `strerror`
-is killed by `test_a_closed_stdin_is_recorded_not_fatal`.)
-"""
-
-[[equivalent]]
 file = "src/lovspor/site/capabilities.py"
 symbol = "bearer_401"
 registered = "2026-09-09, PR #266, from run 34382097818"

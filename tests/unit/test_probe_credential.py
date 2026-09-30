@@ -148,3 +148,16 @@ class TestPath:
 
         assert token is None
         assert notice == f"probe credential unreadable: {missing}: No such file or directory"
+
+    def test_a_closed_stdin_does_not_stop_a_path_being_read(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A service unit runs with no stdin at all; its credential comes by path."""
+        monkeypatch.setattr(sys, "stdin", None)
+        secret = tmp_path / "site-probe"
+        secret.write_text(f"{TOKEN}\n", encoding="utf-8")
+
+        token, notice = load_probe_token(secret)
+
+        assert token is not None and token.get_secret_value() == TOKEN
+        assert notice is None

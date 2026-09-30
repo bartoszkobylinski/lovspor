@@ -13,7 +13,6 @@ command prints one line naming the path, never the content.
 the root-owned file and fails.
 """
 
-import errno
 import os
 import sys
 from pathlib import Path
@@ -55,11 +54,8 @@ def probe_token_path(explicit: Path | None) -> Path | None:
 
 
 def _read_stdin() -> str:
-    stream = sys.stdin
-    if stream is None:
-        raise OSError(errno.EBADF, "stdin is closed")
     # The bytes, decoded as UTF-8 whatever the locale, like a path read.
-    data: str | bytes = getattr(stream, "buffer", stream).read()
+    data: str | bytes = getattr(sys.stdin, "buffer", sys.stdin).read()
     return data.decode("utf-8") if isinstance(data, bytes) else data
 
 
@@ -74,6 +70,8 @@ def load_probe_token(explicit: Path | None) -> ProbeCredential:
     if path is None:
         return ProbeCredential(None, "probe credential: none configured (step (b) unobserved)")
     name = _STDIN_NAME if path == STDIN else str(path)
+    if path == STDIN and sys.stdin is None:
+        return ProbeCredential(None, f"probe credential unreadable: {name}: stdin is closed")
     try:
         token = _read_secret(path).strip()
     except OSError as error:
