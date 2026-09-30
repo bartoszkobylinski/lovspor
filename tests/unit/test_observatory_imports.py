@@ -30,6 +30,8 @@ _MODULES = (
     "lovspor.observatory.commands",
     "lovspor.observatory.corrections",
     "lovspor.observatory.discovery",
+    "lovspor.observatory.document_report",
+    "lovspor.observatory.document_report_commands",
     "lovspor.observatory.engine",
     "lovspor.observatory.entrypoint",
     "lovspor.observatory.events",
