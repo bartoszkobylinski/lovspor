@@ -7,6 +7,8 @@ output, including a line cut short and an hour split by a restart.
 
 from __future__ import annotations
 
+import locale
+from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -14,7 +16,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lovspor.cli import app
-from lovspor.ops_cli import usage_impl
+from lovspor.ops_cli import _utc_now, usage_impl
 from lovspor.usage_report import (
     UsageReportError,
     parse_usage,
@@ -109,3 +111,73 @@ def test_the_command_refuses_a_bad_since_with_a_usage_error() -> None:
     result = CliRunner().invoke(app, ["ops", "usage", "--since", "last week"], input="")
     assert result.exit_code == 2
     assert said("--since takes 'today', 'all' or a date like 2026-09-30", result.output)
+
+
+_MIDNIGHT = (
+    'lovspor.metrics {"hour":"2026-09-30T00:00:00Z","calls":2,"ok":2,"errors":0,"refused":{},'
+    '"p50_ms":9.0,"p95_ms":11.0,"by_tool":{"get_law":2},"active_credentials":1}'
+)
+
+
+@pytest.fixture
+def ascii_locale() -> Iterator[None]:
+    before = locale.setlocale(locale.LC_CTYPE)
+    locale.setlocale(locale.LC_CTYPE, "C")
+    yield
+    locale.setlocale(locale.LC_CTYPE, before)
+
+
+def test_parse_counts_every_malformed_line() -> None:
+    torn = 'lovspor.metrics {"hour":"2026-09-30T14:00:00Z","calls":'
+    assert parse_usage([torn, _MIDNIGHT, torn]).malformed == 2
+
+
+def test_parse_reads_the_payload_after_the_first_tag() -> None:
+    line = _MIDNIGHT.replace('"refused":{}', '"refused":{"lovspor.metrics x":1}')
+    assert parse_usage([line]).hours[0].refused == {"lovspor.metrics x": 1}
+
+
+def test_since_keeps_the_hour_that_starts_the_day() -> None:
+    hours = parse_usage([_MIDNIGHT]).hours
+    assert summarize(hours, since=date(2026, 9, 30)).calls == 2
+
+
+def test_an_empty_summary_has_no_active_credentials() -> None:
+    assert summarize([], since=None).peak_active_credentials == 0
+
+
+def test_render_is_exactly_the_table_a_blank_line_and_the_totals() -> None:
+    text = render_report(summarize(parse_usage([_MIDNIGHT]).hours, since=None), malformed=0)
+    assert text == (
+        "hour (UTC)        calls   ok  errors  refused  p50 ms  p95 ms  active\n"
+        "2026-09-30 00:00      2    2       0        0     9.0    11.0       1\n"
+        "\n"
+        "total: 2 calls, 2 ok, 0 errors, 0 refused\n"
+        "refused by reason: none\n"
+        "by tool: get_law 2\n"
+        "peak distinct credentials in one hour: 1\n"
+        "worst hourly p95: 11.0 ms"
+    )
+
+
+def test_impl_reports_the_malformed_lines_it_skipped(tmp_path: Path) -> None:
+    journal = tmp_path / "journal.txt"
+    journal.write_text(_JOURNAL, encoding="utf-8")
+    text = usage_impl(journal, "all", lambda: datetime(2026, 9, 30, 10, 0, tzinfo=UTC))
+    assert text.endswith("skipped 1 malformed lovspor.metrics line(s)")
+
+
+@pytest.mark.usefixtures("ascii_locale")
+def test_impl_reads_a_journal_file_as_utf8_whatever_the_locale(tmp_path: Path) -> None:
+    # The unit's other log lines carry Norwegian text; a locale-default read
+    # on an ASCII box would die on the first "ø" before reaching a metric.
+    journal = tmp_path / "journal.txt"
+    journal.write_text("INFO:     søk i lovverket\n" + _MIDNIGHT + "\n", encoding="utf-8")
+    text = usage_impl(journal, "all", lambda: datetime(2026, 9, 30, 10, 0, tzinfo=UTC))
+    assert "total: 2 calls, 2 ok, 0 errors, 0 refused" in text
+
+
+def test_the_operator_clock_is_utc() -> None:
+    # --since today means the UTC day: a local-time clock after midnight in
+    # Oslo would name tomorrow's date for two hours every night.
+    assert _utc_now().tzinfo is UTC

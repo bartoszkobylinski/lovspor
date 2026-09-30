@@ -6,11 +6,17 @@ emitted line holds, and that no credential identifier ever reaches it.
 
 from __future__ import annotations
 
+import io
 import json
+import sys
 import threading
+import time
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
-from lovspor.usage_metrics import METRICS_TAG, HourlyUsage, ToolCall, UsageRecorder
+import pytest
+
+from lovspor.usage_metrics import METRICS_TAG, HourlyUsage, ToolCall, UsageRecorder, _utc_now
 
 
 class _Clock:
@@ -156,3 +162,94 @@ def test_the_hourly_ticker_emits_a_turned_hour_and_flushes_on_exit() -> None:
         {"get_law": 1},
         {"list_sections": 1},
     ]
+
+
+class _Flushes(io.StringIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushes = 0
+
+    def flush(self) -> None:
+        self.flushes += 1
+        super().flush()
+
+
+class _StopAfter(threading.Event):
+    """A stop event that reports ``waits`` timeouts, then that it was set."""
+
+    def __init__(self, waits: int) -> None:
+        super().__init__()
+        self.waits = waits
+        self.timeouts: list[float | None] = []
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.timeouts.append(timeout)
+        return len(self.timeouts) > self.waits
+
+
+@pytest.fixture
+def half_hour_local_zone(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_the_default_emitter_writes_stderr_and_flushes_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # journald reads a pipe: an unflushed line sits in the buffer until the
+    # next one, and a crash loses it with the hour it describes.
+    stream = _Flushes()
+    monkeypatch.setattr(sys, "stderr", stream)
+    recorder = UsageRecorder(utc_now=_Clock())
+    recorder.record(_ok())
+    recorder.flush()
+    assert stream.getvalue().startswith(f"{METRICS_TAG} ")
+    assert stream.flushes >= 1
+
+
+def test_the_default_clock_is_utc() -> None:
+    assert _utc_now().tzinfo is UTC
+
+
+def test_the_hour_drops_seconds_as_well_as_minutes() -> None:
+    recorder, lines, clock = _recorder()
+    clock.now = datetime(2026, 9, 30, 13, 5, 42, 7, tzinfo=UTC)
+    recorder.record(_ok())
+    recorder.flush()
+    assert _payload(lines[0])["hour"] == "2026-09-30T13:00:00Z"
+
+
+@pytest.mark.usefixtures("half_hour_local_zone")
+def test_the_hour_is_a_utc_hour_whatever_the_box_zone() -> None:
+    recorder, lines, _ = _recorder()
+    recorder.record(_ok())
+    recorder.flush()
+    assert _payload(lines[0])["hour"] == "2026-09-30T13:00:00Z"
+
+
+def test_latency_is_rounded_to_a_tenth_of_a_millisecond() -> None:
+    recorder, lines, _ = _recorder()
+    recorder.record(_ok(ms=12.34))
+    recorder.flush()
+    assert (_payload(lines[0])["p50_ms"], _payload(lines[0])["p95_ms"]) == (12.3, 12.3)
+
+
+def test_refusals_without_a_reason_accumulate_as_unidentified() -> None:
+    recorder, lines, _ = _recorder()
+    recorder.record(ToolCall("get_law", "refused", 0.1, "beta-001"))
+    recorder.record(ToolCall("get_law", "refused", 0.1, "beta-001"))
+    recorder.flush()
+    assert _payload(lines[0])["refused"] == {"unidentified": 2}
+
+
+def test_the_ticker_loop_ticks_between_waits_until_stopped() -> None:
+    recorder, lines, clock = _recorder()
+    recorder.record(_ok())
+    clock.now += timedelta(hours=1)
+    stop = _StopAfter(waits=2)
+    recorder._tick_until(stop, 7.5)
+    assert stop.timeouts == [7.5, 7.5, 7.5]
+    assert len(lines) == 1
