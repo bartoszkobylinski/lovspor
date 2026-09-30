@@ -66,6 +66,13 @@ ssh root@<DROPLET_IP> 'bash /root/provision.sh'   # clones the app, uv sync, fet
                                                   # the corpus, installs units + Caddyfile
 ```
 
+Pass 2 also installs `journald-retention.conf` as
+`/etc/systemd/journald.conf.d/retention.conf` (`MaxRetentionSec=30day`) and
+restarts `systemd-journald`. The lovspor.no privacy page (PR #474) states the
+server log is kept at most 30 days, so a rebuilt droplet has to enforce that too.
+Caddy's access log is bounded separately, by `roll_size 10MiB` / `roll_keep 5`
+in the `log` block of `deploy/digitalocean/Caddyfile`.
+
 ## 3. Go live
 
 ```bash
@@ -303,6 +310,18 @@ sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
 
 The durable fix for a bad release is `git revert` on `main` + redeploy, not a
 long-lived detached checkout.
+
+**Log retention (30 days).** The live droplet predates this file in
+`provision.sh`: the owner applied `/etc/systemd/journald.conf.d/retention.conf`
+by hand on 2026-09-30, because the privacy page (PR #474) promises the server
+log is kept at most 30 days. It is byte-identical to
+`deploy/digitalocean/journald-retention.conf`. To re-apply it after a change:
+
+```bash
+sudo install -D -m 0644 /opt/lovspor/app/deploy/digitalocean/journald-retention.conf /etc/systemd/journald.conf.d/retention.conf
+sudo systemctl restart systemd-journald
+systemd-analyze cat-config systemd/journald.conf | grep MaxRetentionSec
+```
 
 ---
 

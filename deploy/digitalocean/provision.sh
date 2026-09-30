@@ -249,6 +249,12 @@ install -m644 "$APP_DIR/deploy/digitalocean/lovspor-site-drift.service" /etc/sys
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-site-drift.timer" /etc/systemd/system/
 install -d /etc/caddy
 install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile
+# The site's privacy page promises the server log is kept at most 30 days; journald
+# keeps it until the disk cap otherwise, so the promise is enforced here, not by hand.
+# Caddy's own access log is bounded by roll_size/roll_keep in the Caddyfile.
+install -D -m 0644 "$APP_DIR/deploy/digitalocean/journald-retention.conf" \
+	/etc/systemd/journald.conf.d/retention.conf
+systemctl restart systemd-journald
 # The Caddyfile serves everything outside /mcp through a plain `import` of the
 # active release fragment, so that file has to exist before `caddy validate`
 # can pass — a glob matching nothing would leave the site block empty and 404
