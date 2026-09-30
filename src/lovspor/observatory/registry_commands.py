@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 from pydantic import ValidationError
 
@@ -42,7 +43,10 @@ from lovspor.observatory.registry_io import (
     _root,
     _save,
 )
+from lovspor.observatory.robots_live import refuse_rate_below_crawl_delay
 from lovspor.observatory.storage import ObservatoryRoot
+
+_ROBOTS_TIMEOUT_SECONDS = 30.0
 
 
 @observatory_app.command("register-source")
@@ -98,7 +102,7 @@ def activate_source(
         typer.echo(f"{authority_id} is not registered; run register-source first.", err=True)
         raise typer.Exit(1)
     try:
-        activated = activate(record, read_access_policy_check(check))
+        activated = _cleared(record, check)
     except (ParseError, SourceNotActivatedError) as exc:
         # An unreadable check and a check that refuses capture end the same
         # way on purpose: neither is evidence that this source may be fetched.
@@ -116,6 +120,21 @@ def activate_source(
     assert policy is not None  # noqa: S101 — activate() cannot return a cleared record without one
     typer.echo(f"Activated {authority_id} ({activated.name}) [{activated.canonical_domain}]")
     typer.echo(f"Reviewed by {policy.reviewed_by}; rate limit {policy.rate_limit_seconds}s")
+
+
+def _cleared(record: SourceRecord, check: Path) -> SourceRecord:
+    """The record activated under ``check``, once the live robots.txt agrees.
+
+    The document's own refusals come first, so a check that already refuses
+    capture sends no traffic. Then the live file's ``Crawl-delay`` is a floor
+    under the recorded rate (issue #449): the rule used to rest on the
+    reviewer reading the file by eye.
+    """
+    access = read_access_policy_check(check)
+    activated = activate(record, access)
+    with httpx.Client(timeout=_ROBOTS_TIMEOUT_SECONDS) as client:
+        refuse_rate_below_crawl_delay(client, access, activated.canonical_domain)
+    return activated
 
 
 def _next_listings(current: tuple[str, ...], add: list[str], remove: list[str]) -> tuple[str, ...]:

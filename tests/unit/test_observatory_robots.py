@@ -263,3 +263,75 @@ def test_the_decision_does_not_delegate_to_the_interpreter() -> None:
     } | {node.module for node in ast.walk(ast.parse(source)) if isinstance(node, ast.ImportFrom)}
 
     assert "urllib.robotparser" not in imported
+
+
+KONGSVINGER = (
+    "User-agent: *\n"
+    "Sitemap: https://www.kongsvinger.kommune.no/sitemap.xml\n"
+    "User-agent: MSNBot\n"
+    "Crawl-delay: 30\n"
+    "User-agent: Bingbot\n"
+    "Crawl-delay: 30\n"
+)
+
+
+class TestCrawlDelay:
+    """Issue #449: the Crawl-delay a site declares for this crawler."""
+
+    def test_kongsvinger_declares_thirty_seconds_for_the_wildcard(self) -> None:
+        """The owner's reading of 3401 (2026-09-29): ``*`` has no line of its
+        own before ``User-agent: MSNBot``, so it shares that group's delay."""
+        assert policy(KONGSVINGER).crawl_delay(UA) == 30.0
+
+    def test_no_crawl_delay_line_declares_none(self) -> None:
+        assert policy("User-agent: *\nDisallow: /privat/\n").crawl_delay(UA) is None
+
+    def test_an_empty_file_declares_none(self) -> None:
+        assert policy("").crawl_delay(UA) is None
+
+    def test_a_group_naming_the_crawler_replaces_the_wildcard(self) -> None:
+        text = (
+            "User-agent: *\nCrawl-delay: 60\nDisallow: /x\n\n"
+            "User-agent: lovspor-observatory\nCrawl-delay: 5\nDisallow: /y\n"
+        )
+
+        assert policy(text).crawl_delay(UA) == 5.0
+
+    def test_a_delay_for_another_crawler_does_not_bind_this_one(self) -> None:
+        text = "User-agent: Bingbot\nCrawl-delay: 30\nDisallow: /\n\nUser-agent: *\nAllow: /\n"
+
+        assert policy(text).crawl_delay(UA) is None
+
+    def test_the_longest_delay_addressed_to_the_crawler_wins(self) -> None:
+        """Several groups for one token are one group (RFC 9309 §2.2.1); the
+        stricter of their delays is the one a polite crawler honours."""
+        text = (
+            "User-agent: lovspor-observatory\nCrawl-delay: 4\nDisallow: /a\n\n"
+            "User-agent: lovspor-observatory\nCrawl-delay: 9.5\nDisallow: /b\n"
+        )
+
+        assert policy(text).crawl_delay(UA) == 9.5
+
+    def test_field_names_are_case_insensitive(self) -> None:
+        assert policy("user-agent: *\ncrawl-DELAY: 12 # polite\n").crawl_delay(UA) == 12.0
+
+    @pytest.mark.parametrize("value", ["", "soon", "30s", "nan", "inf", "-5"])
+    def test_a_value_that_is_not_a_delay_is_ignored(self, value: str) -> None:
+        assert policy(f"User-agent: *\nCrawl-delay: {value}\n").crawl_delay(UA) is None
+
+    @pytest.mark.parametrize(("value", "seconds"), [("0", 0.0), ("0.5", 0.5)])
+    def test_a_delay_below_one_second_is_still_a_delay(self, value: str, seconds: float) -> None:
+        """Zero and fractions are delays a site may declare; only negative,
+        non-finite and non-numeric values are not."""
+        assert policy(f"User-agent: *\nCrawl-delay: {value}\n").crawl_delay(UA) == seconds
+
+    def test_a_delay_before_any_user_agent_belongs_to_no_group(self) -> None:
+        assert policy("Crawl-delay: 30\nUser-agent: *\nAllow: /\n").crawl_delay(UA) is None
+
+    def test_a_delay_does_not_change_which_rules_apply(self) -> None:
+        """Grouping is the one ``allows`` already uses, so the two answers
+        cannot come from different readings of the same file."""
+        parsed = policy("User-agent: *\nCrawl-delay: 30\nUser-agent: other\nDisallow: /x\n")
+
+        assert parsed.allows(UA, f"{HOST}/x") is False
+        assert parsed.crawl_delay(UA) == 30.0
