@@ -60,6 +60,9 @@ jobs:
       GH_REPO: ${{ github.repository }}
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      # Every mutation sticky round names the head it describes, and says so
+      # when the PR has moved past it (#477).
+      STICKY_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       # The escalation helper has to exist before the first step that can
       # escalate, and the budget-exceeded path below runs ahead of the full
@@ -439,6 +442,9 @@ jobs:
       GH_REPO: ${{ github.repository }}
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      # Every mutation sticky round names the head it describes, and says so
+      # when the PR has moved past it (#477).
+      STICKY_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       # Recorded on the agent's machine; every diff and squash below is anchored
       # to it.
       BEFORE_SHA: ${{ needs.remediate.outputs.before_sha }}

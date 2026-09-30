@@ -56,6 +56,12 @@ elif "--method" in argv and argv[argv.index("--method") + 1] == "PATCH":
         if comment["id"] == target:
             comment["body"] = body
     (state / "comments.json").write_text(json.dumps(comments))
+elif argv[0] == "api" and "/pulls/" in argv[1]:
+    pull = state / "pull.json"
+    if not pull.exists():
+        sys.stderr.write("HTTP 502\\n")
+        sys.exit(1)
+    sys.stdout.write(jq(argv[argv.index("--jq") + 1], json.loads(pull.read_text())))
 elif argv[0] == "api" and "/issues/comments/" in argv[1]:
     target = int(argv[1].rsplit("/", 1)[1])
     hit = next(c for c in comments if c["id"] == target)
@@ -79,7 +85,12 @@ def _workspace(tmp_path: Path, comments: list[dict[str, object]]) -> Path:
 
 
 def _escalate(
-    state: Path, body: str, *, key: str = "pipeline", repo: str | None = "o/r"
+    state: Path,
+    body: str,
+    *,
+    key: str = "pipeline",
+    repo: str | None = "o/r",
+    head_sha: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     body_file = state / "body.md"
     body_file.write_text(body)
@@ -89,6 +100,8 @@ def _escalate(
     }
     if repo is not None:
         env["GH_REPO"] = repo
+    if head_sha is not None:
+        env["STICKY_HEAD_SHA"] = head_sha
     return subprocess.run(
         [str(_SCRIPT), key, "230", str(body_file)],
         check=False,
@@ -233,3 +246,92 @@ def test_a_missing_repository_fails_instead_of_guessing_one(tmp_path: Path) -> N
     assert result.returncode != 0
     assert "GH_REPO or GITHUB_REPOSITORY" in result.stderr
     assert _comments(state) == []
+
+
+# Issue #477: on PR #469 a reader took the sticky's first round (head a85fe67,
+# 12 survivors) for the current state, while the round for head 99e00f7 (5
+# survivors, run 36679035597) had been appended at the bottom. Each round now
+# names the head it was written for, a round for a head the PR has left says
+# it is stale, and one status line under the marker says where the newest is.
+_A85 = "a85fe67ee7bfff01c44576cd6b14c2ffe27c1dcb"
+_FAB = "fab38daf82f1b7064235b8f95d136de151fac0ae"
+_99E = "99e00f71e70bbe6aa56bd24b943a96156a165ccc"
+_STATUS = "_Rounds run oldest first"
+
+
+def _pr_head(state: Path, sha: str) -> None:
+    (state / "pull.json").write_text(json.dumps({"head": {"sha": sha}}))
+
+
+def _mutation_rounds(state: Path, *heads: str) -> str:
+    for head in heads:
+        _pr_head(state, head)
+        result = _escalate(state, f"round for {head[:7]}", key="mutation", head_sha=head)
+        assert result.returncode == 0, result.stderr
+    (comment,) = _comments(state)
+    return str(comment["body"])
+
+
+def test_each_round_names_the_head_it_was_written_for(tmp_path: Path) -> None:
+    body = _mutation_rounds(_workspace(tmp_path, []), _A85, _99E)
+
+    assert "**Head `a85fe67`**\n\nround for a85fe67" in body
+    assert "**Head `99e00f7`**\n\nround for 99e00f7" in body
+    assert body.index("round for a85fe67") < body.index("round for 99e00f7")
+
+
+def test_the_status_line_names_the_newest_round_and_is_kept_single(tmp_path: Path) -> None:
+    body = _mutation_rounds(_workspace(tmp_path, []), _A85, _FAB, _99E)
+
+    marker = _MARKER.format(key="mutation")
+    assert body.startswith(f"{marker}\n\n{_STATUS}: the newest, at the bottom,")
+    assert "was written for head `99e00f7`, the PR head._" in body
+    assert body.count(_STATUS) == 1
+
+
+def test_a_round_for_a_head_the_pr_has_left_says_it_is_stale(tmp_path: Path) -> None:
+    state = _workspace(tmp_path, [])
+    _mutation_rounds(state, _99E)
+
+    result = _escalate(state, "late round", key="mutation", head_sha=_A85)
+
+    assert result.returncode == 0, result.stderr
+    body = str(_comments(state)[0]["body"])
+    assert "**Head `a85fe67`** — STALE: the PR head is now `99e00f7`" in body
+    assert "was written for head `a85fe67`, not the PR head `99e00f7`._" in body
+
+
+def test_an_unreadable_pr_head_still_posts_the_round(tmp_path: Path) -> None:
+    state = _workspace(tmp_path, [])
+
+    result = _escalate(state, "round A", key="mutation", head_sha=_A85)
+
+    assert result.returncode == 0, result.stderr
+    body = str(_comments(state)[0]["body"])
+    assert "**Head `a85fe67`**\n\nround A" in body
+    assert "PR head unknown" in body
+
+
+def test_without_a_head_sha_the_body_is_unchanged(tmp_path: Path) -> None:
+    state = _workspace(tmp_path, [])
+
+    _escalate(state, "round A")
+
+    assert _comments(state)[0]["body"] == _MARKER.format(key="pipeline") + "\n\nround A"
+
+
+def test_trimming_keeps_the_status_line_and_the_newest_round(tmp_path: Path) -> None:
+    marker = _MARKER.format(key="mutation")
+    rounds = "\n\n---\n\n".join(f"round {i} " + "x" * 2000 for i in range(30))
+    state = _workspace(tmp_path, [{"id": 42, "body": f"{marker}\n\n{rounds}"}])
+    _pr_head(state, _99E)
+
+    result = _escalate(state, "NEWEST", key="mutation", head_sha=_99E)
+
+    assert result.returncode == 0, result.stderr
+    body = str(_comments(state)[0]["body"])
+    assert len(body) < 65536
+    assert body.startswith(f"{marker}\n\n{_STATUS}")
+    assert body.count(_STATUS) == 1
+    assert "round 0 " not in body
+    assert body.rstrip().endswith("NEWEST")
