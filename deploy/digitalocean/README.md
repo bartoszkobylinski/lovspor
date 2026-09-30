@@ -319,27 +319,36 @@ sent or not configured, 1 the configuration or the delivery failed (the reason i
 in the alert unit's journal), 2 a malformed `--unit`.
 
 **Install the alerts on the existing droplet** (it predates this in
-`provision.sh`; do not re-run provisioning there — see First migration). As root
-over the tailnet, after the PR is merged:
+`provision.sh`; do not re-run provisioning there — see First migration). The same
+block also brings the droplet's timer units up to the repository (#484): on
+2026-09-30 its installed `lovspor-fetch-corpus.service` lacked the #234 retry and
+`--full-history`, and the drift pair was not installed at all. As root over the
+tailnet, after the PR is merged — safe to run again, every step overwrites with
+the repository copy or checks first:
 
 ```bash
 sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
 sudo -u lovspor sh -c 'cd /opt/lovspor/app && /opt/lovspor/.local/bin/uv sync --frozen --no-dev'
-sudo install -m644 /opt/lovspor/app/deploy/digitalocean/lovspor-alert@.service /etc/systemd/system/
-sudo install -m644 /opt/lovspor/app/deploy/digitalocean/lovspor-fetch-corpus.service /etc/systemd/system/
-sudo install -m644 /opt/lovspor/app/deploy/digitalocean/lovspor-publish.service /etc/systemd/system/
-sudo install -m644 /opt/lovspor/app/deploy/digitalocean/lovspor-site-drift.service /etc/systemd/system/
+for u in lovspor-alert@.service lovspor-fetch-corpus.service lovspor-fetch-corpus.timer lovspor-publish.service lovspor-site-drift.service lovspor-site-drift.timer; do sudo install -m644 "/opt/lovspor/app/deploy/digitalocean/$u" /etc/systemd/system/; done
 sudo sh -c 'test -f /etc/lovspor/alert.env || printf "%s\n" "LOVSPOR_ALERT_WEBHOOK=" "LOVSPOR_ALERT_FORMAT=text" > /etc/lovspor/alert.env'
 sudo chown root:root /etc/lovspor/alert.env
 sudo chmod 600 /etc/lovspor/alert.env
+sudo test -s /etc/lovspor/credentials/site-probe && echo "site-probe credential: present" || echo "site-probe credential: MISSING (drift check will fail)"
 sudo systemctl daemon-reload
+sudo systemctl enable --now lovspor-fetch-corpus.timer lovspor-site-drift.timer
 sudo systemctl restart lovspor-mcp
 sudo journalctl -u lovspor-mcp -n 40 --no-pager
+systemctl list-timers --all | grep lovspor
 systemctl show -p OnFailure lovspor-fetch-corpus lovspor-publish lovspor-site-drift
+for u in lovspor-alert@.service lovspor-fetch-corpus.service lovspor-fetch-corpus.timer lovspor-publish.service lovspor-site-drift.service lovspor-site-drift.timer; do if sudo cmp -s "/opt/lovspor/app/deploy/digitalocean/$u" "/etc/systemd/system/$u"; then echo "OK   $u"; else echo "DIFF $u"; fi; done
 sudo /opt/lovspor/app/.venv/bin/lovspor ops alert --unit lovspor-publish.service --test
 ```
 
-The last line prints `alert webhook not configured` until you set
+Every unit line of the loop must print `OK`; a `DIFF` means the installed copy
+is not the repository's. The drift check's first run (the next `:17`) presents
+the release probe's credential, `/etc/lovspor/credentials/site-probe` — the
+`present` line above; without it every hourly run fails and, with a webhook set,
+alerts. The last line prints `alert webhook not configured` until you set
 `LOVSPOR_ALERT_WEBHOOK` in `/etc/lovspor/alert.env`; set it, run the line again,
 and the `[TEST]` message arrives. The MCP restart is the ordinary deploy's (the
 checkout moved), not something the alerts need.
