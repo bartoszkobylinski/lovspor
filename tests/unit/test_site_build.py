@@ -661,9 +661,9 @@ class TestConnectPage:
     def test_an_unverified_client_is_named_untested_rather_than_given_steps(
         self, built: tuple[Path, SiteBuildReport]
     ) -> None:
-        """ChatGPT, Cursor and Codex have no procedure in this repository.
-        The page says so; it does not write one down (CLAUDE.md, a claim
-        carries its evidence)."""
+        """Cursor and Codex have no procedure in this repository. The page
+        says so; it does not write one down (CLAUDE.md, a claim carries its
+        evidence)."""
         out, _ = built
         for path, wording in (
             ("/connect/", "Ingen testet framgangsmåte"),
@@ -672,8 +672,26 @@ class TestConnectPage:
             markup = _page(out, path)
 
             assert wording in markup, path
-            for client in ("ChatGPT", "Cursor", "Codex"):
+            untested = markup.split(wording, 1)[1].split("<h2>", 1)[0]
+            assert "ChatGPT" not in untested, path
+            for client in ("Cursor", "Codex"):
                 assert client in markup, (path, client)
+
+    @pytest.mark.parametrize("path", ["/connect/", "/en/connect/"])
+    def test_the_oauth_connectors_carry_the_procedure_run_on_2026_09_30(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        """claude.ai and ChatGPT were connected over OAuth against the hosted
+        service on 2026-09-30 (owner decision superseding #343). The page
+        carries the choices that decided success: automatic registration
+        for claude.ai, developer mode and OAuth for ChatGPT."""
+        out, _ = built
+        markup = _page(out, path)
+
+        assert "Sign in now" in markup
+        assert "Register automatically" in markup
+        assert "developer mode" in markup
+        assert "<strong>OAuth</strong>" in markup
 
     @pytest.mark.parametrize("path", ["/connect/", "/en/connect/"])
     def test_makes_no_hosted_claim_and_asks_for_a_token_by_email(

@@ -131,6 +131,25 @@ curl -fsS https://lovspor.yourdomain.com/.well-known/oauth-protected-resource/mc
 # 404 => the pair is not set; the server is in opaque-token mode (paste-a-token only).
 ```
 
+The 200 only proves lovspor's half. Connectors also need the WorkOS side set up
+(each of these cost a failed login on the hosted instance, 2026-09-30):
+
+- **Dynamic Client Registration enabled** in WorkOS — connectors register themselves.
+- **The MCP resource defined and set as the default**, with exactly your
+  `LOVSPOR_PUBLIC_URL` (`https://lovspor.yourdomain.com/mcp`). lovspor rejects a JWT
+  whose audience is anything else (`src/lovspor/workos_auth.py`); a stale default
+  resource shows up in Claude.ai as "Authorization failed" after a successful login.
+- **Claude.ai registration choice:** its default, "Use Claude's published identity"
+  (CIMD), fails unless CIMD is enabled in WorkOS. With DCR only, pick
+  **Register automatically**.
+
+Then, in the client:
+
+- **Claude.ai** — add a custom connector with the `/mcp` URL, **Sign in now**,
+  **Register automatically**, and log in on the AuthKit page.
+- **ChatGPT** — enable **developer mode**, create a connector with the `/mcp` URL and
+  **OAuth** authentication, and log in on the AuthKit page.
+
 Hand-issued `lsp_…` tokens keep working either way — see
 [`docs/mcp.md` § Authentication](../../docs/mcp.md#authentication-two-modes).
 
