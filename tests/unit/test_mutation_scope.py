@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -711,3 +712,201 @@ def decorated():
         assert mutation_scope.main() == 0
 
         assert capsys.readouterr() == ("\n", "")
+
+
+LEGACY_SOURCE = """\
+def big(a):
+    x = a + 1
+    return x * 2
+
+
+def small(a):
+    return a - 1
+
+
+class Svc:
+    def work(self, n):
+        return n + 1
+"""
+
+BASELINE = """\
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/example.py"
+name = "big"
+value = 30
+reason = "legacy"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/example.py"
+name = "Svc.work"
+value = 25
+reason = "legacy"
+
+[[entry]]
+rule = "function-complexity"
+path = "src/lovspor/example.py"
+name = "small"
+value = 12
+reason = "legacy"
+
+[[entry]]
+rule = "file-lines"
+path = "src/lovspor/example.py"
+value = 900
+reason = "legacy"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/other.py"
+name = "small"
+value = 40
+reason = "legacy"
+"""
+
+
+class TestLegacyCarveOut:
+    """#228: a changed function on the function-lines baseline mutates its changed lines only."""
+
+    def test_only_function_lines_entries_are_legacy(
+        self, mutation_scope: ModuleType, tmp_path: Path
+    ) -> None:
+        baseline = tmp_path / "ratchet-baseline.toml"
+        baseline.write_text(BASELINE, encoding="utf-8")
+
+        assert mutation_scope.legacy_functions(baseline) == {
+            ("src/lovspor/example.py", "big"),
+            ("src/lovspor/example.py", "Svc.work"),
+            ("src/lovspor/other.py", "small"),
+        }
+
+    def test_a_missing_baseline_makes_nothing_legacy(
+        self, mutation_scope: ModuleType, tmp_path: Path
+    ) -> None:
+        assert mutation_scope.legacy_functions(tmp_path / "absent.toml") == set()
+
+    def test_the_repo_baseline_names_run_sync_as_legacy(self, mutation_scope: ModuleType) -> None:
+        # the function whose 179 legacy survivors opened #228
+        assert ("src/lovspor/sync/orchestrator.py", "run_sync") in mutation_scope.legacy_functions(
+            mutation_scope.BASELINE
+        )
+
+    def test_unit_keys_map_to_the_baselines_qualified_names(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        assert mutation_scope.qualname_of("x_big") == "big"
+        assert mutation_scope.qualname_of("xǁSvcǁwork") == "Svc.work"
+
+    def test_changed_legacy_functions_become_targets_with_their_changed_lines(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        legacy = {("src/lovspor/example.py", "big"), ("src/lovspor/example.py", "Svc.work")}
+
+        targets = mutation_scope.legacy_targets(
+            "src/lovspor/example.py", {2, 7, 12, 20}, LEGACY_SOURCE, legacy
+        )
+
+        assert targets == [
+            mutation_scope.LegacyTarget(
+                "src/lovspor/example.py", "big", "lovspor.example.x_big__mutmut_", 1, 3, (2,)
+            ),
+            mutation_scope.LegacyTarget(
+                "src/lovspor/example.py",
+                "Svc.work",
+                "lovspor.example.xǁSvcǁwork__mutmut_",
+                11,
+                12,
+                (12,),
+            ),
+        ]
+
+    def test_a_legacy_name_in_another_file_is_not_this_files_function(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        targets = mutation_scope.legacy_targets(
+            "src/lovspor/example.py", {7}, LEGACY_SOURCE, {("src/lovspor/other.py", "small")}
+        )
+
+        assert targets == []
+
+    def test_unparseable_source_has_no_legacy_target(self, mutation_scope: ModuleType) -> None:
+        legacy = {("src/lovspor/example.py", "big")}
+
+        assert (
+            mutation_scope.legacy_targets("src/lovspor/example.py", {1}, "def big(:\n", legacy)
+            == []
+        )
+
+    def _main(
+        self, mutation_scope: ModuleType, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        monkeypatch.setattr(
+            mutation_scope, "changed_lines", lambda base: {"src/lovspor/example.py": {2, 7}}
+        )
+        monkeypatch.setattr(mutation_scope, "head_source", lambda path: LEGACY_SOURCE)
+        monkeypatch.setattr("sys.argv", ["mutation_scope.py", "--base", "main", *argv])
+        assert mutation_scope.main() == 0
+
+    def test_with_a_plan_a_legacy_pattern_leaves_stdout_for_the_plan(
+        self,
+        mutation_scope: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        baseline, plan = tmp_path / "baseline.toml", tmp_path / "plan.json"
+        baseline.write_text(BASELINE, encoding="utf-8")
+
+        self._main(
+            mutation_scope,
+            monkeypatch,
+            ["--explain", "--baseline", str(baseline), "--legacy-plan", str(plan)],
+        )
+
+        captured = capsys.readouterr()
+        assert captured.out.split() == ["lovspor.example.x_small__mutmut_*"]
+        assert json.loads(plan.read_text(encoding="utf-8")) == [
+            {
+                "path": "src/lovspor/example.py",
+                "function": "big",
+                "prefix": "lovspor.example.x_big__mutmut_",
+                "start": 1,
+                "end": 3,
+                "changed": [2],
+            }
+        ]
+        assert (
+            "      lovspor.example.x_big__mutmut_* "
+            "(legacy function: only mutants on changed lines 2 run, #228)\n" in captured.err
+        )
+
+    def test_with_no_changed_legacy_function_no_plan_is_written(
+        self, mutation_scope: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        plan = tmp_path / "plan.json"
+
+        self._main(
+            mutation_scope,
+            monkeypatch,
+            ["--baseline", str(tmp_path / "absent.toml"), "--legacy-plan", str(plan)],
+        )
+
+        assert not plan.exists()
+
+    def test_without_a_plan_a_legacy_function_keeps_its_whole_pattern(
+        self,
+        mutation_scope: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        baseline = tmp_path / "baseline.toml"
+        baseline.write_text(BASELINE, encoding="utf-8")
+
+        self._main(mutation_scope, monkeypatch, ["--baseline", str(baseline)])
+
+        assert capsys.readouterr().out.split() == [
+            "lovspor.example.x_big__mutmut_*",
+            "lovspor.example.x_small__mutmut_*",
+        ]

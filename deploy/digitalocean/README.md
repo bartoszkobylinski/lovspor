@@ -66,6 +66,13 @@ ssh root@<DROPLET_IP> 'bash /root/provision.sh'   # clones the app, uv sync, fet
                                                   # the corpus, installs units + Caddyfile
 ```
 
+Pass 2 also installs `journald-retention.conf` as
+`/etc/systemd/journald.conf.d/retention.conf` (`MaxRetentionSec=30day`) and
+restarts `systemd-journald`. The lovspor.no privacy page (PR #474) states the
+server log is kept at most 30 days, so a rebuilt droplet has to enforce that too.
+Caddy's access log is bounded separately, by `roll_size 10MiB` / `roll_keep 5`
+in the `log` block of `deploy/digitalocean/Caddyfile`.
+
 ## 3. Go live
 
 ```bash
@@ -130,6 +137,25 @@ curl -fsS https://lovspor.yourdomain.com/.well-known/oauth-protected-resource/mc
 # 200 + a JSON body naming your AuthKit domain => hosted OAuth is live.
 # 404 => the pair is not set; the server is in opaque-token mode (paste-a-token only).
 ```
+
+The 200 only proves lovspor's half. Connectors also need the WorkOS side set up
+(each of these cost a failed login on the hosted instance, 2026-09-30):
+
+- **Dynamic Client Registration enabled** in WorkOS — connectors register themselves.
+- **The MCP resource defined and set as the default**, with exactly your
+  `LOVSPOR_PUBLIC_URL` (`https://lovspor.yourdomain.com/mcp`). lovspor rejects a JWT
+  whose audience is anything else (`src/lovspor/workos_auth.py`); a stale default
+  resource shows up in Claude.ai as "Authorization failed" after a successful login.
+- **Claude.ai registration choice:** its default, "Use Claude's published identity"
+  (CIMD), fails unless CIMD is enabled in WorkOS. With DCR only, pick
+  **Register automatically**.
+
+Then, in the client:
+
+- **Claude.ai** — add a custom connector with the `/mcp` URL, **Sign in now**,
+  **Register automatically**, and log in on the AuthKit page.
+- **ChatGPT** — enable **developer mode**, create a connector with the `/mcp` URL and
+  **OAuth** authentication, and log in on the AuthKit page.
 
 Hand-issued `lsp_…` tokens keep working either way — see
 [`docs/mcp.md` § Authentication](../../docs/mcp.md#authentication-two-modes).
@@ -284,6 +310,18 @@ sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
 
 The durable fix for a bad release is `git revert` on `main` + redeploy, not a
 long-lived detached checkout.
+
+**Log retention (30 days).** The live droplet predates this file in
+`provision.sh`: the owner applied `/etc/systemd/journald.conf.d/retention.conf`
+by hand on 2026-09-30, because the privacy page (PR #474) promises the server
+log is kept at most 30 days. It is byte-identical to
+`deploy/digitalocean/journald-retention.conf`. To re-apply it after a change:
+
+```bash
+sudo install -D -m 0644 /opt/lovspor/app/deploy/digitalocean/journald-retention.conf /etc/systemd/journald.conf.d/retention.conf
+sudo systemctl restart systemd-journald
+systemd-analyze cat-config systemd/journald.conf | grep MaxRetentionSec
+```
 
 ---
 

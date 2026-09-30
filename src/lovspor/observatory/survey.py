@@ -1,8 +1,8 @@
 """What a municipal site offers a crawler, read before the site is registered.
 
 Registration needs evidence, and gathering it is the one step the observatory
-never had a supported command for. The 2026-08-20 sweep over all 358
-municipalities — the source of "190 of 358 serve one at the conventional path"
+never had a supported command for. The 2026-08-20 sweep over the
+municipalities — the source of "190 more served one undeclared"
 in :mod:`lovspor.observatory.commands` — ran as a script and persisted nothing,
 so its population cannot be re-derived (issue #349). This module is the part of
 that work that decides what a probe *means*; the probing itself and the record

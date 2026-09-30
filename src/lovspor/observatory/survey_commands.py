@@ -1,7 +1,7 @@
 """The ``observatory survey`` command: recon that leaves a record.
 
 Registration needs evidence about a site, and until now gathering it happened in
-scripts. The 2026-08-20 sweep over all 358 municipalities is the cost of that: it
+scripts. The 2026-08-20 sweep over the municipalities is the cost of that: it
 produced the figures still quoted in :mod:`lovspor.observatory.commands` and
 persisted nothing, so the population it measured cannot be re-derived (issue
 #349). This command exists so the next such pass is answerable a month later.

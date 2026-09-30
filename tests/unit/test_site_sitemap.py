@@ -25,7 +25,7 @@ class TestSitemapSiteXml:
         locs = _locs(sitemap_site_xml(pages))
 
         assert locs == [f"{SITE_ORIGIN}{page.path}" for page in pages]
-        assert len(set(locs)) == len(pages) == 23
+        assert len(set(locs)) == len(pages) == 25
 
     def test_one_urlset_with_the_xml_header_and_no_lastmod(self) -> None:
         """No builder-generated time in the output tree (ADR:645-648): a

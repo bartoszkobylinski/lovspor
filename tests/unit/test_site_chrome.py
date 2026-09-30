@@ -115,6 +115,14 @@ class TestNorwegianSiteChrome:
         assert "Bygget av Bartosz Kobyliński." in footer
         assert '<a href="/observatory/">Om roboten vår</a>' in footer
 
+    def test_footer_links_the_privacy_and_terms_pages_in_the_page_language(self) -> None:
+        nb, en = chrome_html("nb").footer, chrome_html("en", "/").footer
+
+        assert '<a href="/privacy/">Personvern</a>' in nb
+        assert '<a href="/terms/">Vilkår for bruk</a>' in nb
+        assert '<a href="/en/privacy/">Privacy</a>' in en
+        assert '<a href="/en/terms/">Terms of use</a>' in en
+
     def test_adds_no_external_link_asset_or_script(self) -> None:
         """The chrome adds no external link and no new scheme (ADR:1180-1181)."""
         for lang, href in (("nb", None), ("en", "/"), ("nb", "/en/status/")):
@@ -248,6 +256,14 @@ class TestCorpusChrome:
 
         assert not _EXTERNAL.search(chrome.header + chrome.footer)
 
+    def test_the_legal_links_stay_out_of_the_corpus_frame(self) -> None:
+        """The corpus frame is on ~93 000 law pages; a footer link there is a
+        re-render of the whole corpus, so the legal links are site chrome only."""
+        footer = corpus_chrome_html().footer
+
+        assert "/privacy/" not in footer
+        assert "/terms/" not in footer
+
     def test_the_only_numerals_are_marked_literals(self) -> None:
         text = corpus_chrome_html().header + corpus_chrome_html().footer
         outside = re.sub(r"<span data-literal>[^<]*</span>", "", text)
@@ -379,7 +395,11 @@ class TestBaseTemplate:
             "pages/observatory.nb.html",
             "pages/placeholder.en.html",
             "pages/placeholder.nb.html",
+            "pages/privacy.en.html",
+            "pages/privacy.nb.html",
             "pages/status.en.html",
             "pages/status.nb.html",
+            "pages/terms.en.html",
+            "pages/terms.nb.html",
         ]
         assert TEMPLATES_DIR.name != "html"

@@ -139,14 +139,28 @@ def _unmeasured_changed_lines(notices: object) -> list[str]:
     """
     if not isinstance(notices, list):
         return []
+    texts = [notice for notice in notices if isinstance(notice, str)]
+    legacy = [notice for notice in texts if LEGACY_REMAINDER in notice]
+    reachable = [notice for notice in texts if notice not in legacy]
+    return [
+        *_notice_bullets("- Unmeasured changed lines (no mutant can reach them):", reachable),
+        *_notice_bullets(
+            "- Legacy remainder, not run (#228) — never counted killed, not in the score:", legacy
+        ),
+    ]
+
+
+# `mutation_legacy.py`'s region for the unchanged part of a legacy function:
+# reachable by mutants, just not run, so not "no mutant can reach them".
+LEGACY_REMAINDER = " (legacy remainder "
+
+
+def _notice_bullets(heading: str, notices: list[str]) -> list[str]:
     bullets = []
     for notice in notices:
-        if isinstance(notice, str):
-            where, _, region = notice.partition(" (")
-            bullets.append(f"  - `{where}` — {region.removesuffix(')')}")
-    if not bullets:
-        return []
-    return ["- Unmeasured changed lines (no mutant can reach them):", *bullets]
+        where, _, region = notice.partition(" (")
+        bullets.append(f"  - `{where}` — {region.removesuffix(')')}")
+    return [heading, *bullets] if bullets else []
 
 
 # Every bucket outside 🎉, keyed as the artifact stores it. A timed-out mutant

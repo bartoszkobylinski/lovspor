@@ -247,7 +247,7 @@ class TestWhenTheHostMisbehaves:
     def test_a_transport_error_on_robots_reads_as_unreadable_not_as_a_crash(
         self, client: httpx.Client, httpx_mock: HTTPXMock
     ) -> None:
-        """358 hosts in one pass: one refusing a TCP connection cannot end it."""
+        """Every host in one pass: one refusing a TCP connection cannot end it."""
         httpx_mock.add_exception(httpx.ConnectError("no route"), url=ROBOTS)
 
         assert _probe(client).read(DOMAIN).entry == "robots_unreadable"

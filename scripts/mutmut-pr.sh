@@ -3,7 +3,9 @@
 #
 # Mutmut 3 builds one shadow tree, records which tests exercise each function,
 # and then runs only those tests for each mutant. The PR scope is the changed
-# functions, not every function in a changed module.
+# functions, not every function in a changed module; for a changed function on
+# the function-lines ratchet baseline, only the mutants on its changed lines
+# (#228, scripts/ci/mutation_legacy.py).
 set -euo pipefail
 
 list_only=0
@@ -141,15 +143,27 @@ count="$(printf '%s\n' "$changed" | wc -l | tr -d ' ')"
 echo "mutation scope: $count changed file(s) relative to $base_ref"
 
 patterns=()
+# A changed function on the function-lines ratchet baseline is legacy (#228):
+# the plan lists it, and only its mutants on changed lines join the run.
+legacy_plan="$guard_dir/legacy-plan.json"
 while IFS= read -r pattern; do
   [ -n "$pattern" ] && patterns+=("$pattern")
-done < <("$python_bin" "$repo_root/scripts/ci/mutation_scope.py" --base "$base_ref" --explain)
+done < <("$python_bin" "$repo_root/scripts/ci/mutation_scope.py" --base "$base_ref" --explain \
+  --legacy-plan "$legacy_plan")
+legacy_count=0
+if [ -s "$legacy_plan" ]; then
+  legacy_count="$("$python_bin" -c 'import json, sys; print(len(json.load(open(sys.argv[1]))))' "$legacy_plan")"
+fi
 
-if [ "${#patterns[@]}" -eq 0 ]; then
+if [ "${#patterns[@]}" -eq 0 ] && [ "$legacy_count" -eq 0 ]; then
   echo "mutation not applicable: $count changed file(s), but no mutatable function changed relative to $base_ref"
   exit 0
 fi
-echo "scoped to ${#patterns[@]} mutation target(s)"
+if [ "$legacy_count" -gt 0 ]; then
+  echo "scoped to ${#patterns[@]} mutation target(s) and $legacy_count legacy function(s)"
+else
+  echo "scoped to ${#patterns[@]} mutation target(s)"
+fi
 if [ "$list_only" -eq 1 ]; then
   exit 0
 fi
@@ -162,6 +176,28 @@ ln -sfn "../.venv" "mutants/.venv"
 file_budget="${MUTMUT_PR_FILE_BUDGET_SECONDS:-1200}"
 total_budget=$((file_budget * count))
 max_children="${MUTMUT_PR_MAX_CHILDREN:-4}"
+
+if [ "$legacy_count" -gt 0 ]; then
+  if ! "$python_bin" "$repo_root/scripts/ci/mutation_legacy.py" generate --jobs "$max_children" >/dev/null; then
+    echo "error: generating mutants for the legacy carve-out failed" >&2
+    echo "no score for this PR — do not report one" >&2
+    exit 3
+  fi
+  selected="$guard_dir/legacy-selected.txt"
+  if ! "$python_bin" "$repo_root/scripts/ci/mutation_legacy.py" select --plan "$legacy_plan" \
+    --mutmut "$mutmut_bin" --jobs "$max_children" >"$selected"; then
+    echo "error: selecting the legacy functions' changed-line mutants failed" >&2
+    echo "no score for this PR — do not report one" >&2
+    exit 3
+  fi
+  while IFS= read -r name; do
+    [ -n "$name" ] && patterns+=("$name")
+  done <"$selected"
+  if [ "${#patterns[@]}" -eq 0 ]; then
+    echo "mutation not applicable: no mutant sits on a changed line of the legacy function(s) — the remainder is reported above, not measured"
+    exit 0
+  fi
+fi
 timeout_bin="$(command -v timeout || true)"
 run_status=0
 if [ -n "$timeout_bin" ]; then
