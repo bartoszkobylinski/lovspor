@@ -807,3 +807,38 @@ working directory, dies with `Error loading configuration: Permission denied (os
    ssh root@100.92.40.52 "cd /home/runner/actions-runner && ./svc.sh uninstall && su -s /bin/bash runner -c 'cd /home/runner/actions-runner && ./config.sh remove --token $TOKEN'"
    gh api repos/bartoszkobylinski/lovspor/actions/runners --jq '.runners[] | [.name, .status] | @tsv'
    ```
+
+9. Install the runner watchdog (issue #493). On 2026-10-01 GitHub listed
+   `mac-mini-lovspor` as `offline` while the LaunchDaemon was `running` and
+   `Runner.Listener` alive: the listener lost its session in a night of network outages
+   and never re-registered, and `KeepAlive` cannot see that because the process never
+   exited. `codex-author` sat `queued` for hours until a manual `kickstart -k`.
+   `scripts/ops/runner_watchdog.py`, run every five minutes by the root LaunchDaemon
+   `deploy/launchd/no.lovspor.runner-watchdog.plist`, makes that restart — only after two
+   consecutive readings of `offline` from the runners API while `launchctl print` says
+   the daemon is `running`. An API it cannot reach is no evidence (no restart, streak
+   kept); a daemon that is not running is launchd's own to restart.
+
+   It needs a token that can list the repository's runners: a fine-grained personal
+   access token for **`bartoszkobylinski/lovspor` only**, with repository permission
+   **Administration: Read-only** and nothing else. It lives in a root-only file, never in
+   the plist (which is world-readable). The script and plist are copied to root-owned
+   paths so the root job never executes a file the login user can edit; re-run the two
+   `install` lines after a change to either. Run from an up-to-date `main` checkout:
+
+   ```bash
+   cd /Users/bartoszkobylinski/Programming/Python/lovspor && git checkout main && git pull --ff-only
+   sudo install -d -m 755 -o root -g wheel /usr/local/libexec/lovspor
+   sudo install -m 755 -o root -g wheel scripts/ops/runner_watchdog.py /usr/local/libexec/lovspor/runner_watchdog.py
+   sudo install -m 644 -o root -g wheel deploy/launchd/no.lovspor.runner-watchdog.plist /Library/LaunchDaemons/no.lovspor.runner-watchdog.plist
+   plutil -lint /Library/LaunchDaemons/no.lovspor.runner-watchdog.plist
+   sudo install -m 600 -o root -g wheel /dev/null /var/root/.lovspor-runner-watchdog-token
+   printf 'Paste the token, then Enter: '; read -rs TOKEN; echo; printf '%s\n' "$TOKEN" | sudo tee /var/root/.lovspor-runner-watchdog-token >/dev/null; unset TOKEN
+   sudo launchctl bootstrap system /Library/LaunchDaemons/no.lovspor.runner-watchdog.plist
+   sudo launchctl kickstart system/no.lovspor.runner-watchdog
+   sleep 10; sudo tail -n 5 /var/log/lovspor-runner-watchdog.log
+   ```
+
+   Expect a line like `2026-10-02T08:00:00Z wait: runner is online`. A `gh exit=…` line
+   means the token was refused. To remove it:
+   `sudo launchctl bootout system/no.lovspor.runner-watchdog`.

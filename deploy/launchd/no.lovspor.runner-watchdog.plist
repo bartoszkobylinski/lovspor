@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Self-hosted runner watchdog (issue #493).
+
+  A LaunchDaemon, not a LaunchAgent: `launchctl kickstart -k system/<label>`
+  needs root. Installed to /Library/LaunchDaemons with the script copied to a
+  root-owned path, so a root job never executes a file the login user can edit.
+  Steps: docs/agentic-ci.md, "Mac mini runner", operator step 9.
+
+  Every five minutes it reads the runners API and `launchctl print`; it restarts
+  the runner's daemon only after two consecutive readings of `offline` while the
+  daemon is `running` - the state that held the lane `queued` for hours on
+  2026-10-01 while KeepAlive saw a live process. The token lives in a root-only
+  file, never in this plist, which is world-readable.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>no.lovspor.runner-watchdog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/usr/local/libexec/lovspor/runner_watchdog.py</string>
+        <string>--repo</string>
+        <string>bartoszkobylinski/lovspor</string>
+        <string>--runner</string>
+        <string>mac-mini-lovspor</string>
+        <string>--label</string>
+        <string>actions.runner.bartoszkobylinski-lovspor.mac-mini-lovspor</string>
+        <string>--token-file</string>
+        <string>/var/root/.lovspor-runner-watchdog-token</string>
+        <string>--state-file</string>
+        <string>/var/db/lovspor-runner-watchdog.json</string>
+        <string>--gh</string>
+        <string>/opt/homebrew/bin/gh</string>
+    </array>
+
+    <!-- gh keeps its own state under $HOME; launchd sets none for a daemon. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/var/root</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/lovspor-runner-watchdog.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/lovspor-runner-watchdog.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
