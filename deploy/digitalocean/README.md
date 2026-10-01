@@ -263,9 +263,95 @@ until the first releases have shown what a rebuild costs on this box.
 Force one now: `sudo systemctl start lovspor-fetch-corpus`.
 A failed run is retried every 10 minutes, at most 4 starts within 2 hours
 (`Restart=on-failure`, `StartLimitBurst=4`, #234); after that the unit stays
-`failed` until the next daily run. Nothing alerts on that final failure yet —
-check with `systemctl status lovspor-fetch-corpus` or
+`failed` until the next daily run. That final failure — and only that one
+(`RestartMode=direct`) — sends a failure alert (see **Failure alerts** below);
+details with `systemctl status lovspor-fetch-corpus` or
 `journalctl -u lovspor-fetch-corpus`.
+
+**Failure alerts** (#478). `lovspor-fetch-corpus`, `lovspor-publish` and
+`lovspor-site-drift` carry `OnFailure=lovspor-alert@%n.service`: when one of them
+enters `failed`, systemd starts the template `lovspor-alert@.service`, which runs
+`lovspor ops alert --unit <that unit>` as root. It POSTs one short message —
+unit, host, UTC time, systemd `Result`, exit status and the last 20 journal lines,
+each cut to 240 characters and the whole bounded to 1,800 — to the webhook you
+configure. The target is yours: ntfy, Discord, Slack, an e-mail-to-webhook gateway.
+
+- **Where:** `/etc/lovspor/alert.env`, `root:root` mode `0600` (provisioning
+  creates it commented out). It is deliberately not `/etc/lovspor/lovspor.env`:
+  that file is readable by the MCP service's group, and a webhook URL is a bearer
+  secret for most targets. The command reads the file itself — no
+  `EnvironmentFile=` — so the URL is never in a process environment, and the MCP
+  service does not need or see it. A variable set in the calling process wins
+  over the file (handy for a one-off test; prefer the file).
+- **`LOVSPOR_ALERT_WEBHOOK`:** the full `http(s)://` URL. Unset, empty or file
+  absent: the alert unit logs `alert webhook not configured` and exits 0 —
+  never a second failed unit. Logs name only the scheme and host
+  (`https://ntfy.sh/…`), never the path or credentials.
+- **`LOVSPOR_ALERT_FORMAT`:** `text` (default) posts the message as
+  `text/plain` with ntfy's `Title`/`Priority: high`/`Tags` headers — right for
+  ntfy (`https://ntfy.sh/<topic>`) and any plain-body endpoint. `json` posts
+  `{"text", "content", "unit", "host", "time", "result", "exit_status",
+  "journal", "test"}` — Slack incoming webhooks read `text`, Discord webhooks
+  read `content`, a generic receiver gets the fields.
+
+```bash
+# configure (restart nothing: the file is read at every alert)
+sudo nano /etc/lovspor/alert.env
+#   LOVSPOR_ALERT_WEBHOOK=https://ntfy.sh/<an-unguessable-topic>
+#   LOVSPOR_ALERT_FORMAT=text
+# send a test alert (reads no unit state; the message starts with [TEST])
+sudo /opt/lovspor/app/.venv/bin/lovspor ops alert --unit lovspor-publish.service --test
+# prove the real path — the template unit, as OnFailure= starts it (not marked TEST;
+# it reports lovspor-publish's current Result, e.g. success)
+sudo systemctl start lovspor-alert@lovspor-publish.service.service
+sudo journalctl -u 'lovspor-alert@*' -n 20 --no-pager
+# the wiring systemd actually loaded
+systemctl show -p OnFailure lovspor-fetch-corpus lovspor-publish lovspor-site-drift
+```
+
+`lovspor-site-drift` fails hourly while drift lasts (and before the first
+release), so it alerts hourly — the same truthful state `systemctl --failed`
+shows. `lovspor-mcp` has no `OnFailure=`: it restarts itself every 5 s
+(`Restart=on-failure`), which never reaches `failed` under the default start
+limit, so the hook would either never fire or fire on every crash; its
+availability is an external probe's job. Exit codes of `lovspor ops alert`: 0
+sent or not configured, 1 the configuration or the delivery failed (the reason is
+in the alert unit's journal), 2 a malformed `--unit`.
+
+**Install the alerts on the existing droplet** (it predates this in
+`provision.sh`; do not re-run provisioning there — see First migration). The same
+block also brings the droplet's timer units up to the repository (#484): on
+2026-09-30 its installed `lovspor-fetch-corpus.service` lacked the #234 retry and
+`--full-history`, and the drift pair was not installed at all. As root over the
+tailnet, after the PR is merged — safe to run again, every step overwrites with
+the repository copy or checks first:
+
+```bash
+sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
+sudo -u lovspor sh -c 'cd /opt/lovspor/app && /opt/lovspor/.local/bin/uv sync --frozen --no-dev'
+for u in lovspor-alert@.service lovspor-fetch-corpus.service lovspor-fetch-corpus.timer lovspor-publish.service lovspor-site-drift.service lovspor-site-drift.timer; do sudo install -m644 "/opt/lovspor/app/deploy/digitalocean/$u" /etc/systemd/system/; done
+sudo sh -c 'test -f /etc/lovspor/alert.env || printf "%s\n" "LOVSPOR_ALERT_WEBHOOK=" "LOVSPOR_ALERT_FORMAT=text" > /etc/lovspor/alert.env'
+sudo chown root:root /etc/lovspor/alert.env
+sudo chmod 600 /etc/lovspor/alert.env
+sudo test -s /etc/lovspor/credentials/site-probe && echo "site-probe credential: present" || echo "site-probe credential: MISSING (drift check will fail)"
+sudo systemctl daemon-reload
+sudo systemctl enable --now lovspor-fetch-corpus.timer lovspor-site-drift.timer
+sudo systemctl restart lovspor-mcp
+sudo journalctl -u lovspor-mcp -n 40 --no-pager
+systemctl list-timers --all | grep lovspor
+systemctl show -p OnFailure lovspor-fetch-corpus lovspor-publish lovspor-site-drift
+for u in lovspor-alert@.service lovspor-fetch-corpus.service lovspor-fetch-corpus.timer lovspor-publish.service lovspor-site-drift.service lovspor-site-drift.timer; do if sudo cmp -s "/opt/lovspor/app/deploy/digitalocean/$u" "/etc/systemd/system/$u"; then echo "OK   $u"; else echo "DIFF $u"; fi; done
+sudo /opt/lovspor/app/.venv/bin/lovspor ops alert --unit lovspor-publish.service --test
+```
+
+Every unit line of the loop must print `OK`; a `DIFF` means the installed copy
+is not the repository's. The drift check's first run (the next `:17`) presents
+the release probe's credential, `/etc/lovspor/credentials/site-probe` — the
+`present` line above; without it every hourly run fails and, with a webhook set,
+alerts. The last line prints `alert webhook not configured` until you set
+`LOVSPOR_ALERT_WEBHOOK` in `/etc/lovspor/alert.env`; set it, run the line again,
+and the `[TEST]` message arrives. The MCP restart is the ordinary deploy's (the
+checkout moved), not something the alerts need.
 
 **Full git history is required** on this box: the hosted MCP exposes the
 time-machine tools, so the fetch units run `fetch-corpus --full-history`
@@ -364,6 +450,9 @@ has not published yet, e.g. pass 2 interrupted — is
 
 Reach the box over the tailnet (`root@<DROPLET_TAILSCALE_IP>`); public SSH is
 firewalled off. All commands below run as root unless they say otherwise.
+
+Failure alerts (#478) are installed on this box separately, after the
+migration: **Operating it → Install the alerts on the existing droplet**.
 
 ### 1. Read the box first (changes nothing)
 

@@ -1,8 +1,10 @@
-"""``lovspor ops``: operator tools for the hosted service.
+"""``lovspor ops usage``: the hosted service's hourly usage report.
 
-Its own module because :mod:`lovspor.cli` sits at its size ratchet. The
-decorated command only calls :func:`usage_impl`, so the body stays inside the
-mutation gate (#292: mutmut skips decorated functions).
+Registers ``usage`` on the one ``ops`` group from :mod:`lovspor.ops.commands`,
+beside ``alert``, and re-exports that group for :mod:`lovspor.cli`. Its own
+module because :mod:`lovspor.cli` sits at its size ratchet. The decorated command only calls
+:func:`usage_impl`, so the body stays inside the mutation gate (#292: mutmut
+skips decorated functions).
 """
 
 from collections.abc import Callable
@@ -12,6 +14,7 @@ from typing import Annotated
 
 import typer
 
+from lovspor.ops.commands import ops_app
 from lovspor.usage_report import (
     UsageReportError,
     parse_usage,
@@ -20,11 +23,7 @@ from lovspor.usage_report import (
     summarize,
 )
 
-ops_app = typer.Typer(
-    name="ops",
-    help="Operator tools for the hosted MCP service.",
-    no_args_is_help=True,
-)
+__all__ = ["ops_app", "usage", "usage_impl"]
 
 
 def _utc_now() -> datetime:

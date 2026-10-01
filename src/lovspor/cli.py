@@ -72,7 +72,6 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-
 tokens_app = typer.Typer(
     name="tokens",
     help="Issue, list and revoke hosted-MCP beta credentials.",
@@ -163,11 +162,10 @@ def main(
     ),
 ) -> None:
     """Norwegian law change tracker."""
-    # Load .env here, in the group callback, so it is applied BEFORE Typer
-    # resolves any subcommand option's ``envvar=`` (e.g. the mcp command's
-    # LOVVERK_CORPUS_PATH). Doing it inside the command body — or in
-    # serve() — is too late: the option is resolved during arg parsing and
-    # a value living only in .env would be missed, exiting with code 2.
+    # Load .env here, in the group callback, so it is applied BEFORE Typer resolves any subcommand
+    # option's ``envvar=`` (e.g. the mcp command's LOVVERK_CORPUS_PATH). Doing it inside the command
+    # body — or in serve() — is too late: the option is resolved during arg parsing and a value
+    # living only in .env would be missed, exiting with code 2.
     load_env()
 
 

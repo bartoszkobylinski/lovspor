@@ -24,6 +24,7 @@ APP_HOME=/opt/lovspor
 APP_DIR="$APP_HOME/app"
 CORPUS_DIR="$APP_HOME/.cache/lovverk"
 ENV_FILE=/etc/lovspor/lovspor.env
+ALERT_ENV=/etc/lovspor/alert.env
 REPO_SSH="git@github.com:bartoszkobylinski/lovspor.git"
 CADDYFILE=/etc/caddy/Caddyfile
 MARKER=/var/www/lovspor-releases/ACTIVE
@@ -178,6 +179,22 @@ fi
 # a loosened secret file rather than leaving it world-readable.
 chown root:"$APP_USER" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
+# The unit-failure alert's webhook (#478) gets its own file, root-only: the
+# lovspor.env above is readable by the MCP service's group, and a webhook URL is
+# a bearer secret for most targets. `lovspor ops alert` reads it directly (no
+# EnvironmentFile=). Left commented out, the alert is a logged no-op.
+if [ ! -f "$ALERT_ENV" ]; then
+	log "Creating $ALERT_ENV (optional: set LOVSPOR_ALERT_WEBHOOK)"
+	printf '%s\n' \
+		'# Unit-failure alerts (lovspor-alert@.service) — read by `lovspor ops alert`.' \
+		'# Unset => no alert is sent, and the alert unit logs that and exits 0.' \
+		'# LOVSPOR_ALERT_FORMAT: text (default; ntfy or any plain-text endpoint)' \
+		'# or json (Slack, Discord, generic JSON). Test: README § Failure alerts.' \
+		'#LOVSPOR_ALERT_WEBHOOK=https://ntfy.sh/your-unguessable-topic' \
+		'#LOVSPOR_ALERT_FORMAT=text' >"$ALERT_ENV"
+fi
+chown root:root "$ALERT_ENV"
+chmod 600 "$ALERT_ENV"
 # Ensure the service's writable dirs exist (ReadWritePaths requires them at start).
 sudo -u "$APP_USER" mkdir -p "$APP_HOME/.cache" "$APP_HOME/.config"
 
@@ -247,6 +264,7 @@ install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.timer" /etc/sys
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-publish.service" /etc/systemd/system/
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-site-drift.service" /etc/systemd/system/
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-site-drift.timer" /etc/systemd/system/
+install -m644 "$APP_DIR/deploy/digitalocean/lovspor-alert@.service" /etc/systemd/system/
 install -d /etc/caddy
 install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile
 # The site's privacy page promises the server log is kept at most 30 days; journald
@@ -296,4 +314,6 @@ cat <<EOF
   6. Start:       sudo systemctl restart caddy lovspor-mcp
   7. Verify:      curl -fsS https://lovspor.yourdomain.com/healthz && echo ' OK'
   8. First site:  sudo systemctl start lovspor-publish    # until it runs, / answers 503
+  9. Alerts:      sudo nano $ALERT_ENV               # optional: LOVSPOR_ALERT_WEBHOOK=...
+                  sudo $APP_DIR/.venv/bin/lovspor ops alert --unit lovspor-publish.service --test
 EOF

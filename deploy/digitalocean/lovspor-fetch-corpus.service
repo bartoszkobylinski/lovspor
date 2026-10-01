@@ -9,6 +9,10 @@ Wants=network-online.target
 # the next 05:30 run is never blocked by the limit.
 StartLimitIntervalSec=2h
 StartLimitBurst=4
+# The operator hears about the final failure only (#478): RestartMode=direct
+# (below) skips OnFailure= on each auto-restart, so the alert fires once, when
+# the start limit refuses a fifth start and the unit enters `failed`.
+OnFailure=lovspor-alert@%n.service
 
 [Service]
 Type=oneshot
@@ -27,5 +31,8 @@ TimeoutStartSec=600
 # Restart= on a oneshot needs systemd >= 244; the droplet runs Ubuntu 24.04.
 Restart=on-failure
 RestartSec=10min
+# systemd >= 254 (Ubuntu 24.04 ships 255). Without it every failed attempt
+# passes through `failed` and fires OnFailure=, i.e. up to four alerts per day.
+RestartMode=direct
 # No mcp restart needed: the running reader drops every cache when manifest.json
 # changes (_refresh_if_stale) and rebuilds indices on the next query.

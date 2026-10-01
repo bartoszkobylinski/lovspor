@@ -7,6 +7,9 @@ Wants=network-online.target
 # would compare a fresh observation with a document about to be replaced.
 After=lovspor-publish.service
 Conflicts=lovspor-publish.service
+# Drift, an unreadable served document or an unmet socket precondition is a
+# failed unit, and a failed unit tells the operator (#478) — hourly while it lasts.
+OnFailure=lovspor-alert@%n.service
 
 [Service]
 Type=oneshot

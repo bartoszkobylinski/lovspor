@@ -5,6 +5,8 @@ Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/deploy/digi
 # validate fine and still be wrong, so never overlap the two.
 After=lovspor-fetch-corpus.service
 Conflicts=lovspor-fetch-corpus.service
+# A failed release tells the operator (#478); the live release is untouched.
+OnFailure=lovspor-alert@%n.service
 
 [Service]
 Type=oneshot
