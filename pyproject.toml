@@ -46,7 +46,7 @@ dependencies = [
     # WorkOS AuthKit issues RS256 JWTs for the self-service OAuth connector path
     # (Sprint 12 item 3); we verify them against its JWKS in workos_auth.py. The
     # [crypto] extra pulls cryptography, which PyJWT needs for RS256.
-    "pyjwt[crypto]>=2.14.0",
+    "pyjwt[crypto]>=2.15.0",
     # anyio.to_thread offloads the blocking JWKS/JWT verification off the event
     # loop. Already a transitive mcp dep; declared because we import it directly.
     "anyio>=4.0.0",
