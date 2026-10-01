@@ -9,9 +9,9 @@ never reaches a log line in full. HTTP is faked with pytest-httpx only.
 """
 
 import json
+import locale
 import os
 import socket
-import subprocess
 import sys
 import time
 from collections.abc import Iterator, Sequence
@@ -488,27 +488,19 @@ class TestAlertConfigEdges:
         assert str(info.value) == "LOVSPOR_ALERT_FORMAT must be one of text, json; got 'xml'"
 
     def test_the_env_file_is_utf8_whatever_the_locale(self, tmp_path: Path) -> None:
+        # In-process on purpose: a subprocess imports the unmutated package, so
+        # under mutmut it could never see a locale-default read.
         env_file = tmp_path / "alert.env"
         env_file.write_text(f"# varsling — drift\nLOVSPOR_ALERT_WEBHOOK={WEBHOOK}\n", "utf-8")
-        assert load_alert_config({}, env_file).webhook is not None
-        probe = (
-            "import sys; from pathlib import Path; "
-            "from lovspor.ops.alert import load_alert_config; "
-            "print(load_alert_config({}, Path(sys.argv[1])).webhook.get_secret_value())"
-        )
-        env = {**os.environ, "LC_ALL": "C", "LANG": "C", "PYTHONCOERCECLOCALE": "0"}
-        env.pop("PYTHONUTF8", None)
-        done = subprocess.run(
-            [sys.executable, "-X", "utf8=0", "-c", probe, str(env_file)],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
-            encoding="utf-8",
-        )
+        before = locale.setlocale(locale.LC_CTYPE)
+        locale.setlocale(locale.LC_CTYPE, "C")
+        try:
+            config = load_alert_config({}, env_file)
+        finally:
+            locale.setlocale(locale.LC_CTYPE, before)
 
-        assert done.returncode == 0, done.stderr
-        assert done.stdout.strip() == WEBHOOK
+        assert config.webhook is not None
+        assert config.webhook.get_secret_value() == WEBHOOK
 
     def test_assumption_a_text_without_an_assignment_sets_nothing(self) -> None:
         """Pins the equivalence registered for `_read_env_file`'s missing-file value."""
