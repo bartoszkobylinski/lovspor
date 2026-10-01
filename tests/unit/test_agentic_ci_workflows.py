@@ -708,7 +708,9 @@ class TestEscalationCoversEveryFailure:
         steps = _steps("pr-pipeline.yml", "codex-tests")
         fallback = _named_step(steps, "Escalate — the pipeline failed before the tests ran")
 
-        assert fallback["if"] == "failure() && steps.verdict.outcome != 'failure'"
+        # The one carve-out (#493) is an author that never ran a step of its
+        # own; `codex-tests-report` owns that report.
+        assert fallback["if"].startswith("failure() && steps.verdict.outcome != 'failure' && ")
         assert "needs-human:pipeline" in fallback["run"]
         assert "scripts/ci/pr_sticky_comment.sh pipeline" in fallback["run"]
 
@@ -1493,6 +1495,81 @@ class TestADeadMachineIsNotAVerdictOnTheDiff:
 
         assert "codex-tests BLOCKED and reported nothing itself" in report
         assert 'gh pr edit "$PR" --add-label "needs-human:pipeline"' in report
+
+
+class TestARunnerSetUpFailureIsNamedAsTheRunner:
+    """Issue #493. Three times in a day `codex-author` failed in GitHub's own
+    `Set up job` — the Mac runner timed out downloading a pinned action — and
+    the PR was told `codex-tests BLOCKED before the tests ran`, a pipeline
+    failure, with no word that no step had run and that a rerun clears it."""
+
+    REPORT = "Report a codex-tests job that never reached its own escalation"
+    FALLBACK = "Escalate — the pipeline failed before the tests ran"
+
+    def _report(self, tmp_path: Path, kind: str, step: str) -> str:
+        run = _named_step(_steps("pr-pipeline.yml", "codex-tests-report"), self.REPORT)["run"]
+        values = {
+            "steps.classify.outputs.kind": kind,
+            "steps.classify.outputs.job": "codex-author",
+            "steps.classify.outputs.step": step,
+            "github.repository": "o/r",
+            "github.run_id": "1",
+            "github.server_url": "https://github.com",
+        }
+        env = _escalation_sandbox(tmp_path) | {
+            "PR": "482",
+            "SIGNATURE": "",
+            "BLOCKED_LABELS": "needs-implementation-fix needs-human:mutation needs-human:pipeline",
+        }
+        _run_step(_render(run, values), tmp_path, env)
+        return (tmp_path / "body").read_text(encoding="utf-8")
+
+    def test_the_comment_names_the_runner_and_the_rerun(self, tmp_path: Path) -> None:
+        body = self._report(tmp_path, "runner_setup", "Set up job")
+
+        assert body.startswith("codex-tests BLOCKED by a RUNNER SET-UP failure")
+        assert "not the diff and not Codex" in body
+        assert "`codex-author` failed in `Set up job`" in body
+        assert "no Codex round started" in body
+        assert "`gh run rerun 1 --failed`" in body
+        assert "#493" in body
+        assert _RUN_URL in body
+        assert "pr edit 482 --add-label needs-human:pipeline" in (tmp_path / "gh-calls").read_text()
+
+    def test_an_ordinary_lane_failure_keeps_its_wording(self, tmp_path: Path) -> None:
+        body = self._report(tmp_path, "in_job", "")
+
+        assert body.startswith("codex-tests BLOCKED and reported nothing itself")
+        assert "RUNNER SET-UP" not in body
+
+    def test_the_verifier_leaves_an_author_that_never_ran_a_step_to_the_reporter(self) -> None:
+        """`codex-tests` cannot read the jobs API, so it cannot tell a set-up
+        death from any other; its generic round, written first, also made the
+        reporter stand down on the label. An author that failed with no output
+        at all never ran its first step: the hosted reporter, which classifies,
+        owns that report — and its `if` fires on exactly that failure."""
+        fallback = _named_step(_steps("pr-pipeline.yml", "codex-tests"), self.FALLBACK)
+        reporter = _workflow("pr-pipeline.yml")["jobs"]["codex-tests-report"]
+
+        assert fallback["if"] == (
+            "failure() && steps.verdict.outcome != 'failure' && "
+            "!(needs.codex-author.result == 'failure' && needs.codex-author.outputs.skip == '')"
+        )
+        assert "needs.codex-author.result == 'failure'" in reporter["if"]
+
+    def test_the_skip_output_is_written_by_the_authors_first_own_step(self) -> None:
+        """The proxy above holds only while `skip` is set unconditionally by the
+        step straight after the checkout: an empty value then means the author
+        never got that far."""
+        steps = _steps("pr-pipeline.yml", "codex-author")
+        antiloop = steps[1]
+
+        assert antiloop["id"] == "antiloop"
+        assert "if" not in antiloop
+        assert 'echo "skip=true" >> "$GITHUB_OUTPUT"' in antiloop["run"]
+        assert 'echo "skip=false" >> "$GITHUB_OUTPUT"' in antiloop["run"]
+        author = _workflow("pr-pipeline.yml")["jobs"]["codex-author"]
+        assert author["outputs"]["skip"] == "${{ steps.antiloop.outputs.skip }}"
 
 
 class TestARejectedCredentialIsAnOperatorAction:

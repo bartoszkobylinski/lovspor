@@ -19,6 +19,11 @@ because the push token had expired, and the pipeline reported it as a pipeline
 failure — the wording that sends a reader to the runner or the code. Handed the
 failed lane job's log (`--log`), the script names that case `credential`: an
 operator renews a secret, and no rerun or code change can clear it.
+
+A job can also fail before any step of the workflow runs (#493): GitHub's own
+`Set up job` failed because the runner could not download a pinned action. That
+is `runner_setup` — no checkout and no Codex round happened, and a rerun of the
+failed jobs is the remedy.
 """
 
 from __future__ import annotations
@@ -68,7 +73,23 @@ class Verdict:
 
     @property
     def is_infrastructure(self) -> bool:
-        return self.kind in ("infrastructure", "runner_tool")
+        return self.kind in ("infrastructure", "runner_tool", "runner_setup")
+
+
+# Issue #493: GitHub's own first step, in which the runner downloads every
+# pinned action before any step of the workflow runs. A job that failed here
+# (the Mac runner timing out against codeload.github.com, runs 36784234807 and
+# 36823210811) never checked out the diff, so it cannot have failed on it.
+SETUP_STEP = "Set up job"
+NO_STEP = "(no step started)"
+
+
+def _setup_failure(job: dict[str, Any]) -> str:
+    """Name the runner set-up the job died in, or "" when a workflow step ran."""
+    steps = job.get("steps") or []
+    if not steps:
+        return NO_STEP
+    return SETUP_STEP if _failed_step(job) == SETUP_STEP else ""
 
 
 def _unfinished_step(job: dict[str, Any]) -> str:
@@ -139,6 +160,9 @@ def classify(jobs: list[dict[str, Any]], lanes: list[str], log: str = "") -> Ver
         step = _unfinished_step(job)
         if step:
             return Verdict("infrastructure", job=lane, step=step)
+        setup = _setup_failure(job)
+        if setup:
+            return Verdict("runner_setup", job=lane, step=setup)
         return _in_job(job, lane, log)
     return Verdict("unknown")
 

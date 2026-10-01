@@ -567,8 +567,14 @@ jobs:
           name: agent-work-author-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/author-partial
 
+      # Issue #493: an author with no outputs at all failed before its first own
+      # step — in GitHub's `Set up job`, as when the Mac runner timed out on a
+      # pinned action download. This job cannot read the jobs API to tell that
+      # apart, and its generic round made the hosted reporter stand down on the
+      # label. `codex-tests-report` fires on exactly that author failure and
+      # classifies it, so it owns the report.
       - name: Escalate — the pipeline failed before the tests ran
-        if: failure() && steps.verdict.outcome != 'failure'
+        if: failure() && steps.verdict.outcome != 'failure' && !(needs.codex-author.result == 'failure' && needs.codex-author.outputs.skip == '')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -702,6 +708,21 @@ jobs:
               echo "Nothing here is evidence about the implementation. Check the machine, then re-run:"
               echo "\`gh api repos/${{ github.repository }}/actions/runners\`"
               echo "\`gh run rerun ${{ github.run_id }} --failed\`"
+              echo ""
+              echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } > "$RUNNER_TEMP/lane-escalation.md"
+          elif [ "${{ steps.classify.outputs.kind }}" = "runner_setup" ]; then
+            {
+              echo "codex-tests BLOCKED by a RUNNER SET-UP failure — the runner, not the diff and not Codex."
+              echo ""
+              echo "Job \`${{ steps.classify.outputs.job }}\` failed in \`${{ steps.classify.outputs.step }}\`, before any step of"
+              echo "the workflow ran: nothing was checked out and no Codex round started. The usual"
+              echo "cause is the self-hosted runner timing out while downloading a pinned action (#493)."
+              echo ""
+              echo "Re-run the failed jobs:"
+              echo "\`gh run rerun ${{ github.run_id }} --failed\`"
+              echo "If the rerun fails in the same place, read that job's log: an action reference"
+              echo "that cannot be resolved fails here too, and no rerun clears it."
               echo ""
               echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             } > "$RUNNER_TEMP/lane-escalation.md"
