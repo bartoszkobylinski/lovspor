@@ -93,6 +93,7 @@ from lovspor.mcp import (
 from lovspor.quota import QuotaEnforcer, QuotaExceededError
 from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
 from lovspor.timetravel import RevisionNotFoundError, RevisionResult, ShallowHistoryError
+from lovspor.usage_metrics import METRICS_TAG, ToolCall, UsageRecorder
 from lovspor.workos_auth import CompositeVerifier
 
 # The identity a stamped, corpus-compatible record and its query embedder
@@ -5689,9 +5690,12 @@ def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
 
     built = _FakeServer()
 
-    def fake_build(path: Path, *, http: HttpConfig | None = None) -> _FakeServer:
+    def fake_build(
+        path: Path, *, http: HttpConfig | None = None, usage: UsageRecorder | None = None
+    ) -> _FakeServer:
         captured["path"] = path
         captured["http"] = http
+        captured["usage"] = usage
         calls.append("build")
         return built
 
@@ -5713,6 +5717,9 @@ def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
     assert captured["http"] == config
     assert captured["health"] == (built, tmp_path, config)
     assert captured["health"][0] is built
+    # Hosted mode counts usage for the operator (#479): a recorder reaches
+    # the server it serves.
+    assert isinstance(captured["usage"], UsageRecorder)
 
 
 def test_serve_http_refuses_to_start_without_authentication(tmp_path: Path) -> None:
@@ -8637,3 +8644,71 @@ def test_parse_recorded_at_names_its_field_on_a_malformed_value() -> None:
         match=r"^recorded_at must be ISO date YYYY-MM-DD, got '05/01/2026'$",
     ):
         mcp_module._parse_recorded_at("05/01/2026")
+
+
+def _usage_lines() -> tuple[UsageRecorder, list[str]]:
+    lines: list[str] = []
+    return UsageRecorder(emit=lines.append), lines
+
+
+def test_hosted_calls_are_counted_with_their_outcome_and_refusal_reason(tmp_path: Path) -> None:
+    """Issue #479: the operator's hourly line counts admitted and refused calls,
+    and names the brake — here the caller's own daily quota."""
+    creds = _quota_corpus(tmp_path, Limits(daily_quota=1, max_in_flight=9, rate_burst=9))
+    usage, lines = _usage_lines()
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds), usage=usage)
+
+    _authed_call(server, "beta-001", "get_law", {"slug": "skatteloven"})
+    with pytest.raises(ToolError, match="daily quota"):
+        _authed_call(server, "beta-001", "get_law", {"slug": "skatteloven"})
+    usage.flush()
+
+    payload = json.loads(lines[0].removeprefix(f"{METRICS_TAG} "))
+    assert (payload["calls"], payload["ok"], payload["refused"]) == (2, 1, {"daily": 1})
+    assert payload["by_tool"] == {"get_law": 2}
+    assert payload["active_credentials"] == 1
+    assert "beta-001" not in lines[0]
+
+
+def test_a_failing_hosted_call_is_counted_as_an_error(tmp_path: Path) -> None:
+    creds = _quota_corpus(tmp_path, Limits())
+    usage, lines = _usage_lines()
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds), usage=usage)
+
+    with pytest.raises(ToolError):
+        _authed_call(server, "beta-001", "get_law", {"slug": "no-such-law"})
+    usage.flush()
+
+    payload = json.loads(lines[0].removeprefix(f"{METRICS_TAG} "))
+    assert (payload["calls"], payload["errors"], payload["refused"]) == (1, 1, {})
+
+
+def test_serve_http_writes_the_open_hour_to_stderr_on_shutdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A restart must not lose the hour in progress: the recorder is flushed
+    when the server stops, to the stderr the unit's journal collects."""
+    monkeypatch.setattr(mcp_module, "load_env", lambda: None)
+    monkeypatch.setattr(mcp_module, "_add_health_routes", lambda *_: None)
+    recorders: list[UsageRecorder] = []
+
+    class _FakeServer:
+        def run(self, transport: str) -> None:
+            recorders[0].record(ToolCall("get_law", "ok", 5.0, "beta-001"))
+
+    def fake_build(
+        path: Path, *, http: HttpConfig | None = None, usage: UsageRecorder | None = None
+    ) -> _FakeServer:
+        assert usage is not None
+        recorders.append(usage)
+        return _FakeServer()
+
+    monkeypatch.setattr(mcp_module, "build_server", fake_build)
+
+    mcp_module.serve_http(tmp_path, HttpConfig(credentials_path=tmp_path / "creds.json"))
+
+    metric_lines = [
+        line for line in capsys.readouterr().err.splitlines() if line.startswith(METRICS_TAG)
+    ]
+    assert len(metric_lines) == 1
+    assert '"by_tool":{"get_law":1}' in metric_lines[0]

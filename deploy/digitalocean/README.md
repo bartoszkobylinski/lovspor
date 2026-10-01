@@ -363,6 +363,7 @@ shallow checkout with: `sudo -u lovspor git -C /opt/lovspor/.cache/lovverk fetch
 
 ```bash
 sudo journalctl -u lovspor-mcp -f                 # app
+sudo journalctl -u lovspor-mcp --since today -o cat | grep lovspor.metrics | /opt/lovspor/app/.venv/bin/lovspor ops usage   # hourly usage (docs/operations.md)
 sudo tail -f /var/log/caddy/lovspor.log           # proxy / TLS
 curl -fsS https://lovspor.yourdomain.com/readyz   # corpus present + reader ready
 sudo systemctl status lovspor-mcp caddy

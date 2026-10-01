@@ -41,7 +41,6 @@ Why dataset aliases: legal text consumers think in Norwegian terms
 inputs accept either form and normalize internally.
 """
 
-import asyncio
 import collections
 import difflib
 import functools
@@ -102,6 +101,8 @@ from lovspor.headings import (
     is_block_id,
     parse_section_heading,
 )
+from lovspor.hosted_calls import offload_to_thread as _offload_to_thread
+from lovspor.hosted_calls import record_usage
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
 from lovspor.slug_index import SlugIndex, build_slug_index
@@ -133,6 +134,7 @@ from lovspor.timetravel import (
     get_law_at_revision,
     resolve_law_at_revision,
 )
+from lovspor.usage_metrics import UsageRecorder
 from lovspor.workos_auth import (
     CompositeVerifier,
     WorkOSTokenVerifier,
@@ -3478,26 +3480,6 @@ def _build_enforcer(bind: HttpConfig, metering: LimitsSource | None) -> QuotaEnf
     return QuotaEnforcer(metering, service_limits=ceiling)
 
 
-def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
-    """Wrap a synchronous tool body as an async tool run on a worker thread.
-
-    mcp 1.27.0 calls a synchronous tool handler inline on the single event-
-    loop thread, so one blocking call — a cold-cache ``search_body``, a
-    ``semantic_search`` embedding round-trip, a ``git`` subprocess — would
-    stall every other client on an HTTP server. Offloading to a thread lets
-    the loop serve other requests while the body runs. ``functools.wraps``
-    preserves ``__wrapped__`` so FastMCP still derives the tool's argument
-    schema from the original signature; the wrapper is ``async`` so FastMCP
-    awaits it instead of calling it inline.
-    """
-
-    @functools.wraps(fn)
-    async def wrapper(**kwargs: Any) -> Any:
-        return await asyncio.to_thread(fn, **kwargs)
-
-    return wrapper
-
-
 def _enforcer_with_spend_charger(
     bind: HttpConfig,
     metering: LimitsSource | None,
@@ -3551,6 +3533,16 @@ def _with_quota(
             return await fn(**kwargs)
 
     return wrapper
+
+
+def _hosted(
+    fn: Callable[..., Any], enforcer: QuotaEnforcer | None, usage: UsageRecorder | None
+) -> Callable[..., Awaitable[Any]]:
+    """A tool body as hosted mode registers it: on a thread, metered, counted.
+    Counting is outermost so a refused call is seen with its brake (#479)."""
+    tool = _offload_to_thread(fn)
+    metered = tool if enforcer is None else _with_quota(tool, enforcer)
+    return metered if usage is None else record_usage(metered, usage)
 
 
 _NOT_EVALUATED_NOTICE: dict[str, str] = {
@@ -4095,7 +4087,9 @@ def _with_section_notice(result: dict[str, Any], evaluation_date: date) -> dict[
     return result
 
 
-def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMCP:
+def build_server(
+    corpus_path: Path, *, http: HttpConfig | None = None, usage: UsageRecorder | None = None
+) -> FastMCP:
     """Build a FastMCP server bound to ``corpus_path``.
 
     The reader is constructed eagerly so configuration errors (missing
@@ -4143,8 +4137,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
             if http is None:
                 mcp.add_tool(fn)
                 return fn
-            hosted = _offload_to_thread(fn)
-            mcp.add_tool(hosted if enforcer is None else _with_quota(hosted, enforcer))
+            mcp.add_tool(_hosted(fn, enforcer, usage))
             return fn
 
         return decorator
@@ -4924,9 +4917,11 @@ def serve_http(corpus_path: Path, http: HttpConfig) -> None:
             file=sys.stderr,
             flush=True,
         )
-    server = build_server(corpus_path, http=http)
+    usage = UsageRecorder()
+    server = build_server(corpus_path, http=http, usage=usage)
     _add_health_routes(server, corpus_path, http)
-    server.run(transport="streamable-http")
+    with usage.hourly_ticker():
+        server.run(transport="streamable-http")
 
 
 def _add_health_routes(server: FastMCP, corpus_path: Path, http: HttpConfig) -> None:

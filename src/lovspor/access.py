@@ -378,6 +378,15 @@ def revoke_credential(credentials: list[Credential], credential_id: str) -> list
     ]
 
 
+def describe_credential(credential: Credential) -> str:
+    """A credential's state as ``tokens list`` prints it."""
+    if credential.revoked:
+        return "revoked"
+    if credential.expires_at is None:
+        return "active (no expiry)"
+    return f"active until {credential.expires_at.date().isoformat()}"
+
+
 def _load_credential_file(path: Path) -> CredentialFile:
     return CredentialFile.model_validate_json(path.read_text(encoding="utf-8"))
 

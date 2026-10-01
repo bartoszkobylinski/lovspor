@@ -33,7 +33,7 @@ from lovspor.ops.unit_facts import Runner, UnitFacts, UnitName, read_unit_facts,
 
 ops_app = typer.Typer(
     name="ops",
-    help="Operate the droplet: alerts for failed lovspor systemd units.",
+    help="Operate the droplet: alerts for failed lovspor units, hourly usage.",
     no_args_is_help=True,
 )
 

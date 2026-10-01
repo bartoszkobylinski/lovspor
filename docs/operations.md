@@ -126,6 +126,90 @@ OPENAI_API_KEY=sk-...        # also accepts OPENAI_APIKEY for legacy configs
 
 Required for `lovspor sync` to write per-section embedding `.bin` files (Sprint 9), and for the MCP `semantic_search` tool to embed user queries at runtime. Without a key the engine still produces Markdown and runs the rest of the sync pipeline normally — the only casualty is that `.bin` files for documents added or changed in this run will not be written, and the next sync with a key set picks them up via the Sprint 9 backfill migration. The post-sync `lovspor audit` step reports each added document left without a sidecar as `missing_embedding` and fails, so a cleared or mistyped secret no longer passes as a green run (#344). Missing key in the MCP server disables only `semantic_search` and leaves the other sixteen tools working normally. Cost is fractions of a cent per query and ~$5-15/year for the production sync cadence — see [`docs/embeddings.md`](embeddings.md) for the model choice rationale.
 
+## Load-testing the hosted endpoint (issue #480)
+
+`scripts/load/mcp_load.py` drives N concurrent simulated clients against a `lovspor mcp-http` endpoint over Streamable HTTP, one concurrency level after another, and reports per level: calls, ok, refusals by reason (`capacity` — the instance ceiling; `in_flight`, `rate`, `quota` — the credential's own brakes), errors, latency p50/p95/p99 of the successful calls, and throughput. Every client opens its own MCP session and replays a research question — `search_laws` → `get_section` × k → `verify_quote` (a quote from the first section it read) → `validate_citation` — over a fixed list of real acts. `semantic_search` spends the operator's OpenAI money and runs only with `--include-paid`; leave it off. A refused call is counted, not retried.
+
+It is repo tooling, not part of the MCP runtime, and **never runs in CI**. The token comes from `--token-file PATH` (one token per line, `-` for stdin; clients take the tokens round-robin) or `LOVSPOR_LOAD_TOKEN` — never from argv, and it is never printed. `--json-out FILE` writes the full report (per-tool counts, up to three distinct error texts per level) beside the Markdown table on stdout.
+
+**What a local run can and cannot show.** The instance-wide ceiling (`ServiceLimits`, `LOVSPOR_SERVICE_MAX_IN_FLIGHT`, default 4) is applied **only in hosted-OAuth mode** (`_build_enforcer` in `src/lovspor/mcp.py`). A local `mcp-http` serving opaque tokens only never refuses `capacity`: it measures the tool bodies, the transport and the per-credential brakes. Local numbers describe the machine they ran on, never the 1-vCPU droplet.
+
+### Locally first
+
+```bash
+# a throwaway credential store; run from the repo root with no .env, so no OpenAI key reaches the server
+mkdir -p /tmp/lovspor-load && chmod 700 /tmp/lovspor-load
+uv run lovspor tokens issue --label load-local --expires-in-days 1 \
+  --credentials /tmp/lovspor-load/credentials.json
+(umask 077 && pbpaste > /tmp/lovspor-load/token)   # copy the lsp_… line just printed first
+LOVVERK_CORPUS_PATH=../lovverk uv run lovspor mcp-http --host 127.0.0.1 --port 18480 \
+  --credentials /tmp/lovspor-load/credentials.json &
+uv run python scripts/load/mcp_load.py --url http://127.0.0.1:18480/mcp \
+  --token-file /tmp/lovspor-load/token --concurrency 1,2,4,8,16 --questions 3 --pause 20 \
+  --json-out /tmp/lovspor-load/report.json
+kill %1 && rm -rf /tmp/lovspor-load
+```
+
+One token for all clients shows the credential brakes (a hand-issued token's default burst of 30 is spent by the second level); one token per client in the file takes the per-credential brakes out of the picture. `--pause 20` lets a token's bucket refill between levels (120/min refills 30 in 15 s).
+
+### Production (owner action)
+
+Never automated, never from CI or an agent. Run it at a **quiet hour**: at 5+ clients the run fills the instance ceiling, and real users are refused `capacity` while it lasts. The run also spends from the server-wide daily ceiling (`LOVSPOR_SERVICE_DAILY_QUOTA`, default 20 000); the token's own `daily_quota` below bounds that at 600.
+
+1. On the droplet, issue a dedicated one-day token and note its credential id (`beta-0NN` below):
+
+```bash
+sudo -u lovspor /opt/lovspor/app/.venv/bin/lovspor tokens issue --label load-test --expires-in-days 1 \
+  --credentials /opt/lovspor/.config/lovspor/credentials.json
+```
+
+2. Give that record its limits. `daily_quota` is the low quota — the hard cap on calls the run can be served. `max_in_flight` and the rate are raised on purpose: at the hand-issued defaults (4 in flight, burst 30) the token's own brakes refuse first and hide the instance ceiling the run is there to measure. Replace `beta-0NN`; the server re-reads the store on change:
+
+```bash
+sudo -u lovspor /opt/lovspor/app/.venv/bin/python - beta-0NN <<'PY'
+import sys
+from pathlib import Path
+from lovspor.access import Limits, load_credentials, write_credential_file
+path = Path("/opt/lovspor/.config/lovspor/credentials.json")
+target = sys.argv[1]
+limits = Limits(max_in_flight=16, rate_per_minute=600, rate_burst=100, daily_quota=600, paid_daily_quota=1)
+credentials = load_credentials(path)
+if not any(c.credential_id == target for c in credentials):
+    sys.exit(f"no credential {target}")
+write_credential_file(path, [c.model_copy(update={"limits": limits}) if c.credential_id == target else c for c in credentials])
+print(f"{target}: {limits}")
+PY
+```
+
+3. From the Mac — the real path through the internet, Caddy and TLS — with the token copied to the clipboard:
+
+```bash
+cd ~/Programming/Python/lovspor && git pull
+mkdir -p ~/.config/lovspor && (umask 077 && pbpaste > ~/.config/lovspor/load-token)
+uv run python scripts/load/mcp_load.py --url https://lovspor.no/mcp \
+  --token-file ~/.config/lovspor/load-token --concurrency 1,2,4,8,16 --questions 2 --pause 20 \
+  --json-out ~/lovspor-load-$(date +%Y%m%d-%H%M).json
+```
+
+   About 31 clients × 2 questions × 5–6 calls ≈ 340 calls in total, under the token's 600. Server side of the same window, on the droplet:
+
+```bash
+sudo journalctl -u lovspor-mcp --since "-30 min" --no-pager | tail -200
+```
+
+4. Revoke the token on the droplet and delete the local copy on the Mac, whatever the outcome:
+
+```bash
+sudo -u lovspor /opt/lovspor/app/.venv/bin/lovspor tokens revoke beta-0NN \
+  --credentials /opt/lovspor/.config/lovspor/credentials.json
+```
+
+```bash
+rm ~/.config/lovspor/load-token
+```
+
+Latencies from the Mac include the network round trip: compare levels with each other, not with a local table.
+
 ## Publishing the site: the release envelope (ADR-0014 Decision 6)
 
 The corpus site (ADR-0013) and the ADR-0014 site are released **together**, as
@@ -1357,6 +1441,44 @@ never serves a false `unattested`; the other tools are unaffected. Later
 parser bumps need no backfill: the first sync run under the new version
 records its own epoch, so trigger the sync right after merging, or deploy
 after the scheduled run has refreshed the clone.
+
+## Hosted MCP: usage metrics (issue #479)
+
+`lovspor mcp-http` counts every tool call in memory and, once per UTC hour,
+writes the finished hour as one line to stderr, which systemd puts in the
+`lovspor-mcp` journal:
+
+```
+lovspor.metrics {"hour":"2026-09-30T13:00:00Z","calls":812,"ok":790,"errors":3,"refused":{"service_capacity":17,"rate":2},"p50_ms":41.0,"p95_ms":930.5,"by_tool":{"get_law":402,"semantic_search":88},"active_credentials":6}
+```
+
+- `calls` = `ok` + `errors` + the sum of `refused`. `errors` is a call that
+  was admitted and failed (an unknown slug, a bad argument).
+- `refused` is keyed by the brake that fired (`src/lovspor/quota.py`):
+  `service_capacity` (the instance-wide `max_in_flight`, the resize signal),
+  `service_daily`, `service_paid`, and per caller `in_flight`, `rate`,
+  `daily`, `paid`, `unknown_credential`, `unidentified`.
+- `p50_ms` / `p95_ms` are nearest-rank latencies over admitted calls only;
+  `null` in an hour with none.
+- `active_credentials` is the number of distinct callers in that hour, a
+  count only. It cannot be summed across hours; the report shows the peak.
+
+Aggregate only, as the privacy page states: no query text, no arguments, no
+credential ids, no IP addresses. Hours with no calls write nothing. The line
+is written within a minute after the hour turns, and on shutdown, so a
+restart splits its hour into two lines (the report lists both and sums them).
+The journal keeps them for 30 days (`deploy/digitalocean/journald-retention.conf`).
+
+Today's numbers, from the owner's machine:
+
+```bash
+ssh root@100.77.85.60 'journalctl -u lovspor-mcp --since today -o cat | grep lovspor.metrics | /opt/lovspor/app/.venv/bin/lovspor ops usage'
+```
+
+`journalctl --since` reads the droplet's local time; the hours in the report
+are UTC. `lovspor ops usage` also takes a saved file (`lovspor ops usage
+journal.txt`) and `--since today|all|YYYY-MM-DD` to filter by UTC day. Metrics
+are recorded only by the hosted server; `lovspor mcp` (stdio) records none.
 
 ## Idempotency
 

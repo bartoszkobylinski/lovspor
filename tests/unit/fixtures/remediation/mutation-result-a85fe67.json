@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "commit": "a85fe67ee7bfff01c44576cd6b14c2ffe27c1dcb",
+  "completed": true,
+  "baseline_tests_passed": true,
+  "tool": "mutmut 3.8.0 (function-scoped via scripts/mutmut-pr.sh)",
+  "tool_exit_code": 2,
+  "mutants": {
+    "total": 55,
+    "killed": 43,
+    "survived": 12,
+    "timeout": 0,
+    "invalid": 0,
+    "skipped": 0,
+    "no_tests": 0,
+    "unmeasured": 0
+  },
+  "score": 78.18,
+  "gate": {
+    "passed": false,
+    "reason": "surviving_mutants"
+  },
+  "equivalents": {
+    "registered": 0,
+    "refused": []
+  },
+  "failure_hint": null,
+  "unmeasured_changed_lines": [
+    "src/lovspor/cli.py:353 (module level)",
+    "src/lovspor/cli.py:416 (decorated function release_probe)",
+    "src/lovspor/cli.py:503 (decorated function site_drift_check)",
+    "src/lovspor/release/commands.py:243 (decorated function build_command)",
+    "src/lovspor/site/probe_credential.py:26-27,29-40 (module level)"
+  ],
+  "survivors": [
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_3",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -1,7 +1,7 @@\n def _read_stdin() -> str:\n     stream = sys.stdin\n     if stream is None:\n-        raise OSError(errno.EBADF, \"stdin is closed\")\n+        raise OSError(None, \"stdin is closed\")\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n     data: str | bytes = getattr(stream, \"buffer\", stream).read()\n     return data.decode(\"utf-8\") if isinstance(data, bytes) else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_4",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -1,7 +1,7 @@\n def _read_stdin() -> str:\n     stream = sys.stdin\n     if stream is None:\n-        raise OSError(errno.EBADF, \"stdin is closed\")\n+        raise OSError(errno.EBADF, None)\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n     data: str | bytes = getattr(stream, \"buffer\", stream).read()\n     return data.decode(\"utf-8\") if isinstance(data, bytes) else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_5",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -1,7 +1,7 @@\n def _read_stdin() -> str:\n     stream = sys.stdin\n     if stream is None:\n-        raise OSError(errno.EBADF, \"stdin is closed\")\n+        raise OSError(\"stdin is closed\")\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n     data: str | bytes = getattr(stream, \"buffer\", stream).read()\n     return data.decode(\"utf-8\") if isinstance(data, bytes) else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_6",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -1,7 +1,7 @@\n def _read_stdin() -> str:\n     stream = sys.stdin\n     if stream is None:\n-        raise OSError(errno.EBADF, \"stdin is closed\")\n+        raise OSError(errno.EBADF, )\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n     data: str | bytes = getattr(stream, \"buffer\", stream).read()\n     return data.decode(\"utf-8\") if isinstance(data, bytes) else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_7",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -1,7 +1,7 @@\n def _read_stdin() -> str:\n     stream = sys.stdin\n     if stream is None:\n-        raise OSError(errno.EBADF, \"stdin is closed\")\n+        raise OSError(errno.EBADF, \"XXstdin is closedXX\")\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n     data: str | bytes = getattr(stream, \"buffer\", stream).read()\n     return data.decode(\"utf-8\") if isinstance(data, bytes) else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_8",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -1,7 +1,7 @@\n def _read_stdin() -> str:\n     stream = sys.stdin\n     if stream is None:\n-        raise OSError(errno.EBADF, \"stdin is closed\")\n+        raise OSError(errno.EBADF, \"STDIN IS CLOSED\")\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n     data: str | bytes = getattr(stream, \"buffer\", stream).read()\n     return data.decode(\"utf-8\") if isinstance(data, bytes) else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_10",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -3,5 +3,5 @@\n     if stream is None:\n         raise OSError(errno.EBADF, \"stdin is closed\")\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n-    data: str | bytes = getattr(stream, \"buffer\", stream).read()\n+    data: str | bytes = getattr(None, \"buffer\", stream).read()\n     return data.decode(\"utf-8\") if isinstance(data, bytes) else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_16",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -3,5 +3,5 @@\n     if stream is None:\n         raise OSError(errno.EBADF, \"stdin is closed\")\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n-    data: str | bytes = getattr(stream, \"buffer\", stream).read()\n+    data: str | bytes = getattr(stream, \"XXbufferXX\", stream).read()\n     return data.decode(\"utf-8\") if isinstance(data, bytes) else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_17",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -3,5 +3,5 @@\n     if stream is None:\n         raise OSError(errno.EBADF, \"stdin is closed\")\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n-    data: str | bytes = getattr(stream, \"buffer\", stream).read()\n+    data: str | bytes = getattr(stream, \"BUFFER\", stream).read()\n     return data.decode(\"utf-8\") if isinstance(data, bytes) else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_19",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -4,4 +4,4 @@\n         raise OSError(errno.EBADF, \"stdin is closed\")\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n     data: str | bytes = getattr(stream, \"buffer\", stream).read()\n-    return data.decode(\"utf-8\") if isinstance(data, bytes) else data\n+    return data.decode(\"utf-8\") if (isinstance(data, bytes)) or True else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_stdin__mutmut_22",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_stdin",
+      "class": null,
+      "symbol_line": 57,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -4,4 +4,4 @@\n         raise OSError(errno.EBADF, \"stdin is closed\")\n     # The bytes, decoded as UTF-8 whatever the locale, like a path read.\n     data: str | bytes = getattr(stream, \"buffer\", stream).read()\n-    return data.decode(\"utf-8\") if isinstance(data, bytes) else data\n+    return data.decode(\"UTF-8\") if isinstance(data, bytes) else data",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    },
+    {
+      "id": "lovspor.site.probe_credential.x__read_secret__mutmut_4",
+      "file": "src/lovspor/site/probe_credential.py",
+      "line": null,
+      "symbol": "_read_secret",
+      "class": null,
+      "symbol_line": 66,
+      "operator": null,
+      "diff": "--- src/lovspor/site/probe_credential.py\n+++ src/lovspor/site/probe_credential.py\n@@ -1,4 +1,4 @@\n def _read_secret(path: Path) -> str:\n     if path == STDIN:\n         return _read_stdin()\n-    return path.read_text(encoding=\"utf-8\")\n+    return path.read_text(encoding=\"UTF-8\")",
+      "detail_source": "mutants_shadow_tree",
+      "equivalent": null
+    }
+  ]
+}

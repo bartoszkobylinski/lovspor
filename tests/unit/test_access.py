@@ -26,6 +26,7 @@ from lovspor.access import (
     Limits,
     ServiceLimits,
     default_credentials_path,
+    describe_credential,
     generate_token,
     hash_token,
     issue_credential,
@@ -714,3 +715,12 @@ def test_a_non_positive_environment_setting_names_the_variable_and_floor() -> No
         ServiceLimits.from_env({"LOVSPOR_SERVICE_DAILY_QUOTA": "0"})
 
     assert str(excinfo.value) == ("LOVSPOR_SERVICE_DAILY_QUOTA must be at least 1, got '0'")
+
+
+def test_describe_credential_names_each_state() -> None:
+    """``tokens list`` prints this; it moved here from cli.py (issue #479)."""
+    base = Credential(credential_id="beta-001", label="x", token_sha256=hash_token("t"))
+    expiring = base.model_copy(update={"expires_at": datetime(2026, 12, 31, 9, tzinfo=UTC)})
+    assert describe_credential(base) == "active (no expiry)"
+    assert describe_credential(expiring) == "active until 2026-12-31"
+    assert describe_credential(expiring.model_copy(update={"revoked": True})) == "revoked"
