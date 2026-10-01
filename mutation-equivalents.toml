@@ -3247,3 +3247,162 @@ before matching (HTTP field names are case-insensitive, RFC 9110 §5.1), so
 for every response a server can send. Argued from the dependency, hence pinned.
 """
 assumption_test = "tests/unit/test_observatory_robots_live.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_response_header_lookup_ignores_case"
+
+[[equivalent]]
+file = "src/lovspor/ops/alert.py"
+symbol = "_read_env_file"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        return env_file.read_text(encoding="utf-8")
++        return env_file.read_text(encoding="UTF-8")
+"""
+justification = """
+The codec registry normalises a codec name before lookup (case is folded,
+`codecs.lookup("UTF-8").name == codecs.lookup("utf-8").name == "utf-8"`), so
+both spellings open the file with the same decoder and return the same text,
+or raise the same UnicodeDecodeError, for every byte sequence. The sibling
+mutant `encoding=None` (locale-dependent) is not equivalent and is killed by
+test_the_env_file_is_utf8_whatever_the_locale.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"
+
+[[equivalent]]
+file = "src/lovspor/ops/alert.py"
+symbol = "_read_env_file"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        return ""
++        return "XXXX"
+"""
+justification = """
+The returned text has exactly one consumer: `_setting` passes it to
+`environment_file_value(text, name)` for LOVSPOR_ALERT_WEBHOOK and
+LOVSPOR_ALERT_FORMAT. That reader only assigns a value on a line where
+`raw.partition("=")` finds an "=" and the stripped key equals the name; "XXXX"
+contains no "=", so — exactly as for "" — no line assigns anything and it
+returns None for both names. The missing-file result is therefore the same
+config for every environment. The reader is in-repo, not stdlib, so the
+assumption is pinned by a test.
+"""
+assumption_test = "tests/unit/test_ops_alert.py::TestAlertConfigEdges::test_assumption_a_text_without_an_assignment_sets_nothing"
+
+[[equivalent]]
+file = "src/lovspor/ops/alert.py"
+symbol = "_post"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        url, content=text.encode("utf-8"), headers=_ntfy_headers(alert), timeout=TIMEOUT_SECONDS
++        url, content=text.encode("UTF-8"), headers=_ntfy_headers(alert), timeout=TIMEOUT_SECONDS
+"""
+justification = """
+Codec names are normalised before lookup, so `str.encode("UTF-8")` and
+`str.encode("utf-8")` select the same encoder and produce identical bytes for
+every string (and a Python str can always be encoded to UTF-8 except for lone
+surrogates, which both spellings refuse identically). The posted body is the
+same on every input.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"
+
+[[equivalent]]
+file = "src/lovspor/ops/alert.py"
+symbol = "_ntfy_headers"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        "Title": title(alert).encode("ascii", "replace").decode("ascii"),
++        "Title": title(alert).encode("ASCII", "replace").decode("ascii"),
+"""
+justification = """
+Codec names are normalised before lookup: `codecs.lookup("ASCII").name ==
+codecs.lookup("ascii").name == "ascii"`. Both spellings select the same
+encoder with the same "replace" error handler (error-handler names are NOT
+normalised, which is why the "REPLACE"/"XXreplaceXX" siblings are killed by
+test_a_non_ascii_title_is_sent_with_replacement_marks), so the Title header
+is identical for every title.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"
+
+[[equivalent]]
+file = "src/lovspor/ops/alert.py"
+symbol = "_ntfy_headers"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        "Title": title(alert).encode("ascii", "replace").decode("ascii"),
++        "Title": title(alert).encode("ascii", "replace").decode("ASCII"),
+"""
+justification = """
+Same codec-name normalisation as the encode("ASCII") entry: the decoder for
+"ASCII" is the one for "ascii". Its input is the output of an ascii encode
+with "replace", so it holds only bytes below 0x80 and both spellings decode
+it to the same str without error.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"
+
+[[equivalent]]
+file = "src/lovspor/ops/commands.py"
+symbol = "_real_deps"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        clock=lambda: datetime.now(UTC),
++        clock=lambda: datetime.now(None),
+"""
+justification = """
+The clock's value reaches exactly one place: `Alert.at`, read only by
+`alert._utc`, which returns `at.astimezone(UTC).strftime(...)`.
+`datetime.now(None)` is the naive local time of the same instant, with `fold`
+set for an ambiguous wall time (PEP 495: `now()` goes through `fromtimestamp`,
+which sets fold), and `astimezone` on a naive datetime interprets it as local
+time honouring `fold`, so it converts back to the identical UTC instant; a
+`now()` instant is never inside a DST gap. Both versions therefore print the
+same UTC string. Verified by round-tripping `fromtimestamp(t)` against
+`fromtimestamp(t, UTC)` every 7 s across both 2026 DST transitions in
+Europe/Oslo, America/New_York, Australia/Lord_Howe (30-minute shift) and
+Asia/Kolkata: zero disagreements.
+"""
+
+[[equivalent]]
+file = "src/lovspor/ops/unit_facts.py"
+symbol = "run_command"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`subprocess.run` tests `check` for truth (`if check and retcode:`) and never
+compares it to False, so None and False select the same path: return the
+CompletedProcess, never raise CalledProcessError. The function then branches
+on `done.returncode` itself, unchanged. The register's existing check=None
+entries rest on the same stdlib contract.
+"""
+
+[[equivalent]]
+file = "src/lovspor/ops/unit_facts.py"
+symbol = "run_command"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-            check=False,
+"""
+justification = """
+`check` defaults to False in `subprocess.run`'s signature, so removing the
+explicit `check=False` selects the same no-raise behaviour; it is spelled out
+only because ruff PLW1510 demands it. The function's own returncode branch is
+untouched.
+"""
+
+[[equivalent]]
+file = "src/lovspor/ops/unit_facts.py"
+symbol = "_state"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-    status = fields.get("ExecMainStatus", "").strip()
++    status = fields.get("ExecMainStatus", "XXXX").strip()
+"""
+justification = """
+`status` is read only by `int(status) if status.isdigit() else None`. When the
+key is present both versions see the same value. When it is absent the
+original's "" and the mutant's "XXXX" both fail `str.isdigit()` ("" because
+isdigit is False on the empty string, "XXXX" because X is not a digit), so both
+return None. No input reaches a different result. The Result-default siblings
+are not equivalent ("XXXX" is truthy and would replace "unknown") and are
+killed by test_a_missing_result_line_is_unknown.
+"""
