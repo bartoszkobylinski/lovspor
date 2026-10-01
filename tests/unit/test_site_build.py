@@ -745,6 +745,20 @@ class TestLegalPages:
         assert "semantic_search" in text
         assert 'href="/lov/personopplysningsloven/"' in _page(built[0], path)
 
+    @pytest.mark.parametrize(
+        ("path", "phrase"),
+        [
+            ("/privacy/", "ingen søketekst, ingen brukeridentifikatorer og ingen IP-adresser"),
+            ("/en/privacy/", "no query text, no user identifiers and no IP addresses"),
+        ],
+    )
+    def test_privacy_says_the_hourly_usage_summary_is_aggregate_only(
+        self, built: tuple[Path, SiteBuildReport], path: str, phrase: str
+    ) -> None:
+        """lovspor.usage_metrics writes an hourly summary to the journal (#479);
+        the page must say so, and say what it cannot contain."""
+        assert phrase in _text(_page(built[0], path))
+
     @pytest.mark.parametrize("path", ["/terms/", "/en/terms/"])
     def test_terms_carry_the_licences_and_the_not_legal_advice_line(
         self, built: tuple[Path, SiteBuildReport], path: str

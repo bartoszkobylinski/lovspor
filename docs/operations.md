@@ -1442,6 +1442,44 @@ parser bumps need no backfill: the first sync run under the new version
 records its own epoch, so trigger the sync right after merging, or deploy
 after the scheduled run has refreshed the clone.
 
+## Hosted MCP: usage metrics (issue #479)
+
+`lovspor mcp-http` counts every tool call in memory and, once per UTC hour,
+writes the finished hour as one line to stderr, which systemd puts in the
+`lovspor-mcp` journal:
+
+```
+lovspor.metrics {"hour":"2026-09-30T13:00:00Z","calls":812,"ok":790,"errors":3,"refused":{"service_capacity":17,"rate":2},"p50_ms":41.0,"p95_ms":930.5,"by_tool":{"get_law":402,"semantic_search":88},"active_credentials":6}
+```
+
+- `calls` = `ok` + `errors` + the sum of `refused`. `errors` is a call that
+  was admitted and failed (an unknown slug, a bad argument).
+- `refused` is keyed by the brake that fired (`src/lovspor/quota.py`):
+  `service_capacity` (the instance-wide `max_in_flight`, the resize signal),
+  `service_daily`, `service_paid`, and per caller `in_flight`, `rate`,
+  `daily`, `paid`, `unknown_credential`, `unidentified`.
+- `p50_ms` / `p95_ms` are nearest-rank latencies over admitted calls only;
+  `null` in an hour with none.
+- `active_credentials` is the number of distinct callers in that hour, a
+  count only. It cannot be summed across hours; the report shows the peak.
+
+Aggregate only, as the privacy page states: no query text, no arguments, no
+credential ids, no IP addresses. Hours with no calls write nothing. The line
+is written within a minute after the hour turns, and on shutdown, so a
+restart splits its hour into two lines (the report lists both and sums them).
+The journal keeps them for 30 days (`deploy/digitalocean/journald-retention.conf`).
+
+Today's numbers, from the owner's machine:
+
+```bash
+ssh root@100.77.85.60 'journalctl -u lovspor-mcp --since today -o cat | grep lovspor.metrics | /opt/lovspor/app/.venv/bin/lovspor ops usage'
+```
+
+`journalctl --since` reads the droplet's local time; the hours in the report
+are UTC. `lovspor ops usage` also takes a saved file (`lovspor ops usage
+journal.txt`) and `--since today|all|YYYY-MM-DD` to filter by UTC day. Metrics
+are recorded only by the hosted server; `lovspor mcp` (stdio) records none.
+
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.
