@@ -48,7 +48,7 @@ SURVIVOR_KEYS = ("id", "file", "line", "symbol", "operator", "diff", "detail_sou
 # EARLIER file may still sit completed in the raw log, so without this check
 # a fatal run could read as PASS off stale output (issue #72; found again
 # independently by a Codex CI test on the milamber port's first flight).
-# Bit 16 is mutmut-pr.sh's own (issue #102): a per-file wall-clock budget
+# Bit 16 is mutmut-pr.sh's own (issue #102): its one wall-clock budget
 # cut the run short. Still a legal verdict — the script harvested what was
 # measured — but the gate must read it as "surface not fully measured".
 _WRAPPER_VERDICTS = frozenset({0, 2, 4, 6, 8, 10, 12, 14})

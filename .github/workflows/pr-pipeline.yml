@@ -760,8 +760,9 @@ jobs:
        (needs.codex-tests.result == 'skipped' && github.actor == 'dependabot[bot]')) &&
       needs.codex-tests.outputs.pushed != 'true'
     runs-on: ubuntu-latest
-    # Backstop over the script's own per-file budget (issue #102). Two files
-    # can consume 40 minutes of mutation time, and harvesting the resulting
+    # Backstop over the script's own run budget (issue #102: one total of
+    # 1200 s per changed file). Two changed files allow 40 minutes of
+    # mutation time, and harvesting the resulting
     # cache also needs room to emit the explicit budget verdict artifact.
     timeout-minutes: 60
     env:
