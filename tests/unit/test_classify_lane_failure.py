@@ -524,3 +524,25 @@ def test_the_cli_reports_a_runner_setup_failure(
         "step=Set up job",
         "signature=",
     ]
+
+
+def test_the_cli_names_a_remediate_lane_that_died_in_set_up_job(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #499: `remediate-verify` calls the classifier with `--lane remediate`
+    and the lane's log, which a job that never ran a step barely has."""
+    jobs = tmp_path / "jobs.json"
+    death = [_job("remediate", "failure", [("Set up job", "completed", "failure")])]
+    jobs.write_text(json.dumps({"jobs": death}), encoding="utf-8")
+    log = tmp_path / "lane.log"
+    log.write_text("", encoding="utf-8")
+
+    argv = ["--jobs", str(jobs), "--lane", "remediate", "--log", str(log)]
+    assert classify_lane_failure.main(argv) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "kind=runner_setup",
+        "job=remediate",
+        "step=Set up job",
+        "signature=",
+    ]

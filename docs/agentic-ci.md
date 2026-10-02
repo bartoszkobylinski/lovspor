@@ -493,6 +493,11 @@ Two rules follow, and they are pinned by tests:
   The label stays `needs-human:pipeline`. No automatic rerun: a run cannot rerun
   itself while in progress, and doing it from a `workflow_run` workflow would add an
   `actions: write` surface for a failure a human clears with one command.
+  The remediation lane gets the same wording (issue #499): a `remediate` job the
+  runner never set up has no outputs, so `remediate-verify`'s dead-lane step reports
+  it, and with `kind=runner_setup` it names the runner and the rerun instead of
+  "ended 'failure' without reporting its own state". Its label stays
+  `needs-human:mutation`.
 - **A rejected credential is an operator action, not a pipeline failure (issue
   #270).** When the lane reached its own failure, `codex-tests-report` also fetches
   that job's log (`actions: read`) and hands it to the classifier with `--log`. A

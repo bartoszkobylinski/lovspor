@@ -2114,6 +2114,46 @@ class TestADeadRemediationLaneStillEscalates:
         assert not (tmp_path / "sticky-args").exists()
 
 
+class TestARemediationSetUpFailureIsNamedAsTheRunner:
+    """Issue #499, the remediation twin of #493. A `remediate` lane the
+    self-hosted runner never set up has no outputs, so the hosted lane's
+    dead-lane step reports it — and it said only that the job "ended 'failure'
+    without reporting its own state", which reads like a Codex or diff failure
+    and says nothing of the rerun that clears it."""
+
+    def _report(self, tmp_path: Path, kind: str, step: str) -> str:
+        env = _dead_lane_sandbox(tmp_path, "482\n", f"{_SHA}\n")
+        env |= {"KIND": kind, "STEP": step}
+        run = _named_step(_steps("mutation-remediation.yml", "remediate-verify"), _DEAD_LANE)
+        _run_step(run["run"], tmp_path, env)
+        return (tmp_path / "body").read_text(encoding="utf-8")
+
+    def test_the_comment_names_the_runner_and_the_rerun(self, tmp_path: Path) -> None:
+        body = self._report(tmp_path, "runner_setup", "Set up job")
+
+        assert body.startswith("Mutation remediation BLOCKED by a RUNNER SET-UP failure")
+        assert "not the diff and not Codex" in body
+        assert "`remediate` failed in `Set up job`" in body
+        assert "no Codex round started" in body
+        assert "`gh run rerun 1 --failed`" in body
+        assert "#493" in body
+        assert _RUN_URL in body
+        # The label is unchanged: a remediation lane escalates to mutation review.
+        assert "pr edit 482 --add-label needs-human:mutation" in (tmp_path / "gh-calls").read_text()
+        assert (tmp_path / "sticky-args").read_text().split()[:2] == ["mutation", "482"]
+
+    def test_a_lane_with_no_steps_at_all_is_named_too(self, tmp_path: Path) -> None:
+        body = self._report(tmp_path, "runner_setup", "(no step started)")
+
+        assert "`remediate` failed in `(no step started)`" in body
+
+    def test_an_ordinary_dead_lane_keeps_its_wording(self, tmp_path: Path) -> None:
+        body = self._report(tmp_path, "in_job", "")
+
+        assert body.startswith("Mutation remediation ended 'failure' without reporting")
+        assert "RUNNER SET-UP" not in body
+
+
 _AGENT_LANES = [
     ("pr-pipeline.yml", "codex-author", "Codex — independent PR test author"),
     ("mutation-remediation.yml", "remediate", "Codex — mutation remediation (tests only)"),
