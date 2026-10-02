@@ -34,19 +34,15 @@ from lovspor.observatory.addresses import (
     system_resolver,
 )
 from lovspor.observatory.app import _AuthorityIdOption, observatory_app
+from lovspor.observatory.capture_pass import CaptureCounts, capture_candidates, capture_summary
 from lovspor.observatory.catch_up import skip_catch_up
-from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
+from lovspor.observatory.discovery import Discoverer, DiscoveryResult
 from lovspor.observatory.engine import describe_engine
 from lovspor.observatory.fetch import Fetcher
-from lovspor.observatory.freshness import (
-    CaptureState,
-    collect_capture_state,
-    worth_capturing,
-)
+from lovspor.observatory.freshness import CaptureState, collect_capture_state
 from lovspor.observatory.freshness_index import indexed_capture_state
 from lovspor.observatory.heartbeat import report_run
 from lovspor.observatory.log import ObservationLog
-from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.registry import (
     SourceRecord,
     registry_path,
@@ -266,91 +262,6 @@ def discover(
     _report_discovery(result)
 
 
-class _CaptureCounts(NamedTuple):
-    """What one source's pass did, and whether the limit cut it short.
-
-    ``capped`` is the point of the type: the three counters cannot express the
-    difference between a sitemap that ran out and a pass that was stopped, and
-    that difference is what makes a truncated source read as finished (#172).
-
-    ``deferred`` is counted apart from ``unchanged`` because the two are
-    different answers. A URL is unchanged when the site says so; it is deferred
-    when it has refused us the same way and we are waiting before asking again
-    (#204). Folding them together would hide a source whose candidate list has
-    quietly become a list of dead ends.
-    """
-
-    captured: int
-    failed: int
-    unchanged: int
-    capped: bool
-    #: The pass stopped because a candidate's host is claimed by more than one
-    #: activated source. Its own field rather than a kind of `capped`: both
-    #: leave the source's archive incomplete, but a limit was our choice and
-    #: this is a register that cannot name a publisher (#215).
-    contested: bool = False
-    deferred: int = 0
-    #: Redirect hops followed on the way to the records above. Reported rather
-    #: than left implicit: they are 75% of everything the log files as a
-    #: failure (#188), and the pass that stopped counting them as failures
-    #: must not be the pass that stopped mentioning them at all.
-    redirects: int = 0
-    #: The pass stopped because the register stopped filing a candidate under
-    #: the row this run bound itself to. Apart from `contested` because the
-    #: repair differs: that one needs a human to say which authority publishes
-    #: a host, this one is already repaired and needs only a re-run (#221).
-    stale: bool = False
-
-
-def _capture_candidates(
-    fetcher: Fetcher, candidates: tuple[Candidate, ...], state: CaptureState, limit: int
-) -> _CaptureCounts:
-    """Fetch what has changed, in order, and report each outcome as it happens.
-
-    A run over a municipal site is hours of politely-spaced requests, so the
-    per-URL line is not noise: it is the only way an operator can tell a slow
-    run from a stuck one.
-    """
-    captured = failed = skipped = deferred = hops = 0
-    # One instant for the whole pass: a clock read per candidate would let two
-    # candidates observed at the same moment fall on opposite sides of the
-    # re-check window, for no reason a reader could reconstruct later.
-    now = datetime.now(UTC)
-    for candidate in candidates:
-        if not worth_capturing(candidate, state, now):
-            if candidate.url in state.observed:
-                skipped += 1
-            else:
-                deferred += 1
-            continue
-        if limit and captured + failed >= limit:
-            typer.echo(f"stopping at --limit {limit}")
-            return _CaptureCounts(captured, failed, skipped, True, False, deferred, hops)
-        try:
-            record = fetcher.capture(candidate.url, candidate.discovery_method)
-        except (AmbiguousSourceError, StaleSourceError) as exc:
-            # A refusal about the register, not about the page. Either it cannot
-            # name one authority for this host — discovery cleared the source's
-            # own host, but a candidate may sit on a subdomain a second source
-            # also claims (#215) — or it no longer names the one this run bound
-            # itself to (#221). Reaching either as a traceback would end the
-            # pass with an empty stderr and the records already appended
-            # unexplained (#208's shape).
-            typer.echo(f"Refused: {exc}", err=True)
-            stale = isinstance(exc, StaleSourceError)
-            return _CaptureCounts(
-                captured, failed, skipped, False, not stale, deferred, hops, stale
-            )
-        hops += len(record.provenance.redirect_chain)
-        if isinstance(record, ArtifactObservation):
-            captured += 1
-            typer.echo(f"  {record.http_status}  {candidate.url}")
-        else:
-            failed += 1
-            typer.echo(f"  {record.outcome}  {candidate.url}")
-    return _CaptureCounts(captured, failed, skipped, False, False, deferred, hops)
-
-
 @observatory_app.command("capture")
 def capture(
     authority_id: _AuthorityIdOption,
@@ -384,12 +295,12 @@ def capture(
         raise typer.Exit(1) from exc
     _require_documents(record, result, starts.probed)
     typer.echo(f"candidates: {len(result.candidates)}")
-    counts = _capture_candidates(fetcher, result.candidates, state, limit)
-    typer.echo(_capture_summary(counts))
+    counts = capture_candidates(fetcher, result.candidates, state, limit)
+    typer.echo(capture_summary(counts))
     _refuse_incomplete(record, counts)
 
 
-def _refuse_incomplete(record: SourceRecord, counts: _CaptureCounts) -> None:
+def _refuse_incomplete(record: SourceRecord, counts: CaptureCounts) -> None:
     """Name what is missing from this source's archive, then exit 1.
 
     The records already appended stay; what stopped is the rest of the pass.
@@ -408,21 +319,6 @@ def _refuse_incomplete(record: SourceRecord, counts: _CaptureCounts) -> None:
         err=True,
     )
     raise typer.Exit(1)
-
-
-def _capture_summary(counts: _CaptureCounts) -> str:
-    """The line a whole pass is read from, and the one the fleet greps.
-
-    ``deferred`` is appended rather than inserted: the prefix is what an
-    operator's scripts match on to tell a finished source from a running one,
-    and a new counter must not move it.
-    """
-    return (
-        f"captured: {counts.captured} | failed: {counts.failed} "
-        f"| unchanged since last seen: {counts.unchanged} "
-        f"| deferred after repeated failure: {counts.deferred} "
-        f"| redirect hops: {counts.redirects}"
-    )
 
 
 def _capture_state(log: ObservationLog, authority_id: str | None) -> CaptureState:
@@ -525,8 +421,8 @@ def _sweep_one(
         )
         return _SweepTotals(refused=1)
     typer.echo(f"candidates: {len(result.candidates)}")
-    counts = _capture_candidates(fetcher, result.candidates, state, limit)
-    typer.echo(_capture_summary(counts))
+    counts = capture_candidates(fetcher, result.candidates, state, limit)
+    typer.echo(capture_summary(counts))
     if counts.capped:
         # Loud on stderr, like a refusal: a source stopped by the limit was
         # truncated, and the whole point of #172 is that this is otherwise
@@ -550,7 +446,7 @@ _CONTESTED = "a candidate's host is claimed by more than one activated source"
 _STALE = "the register row it was bound to is not the row on disk any more"
 
 
-def _abandoned(record: SourceRecord, counts: _CaptureCounts) -> bool:
+def _abandoned(record: SourceRecord, counts: CaptureCounts) -> bool:
     """Report a pass that stopped early, and say whether it was a refusal.
 
     Counted as a refusal so the sweep degrades, but the counts it did collect

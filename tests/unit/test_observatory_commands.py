@@ -24,6 +24,7 @@ from click.testing import Result
 from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
+import lovspor.observatory.capture_pass as observatory_capture_pass
 import lovspor.observatory.commands as observatory_commands
 import lovspor.observatory.registry_commands as observatory_registry_commands
 import lovspor.observatory.registry_io as observatory_registry_io
@@ -33,10 +34,10 @@ from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.addresses import SharedAddress, SourceAddresses
 from lovspor.observatory.audit_commands import _defects
+from lovspor.observatory.capture_pass import CaptureCounts, capture_candidates
 from lovspor.observatory.commands import (
     ENV_REQUIRE_PINNED_ENGINE,
     OBSERVATORY_WORKLOAD,
-    _capture_candidates,
     _echo_shared_group,
     _entry_points,
     _record_sweep,
@@ -2964,7 +2965,7 @@ class TestCaptureAll:
         so returning None would behave identically everywhere while being a lie
         about the declared type. Identity is the only thing that catches it —
         and a NamedTuple validates nothing at runtime, so nothing else will."""
-        counts = _capture_candidates(Mock(), (), CaptureState.empty(), 0)
+        counts = capture_candidates(Mock(), (), CaptureState.empty(), 0)
 
         assert counts.capped is False
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 0)
@@ -2992,7 +2993,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.return_value = terminal_failure
 
-        counts = _capture_candidates(fetcher, (candidate,), CaptureState.empty(), limit=0)
+        counts = capture_candidates(fetcher, (candidate,), CaptureState.empty(), limit=0)
 
         assert (counts.captured, counts.failed, counts.redirects) == (0, 1, 2)
         assert counts.capped is False
@@ -3021,7 +3022,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.side_effect = (first, second)
 
-        counts = _capture_candidates(fetcher, candidates, CaptureState.empty(), limit=2)
+        counts = capture_candidates(fetcher, candidates, CaptureState.empty(), limit=2)
 
         assert counts == (2, 0, 0, True, False, 0, 5, False)
         assert fetcher.capture.call_count == 2
@@ -3034,7 +3035,7 @@ class TestCaptureAll:
         now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
         clock = Mock()
         clock.now.return_value = now
-        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        monkeypatch.setattr(observatory_capture_pass, "datetime", clock)
         candidates = tuple(
             Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
             for url in (PAGE_URL, OTHER_PAGE_URL)
@@ -3042,7 +3043,7 @@ class TestCaptureAll:
         observed = {candidate.url: now - timedelta(hours=23) for candidate in candidates}
         fetcher = Mock()
 
-        counts = _capture_candidates(fetcher, candidates, CaptureState(observed, {}, {}), limit=0)
+        counts = capture_candidates(fetcher, candidates, CaptureState(observed, {}, {}), limit=0)
 
         clock.now.assert_called_once_with(UTC)
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 2)
@@ -3056,7 +3057,7 @@ class TestCaptureAll:
         now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
         clock = Mock()
         clock.now.return_value = now
-        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        monkeypatch.setattr(observatory_capture_pass, "datetime", clock)
         recent = Candidate(
             url=PAGE_URL,
             discovery_method="sitemap",
@@ -3070,7 +3071,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.return_value = _observation(b"page", OTHER_PAGE_URL)
 
-        counts = _capture_candidates(
+        counts = capture_candidates(
             fetcher,
             (recent, unseen),
             CaptureState({PAGE_URL: now - timedelta(hours=1)}, {}, {}),
@@ -3086,7 +3087,7 @@ class TestCaptureAll:
         now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
         clock = Mock()
         clock.now.return_value = now
-        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        monkeypatch.setattr(observatory_capture_pass, "datetime", clock)
         candidates = tuple(
             Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
             for url in (PAGE_URL, OTHER_PAGE_URL)
@@ -3094,7 +3095,7 @@ class TestCaptureAll:
         holds = {candidate.url: FailureHold("http_404", 1, now) for candidate in candidates}
         fetcher = Mock()
 
-        counts = _capture_candidates(fetcher, candidates, CaptureState({}, holds, {}), limit=0)
+        counts = capture_candidates(fetcher, candidates, CaptureState({}, holds, {}), limit=0)
 
         assert counts.deferred == 2
         fetcher.capture.assert_not_called()
@@ -3105,7 +3106,7 @@ class TestCaptureAll:
         now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
         clock = Mock()
         clock.now.return_value = now
-        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        monkeypatch.setattr(observatory_capture_pass, "datetime", clock)
         held = Candidate(url=PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
         first = Candidate(url=OTHER_PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
         capped = Candidate(url=THIRD_PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
@@ -3113,7 +3114,7 @@ class TestCaptureAll:
         fetcher.capture.return_value = _observation(b"page", OTHER_PAGE_URL)
         state = CaptureState({}, {PAGE_URL: FailureHold("http_404", 1, now)}, {})
 
-        counts = _capture_candidates(fetcher, (held, first, capped), state, limit=1)
+        counts = capture_candidates(fetcher, (held, first, capped), state, limit=1)
 
         assert counts == (1, 0, 0, True, False, 1, 0, False)
 
@@ -3150,7 +3151,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.side_effect = (first, failure, AmbiguousSourceError("two claimants"))
         monkeypatch.setattr(
-            observatory_commands,
+            observatory_capture_pass,
             "worth_capturing",
             lambda candidate, *_: candidate.url not in {THIRD_PAGE_URL, "https://held.invalid"},
         )
@@ -3160,7 +3161,7 @@ class TestCaptureAll:
             {},
         )
 
-        counts = _capture_candidates(fetcher, candidates, state, limit=0)
+        counts = capture_candidates(fetcher, candidates, state, limit=0)
 
         assert counts == (1, 1, 1, False, True, 1, 3, False)
 
@@ -3173,7 +3174,7 @@ class TestCaptureAll:
         discoverer = Mock()
         discoverer.discover.return_value = discovery
         monkeypatch.setattr(observatory_commands, "Discoverer", lambda *args: discoverer)
-        monkeypatch.setattr(observatory_commands, "worth_capturing", lambda *args: False)
+        monkeypatch.setattr(observatory_capture_pass, "worth_capturing", lambda *args: False)
         record = Mock(authority_id=BAERUM_ID)
 
         totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
@@ -3190,8 +3191,8 @@ class TestCaptureAll:
         monkeypatch.setattr(observatory_commands, "Discoverer", lambda *args: discoverer)
         monkeypatch.setattr(
             observatory_commands,
-            "_capture_candidates",
-            lambda *args: observatory_commands._CaptureCounts(2, 1, 3, False, True, 4, 5),
+            "capture_candidates",
+            lambda *args: CaptureCounts(2, 1, 3, False, True, 4, 5),
         )
         record = Mock(authority_id=BAERUM_ID)
 
@@ -3214,7 +3215,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.return_value = _observation(b"page", PAGE_URL)
 
-        counts = _capture_candidates(fetcher, (candidate,), CaptureState.empty(), limit=1)
+        counts = capture_candidates(fetcher, (candidate,), CaptureState.empty(), limit=1)
 
         assert counts.capped is False
         assert (counts.captured, counts.failed, counts.unchanged) == (1, 0, 0)
@@ -3239,7 +3240,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.return_value = _observation(b"page", PAGE_URL)
 
-        counts = _capture_candidates(
+        counts = capture_candidates(
             fetcher,
             (fresh, unchanged),
             CaptureState({OTHER_PAGE_URL: datetime(2026, 8, 18, tzinfo=UTC)}, {}, {}),
