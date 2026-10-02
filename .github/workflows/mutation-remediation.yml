@@ -167,7 +167,7 @@ jobs:
           [ -n "$pr" ] || { echo "no open PR for $HEAD_BRANCH" >&2; exit 1; }
           gh pr edit "$pr" --add-label "needs-human:mutation"
           {
-            echo "Mutation gate: per-file wall-clock budget exceeded — the changed surface was not fully measured (artifact: mutation-result-$HEAD_SHA, run: ${{ github.event.workflow_run.html_url }}). Codex remediation skipped: tests cannot kill unmeasured mutants. Human decision required."
+            echo "Mutation gate: wall-clock budget exceeded — the changed surface was not fully measured (artifact: mutation-result-$HEAD_SHA, run: ${{ github.event.workflow_run.html_url }}). Codex remediation skipped: tests cannot kill unmeasured mutants. Human decision required."
           } > "$RUNNER_TEMP/budget-escalation.md"
           scripts/ci/pr_sticky_comment.sh mutation "$pr" "$RUNNER_TEMP/budget-escalation.md"
 

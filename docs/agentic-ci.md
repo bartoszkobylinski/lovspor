@@ -104,8 +104,15 @@ colour. Issue #162 is where this gap was written down.
 
 `scripts/mutmut-pr.sh <base-sha>` runs mutmut 3.8.0 for functions changed by the PR.
 The script rebuilds the shadow tree for each run, then uses mutmut's warm baseline and
-parallel workers. Module-level or otherwise unsafe-to-narrow changes fall back to the
-affected module instead of being exempted.
+parallel workers. Mutants are judged by `tests/unit/` only
+(`pytest_add_cli_args_test_selection` in `pyproject.toml`): mutmut's stats pass records which
+unit tests exercise each function and runs just those per mutant. Changed lines no mutant can
+reach — module-level and class-body statements, decorated functions, decorated class headers —
+are not run but named in an `unmeasured changed lines: ...` notice, carried into
+`mutation-result.json` as `unmeasured_changed_lines` (#289, #292, #419, #420); only a file that
+does not parse falls back to its whole-module pattern. The whole run has one wall-clock budget,
+`MUTMUT_PR_FILE_BUDGET_SECONDS` (default 1200 s) × the number of changed files (issue #102),
+enforced with `timeout(1)`; it is not a per-file budget.
 
 A changed function with a `function-lines` entry in `scripts/quality/ratchet-baseline.toml`
 is a large legacy function (issue #228, owner decision 2026-09-30): only the mutants on its
