@@ -42,7 +42,6 @@ from lovspor.observatory.commands import (
     _entry_points,
     _record_sweep,
     _sweep_one,
-    _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
 from lovspor.observatory.engine import EngineCheckout, describe_engine
@@ -93,6 +92,7 @@ from lovspor.observatory.sweeps import (
     SWEEP_DEADLINE,
     CadenceState,
     SweepRun,
+    SweepTotals,
     append_sweep_run,
     latest_sweep_run,
     read_sweep_runs,
@@ -2887,7 +2887,7 @@ class TestCaptureAll:
         """A sweep that observed nothing must not leave green telemetry."""
         started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
 
-        _record_sweep(ObservatoryRoot(root, ()), started, 0, _SweepTotals())
+        _record_sweep(ObservatoryRoot(root, ()), started, 0, SweepTotals())
 
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
@@ -2901,7 +2901,7 @@ class TestCaptureAll:
     def test_recorded_sweep_preserves_deferred_count(self, root: Path) -> None:
         started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
 
-        run = _record_sweep(ObservatoryRoot(root, ()), started, 1, _SweepTotals(deferred=3))
+        run = _record_sweep(ObservatoryRoot(root, ()), started, 1, SweepTotals(deferred=3))
 
         assert run.deferred == 3
         recorded = latest_sweep_run(root / "sweep-runs.jsonl")
@@ -3207,7 +3207,7 @@ class TestCaptureAll:
             f"  refused: {BAERUM_ID} abandoned partway — a candidate's host "
             "is claimed by more than one activated source\n"
         )
-        assert totals == (1, 2, 1, 3, 0, 0, 4, 0)
+        assert totals == (1, 2, 1, 3, 0, 0, 4, 0, 0)
 
     def test_using_the_whole_limit_on_the_final_candidate_is_not_capped(self) -> None:
         """A limit is truncation only when another fetch remains."""
@@ -4247,6 +4247,7 @@ class TestStatus:
             "  held:       0\n"
             "  withdrawn:  0\n"
             "  captured:   47 | unchanged: 4218 | deferred: 0\n"
+            "  selection:  off\n"
             "  status:     DEGRADED\n"
             "  engine:     unknown\n"
             "\nCadence\n"
@@ -4390,14 +4391,41 @@ class TestStatus:
         assert _hm(timedelta(hours=1, minutes=1, seconds=59)) == "1h01m"
 
     def test_sweep_totals_preserve_unchanged_counts(self) -> None:
-        assert _SweepTotals(unchanged=2).plus(_SweepTotals(unchanged=3)).unchanged == 5
+        assert SweepTotals(unchanged=2).plus(SweepTotals(unchanged=3)).unchanged == 5
 
     def test_sweep_totals_add_capped_sources(self) -> None:
-        assert _SweepTotals(capped=1).plus(_SweepTotals(capped=2)).capped == 3
+        assert SweepTotals(capped=1).plus(SweepTotals(capped=2)).capped == 3
+
+    def test_sweep_totals_add_unselected_candidates(self) -> None:
+        assert SweepTotals(unselected=4).plus(SweepTotals(unselected=5)).unselected == 9
+
+    def test_last_sweep_names_a_selecting_run_and_what_it_declined(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        run = SweepRun(
+            run_id="selecting",
+            started_at=datetime(2026, 8, 25, 1, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 8, 25, 2, 16, tzinfo=UTC),
+            active_sources=1,
+            sources_completed=1,
+            sources_refused=0,
+            captured=12,
+            failed_fetches=0,
+            unchanged=0,
+            status="success",
+            capture_selection=True,
+            unselected=1888,
+        )
+
+        _echo_last_sweep(run)
+
+        assert "  selection:  on — 1888 candidates not selected by path\n" in (
+            capsys.readouterr().out
+        )
 
     def test_sweep_totals_add_held_sources(self) -> None:
-        assert _SweepTotals(held=1).plus(_SweepTotals(held=2)).held == 3
-        assert _SweepTotals(deferred=1).plus(_SweepTotals(deferred=2)).deferred == 3
+        assert SweepTotals(held=1).plus(SweepTotals(held=2)).held == 3
+        assert SweepTotals(deferred=1).plus(SweepTotals(deferred=2)).deferred == 3
 
     def test_a_never_swept_archive_says_so_and_exits_nonzero(self, root: Path) -> None:
         """Never swept cannot read as healthy — that is the Mac-was-off case
@@ -5068,6 +5096,37 @@ class TestCaptureSelection:
         assert result.exit_code == 0, result.output
         assert "selected: 1 of 2 candidates" in result.output
         assert _logged_urls(root) == [SITEMAP_URL, LISTING_URL, NEWS_URL]
+
+    def test_a_selecting_sweep_records_the_switch_and_what_it_declined(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._ready(httpx_mock, root, NEWS_URL, PAGE_URL, CLUB_URL)
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert "candidates not selected by path: 2 (selection on)" in result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.capture_selection, run.unselected, run.captured) == (True, 2, 1)
+        status = runner.invoke(app, ["observatory", "status"])
+        assert "  selection:  on — 2 candidates not selected by path\n" in status.output
+
+    def test_a_sweep_with_selection_off_records_it_off(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        self._ready(httpx_mock, root, NEWS_URL)
+        httpx_mock.add_response(url=NEWS_URL, content=b"<html>nyhet</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert "not selected by path: 0 (selection" not in result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.capture_selection, run.unselected, run.captured) == (False, 0, 1)
 
     def test_every_lane_of_a_sweep_selects_the_same_way(
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch

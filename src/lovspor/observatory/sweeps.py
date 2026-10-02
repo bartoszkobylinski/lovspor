@@ -46,6 +46,9 @@ SWEEP_DEADLINE = timedelta(hours=36)
 
 SweepStatus = Literal["success", "degraded", "failed"]
 
+#: The failure reason of a sweep over a register with nothing activated.
+NO_ACTIVE_SOURCES = "no_active_sources"
+
 
 class SweepRun(BaseModel):
     """What one pass over the register did.
@@ -94,6 +97,14 @@ class SweepRun(BaseModel):
     #: source whose candidates have all become dead ends would otherwise report
     #: a clean pass that fetched nothing.
     deferred: int = Field(default=0, ge=0)
+    #: Whether this run fetched only candidates whose path names a regulation
+    #: (issue #348). False for runs recorded before selection existed, which
+    #: is also what they did.
+    capture_selection: bool = False
+    #: Candidates discovery proposed and selection declined to fetch. With the
+    #: discovery documents in the archive and ``engine_commit`` naming the
+    #: stem list, it keeps "what did we decline to fetch" answerable.
+    unselected: int = Field(default=0, ge=0)
     status: SweepStatus
     #: Why the sweep could not execute. Present exactly when ``status`` is
     #: ``failed``: a red light with no next step is barely better than none,
@@ -143,6 +154,13 @@ class SweepRun(BaseModel):
             raise ValueError(
                 f"{self.sources_capped} capped exceeds {self.sources_completed} completed"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _only_a_selecting_run_declines(self) -> "SweepRun":
+        """Nothing is declined with selection off; a record saying both is damage."""
+        if self.unselected and not self.capture_selection:
+            raise ValueError(f"{self.unselected} unselected on a run with selection off")
         return self
 
     @model_validator(mode="after")
@@ -285,3 +303,59 @@ def cadence_state(run: SweepRun | None, *, now: datetime | None = None) -> Caden
         # to catch, so it reads as overdue with no usable age.
         return CadenceState(age=None, overdue=True)
     return CadenceState(age=age, overdue=age >= SWEEP_DEADLINE)
+
+
+class RunContext(NamedTuple):
+    """What a run records about how it ran, apart from what it counted."""
+
+    engine_commit: str | None
+    #: Whether capture fetched only selected candidates (issue #348).
+    selection: bool
+
+
+class SweepTotals(NamedTuple):
+    """Running counts over a whole sweep, so the run can describe itself."""
+
+    refused: int = 0
+    captured: int = 0
+    failed: int = 0
+    unchanged: int = 0
+    capped: int = 0
+    held: int = 0
+    deferred: int = 0
+    withdrawn: int = 0
+    unselected: int = 0
+
+    def plus(self, other: "SweepTotals") -> "SweepTotals":
+        return SweepTotals(*(mine + theirs for mine, theirs in zip(self, other, strict=True)))
+
+    def as_run(
+        self, started_at: datetime, finished_at: datetime, active: int, context: RunContext
+    ) -> SweepRun:
+        """The record of a sweep that ran over ``active`` sources to these totals.
+
+        A register with nothing to sweep is a failure with a nameable cause,
+        not a green run over an empty list. `capture-all` refuses before
+        reaching here, but the recorder must stay total: the one caller that
+        does produce it must not produce a reasonless failure.
+        """
+        return SweepRun(
+            run_id=started_at.isoformat(),
+            started_at=started_at,
+            finished_at=finished_at,
+            active_sources=active,
+            sources_completed=active - self.refused - self.held - self.withdrawn,
+            sources_refused=self.refused,
+            sources_capped=self.capped,
+            sources_held=self.held,
+            sources_withdrawn=self.withdrawn,
+            captured=self.captured,
+            failed_fetches=self.failed,
+            unchanged=self.unchanged,
+            deferred=self.deferred,
+            capture_selection=context.selection,
+            unselected=self.unselected,
+            status=sweep_status(active=active, refused=self.refused, capped=self.capped),
+            failure_reason=NO_ACTIVE_SOURCES if active == 0 else None,
+            engine_commit=context.engine_commit,
+        )

@@ -92,8 +92,16 @@ def _echo_last_sweep(run: SweepRun | None) -> None:
     typer.echo(
         f"  captured:   {run.captured} | unchanged: {run.unchanged} | deferred: {run.deferred}"
     )
+    typer.echo(f"  selection:  {_selection(run)}")
     typer.echo(f"  status:     {run.status.upper()}")
     typer.echo(f"  engine:     {run.engine_commit or 'unknown'}")
+
+
+def _selection(run: SweepRun) -> str:
+    """Whether the run selected by path (#348), and what that left unfetched."""
+    if not run.capture_selection:
+        return "off"
+    return f"on — {run.unselected} candidates not selected by path"
 
 
 def _echo_switch() -> None:
