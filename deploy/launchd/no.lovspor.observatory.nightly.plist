@@ -55,6 +55,11 @@
              on a merged commit; a stray checkout must read as a red run. -->
         <key>LOVSPOR_OBSERVATORY_REQUIRE_PINNED_ENGINE</key>
         <string>1</string>
+
+        <!-- Capture selection (issue #348) is deliberately absent: off by
+             default, switched on only after one measured pass, by adding
+             LOVSPOR_OBSERVATORY_CAPTURE_SELECTION=1 here. See
+             docs/operations.md, "Selecting what to capture by path". -->
     </dict>
 
     <key>StartCalendarInterval</key>

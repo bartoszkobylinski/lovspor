@@ -69,6 +69,13 @@ the canonical pipeline's:
   log like any other observation. Discovery *proposes* URLs; capturing one is a separate
   decision, which is what keeps a sitemap of 40,000 entries from becoming a mass
   download. Depth, document count and decompressed size are all bounded.
+- **Capture can be scoped by path** (issue #348): with selection switched on, only
+  candidates whose URL path names a regulation (`forskrift`, `reglement`,
+  `kunngjøring`, `høring`, …) are fetched. That scopes crawl budget; it does not
+  classify anything as law, which ADR-0010 still defers, and a regulation on a path
+  that names none is a known, accepted miss. Every declined candidate stays answerable:
+  the discovery documents that proposed it are in the log, and each run records how
+  many it declined.
 - **May fetch ≠ may redistribute.** Observed bytes live outside this repo and outside
   `lovverk`, and are not published anywhere until a per-source redistribution basis
   exists. A municipality-hosted copy of a Lovtidend document carries its own
