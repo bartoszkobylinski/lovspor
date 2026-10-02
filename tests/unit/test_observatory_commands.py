@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import httpx
@@ -24,6 +25,7 @@ from click.testing import Result
 from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
+import lovspor.observatory.capture_pass as observatory_capture_pass
 import lovspor.observatory.commands as observatory_commands
 import lovspor.observatory.registry_commands as observatory_registry_commands
 import lovspor.observatory.registry_io as observatory_registry_io
@@ -33,15 +35,14 @@ from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.addresses import SharedAddress, SourceAddresses
 from lovspor.observatory.audit_commands import _defects
+from lovspor.observatory.capture_pass import CaptureCounts, capture_candidates
 from lovspor.observatory.commands import (
     ENV_REQUIRE_PINNED_ENGINE,
     OBSERVATORY_WORKLOAD,
-    _capture_candidates,
     _echo_shared_group,
     _entry_points,
     _record_sweep,
     _sweep_one,
-    _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
 from lovspor.observatory.engine import EngineCheckout, describe_engine
@@ -71,6 +72,7 @@ from lovspor.observatory.registry import (
     replace_domain,
     write_registry,
 )
+from lovspor.observatory.selection import ENV_CAPTURE_SELECTION
 from lovspor.observatory.status_report import (
     _echo_cadence,
     _echo_last_sweep,
@@ -91,6 +93,7 @@ from lovspor.observatory.sweeps import (
     SWEEP_DEADLINE,
     CadenceState,
     SweepRun,
+    SweepTotals,
     append_sweep_run,
     latest_sweep_run,
     read_sweep_runs,
@@ -145,6 +148,9 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     observatory = tmp_path / "observatory"
     monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(observatory))
     monkeypatch.delenv(ENV_CORPUS_ROOT, raising=False)
+    # An operator's shell may have switched selection on; every test here
+    # starts from the shipped default and switches it on itself.
+    monkeypatch.delenv(ENV_CAPTURE_SELECTION, raising=False)
     return observatory
 
 
@@ -2882,7 +2888,7 @@ class TestCaptureAll:
         """A sweep that observed nothing must not leave green telemetry."""
         started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
 
-        _record_sweep(ObservatoryRoot(root, ()), started, 0, _SweepTotals())
+        _record_sweep(ObservatoryRoot(root, ()), started, 0, SweepTotals())
 
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
@@ -2896,7 +2902,7 @@ class TestCaptureAll:
     def test_recorded_sweep_preserves_deferred_count(self, root: Path) -> None:
         started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
 
-        run = _record_sweep(ObservatoryRoot(root, ()), started, 1, _SweepTotals(deferred=3))
+        run = _record_sweep(ObservatoryRoot(root, ()), started, 1, SweepTotals(deferred=3))
 
         assert run.deferred == 3
         recorded = latest_sweep_run(root / "sweep-runs.jsonl")
@@ -2964,7 +2970,7 @@ class TestCaptureAll:
         so returning None would behave identically everywhere while being a lie
         about the declared type. Identity is the only thing that catches it —
         and a NamedTuple validates nothing at runtime, so nothing else will."""
-        counts = _capture_candidates(Mock(), (), CaptureState.empty(), 0)
+        counts = capture_candidates(Mock(), (), CaptureState.empty(), 0)
 
         assert counts.capped is False
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 0)
@@ -2992,7 +2998,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.return_value = terminal_failure
 
-        counts = _capture_candidates(fetcher, (candidate,), CaptureState.empty(), limit=0)
+        counts = capture_candidates(fetcher, (candidate,), CaptureState.empty(), limit=0)
 
         assert (counts.captured, counts.failed, counts.redirects) == (0, 1, 2)
         assert counts.capped is False
@@ -3021,9 +3027,9 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.side_effect = (first, second)
 
-        counts = _capture_candidates(fetcher, candidates, CaptureState.empty(), limit=2)
+        counts = capture_candidates(fetcher, candidates, CaptureState.empty(), limit=2)
 
-        assert counts == (2, 0, 0, True, False, 0, 5, False)
+        assert counts == (2, 0, 0, True, False, 0, 5, False, 0)
         assert fetcher.capture.call_count == 2
 
     def test_every_candidate_in_a_pass_uses_the_same_clock_read(
@@ -3034,7 +3040,7 @@ class TestCaptureAll:
         now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
         clock = Mock()
         clock.now.return_value = now
-        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        monkeypatch.setattr(observatory_capture_pass, "datetime", clock)
         candidates = tuple(
             Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
             for url in (PAGE_URL, OTHER_PAGE_URL)
@@ -3042,7 +3048,7 @@ class TestCaptureAll:
         observed = {candidate.url: now - timedelta(hours=23) for candidate in candidates}
         fetcher = Mock()
 
-        counts = _capture_candidates(fetcher, candidates, CaptureState(observed, {}, {}), limit=0)
+        counts = capture_candidates(fetcher, candidates, CaptureState(observed, {}, {}), limit=0)
 
         clock.now.assert_called_once_with(UTC)
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 2)
@@ -3056,7 +3062,7 @@ class TestCaptureAll:
         now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
         clock = Mock()
         clock.now.return_value = now
-        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        monkeypatch.setattr(observatory_capture_pass, "datetime", clock)
         recent = Candidate(
             url=PAGE_URL,
             discovery_method="sitemap",
@@ -3070,14 +3076,14 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.return_value = _observation(b"page", OTHER_PAGE_URL)
 
-        counts = _capture_candidates(
+        counts = capture_candidates(
             fetcher,
             (recent, unseen),
             CaptureState({PAGE_URL: now - timedelta(hours=1)}, {}, {}),
             limit=1,
         )
 
-        assert counts == (1, 0, 1, False, False, 0, 0, False)
+        assert counts == (1, 0, 1, False, False, 0, 0, False, 0)
         fetcher.capture.assert_called_once_with(OTHER_PAGE_URL, "sitemap")
 
     def test_multiple_held_candidates_are_all_counted_as_deferred(
@@ -3086,7 +3092,7 @@ class TestCaptureAll:
         now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
         clock = Mock()
         clock.now.return_value = now
-        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        monkeypatch.setattr(observatory_capture_pass, "datetime", clock)
         candidates = tuple(
             Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
             for url in (PAGE_URL, OTHER_PAGE_URL)
@@ -3094,7 +3100,7 @@ class TestCaptureAll:
         holds = {candidate.url: FailureHold("http_404", 1, now) for candidate in candidates}
         fetcher = Mock()
 
-        counts = _capture_candidates(fetcher, candidates, CaptureState({}, holds, {}), limit=0)
+        counts = capture_candidates(fetcher, candidates, CaptureState({}, holds, {}), limit=0)
 
         assert counts.deferred == 2
         fetcher.capture.assert_not_called()
@@ -3105,7 +3111,7 @@ class TestCaptureAll:
         now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
         clock = Mock()
         clock.now.return_value = now
-        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        monkeypatch.setattr(observatory_capture_pass, "datetime", clock)
         held = Candidate(url=PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
         first = Candidate(url=OTHER_PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
         capped = Candidate(url=THIRD_PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
@@ -3113,9 +3119,9 @@ class TestCaptureAll:
         fetcher.capture.return_value = _observation(b"page", OTHER_PAGE_URL)
         state = CaptureState({}, {PAGE_URL: FailureHold("http_404", 1, now)}, {})
 
-        counts = _capture_candidates(fetcher, (held, first, capped), state, limit=1)
+        counts = capture_candidates(fetcher, (held, first, capped), state, limit=1)
 
-        assert counts == (1, 0, 0, True, False, 1, 0, False)
+        assert counts == (1, 0, 0, True, False, 1, 0, False, 0)
 
     def test_contested_counts_preserve_every_prior_outcome(
         self, monkeypatch: pytest.MonkeyPatch
@@ -3150,7 +3156,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.side_effect = (first, failure, AmbiguousSourceError("two claimants"))
         monkeypatch.setattr(
-            observatory_commands,
+            observatory_capture_pass,
             "worth_capturing",
             lambda candidate, *_: candidate.url not in {THIRD_PAGE_URL, "https://held.invalid"},
         )
@@ -3160,21 +3166,21 @@ class TestCaptureAll:
             {},
         )
 
-        counts = _capture_candidates(fetcher, candidates, state, limit=0)
+        counts = capture_candidates(fetcher, candidates, state, limit=0)
 
-        assert counts == (1, 1, 1, False, True, 1, 3, False)
+        assert counts == (1, 1, 1, False, True, 1, 3, False, 0)
 
     def test_one_sweep_source_preserves_deferred_counts(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         candidate = Candidate(url=PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
-        discovery = SimpleNamespace(documents_read=1, candidates=(candidate,))
+        discovery = SimpleNamespace(documents_read=1, candidates=(candidate,), skipped=())
         monkeypatch.setattr(observatory_commands, "_entry_points", lambda *args: Mock())
         discoverer = Mock()
         discoverer.discover.return_value = discovery
         monkeypatch.setattr(observatory_commands, "Discoverer", lambda *args: discoverer)
-        monkeypatch.setattr(observatory_commands, "worth_capturing", lambda *args: False)
-        record = Mock(authority_id=BAERUM_ID)
+        monkeypatch.setattr(observatory_capture_pass, "worth_capturing", lambda *args: False)
+        record = Mock(authority_id=BAERUM_ID, listing_entry_points=())
 
         totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
 
@@ -3183,17 +3189,17 @@ class TestCaptureAll:
     def test_contested_sweep_reports_to_stderr_and_preserves_counts(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        discovery = SimpleNamespace(documents_read=1, candidates=())
+        discovery = SimpleNamespace(documents_read=1, candidates=(), skipped=())
         monkeypatch.setattr(observatory_commands, "_entry_points", lambda *args: Mock())
         discoverer = Mock()
         discoverer.discover.return_value = discovery
         monkeypatch.setattr(observatory_commands, "Discoverer", lambda *args: discoverer)
         monkeypatch.setattr(
             observatory_commands,
-            "_capture_candidates",
-            lambda *args: observatory_commands._CaptureCounts(2, 1, 3, False, True, 4, 5),
+            "capture_proposals",
+            lambda *args: CaptureCounts(2, 1, 3, False, True, 4, 5),
         )
-        record = Mock(authority_id=BAERUM_ID)
+        record = Mock(authority_id=BAERUM_ID, listing_entry_points=())
 
         totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
 
@@ -3202,7 +3208,7 @@ class TestCaptureAll:
             f"  refused: {BAERUM_ID} abandoned partway — a candidate's host "
             "is claimed by more than one activated source\n"
         )
-        assert totals == (1, 2, 1, 3, 0, 0, 4, 0)
+        assert totals == (1, 2, 1, 3, 0, 0, 4, 0, 0)
 
     def test_using_the_whole_limit_on_the_final_candidate_is_not_capped(self) -> None:
         """A limit is truncation only when another fetch remains."""
@@ -3214,7 +3220,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.return_value = _observation(b"page", PAGE_URL)
 
-        counts = _capture_candidates(fetcher, (candidate,), CaptureState.empty(), limit=1)
+        counts = capture_candidates(fetcher, (candidate,), CaptureState.empty(), limit=1)
 
         assert counts.capped is False
         assert (counts.captured, counts.failed, counts.unchanged) == (1, 0, 0)
@@ -3239,7 +3245,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.return_value = _observation(b"page", PAGE_URL)
 
-        counts = _capture_candidates(
+        counts = capture_candidates(
             fetcher,
             (fresh, unchanged),
             CaptureState({OTHER_PAGE_URL: datetime(2026, 8, 18, tzinfo=UTC)}, {}, {}),
@@ -4242,6 +4248,7 @@ class TestStatus:
             "  held:       0\n"
             "  withdrawn:  0\n"
             "  captured:   47 | unchanged: 4218 | deferred: 0\n"
+            "  selection:  off\n"
             "  status:     DEGRADED\n"
             "  engine:     unknown\n"
             "\nCadence\n"
@@ -4385,14 +4392,47 @@ class TestStatus:
         assert _hm(timedelta(hours=1, minutes=1, seconds=59)) == "1h01m"
 
     def test_sweep_totals_preserve_unchanged_counts(self) -> None:
-        assert _SweepTotals(unchanged=2).plus(_SweepTotals(unchanged=3)).unchanged == 5
+        assert SweepTotals(unchanged=2).plus(SweepTotals(unchanged=3)).unchanged == 5
 
     def test_sweep_totals_add_capped_sources(self) -> None:
-        assert _SweepTotals(capped=1).plus(_SweepTotals(capped=2)).capped == 3
+        assert SweepTotals(capped=1).plus(SweepTotals(capped=2)).capped == 3
+
+    def test_sweep_totals_add_unselected_candidates(self) -> None:
+        assert SweepTotals(unselected=4).plus(SweepTotals(unselected=5)).unselected == 9
+
+    def test_sweep_totals_refuse_a_tally_of_another_shape(self) -> None:
+        # A short tally must not be zero-filled into a plausible-looking total:
+        # a field it lacks would read as "nothing happened" in the sweep record.
+        with pytest.raises(ValueError, match="zip"):
+            SweepTotals(unchanged=2).plus(cast(SweepTotals, (1, 2)))
+
+    def test_last_sweep_names_a_selecting_run_and_what_it_declined(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        run = SweepRun(
+            run_id="selecting",
+            started_at=datetime(2026, 8, 25, 1, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 8, 25, 2, 16, tzinfo=UTC),
+            active_sources=1,
+            sources_completed=1,
+            sources_refused=0,
+            captured=12,
+            failed_fetches=0,
+            unchanged=0,
+            status="success",
+            capture_selection=True,
+            unselected=1888,
+        )
+
+        _echo_last_sweep(run)
+
+        assert "  selection:  on — 1888 candidates not selected by path\n" in (
+            capsys.readouterr().out
+        )
 
     def test_sweep_totals_add_held_sources(self) -> None:
-        assert _SweepTotals(held=1).plus(_SweepTotals(held=2)).held == 3
-        assert _SweepTotals(deferred=1).plus(_SweepTotals(deferred=2)).deferred == 3
+        assert SweepTotals(held=1).plus(SweepTotals(held=2)).held == 3
+        assert SweepTotals(deferred=1).plus(SweepTotals(deferred=2)).deferred == 3
 
     def test_a_never_swept_archive_says_so_and_exits_nonzero(self, root: Path) -> None:
         """Never swept cannot read as healthy — that is the Mac-was-off case
@@ -4951,6 +4991,164 @@ class TestCapture:
         assert "captured: 0 | failed: 1" in first.output
         assert "captured: 1 | failed: 0" in second.output
         assert f"200  {OTHER_PAGE_URL}" in second.output
+
+
+NEWS_URL = f"https://www.{BAERUM_DOMAIN}/nyhetsarkiv/2026/ny-lekeplass"
+CLUB_URL = f"https://www.{BAERUM_DOMAIN}/kultur-idrett-fritid/lag-og-foreninger/skiklubb"
+NEWS_SITEMAP_URL = f"https://www.{BAERUM_DOMAIN}/sitemap-nyheter.xml"
+
+
+class TestCaptureSelection:
+    """#348: between discovery's proposals and capture's fetch, a path rule.
+
+    Global, behind a flag, switched on after one measured pass (owner,
+    2026-09-26). Each test drives the command an operator runs, with the
+    switch set the way the job's environment sets it; only HTTP is mocked.
+    """
+
+    def _ready(self, httpx_mock: HTTPXMock, root: Path, *pages: str) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(*pages), is_reusable=True)
+
+    def test_on_an_unselected_candidate_is_never_fetched_and_a_selected_one_is(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The Kongsvinger night: a news archive and a sports club fetched at
+        30 s apiece, beside the one page whose path names a regulation."""
+        self._ready(httpx_mock, root, NEWS_URL, PAGE_URL, CLUB_URL)
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        requested = [str(r.url) for r in _requests_after_setup(httpx_mock)]
+        assert PAGE_URL in requested
+        assert NEWS_URL not in requested
+        assert CLUB_URL not in requested
+        assert "candidates: 3\n" in result.output
+        assert "selected: 1 of 3 candidates (2 not selected: path names no regulation)" in (
+            result.output
+        )
+        assert result.output.rstrip().endswith("| not selected by path: 2")
+        assert _logged_urls(root) == [SITEMAP_URL, PAGE_URL]
+
+    def test_off_by_default_every_candidate_is_fetched_and_the_match_is_measured(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The shipped default is today's crawl. The line it adds is the
+        measured pass the decision asks for before switching it on."""
+        self._ready(httpx_mock, root, NEWS_URL, PAGE_URL)
+        httpx_mock.add_response(url=NEWS_URL, content=b"<html>nyhet</html>")
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "selection off: 1 of 2 candidates would be selected" in result.output
+        assert "captured: 2 | failed: 0" in result.output
+        assert "| not selected by path: 0" in result.output
+        assert _logged_urls(root) == [SITEMAP_URL, NEWS_URL, PAGE_URL]
+
+    def test_an_already_captured_page_on_an_unselected_path_stops_being_observed(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#348's tuning counted what the existing archive would *keep*; the
+        rest of it is left alone — its records stay, it is not fetched again,
+        and it is counted as not selected rather than as unchanged."""
+        self._ready(httpx_mock, root, NEWS_URL)
+        httpx_mock.add_response(url=NEWS_URL, content=b"<html>nyhet</html>")
+        assert runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID]).exit_code == 0
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert [str(r.url) for r in httpx_mock.get_requests()].count(NEWS_URL) == 1
+        assert "captured: 0 | failed: 0 | unchanged since last seen: 0" in result.output
+        assert "| not selected by path: 1" in result.output
+        assert _logged_urls(root) == [SITEMAP_URL, NEWS_URL, SITEMAP_URL]
+
+    def test_discovery_still_reads_a_sitemap_whose_own_path_names_no_regulation(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Selection is capture's, never discovery's: a nested sitemap is a
+        document discovery traverses, not a candidate, whatever its name."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_sitemapindex(NEWS_SITEMAP_URL))
+        httpx_mock.add_response(url=NEWS_SITEMAP_URL, content=_urlset(PAGE_URL, NEWS_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert _logged_urls(root) == [SITEMAP_URL, NEWS_SITEMAP_URL, PAGE_URL]
+
+    def test_a_page_a_registered_listing_links_to_is_fetched_whatever_its_path(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The listing is declared with the supported command, and the sitemap
+        proposes the same page first — the shape a source with both has."""
+        self._ready(httpx_mock, root, NEWS_URL, CLUB_URL)
+        assert _update("--add-listing", LISTING_URL).exit_code == 0
+        httpx_mock.add_response(url=LISTING_URL, content=_listing_page(href=NEWS_URL))
+        httpx_mock.add_response(url=NEWS_URL, content=b"<html>nyhet</html>")
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "selected: 1 of 2 candidates" in result.output
+        assert _logged_urls(root) == [SITEMAP_URL, LISTING_URL, NEWS_URL]
+
+    def test_a_selecting_sweep_records_the_switch_and_what_it_declined(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._ready(httpx_mock, root, NEWS_URL, PAGE_URL, CLUB_URL)
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert "candidates not selected by path: 2 (selection on)" in result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.capture_selection, run.unselected, run.captured) == (True, 2, 1)
+        status = runner.invoke(app, ["observatory", "status"])
+        assert "  selection:  on — 2 candidates not selected by path\n" in status.output
+
+    def test_a_sweep_with_selection_off_records_it_off(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        self._ready(httpx_mock, root, NEWS_URL)
+        httpx_mock.add_response(url=NEWS_URL, content=b"<html>nyhet</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert "not selected by path: 0 (selection" not in result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.capture_selection, run.unselected, run.captured) == (False, 0, 1)
+
+    def test_every_lane_of_a_sweep_selects_the_same_way(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._ready(httpx_mock, root, NEWS_URL, PAGE_URL)
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert "selected: 1 of 2 candidates (1 not selected: path names no regulation)" in (
+            result.output
+        )
+        assert NEWS_URL not in [str(r.url) for r in httpx_mock.get_requests()]
 
 
 class TestTheRegisterIsRereadWhileACaptureRuns:

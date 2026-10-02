@@ -383,6 +383,49 @@ class TestDamageIsRefused:
             read_sweep_runs(sweeps_path(root))
 
 
+class TestSelectionIsRecordedOnTheRun:
+    """#348: a run says whether it selected, and how much it declined.
+
+    "What did we decline to fetch" must stay answerable: the run carries the
+    switch and the count, the archived sitemaps carry the proposals, and
+    ``engine_commit`` names the stem list that judged them.
+    """
+
+    def test_a_run_written_before_selection_existed_reads_as_unselected(
+        self, root: ObservatoryRoot
+    ) -> None:
+        line = _run().model_dump(mode="json")
+        del line["capture_selection"]
+        del line["unselected"]
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        run = read_sweep_runs(sweeps_path(root))[0]
+
+        assert (run.capture_selection, run.unselected) == (False, 0)
+
+    def test_a_selecting_run_round_trips(self, root: ObservatoryRoot) -> None:
+        run = _run().model_copy(update={"capture_selection": True, "unselected": 1888})
+
+        append_sweep_run(root, run)
+
+        assert read_sweep_runs(sweeps_path(root)) == [run]
+
+    def test_declines_on_a_run_that_did_not_select_are_damage(self) -> None:
+        """Nothing is declined with the switch off, so a record saying both is
+        one that cannot have happened."""
+        line = _run().model_dump(mode="json") | {"capture_selection": False, "unselected": 3}
+
+        with pytest.raises(ValidationError, match="selection off"):
+            SweepRun.model_validate(line)
+
+    def test_a_negative_decline_count_is_damage(self) -> None:
+        line = _run().model_dump(mode="json") | {"capture_selection": True, "unselected": -1}
+
+        with pytest.raises(ValidationError):
+            SweepRun.model_validate(line)
+
+
 class TestAHeldSourceIsCountedNotHidden:
     """Issue #195. A source under a capture verdict is not asked until the
     verdict's re-check date, and the run says how many were spared: a source

@@ -569,6 +569,68 @@ thousands.
 A damaged log is refused before anything is fetched: appending thousands of
 records would bury the damage. Run `observatory verify` first.
 
+### Selecting what to capture by path (issue #348)
+
+On a whole-site crawl of 201 municipalities, 95% of distinct URLs name no
+regulation in their path, and that share is crawl budget: a source rate-limited
+at 30 s a request spends most of a night on `/nyhetsarkiv/…` and
+`/kultur-idrett-fritid/lag-og-foreninger/…`. Selection sits between discovery's
+proposals and capture's fetch, and keeps only candidates whose percent-decoded,
+lowercased path contains one of 23 stems (the owner's set of 2026-09-19 in
+`src/lovspor/observatory/selection.py`: `forskrift`, `reglement`, `vedtekt`,
+the `kunngjør`/`kunngjering` and `høring`/`hoyring` spellings, and the rest).
+
+- **Global, behind a flag, off by default** (owner decision 2026-09-26). It is on
+  only when the process environment has `LOVSPOR_OBSERVATORY_CAPTURE_SELECTION=1`,
+  for `capture`, `capture-all` and `nightly` alike; any other value is off. There is
+  no per-source switch.
+- **Off is a measurement.** Each pass prints what selection would keep, read off the
+  same proposals, so one nightly run with the flag off sizes the cut before it is
+  switched on (numbers here are illustrative, not measured):
+
+  ```
+  candidates: 1904
+  selection off: 61 of 1904 candidates would be selected
+  ```
+
+  With the flag on, the same pass reads:
+
+  ```
+  candidates: 1904
+  selected: 61 of 1904 candidates (1843 not selected: path names no regulation)
+  ...
+  captured: 3 | failed: 0 | unchanged since last seen: 58 | deferred after repeated failure: 0 | redirect hops: 0 | not selected by path: 1843
+  ```
+
+  The new counter is appended to the summary line, so a script matching its prefix
+  is unaffected. A sweep with selection on also prints
+  `candidates not selected by path: N (selection on)` at the end.
+- **Discovery is untouched.** Every sitemap, sitemap index and listing is still read
+  and archived, whatever its own URL says; only the pages capture would fetch are
+  selected. That is what keeps "what did we decline to fetch" answerable: the
+  proposals are in the archived discovery documents, the run record carries
+  `capture_selection` and `unselected`, and `engine_commit` names the stem list.
+- **A page a registered listing links to is always fetched**, whatever its path —
+  a listing is a page a reviewer declared, so it is not a guess. That holds when a
+  sitemap proposed the same page first.
+- **Already-captured pages on unselected paths stop being observed.** Their records
+  stay in the archive untouched; nothing is re-crawled or re-rendered. They are
+  counted as not selected, never as unchanged or deferred.
+- **Not a classifier.** ADR-0010's deferral holds: this scopes budget by what a path
+  *names*. A regulation at `/tjenester/vann-og-avlop/` will not be fetched, a known,
+  accepted miss, and a selected page can still be an empty JS shell (#332).
+
+To switch it on for the scheduled job, add the variable to the installed plist's
+`EnvironmentVariables` and reload the agent (see "Installing the job"):
+
+```xml
+<key>LOVSPOR_OBSERVATORY_CAPTURE_SELECTION</key>
+<string>1</string>
+```
+
+`observatory status` then shows `selection:  on — N candidates not selected by
+path` for the last run.
+
 ### One domain, one authority
 
 **Two activated sources on one domain make capture refuse, on both.** The archive's
@@ -912,7 +974,7 @@ registry. Process telemetry, not an observation:
 {"run_id":"2026-08-25T01:00:00+00:00","started_at":"...","finished_at":"...",
  "active_sources":201,"sources_completed":198,"sources_refused":3,
  "sources_withdrawn":0,"captured":47,"failed_fetches":2,"unchanged":4218,
- "deferred":36,"status":"degraded"}
+ "deferred":36,"capture_selection":false,"unselected":0,"status":"degraded"}
 ```
 
 | status | meaning | who records it |
@@ -1198,6 +1260,7 @@ Last sweep
   held:       0
   withdrawn:  0
   captured:   47 | unchanged: 4218 | deferred: 36
+  selection:  off
   status:     DEGRADED
 
 Cadence

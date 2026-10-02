@@ -34,19 +34,15 @@ from lovspor.observatory.addresses import (
     system_resolver,
 )
 from lovspor.observatory.app import _AuthorityIdOption, observatory_app
+from lovspor.observatory.capture_pass import CaptureCounts, capture_proposals, capture_summary
 from lovspor.observatory.catch_up import skip_catch_up
-from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
+from lovspor.observatory.discovery import Discoverer, DiscoveryResult
 from lovspor.observatory.engine import describe_engine
 from lovspor.observatory.fetch import Fetcher
-from lovspor.observatory.freshness import (
-    CaptureState,
-    collect_capture_state,
-    worth_capturing,
-)
+from lovspor.observatory.freshness import CaptureState, collect_capture_state
 from lovspor.observatory.freshness_index import indexed_capture_state
 from lovspor.observatory.heartbeat import report_run
 from lovspor.observatory.log import ObservationLog
-from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.registry import (
     SourceRecord,
     registry_path,
@@ -57,13 +53,16 @@ from lovspor.observatory.registry_io import (
     _registry_file,
     _root,
 )
+from lovspor.observatory.selection import choose, selection_enabled
 from lovspor.observatory.status_report import echo_status_report
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.observatory.sweeps import (
+    NO_ACTIVE_SOURCES,
+    RunContext,
     SweepRun,
+    SweepTotals,
     append_sweep_run,
     read_sweep_runs,
-    sweep_status,
     sweeps_path,
 )
 from lovspor.observatory.triggers import running_sweep
@@ -250,8 +249,7 @@ def discover(
 
     Discovery proposes; it never captures a candidate. That separation is what
     keeps a sitemap of 40,000 entries from turning one command into a mass
-    download — deciding which candidates to observe is a later step, and a
-    deliberate one.
+    download — which candidates to observe is capture's choice (#348).
 
     The documents discovery reads are themselves fetched through every gate
     and recorded in the log, because what a source listed on a given day is
@@ -264,91 +262,6 @@ def discover(
     if not entry_point:
         _require_documents(record, result, starts.probed)
     _report_discovery(result)
-
-
-class _CaptureCounts(NamedTuple):
-    """What one source's pass did, and whether the limit cut it short.
-
-    ``capped`` is the point of the type: the three counters cannot express the
-    difference between a sitemap that ran out and a pass that was stopped, and
-    that difference is what makes a truncated source read as finished (#172).
-
-    ``deferred`` is counted apart from ``unchanged`` because the two are
-    different answers. A URL is unchanged when the site says so; it is deferred
-    when it has refused us the same way and we are waiting before asking again
-    (#204). Folding them together would hide a source whose candidate list has
-    quietly become a list of dead ends.
-    """
-
-    captured: int
-    failed: int
-    unchanged: int
-    capped: bool
-    #: The pass stopped because a candidate's host is claimed by more than one
-    #: activated source. Its own field rather than a kind of `capped`: both
-    #: leave the source's archive incomplete, but a limit was our choice and
-    #: this is a register that cannot name a publisher (#215).
-    contested: bool = False
-    deferred: int = 0
-    #: Redirect hops followed on the way to the records above. Reported rather
-    #: than left implicit: they are 75% of everything the log files as a
-    #: failure (#188), and the pass that stopped counting them as failures
-    #: must not be the pass that stopped mentioning them at all.
-    redirects: int = 0
-    #: The pass stopped because the register stopped filing a candidate under
-    #: the row this run bound itself to. Apart from `contested` because the
-    #: repair differs: that one needs a human to say which authority publishes
-    #: a host, this one is already repaired and needs only a re-run (#221).
-    stale: bool = False
-
-
-def _capture_candidates(
-    fetcher: Fetcher, candidates: tuple[Candidate, ...], state: CaptureState, limit: int
-) -> _CaptureCounts:
-    """Fetch what has changed, in order, and report each outcome as it happens.
-
-    A run over a municipal site is hours of politely-spaced requests, so the
-    per-URL line is not noise: it is the only way an operator can tell a slow
-    run from a stuck one.
-    """
-    captured = failed = skipped = deferred = hops = 0
-    # One instant for the whole pass: a clock read per candidate would let two
-    # candidates observed at the same moment fall on opposite sides of the
-    # re-check window, for no reason a reader could reconstruct later.
-    now = datetime.now(UTC)
-    for candidate in candidates:
-        if not worth_capturing(candidate, state, now):
-            if candidate.url in state.observed:
-                skipped += 1
-            else:
-                deferred += 1
-            continue
-        if limit and captured + failed >= limit:
-            typer.echo(f"stopping at --limit {limit}")
-            return _CaptureCounts(captured, failed, skipped, True, False, deferred, hops)
-        try:
-            record = fetcher.capture(candidate.url, candidate.discovery_method)
-        except (AmbiguousSourceError, StaleSourceError) as exc:
-            # A refusal about the register, not about the page. Either it cannot
-            # name one authority for this host — discovery cleared the source's
-            # own host, but a candidate may sit on a subdomain a second source
-            # also claims (#215) — or it no longer names the one this run bound
-            # itself to (#221). Reaching either as a traceback would end the
-            # pass with an empty stderr and the records already appended
-            # unexplained (#208's shape).
-            typer.echo(f"Refused: {exc}", err=True)
-            stale = isinstance(exc, StaleSourceError)
-            return _CaptureCounts(
-                captured, failed, skipped, False, not stale, deferred, hops, stale
-            )
-        hops += len(record.provenance.redirect_chain)
-        if isinstance(record, ArtifactObservation):
-            captured += 1
-            typer.echo(f"  {record.http_status}  {candidate.url}")
-        else:
-            failed += 1
-            typer.echo(f"  {record.outcome}  {candidate.url}")
-    return _CaptureCounts(captured, failed, skipped, False, False, deferred, hops)
 
 
 @observatory_app.command("capture")
@@ -364,9 +277,9 @@ def capture(
     Discovery runs first, every time, so the candidate list is the one the
     source publishes now rather than one cached from an earlier day.
 
-    A candidate is skipped only when the site's own ``lastmod`` predates an
-    observation we already hold of that URL. Every other case is fetched:
-    declining to look is the one mistake this archive cannot undo later.
+    A candidate is skipped when the site's own ``lastmod`` predates an
+    observation we already hold of it, or, with selection on (#348), when its
+    path names no regulation. Both are counted; every other case is fetched.
 
     An interrupted run needs no resuming. Each observation is appended as it
     happens, so running the command again picks up where it stopped — the
@@ -383,13 +296,13 @@ def capture(
         typer.echo(f"Refused: {exc}", err=True)
         raise typer.Exit(1) from exc
     _require_documents(record, result, starts.probed)
-    typer.echo(f"candidates: {len(result.candidates)}")
-    counts = _capture_candidates(fetcher, result.candidates, state, limit)
-    typer.echo(_capture_summary(counts))
+    selection = choose(result, record.listing_entry_points, selection_enabled())
+    counts = capture_proposals(fetcher, selection, state, limit)
+    typer.echo(capture_summary(counts))
     _refuse_incomplete(record, counts)
 
 
-def _refuse_incomplete(record: SourceRecord, counts: _CaptureCounts) -> None:
+def _refuse_incomplete(record: SourceRecord, counts: CaptureCounts) -> None:
     """Name what is missing from this source's archive, then exit 1.
 
     The records already appended stay; what stopped is the rest of the pass.
@@ -408,21 +321,6 @@ def _refuse_incomplete(record: SourceRecord, counts: _CaptureCounts) -> None:
         err=True,
     )
     raise typer.Exit(1)
-
-
-def _capture_summary(counts: _CaptureCounts) -> str:
-    """The line a whole pass is read from, and the one the fleet greps.
-
-    ``deferred`` is appended rather than inserted: the prefix is what an
-    operator's scripts match on to tell a finished source from a running one,
-    and a new counter must not move it.
-    """
-    return (
-        f"captured: {counts.captured} | failed: {counts.failed} "
-        f"| unchanged since last seen: {counts.unchanged} "
-        f"| deferred after repeated failure: {counts.deferred} "
-        f"| redirect hops: {counts.redirects}"
-    )
 
 
 def _capture_state(log: ObservationLog, authority_id: str | None) -> CaptureState:
@@ -461,31 +359,6 @@ def _capture_state(log: ObservationLog, authority_id: str | None) -> CaptureStat
     return state
 
 
-class _SweepTotals(NamedTuple):
-    """Running counts over a whole sweep, so the run can describe itself."""
-
-    refused: int = 0
-    captured: int = 0
-    failed: int = 0
-    unchanged: int = 0
-    capped: int = 0
-    held: int = 0
-    deferred: int = 0
-    withdrawn: int = 0
-
-    def plus(self, other: "_SweepTotals") -> "_SweepTotals":
-        return _SweepTotals(
-            refused=self.refused + other.refused,
-            captured=self.captured + other.captured,
-            failed=self.failed + other.failed,
-            unchanged=self.unchanged + other.unchanged,
-            capped=self.capped + other.capped,
-            held=self.held + other.held,
-            deferred=self.deferred + other.deferred,
-            withdrawn=self.withdrawn + other.withdrawn,
-        )
-
-
 class _Lane(NamedTuple):
     """What every source's pass shares, so re-binding stays a per-source act."""
 
@@ -501,7 +374,7 @@ def _sweep_one(
     record: SourceRecord,
     state: CaptureState,
     limit: int,
-) -> _SweepTotals:
+) -> SweepTotals:
     """One source of a sweep, as counts; ``refused`` is 1 when it refused.
 
     The sweep continues either way — one municipality's missing sitemap must
@@ -518,27 +391,33 @@ def _sweep_one(
         # their night's observations, and it must not pass quietly either, so
         # it moves the sweep's exit code the way every other refusal does.
         typer.echo(f"  refused: {record.authority_id} {exc}", err=True)
-        return _SweepTotals(refused=1)
+        return SweepTotals(refused=1)
     if not result.documents_read:
         typer.echo(
             f"  refused: {record.authority_id} {_no_documents_reason(starts.probed)}", err=True
         )
-        return _SweepTotals(refused=1)
-    typer.echo(f"candidates: {len(result.candidates)}")
-    counts = _capture_candidates(fetcher, result.candidates, state, limit)
-    typer.echo(_capture_summary(counts))
+        return SweepTotals(refused=1)
+    selection = choose(result, record.listing_entry_points, selection_enabled())
+    counts = capture_proposals(fetcher, selection, state, limit)
+    typer.echo(capture_summary(counts))
     if counts.capped:
         # Loud on stderr, like a refusal: a source stopped by the limit was
         # truncated, and the whole point of #172 is that this is otherwise
         # indistinguishable from a source that simply ran out of pages.
         typer.echo(f"  capped: {record.authority_id} stopped at --limit {limit}", err=True)
-    return _SweepTotals(
+    return _pass_totals(record, counts)
+
+
+def _pass_totals(record: SourceRecord, counts: CaptureCounts) -> SweepTotals:
+    """One source's pass as the sweep's running counts."""
+    return SweepTotals(
         refused=1 if _abandoned(record, counts) else 0,
         captured=counts.captured,
         failed=counts.failed,
         unchanged=counts.unchanged,
         capped=1 if counts.capped else 0,
         deferred=counts.deferred,
+        unselected=counts.unselected,
     )
 
 
@@ -550,7 +429,7 @@ _CONTESTED = "a candidate's host is claimed by more than one activated source"
 _STALE = "the register row it was bound to is not the row on disk any more"
 
 
-def _abandoned(record: SourceRecord, counts: _CaptureCounts) -> bool:
+def _abandoned(record: SourceRecord, counts: CaptureCounts) -> bool:
     """Report a pass that stopped early, and say whether it was a refusal.
 
     Counted as a refusal so the sweep degrades, but the counts it did collect
@@ -618,14 +497,14 @@ def _sweep(root: ObservatoryRoot, limit: int) -> SweepRun:
     active = [record.authority_id for record in _active_sources()]
     log, state = _sweep_inputs(root)
     lane = _Lane(log, state, httpx.Client(), limit)
-    totals = _SweepTotals()
+    totals = SweepTotals()
     for authority_id in active:
         totals = totals.plus(_sweep_source(authority_id, lane, started_at))
     _echo_sweep_outcome(totals, len(active))
     return _record_sweep(root, started_at, len(active), totals)
 
 
-def _sweep_source(authority_id: str, lane: _Lane, now: datetime) -> _SweepTotals:
+def _sweep_source(authority_id: str, lane: _Lane, now: datetime) -> SweepTotals:
     """One source's pass, bound to the register as it stands at its turn.
 
     The scope of the run is the ids the register held when it began; which row
@@ -638,15 +517,15 @@ def _sweep_source(authority_id: str, lane: _Lane, now: datetime) -> _SweepTotals
     if record is None:
         typer.echo(f"== {authority_id}")
         typer.echo(f"  withdrawn: {authority_id} is no longer an activated source")
-        return _SweepTotals(withdrawn=1)
+        return SweepTotals(withdrawn=1)
     typer.echo(f"== {record.authority_id} {record.name}")
     if _held(record, now):
-        return _SweepTotals(held=1)
+        return SweepTotals(held=1)
     fetcher = Fetcher(register, lane.log, lane.client)
     return _sweep_one(fetcher, lane.log, record, lane.state, lane.limit)
 
 
-def _echo_sweep_outcome(totals: _SweepTotals, active: int) -> None:
+def _echo_sweep_outcome(totals: SweepTotals, active: int) -> None:
     """Every tally the run did not end clean on, each on its own stream.
 
     A withdrawal is stdout rather than stderr: the operator asked for it, so it
@@ -662,6 +541,8 @@ def _echo_sweep_outcome(totals: _SweepTotals, active: int) -> None:
         typer.echo(f"sources held under a verdict: {totals.held} of {active}")
     if totals.withdrawn:
         typer.echo(f"sources withdrawn mid-sweep: {totals.withdrawn} of {active}")
+    if selection_enabled():
+        typer.echo(f"candidates not selected by path: {totals.unselected} (selection on)")
 
 
 def _held(record: SourceRecord, now: datetime) -> bool:
@@ -705,7 +586,7 @@ def _sweep_inputs(root: ObservatoryRoot) -> tuple[ObservationLog, CaptureState]:
 
 
 def _record_sweep(
-    root: ObservatoryRoot, started_at: datetime, active: int, totals: _SweepTotals
+    root: ObservatoryRoot, started_at: datetime, active: int, totals: SweepTotals
 ) -> SweepRun:
     """Record that this sweep happened, and how completely.
 
@@ -713,28 +594,8 @@ def _record_sweep(
     evidence a clean one does — the run that refused a source is exactly the
     run somebody will want to read tomorrow.
     """
-    run = SweepRun(
-        run_id=started_at.isoformat(),
-        started_at=started_at,
-        finished_at=datetime.now(UTC),
-        active_sources=active,
-        sources_completed=active - totals.refused - totals.held - totals.withdrawn,
-        sources_refused=totals.refused,
-        sources_capped=totals.capped,
-        sources_held=totals.held,
-        sources_withdrawn=totals.withdrawn,
-        captured=totals.captured,
-        failed_fetches=totals.failed,
-        unchanged=totals.unchanged,
-        deferred=totals.deferred,
-        status=sweep_status(active=active, refused=totals.refused, capped=totals.capped),
-        # A register with nothing to sweep is a failure with a nameable
-        # cause, not a green run over an empty list. `capture-all` refuses
-        # before reaching here, but the recorder must stay total: the one
-        # caller that does produce it must not produce a reasonless failure.
-        failure_reason=_NO_ACTIVE_SOURCES if active == 0 else None,
-        engine_commit=describe_engine().commit,
-    )
+    context = RunContext(engine_commit=describe_engine().commit, selection=selection_enabled())
+    run = totals.as_run(started_at, datetime.now(UTC), active, context)
     append_sweep_run(root, run)
     return run
 
@@ -752,7 +613,6 @@ def _sweep_runs(root: ObservatoryRoot) -> list[SweepRun]:
 _STORAGE_UNAVAILABLE = "storage_unavailable"
 _REGISTRY_MISSING = "registry_missing"
 _LOG_DAMAGED = "observation_log_damaged"
-_NO_ACTIVE_SOURCES = "no_active_sources"
 _ENGINE_NOT_PINNED = "engine_not_pinned"
 #: Set to 1 in the scheduled job's environment: the sweep then refuses to run
 #: from an engine checkout that is on a branch or dirty (issue #219). Opt-in,
@@ -785,7 +645,7 @@ def _preflight(root: ObservatoryRoot) -> str | None:
     if not registry_path(root).exists():
         return _REGISTRY_MISSING
     if not any(record.active for record in _load(registry_path(root)).sources.values()):
-        return _NO_ACTIVE_SOURCES
+        return NO_ACTIVE_SOURCES
     if not ObservationLog(root).scan_damage().complete:
         return _LOG_DAMAGED
     return _engine_pin_verdict()

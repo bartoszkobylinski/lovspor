@@ -26,6 +26,7 @@ _MODULES = (
     "lovspor.observatory.addresses",
     "lovspor.observatory.app",
     "lovspor.observatory.audit_commands",
+    "lovspor.observatory.capture_pass",
     "lovspor.observatory.catch_up",
     "lovspor.observatory.commands",
     "lovspor.observatory.corrections",

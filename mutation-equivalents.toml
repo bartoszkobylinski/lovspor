@@ -3424,3 +3424,20 @@ or invalid. Python's own semantics. The locale-default mutation on the same line
 (`encoding=None`) is not equivalent and is killed by
 test_impl_reads_a_journal_file_as_utf8_whatever_the_locale.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/selection.py"
+symbol = "selection_enabled"
+registered = "2026-10-02, PR #504, from run 37034306144"
+mutation = """
+-    return os.environ.get(ENV_CAPTURE_SELECTION, "").strip() == "1"
++    return os.environ.get(ENV_CAPTURE_SELECTION, "XXXX").strip() == "1"
+"""
+justification = """
+The default is used only when the variable is unset, and then the result is
+`default.strip() == "1"`. For the original that is `"" == "1"`, for the mutant
+`"XXXX" == "1"`: both False. When the variable is set, `dict.get` returns its value
+and ignores the default, so both versions compare the same string. No environment
+yields a different boolean; this is `os.environ.get`/`str.strip`/`==` semantics,
+not a dependency's behaviour.
+"""
