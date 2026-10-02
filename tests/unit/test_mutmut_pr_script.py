@@ -160,7 +160,12 @@ class TestBudget:
 
 
 SILENT_MUTMUT = "#!/bin/sh\nexec sleep 30\n"
-SPINNER_MUTMUT = "#!/bin/sh\nprintf 'collecting stats\\r'\nexec sleep 30\n"
+# GNU timeout handles SIGALRM as its own timer firing: it marks the run timed
+# out, TERMs the child and exits 124. Raising it from the fake, after the
+# spinner is written, ends the budget at a known point instead of racing a
+# short wall clock against the fake's startup on a loaded machine (issue #491).
+SPINNER_BUDGET_SECONDS = 20
+SPINNER_MUTMUT = "#!/bin/sh\nprintf 'collecting stats\\r'\nkill -ALRM \"$PPID\"\nexec sleep 30\n"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -225,12 +230,14 @@ class TestBudgetKillBeforeFirstTally:
             ["bash", "scripts/mutmut-pr.sh", "base"],
             cwd=repo,
             capture_output=True,
-            env={**os.environ, "MUTMUT_PR_FILE_BUDGET_SECONDS": "1"},
+            env={**os.environ, "MUTMUT_PR_FILE_BUDGET_SECONDS": str(SPINNER_BUDGET_SECONDS)},
             timeout=60,
             check=False,
         )
 
-        assert b"collecting stats\r\nmutation budget exceeded: after 1s" in result.stdout
+        verdict = f"mutation budget exceeded: after {SPINNER_BUDGET_SECONDS}s".encode()
+        assert b"collecting stats\r\n" + verdict in result.stdout
+        assert result.returncode == 16
 
     def test_the_gate_reads_it_as_the_budget(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
