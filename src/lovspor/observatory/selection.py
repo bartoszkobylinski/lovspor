@@ -21,9 +21,28 @@ The stems are the owner's decision of 2026-09-19 on issue #348, tuned offline
 against the crawled corpus: the recommended twenty plus the three spellings
 of public hearing (``hoyring``, ``hoering``, ``horing``), which go in together
 so bokmål and nynorsk sites are held to the same rule.
+
+The owner's decision of 2026-09-26 placed the step: it sits inside ADR-0010's
+deferral of classification, and it is global, behind a flag, switched on after
+one measured pass. So it is off unless :data:`ENV_CAPTURE_SELECTION` is ``1``,
+and off still counts what it would keep — that count is the measurement.
+
+Proposals from a registered listing page bypass the path rule (#348's
+proposed shape): a listing is a page a reviewer declared, so what it links to
+is not a guess.
 """
 
+import os
+from typing import NamedTuple
 from urllib.parse import unquote, urlsplit
+
+from lovspor.observatory.discovery import Candidate, DiscoveryResult
+
+#: Set to 1 in the job's environment to fetch only selected candidates.
+ENV_CAPTURE_SELECTION = "LOVSPOR_OBSERVATORY_CAPTURE_SELECTION"
+
+#: Discovery's reason for a second proposal of a URL it already holds.
+_DUPLICATE = "duplicate_candidate"
 
 REGULATION_PATH_STEMS: tuple[str, ...] = (
     "forskrift",
@@ -60,3 +79,39 @@ def selects(url: str) -> bool:
     """
     path = unquote(urlsplit(url).path).lower()
     return any(stem in path for stem in REGULATION_PATH_STEMS)
+
+
+def selection_enabled() -> bool:
+    """Whether this process fetches only selected candidates; one spelling, ``1``."""
+    return os.environ.get(ENV_CAPTURE_SELECTION, "").strip() == "1"
+
+
+class Selection(NamedTuple):
+    """Which of discovery's proposals a pass will fetch, and how many it would."""
+
+    chosen: tuple[Candidate, ...]
+    proposed: int
+    #: Proposals the rule keeps, counted whether or not it is switched on.
+    matching: int
+    enabled: bool
+
+    @property
+    def unselected(self) -> int:
+        """Proposals left unfetched because selection declined them."""
+        return self.proposed - len(self.chosen)
+
+
+def choose(result: DiscoveryResult, listings: tuple[str, ...], enabled: bool) -> Selection:
+    """Apply the path rule to ``result``'s candidates, keeping their order.
+
+    ``listings`` are the source's registered listing pages. A candidate any
+    of them proposed bypasses the rule — including one a sitemap proposed
+    first, which discovery keeps and files the listing's proposal of as a
+    duplicate.
+    """
+    listed = {s.url for s in result.skipped if s.reason == _DUPLICATE and s.found_in in listings}
+    kept = tuple(
+        c for c in result.candidates if c.found_in in listings or c.url in listed or selects(c.url)
+    )
+    chosen = kept if enabled else result.candidates
+    return Selection(chosen, len(result.candidates), len(kept), enabled)
