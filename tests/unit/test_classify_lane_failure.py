@@ -446,3 +446,81 @@ def test_the_cli_names_the_runner_tool_with_the_constant_only(
         f"step={_TOOL_STOP}",
         "signature=failed to spawn code-mode host",
     ]
+
+
+# Issue #493, the shape of runs 36784234807 and 36823210811: the Mac runner
+# could not download a pinned action from codeload.github.com, so the job's one
+# and only step is GitHub's own `Set up job`, concluded `failure`. No step of
+# the workflow ran — no checkout, no Codex round.
+def _setup_death() -> list[dict[str, Any]]:
+    return [_job("codex-author", "failure", [("Set up job", "completed", "failure")])]
+
+
+def test_a_job_that_failed_in_set_up_job_is_a_runner_setup_failure() -> None:
+    verdict = classify_lane_failure.classify(_setup_death(), ["codex-author", "codex-tests"])
+
+    assert verdict.kind == "runner_setup"
+    assert verdict.job == "codex-author"
+    assert verdict.step == "Set up job"
+    assert verdict.is_infrastructure is True
+
+
+def test_a_failed_job_with_no_steps_at_all_is_a_runner_setup_failure() -> None:
+    """A job the runner never set up has an empty steps list: the machine as
+    well, never a verdict about the diff."""
+    jobs = [_job("codex-author", "failure", [])]
+
+    verdict = classify_lane_failure.classify(jobs, ["codex-author"])
+
+    assert verdict.kind == "runner_setup"
+    assert verdict.step == "(no step started)"
+
+
+def test_set_up_job_only_counts_when_it_is_the_step_that_failed() -> None:
+    """A successful `Set up job` followed by the job's own failing step is the
+    ordinary in-job case."""
+    jobs = [
+        _job(
+            "codex-author",
+            "failure",
+            [("Set up job", "completed", "success"), ("Scope guard", "completed", "failure")],
+        )
+    ]
+
+    assert classify_lane_failure.classify(jobs, ["codex-author"]).kind == "in_job"
+
+
+def test_a_set_up_job_frozen_mid_flight_stays_infrastructure() -> None:
+    jobs = [_job("codex-author", "failure", [("Set up job", "in_progress", None)])]
+
+    assert classify_lane_failure.classify(jobs, ["codex-author"]).kind == "infrastructure"
+
+
+def test_a_set_up_job_failure_is_not_refined_by_the_log() -> None:
+    """No workflow step ran, so nothing in the log can be the job's own
+    credential refusal or tool failure."""
+    log = _EXPIRED_TOKEN_LOG + _CODE_MODE_HOST_LOG
+
+    verdict = classify_lane_failure.classify(_setup_death(), ["codex-author"], log)
+
+    assert verdict == classify_lane_failure.Verdict(
+        "runner_setup", job="codex-author", step="Set up job"
+    )
+
+
+def test_the_cli_reports_a_runner_setup_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jobs = tmp_path / "jobs.json"
+    jobs.write_text(json.dumps({"jobs": _setup_death()}), encoding="utf-8")
+    log = tmp_path / "lane.log"
+    log.write_text("", encoding="utf-8")
+
+    assert classify_lane_failure.main(["--jobs", str(jobs), "--log", str(log)]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "kind=runner_setup",
+        "job=codex-author",
+        "step=Set up job",
+        "signature=",
+    ]

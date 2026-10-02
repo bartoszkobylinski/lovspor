@@ -478,6 +478,21 @@ Two rules follow, and they are pinned by tests:
   `needs-human:pipeline`. Until this existed, both deaths on PR #269 were reported
   as `codex-tests BLOCKED before the tests ran` — the tests had run; the machine
   stopped.
+- **A lane that died in `Set up job` is the runner, not the diff and not Codex (issue
+  #493).** When the Mac runner times out downloading a pinned action from
+  `codeload.github.com`, `codex-author` fails in GitHub's own first step and its jobs
+  payload holds that one step, concluded `failure` (runs 36784234807, 36823210811,
+  36831117456). The classifier calls a failed lane whose failed step is `Set up job`,
+  or that has no steps at all, `runner_setup`, and `codex-tests-report` says that no
+  step of the workflow ran and gives the rerun (`gh run rerun <id> --failed`), with a
+  note that an action reference that cannot resolve also fails there and is not
+  cleared by a rerun. `codex-tests`' own pre-test escalation stands down when the
+  author failed with no outputs at all (`needs.codex-author.outputs.skip == ''`, the
+  output its first own step always writes): it cannot read the jobs API to tell this
+  case apart, and its generic round used to make the reporter stand down on the label.
+  The label stays `needs-human:pipeline`. No automatic rerun: a run cannot rerun
+  itself while in progress, and doing it from a `workflow_run` workflow would add an
+  `actions: write` surface for a failure a human clears with one command.
 - **A rejected credential is an operator action, not a pipeline failure (issue
   #270).** When the lane reached its own failure, `codex-tests-report` also fetches
   that job's log (`actions: read`) and hands it to the classifier with `--log`. A
