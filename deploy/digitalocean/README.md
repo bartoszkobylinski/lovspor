@@ -169,9 +169,20 @@ Hand-issued `lsp_…` tokens keep working either way — see
 ```bash
 sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
 sudo -u lovspor sh -c 'cd /opt/lovspor/app && /opt/lovspor/.local/bin/uv sync --frozen --no-dev'
+sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh
 sudo systemctl restart lovspor-mcp
 sudo journalctl -u lovspor-mcp -n 40 --no-pager
 ```
+
+`sync-units.sh` installs every systemd unit this checkout ships (the list
+`provision.sh` installs too), runs `systemctl daemon-reload`, then compares each
+installed unit with the repository copy: one `OK` line per unit, and on any
+difference a `DIFF` line per unit and a non-zero exit — in an `&&` chain that
+stops the deploy before the restart. It enables, starts and restarts nothing.
+To see drift without changing anything:
+`bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh --check`. (#484: the
+deploy used to leave `/etc/systemd/system` alone, so a merged unit change never
+reached the box.)
 
 Restart and release are independent, and neither waits for the other. A release
 run before the restart is not refused: it publishes `runtime_tree_match: false`
@@ -329,23 +340,22 @@ the repository copy or checks first:
 ```bash
 sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
 sudo -u lovspor sh -c 'cd /opt/lovspor/app && /opt/lovspor/.local/bin/uv sync --frozen --no-dev'
-for u in lovspor-alert@.service lovspor-fetch-corpus.service lovspor-fetch-corpus.timer lovspor-publish.service lovspor-site-drift.service lovspor-site-drift.timer; do sudo install -m644 "/opt/lovspor/app/deploy/digitalocean/$u" /etc/systemd/system/; done
+sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh
 sudo sh -c 'test -f /etc/lovspor/alert.env || printf "%s\n" "LOVSPOR_ALERT_WEBHOOK=" "LOVSPOR_ALERT_FORMAT=text" > /etc/lovspor/alert.env'
 sudo chown root:root /etc/lovspor/alert.env
 sudo chmod 600 /etc/lovspor/alert.env
 sudo test -s /etc/lovspor/credentials/site-probe && echo "site-probe credential: present" || echo "site-probe credential: MISSING (drift check will fail)"
-sudo systemctl daemon-reload
 sudo systemctl enable --now lovspor-fetch-corpus.timer lovspor-site-drift.timer
 sudo systemctl restart lovspor-mcp
 sudo journalctl -u lovspor-mcp -n 40 --no-pager
 systemctl list-timers --all | grep lovspor
 systemctl show -p OnFailure lovspor-fetch-corpus lovspor-publish lovspor-site-drift
-for u in lovspor-alert@.service lovspor-fetch-corpus.service lovspor-fetch-corpus.timer lovspor-publish.service lovspor-site-drift.service lovspor-site-drift.timer; do if sudo cmp -s "/opt/lovspor/app/deploy/digitalocean/$u" "/etc/systemd/system/$u"; then echo "OK   $u"; else echo "DIFF $u"; fi; done
 sudo /opt/lovspor/app/.venv/bin/lovspor ops alert --unit lovspor-publish.service --test
 ```
 
-Every unit line of the loop must print `OK`; a `DIFF` means the installed copy
-is not the repository's. The drift check's first run (the next `:17`) presents
+The `sync-units.sh` line installs the units, reloads systemd and prints one
+`OK` per unit; a `DIFF` means the installed copy is not the repository's, and
+the script exits non-zero. The drift check's first run (the next `:17`) presents
 the release probe's credential, `/etc/lovspor/credentials/site-probe` — the
 `present` line above; without it every hourly run fails and, with a webhook set,
 alerts. The last line prints `alert webhook not configured` until you set
@@ -389,6 +399,7 @@ sudo -u lovspor /opt/lovspor/app/.venv/bin/lovspor tokens revoke <id>
 ```bash
 sudo -u lovspor git -C /opt/lovspor/app checkout <good-sha>
 sudo -u lovspor sh -c 'cd /opt/lovspor/app && /opt/lovspor/.local/bin/uv sync --frozen --no-dev'
+sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh
 sudo systemctl restart lovspor-mcp
 # return to the tip once the fix is in — leaves a clean, trackable branch for future pulls:
 sudo -u lovspor git -C /opt/lovspor/app checkout main

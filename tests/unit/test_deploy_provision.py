@@ -315,20 +315,14 @@ class TestTheRetiredSiteRoot:
 
 class TestTheUnits:
     def test_installs_the_drift_pair_from_the_verified_checkout(self) -> None:
+        """The unit list lives in ``sync-units.sh``, shared with every deploy
+        (#484); ``test_deploy_sync_units`` pins that it names every unit,
+        the drift pair included. Here: it runs only after the checkout is
+        verified, because it installs the units as root."""
         text = _script()
 
-        for unit in (
-            "lovspor-mcp.service",
-            "lovspor-fetch-corpus.service",
-            "lovspor-fetch-corpus.timer",
-            "lovspor-publish.service",
-            "lovspor-site-drift.service",
-            "lovspor-site-drift.timer",
-            "lovspor-alert@.service",
-        ):
-            assert f'install -m644 "$APP_DIR/deploy/digitalocean/{unit}" /etc/systemd/system/' in (
-                text
-            ), unit
+        sync = text.index('bash "$APP_DIR/deploy/digitalocean/sync-units.sh"')
+        assert text.index('[ "$LOCAL_HEAD" = "$UPSTREAM_HEAD" ]') < sync
 
     def test_enables_and_starts_the_drift_timer_like_the_fetch_timer(self) -> None:
         """ADR-0014: installed and enabled the way `lovspor-fetch-corpus.timer`

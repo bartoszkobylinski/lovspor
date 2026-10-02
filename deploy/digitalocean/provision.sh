@@ -258,13 +258,8 @@ UPSTREAM_HEAD="$(sudo -u "$APP_USER" git -C "$APP_DIR" rev-parse '@{upstream}')"
 
 # --- 13. Install units + Caddyfile from the (verified) repo ---
 log "Installing systemd units and Caddyfile"
-install -m644 "$APP_DIR/deploy/digitalocean/lovspor-mcp.service" /etc/systemd/system/
-install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.service" /etc/systemd/system/
-install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.timer" /etc/systemd/system/
-install -m644 "$APP_DIR/deploy/digitalocean/lovspor-publish.service" /etc/systemd/system/
-install -m644 "$APP_DIR/deploy/digitalocean/lovspor-site-drift.service" /etc/systemd/system/
-install -m644 "$APP_DIR/deploy/digitalocean/lovspor-site-drift.timer" /etc/systemd/system/
-install -m644 "$APP_DIR/deploy/digitalocean/lovspor-alert@.service" /etc/systemd/system/
+# The same script every deploy runs (#484): one list of units, verified installed.
+bash "$APP_DIR/deploy/digitalocean/sync-units.sh"
 install -d /etc/caddy
 install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile
 # The site's privacy page promises the server log is kept at most 30 days; journald
