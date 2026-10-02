@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import httpx
@@ -4398,6 +4399,12 @@ class TestStatus:
 
     def test_sweep_totals_add_unselected_candidates(self) -> None:
         assert SweepTotals(unselected=4).plus(SweepTotals(unselected=5)).unselected == 9
+
+    def test_sweep_totals_refuse_a_tally_of_another_shape(self) -> None:
+        # A short tally must not be zero-filled into a plausible-looking total:
+        # a field it lacks would read as "nothing happened" in the sweep record.
+        with pytest.raises(ValueError, match="zip"):
+            SweepTotals(unchanged=2).plus(cast(SweepTotals, (1, 2)))
 
     def test_last_sweep_names_a_selecting_run_and_what_it_declined(
         self, capsys: pytest.CaptureFixture[str]
