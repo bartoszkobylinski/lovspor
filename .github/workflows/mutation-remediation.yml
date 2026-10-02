@@ -646,6 +646,24 @@ jobs:
               echo ""
               echo "Run: $RUN_URL"
             } > "$RUNNER_TEMP/dead-lane-escalation.md"
+          # Issue #499, the twin of #493: a lane the runner never set up has
+          # no outputs, so it lands here, never in the in-job escalation.
+          elif [ "$KIND" = "runner_setup" ]; then
+            {
+              echo "Mutation remediation BLOCKED by a RUNNER SET-UP failure — the runner, not the diff and not Codex."
+              echo ""
+              echo "Job \`remediate\` failed in \`$STEP\`, before any step of the workflow ran:"
+              echo "nothing was checked out and no Codex round started, so whether remediation"
+              echo "applies is unknown. The usual cause is the self-hosted runner timing out while"
+              echo "downloading a pinned action (#493)."
+              echo ""
+              echo "Re-run the failed jobs:"
+              echo "\`gh run rerun ${RUN_URL##*/} --failed\`"
+              echo "If the rerun fails in the same place, read that job's log: an action reference"
+              echo "that cannot be resolved fails here too, and no rerun clears it."
+              echo ""
+              echo "Run: $RUN_URL"
+            } > "$RUNNER_TEMP/dead-lane-escalation.md"
           else
             {
               echo "Mutation remediation ended '$RESULT' without reporting its own state — the job"
