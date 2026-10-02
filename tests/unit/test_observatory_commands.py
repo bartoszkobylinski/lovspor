@@ -72,6 +72,7 @@ from lovspor.observatory.registry import (
     replace_domain,
     write_registry,
 )
+from lovspor.observatory.selection import ENV_CAPTURE_SELECTION
 from lovspor.observatory.status_report import (
     _echo_cadence,
     _echo_last_sweep,
@@ -146,6 +147,9 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     observatory = tmp_path / "observatory"
     monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(observatory))
     monkeypatch.delenv(ENV_CORPUS_ROOT, raising=False)
+    # An operator's shell may have switched selection on; every test here
+    # starts from the shipped default and switches it on itself.
+    monkeypatch.delenv(ENV_CAPTURE_SELECTION, raising=False)
     return observatory
 
 
@@ -3024,7 +3028,7 @@ class TestCaptureAll:
 
         counts = capture_candidates(fetcher, candidates, CaptureState.empty(), limit=2)
 
-        assert counts == (2, 0, 0, True, False, 0, 5, False)
+        assert counts == (2, 0, 0, True, False, 0, 5, False, 0)
         assert fetcher.capture.call_count == 2
 
     def test_every_candidate_in_a_pass_uses_the_same_clock_read(
@@ -3078,7 +3082,7 @@ class TestCaptureAll:
             limit=1,
         )
 
-        assert counts == (1, 0, 1, False, False, 0, 0, False)
+        assert counts == (1, 0, 1, False, False, 0, 0, False, 0)
         fetcher.capture.assert_called_once_with(OTHER_PAGE_URL, "sitemap")
 
     def test_multiple_held_candidates_are_all_counted_as_deferred(
@@ -3116,7 +3120,7 @@ class TestCaptureAll:
 
         counts = capture_candidates(fetcher, (held, first, capped), state, limit=1)
 
-        assert counts == (1, 0, 0, True, False, 1, 0, False)
+        assert counts == (1, 0, 0, True, False, 1, 0, False, 0)
 
     def test_contested_counts_preserve_every_prior_outcome(
         self, monkeypatch: pytest.MonkeyPatch
@@ -3163,19 +3167,19 @@ class TestCaptureAll:
 
         counts = capture_candidates(fetcher, candidates, state, limit=0)
 
-        assert counts == (1, 1, 1, False, True, 1, 3, False)
+        assert counts == (1, 1, 1, False, True, 1, 3, False, 0)
 
     def test_one_sweep_source_preserves_deferred_counts(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         candidate = Candidate(url=PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
-        discovery = SimpleNamespace(documents_read=1, candidates=(candidate,))
+        discovery = SimpleNamespace(documents_read=1, candidates=(candidate,), skipped=())
         monkeypatch.setattr(observatory_commands, "_entry_points", lambda *args: Mock())
         discoverer = Mock()
         discoverer.discover.return_value = discovery
         monkeypatch.setattr(observatory_commands, "Discoverer", lambda *args: discoverer)
         monkeypatch.setattr(observatory_capture_pass, "worth_capturing", lambda *args: False)
-        record = Mock(authority_id=BAERUM_ID)
+        record = Mock(authority_id=BAERUM_ID, listing_entry_points=())
 
         totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
 
@@ -3184,17 +3188,17 @@ class TestCaptureAll:
     def test_contested_sweep_reports_to_stderr_and_preserves_counts(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        discovery = SimpleNamespace(documents_read=1, candidates=())
+        discovery = SimpleNamespace(documents_read=1, candidates=(), skipped=())
         monkeypatch.setattr(observatory_commands, "_entry_points", lambda *args: Mock())
         discoverer = Mock()
         discoverer.discover.return_value = discovery
         monkeypatch.setattr(observatory_commands, "Discoverer", lambda *args: discoverer)
         monkeypatch.setattr(
             observatory_commands,
-            "capture_candidates",
+            "capture_proposals",
             lambda *args: CaptureCounts(2, 1, 3, False, True, 4, 5),
         )
-        record = Mock(authority_id=BAERUM_ID)
+        record = Mock(authority_id=BAERUM_ID, listing_entry_points=())
 
         totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
 
@@ -4952,6 +4956,133 @@ class TestCapture:
         assert "captured: 0 | failed: 1" in first.output
         assert "captured: 1 | failed: 0" in second.output
         assert f"200  {OTHER_PAGE_URL}" in second.output
+
+
+NEWS_URL = f"https://www.{BAERUM_DOMAIN}/nyhetsarkiv/2026/ny-lekeplass"
+CLUB_URL = f"https://www.{BAERUM_DOMAIN}/kultur-idrett-fritid/lag-og-foreninger/skiklubb"
+NEWS_SITEMAP_URL = f"https://www.{BAERUM_DOMAIN}/sitemap-nyheter.xml"
+
+
+class TestCaptureSelection:
+    """#348: between discovery's proposals and capture's fetch, a path rule.
+
+    Global, behind a flag, switched on after one measured pass (owner,
+    2026-09-26). Each test drives the command an operator runs, with the
+    switch set the way the job's environment sets it; only HTTP is mocked.
+    """
+
+    def _ready(self, httpx_mock: HTTPXMock, root: Path, *pages: str) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(*pages), is_reusable=True)
+
+    def test_on_an_unselected_candidate_is_never_fetched_and_a_selected_one_is(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The Kongsvinger night: a news archive and a sports club fetched at
+        30 s apiece, beside the one page whose path names a regulation."""
+        self._ready(httpx_mock, root, NEWS_URL, PAGE_URL, CLUB_URL)
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        requested = [str(r.url) for r in _requests_after_setup(httpx_mock)]
+        assert PAGE_URL in requested
+        assert NEWS_URL not in requested
+        assert CLUB_URL not in requested
+        assert "candidates: 3\n" in result.output
+        assert "selected: 1 of 3 candidates (2 not selected: path names no regulation)" in (
+            result.output
+        )
+        assert result.output.rstrip().endswith("| not selected by path: 2")
+        assert _logged_urls(root) == [SITEMAP_URL, PAGE_URL]
+
+    def test_off_by_default_every_candidate_is_fetched_and_the_match_is_measured(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The shipped default is today's crawl. The line it adds is the
+        measured pass the decision asks for before switching it on."""
+        self._ready(httpx_mock, root, NEWS_URL, PAGE_URL)
+        httpx_mock.add_response(url=NEWS_URL, content=b"<html>nyhet</html>")
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "selection off: 1 of 2 candidates would be selected" in result.output
+        assert "captured: 2 | failed: 0" in result.output
+        assert "| not selected by path: 0" in result.output
+        assert _logged_urls(root) == [SITEMAP_URL, NEWS_URL, PAGE_URL]
+
+    def test_an_already_captured_page_on_an_unselected_path_stops_being_observed(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#348's tuning counted what the existing archive would *keep*; the
+        rest of it is left alone — its records stay, it is not fetched again,
+        and it is counted as not selected rather than as unchanged."""
+        self._ready(httpx_mock, root, NEWS_URL)
+        httpx_mock.add_response(url=NEWS_URL, content=b"<html>nyhet</html>")
+        assert runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID]).exit_code == 0
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert [str(r.url) for r in httpx_mock.get_requests()].count(NEWS_URL) == 1
+        assert "captured: 0 | failed: 0 | unchanged since last seen: 0" in result.output
+        assert "| not selected by path: 1" in result.output
+        assert _logged_urls(root) == [SITEMAP_URL, NEWS_URL, SITEMAP_URL]
+
+    def test_discovery_still_reads_a_sitemap_whose_own_path_names_no_regulation(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Selection is capture's, never discovery's: a nested sitemap is a
+        document discovery traverses, not a candidate, whatever its name."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_sitemapindex(NEWS_SITEMAP_URL))
+        httpx_mock.add_response(url=NEWS_SITEMAP_URL, content=_urlset(PAGE_URL, NEWS_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert _logged_urls(root) == [SITEMAP_URL, NEWS_SITEMAP_URL, PAGE_URL]
+
+    def test_a_page_a_registered_listing_links_to_is_fetched_whatever_its_path(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The listing is declared with the supported command, and the sitemap
+        proposes the same page first — the shape a source with both has."""
+        self._ready(httpx_mock, root, NEWS_URL, CLUB_URL)
+        assert _update("--add-listing", LISTING_URL).exit_code == 0
+        httpx_mock.add_response(url=LISTING_URL, content=_listing_page(href=NEWS_URL))
+        httpx_mock.add_response(url=NEWS_URL, content=b"<html>nyhet</html>")
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "selected: 1 of 2 candidates" in result.output
+        assert _logged_urls(root) == [SITEMAP_URL, LISTING_URL, NEWS_URL]
+
+    def test_every_lane_of_a_sweep_selects_the_same_way(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._ready(httpx_mock, root, NEWS_URL, PAGE_URL)
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert "selected: 1 of 2 candidates (1 not selected: path names no regulation)" in (
+            result.output
+        )
+        assert NEWS_URL not in [str(r.url) for r in httpx_mock.get_requests()]
 
 
 class TestTheRegisterIsRereadWhileACaptureRuns:

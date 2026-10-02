@@ -1,8 +1,13 @@
-"""One source's capture pass: fetch what discovery proposed and has changed.
+"""One source's capture pass: select from discovery's proposals, fetch what changed.
 
 Split out of ``commands`` so the pass can grow a step without the command
 module growing with it. ``capture`` and every lane of a sweep run exactly
 this pass, so whatever it declines, it declines identically in both.
+
+:func:`capture_proposals` is the seam #348 asked for, between discovery's
+proposals and capture's fetch: selection first, then freshness. In that order
+a page selection declined is counted once, as not selected, and never as
+unchanged or deferred — those describe pages the pass did consider.
 """
 
 from dataclasses import dataclass
@@ -16,6 +21,7 @@ from lovspor.observatory.discovery import Candidate
 from lovspor.observatory.fetch import Fetcher
 from lovspor.observatory.freshness import CaptureState, worth_capturing
 from lovspor.observatory.model import ArtifactObservation
+from lovspor.observatory.selection import Selection
 
 
 class CaptureCounts(NamedTuple):
@@ -52,6 +58,10 @@ class CaptureCounts(NamedTuple):
     #: repair differs: that one needs a human to say which authority publishes
     #: a host, this one is already repaired and needs only a re-run (#221).
     stale: bool = False
+    #: Proposals selection declined to fetch because their path names no
+    #: regulation (#348). Counted, never silent: an exclusion nobody can see
+    #: turns a tunable heuristic into an unknowable one.
+    unselected: int = 0
 
 
 @dataclass
@@ -77,6 +87,33 @@ class _Tally:
             self.redirects,
             stale,
         )
+
+
+def capture_proposals(
+    fetcher: Fetcher, selection: Selection, state: CaptureState, limit: int
+) -> CaptureCounts:
+    """Say what selection kept, then capture only that."""
+    typer.echo(f"candidates: {selection.proposed}")
+    typer.echo(_selection_line(selection))
+    counts = capture_candidates(fetcher, selection.chosen, state, limit)
+    return counts._replace(unselected=selection.unselected)
+
+
+def _selection_line(selection: Selection) -> str:
+    """Selected N of M when on; when off, what it would have kept.
+
+    The off line is the measured pass the 2026-09-26 decision asks for
+    before selection is switched on, read off the same proposals.
+    """
+    if not selection.enabled:
+        return (
+            f"selection off: {selection.matching} of {selection.proposed} "
+            "candidates would be selected"
+        )
+    return (
+        f"selected: {len(selection.chosen)} of {selection.proposed} candidates "
+        f"({selection.unselected} not selected: path names no regulation)"
+    )
 
 
 def capture_candidates(
@@ -137,7 +174,7 @@ def _fetch(fetcher: Fetcher, candidate: Candidate, tally: _Tally) -> CaptureCoun
 def capture_summary(counts: CaptureCounts) -> str:
     """The line a whole pass is read from, and the one the fleet greps.
 
-    ``deferred`` is appended rather than inserted: the prefix is what an
+    ``deferred`` and ``unselected`` are appended rather than inserted: the prefix is what an
     operator's scripts match on to tell a finished source from a running one,
     and a new counter must not move it.
     """
@@ -145,5 +182,6 @@ def capture_summary(counts: CaptureCounts) -> str:
         f"captured: {counts.captured} | failed: {counts.failed} "
         f"| unchanged since last seen: {counts.unchanged} "
         f"| deferred after repeated failure: {counts.deferred} "
-        f"| redirect hops: {counts.redirects}"
+        f"| redirect hops: {counts.redirects} "
+        f"| not selected by path: {counts.unselected}"
     )

@@ -34,7 +34,7 @@ from lovspor.observatory.addresses import (
     system_resolver,
 )
 from lovspor.observatory.app import _AuthorityIdOption, observatory_app
-from lovspor.observatory.capture_pass import CaptureCounts, capture_candidates, capture_summary
+from lovspor.observatory.capture_pass import CaptureCounts, capture_proposals, capture_summary
 from lovspor.observatory.catch_up import skip_catch_up
 from lovspor.observatory.discovery import Discoverer, DiscoveryResult
 from lovspor.observatory.engine import describe_engine
@@ -53,6 +53,7 @@ from lovspor.observatory.registry_io import (
     _registry_file,
     _root,
 )
+from lovspor.observatory.selection import choose, selection_enabled
 from lovspor.observatory.status_report import echo_status_report
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.observatory.sweeps import (
@@ -246,8 +247,7 @@ def discover(
 
     Discovery proposes; it never captures a candidate. That separation is what
     keeps a sitemap of 40,000 entries from turning one command into a mass
-    download — deciding which candidates to observe is a later step, and a
-    deliberate one.
+    download — which candidates to observe is capture's choice (#348).
 
     The documents discovery reads are themselves fetched through every gate
     and recorded in the log, because what a source listed on a given day is
@@ -275,9 +275,9 @@ def capture(
     Discovery runs first, every time, so the candidate list is the one the
     source publishes now rather than one cached from an earlier day.
 
-    A candidate is skipped only when the site's own ``lastmod`` predates an
-    observation we already hold of that URL. Every other case is fetched:
-    declining to look is the one mistake this archive cannot undo later.
+    A candidate is skipped when the site's own ``lastmod`` predates an
+    observation we already hold of it, or, with selection on (#348), when its
+    path names no regulation. Both are counted; every other case is fetched.
 
     An interrupted run needs no resuming. Each observation is appended as it
     happens, so running the command again picks up where it stopped — the
@@ -294,8 +294,8 @@ def capture(
         typer.echo(f"Refused: {exc}", err=True)
         raise typer.Exit(1) from exc
     _require_documents(record, result, starts.probed)
-    typer.echo(f"candidates: {len(result.candidates)}")
-    counts = capture_candidates(fetcher, result.candidates, state, limit)
+    selection = choose(result, record.listing_entry_points, selection_enabled())
+    counts = capture_proposals(fetcher, selection, state, limit)
     typer.echo(capture_summary(counts))
     _refuse_incomplete(record, counts)
 
@@ -420,8 +420,8 @@ def _sweep_one(
             f"  refused: {record.authority_id} {_no_documents_reason(starts.probed)}", err=True
         )
         return _SweepTotals(refused=1)
-    typer.echo(f"candidates: {len(result.candidates)}")
-    counts = capture_candidates(fetcher, result.candidates, state, limit)
+    selection = choose(result, record.listing_entry_points, selection_enabled())
+    counts = capture_proposals(fetcher, selection, state, limit)
     typer.echo(capture_summary(counts))
     if counts.capped:
         # Loud on stderr, like a refusal: a source stopped by the limit was
