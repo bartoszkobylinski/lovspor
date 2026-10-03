@@ -149,7 +149,9 @@ The product promise is deliberately narrower than "no hallucinations": Lovspor s
 
 ### Deferred, not rejected
 
-Until the hosted beta is usable, do not start AST, Høyesterett ingestion, local regulations, FTS5, Docker, a broad web UI, or multi-jurisdiction work. Every option remains documented below and can be promoted when beta evidence shows that it removes a real adoption or answer-quality constraint.
+Until the hosted beta is usable, do not start AST, Høyesterett ingestion, FTS5, Docker, a broad web UI, or multi-jurisdiction work. Every option remains documented below and can be promoted when beta evidence shows that it removes a real adoption or answer-quality constraint.
+
+Local regulations are **not** in this deferred list: they are active work. Lovdata `publicData` does not serve them (Lovtidend avd. II; see D-API-1 → D-DIRECT-6 below), so the only route is capturing municipalities' own publications, and every day not captured is history that cannot be backfilled. The observatory (ADR-0010, lovspor-notebook) has captured since 2026-08-19 and runs nightly; since #348/#504 it fetches only paths that name a regulation. Captured is not yet corpus: classification, the identity model and promotion into lovverk and the MCP are open (lovspor-notebook #139).
 
 ---
 
