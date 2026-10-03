@@ -218,3 +218,19 @@ class StaleSourceError(SourceNotActivatedError):
     Refusing is the recoverable outcome and writing is not: nothing in this
     engine rewrites ``authority_id``, and nothing appends a tombstone.
     """
+
+
+class PromotionError(LovsporError):
+    """Base for promoting observed local regulations into ``lovverk`` (ADR-0016).
+
+    Its own branch: promotion reads the observatory's archive and writes a
+    corpus, and a refusal here must never read as a capture or sync failure.
+    """
+
+
+class UnreadableSourceError(PromotionError):
+    """Captured bytes that the extractor's readers cannot turn into text.
+
+    Raised by a reader and turned into a counted hold by the extractor — the
+    artifact stays in the archive, unpublished, never silently skipped.
+    """
