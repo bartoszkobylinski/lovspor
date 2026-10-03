@@ -21,6 +21,11 @@ Event types correspond to the orchestrator's per-document commit policy
     renamed   slug changed (from→to recorded for cross-reference)
     removed   upstream dropped the doc; corpus tombstones it
 
+Local regulations (ADR-0016 Decision 3) carry their own subjects:
+``promote(lokal-forskrift): <authority_id>/<slug> v<N>`` is ``added`` for
+v1 and ``updated`` for a later version, ``withdraw(lokal-forskrift): …`` is
+``removed``, and ``observe: …`` (an observation-interval refresh) is no event.
+
 Pre-Sprint-4 commits used bulk-mode subjects (``sync: N new, M changed,
 …``) that don't tell us per-doc intent. For commits matching that
 pattern we fall back to git's numstat — if line removals occurred the
@@ -54,7 +59,14 @@ _PER_DOC_SUBJECT = re.compile(
     r"^(?P<verb>add|update|rename|remove)\((?P<dataset>lov|forskrift)\): ",
 )
 _MIGRATION_RENAME_SUBJECT = re.compile(r"^migration: rename ")
-_RERENDER_SUBJECT = re.compile(r"^migration: re-render ")
+# Not legal-history events: a re-render rewrites Markdown from unchanged input,
+# and an `observe:` commit refreshes local observation intervals (ADR-0016 3).
+_HISTORY_EXEMPT_SUBJECT = re.compile(r"^(?:migration: re-render |observe: )")
+# ADR-0016 Decision 3: a local regulation's per-version and withdrawal subjects.
+_LOCAL_SUBJECT = re.compile(
+    r"^(?:promote\(lokal-forskrift\): \S+ v(?P<version>[1-9]\d*)"
+    r"|(?P<withdraw>withdraw)\(lokal-forskrift\): \S+)$"
+)
 _MIGRATION_SUBJECT = re.compile(r"^migration: ")
 _BULK_SYNC_SUBJECT = re.compile(r"^sync: \d+ new, \d+ changed")
 _BULK_SYNC_REMOVED_COUNT = re.compile(r"(?P<count>\d+) removed")
@@ -206,15 +218,17 @@ def write_history(record: HistoryRecord, dataset_dir: Path) -> tuple[Path, Path]
     history_dir.mkdir(parents=True, exist_ok=True)
     json_path = history_dir / f"{record.slug}.json"
     md_path = history_dir / f"{record.slug}.md"
-    payload = json.dumps(
-        record.model_dump(mode="json"),
-        sort_keys=True,
-        indent=2,
-        ensure_ascii=False,
-    )
-    atomic_write_text(json_path, payload + "\n")
+    atomic_write_text(json_path, history_json(record))
     atomic_write_text(md_path, render_history_markdown(record))
     return json_path, md_path
+
+
+def history_json(record: HistoryRecord) -> str:
+    """``history/<slug>.json`` as written: sorted keys, two-space indent, final newline."""
+    payload = json.dumps(
+        record.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=False
+    )
+    return payload + "\n"
 
 
 def _run_git_log(repo_path: Path, file_path: str) -> str:
@@ -348,7 +362,7 @@ def _classify_commit(
     renderer fix), so it must not surface as a change of the law — no event,
     no ``last_changed`` bump, no ``total_changes`` increment.
     """
-    if _RERENDER_SUBJECT.match(subject):
+    if _HISTORY_EXEMPT_SUBJECT.match(subject):
         return None
     short_sha = sha[:7]
     # Convert the author-timezone %aI instant to a UTC calendar date so
@@ -361,9 +375,9 @@ def _classify_commit(
     added, removed = _parse_line_stats(stat_lines)
     from_path, to_path = _parse_rename_paths(stat_lines)
 
-    per_doc = _PER_DOC_SUBJECT.match(subject)
-    if per_doc:
-        event_type = _VERB_TO_TYPE[per_doc.group("verb")]
+    per_doc = _per_doc_event_type(subject)
+    if per_doc is not None:
+        event_type = per_doc
     elif _MIGRATION_RENAME_SUBJECT.match(subject):
         # Only the Sprint 4 slug migration ("migration: rename N documents
         # to slug-based filenames") is a genuine filename change.
@@ -398,6 +412,23 @@ def _classify_commit(
         lines_added=added,
         lines_removed=removed,
     )
+
+
+def _per_doc_event_type(subject: str) -> EventType | None:
+    """The event a per-document subject names — central or local — else ``None``.
+
+    A local ``promote`` of version 1 adds the document; a later version
+    updates it; a ``withdraw`` removes it (ADR-0016 4f).
+    """
+    central = _PER_DOC_SUBJECT.match(subject)
+    if central:
+        return _VERB_TO_TYPE[central.group("verb")]
+    local = _LOCAL_SUBJECT.match(subject)
+    if local is None:
+        return None
+    if local.group("withdraw"):
+        return "removed"
+    return "added" if local.group("version") == "1" else "updated"
 
 
 def _classify_bulk_sync(
