@@ -151,19 +151,29 @@ Observed material is evidence that specific bytes were retrievable from a
 recorded endpoint at a recorded time — never an assertion of law, and never
 published until a per-source redistribution basis exists. Promotion into the
 canonical corpus is an explicit, per-artifact step: `promotion/` below, of which
-only the identity layer exists so far.
+the identity layer, the extractor and the renderer exist so far; the writer does
+not.
 
 ### `promotion/` — local regulations into `lovverk` (ADR-0016, in progress)
 
 ADR-0016 (lovspor-notebook, proposed) makes this package the only writer of
-`lovverk/lokale-forskrifter/`. Slice S1 is the identity layer alone: pure, no
-I/O, and wired to nothing yet — not the observatory, the renderer, MCP or
-`lovverk`. Extraction, rendering and the writer are later slices.
+`lovverk/lokale-forskrifter/`. Slice S1 is the identity layer; slice S2 the
+extractor, the personal-data gate and the local renderer. All of it is pure,
+no I/O, and wired to nothing yet — not the observatory, a CLI, MCP or
+`lovverk`. The writer and the decision log are later slices. Local documents
+are published on the basis of åndsverkloven § 14, never NLOD: the renderer
+refuses output that mentions NLOD at all.
 
 | Module | Responsibility | Key public API |
 |---|---|---|
 | `promotion/models.py` | The identity result: minted (`doc_id`, `lf`/`lk` scheme, `ref_id`, normalised title, content hash) or held (a typed reason, no id field at all). The authority block refuses a KLASS code whose length disagrees with its type (4 digits kommune, 2 fylkeskommune). | `Authority`, `AuthorityType`, `ExtractedRegulation`, `MintedIdentity`, `HeldIdentity`, `HoldReason`, `IdScheme`, `IdentityResult` |
 | `promotion/identity.py` | ADR-0016 1a in order: `lf-yyyymmdd-nnnn` only from the regulation's own identification lines (FOR header, `Forskrift <dato> nr. <n>` title, `Kunngjort` line; never `Hjemmel`/`Endrer` lines or the body); else `lk-<authority>-<h12>` from authority, normalised title and stated vedtaksdato; else held. An `lf-` id whose ref-id a central record carries is held, never merged. `content_hash` is SHA-256 of layout-normalised extracted text, so whitespace churn mints no version. | `mint_identity()`, `find_identification_ids()`, `normalise_title()`, `normalise_text()`, `content_hash()` |
+| `promotion/dates.py` | Dates as the text states them (`12. desember 2019`, `12.12.2019`, `2019-12-12`), a real calendar date or `None`; a draft's placeholder date (`X.X.2016`). | `parse_stated_date()`, `has_placeholder_date()` |
+| `promotion/source_text.py` | Captured bytes to lines. HTML: the observatory's document region and hardened parser, page chrome (nav, sidebars, footers, breadcrumbs, update stamps) dropped before reading, so a CMS sidebar or a date stamp cannot mint a version. PDF: `pypdf`, pinned exactly, page text only, never metadata. DOCX: `word/document.xml` in memory under a size cap, through `safe_parser`. | `source_form()`, `html_lines()`, `pdf_lines()`, `docx_lines()` |
+| `promotion/fields.py` | Identification block (title line up to the first `§ 1`/`Kapittel 1`) and body; pre-filled `title`, `hjemmel`, `vedtatt`/`vedtatt_av`, `ikraft`/`ikraft_text`, each verbatim or a stated date, else empty. | `read_regulation()` |
+| `promotion/personal_data.py` | The personopplysningsloven gate: fødselsnummer/D-nummer (mod-11), e-mail, phone, postal address, contact lines, signature blocks. Reports kind and line, never the value; holds, never redacts. | `screen_personal_data()` |
+| `promotion/extract.py` | Bytes and media type (never the URL) to `ExtractedDocument` or a `HeldExtraction` with a typed reason: unsupported format, unreadable, empty, garbled (a PDF font without ToUnicode), Lovdata print, placeholder date, no body, no title, personal data. | `extract_regulation()`, `EXTRACTOR_VERSION` |
+| `promotion/render.py` | One version to Markdown, byte-deterministic: ADR-0016's front matter in its fixed order (`source_license: "åndsverkloven § 14"`, `basis: "observed"`, `asserted: false`, `observed_at_first` in UTC; no `retrieved_at`, no `observed_at_last`), then the title, block and body. Refuses a content hash that is not the text's, and any NLOD mention. | `render_local_regulation()`, `LOCAL_RENDERER_VERSION` |
 
 ## The sync pipeline
 

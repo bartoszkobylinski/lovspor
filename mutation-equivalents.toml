@@ -3443,6 +3443,37 @@ not a dependency's behaviour.
 """
 
 [[equivalent]]
+file = "src/lovspor/observatory/freshness.py"
+symbol = "is_document_type"
+registered = "2026-10-03, PR #511, from run 37106345163"
+mutation = """
+-    return content_type.split(";", 1)[0].strip().lower() in DOCUMENT_MEDIA_TYPES
++    return content_type.split(";", )[0].strip().lower() in DOCUMENT_MEDIA_TYPES
+"""
+justification = """
+Only element [0] of the split is read. `str.split(sep, maxsplit)` splits from the
+left, so element [0] is the text before the first separator for every maxsplit >= 1
+and for no limit at all; the limit only changes how the remainder is divided, which
+is discarded. Identical result for every string. Python's own `str.split` semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/freshness.py"
+symbol = "is_document_type"
+registered = "2026-10-03, PR #511, from run 37106345163"
+mutation = """
+-    return content_type.split(";", 1)[0].strip().lower() in DOCUMENT_MEDIA_TYPES
++    return content_type.split(";", 2)[0].strip().lower() in DOCUMENT_MEDIA_TYPES
+"""
+justification = """
+Same argument as the unlimited-split entry: `split` works left to right, so with
+maxsplit 1 or 2 element [0] is the text before the first ";" in both cases; only the
+discarded tail differs. Python's own `str.split` semantics. (The `rsplit` sibling is
+not equivalent — it is killed by the two-parameter content type in
+test_pdf_and_word_processor_types_are_documents.)
+"""
+
+[[equivalent]]
 file = "src/lovspor/promotion/identity.py"
 symbol = "content_hash"
 registered = "2026-10-03, PR #506, from run 37101259342"
@@ -3567,4 +3598,239 @@ The fallback only reaches `_articles_or`'s `_tag(ancestor) == "article"`, and
 both "" and "XXXX" compare unequal to "article", so the boolean is identical for
 every node whichever fallback is returned. `_tag` has no other caller. Python's
 own string-equality semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/personal_data.py"
+symbol = "_is_identity_number"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    day -= _D_NUMMER_DAY_OFFSET if day > _D_NUMMER_DAY_OFFSET else 0
++    day -= _D_NUMMER_DAY_OFFSET if day >= _D_NUMMER_DAY_OFFSET else 0
+"""
+justification = """
+The two conditions differ only at day == 40. There the original leaves day at 40
+and the mutant makes it 0; the function then returns `1 <= day <= 31 and ...`,
+which is False for 40 (above 31) and False for 0 (below 1). `day` is read nowhere
+else, so the returned boolean is identical for every eleven-digit input. The live
+boundaries of the D-nummer gate (day 31 and day 71 both hits, day 32 not) are
+pinned by tests in test_promotion_personal_data.py. Python comparison semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/personal_data.py"
+symbol = "_is_identity_number"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    if month > _SYNTHETIC_MONTH_OFFSET:
++    if month >= _SYNTHETIC_MONTH_OFFSET:
+"""
+justification = """
+The two conditions differ only at month == 80. The original falls to the H-nummer
+branch (80 > 40) and makes month 40; the mutant subtracts 80 and makes it 0. The
+return `... and 1 <= month <= 12` is False for 40 and False for 0, and `month` is
+read nowhere else, so the boolean is identical for every input. Python semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/personal_data.py"
+symbol = "_is_identity_number"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    elif month > _H_NUMMER_MONTH_OFFSET:
++    elif month >= _H_NUMMER_MONTH_OFFSET:
+"""
+justification = """
+The two conditions differ only at month == 40 (the first branch already took every
+month above 80). The original keeps month 40, the mutant makes it 0; the return
+`... and 1 <= month <= 12` is False for both, and `month` is read nowhere else.
+Identical boolean for every input. Python comparison semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/render.py"
+symbol = "_scalar"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    return json.dumps(value, ensure_ascii=False)
++    return json.dumps(value, ensure_ascii=None)
+"""
+justification = """
+`json.dumps` tests ensure_ascii for truth (`if self.ensure_ascii:` in the encoder,
+`ensure_ascii and ...` on the cached-encoder fast path), and None is falsy, so None
+and False select the same non-escaping encoder and return identical strings — the
+argument of the existing observatory/model.py entry. Stdlib semantics. The other
+two `ensure_ascii` mutants (dropped, True) are killed by
+test_front_matter_writes_non_ascii_as_itself_not_as_escapes.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "source_form"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    media = content_type.split(";", 1)[0].strip().lower()
++    media = content_type.split(";", )[0].strip().lower()
+"""
+justification = """
+Element [0] of `str.split(sep, maxsplit)` is the text before the first `sep` for
+every maxsplit >= 1 and for the unbounded default alike; only later elements
+depend on the limit, and only [0] is read. Same argument as the registered
+`line.split(":", 1)[0]` entries. Python's own semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "source_form"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    media = content_type.split(";", 1)[0].strip().lower()
++    media = content_type.split(";", 2)[0].strip().lower()
+"""
+justification = """
+Same head-element argument as the maxsplit-dropped entry above: [0] is the text
+before the first ";" for maxsplit 1 and 2 alike. Python's own semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "pdf_lines"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-        reader = PdfReader(io.BytesIO(payload), strict=False)
++        reader = PdfReader(io.BytesIO(payload), strict=None)
+"""
+justification = """
+pypdf's PdfReader reads `strict` only for truth (`if self.strict:` /
+`getattr(pdf, "strict", False)`), and None is falsy, so None selects the same
+lenient, repairing reader as False. Argued from the dependency, so pinned: the
+assumption test shows a PDF whose startxref misses its xref table is read
+identically under strict=None, strict=False and the default, while strict=True
+refuses it (the strict=True mutant is killed by
+test_pdf_whose_startxref_misses_the_xref_table_is_still_read).
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_pypdf_reads_strict_for_truth_and_defaults_it_off"
+
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "pdf_lines"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-        reader = PdfReader(io.BytesIO(payload), strict=False)
++        reader = PdfReader(io.BytesIO(payload), )
+"""
+justification = """
+pypdf's PdfReader declares `strict: bool = False`, so dropping the argument passes
+the same False. Argued from the dependency's default, so pinned: the assumption
+test asserts the signature default is False and that the default reader repairs
+what strict=True refuses, exactly as strict=False does.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_pypdf_reads_strict_for_truth_and_defaults_it_off"
+
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "docx_lines"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-        root = etree.fromstring(_docx_part(payload), parser=safe_parser(remove_blank_text=False))
++        root = etree.fromstring(_docx_part(payload), parser=safe_parser(remove_blank_text=None))
+"""
+justification = """
+`safe_parser` passes the flag straight to lxml's XMLParser, which reads
+remove_blank_text for truth; None is falsy, so None keeps blank text exactly as
+False does. Argued from the dependency, so pinned: the assumption test shows a
+blank word-space before a comment inside a run kept under None and False and
+stripped under True (the True mutant is killed by
+test_docx_keeps_a_blank_run_beside_a_comment_as_the_word_space).
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_lxml_reads_remove_blank_text_for_truth"
+
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "_is_chrome"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    if (node.get("role") or "").strip().lower() in _CHROME_ROLES:
++    if (node.get("role") or "XXXX").strip().lower() in _CHROME_ROLES:
+"""
+justification = """
+The default is used only when the role attribute is absent or empty. Then the
+original tests "" and the mutant "xxxx" for membership in _CHROME_ROLES
+({navigation, complementary, banner, contentinfo, search}); neither is a member,
+so both conditions are False. A present, non-empty role is read identically.
+Python `or`/`in` semantics over a fixed frozenset.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "_is_chrome"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    words = _CLASS_WORD.findall(f"{node.get('class') or ''} {node.get('id') or ''}".lower())
++    words = _CLASS_WORD.findall(f"{node.get('class') or 'XXXX'} {node.get('id') or ''}".lower())
+"""
+justification = """
+The default is used only when the class attribute is absent or empty. Then the
+original contributes no word and the mutant contributes the one word "xxxx", which
+is not in _CHROME_CLASS_WORDS ({sidebar, breadcrumb, breadcrumbs, cookie, share}).
+`isdisjoint` answers the same with or without a word outside the set, so the
+returned boolean is identical. Python semantics over a fixed frozenset.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "_is_chrome"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    words = _CLASS_WORD.findall(f"{node.get('class') or ''} {node.get('id') or ''}".lower())
++    words = _CLASS_WORD.findall(f"{node.get('class') or ''} {node.get('id') or 'XXXX'}".lower())
+"""
+justification = """
+Same argument as the class-default entry above, for an absent or empty id: the
+extra word "xxxx" is outside _CHROME_CLASS_WORDS, so `isdisjoint` is unchanged.
+The id mutants that do change the answer (`and ''`, `'XXidXX'`, `'ID'`) are killed
+by test_chrome_by_tag_or_id_alone_is_dropped. Python semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/fields.py"
+symbol = "_enactment"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    return parse_stated_date(match.groups()[-1]), match.group("organ").strip()
++    return parse_stated_date(match.groups()[+1]), match.group("organ").strip()
+"""
+justification = """
+_ENACTED has exactly two groups, `organ` and the date group of dates.DATE, so
+`match.groups()` always has length 2 and indices 1 and -1 name the same element.
+Tuple indexing semantics, resting on an in-repo pattern rather than a dependency;
+it is pinned all the same, because a third group would make this a real defect.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_the_enactment_pattern_has_only_the_organ_and_date_groups"
+
+[[equivalent]]
+file = "src/lovspor/promotion/fields.py"
+symbol = "_date_or_phrase"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    return None, _SENTENCE_END.split(rest, maxsplit=1)[0].strip() or None
++    return None, _SENTENCE_END.split(rest, )[0].strip() or None
+"""
+justification = """
+`re.Pattern.split` returns as element [0] the text before the first match for every
+maxsplit (0 meaning unbounded); _SENTENCE_END has no capturing group, so nothing
+is interleaved before that element. Only [0] is read. Python `re` semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/fields.py"
+symbol = "_date_or_phrase"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    return None, _SENTENCE_END.split(rest, maxsplit=1)[0].strip() or None
++    return None, _SENTENCE_END.split(rest, maxsplit=2)[0].strip() or None
+"""
+justification = """
+Same head-element argument as the maxsplit-dropped entry above: [0] is the text
+before the first sentence end for maxsplit 1 and 2 alike. Python `re` semantics.
 """

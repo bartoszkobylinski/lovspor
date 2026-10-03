@@ -623,9 +623,54 @@ regulation in their path, and that share is crawl budget: a source rate-limited
 at 30 s a request spends most of a night on `/nyhetsarkiv/…` and
 `/kultur-idrett-fritid/lag-og-foreninger/…`. Selection sits between discovery's
 proposals and capture's fetch, and keeps only candidates whose percent-decoded,
-lowercased path contains one of 23 stems (the owner's set of 2026-09-19 in
-`src/lovspor/observatory/selection.py`: `forskrift`, `reglement`, `vedtekt`,
-the `kunngjør`/`kunngjering` and `høring`/`hoyring` spellings, and the rest).
+lowercased path contains one of 48 stems (`REGULATION_PATH_STEMS` in
+`src/lovspor/observatory/selection.py`), plus every linked document.
+
+- **The stems.** The owner's set of 2026-09-19 (`forskrift`, `reglement`,
+  `vedtekt`, the `kunngjør`/`kunngjering` and `høring`/`hoyring` spellings, and
+  the rest), widened on 2026-10-03 (#507) after the classification study found
+  it rejecting the URLs of 61 of 117 labelled enacted regulations and about 40 of
+  ~153 distinct forskrifter. The 25 additions were read off those rejected URLs —
+  school rules (`ordensregl`, `regler-for`), fees (`gebyr`, `betalingssats`),
+  councillors' pay (`godtgjor`, `for-folkevalgte`), school permission, routes,
+  districts and SFO (`permisjon`, `skolerute`, `skolekrets`,
+  `skolefritidsordning`, `/sfo`), leash orders (`bandtvang`), alcohol sale hours
+  — with their nynorsk forms; three narrow stems were widened to cover both
+  languages (`ordensregl`, `retningslin`, `bestemmels`).
+- **Every linked document** (owner decision 2026-10-03, #507): a path ending in
+  `.pdf`, `.docx`, `.doc` or `.odt`, and any URL whose latest capture was a PDF
+  or word-processor file, is selected whatever its path names. Linked PDFs are
+  the richest regulation source the study found (85 of the ~153 forskrifter also
+  exist as PDF/DOCX), and 2,732 of the archive's 4,365 PDF URLs carry no suffix,
+  so the content type the capture state already holds is what finds them. A
+  document never yet captured on a suffixless path naming no stem is not seen
+  until it is fetched some other way.
+
+Measured on 2026-10-03 against the 144,842 URLs in the archive (labels from
+`~/lovspor-ops/classification-2026-10-03/`):
+
+| | 2026-09-19 stems | widened (#507) |
+|---|--:|--:|
+| labelled enacted regulations selected | 56 of 117 | 79 of 117 |
+| labelled adopted rule sets (§ 14 vedtak) | 70 of 84 | 80 of 84 |
+| R1.1-positive URLs | 135 of 286 | 202 of 286 |
+| municipalities with an R1.1 positive but none selected | 11 of 78 | 0 of 78 |
+| selected share of all URLs | 6.6% | 12.4% |
+
+The first selecting nightly (2026-10-03) selected 8,530 of 136,300 candidates
+(6.3%); the widened rule should roughly double that. What is still rejected is
+known and accepted:
+
+- **Kongsvinger's CMS sidebar**: all 38 remaining enacted-regulation misses, 2 of
+  the 4 adopted-rule misses and 81 of the 84 R1.1 misses. News and school pages
+  under `/barnehage-skole-utdanning/` repeat the skoleregler forskrift, or the
+  barnehage vedtekter, in a sidebar. The canonical pages
+  (`…/hvilke-ordensregler-gjelder-for-grunnskolen-i-kongsvinger`,
+  `…/vedtekter-for-de-kommunale-barnehagene-i-kongsvinger`) are selected.
+- **Single pages on paths naming no regulation** — Fredrikstad's and Tingvoll's
+  grant schemes (`tilskudd…`), Averøy's `planer-og-rapporter`, Inderøy's
+  `brenning-av-avfall`, Steigen's `kommunal-bolig`. A stem broad enough to reach
+  them (`tilskudd`, `plan`) would select a large share of every site.
 
 - **Global, behind a flag, off by default** (owner decision 2026-09-26). It is on
   only when the process environment has `LOVSPOR_OBSERVATORY_CAPTURE_SELECTION=1`,
@@ -664,8 +709,12 @@ the `kunngjør`/`kunngjering` and `høring`/`hoyring` spellings, and the rest).
   stay in the archive untouched; nothing is re-crawled or re-rendered. They are
   counted as not selected, never as unchanged or deferred.
 - **Not a classifier.** ADR-0010's deferral holds: this scopes budget by what a path
-  *names*. A regulation at `/tjenester/vann-og-avlop/` will not be fetched, a known,
-  accepted miss, and a selected page can still be an empty JS shell (#332).
+  *names* and what a URL last served, never by what a document says. A regulation at
+  `/tjenester/vann-og-avlop/` will not be fetched, a known, accepted miss, and a
+  selected page can still be an empty JS shell (#332).
+- **The freshness index rebuilds once.** Remembering what a URL last served bumped
+  the index's derivation version to 4, so the first run after deploying #507 folds
+  the whole log again instead of its tail.
 
 To switch it on for the scheduled job, add the variable to the installed plist's
 `EnvironmentVariables` and reload the agent (see "Installing the job"):
