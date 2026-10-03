@@ -149,7 +149,20 @@ how to reach `lovverk`.
 Observed material is evidence that specific bytes were retrievable from a
 recorded endpoint at a recorded time — never an assertion of law, and never
 published until a per-source redistribution basis exists. Promotion into the
-canonical corpus is an explicit, per-artifact step that does not exist yet.
+canonical corpus is an explicit, per-artifact step: `promotion/` below, of which
+only the identity layer exists so far.
+
+### `promotion/` — local regulations into `lovverk` (ADR-0016, in progress)
+
+ADR-0016 (lovspor-notebook, proposed) makes this package the only writer of
+`lovverk/lokale-forskrifter/`. Slice S1 is the identity layer alone: pure, no
+I/O, and wired to nothing yet — not the observatory, the renderer, MCP or
+`lovverk`. Extraction, rendering and the writer are later slices.
+
+| Module | Responsibility | Key public API |
+|---|---|---|
+| `promotion/models.py` | The identity result: minted (`doc_id`, `lf`/`lk` scheme, `ref_id`, normalised title, content hash) or held (a typed reason, no id field at all). The authority block refuses a KLASS code whose length disagrees with its type (4 digits kommune, 2 fylkeskommune). | `Authority`, `AuthorityType`, `ExtractedRegulation`, `MintedIdentity`, `HeldIdentity`, `HoldReason`, `IdScheme`, `IdentityResult` |
+| `promotion/identity.py` | ADR-0016 1a in order: `lf-yyyymmdd-nnnn` only from the regulation's own identification lines (FOR header, `Forskrift <dato> nr. <n>` title, `Kunngjort` line; never `Hjemmel`/`Endrer` lines or the body); else `lk-<authority>-<h12>` from authority, normalised title and stated vedtaksdato; else held. An `lf-` id whose ref-id a central record carries is held, never merged. `content_hash` is SHA-256 of layout-normalised extracted text, so whitespace churn mints no version. | `mint_identity()`, `find_identification_ids()`, `normalise_title()`, `normalise_text()`, `content_hash()` |
 
 ## The sync pipeline
 
