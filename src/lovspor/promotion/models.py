@@ -8,11 +8,11 @@ regulation the rules refused to identify (ADR-0016 1a.3, 4h).
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import UTC, date
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 _KLASS_CODE_LENGTH = {"kommune": 4, "fylkeskommune": 2}
 _DIGITS = re.compile(r"[0-9]+")
@@ -199,3 +199,34 @@ class HeldExtraction(BaseModel):
 
 
 ExtractionResult = Annotated[ExtractedDocument | HeldExtraction, Field(discriminator="outcome")]
+
+
+class ObservedSource(BaseModel):
+    """Where and when the rendered version was first observed (ADR-0016 Decision 2).
+
+    ``observed_at_first`` is the observation axis only — the first capture of
+    *this* version's content — and must carry a timezone; it is written in
+    UTC. ``source_sha256`` names the archived blob the text was rendered from.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    observed_at_first: AwareDatetime
+    source_url: str = Field(pattern=r"^https?://\S+$")
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @property
+    def observed_at_first_utc(self) -> str:
+        return self.observed_at_first.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class LocalDocument(BaseModel):
+    """Everything one rendered version of a local regulation is made from."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    identity: MintedIdentity
+    extracted: ExtractedDocument
+    slug: str = Field(pattern=r"^[^\s/\\.][^\s/\\]*$")
+    version: int = Field(ge=1)
+    source: ObservedSource

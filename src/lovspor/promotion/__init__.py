@@ -3,7 +3,7 @@
 Slice S1 is the identity layer: id minting, title normalisation, the content
 hash and the authority block. Slice S2 adds the extractor (captured
 HTML/PDF/DOCX bytes to identification block, body and pre-filled fields, or a
-typed hold) and the personal-data gate. All of it is pure
+typed hold), the personal-data gate and the local renderer. All of it is pure
 — it reads no archive, writes no corpus and is not yet wired to the
 observatory, a CLI or MCP; those are later slices. When the writer exists,
 this package is the only one that writes ``lovverk/lokale-forskrifter/``
@@ -30,16 +30,20 @@ from lovspor.promotion.models import (
     HoldReason,
     IdentityResult,
     IdScheme,
+    LocalDocument,
     MintedIdentity,
+    ObservedSource,
     PersonalDataHit,
     PersonalDataKind,
     RegulationFields,
     SourceForm,
 )
 from lovspor.promotion.personal_data import screen_personal_data
+from lovspor.promotion.render import LOCAL_RENDERER_VERSION, render_local_regulation
 
 __all__ = [
     "EXTRACTOR_VERSION",
+    "LOCAL_RENDERER_VERSION",
     "Authority",
     "AuthorityType",
     "ExtractedDocument",
@@ -51,7 +55,9 @@ __all__ = [
     "HoldReason",
     "IdScheme",
     "IdentityResult",
+    "LocalDocument",
     "MintedIdentity",
+    "ObservedSource",
     "PersonalDataHit",
     "PersonalDataKind",
     "RegulationFields",
@@ -62,5 +68,6 @@ __all__ = [
     "mint_identity",
     "normalise_text",
     "normalise_title",
+    "render_local_regulation",
     "screen_personal_data",
 ]

@@ -234,3 +234,11 @@ class UnreadableSourceError(PromotionError):
     Raised by a reader and turned into a counted hold by the extractor — the
     artifact stays in the archive, unpublished, never silently skipped.
     """
+
+
+class PromotionRenderError(PromotionError):
+    """A local regulation the renderer refuses to write as asked.
+
+    The inputs disagree with each other (a content hash that is not the text's)
+    or the output would break the dataset's contract (an NLOD mention).
+    """
