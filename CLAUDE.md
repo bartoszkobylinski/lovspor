@@ -14,8 +14,9 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 
 ## Critical constraints (non-negotiable)
 
-- **Source:** only `https://api.lovdata.no/v1/publicData/`. Never scrape lovdata.no HTML.
-- **License:** every output Markdown file carries NLOD 2.0 attribution in YAML front matter.
+- **Source (Lovdata datasets — `lover/`, `forskrifter/`):** only `https://api.lovdata.no/v1/publicData/`. Never scrape lovdata.no HTML — that holds for every workstream, local law included.
+- **License (Lovdata datasets):** every output Markdown file carries NLOD 2.0 attribution in YAML front matter.
+- **Local regulations (`lokale-forskrifter/`) are a separate dataset with their own rules** (owner decision 2026-10-03, ADR-0016, lovspor-notebook #139). Lovdata publicData does not serve them (Lovtidend avd. II), so their only sources are the local-law observatory (ADR-0010: municipal and fylkeskommune websites, per-source access-policy check) and documents obtained from the authority under offentleglova (#509). They are published on the basis of **åndsverkloven § 14**, never NLOD — a local file that mentions NLOD is a defect. Only artifacts classified as enacted regulations are published, after human review, labelled observed-not-asserted (`asserted: false`) with their ObservedAt. Personal data is minimised under personopplysningsloven.
 - **Renderer must be deterministic.** Same XML input → byte-identical Markdown output. Tested.
 - **Hash is on normalized XML, never on rendered Markdown or HTML.** Change-detection invariant.
 - **Raw XML never to git.** Cache in `data/cache/` is gitignored. Conservative posture: avoid argument over Lovdata's editorial markup.
