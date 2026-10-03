@@ -3,11 +3,14 @@
 Slice S1 is the identity layer: id minting, title normalisation, the content
 hash and the authority block. Slice S2 adds the extractor (captured
 HTML/PDF/DOCX bytes to identification block, body and pre-filled fields, or a
-typed hold), the personal-data gate and the local renderer. All of it is pure
-— it reads no archive, writes no corpus and is not yet wired to the
-observatory, a CLI or MCP; those are later slices. When the writer exists,
-this package is the only one that writes ``lovverk/lokale-forskrifter/``
-(ADR-0016 4a).
+typed hold), the personal-data gate and the local renderer, all pure. Slice
+S3 adds the writer, ``lovspor promote`` (``commands.py``): one artifact read
+from the observatory archive (``archive.py``), a human decision in the
+append-only decision log beside it (``decisions.py``), the version placed and
+rendered (``plan.py``) and written into a ``lovverk`` checkout (``corpus.py``,
+``writer.py``), and its history derived from the checkout's log
+(``local_history.py``). This package is the only writer of
+``lovverk/lokale-forskrifter/`` (ADR-0016 4a); MCP serving is a later slice.
 """
 
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation

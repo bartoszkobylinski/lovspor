@@ -3917,3 +3917,267 @@ justification = """
 Same head-element argument as the maxsplit-dropped entry above: [0] is the text
 before the first sentence end for maxsplit 1 and 2 alike. Python `re` semantics.
 """
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "history_json"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-        record.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=False
++        record.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=None
+"""
+justification = """
+`json.dumps` and `json.JSONEncoder` consult ensure_ascii only for its truth value
+(`if self.ensure_ascii:` picks encode_basestring_ascii, else encode_basestring; the
+C fast path is gated on the same truth test). None and False are both falsy, so
+they select the same string encoder and return identical text on every input,
+non-ASCII included. Python stdlib semantics; same argument as the registered
+ensure_ascii=None entries for the registry and the access-policy writers.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/writer.py"
+symbol = "_json"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\\n"
++    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=None) + "\\n"
+"""
+justification = """
+`json.dumps` tests ensure_ascii only for truth: None and False are both falsy and
+select the same non-escaping string encoder, so the observations file is
+byte-identical under both on every input, non-ASCII included (the ensure_ascii=True
+and dropped-argument mutants, which DO escape, are killed by
+test_promotion_writer.py's canonical-JSON tests). Python stdlib semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/corpus.py"
+symbol = "manifest_text"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\\n"
++    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=None) + "\\n"
+"""
+justification = """
+Same truth-test argument as the writer `_json` entry above: None and False select
+the same encoder in `json.dumps`, so the local manifest is byte-identical on every
+input. The escaping mutants (ensure_ascii=True, argument dropped) are killed by
+test_the_manifest_text_is_sorted_indented_unescaped_and_newline_terminated.
+Python stdlib semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/writer.py"
+symbol = "apply"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-        if target.is_file() and target.read_text(encoding="utf-8") == text:
++        if target.is_file() and target.read_text(encoding="UTF-8") == text:
+"""
+justification = """
+Python's codec registry normalises the encoding name before lookup — case is
+folded (`encodings.normalize_encoding`, `codecs.lookup("UTF-8").name ==
+codecs.lookup("utf-8").name == "utf-8"`), so `read_text` builds the same decoder
+for both spellings and returns the same string for every file, valid or not. The
+encoding=None mutant, which is NOT equivalent, is killed under the C locale by
+test_files_already_on_disk_are_compared_as_utf8_under_any_locale.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/decisions.py"
+symbol = "append"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-        with self._path.open("a", encoding="utf-8") as handle:
++        with self._path.open("a", encoding="UTF-8") as handle:
+"""
+justification = """
+Codec names are case-folded and normalised before lookup (`codecs.lookup("UTF-8")`
+and `codecs.lookup("utf-8")` return the same CodecInfo), so the append stream
+encodes every record to the same bytes under both spellings. The encoding=None
+and dropped-argument mutants, which are NOT equivalent, are killed under the C
+locale by test_the_log_is_utf8_whatever_the_locale. Python codec semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/decisions.py"
+symbol = "records"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-        lines = self._path.read_text(encoding="utf-8").split("\\n")
++        lines = self._path.read_text(encoding="UTF-8").split("\\n")
+"""
+justification = """
+Same codec-name normalisation as the `append` entry above: both spellings select
+the one utf-8 decoder, so every log reads back identically. encoding=None is
+killed under the C locale by test_the_log_is_utf8_whatever_the_locale.
+Python codec semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/local_history.py"
+symbol = "derive_local_history"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-        if target.is_file() and target.read_text(encoding="utf-8") == text:
++        if target.is_file() and target.read_text(encoding="UTF-8") == text:
+"""
+justification = """
+Codec names are case-folded before lookup (`codecs.lookup("UTF-8").name ==
+codecs.lookup("utf-8").name`), so both spellings decode an existing history file
+to the same string and the skip decision never differs. Python codec semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/promotion/commands.py"
+symbol = "preview_impl"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-    typer.echo("")
++    typer.echo(None)
+"""
+justification = """
+`typer.echo` is `click.echo`, which turns a None message into "" before writing
+(`out = ""` for None) and then appends the newline: both calls write exactly "\\n".
+No input exists — the call takes no data. Dependency behaviour (click), pinned by
+the assumption test.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_click_echo_treats_none_as_empty_and_reads_nl_for_truth"
+
+[[equivalent]]
+file = "src/lovspor/promotion/commands.py"
+symbol = "preview_impl"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-    typer.echo(prepared.markdown, nl=False)
++    typer.echo(prepared.markdown, nl=None)
+"""
+justification = """
+`click.echo` reads nl only as `if nl:`, so None and False both write the message
+with no trailing newline. The nl=True and dropped-argument mutants, which do add
+one, are killed by test_preview_prints_the_header_then_exactly_the_markdown_local_writes.
+Dependency behaviour (click), pinned by the assumption test.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_click_echo_treats_none_as_empty_and_reads_nl_for_truth"
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        text=True,
++        text=None,
+"""
+justification = """
+Popen decides text mode as `self.text_mode = encoding or errors or text or
+universal_newlines` (CPython subprocess.py, Popen.__init__). Both calls also pass
+encoding="utf-8", a non-empty string, so text_mode is truthy whatever `text` is,
+and the output is decoded with the given encoding, not the locale's. Matches both
+call sites: each passes encoding="utf-8". Python stdlib semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        text=True,
++        text=False,
+"""
+justification = """
+Same `encoding or errors or text or universal_newlines` test: encoding="utf-8"
+makes text mode truthy before `text` is consulted. The only other read of `text`
+is the universal_newlines disambiguation check, which runs only when
+universal_newlines is not None; neither call passes it. Python stdlib semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        text=True,
+"""
+justification = """
+Dropping the argument leaves text at its default None, the case of the text=None
+entry: encoding="utf-8" alone selects text mode and the UTF-8 decode
+(`encoding or errors or text or universal_newlines`). Python stdlib semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        encoding="utf-8",
++        encoding="UTF-8",
+"""
+justification = """
+Codec names are normalised and case-folded before lookup: codecs.lookup("UTF-8")
+and codecs.lookup("utf-8") return the same CodecInfo, so subprocess's
+`data.decode(encoding, errors)` picks the same decoder on every input. The
+encoding=None and dropped-argument mutants, which do change the decoder, are
+killed by tests/unit/test_history_utf8.py under the C locale. Python codec
+semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+`subprocess.run` reads check only as `if check and retcode:`; None and False are
+both falsy, so both return the CompletedProcess and never raise. The returncode
+branch that follows is what handles a missing blob. Python stdlib semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        check=False,
+-    )
++        )
+"""
+justification = """
+Dropping check leaves the default check=False (`def run(..., check=False, ...)`),
+the value written; the `)` lines differ only in indentation. Python stdlib
+semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-            "core.quotePath=false",
++            "core.quotepath=false",
+"""
+justification = """
+git config section and key names are case-insensitive, so core.quotepath and
+core.quotePath name the same setting and the numstat rows carry the same raw
+UTF-8 paths. Argues from git, not Python, so it is pinned by a real-git
+assumption test over an æøå path, compared with the quoted default as control.
+"""
+assumption_test = "tests/unit/test_history_utf8.py::test_assumption_git_reads_the_quotepath_setting_case_insensitively"
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-            "core.quotePath=false",
++            "CORE.QUOTEPATH=FALSE",
+"""
+justification = """
+Section and key names are case-insensitive and git's boolean parsing case-folds
+"FALSE", so the uppercased spelling selects the same unquoted output. Pinned by
+the same real-git assumption test.
+"""
+assumption_test = "tests/unit/test_history_utf8.py::test_assumption_git_reads_the_quotepath_setting_case_insensitively"
