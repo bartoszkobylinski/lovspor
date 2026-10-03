@@ -42,11 +42,9 @@ from lovspor.observatory.fetch import Fetcher
 from lovspor.observatory.freshness import CaptureState, collect_capture_state
 from lovspor.observatory.freshness_index import indexed_capture_state
 from lovspor.observatory.heartbeat import report_run
+from lovspor.observatory.lf_commands import refresh_after_sweep
 from lovspor.observatory.log import ObservationLog
-from lovspor.observatory.registry import (
-    SourceRecord,
-    registry_path,
-)
+from lovspor.observatory.registry import SourceRecord, registry_path
 from lovspor.observatory.registry_io import (
     _bound_register,
     _load,
@@ -755,8 +753,9 @@ def nightly(
         raise typer.Exit(1) from exc
     # Reported from the record this invocation holds, never from whatever the
     # log happens to end with. A degraded sweep still reports: it ran, and
-    # liveness is what the switch guards.
+    # liveness is what the switch guards. The LF ledger (#509) reads after it.
     report_run(run)
+    refresh_after_sweep(root)
     if run.status != "success":
         raise typer.Exit(1)
 
