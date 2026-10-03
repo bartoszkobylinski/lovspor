@@ -329,3 +329,158 @@ def test_docx_document_part_of_exactly_the_cap_is_read(monkeypatch: pytest.Monke
 def _document_xml(payload: bytes) -> bytes:
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         return archive.read("word/document.xml")
+
+
+# --- page chrome lines (#522) -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "chrome",
+    [
+        "Fant du det du trengte?",
+        "Fann du det du trong?",
+        "Fann du det du leita etter?",
+        "Fant du det du lette etter?",
+        "Var denne siden nyttig?",
+        "Var denne sida nyttig?",
+        "Var informasjonen nyttig?",
+        "Sist endra 13.10.2017 08.44",
+        "Sist endret: 01.02.2024",
+        "Endra 13.10.2017",
+        "Del på Facebook",
+        "Del på",
+        "Del sida",
+        "Skriv ut sida",
+        "Tilbake til toppen",
+        "Gå til toppen",
+    ],
+)
+def test_municipal_cms_chrome_line_is_dropped(chrome: str) -> None:
+    page = f"<html><body><main><p>§ 1 Formål</p><p>{chrome}</p></main></body></html>".encode()
+    assert html_lines(page, "text/html") == ("§ 1 Formål",)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Publisert av Ola Nordmann",
+        "Sist endra av Kari Nordmann 13.10.2017",
+        "Del på kostnadene mellom eierne.",
+        "Fant du feil i vedtaket, skal du klage.",
+    ],
+)
+def test_bylines_and_prose_that_resemble_chrome_are_kept(line: str) -> None:
+    """A byline must still reach the personal-data gate; prose is never chrome."""
+    page = f"<html><body><main><p>§ 1 Formål</p><p>{line}</p></main></body></html>".encode()
+    assert html_lines(page, "text/html") == ("§ 1 Formål", line)
+
+
+# --- PDF hard line wraps (#522) -----------------------------------------------
+
+
+def test_pdf_rejoins_a_wrapped_title_and_wrapped_prose() -> None:
+    pdf = minimal_pdf(
+        (
+            "Forskrift om tidsfrister i saker som krever",
+            "oppmålingsforretning, Eksempel kommune,",
+            "Innlandet",
+            "Fastsatt av kommunestyret 17.06.2024 med hjemmel lov 9.",
+            "juni 2023 nr. 30 om grunnskolen § 15-2.",
+            "§ 1 Formål og virkeområde",
+            "Forskriften gjelder for skolene i Eksempel",
+            "kommune. Skolen skal bruke hovedmålet i den skriftlige",
+            "opplæringen.",
+            "Neste ledd gjelder i perioden 1.",
+            "november til 15. mai.",
+        )
+    )
+    assert pdf_lines(pdf) == (
+        "Forskrift om tidsfrister i saker som krever oppmålingsforretning, Eksempel kommune, "
+        "Innlandet",
+        "Fastsatt av kommunestyret 17.06.2024 med hjemmel lov 9. juni 2023 nr. 30 om grunnskolen "
+        "§ 15-2.",
+        "§ 1 Formål og virkeområde",
+        "Forskriften gjelder for skolene i Eksempel kommune. Skolen skal bruke hovedmålet i den "
+        "skriftlige opplæringen.",
+        "Neste ledd gjelder i perioden 1. november til 15. mai.",
+    )
+
+
+def test_pdf_rejoins_a_year_wrapped_after_a_month() -> None:
+    pdf = minimal_pdf(("Fastsatt med hjemmel i lov 9. juni", "2023 nr. 30 § 2-2.", "§ 1 Formål"))
+    assert pdf_lines(pdf) == ("Fastsatt med hjemmel i lov 9. juni 2023 nr. 30 § 2-2.", "§ 1 Formål")
+
+
+def test_pdf_rejoins_a_date_wrapped_before_its_day() -> None:
+    pdf = minimal_pdf(("Forskriften trer i kraft", "1. januar 2020.", "§ 2 Gebyr"))
+    assert pdf_lines(pdf) == ("Forskriften trer i kraft 1. januar 2020.", "§ 2 Gebyr")
+
+
+def test_pdf_keeps_headings_list_items_and_new_sentences_apart() -> None:
+    lines = (
+        "§ 1 Formål",
+        "forskriften gjelder hele kommunen.",
+        "Kommunen kan gi fritak for:",
+        "a) bygning som",
+        "brukes til lager,",
+        "b) annen bruk,",
+        "1. Søknad sendes kommunen,",
+        "\u2013 kopi til fylket,",
+        "• kopi til eier,",
+        "§ 2 Gebyr",
+        "Gebyret er kr 100.",
+        "Kapittel 2 Klage",
+        "Klage sendes kommunen.",
+        "2024 er første år.",
+    )
+    assert pdf_lines(minimal_pdf(lines)) == (
+        "§ 1 Formål",
+        "forskriften gjelder hele kommunen.",
+        "Kommunen kan gi fritak for:",
+        "a) bygning som brukes til lager,",
+        *lines[5:],
+    )
+
+
+def test_pdf_keeps_an_enactment_line_off_the_title() -> None:
+    lines = ("Forskrift om gebyr, Eksempel kommune", "vedtatt av kommunestyret 1.2.2020.", "§ 1")
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_pdf_rejoins_across_a_page_break_and_a_page_number() -> None:
+    pdf = pdf_pages(("§ 1 Formål", "Forskriften gjelder for", "Side 1 av 2"), ("hele kommunen.",))
+    assert pdf_lines(pdf) == ("§ 1 Formål", "Forskriften gjelder for hele kommunen.")
+
+
+def test_html_and_docx_lines_are_never_rejoined() -> None:
+    lines = ("§ 1 Formål", "Forskriften gjelder for", "hele kommunen.")
+    page = "<html><body><main>" + "".join(f"<p>{line}</p>" for line in lines) + "</main></body>"
+    assert html_lines(page.encode(), "text/html") == lines
+    assert docx_lines(minimal_docx(lines)) == lines
+
+
+def test_pdf_rejoining_is_deterministic() -> None:
+    pdf = minimal_pdf(
+        ("Forskrift om gebyr i Eksempel", "kommune", "§ 1 Formål", "Gebyret", "er 1.")
+    )
+    assert (
+        pdf_lines(pdf)
+        == pdf_lines(pdf)
+        == (
+            "Forskrift om gebyr i Eksempel kommune",
+            "§ 1 Formål",
+            "Gebyret er 1.",
+        )
+    )
+
+
+def test_pdf_rejoins_a_parenthesis_wrapped_after_a_word_but_not_after_a_full_stop() -> None:
+    lines = (
+        "Fastsatt med hjemmel i lov om eigedomsregistrering",
+        "(matrikkellova).",
+        "(Endret 2020.)",
+    )
+    assert pdf_lines(minimal_pdf(lines)) == (
+        "Fastsatt med hjemmel i lov om eigedomsregistrering (matrikkellova).",
+        "(Endret 2020.)",
+    )
