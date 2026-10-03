@@ -172,9 +172,10 @@ class TestTheRoleIsNotAPersonOrAMachine:
     ) -> None:
         stderr = _refused(root, tmp_path, DecisionFile(reviewer_role=role))
 
-        assert "reviewer_role carries personal data; it is published with the audit record" in (
-            stderr
-        )
+        # Anchored on pydantic's "Value error, " prefix and the "[type=" suffix, so a
+        # message that merely contains the sentence does not pass.
+        message = "reviewer_role carries personal data; it is published with the audit record"
+        assert f"Value error, {message} [type=" in stderr
 
     @pytest.mark.parametrize(
         ("field", "document"),
