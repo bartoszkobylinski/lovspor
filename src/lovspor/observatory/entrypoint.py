@@ -18,6 +18,7 @@ drags in a CLI makes every such import pay for it.
 """
 
 from lovspor.observatory import document_report_commands as _document_report_commands  # noqa: F401
+from lovspor.observatory import lf_commands as _lf_commands  # noqa: F401
 from lovspor.observatory import survey_commands as _survey_commands  # noqa: F401
 from lovspor.observatory.commands import observatory_app
 

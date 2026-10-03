@@ -1027,6 +1027,40 @@ output, and the remote dead-man switch is what turns the resulting silence into 
 second observatory on the internal disk is the most damaging thing this command could do
 while trying to be helpful: two archives, each partial, neither aware of the other.
 
+### After the sweep: the LF first-seen ledger (issue #509)
+
+The kommuner mostly link to Lovdata instead of hosting a local regulation's text. The
+owner's rule is that an LF id first seen on a kommune's pages is requested from that
+kommune under offentleglova the next day, so the archive keeps a ledger of when each
+id was first seen. It is read from links in captured HTML only — nothing fetches
+lovdata.no.
+
+```bash
+uv run lovspor observatory lf-ledger                 # bring it up to date (cheap: log tail only)
+uv run lovspor observatory lf-ledger --rebuild       # read the whole log again (idempotent)
+uv run lovspor observatory lf-first-seen --day 2026-10-02
+uv run lovspor observatory lf-first-seen --since 2026-10-01
+```
+
+- `lf-ledger.jsonl` sits beside the observation log (ADR-0010 §5). It is append-only,
+  with one entry per (authority, kind, id): the earliest `ObservedAt` of a 2xx HTML page
+  that linked it, plus that page's URL and blob hash. `kind` is `LF` or `LTII` for
+  `lovdata.no/dokument/LF/forskrift/<id>` and Lovtidend avd. II links, and `forskrift`
+  for the short `lovdata.no/forskrift/<id>` form. The short form does not say whether
+  the regulation is local or central, so it stays `forskrift` and is resolved later.
+- `lf-ledger-cursor.json` records how far into the log the ledger has read. It is
+  trusted only when the log still begins with the bytes it was built from and no
+  correction landed after it. Otherwise the next update reads the whole log, which
+  costs time but never misses an id, because existing keys are not appended again.
+- `nightly` updates the ledger after the sweep and the heartbeat. If the update fails,
+  it says so on stderr (`lf-ledger not updated: …`) and leaves the sweep's exit code
+  alone, and the next update catches up.
+- A ledger line that does not parse is refused. The ledger is a function of the log, so
+  delete the file and run `lf-ledger --rebuild`; don't edit it by hand.
+- `lf-first-seen` prints tab-separated rows (Oslo day, first `ObservedAt` in UTC,
+  authority, kind, id, page) to stdout and the count to stderr. Days are Oslo calendar
+  days.
+
 ### The dead-man switch (issue #167, part 3)
 
 Two failures look identical from inside this machine: *the sweep ran and found nothing
