@@ -10,7 +10,7 @@ import pytest
 from lxml import etree, html
 
 from lovspor.errors import ParseError
-from lovspor.observatory.listing import _tag_of, parse_listing, safe_html_parser
+from lovspor.observatory.listing import _tag_of, parse_listing, safe_html_parser, usable_href
 
 PAGE_URL = "https://www.example.invalid/kunngjoringer/"
 
@@ -196,6 +196,120 @@ class TestWhatIsRefused:
         )
 
         assert [entry.url for entry in readout.entries] == ["https://www.example.invalid/a"]
+
+
+class TestADateBelongsToOneEntry:
+    """Issue #514: a CMS that wraps the whole body in one ``<article>`` with the
+    page's own "last updated" ``<time>`` stamped every link on the page with
+    that date — share buttons and off-domain links included."""
+
+    def test_a_page_date_on_a_whole_body_article_dates_no_link(self) -> None:
+        with pytest.raises(ParseError, match=r"\(3 undated link\(s\) seen\)"):
+            parse_listing(
+                _page(
+                    '<article><p>Sist endret <time datetime="2026-04-21">21. april</time></p>'
+                    '<p><a href="/download/reglement.pdf">Reglement</a></p>'
+                    '<p><a href="https://lovdata.no/dokument/LF/forskrift/2025-11-03-2390">F</a></p>'
+                    '<p><a href="https://www.facebook.com/sharer.php?u=x">Del</a></p></article>'
+                ),
+                PAGE_URL,
+            )
+
+    def test_share_buttons_inside_a_dated_row_do_not_borrow_its_date(self) -> None:
+        readout = parse_listing(
+            _page(
+                "<ul>"
+                '<li><time datetime="2026-08-01">d</time><a href="/a">A</a>'
+                '<a href="https://twitter.com/intent/tweet?url=a">Del</a></li>'
+                '<li><time datetime="2026-08-02">d</time><a href="/b">B</a></li>'
+                "</ul>"
+            ),
+            PAGE_URL,
+        )
+
+        assert [(e.url, e.site_reported_lastmod) for e in readout.entries] == [
+            ("https://www.example.invalid/b", "2026-08-02")
+        ]
+        assert readout.skipped_without_date == 2
+
+    def test_two_links_to_the_same_url_are_still_one_entry(self) -> None:
+        """A title link and a "read more" link to one page is one entry."""
+        readout = parse_listing(
+            _page(
+                '<ul><li><a href="/a">Title</a><time datetime="2026-08-03">d</time>'
+                '<a href="https://www.example.invalid/a">Les mer</a></li></ul>'
+            ),
+            PAGE_URL,
+        )
+
+        assert [(e.url, e.site_reported_lastmod) for e in readout.entries] == [
+            ("https://www.example.invalid/a", "2026-08-03")
+        ]
+        assert readout.skipped_without_date == 0
+
+    def test_a_dated_list_with_the_time_inside_each_link_is_read_as_before(self) -> None:
+        """The one real dated list of the 2026-10-03 crawl (a hearings archive):
+        the whole entry is one anchor with its ``<time>`` inside."""
+        readout = parse_listing(
+            _page(
+                '<nav><ol><li><a href="/">Forside</a></li></ol></nav><ul>'
+                + "".join(
+                    f'<li><a href="/artikler/h{n}"><p><time datetime="2026-0{n}-19T14:33:03+02:00">'
+                    f"{n}</time></p><h2>Høring {n}</h2></a></li>"
+                    for n in range(1, 4)
+                )
+                + "</ul>"
+            ),
+            PAGE_URL,
+        )
+
+        assert [(e.url.rsplit("/", 1)[-1], e.site_reported_lastmod) for e in readout.entries] == [
+            ("h1", "2026-01-19T14:33:03+02:00"),
+            ("h2", "2026-02-19T14:33:03+02:00"),
+            ("h3", "2026-03-19T14:33:03+02:00"),
+        ]
+        assert readout.skipped_without_date == 1
+        assert readout.undated is False
+
+    def test_a_row_holding_dated_rows_dates_only_its_own_link_if_it_is_alone(self) -> None:
+        readout = parse_listing(
+            _page(
+                '<ul><li><a href="/section">Section</a><ul>'
+                '<li><time datetime="2026-08-04">d</time><a href="/x">X</a></li>'
+                '<li><time datetime="2026-08-05">d</time><a href="/y">Y</a></li>'
+                "</ul></li></ul>"
+            ),
+            PAGE_URL,
+        )
+
+        assert [e.url.rsplit("/", 1)[-1] for e in readout.entries] == ["x", "y"]
+        assert readout.skipped_without_date == 1
+
+    def test_a_non_document_link_in_a_row_does_not_make_it_a_container(self) -> None:
+        readout = parse_listing(
+            _page(
+                '<ul><li><time datetime="2026-08-06">d</time><a href="/a">A</a>'
+                '<a href="#comments">Kommentarer</a><a href="mailto:x@example.invalid">E</a>'
+                "</li></ul>"
+            ),
+            PAGE_URL,
+        )
+
+        assert [e.site_reported_lastmod for e in readout.entries] == ["2026-08-06"]
+
+
+class TestUsableHref:
+    @pytest.mark.parametrize(
+        "href", ["", "   ", "#top", "mailto:a@b.invalid", "tel:1", "javascript:x", "data:x"]
+    )
+    def test_hrefs_that_address_no_document_are_none(self, href: str) -> None:
+        assert usable_href(html.fromstring(f'<a href="{href}">x</a>')) is None
+
+    def test_a_missing_href_is_none(self) -> None:
+        assert usable_href(html.fromstring("<a>x</a>")) is None
+
+    def test_a_document_href_is_returned_stripped(self) -> None:
+        assert usable_href(html.fromstring('<a href="  /a  ">x</a>')) == "/a"
 
 
 class TestTheSamePageTwice:
