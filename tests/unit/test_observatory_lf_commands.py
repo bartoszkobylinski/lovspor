@@ -9,12 +9,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.observatory import commands as observatory_commands
 from lovspor.observatory.heartbeat import ENV_HEARTBEAT_URL
-from lovspor.observatory.lf_commands import refresh_after_sweep
+from lovspor.observatory.lf_commands import _days, refresh_after_sweep
 from lovspor.observatory.lf_ledger import ledger_path, read_ledger
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance
@@ -153,6 +154,21 @@ class TestLfFirstSeen:
         result = runner.invoke(app, ["observatory", "lf-first-seen", *arguments])
 
         assert result.exit_code == 2
+
+    @pytest.mark.parametrize(("day", "since"), [(None, None), ("2026-10-02", "2026-10-01")])
+    def test_the_refusal_says_which_options_to_give(
+        self, day: str | None, since: str | None
+    ) -> None:
+        with pytest.raises(typer.BadParameter) as refused:
+            _days(day, since)
+
+        assert refused.value.message == "give exactly one of --day or --since"
+
+    def test_the_refusal_names_the_date_that_did_not_parse(self) -> None:
+        with pytest.raises(typer.BadParameter) as refused:
+            _days("02.10.2026", None)
+
+        assert refused.value.message == "not an ISO date (YYYY-MM-DD): 02.10.2026"
 
     def test_a_damaged_ledger_is_refused(self, root: Path) -> None:
         ledger_path(_log(root)).write_text("garbage\n", encoding="utf-8")

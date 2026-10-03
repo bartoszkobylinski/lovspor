@@ -16,6 +16,7 @@ import pytest
 from lovspor.errors import LogIntegrityError
 from lovspor.observatory.lf_ledger import (
     LedgerEntry,
+    _prefix_digest,
     first_seen_between,
     ledger_cursor_path,
     ledger_path,
@@ -161,6 +162,8 @@ class TestWhatTheLedgerRecords:
             {"http_status": 199},
             {"http_status": 300},
             {"content_type": 'application/octet-stream; name="page.html"'},
+            {"content_type": "application/json;profile=html"},
+            {"content_type": "application/json; profile=html; charset=utf-8"},
         ],
     )
     def test_only_successfully_served_html_is_read(
@@ -174,7 +177,10 @@ class TestWhatTheLedgerRecords:
         assert read_ledger(log) == []
         assert report.html_records == 0
 
-    @pytest.mark.parametrize("content_type", ["TEXT/HTML", "application/xhtml+xml"])
+    @pytest.mark.parametrize(
+        "content_type",
+        ["TEXT/HTML", "application/xhtml+xml", "text/html;charset=utf-8", "text/html;a=b;c=d"],
+    )
     def test_html_is_recognised_in_any_spelling(self, tmp_path: Path, content_type: str) -> None:
         log = make_log(tmp_path)
         _capture(log, _page(LF_A), content_type=content_type, http_status=299)
@@ -269,6 +275,31 @@ class TestUpdatingIsIdempotentAndCheap:
 
         assert (report.started_at_offset, report.html_records, report.appended) == (0, 1, ())
 
+    def test_a_cursor_past_an_absent_log_costs_a_full_read(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        cursor = {"schema_version": 1, "log_offset": 1, "prefix_sha256": "0" * 64}
+        ledger_cursor_path(log).write_text(json.dumps(cursor), encoding="utf-8")
+
+        report = update_ledger(log)
+
+        assert (report.started_at_offset, report.html_records, report.appended) == (0, 0, ())
+
+    def test_a_prefix_longer_than_the_log_digests_the_bytes_there_are(self, tmp_path: Path) -> None:
+        short = tmp_path / "short.jsonl"
+        short.write_bytes(b"abc")
+
+        assert _prefix_digest(short, 10) == hashlib.sha256(b"abc").hexdigest()
+
+    def test_non_ascii_pages_are_kept_whatever_the_locale(
+        self, tmp_path: Path, c_locale: None
+    ) -> None:
+        log = make_log(tmp_path)
+        record = _capture(log, _page(LF_A), url="https://k.invalid/forskrifter-for-v\u00e6r")
+
+        update_ledger(log)
+
+        assert [entry.url for entry in read_ledger(log)] == [record.url]
+
     def test_a_correction_after_the_cursor_forces_a_full_read(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         original = _capture(log, _page(LF_A))
@@ -318,12 +349,17 @@ class TestWhatTheLedgerRefuses:
     ) -> None:
         log = make_log(tmp_path)
         _capture(log, _page(LF_A))
+        clean = log.log_path.stat().st_size
         with log.log_path.open("ab") as handle:
             handle.write(b'{"torn":')
 
-        with pytest.raises(LogIntegrityError):
+        with pytest.raises(LogIntegrityError) as refused:
             update_ledger(log)
 
+        assert str(refused.value) == (
+            f"{log.log_path}: unreadable record after byte {clean}; the LF ledger is not "
+            "updated from a damaged log (run `observatory verify`)"
+        )
         assert not ledger_path(log).exists() or read_ledger(log) == []
         assert not ledger_cursor_path(log).exists()
 
@@ -339,8 +375,13 @@ class TestWhatTheLedgerRefuses:
         log = make_log(tmp_path)
         ledger_path(log).write_text("\n", encoding="utf-8")
 
-        with pytest.raises(LogIntegrityError):
+        with pytest.raises(LogIntegrityError) as refused:
             read_ledger(log)
+
+        assert str(refused.value) == (
+            f"{ledger_path(log)}:1: unreadable ledger entry; the ledger is derived from the "
+            "log, so remove it and run `lovspor observatory lf-ledger --rebuild`"
+        )
 
     def test_a_missing_blob_is_counted_not_fatal(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
@@ -358,6 +399,16 @@ class TestWhatTheLedgerRefuses:
         report = update_ledger(log)
 
         assert (report.blobs_missing, report.blobs_read, read_ledger(log)) == (1, 0, [])
+
+    def test_every_missing_blob_is_counted(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        records = [_capture(log, _page(LF_A, salt=str(n))) for n in range(3)]
+        for record in records:
+            log.blob_path(record.sha256).unlink()
+
+        report = update_ledger(log)
+
+        assert (report.blobs_missing, report.blobs_read) == (3, 0)
 
     def test_an_empty_archive_has_an_empty_ledger(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
