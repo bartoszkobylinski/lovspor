@@ -242,3 +242,22 @@ class PromotionRenderError(PromotionError):
     The inputs disagree with each other (a content hash that is not the text's)
     or the output would break the dataset's contract (an NLOD mention).
     """
+
+
+class PromotionRefusedError(PromotionError):
+    """A promotion the command refuses to carry out, with the reason.
+
+    Not a hold: a hold is a property of the source (its text, its identity)
+    and is recorded and counted. A refusal is about the request — no human
+    approval, an artifact the archive cannot name unambiguously, a corpus path
+    that is not a ``lovverk`` checkout — and nothing is written or recorded.
+    """
+
+
+class DecisionLogError(PromotionError):
+    """The promotion decision log does not read to its end.
+
+    The log is append-only evidence of human decisions (ADR-0016 4c); a line
+    skipped because it does not parse could be the ``reject`` that keeps an
+    artifact out of the corpus.
+    """
