@@ -273,3 +273,57 @@ def test_rendered_fixture_passes_lovverk_integrity_check(tmp_path: Path) -> None
 def test_observed_at_first_is_written_in_utc() -> None:
     assert SOURCE.observed_at_first_utc == "2026-08-19T15:17:23Z"
     assert SOURCE.observed_at_first.astimezone(UTC).hour == 15
+
+
+def _front_matter_lines(markdown: str) -> list[str]:
+    return markdown.split("---\n")[1].splitlines()
+
+
+def test_front_matter_writes_non_ascii_as_itself_not_as_escapes() -> None:
+    """lovverk reads the scalar bytes; ``\\u00e5`` would load equal but is not what is written."""
+    lines = _front_matter_lines(render_local_regulation(_document()))
+    assert 'source_license: "åndsverkloven § 14"' in lines
+
+
+def test_hjemmel_flow_list_separates_references_with_a_comma() -> None:
+    lines = (
+        REGULATION_LINES[0],
+        "Hjemmel: LOV-1981-03-13-6-§30, LOV-2018-06-22-83-§8-1",
+        *REGULATION_LINES[1:],
+    )
+    rendered = _front_matter_lines(render_local_regulation(_document(lines)))
+    assert 'hjemmel: ["LOV-1981-03-13-6-§30", "LOV-2018-06-22-83-§8-1", ' in rendered[6]
+
+
+def test_no_enactment_renders_vedtatt_as_null() -> None:
+    lines = (REGULATION_LINES[0], "Dato: FOR-2019-12-12-2077", *REGULATION_LINES[2:])
+    rendered = _front_matter_lines(render_local_regulation(_document(lines)))
+    assert (rendered[7], rendered[8]) == ("vedtatt: null", "vedtatt_av: null")
+
+
+def test_a_section_line_of_exactly_the_heading_limit_is_a_heading() -> None:
+    section = "§ 4 Særlige regler for hytter og fritidsboliger i områder uten fast bosetting " + "x"
+    section = section.ljust(100, "x")
+    assert len(section) == 100
+    lines = (*REGULATION_LINES[:-1], section, REGULATION_LINES[-1])
+    body = render_local_regulation(_document(lines)).split("---\n", 2)[2]
+    assert f"\n\n## {section}\n\n" in body
+
+
+def test_content_hash_refusal_message_names_the_mismatch() -> None:
+    document = _document()
+    forged = document.identity.model_copy(update={"content_hash": "0" * 64})
+    with pytest.raises(PromotionRenderError) as caught:
+        render_local_regulation(document.model_copy(update={"identity": forged}))
+    assert str(caught.value) == (
+        "identity content_hash is not the hash of the extracted text it names"
+    )
+
+
+def test_nlod_refusal_message_cites_the_decision() -> None:
+    lines = (*REGULATION_LINES, "Data er lisensiert under NLOD 2.0.")
+    with pytest.raises(PromotionRenderError) as caught:
+        render_local_regulation(_document(lines))
+    assert str(caught.value) == (
+        "a local regulation's rendering may not mention NLOD (ADR-0016 Decision 3)"
+    )

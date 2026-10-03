@@ -167,3 +167,38 @@ def test_ikraft_header_wins_over_the_body_clause() -> None:
 def test_no_ikraft_clause_leaves_both_empty() -> None:
     fields = _read("Forskrift om gebyr", "§ 1 Gebyr")
     assert (fields.ikraft, fields.ikraft_text) == (None, None)
+
+
+def test_a_title_of_exactly_the_length_limit_is_a_title() -> None:
+    title = ("Forskrift om renovasjon og slam for hytter og fritidsboliger " * 5)[:250]
+    assert len(title) == 250
+    assert _read("Hjem", title, "§ 1 Formål").title == title
+
+
+def test_hjemmel_header_drops_only_a_sentence_period() -> None:
+    fields = _read(
+        "Forskrift om gebyr",
+        "Hjemmel: LOV-1981-03-13-6-§30, FOR-2008-06-27-71-KAPIX.",
+        "§ 1 Gebyr",
+    )
+    assert fields.hjemmel == ("LOV-1981-03-13-6-§30", "FOR-2008-06-27-71-KAPIX")
+
+
+def test_hjemmel_phrase_wrapped_across_block_lines() -> None:
+    fields = _read(
+        "Forskrift om gebyr",
+        "Vedtatt av kommunestyret med hjemmel i",
+        "forurensningsloven § 30. Kunngjort på nettstedet.",
+        "§ 1 Gebyr",
+    )
+    assert fields.hjemmel == ("forurensningsloven § 30",)
+
+
+def test_ikraft_phrase_ends_at_its_sentence_when_the_next_starts_a_new_line() -> None:
+    fields = _read(
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Forskriften trer i kraft straks.",
+        "Samtidig oppheves forskrift om gebyr.",
+    )
+    assert (fields.ikraft, fields.ikraft_text) == (None, "straks")

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import io
+import zipfile
+
 import pypdf
 import pytest
+from lxml import html
 
 from lovspor.errors import LovsporError, UnreadableSourceError
 from lovspor.promotion import SourceForm
@@ -20,7 +24,16 @@ from tests.unit.promotion_fixtures import (
     html_page,
     minimal_docx,
     minimal_pdf,
+    pdf_pages,
 )
+
+DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _docx_body(paragraphs: str) -> bytes:
+    document = f'<w:document xmlns:w="{_W}"><w:body>{paragraphs}</w:body></w:document>'
+    return docx_with_document(document.encode())
 
 
 @pytest.mark.parametrize(
@@ -33,6 +46,8 @@ from tests.unit.promotion_fixtures import (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             SourceForm.DOCX,
         ),
+        (f"{DOCX_MEDIA}; charset=binary", SourceForm.DOCX),
+        (f'{DOCX_MEDIA}; charset=binary; name="forskrift.docx"', SourceForm.DOCX),
         ("application/msword", None),
         ("image/png", None),
         ("", None),
@@ -202,3 +217,115 @@ def test_docx_oversized_document_part_is_unreadable(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr("lovspor.promotion.source_text.MAX_DOCX_PART_BYTES", 100)
     with pytest.raises(UnreadableSourceError, match="larger than"):
         docx_lines(minimal_docx())
+
+
+@pytest.mark.parametrize(
+    "chrome",
+    [
+        "<nav><a href='/'>Hjem</a></nav>",
+        "<header><p>Eksempel kommune</p></header>",
+        "<div id='sidebar'>Relaterte saker</div>",
+        "<script>var x = 'Forskrift om noe annet';</script>",
+    ],
+)
+def test_chrome_by_tag_or_id_alone_is_dropped(chrome: str) -> None:
+    page = f"<html><body><main>{chrome}<p>§ 1 Formål</p></main></body></html>".encode()
+    assert html_lines(page, "text/html") == ("§ 1 Formål",)
+
+
+def test_html_with_no_document_region_says_so() -> None:
+    with pytest.raises(UnreadableSourceError) as caught:
+        html_lines(b"<frameset></frameset>", "text/html")
+    assert str(caught.value) == "HTML has no document region (<main> or <body>)"
+
+
+def test_html_the_parser_rejects_is_unreadable_with_the_parser_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """lxml's ValueError (an encoding declaration in text) is unreachable through
+    ``_decoded``'s guard, so the parser is made to raise it here."""
+
+    def rejecting(*_args: object, **_kwargs: object) -> html.HtmlElement:
+        raise ValueError("Unicode strings with encoding declaration are not supported")
+
+    monkeypatch.setattr(html, "document_fromstring", rejecting)
+    with pytest.raises(UnreadableSourceError) as caught:
+        html_lines(b"<html><body><main><p>x</p></main></body></html>", "text/html")
+    assert str(caught.value) == (
+        "HTML did not parse: Unicode strings with encoding declaration are not supported"
+    )
+
+
+def test_pdf_pages_join_line_by_line_in_page_order() -> None:
+    pdf = pdf_pages(("§ 1 Formål", "Forskriften gjelder"), ("§ 2 Gebyr", "Gebyret er kr 100"))
+    assert pdf_lines(pdf) == ("§ 1 Formål", "Forskriften gjelder", "§ 2 Gebyr", "Gebyret er kr 100")
+
+
+def test_pdf_whose_startxref_misses_the_xref_table_is_still_read() -> None:
+    """A wrong ``startxref`` is common in served PDFs; the reader repairs it, as viewers do."""
+    broken = minimal_pdf().replace(b"startxref\n", b"startxref\n1")
+    assert broken != minimal_pdf()
+    assert pdf_lines(broken) == (*REGULATION_LINES,)
+
+
+def test_pdf_that_does_not_parse_says_why() -> None:
+    with pytest.raises(UnreadableSourceError) as caught:
+        pdf_lines(b"%PDF-1.4 this is not a pdf")
+    assert str(caught.value).startswith("PDF did not parse: ")
+
+
+def test_docx_internal_entity_is_never_expanded() -> None:
+    document = (
+        f'<!DOCTYPE w:document [<!ENTITY k "Eksempel kommune">]><w:document xmlns:w="{_W}">'
+        "<w:body><w:p><w:r><w:t>Forskrift om gebyr, &k;</w:t></w:r></w:p></w:body></w:document>"
+    )
+    lines = docx_lines(docx_with_document(document.encode()))
+    assert all("Eksempel kommune" not in line for line in lines)
+
+
+def test_docx_keeps_a_blank_run_beside_a_comment_as_the_word_space() -> None:
+    runs = "<w:r><w:t>om</w:t><w:t> <!--x--></w:t><w:t>gebyr</w:t></w:r>"
+    assert docx_lines(
+        _docx_body(f"<w:p><w:r><w:t>Forskrift</w:t></w:r></w:p><w:p>{runs}</w:p>")
+    ) == (
+        "Forskrift",
+        "om gebyr",
+    )
+
+
+def test_docx_empty_run_adds_no_text() -> None:
+    paragraph = "<w:p><w:r><w:t>Forskrift om</w:t><w:t/><w:t> gebyr</w:t></w:r></w:p>"
+    assert docx_lines(_docx_body(paragraph)) == ("Forskrift om gebyr",)
+
+
+def test_docx_tracked_deletion_and_field_codes_are_not_text() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Gebyret er kr </w:t></w:r>"
+        "<w:del><w:r><w:delText>100</w:delText></w:r></w:del>"
+        "<w:r><w:instrText>PAGE</w:instrText></w:r><w:r><w:t>200</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Gebyret er kr 200",)
+
+
+def test_docx_that_does_not_parse_says_why() -> None:
+    with pytest.raises(UnreadableSourceError) as caught:
+        docx_lines(docx_with_document(b"<w:document><w:body>"))
+    assert str(caught.value).startswith("DOCX word/document.xml did not parse: ")
+
+
+def test_docx_that_is_not_a_zip_says_why() -> None:
+    with pytest.raises(UnreadableSourceError) as caught:
+        docx_lines(b"not a zip")
+    assert str(caught.value).startswith("DOCX is not a readable zip: ")
+
+
+def test_docx_document_part_of_exactly_the_cap_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = minimal_docx()
+    size = len(_document_xml(payload))
+    monkeypatch.setattr("lovspor.promotion.source_text.MAX_DOCX_PART_BYTES", size)
+    assert docx_lines(payload) == (*REGULATION_LINES,)
+
+
+def _document_xml(payload: bytes) -> bytes:
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        return archive.read("word/document.xml")

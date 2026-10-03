@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from lovspor.promotion import PersonalDataHit, PersonalDataKind
-from lovspor.promotion.personal_data import screen_personal_data
+from lovspor.promotion.personal_data import _check_digit, screen_personal_data
 
 VALID_FODSELSNUMMER = "01019012480"
 VALID_D_NUMMER = "41019012393"
@@ -27,6 +27,8 @@ def _kinds(text: str) -> set[PersonalDataKind]:
         "010190 12480",
         "01419012110",  # H-nummer: month + 40
         "01819012012",  # synthetic test number: month + 80
+        "31129010188",  # the last day of the last month
+        "71129010090",  # D-nummer on the 31st: day 71 is 31 after the offset
     ],
 )
 def test_identity_number_passing_mod_11_is_a_hit(number: str) -> None:
@@ -141,3 +143,18 @@ def test_hits_are_ordered_by_line_then_kind() -> None:
         (2, PersonalDataKind.FODSELSNUMMER),
         (3, PersonalDataKind.EMAIL),
     ]
+
+
+def test_a_digit_list_shorter_than_its_weights_is_refused_not_weighted_by_a_prefix() -> None:
+    """``zip`` would silently weigh only the first nine digits of a ten-digit list."""
+    with pytest.raises(ValueError, match="zip"):
+        _check_digit([0, 1, 0, 1, 9, 0, 1, 2, 4], (5, 4, 3, 2, 7, 6, 5, 4, 3, 2))
+
+
+def test_signature_hit_names_the_name_line_not_the_title_line() -> None:
+    text = "§ 9 Ikrafttredelse\nKari Testperson\nordfører\n"
+    assert screen_personal_data(text) == (PersonalDataHit(kind=PersonalDataKind.SIGNATURE, line=2),)
+
+
+def test_a_word_that_only_starts_with_an_office_title_is_not_one() -> None:
+    assert screen_personal_data("Kari Testperson\nordførerX") == ()

@@ -69,28 +69,44 @@ def minimal_pdf(lines: tuple[str, ...] = REGULATION_LINES, *, glyph_shift: int =
     to a text extractor (study §6.2, the Herøy case): the page renders, the
     extracted text is a cipher.
     """
+    return _pdf_document(_pdf_stream(lines, glyph_shift))
+
+
+def pdf_pages(*pages: tuple[str, ...]) -> bytes:
+    """A PDF with one page per entry, each holding its lines as ``minimal_pdf`` does."""
+    return _pdf_document(*(_pdf_stream(lines, 0) for lines in pages))
+
+
+def _pdf_stream(lines: tuple[str, ...], glyph_shift: int) -> bytes:
     ops = [b"BT /F1 11 Tf 14 TL 72 760 Td"]
     for line in lines:
         raw = bytes((code + glyph_shift) % 256 for code in line.encode("cp1252"))
         ops.append(b"(" + _pdf_escape(raw) + b") Tj T*")
     ops.append(b"ET")
-    return _pdf_document(b"\n".join(ops))
+    return b"\n".join(ops)
 
 
 def _pdf_escape(raw: bytes) -> bytes:
     return raw.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
 
 
-def _pdf_document(stream: bytes) -> bytes:
-    objects = (
+def _pdf_document(*streams: bytes) -> bytes:
+    font = 3 + 2 * len(streams)
+    kids = b" ".join(b"%d 0 R" % (3 + 2 * i) for i in range(len(streams)))
+    objects: list[bytes] = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
-        b"/Resources << /Font << /F1 5 0 R >> >> >>",
-        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-        b"<< /Author (Kari Testperson) /Title (Utkast) >>",
+        b"<< /Type /Pages /Kids [%s] /Count %d >>" % (kids, len(streams)),
+    ]
+    for i, stream in enumerate(streams):
+        objects.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents %d 0 R "
+            b"/Resources << /Font << /F1 %d 0 R >> >> >>" % (4 + 2 * i, font)
+        )
+        objects.append(b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream")
+    objects.append(
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
     )
+    objects.append(b"<< /Author (Kari Testperson) /Title (Utkast) >>")
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, body in enumerate(objects, start=1):
@@ -99,7 +115,7 @@ def _pdf_document(stream: bytes) -> bytes:
     xref = len(out)
     out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
     out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
-    out += b"trailer\n<< /Size %d /Root 1 0 R /Info 6 0 R >>\n" % (len(objects) + 1)
+    out += b"trailer\n<< /Size %d /Root 1 0 R /Info %d 0 R >>\n" % (len(objects) + 1, len(objects))
     out += b"startxref\n%d\n%%%%EOF\n" % xref
     return bytes(out)
 

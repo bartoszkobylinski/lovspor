@@ -166,3 +166,76 @@ def test_result_round_trips_through_its_discriminated_union() -> None:
     adapter: TypeAdapter[ExtractionResult] = TypeAdapter(ExtractionResult)
     for result in (extract_regulation(html_page(), HTML), extract_regulation(b"", "image/png")):
         assert adapter.validate_json(adapter.dump_json(result)) == result
+
+
+def _lines_of_length(length: int, *, marks: int = 0) -> tuple[str, ...]:
+    """The regulation and a padding line: ``length`` characters joined, ``marks`` U+FFFD."""
+    head = (*REGULATION_LINES, "�" * marks + " Merknad")
+    pad = length - len("\n".join(head)) - 1
+    assert pad > 0
+    lines = (*head, "a" * pad)
+    assert len("\n".join(lines)) == length
+    return lines
+
+
+def test_text_of_exactly_the_minimum_is_not_empty() -> None:
+    lines = ("Forskrift om gebyr og avfall i kommunen", "a" * 160)
+    assert len("\n".join(lines)) == 200
+    assert _held(html_page(lines)).reason == ExtractionHoldReason.NO_BODY
+
+
+def test_text_one_under_the_minimum_split_over_lines_is_empty() -> None:
+    lines = ("Forskrift om gebyr og avfall i kommunen", "a" * 80, "b" * 78)
+    assert len("\n".join(lines)) == 199
+    assert _held(html_page(lines)).reason == ExtractionHoldReason.EMPTY_TEXT
+
+
+def test_function_word_share_of_exactly_the_minimum_is_prose() -> None:
+    line = " ".join(["avfall"] * 19 + ["og"])
+    assert _held(html_page((line, line))).reason == ExtractionHoldReason.NO_BODY
+
+
+def test_one_function_word_in_a_hundred_is_garbled() -> None:
+    line = " ".join(["avfall"] * 99 + ["og"])
+    held = _held(html_page((line,)))
+    assert (held.reason, held.detail) == (
+        ExtractionHoldReason.GARBLED_TEXT,
+        "text does not read as Norwegian prose",
+    )
+
+
+def test_replacement_characters_over_the_share_are_garbled() -> None:
+    held = _held(html_page((*REGULATION_LINES, "�" * 20)))
+    assert held.reason == ExtractionHoldReason.GARBLED_TEXT
+
+
+def test_unprintable_share_of_exactly_the_maximum_is_still_prose() -> None:
+    lines = _lines_of_length(600, marks=6)
+    assert isinstance(extract_regulation(html_page(lines), HTML), ExtractedDocument)
+
+
+def test_lovdata_print_detail() -> None:
+    lines = ("Utskrift fra Lovdata - 03.10.2026 12:00", *REGULATION_LINES)
+    assert _held(html_page(lines)).detail == "the text is a print out of Lovdata"
+
+
+def test_placeholder_date_detail() -> None:
+    lines = tuple(line.replace("12.12.2019", "X.X.2019") for line in REGULATION_LINES)
+    assert _held(html_page(lines)).detail == "a date is a draft's placeholder"
+
+
+def test_unreadable_hold_keeps_the_form_and_the_readers_reason() -> None:
+    held = _held(b"%PDF-1.4 broken", PDF)
+    assert (held.reason, held.source_form) == (ExtractionHoldReason.UNREADABLE, SourceForm.PDF)
+    assert held.detail.startswith("PDF did not parse: ")
+
+
+def test_split_and_personal_data_holds_keep_the_form() -> None:
+    no_body = tuple(line for line in REGULATION_LINES if not line.startswith("§"))
+    personal = (*REGULATION_LINES, "Kontaktperson: Kari Testperson")
+    for lines, reason in (
+        (no_body, ExtractionHoldReason.NO_BODY),
+        (personal, ExtractionHoldReason.PERSONAL_DATA),
+    ):
+        held = _held(minimal_docx(lines), DOCX)
+        assert (held.reason, held.source_form) == (reason, SourceForm.DOCX)
