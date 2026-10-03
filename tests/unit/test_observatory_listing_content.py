@@ -177,6 +177,18 @@ class TestTheContentRegion:
             _page('<main><article><p>Intro.</p></article><a href="/doc">D</a></main>')
         ) == [f"{HOST}/doc"]
 
+    def test_an_article_nested_in_an_article_never_narrows_the_region(self) -> None:
+        """An ``<article>`` inside another is a part of it — a comment, a card —
+        not the page's statement of where its content is. That holds when the
+        outer one wraps the ``<main>`` the region starts at, too: narrowing to
+        the inner one there would drop every other link the page lists."""
+        assert _urls(
+            _page(
+                '<article><main><a href="/politikk/reglement/a">A</a>'
+                '<article><a href="/kommentar">K</a></article></main></article>'
+            )
+        ) == [f"{HOST}/politikk/reglement/a", f"{HOST}/kommentar"]
+
     def test_scripts_are_not_content(self) -> None:
         assert _urls(
             _page(
@@ -256,6 +268,7 @@ class TestWhatIsADocumentLink:
             "/finn?q=x",
             "/x?Search=y",
             "/redirect?to=https://elsewhere.invalid/",
+            "/redirect?to=http://elsewhere.invalid/",
         ],
     )
     def test_site_functions_are_not_documents(self, path: str) -> None:
@@ -304,6 +317,21 @@ class TestWhatIsADocumentLink:
         assert is_content_link(f"{HOST}/politikk/regl", PAGE_URL) is True
         assert is_content_link(f"{HOST}/politikk-og-planer/", PAGE_URL) is True
 
+    @pytest.mark.parametrize(
+        ("path", "page_path"),
+        [
+            ("/politikk/X", "/politikk/reglement/"),
+            ("/politikk/vedtekter", "/politikk/vedtekterX/"),
+            ("/politikk/reglement", "/politikk/reglement "),
+        ],
+    )
+    def test_only_trailing_slashes_are_trimmed_before_comparing_paths(
+        self, path: str, page_path: str
+    ) -> None:
+        """``/politikk/X`` is a page under ``/politikk``, not ``/politikk``
+        itself; a trailing letter or space is part of a path's name."""
+        assert is_content_link(f"{HOST}{path}", f"{HOST}{page_path}") is True
+
     def test_another_port_is_another_site(self) -> None:
         assert is_content_link("https://www.example.invalid:8443/politikk/", PAGE_URL) is True
 
@@ -311,6 +339,7 @@ class TestWhatIsADocumentLink:
         assert _origin("http://h.invalid/") == ("http", "h.invalid", 80)
         assert _origin("https://h.invalid/") == ("https", "h.invalid", 443)
         assert _origin("https://h.invalid:8443/") == ("https", "h.invalid", 8443)
+        assert _origin("https:///no-host") == ("https", "", 443)
 
     def test_each_url_is_proposed_once_in_document_order(self) -> None:
         assert _urls(
@@ -342,6 +371,21 @@ class TestWhatIsReported:
 
         assert [e.url for e in readout.entries] == [f"{HOST}/doc"]
         assert readout.not_proposed == 4
+
+    def test_only_anchors_are_links(self) -> None:
+        """A stylesheet ``<link>`` and an image-map ``<area>`` carry an href
+        too; neither is a link the page lists, proposed or counted."""
+        readout = read_listing(
+            _page(
+                '<main><map name="kart"><area href="/kart/sone-1" alt="Sone 1"></map>'
+                '<a href="/doc">D</a></main>',
+                head='<link rel="stylesheet" href="/stil.css">',
+            ),
+            PAGE_URL,
+        )
+
+        assert [e.url for e in readout.entries] == [f"{HOST}/doc"]
+        assert readout.not_proposed == 0
 
     def test_a_page_with_no_content_link_is_a_refusal_naming_what_it_saw(self) -> None:
         with pytest.raises(ParseError) as caught:

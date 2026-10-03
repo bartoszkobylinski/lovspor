@@ -295,6 +295,25 @@ def test_assumption_lxml_default_html_parser_reads_text_like_the_hardened_one() 
     assert _main_text(pages[2], None) == ""
 
 
+def test_assumption_lxml_ancestors_always_carry_a_string_tag() -> None:
+    """Pins the argument that waives ``_tag``'s ``isinstance(...) or True``
+    mutant in ``observatory/listing_content.py``: ``_tag`` is only ever asked
+    about an ancestor, and lxml gives a non-string ``tag`` only to comments,
+    processing instructions and entities — nodes that cannot hold children, so
+    none is ever anyone's ancestor."""
+    page = (
+        "<html><body><!-- top --><main><?pi x?><!-- c --><article>"
+        "<p><!-- inner --><a href='/a'>A</a></p></article></main></body></html>"
+    )
+    root = html.document_fromstring(page, parser=html.HTMLParser())
+    nodes = list(root.iter())
+
+    assert any(not isinstance(node.tag, str) for node in nodes)
+    assert all(isinstance(ancestor.tag, str) for node in nodes for ancestor in node.iterancestors())
+    with pytest.raises(TypeError):
+        html.HtmlComment("c").append(html.Element("a"))
+
+
 def test_an_entry_arguing_from_a_dependency_names_the_test_that_pins_it() -> None:
     """A justification resting on a package that `pyproject.toml` can bump is
     an assumption with an expiry date nobody is watching."""
