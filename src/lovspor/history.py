@@ -251,6 +251,7 @@ def _run_git_log(repo_path: Path, file_path: str) -> str:
         cwd=repo_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return result.stdout
@@ -298,6 +299,7 @@ def _frontmatter_id_at(repo_path: Path, sha: str, file_path: str) -> str | None:
         cwd=repo_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if result.returncode != 0:

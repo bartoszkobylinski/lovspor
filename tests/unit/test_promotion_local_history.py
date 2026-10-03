@@ -139,11 +139,6 @@ def test_history_recreates_the_authority_directory_from_git(
     assert (corpus / _history_path(corpus, doc_id)).is_file()
 
 
-@pytest.mark.xfail(
-    raises=UnicodeDecodeError,
-    strict=True,
-    reason="#518: history.py decodes git output with the locale codec",
-)
 def test_an_existing_history_is_compared_as_utf8_under_any_locale(
     root: Path, corpus: Path, tmp_path: Path, c_locale: None
 ) -> None:
