@@ -39,7 +39,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lovspor.errors import ParseError, SourceNotActivatedError, TombstonedArtifactError
 from lovspor.observatory.fetch import Fetcher
-from lovspor.observatory.listing import LISTING_METHOD, parse_listing
+from lovspor.observatory.listing import LISTING_METHOD, ListingReadout
+from lovspor.observatory.listing_content import read_listing
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.registry import SourceRecord, capture_host
@@ -398,19 +399,13 @@ class Discoverer:
         something to infer from a parse failure.
         """
         try:
-            readout = parse_listing(payload, pending.url)
+            readout = read_listing(payload, pending.url)
         except ParseError:
             walk.skip(pending.url, "unparseable_listing", pending.found_in)
             return ()
-        if readout.skipped_without_date:
-            # Not a failure, but not silence either: a listing where most links
-            # carry no date is one this reader is reading badly, and a caller
-            # that only sees what was proposed cannot notice.
-            walk.skip(
-                pending.url,
-                f"listing_entries_without_date: {readout.skipped_without_date}",
-                pending.found_in,
-            )
+        reason = _listing_note(readout)
+        if reason is not None:
+            walk.skip(pending.url, reason, pending.found_in)
         return tuple(
             DiscoveredLink(
                 url=entry.url,
@@ -459,6 +454,20 @@ class Discoverer:
         if pending.url in walk.seen_documents:
             return "already_read"
         return None
+
+
+def _listing_note(readout: ListingReadout) -> str | None:
+    """What a listing reading left out, as a skip reason, or None.
+
+    Not a failure, but not silence either. A dated listing where most links
+    carry no date is one the reader is reading badly. An undated one is always
+    noted, even at zero, so the log says which way the page was read (#514).
+    """
+    if readout.undated:
+        return f"listing_undated_links_not_proposed: {readout.not_proposed}"
+    if readout.skipped_without_date:
+        return f"listing_entries_without_date: {readout.skipped_without_date}"
+    return None
 
 
 def _off_source(walk: _Walk, url: str) -> str | None:
