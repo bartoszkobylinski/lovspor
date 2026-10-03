@@ -3441,3 +3441,34 @@ and ignores the default, so both versions compare the same string. No environmen
 yields a different boolean; this is `os.environ.get`/`str.strip`/`==` semantics,
 not a dependency's behaviour.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/freshness.py"
+symbol = "is_document_type"
+registered = "2026-10-03, PR #511, from run 37106345163"
+mutation = """
+-    return content_type.split(";", 1)[0].strip().lower() in DOCUMENT_MEDIA_TYPES
++    return content_type.split(";", )[0].strip().lower() in DOCUMENT_MEDIA_TYPES
+"""
+justification = """
+Only element [0] of the split is read. `str.split(sep, maxsplit)` splits from the
+left, so element [0] is the text before the first separator for every maxsplit >= 1
+and for no limit at all; the limit only changes how the remainder is divided, which
+is discarded. Identical result for every string. Python's own `str.split` semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/freshness.py"
+symbol = "is_document_type"
+registered = "2026-10-03, PR #511, from run 37106345163"
+mutation = """
+-    return content_type.split(";", 1)[0].strip().lower() in DOCUMENT_MEDIA_TYPES
++    return content_type.split(";", 2)[0].strip().lower() in DOCUMENT_MEDIA_TYPES
+"""
+justification = """
+Same argument as the unlimited-split entry: `split` works left to right, so with
+maxsplit 1 or 2 element [0] is the text before the first ";" in both cases; only the
+discarded tail differs. Python's own `str.split` semantics. (The `rsplit` sibling is
+not equivalent — it is killed by the two-parameter content type in
+test_pdf_and_word_processor_types_are_documents.)
+"""

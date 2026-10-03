@@ -655,6 +655,8 @@ class TestDocumentFold:
         [
             "application/pdf",
             "Application/PDF; qs=0.9",
+            # Two parameters: only the text before the FIRST ";" is the media type.
+            'application/pdf; name="vedtekter.pdf"; charset=binary',
             "application/msword",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "application/vnd.oasis.opendocument.text",
