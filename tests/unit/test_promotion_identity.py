@@ -177,6 +177,11 @@ def test_identification_line_forms(line: str) -> None:
     assert find_identification_ids(line) == ("lf-20191212-2077",)
 
 
+def test_numeric_date_reads_day_then_month() -> None:
+    # 14.01: the day and the month differ, so a swapped field cannot pass.
+    assert find_identification_ids("Forskrift 14.01.2020 nr. 63 om gebyr") == ("lf-20200114-0063",)
+
+
 def test_kunngjort_line_without_number_is_not_a_candidate() -> None:
     assert find_identification_ids("Kunngjort 20. desember 2019 kl. 14.10") == ()
 
@@ -252,6 +257,9 @@ def test_no_identification_and_no_date_is_held_never_minted() -> None:
     result = mint_identity(_regulation(MUNICIPAL_TITLE_BLOCK), OSLO)
     assert isinstance(result, HeldIdentity)
     assert result.reason is HoldReason.NO_IDENTITY
+    assert result.detail == (
+        "no single lf- id in the identification block, and no stated vedtaksdato"
+    )
     assert not hasattr(result, "doc_id")
 
 
@@ -262,6 +270,7 @@ def test_title_without_words_is_held_even_with_a_date() -> None:
     result = mint_identity(regulation, OSLO)
     assert isinstance(result, HeldIdentity)
     assert result.reason is HoldReason.NO_IDENTITY
+    assert result.detail == "no single lf- id in the identification block, and no title words"
 
 
 # --- normalisation and content hash -------------------------------------------
@@ -279,6 +288,12 @@ def test_normalise_title_is_nfc() -> None:
 def test_normalise_text_ignores_layout_whitespace() -> None:
     noisy = "\ufeff  § 1. Formål \r\n\r\n\r\nForskriften\u00a0skal\u00adsikre  renovasjon.\t\n\n"
     assert normalise_text(noisy) == "§ 1. Formål\n\nForskriften skalsikre renovasjon."
+
+
+def test_normalise_text_keeps_lines_of_one_paragraph_on_their_own_lines() -> None:
+    assert normalise_text("§ 1. Formål\nForskriften gjeld.\n\n§ 2") == (
+        "§ 1. Formål\nForskriften gjeld.\n\n§ 2"
+    )
 
 
 def test_normalise_text_keeps_case_and_punctuation() -> None:
