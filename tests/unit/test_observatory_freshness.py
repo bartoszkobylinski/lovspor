@@ -7,6 +7,8 @@ observation window that cannot be recovered.
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from lovspor.observatory.discovery import Candidate
 from lovspor.observatory.freshness import (
     FAILED_RECHECK,
@@ -20,6 +22,7 @@ from lovspor.observatory.freshness import (
     collect_capture_state,
     collect_latest_observations,
     failure_backoff,
+    is_document_type,
     latest_observations,
     parse_site_lastmod,
     undated_recheck,
@@ -633,6 +636,81 @@ class TestContentRunFold:
         collect(_observation(DAY_2))
 
         assert state.content == {URL: ContentRun(SAME, 1)}
+
+
+PDF = "application/pdf"
+
+
+def _typed(when: datetime, content_type: str, sha256: str = SAME) -> ArtifactObservation:
+    return _observation(when, sha256=sha256).model_copy(update={"content_type": content_type})
+
+
+class TestDocumentFold:
+    """#507: the fold remembers whether a URL's latest bytes were a document,
+    so selection can keep a PDF whose URL names neither a regulation nor
+    a ``.pdf`` suffix — 2,732 of the archive's 4,365 PDF URLs."""
+
+    @pytest.mark.parametrize(
+        "content_type",
+        [
+            "application/pdf",
+            "Application/PDF; qs=0.9",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.oasis.opendocument.text",
+        ],
+    )
+    def test_pdf_and_word_processor_types_are_documents(self, content_type: str) -> None:
+        assert is_document_type(content_type)
+
+    @pytest.mark.parametrize(
+        "content_type",
+        [
+            "text/html; charset=utf-8",
+            "application/xhtml+xml",
+            "image/jpeg",
+            "application/octet-stream",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "",
+        ],
+    )
+    def test_anything_else_is_not(self, content_type: str) -> None:
+        assert not is_document_type(content_type)
+
+    def test_a_run_is_not_a_document_unless_a_capture_said_so(self) -> None:
+        assert ContentRun(SAME, 0).document is False
+        assert capture_state([_observation(DAY_1)]).content[URL].document is False
+
+    def test_a_first_capture_of_a_pdf_marks_the_url(self) -> None:
+        state = capture_state([_typed(DAY_1, PDF)])
+
+        assert state.content == {URL: ContentRun(SAME, 0, document=True)}
+
+    def test_identical_bytes_again_keep_the_mark(self) -> None:
+        state = capture_state([_typed(DAY_1, PDF), _typed(DAY_2, PDF)])
+
+        assert state.content == {URL: ContentRun(SAME, 1, document=True)}
+
+    def test_the_latest_capture_decides(self) -> None:
+        """A URL that served a PDF and now serves a page is a page."""
+        to_html = capture_state([_typed(DAY_1, PDF), _typed(DAY_2, "text/html", OTHER)])
+        to_pdf = capture_state([_observation(DAY_1), _typed(DAY_2, PDF, OTHER)])
+
+        assert to_html.content[URL].document is False
+        assert to_pdf.content[URL].document is True
+
+    def test_identical_bytes_under_a_new_type_take_the_new_type(self) -> None:
+        state = capture_state([_observation(DAY_1), _typed(DAY_2, PDF)])
+
+        assert state.content == {URL: ContentRun(SAME, 1, document=True)}
+
+    def test_an_older_record_arriving_late_does_not_change_the_mark(self) -> None:
+        """The run keeps the later bytes, so it keeps what they were."""
+        kept_pdf = capture_state([_typed(DAY_2, PDF), _observation(DAY_1, sha256=OTHER)])
+        kept_html = capture_state([_observation(DAY_2), _typed(DAY_1, PDF, OTHER)])
+
+        assert kept_pdf.content == {URL: ContentRun(SAME, 0, document=True)}
+        assert kept_html.content == {URL: ContentRun(SAME, 0, document=False)}
 
 
 class TestUndatedRecheck:

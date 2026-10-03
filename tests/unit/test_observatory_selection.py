@@ -3,12 +3,14 @@
 import pytest
 
 from lovspor.observatory.discovery import Candidate, DiscoveryResult, SkippedLink
+from lovspor.observatory.freshness import CaptureState, ContentRun
 from lovspor.observatory.listing import LISTING_METHOD
 from lovspor.observatory.selection import (
     DOCUMENT_SUFFIXES,
     ENV_CAPTURE_SELECTION,
     REGULATION_PATH_STEMS,
     choose,
+    known_document,
     selection_enabled,
     selects,
 )
@@ -409,3 +411,56 @@ class TestChoose:
         listed = Candidate(url=NEWS, discovery_method="sitemap", found_in=LISTING)
 
         assert choose(_discovered(listed), (), enabled=True).chosen == ()
+
+
+def _known(url: str, *, document: bool) -> CaptureState:
+    return CaptureState({}, {}, {url: ContentRun("a" * 64, 0, document)})
+
+
+class TestKnownDocuments:
+    """#507: a URL whose latest capture was a PDF or DOCX is selected whatever
+    its path — 2,732 of the archive's 4,365 PDF URLs end in a slash, so the
+    suffix rule alone would miss most of them."""
+
+    def test_a_url_last_captured_as_a_document_is_known(self) -> None:
+        assert known_document(NEWS, _known(NEWS, document=True))
+
+    def test_a_url_last_captured_as_a_page_is_not(self) -> None:
+        assert not known_document(NEWS, _known(NEWS, document=False))
+
+    def test_a_url_never_captured_is_not(self) -> None:
+        assert not known_document(NEWS, _known(CLUB, document=True))
+        assert not known_document(NEWS, CaptureState.empty())
+
+    def test_on_a_known_document_on_an_unselected_path_is_chosen(self) -> None:
+        candidates = (_sitemap_candidate(NEWS), _sitemap_candidate(CLUB))
+
+        selection = choose(
+            _discovered(*candidates), (), enabled=True, state=_known(NEWS, document=True)
+        )
+
+        assert selection.chosen == (candidates[0],)
+        assert (selection.proposed, selection.matching, selection.unselected) == (2, 1, 1)
+
+    def test_off_a_known_document_is_counted_as_one_selection_would_keep(self) -> None:
+        candidates = (_sitemap_candidate(NEWS), _sitemap_candidate(CLUB))
+
+        selection = choose(
+            _discovered(*candidates), (), enabled=False, state=_known(NEWS, document=True)
+        )
+
+        assert selection.chosen == candidates
+        assert selection.matching == 1
+
+    def test_a_known_page_is_not_rescued(self) -> None:
+        selection = choose(
+            _discovered(_sitemap_candidate(NEWS)),
+            (),
+            enabled=True,
+            state=_known(NEWS, document=False),
+        )
+
+        assert selection.chosen == ()
+
+    def test_without_a_state_nothing_is_known(self) -> None:
+        assert choose(_discovered(_sitemap_candidate(NEWS)), (), enabled=True).chosen == ()

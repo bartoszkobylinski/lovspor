@@ -489,12 +489,12 @@ class TestTheBindingIsPinnedByItsBytes:
             },
             content={
                 "https://example.invalid/b": StoredRun(sha256="c" * 64, unchanged=0),
-                "https://example.invalid/a": StoredRun(sha256="d" * 64, unchanged=3),
+                "https://example.invalid/a": StoredRun(sha256="d" * 64, unchanged=3, document=True),
             },
         )
 
         assert _state_binding(index) == (
-            "4e305e84b2f6935cc5ffde337ce56ce3243d21f4160368df1474177298846c2a"
+            "2e05c1facfe222df8e94a8bcd8f7828cf215e75769726e96986c8c1f1f6b3d50"
         )
 
     def test_an_empty_log_records_the_empty_prefix_digest(self, tmp_path: Path) -> None:
@@ -568,7 +568,7 @@ class TestTheIndexFoldsTheCorrectedView:
     index built before a correction landed is rebuilt, not extended."""
 
     def test_the_derivation_version_moved_past_the_uncorrected_fold(self) -> None:
-        assert INDEX_DERIVATION_VERSION == 3
+        assert INDEX_DERIVATION_VERSION >= 3
 
     def test_a_cold_build_folds_the_corrected_view(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
@@ -645,3 +645,43 @@ class TestTheNarrowedFoldFollowsTheCorrection:
             assert _capture_state(corrected, authority_id) == _capture_state(
                 filed_right, authority_id
             )
+
+
+class TestTheIndexRemembersDocuments:
+    """#507: selection keeps a URL whose latest bytes were a document, so the
+    indexed fold must carry that mark exactly as the full fold does."""
+
+    def test_the_fold_that_learned_documents_has_its_own_version(self) -> None:
+        assert INDEX_DERIVATION_VERSION == 4
+
+    def test_a_document_mark_survives_the_index(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        url = "https://example.invalid/vedtak/"
+        pdf = _observation(url).model_copy(update={"content_type": "application/pdf"})
+        log.append(pdf)
+        log.append(_observation("https://example.invalid/side"))
+        indexed_capture_state(log)
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.records_read == 0
+        assert state.content[url] == ContentRun("0" * 64, 0, document=True)
+        assert state.content["https://example.invalid/side"].document is False
+        assert state == _full_fold(log)
+
+    def test_an_index_from_the_fold_without_documents_is_rebuilt(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        url = "https://example.invalid/vedtak/"
+        log.append(_observation(url).model_copy(update={"content_type": "application/pdf"}))
+        indexed_capture_state(log)
+        path = freshness_index_path(log)
+        doc = json.loads(path.read_text())
+        doc["derivation_version"] = 3
+        for run in doc["content"].values():
+            del run["document"]
+        path.write_text(json.dumps(doc))
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.records_read == 1
+        assert state.content[url].document is True

@@ -5135,6 +5135,33 @@ class TestCaptureSelection:
         assert run is not None
         assert (run.capture_selection, run.unselected, run.captured) == (False, 0, 1)
 
+    @pytest.mark.parametrize("command", [["capture", "--id", BAERUM_ID], ["capture-all"]])
+    def test_a_url_last_captured_as_a_pdf_stays_selected_whatever_its_path(
+        self,
+        root: Path,
+        httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
+        command: list[str],
+    ) -> None:
+        """#507: most linked PDFs end in a slash, so neither a stem nor the
+        suffix rule names them. The archive knows what each URL served last,
+        through the narrowed fold (`capture`) and the indexed one (a sweep)."""
+        self._ready(httpx_mock, root, NEWS_URL, CLUB_URL)
+        httpx_mock.add_response(
+            url=NEWS_URL, content=b"%PDF-1.7", headers={"content-type": "application/pdf"}
+        )
+        httpx_mock.add_response(url=CLUB_URL, content=b"<html>klubb</html>")
+        assert runner.invoke(app, ["observatory", *command]).exit_code == 0
+        monkeypatch.setenv(ENV_CAPTURE_SELECTION, "1")
+
+        result = runner.invoke(app, ["observatory", *command])
+
+        assert result.exit_code == 0, result.output
+        assert "selected: 1 of 2 candidates (1 not selected: path names no regulation)" in (
+            result.output
+        )
+        assert "unchanged since last seen: 1" in result.output
+
     def test_every_lane_of_a_sweep_selects_the_same_way(
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:

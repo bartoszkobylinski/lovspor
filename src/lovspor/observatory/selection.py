@@ -3,9 +3,9 @@
 Discovery proposes; capture fetches. Between them sits a choice that was
 deliberately deferred: which proposals to observe. On a whole-site crawl of
 201 municipalities, 95% of distinct URLs name no regulation in their path,
-and that share is crawl budget spent off-target. This module is the pure
-half of that choice: an allow-list of path stems, a document rule, and one
-predicate.
+and that share is crawl budget spent off-target. This module is the
+decision half of that choice: an allow-list of path stems, a document rule,
+and one predicate.
 
 It is **not a classifier** (ADR-0010 defers deciding what is law). It scopes
 budget by what a path *names*, never by what a document says. A regulation on
@@ -38,17 +38,26 @@ owner's decision of 2026-10-03 widens it two ways:
   nynorsk forms the first set lacked (``retningsliner`` beside
   ``retningslinjer``, ``ordensregler`` beside ``ordensreglar``).
 - **Every linked document**: a path ending in one of
-  :data:`DOCUMENT_SUFFIXES` is selected whatever else it names. Linked PDFs
-  are the richest regulation source the study found — 85 of the ~153
-  forskrifter also exist as a PDF or DOCX — and their file names
-  (``Aksellastrestriksjoner Gran Kommune 2024.pdf``) anticipate no stem.
+  :data:`DOCUMENT_SUFFIXES` is selected whatever else it names, and so is a
+  URL whose latest capture was a PDF or word-processor file
+  (:func:`known_document`). Linked PDFs are the richest regulation source
+  the study found — 85 of the ~153 forskrifter also exist as a PDF or DOCX —
+  their file names (``Aksellastrestriksjoner Gran Kommune 2024.pdf``)
+  anticipate no stem, and 2,732 of the archive's 4,365 PDF URLs carry no
+  suffix at all. A document never captured on a suffixless, stemless path
+  is the one kind this cannot see before fetching it.
 
-Measured on the 144,842 URLs the archive held on 2026-10-03, stems and suffix
-together select 79 of the 117 labelled enacted regulations (56 before), 79 of
-the 84 adopted rule sets (70) and 195 of the 286 R1.1 positives (135), at a
-selected share of 11.0% of all URLs against 6.6% before. Nearly every URL
-still rejected repeats a regulation from a CMS sidebar on a news page whose
-own, canonical page is selected; ``docs/operations.md`` lists the rest.
+This half reads the capture state as well as the path, so it is no longer a
+pure function of the URL; it still never reads a document's text.
+
+Measured on the 144,842 URLs the archive held on 2026-10-03, the widened rule
+selects 79 of the 117 labelled enacted regulations (56 before), 80 of the 84
+adopted rule sets (70) and 202 of the 286 R1.1-positive URLs (135); every one
+of the 78 municipalities with an R1.1 positive keeps at least one selected
+(11 kept none before). The selected share of all URLs rises from 6.6% to
+12.4%. Nearly every URL still rejected repeats a regulation from a CMS
+sidebar on a news page whose own, canonical page is selected;
+``docs/operations.md`` lists the rest.
 
 The owner's decision of 2026-09-26 placed the step: it sits inside ADR-0010's
 deferral of classification, and it is global, behind a flag, switched on after
@@ -65,6 +74,7 @@ from typing import NamedTuple
 from urllib.parse import unquote, urlsplit
 
 from lovspor.observatory.discovery import Candidate, DiscoveryResult
+from lovspor.observatory.freshness import CaptureState
 
 #: Set to 1 in the job's environment to fetch only selected candidates.
 ENV_CAPTURE_SELECTION = "LOVSPOR_OBSERVATORY_CAPTURE_SELECTION"
@@ -140,6 +150,16 @@ def selects(url: str) -> bool:
     return path.endswith(DOCUMENT_SUFFIXES) or any(stem in path for stem in REGULATION_PATH_STEMS)
 
 
+def known_document(url: str, state: CaptureState) -> bool:
+    """True when the URL's latest capture was a document, whatever its path.
+
+    Most linked PDFs end in a slash, not ``.pdf``, so the suffix alone misses
+    them; the archive already knows what each URL served last (#507).
+    """
+    run = state.content.get(url)
+    return run is not None and run.document
+
+
 def selection_enabled() -> bool:
     """Whether this process fetches only selected candidates; one spelling, ``1``."""
     return os.environ.get(ENV_CAPTURE_SELECTION, "").strip() == "1"
@@ -160,17 +180,28 @@ class Selection(NamedTuple):
         return self.proposed - len(self.chosen)
 
 
-def choose(result: DiscoveryResult, listings: tuple[str, ...], enabled: bool) -> Selection:
+def choose(
+    result: DiscoveryResult,
+    listings: tuple[str, ...],
+    enabled: bool,
+    state: CaptureState | None = None,
+) -> Selection:
     """Apply the path rule to ``result``'s candidates, keeping their order.
 
     ``listings`` are the source's registered listing pages. A candidate any
     of them proposed bypasses the rule — including one a sitemap proposed
     first, which discovery keeps and files the listing's proposal of as a
-    duplicate.
+    duplicate. So does a candidate ``state`` knows as a document.
     """
+    known = state or CaptureState.empty()
     listed = {s.url for s in result.skipped if s.reason == _DUPLICATE and s.found_in in listings}
     kept = tuple(
-        c for c in result.candidates if c.found_in in listings or c.url in listed or selects(c.url)
+        c
+        for c in result.candidates
+        if c.found_in in listings
+        or c.url in listed
+        or selects(c.url)
+        or known_document(c.url, known)
     )
     chosen = kept if enabled else result.candidates
     return Selection(chosen, len(result.candidates), len(kept), enabled)
