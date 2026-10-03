@@ -41,6 +41,8 @@ _MODULES = (
     "lovspor.observatory.freshness",
     "lovspor.observatory.freshness_index",
     "lovspor.observatory.heartbeat",
+    "lovspor.observatory.lf_ledger",
+    "lovspor.observatory.lf_refs",
     "lovspor.observatory.listing",
     "lovspor.observatory.log_commands",
     "lovspor.observatory.log",
