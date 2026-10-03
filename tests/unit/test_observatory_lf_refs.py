@@ -52,6 +52,11 @@ class TestTheLinkFormsTheKommunerUse:
     def test_a_link_yields_its_kind_and_id(self, href: str, expected: LovdataRef) -> None:
         assert extract_lovdata_refs(_page(href)) == (expected,)
 
+    def test_the_host_is_read_in_any_case(self) -> None:
+        page = _page("HTTPS://LOVDATA.NO/DOKUMENT/LF/FORSKRIFT/2020-11-19-2630")
+
+        assert extract_lovdata_refs(page) == (LovdataRef(kind="LF", lf_id="2020-11-19-2630"),)
+
     def test_a_percent_encoded_redirect_link_is_read(self) -> None:
         safelink = (
             "https://eur01.safelinks.example/?url=https%3A%2F%2Flovdata.no%2Fdokument"

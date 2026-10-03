@@ -61,6 +61,14 @@ def _ref(match: re.Match[bytes]) -> LovdataRef:
 
 
 def extract_lovdata_refs(payload: bytes) -> tuple[LovdataRef, ...]:
-    """Every distinct local-regulation link in ``payload``, sorted by kind then id."""
+    """Every distinct local-regulation link in ``payload``, sorted by kind then id.
+
+    The literal host check comes first because the full pattern runs at about
+    20 MB/s and a rebuild reads tens of gigabytes. Fewer than one page in ten
+    names the host, and a plain substring test over the lowered bytes runs at
+    more than 1 GB/s. Every form the pattern accepts contains ``lovdata.no``.
+    """
+    if b"lovdata.no" not in payload.lower():
+        return ()
     found = {_ref(match) for match in _LINK.finditer(payload)}
     return tuple(sorted(found, key=lambda ref: (ref.kind, ref.lf_id)))
