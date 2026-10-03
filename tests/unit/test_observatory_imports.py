@@ -45,6 +45,7 @@ _MODULES = (
     "lovspor.observatory.lf_ledger",
     "lovspor.observatory.lf_refs",
     "lovspor.observatory.listing",
+    "lovspor.observatory.listing_content",
     "lovspor.observatory.log_commands",
     "lovspor.observatory.log",
     "lovspor.observatory.model",

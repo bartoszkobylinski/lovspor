@@ -202,6 +202,67 @@ class TestListingDiscovery:
             (self.LISTING_URL, "listing_entries_without_date: 1")
         ]
 
+    def test_an_undated_overview_proposes_its_content_links_without_a_date(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #514: a regulation overview has no dated entries. Its content
+        links are proposed with no ``lastmod``; an off-domain one is refused by
+        the domain guard with its reason, and the reading is noted."""
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(
+            url=self.LISTING_URL,
+            content=(
+                b'<html><body><header><a href="/meny">Meny</a></header><main>'
+                b'<a href="/forskrifter/renovasjon">Renovasjon</a>'
+                b'<a href="https://lovdata.no/dokument/LF/forskrift/2024-03-20-547">LF</a>'
+                b"</main></body></html>"
+            ),
+        )
+        discoverer, source = _discoverer(log, listing_entry_points=(self.LISTING_URL,))
+
+        result = discoverer.discover(source, [self.LISTING_URL])
+
+        assert [
+            (candidate.url, candidate.discovery_method, candidate.site_reported_lastmod)
+            for candidate in result.candidates
+        ] == [(PAGE_URL, LISTING_METHOD, None)]
+        assert [(skip.url, skip.reason) for skip in result.skipped] == [
+            (self.LISTING_URL, "listing_undated_links_not_proposed: 1"),
+            ("https://lovdata.no/dokument/LF/forskrift/2024-03-20-547", "off_source_host"),
+        ]
+
+    def test_an_undated_reading_is_noted_even_when_nothing_was_left_out(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(
+            url=self.LISTING_URL, content=b'<main><a href="/forskrifter/renovasjon">R</a></main>'
+        )
+        discoverer, source = _discoverer(log, listing_entry_points=(self.LISTING_URL,))
+
+        result = discoverer.discover(source, [self.LISTING_URL])
+
+        assert [(skip.url, skip.reason) for skip in result.skipped] == [
+            (self.LISTING_URL, "listing_undated_links_not_proposed: 0")
+        ]
+
+    def test_a_fully_dated_listing_adds_no_note(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(
+            url=self.LISTING_URL,
+            content=(
+                b'<ul><li><time datetime="2026-08-20">d</time>'
+                b'<a href="/forskrifter/renovasjon">Dated</a></li></ul>'
+            ),
+        )
+        discoverer, source = _discoverer(log, listing_entry_points=(self.LISTING_URL,))
+
+        result = discoverer.discover(source, [self.LISTING_URL])
+
+        assert result.skipped == ()
+
     def test_an_unreadable_registered_listing_has_a_listing_specific_skip_reason(
         self, log: ObservationLog, httpx_mock: HTTPXMock
     ) -> None:

@@ -24,10 +24,19 @@ the browser there is nothing in the served bytes to read, and the honest answer
 is a refusal naming that — the same posture as `mutation not applicable`. Half
 a listing is worse than none: it looks like a complete one.
 
-**A date is required, not optional.** The date is what freshness uses to
-decline work later, and a listing entry without one would be re-fetched on
-every sweep forever. Entries without a machine-readable date are reported as
-skipped rather than proposed, so the count of what was ignored stays visible.
+**A date is required, not optional — in this reader.** The date is what
+freshness uses to decline work later. Entries without a machine-readable date
+are reported as skipped rather than proposed, so the count of what was ignored
+stays visible. A page with no dated entry at all is read by the undated reader
+in :mod:`lovspor.observatory.listing_content` instead (issue #514), which leans
+on freshness's own record of each URL rather than on a date (issue #209).
+
+**A date belongs to one entry, never to a page (issue #514).** A CMS that wraps
+the whole body in one ``<article>`` with the page's own "last updated"
+``<time>`` would otherwise stamp every link on the page with that date — share
+buttons and off-domain links included. So a ``<time>`` dates the links of its
+row only when every link in that row leads to one URL: an entry is one thing,
+and a row pointing to several is a container, not an entry.
 """
 
 from typing import NamedTuple
@@ -112,7 +121,10 @@ def _item_date(item: etree._Element) -> str | None:
 
 
 class ListingEntry(NamedTuple):
-    """One dated link read off a listing page.
+    """One link read off a listing page, with the page's date for it if any.
+
+    ``site_reported_lastmod`` is None only from the undated reader: a page with
+    no dated entry says nothing about when any of its links changed.
 
     Deliberately not discovery's ``DiscoveredLink``: this module reads HTML and
     knows nothing about sitemaps, nesting or discovery methods. Importing that
@@ -121,7 +133,7 @@ class ListingEntry(NamedTuple):
     """
 
     url: str
-    site_reported_lastmod: str
+    site_reported_lastmod: str | None
 
 
 class ListingReadout(NamedTuple):
@@ -134,6 +146,14 @@ class ListingReadout(NamedTuple):
 
     entries: tuple[ListingEntry, ...]
     skipped_without_date: int
+    #: True when the page had no dated entry and was read as an undated
+    #: overview (issue #514); ``skipped_without_date`` is then 0, since no link
+    #: was left out for lacking a date.
+    undated: bool = False
+    #: Undated reading only: links on the page that were not proposed —
+    #: outside the content region, site chrome, the page's own ancestors.
+    #: Reported for the reason ``skipped_without_date`` is.
+    not_proposed: int = 0
 
 
 def parse_listing(payload: bytes, document_url: str) -> ListingReadout:
@@ -180,13 +200,16 @@ def _entries(root: etree._Element, document_url: str) -> tuple[tuple[ListingEntr
     `urljoin` against the fetched URL does neither.
     """
     seen: dict[str, ListingEntry] = {}
+    dates: dict[etree._Element, str | None] = {}
     skipped = 0
     for anchor in root.iter("a"):
-        href = (anchor.get("href") or "").strip()
-        if not href or href.startswith(_NOT_A_DOCUMENT):
+        href = usable_href(anchor)
+        if href is None:
             continue
         item = _closest_listing_item(anchor)
-        stamp = _item_date(item) if item is not None else None
+        if item is not None and item not in dates:
+            dates[item] = _entry_date(item, document_url)
+        stamp = dates.get(item) if item is not None else None
         if stamp is None:
             skipped += 1
             continue
@@ -194,3 +217,29 @@ def _entries(root: etree._Element, document_url: str) -> tuple[tuple[ListingEntr
         if url not in seen:
             seen[url] = ListingEntry(url=url, site_reported_lastmod=stamp)
     return tuple(seen.values()), skipped
+
+
+def usable_href(anchor: etree._Element) -> str | None:
+    """The anchor's href when it addresses a document, else None.
+
+    Judged on the raw attribute, before any joining (see :func:`_entries`).
+    """
+    href = (anchor.get("href") or "").strip()
+    if not href or href.startswith(_NOT_A_DOCUMENT):
+        return None
+    return href
+
+
+def _entry_date(item: etree._Element, document_url: str) -> str | None:
+    """The row's date, but only when the row is one entry (issue #514).
+
+    A row whose links lead to more than one URL is a container — a whole-body
+    ``<article>`` carrying the page's own date, a block of share buttons — and
+    its ``<time>`` dates the page, not any one of those links.
+    """
+    targets = {
+        urljoin(document_url, href)
+        for anchor in item.iter("a")
+        if (href := usable_href(anchor)) is not None
+    }
+    return _item_date(item) if len(targets) == 1 else None

@@ -497,6 +497,53 @@ reason, and the listing is never truncated — a partial list would read as
 "this is what the source publishes", which is the one claim the observatory
 must not make loosely.
 
+### Reading a registered listing page (issues #151, #514)
+
+A source with no sitemap or feed is read from an overview page a reviewer declared
+as one of its `listing_entry_points`. Only a declared URL is read this way: an HTML
+page served under a sitemap URL is still refused as `unparseable_document`. The page
+decides how it is read, every time it is fetched — there is no per-page mode to set:
+
+- **Dated list** — at least one entry carries a `<time datetime>`, as a hearings or
+  kunngjøringer archive does. Each dated entry's link is proposed with that date as its
+  `lastmod`; links without one are counted under `listing_entries_without_date: N`.
+  A date belongs to one entry: a `<li>`, `<tr>` or `<article>` whose links lead to
+  more than one URL is a container, and its `<time>` dates none of them. That is the
+  CMS that wraps the whole body in one `<article>` with the page's "last updated"
+  date, which used to stamp every link — share buttons included — with it.
+- **Undated overview** — no dated entry at all, the shape of "Lokale forskrifter",
+  "Reglement og vedtekter" and "Styrende dokumenter" pages. Every link in the page's
+  content region is proposed, pages and linked documents alike (PDF, DOCX, ODT, and
+  `/download/...` links with no suffix), with no `lastmod`. The region is `<main>`,
+  else `<body>`, narrowed to the page's outermost `<article>` elements when it marks
+  any that hold links. Dropped: `header`, `footer` and the `banner`/`contentinfo`/
+  `search` landmarks; `nav` and `aside` only when the page has no `<main>` (inside
+  one, a `nav` can be the overview itself); the page itself and its ancestors (the
+  breadcrumb trail); fragments, `mailto:`, `tel:`; search, login, cookie and share
+  links; images, CSS and scripts. The reading is always noted as
+  `listing_undated_links_not_proposed: N`, so the log says which way a page was read.
+
+An off-domain link (Lovdata, a delegation register, a share button) is proposed and
+then refused by the same domain guard every candidate passes, as `off_source_host` —
+the host is judged in one place only. A page where neither reading finds a link is
+`unparseable_listing`: usually a page assembled in the browser, which the reader does
+not run.
+
+**Undated proposals are not re-fetched every night.** With no `lastmod` to decline
+work with, freshness judges an undated URL on its own record: left alone for 24 hours
+after it last served content, doubling for every byte-identical re-capture up to a
+week (issues #209, #415); a URL that only ever fails backs off on its failures (#204).
+The listing page itself is re-read on every discovery run — it is the entry point.
+
+Measured offline on the 29 listing pages found on 2026-10-03 for #431: before this
+reader, 20 of the 25 prepared for registration were refused and the other 5 parsed
+only because one page-level date stamped every link. After it, all 29 are read as
+undated overviews; 25 propose on-domain links, and 4 link only off-domain (Lovdata,
+an external document system), which the guard refuses — a fact about those pages,
+not about the reader. The one real dated archive in that crawl (a hearings page, 110
+entries, 110 dates) is read exactly as before. The per-page counts are in the pull
+request that fixed #514.
+
 ## Observatory: capturing what discovery found
 
 ```bash

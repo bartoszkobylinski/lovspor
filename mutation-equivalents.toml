@@ -3503,6 +3503,104 @@ resolve to one codec via `codecs.lookup`, so the encoded seed, its SHA-256 and t
 """
 
 [[equivalent]]
+file = "src/lovspor/observatory/listing.py"
+symbol = "_entries"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-        stamp = dates.get(item) if item is not None else None
++        stamp = dates.get(item) if (item is not None) or True else None
+"""
+justification = """
+The mutant differs only when `item is None`, where it evaluates `dates.get(None)`
+instead of the literal None. `dates` is a local dict written in exactly one place,
+`dates[item] = ...` under `if item is not None and ...`, so None is never a key and
+`dict.get(None)` returns its default, None. Both versions yield None for every
+input. Python's own dict semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/listing_content.py"
+symbol = "parse_undated_listing"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-    region, _ = _region(_decoded(payload, "text/html"))
++    region, _ = _region(_decoded(payload, "XXtext/htmlXX"))
+"""
+justification = """
+`_decoded` reads its content-type argument only through `_charset`, which looks at
+`content_type.split(";")[1:]` — the parameters after the media type. A string with
+no ";" splits into one part, so the slice is empty and `_charset` returns None for
+"text/html" and "XXtext/htmlXX" alike; `_decoded` then tries UTF-8 and falls back
+to the raw bytes identically. The media type itself is never compared to anything.
+Python's str.split semantics over this module's own code.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/listing_content.py"
+symbol = "parse_undated_listing"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-    region, _ = _region(_decoded(payload, "text/html"))
++    region, _ = _region(_decoded(payload, "TEXT/HTML"))
+"""
+justification = """
+Same argument as the "XXtext/htmlXX" entry one up: "TEXT/HTML" holds no ";", so
+`_charset` sees no parameters and returns None, and `_decoded` never reads the
+media type for anything else. Identical decoding for every payload.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/listing_content.py"
+symbol = "_drop_chrome"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-        and (element.tag in tags or (element.get("role") or "").strip().lower() in roles)
++        and (element.tag in tags or (element.get("role") or "XXXX").strip().lower() in roles)
+"""
+justification = """
+The default is used only when the element has no (or an empty) role attribute;
+it then becomes "" in the original and "xxxx" in the mutant after strip/lower.
+`roles` is one of two fixed frozensets built from _CHROME_ROLES and
+_LANDMARK_ROLES — {banner, contentinfo, search, navigation, complementary} —
+which contain neither "" nor "xxxx", so membership is False in both versions.
+A present role takes the attribute's own value and never the default. Python's
+own `or`/frozenset semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/listing_content.py"
+symbol = "_tag"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-    return element.tag if isinstance(element.tag, str) else ""
++    return element.tag if (isinstance(element.tag, str)) or True else ""
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_lxml_ancestors_always_carry_a_string_tag"
+justification = """
+The mutant differs only for an element whose `tag` is not a str. `_tag` has one
+caller, `_articles_or`, which passes it only nodes from `element.iterancestors()`.
+In lxml a non-string tag belongs to comments, processing instructions and
+entities, and those cannot hold children (`HtmlComment.append` raises
+TypeError), so none is ever an ancestor: every node `_tag` sees has a str tag and
+both versions return it. This argues from lxml, so the assumption test pins it.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/listing_content.py"
+symbol = "_tag"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-    return element.tag if isinstance(element.tag, str) else ""
++    return element.tag if isinstance(element.tag, str) else "XXXX"
+"""
+justification = """
+The fallback only reaches `_articles_or`'s `_tag(ancestor) == "article"`, and
+both "" and "XXXX" compare unequal to "article", so the boolean is identical for
+every node whichever fallback is returned. `_tag` has no other caller. Python's
+own string-equality semantics.
+"""
+
+[[equivalent]]
 file = "src/lovspor/observatory/lf_ledger.py"
 symbol = "_is_html_capture"
 registered = "2026-10-03, PR #512, from run 37107607188"
