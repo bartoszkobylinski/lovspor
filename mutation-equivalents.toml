@@ -3879,3 +3879,124 @@ one, are killed by test_preview_prints_the_header_then_exactly_the_markdown_loca
 Dependency behaviour (click), pinned by the assumption test.
 """
 assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_click_echo_treats_none_as_empty_and_reads_nl_for_truth"
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        text=True,
++        text=None,
+"""
+justification = """
+Popen decides text mode as `self.text_mode = encoding or errors or text or
+universal_newlines` (CPython subprocess.py, Popen.__init__). Both calls also pass
+encoding="utf-8", a non-empty string, so text_mode is truthy whatever `text` is,
+and the output is decoded with the given encoding, not the locale's. Matches both
+call sites: each passes encoding="utf-8". Python stdlib semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        text=True,
++        text=False,
+"""
+justification = """
+Same `encoding or errors or text or universal_newlines` test: encoding="utf-8"
+makes text mode truthy before `text` is consulted. The only other read of `text`
+is the universal_newlines disambiguation check, which runs only when
+universal_newlines is not None; neither call passes it. Python stdlib semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        text=True,
+"""
+justification = """
+Dropping the argument leaves text at its default None, the case of the text=None
+entry: encoding="utf-8" alone selects text mode and the UTF-8 decode
+(`encoding or errors or text or universal_newlines`). Python stdlib semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        encoding="utf-8",
++        encoding="UTF-8",
+"""
+justification = """
+Codec names are normalised and case-folded before lookup: codecs.lookup("UTF-8")
+and codecs.lookup("utf-8") return the same CodecInfo, so subprocess's
+`data.decode(encoding, errors)` picks the same decoder on every input. The
+encoding=None and dropped-argument mutants, which do change the decoder, are
+killed by tests/unit/test_history_utf8.py under the C locale. Python codec
+semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+`subprocess.run` reads check only as `if check and retcode:`; None and False are
+both falsy, so both return the CompletedProcess and never raise. The returncode
+branch that follows is what handles a missing blob. Python stdlib semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        check=False,
+-    )
++        )
+"""
+justification = """
+Dropping check leaves the default check=False (`def run(..., check=False, ...)`),
+the value written; the `)` lines differ only in indentation. Python stdlib
+semantics.
+"""
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-            "core.quotePath=false",
++            "core.quotepath=false",
+"""
+justification = """
+git config section and key names are case-insensitive, so core.quotepath and
+core.quotePath name the same setting and the numstat rows carry the same raw
+UTF-8 paths. Argues from git, not Python, so it is pinned by a real-git
+assumption test over an æøå path, compared with the quoted default as control.
+"""
+assumption_test = "tests/unit/test_history_utf8.py::test_assumption_git_reads_the_quotepath_setting_case_insensitively"
+
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-            "core.quotePath=false",
++            "CORE.QUOTEPATH=FALSE",
+"""
+justification = """
+Section and key names are case-insensitive and git's boolean parsing case-folds
+"FALSE", so the uppercased spelling selects the same unquoted output. Pinned by
+the same real-git assumption test.
+"""
+assumption_test = "tests/unit/test_history_utf8.py::test_assumption_git_reads_the_quotepath_setting_case_insensitively"
