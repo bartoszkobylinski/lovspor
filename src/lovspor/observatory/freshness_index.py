@@ -54,14 +54,15 @@ from lovspor.observatory.model import require_utc
 
 FRESHNESS_INDEX_FILENAME = "freshness-index.json"
 
-INDEX_DERIVATION_VERSION = 3
+INDEX_DERIVATION_VERSION = 4
 """Behaviour version of the capture-state fold this index caches.
 
 Bump on ANY change to what ``collect_capture_state`` folds — sighting
 rules, hold transitions, record selection — the ``TEMPORAL_PARSER_VERSION``
 precedent: an index written by other fold semantics must rebuild, never be
 silently reused. Version 2 added the runs of unchanged content (#415);
-version 3 folds the corrected view of the log (ADR-0015 §5).
+version 3 folds the corrected view of the log (ADR-0015 §5); version 4
+remembers whether a URL's latest bytes were a document (#507).
 """
 
 _DIGEST_CHUNK = 1 << 20
@@ -90,6 +91,7 @@ class StoredRun(BaseModel):
 
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     unchanged: int = Field(ge=0)
+    document: bool = False
 
 
 class FreshnessIndex(BaseModel):
@@ -230,7 +232,10 @@ def _state_from_index(index: FreshnessIndex) -> CaptureState:
             url: FailureHold(hold.outcome, hold.consecutive, hold.last_failed_at)
             for url, hold in index.holds.items()
         },
-        content={url: ContentRun(run.sha256, run.unchanged) for url, run in index.content.items()},
+        content={
+            url: ContentRun(run.sha256, run.unchanged, run.document)
+            for url, run in index.content.items()
+        },
     )
 
 
@@ -252,7 +257,7 @@ def _index_from_state(log: ObservationLog, state: CaptureState, offset: int) -> 
             for url, hold in sorted(state.holds.items())
         },
         content={
-            url: StoredRun(sha256=run.sha256, unchanged=run.unchanged)
+            url: StoredRun(sha256=run.sha256, unchanged=run.unchanged, document=run.document)
             for url, run in sorted(state.content.items())
         },
     )

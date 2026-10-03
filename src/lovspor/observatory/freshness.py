@@ -165,16 +165,39 @@ class FailureHold(NamedTuple):
         )
 
 
+#: Media types whose bytes are a linked document — a PDF or a word-processor
+#: file — rather than a page. Selection keeps such a URL whatever its path
+#: names (#507), and most of them carry no ``.pdf`` suffix: 2,732 of the
+#: archive's 4,365 PDF URLs on 2026-10-03 end in a slash.
+DOCUMENT_MEDIA_TYPES = frozenset(
+    {
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.oasis.opendocument.text",
+    }
+)
+
+
+def is_document_type(content_type: str) -> bool:
+    """Whether a recorded ``Content-Type`` names one of :data:`DOCUMENT_MEDIA_TYPES`."""
+    return content_type.split(";", 1)[0].strip().lower() in DOCUMENT_MEDIA_TYPES
+
+
 class ContentRun(NamedTuple):
     """A URL's latest bytes and how many re-captures in a row returned them.
 
     The digest is what the next capture is compared against; the count is
     what :func:`undated_recheck` reads. Zero means the latest capture was the
     first, or brought bytes that differ from the one before (issue #415).
+
+    ``document`` says the latest bytes were served as a document (#507). It
+    follows the bytes the run keeps: a late, older record changes neither.
     """
 
     sha256: str
     unchanged: int
+    document: bool = False
 
     def then(self, record: ArtifactObservation, in_order: bool) -> "ContentRun":
         """This run extended by one more capture, or started over.
@@ -184,10 +207,11 @@ class ContentRun(NamedTuple):
         holds, which are the later ones. Ending errs toward fetching.
         """
         if not in_order:
-            return ContentRun(self.sha256, 0)
+            return ContentRun(self.sha256, 0, self.document)
+        document = is_document_type(record.content_type)
         if record.sha256 != self.sha256:
-            return ContentRun(record.sha256, 0)
-        return ContentRun(self.sha256, self.unchanged + 1)
+            return ContentRun(record.sha256, 0, document)
+        return ContentRun(self.sha256, self.unchanged + 1, document)
 
 
 class CaptureState(NamedTuple):
@@ -273,7 +297,9 @@ def _extend_run(state: CaptureState, record: ArtifactObservation, authority_id: 
         return
     run = state.content.get(record.url)
     if run is None:
-        state.content[record.url] = ContentRun(record.sha256, 0)
+        state.content[record.url] = ContentRun(
+            record.sha256, 0, is_document_type(record.content_type)
+        )
         return
     latest = state.observed.get(record.url)
     in_order = latest is None or record.observed_at >= latest
