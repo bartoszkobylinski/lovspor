@@ -13,12 +13,13 @@ import importlib.util
 import json
 import os
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
+from lovspor.promotion.corpus import LocalManifest, LocalRecord, manifest_text
 from tests.unit.promotion_cli_fixtures import (
     AUTHORITY,
     FIRST_SEEN,
@@ -207,3 +208,39 @@ def test_the_audit_record_says_who_approved_what_and_from_which_observations(
 def test_history_is_written_as_json_only(corpus: Path) -> None:
     history = sorted((corpus / "lokale-forskrifter" / AUTHORITY / "history").iterdir())
     assert [path.suffix for path in history] == [".json", ".json"]
+
+
+def _record(title: str) -> LocalRecord:
+    return LocalRecord(
+        status="current",
+        slug="slamtomming",
+        title=title,
+        markdown_path="lokale-forskrifter/0301/slamtomming.md",
+        renderer_version=1,
+        last_seen="2026-08-19T15:17:23Z",
+        authority_id="0301",
+        authority_type="kommune",
+        content_hash="0" * 64,
+        version=1,
+        extractor_version=1,
+    )
+
+
+def test_the_manifest_text_is_sorted_indented_unescaped_and_newline_terminated() -> None:
+    manifest = LocalManifest(documents={"lk-0301-000000000000": _record("Forskrift om tømming")})
+
+    text = manifest_text(manifest)
+
+    assert text == (
+        json.dumps(json.loads(text), sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+    )
+    assert '      "title": "Forskrift om tømming",\n' in text
+    assert text.index('"authority_id"') < text.index('"doc_type"') < text.index('"version": 1')
+
+
+def test_a_field_a_newer_writer_added_is_kept_as_json() -> None:
+    extended = LocalManifest(refreshed_at=datetime(2026, 8, 19, 15, 17, 23, tzinfo=UTC))
+
+    text = manifest_text(extended)
+
+    assert json.loads(text)["refreshed_at"] == "2026-08-19T15:17:23Z"

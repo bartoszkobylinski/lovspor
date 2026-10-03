@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -13,6 +13,7 @@ from lovspor.errors import PromotionRefusedError
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import Tombstone
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
+from lovspor.promotion.archive import ArchivedArtifact, authority_fetches, locate, read_artifact
 from lovspor.promotion.corpus import CorpusCheckout
 from tests.unit.promotion_cli_fixtures import (
     FIRST_SEEN,
@@ -148,3 +149,27 @@ def test_a_directory_that_is_not_a_git_checkout_is_refused(corpus: Path) -> None
 
 def test_central_ref_ids_are_read_from_sf_records(corpus: Path) -> None:
     assert CorpusCheckout(corpus, []).central_ref_ids() == frozenset({"forskrift/2020-01-14-63"})
+
+
+def _read(root: Path, through: datetime) -> ArchivedArtifact:
+    log = ObservationLog(ObservatoryRoot(root, []))
+    fetches = authority_fetches(log, "0301")
+    return read_artifact(log, fetches, locate(fetches, "0301", PAGE_URL), through)
+
+
+def test_an_observation_at_the_decision_instant_is_read(root: Path) -> None:
+    store(root, html_page())
+
+    artifact = _read(root, FIRST_SEEN)
+
+    assert artifact.observed_at_first == FIRST_SEEN
+    assert len(artifact.observations) == 1
+
+
+def test_bytes_first_observed_after_the_decision_are_refused(root: Path) -> None:
+    sha256 = store(root, html_page())
+
+    with pytest.raises(PromotionRefusedError) as refused:
+        _read(root, FIRST_SEEN - timedelta(seconds=1))
+
+    assert str(refused.value) == f"{sha256} was not observed at {PAGE_URL} by the decision time"

@@ -25,8 +25,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import click
 import httpx
 import pytest
+import typer
 from lxml import etree, html
 from mcp.types import JSONRPCMessage
 from pydantic import ValidationError
@@ -565,3 +567,20 @@ def test_assumption_the_enactment_pattern_has_only_the_organ_and_date_groups() -
     name the same one, the date. A third group would make the mutant a real defect."""
     assert _ENACTED.groups == 2
     assert _ENACTED.groupindex == {"organ": 1}
+
+
+def test_assumption_click_echo_treats_none_as_empty_and_reads_nl_for_truth() -> None:
+    """``typer.echo`` is ``click.echo``: ``None`` prints as ``""``, and ``nl`` is a truth test.
+
+    Pins the two ``preview_impl`` entries (PR #517): ``typer.echo("")`` →
+    ``typer.echo(None)`` and ``nl=False`` → ``nl=None`` write the same bytes.
+    """
+
+    def written(message: str | None, nl: bool | None) -> str:
+        stream = io.StringIO()
+        typer.echo(message, file=stream, nl=nl)  # type: ignore[arg-type]
+        return stream.getvalue()
+
+    assert typer.echo is click.echo
+    assert written(None, True) == written("", True) == "\n"
+    assert written("x", None) == written("x", False) == "x"
