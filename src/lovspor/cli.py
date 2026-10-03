@@ -28,6 +28,7 @@ from lovspor.mcp import serve as _mcp_serve
 from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.observatory.entrypoint import observatory_app
 from lovspor.ops_cli import ops_app
+from lovspor.promotion.commands import promote_app
 from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
@@ -77,11 +78,8 @@ tokens_app = typer.Typer(
     help="Issue, list and revoke hosted-MCP beta credentials.",
     no_args_is_help=True,
 )
-app.add_typer(tokens_app)
-app.add_typer(observatory_app)
-app.add_typer(release_app)
-app.add_typer(temporal_epoch_app)
-app.add_typer(ops_app)
+for _sub in (tokens_app, observatory_app, release_app, temporal_epoch_app, ops_app, promote_app):
+    app.add_typer(_sub)
 
 _CredentialsOption = Annotated[
     Path | None,

@@ -995,6 +995,160 @@ nothing ("already corrected: N", "appended 0 lines").
 A wrong correction is not undone. It is corrected in turn, by correcting its
 re-filed record; `reattribute` itself only selects original observations.
 
+## Promoting a local regulation (ADR-0016)
+
+`lovspor promote` puts **one** archived artifact — an enacted local regulation
+a human has read — into the `lokale-forskrifter/` dataset of a `lovverk`
+checkout (ADR-0016 slice S3). It is the only writer of that directory. It never
+touches the root `manifest.json`, `lover/` or `forskrifter/`, and it never
+commits: committing is your step, made at promotion time.
+
+What you need:
+
+* `LOVSPOR_OBSERVATORY_ROOT` — the archive. It is read through the
+  observatory's own readers (the corrected view, ADR-0015) and never written,
+  except for the decision log `promotions.jsonl`, which lives beside
+  `observations.jsonl` there and nowhere in this repository (ADR-0010 §5).
+* `--corpus` — an absolute path to a separate `lovverk` checkout that carries
+  the S0 skeleton (`lokale-forskrifter/manifest.json`). A path inside this
+  repository or inside the archive, a relative path, or a directory without
+  `.git` or either manifest is refused.
+* `--authority` — the KLASS code as the source register holds it; the
+  authority's name and type are read from the register, never typed.
+* `--klass-version` — the SSB KLASS vintage that code is read under. It is
+  written into the document's `authority` block; the register does not carry
+  it, so you state it.
+* `--artifact` — the SHA-256 of the archived bytes, or the URL that served
+  them. A hash served at two URLs, or a URL that served two texts, is refused
+  with the candidates listed; name the other one.
+
+### 1. Preview — what the reviewer reads
+
+```bash
+export LOVSPOR_OBSERVATORY_ROOT=/Volumes/T7/lovspor-observatory
+uv run lovspor promote preview --authority 0301 --artifact <sha256-or-url> \
+  --corpus /absolute/path/to/lovverk --klass-version <klass-vintage>
+```
+
+It runs the whole pipeline — extractor (S2), personal-data gate, identity
+(S1), placement, renderer — and prints the id, version, path, content hash and
+the full Markdown. It writes nothing and records nothing. A hold prints its
+stage and reason and exits 3. (The ADR sketches this as `promote local
+--dry-run`; it is its own command because a preview and a write are different
+acts, and `local` already takes four options.)
+
+### 2. Approve — the human decision
+
+The owner reviews 100 % of the first promotion (owner decision on ADR-0016,
+lovspor-notebook #141). The decision is a JSON document, so what was decided
+stays re-readable:
+
+```bash
+cat > decision-0301.json <<'JSON'
+{
+  "decision": "approve",
+  "decided_by": "<your name>",
+  "reason": "Enacted forskrift; text read against the source page in full.",
+  "classifier": {"classifier_version": "<version>", "class_name": "forskrift", "evidence": ["<rule id or phrase>"]}
+}
+JSON
+uv run lovspor promote approve --authority 0301 --artifact <sha256-or-url> --decision decision-0301.json
+```
+
+`decision` is `approve`, `reject` or `hold`; `classifier` is optional (leave
+it out when no classifier output was reviewed). `decided_by` must be a person
+— `classifier`, `lovspor` and similar names are refused. The `reason` is
+published in the audit record, so a reason carrying personal data (an e-mail
+address, a phone number) is refused. An `approve` is bound to the text it was
+given for — its content hash and extractor version — and a text the pipeline
+holds cannot be approved. The last decision on an artifact is the one that
+stands; a later `reject` keeps it out.
+
+The record appended to `promotions.jsonl`:
+
+```json
+{"kind": "decision", "artifact": {"authority_id": "0301", "sha256": "…", "source_url": "https://…"},
+ "decision": "approve", "decided_by": "…", "decided_at": "2026-10-03T09:00:00Z", "reason": "…",
+ "content_hash": "…", "extractor_version": 1, "classifier": null}
+```
+
+### 3. Promote — write one version
+
+```bash
+uv run lovspor promote local --authority 0301 --artifact <sha256-or-url> \
+  --corpus /absolute/path/to/lovverk --klass-version <klass-vintage>
+```
+
+It writes, under `lokale-forskrifter/` only:
+
+* `<authority_id>/<slug>.md` — the rendering, with ADR-0016's front matter
+  (`observed_at_first` is the first observation of this content; there is no
+  `retrieved_at` and no `observed_at_last`);
+* `<authority_id>/observations/<slug>.json` — per version: content hash,
+  first and last observation, observation count, primary and corroborating
+  URLs, source blob, and `promotion`, the audit record: decision, reviewer,
+  decision time, reason, `reviewed_in_sample`, classifier evidence (or
+  `null`), extractor/renderer versions, source form, identity (scheme, id,
+  ref-id, candidates), and the archive records it was read from;
+* `manifest.json` — the record keyed by id (`generated_at` is the decision
+  time, not the clock).
+
+The observations read are those **up to the decision time**, so a capture made
+after the approval changes nothing. It then appends a `promoted` record (with
+the same audit) to `promotions.jsonl` and prints the commit to make.
+
+Refused, with nothing written: no decision recorded, a standing `reject` or
+`hold`, an approval for another text, a withdrawn id, an id filed under
+another authority, content first observed before the current version (the
+backfill slice orders that), any output that would mention NLOD.
+
+**Holds** — an extraction hold (unreadable, empty, garbled, a Lovdata print,
+a placeholder date, no body or title), a personal-data hit, or an identity
+hold (no `lf-` id and no vedtaksdato; an `lf-` id a central `sf-` record
+already carries) — write nothing to the corpus, print the stage and reason,
+append a `held` record to `promotions.jsonl` (personal data by kind and line,
+never the value) and exit 3.
+
+**Idempotent.** A rerun on a version the corpus already holds prints
+`Unchanged`, writes nothing and appends nothing; a repeated hold is recorded
+once.
+
+### 4. Commit, at promotion time
+
+```bash
+git -C /absolute/path/to/lovverk add -- lokale-forskrifter
+git -C /absolute/path/to/lovverk commit -m 'promote(lokal-forskrift): 0301/<slug> v1'
+```
+
+Use the exact subject `promote local` printed. It is the history grammar of
+ADR-0016 Decision 3: `promote(lokal-forskrift): <authority_id>/<slug> v<N>` is
+`added` for v1 and `updated` after; `withdraw(lokal-forskrift): …` is
+`removed`; `observe: …` is no event. Never backdate the commit to the
+observation time: the commit date is the transaction axis (when the corpus
+recorded it), `observed_at_first` is the observation axis, and the two are
+never fused.
+
+### 5. Derive history, and commit it
+
+```bash
+uv run lovspor promote history --corpus /absolute/path/to/lovverk
+git -C /absolute/path/to/lovverk add -- lokale-forskrifter
+git -C /absolute/path/to/lovverk commit -m 'history(lokal-forskrift): derive history for 1 documents'
+```
+
+`history` reads the checkout's git log for every current local document and
+writes `<authority_id>/history/<slug>.json` (JSON only — the central
+`history/<slug>.md` carries Lovdata's licence in its front matter). It needs
+the promotion commit to exist; before it, there is nothing to write. A rerun
+on a committed history prints `History is current`.
+
+Before pushing, run the corpus checks in the `lovverk` checkout:
+
+```bash
+python3 scripts/check_corpus_integrity.py
+python3 scripts/check_dataset_separation.py origin/main HEAD
+```
+
 ## Observatory: the 24-hour observation SLA (issue #167)
 
 > **Every active source is observed at least once per 24 hours.**
