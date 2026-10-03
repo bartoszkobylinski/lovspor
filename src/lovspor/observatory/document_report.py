@@ -14,9 +14,11 @@ The measurements are raw on purpose. ``text_chars`` and ``§`` are proxies for
 "carries a document", not for "is a *forskrift*": a budget passes too, and
 ADR-0010 defers every legal classification. Nothing here performs one.
 
-**PDFs are counted, never measured.** The engine ships no PDF text extractor,
-and the issue's own PDF figures came from an ad-hoc ``pypdf`` run. A count of
-PDF blobs per source is honest; a guessed text length is not.
+**PDFs are counted, never measured.** When this report was written the engine
+shipped no PDF text extractor, and the issue's own PDF figures came from an
+ad-hoc ``pypdf`` run. ``promotion/source_text.py`` now reads PDF text for
+promotion (ADR-0016 S2); this report still counts PDF blobs and does not
+measure them.
 """
 
 import statistics

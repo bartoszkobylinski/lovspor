@@ -3,16 +3,21 @@
 import pytest
 
 from lovspor.observatory.discovery import Candidate, DiscoveryResult, SkippedLink
+from lovspor.observatory.freshness import CaptureState, ContentRun
 from lovspor.observatory.listing import LISTING_METHOD
 from lovspor.observatory.selection import (
+    DOCUMENT_SUFFIXES,
     ENV_CAPTURE_SELECTION,
     REGULATION_PATH_STEMS,
     choose,
+    known_document,
     selection_enabled,
     selects,
 )
 
-OWNER_DECIDED_STEMS = [
+#: The owner's set of 2026-09-19 (#348), with three stems widened on
+#: 2026-10-03 (#507) so the nynorsk and bokmål forms are held to one rule.
+STEMS_OF_2026_09_19 = [
     "forskrift",
     "reglement",
     "vedtekt",
@@ -20,17 +25,17 @@ OWNER_DECIDED_STEMS = [
     "kunngjør",
     "kunngjering",
     "kunngjoering",
-    "planbestemmels",
+    "bestemmels",
     "lokal-lov",
     "regelverk",
-    "retningslinj",
+    "retningslin",
     "regulativ",
     "lover-og-regler",
     "lover_og_regler",
     "kommunale-regler",
     "skoleregler",
     "skulereglar",
-    "ordensreglar",
+    "ordensregl",
     "foresegn",
     "lovverk",
     "hoyring",
@@ -38,13 +43,47 @@ OWNER_DECIDED_STEMS = [
     "horing",
 ]
 
+#: Added 2026-10-03 (#507), each read off the URL of a labelled enacted
+#: regulation, adopted rule set or R1.1 positive the 2026-09-19 set rejected.
+STEMS_OF_2026_10_03 = [
+    "regler-for",
+    "reglar-for",
+    "gebyr",
+    "betalingssats",
+    "abonnementsvilk",
+    "godtgjor",
+    "godtgjør",
+    "godtgjer",
+    "arbeidsvilk",
+    "for-folkevalgte",
+    "for-folkevalde",
+    "permisjon",
+    "skolerute",
+    "skulerute",
+    "skolekrets",
+    "skulekrins",
+    "skolefritidsordning",
+    "skulefritidsordning",
+    "/sfo",
+    "bandtvang",
+    "båndtvang",
+    "alkoholpolitisk",
+    "skjenketid",
+    "salgstid",
+    "salstid",
+]
+
+OWNER_DECIDED_STEMS = STEMS_OF_2026_09_19 + STEMS_OF_2026_10_03
+
 BASE = "https://www.kommune.example"
 
 
 class TestStemSet:
-    def test_the_stems_are_exactly_the_owner_decision_of_2026_09_19(self) -> None:
+    def test_the_stems_are_exactly_the_owner_decisions_of_2026_09_19_and_2026_10_03(
+        self,
+    ) -> None:
         assert tuple(OWNER_DECIDED_STEMS) == REGULATION_PATH_STEMS
-        assert len(REGULATION_PATH_STEMS) == 23
+        assert len(REGULATION_PATH_STEMS) == 48
 
     def test_every_stem_is_already_lowercase(self) -> None:
         assert all(stem == stem.lower() for stem in REGULATION_PATH_STEMS)
@@ -58,8 +97,69 @@ class TestStemSet:
     def test_politivedtekt_is_not_listed_because_vedtekt_covers_it(self) -> None:
         assert "politivedtekt" not in REGULATION_PATH_STEMS
 
+    @pytest.mark.parametrize(
+        ("narrow", "wide"),
+        [
+            ("ordensreglar", "ordensregl"),
+            ("retningslinj", "retningslin"),
+            ("planbestemmels", "bestemmels"),
+        ],
+    )
+    def test_a_narrowed_stem_was_replaced_by_the_form_covering_both_languages(
+        self, narrow: str, wide: str
+    ) -> None:
+        """#507: ``ordensreglar`` missed the bokmål ``ordensregler`` and
+        ``retningslinj`` the nynorsk ``retningsliner``. The wide form covers
+        the narrow one, so keeping both would be dead weight."""
+        assert narrow not in REGULATION_PATH_STEMS
+        assert wide in REGULATION_PATH_STEMS
+        assert wide in narrow
+
+
+#: URLs of known positives the 2026-09-19 stems rejected (#507), each taken
+#: from the 2026-10-03 classification study's labels or R1.1 positives.
+MISSED_POSITIVES = [
+    "https://namsos.kommune.no/otteroy-skole/for-elever/ordensregler/",
+    "https://www.kongsvinger.kommune.no/barnehage-skole-utdanning/skole/"
+    "hvilke-ordensregler-gjelder-for-grunnskolen-i-kongsvinger",
+    "https://www.molde.kommune.no/skole-og-utdanning/hjem-skole-barneskole/"
+    "regler-for-orden-og-oppforsel/",
+    "https://www.tynset.kommune.no/saksbehandlingsgebyrer/",
+    "https://www.sortland.kommune.no/tjenester/okonomi-naring-og-bevilling/"
+    "kommunale-avgifter-og-gebyrer/gebyr-for-kart-og-oppmaling/",
+    "https://www.hareid.kommune.no/tenester/byggesak-eigedom-og-plan/betalingssatsar/",
+    "https://www.rauma.kommune.no/tjenester/vann-avlop-og-renovasjon/vann/"
+    "standard-abonnementsvilkar/",
+    "https://www.orkland.kommune.no/politikk/styrer-rad-og-utvalg/godtgjoring-folkevalgte",
+    "https://www.melhus.kommune.no/politikk-og-demokrati/folkevalgtes-arbeidsvilkar",
+    "https://www.trondheim.kommune.no/tema/politikk-og-planer/for-folkevalgte/",
+    "https://www.lorenskog.kommune.no/tjenester/barnehage-og-skole/skole/"
+    "permisjon-fra-undervisning/",
+    "https://www.dovre.kommune.no/tjenester/barnehage-og-skule/barneskule/elevpermisjon/",
+    "https://www.gjesdal.kommune.no/tjenester/barnehage-skole-og-familie/skole/"
+    "skoleruten-ferie-og-fridager/",
+    "https://www.kvam.no/tenester/barn-ungdom-og-familie/skule/skular-i-kvam/skulekrinsar-i-kvam/",
+    "https://laerdal.kommune.no/tenester/oppvekst-og-utdanning/skolefritidsordningen-sfo/"
+    "opningstider-prisar-og-opptakskriterie/",
+    "https://www.trondheim.kommune.no/tema/skole/praktisk-informasjon-skole/sfo/",
+    "https://www.lom.kommune.no/barnehage-og-skule/barneskule/sfo-skulefritidsordning/",
+    "https://www.levanger.kommune.no/tjenester/natur-klima-og-miljo/bandtvang-pa-hunder/",
+    "https://www.arendal.kommune.no/politikk-og-medvirkning/kommunens-planer/alle-planer/"
+    "alkoholpolitisk-handlingsplan/",
+    "https://www.sande.kommune.no/tenester/bygg-eigedom-og-plan/min-eigedom/eigedomsskatt/"
+    "taksering/retningsliner-taksering/",
+    "https://www.melhus.kommune.no/tjenester/veg-vann-avlop-og-renovasjon/vann-og-avlop/"
+    "vannmaler/bestemmelser-for-bruk-av-vannmaler",
+    "https://www.gran.kommune.no/download/18.33a2660519545e0ea915f819/1742209304910/"
+    "Aksellastrestriksjoner%20Gran%20Kommune%202024.pdf",
+]
+
 
 class TestSelects:
+    @pytest.mark.parametrize("url", MISSED_POSITIVES)
+    def test_a_positive_the_2026_09_19_stems_rejected_is_selected(self, url: str) -> None:
+        assert selects(url)
+
     @pytest.mark.parametrize("stem", OWNER_DECIDED_STEMS)
     def test_every_stem_as_a_bare_segment_is_selected(self, stem: str) -> None:
         assert selects(f"{BASE}/{stem}/")
@@ -142,6 +242,48 @@ class TestSelects:
         ],
     )
     def test_only_the_path_is_matched_not_host_query_or_fragment(self, url: str) -> None:
+        assert not selects(url)
+
+
+class TestDocumentSuffix:
+    """A linked document is selected whatever its path names (owner, 2026-10-03).
+
+    The classification study found 85 of ~153 enacted forskrifter also as a
+    PDF or DOCX, under names like ``Aksellastrestriksjoner Gran Kommune.pdf``
+    that no stem list anticipates.
+    """
+
+    def test_the_suffixes_are_the_word_processor_and_pdf_forms(self) -> None:
+        assert DOCUMENT_SUFFIXES == (".pdf", ".docx", ".doc", ".odt")
+
+    @pytest.mark.parametrize("suffix", [".pdf", ".docx", ".doc", ".odt"])
+    def test_a_document_on_a_path_naming_nothing_is_selected(self, suffix: str) -> None:
+        assert selects(f"{BASE}/download/18.3/1742209304910/vedlegg-1{suffix}")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            f"{BASE}/download/Vedtak.PDF",
+            f"{BASE}/download/Skjema%20A.DocX",
+            f"{BASE}/download/vedlegg.pdf?version=3",
+            f"{BASE}/download/vedlegg.pdf#page=2",
+        ],
+    )
+    def test_the_suffix_is_read_off_the_decoded_lowercased_path(self, url: str) -> None:
+        assert selects(url)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            f"{BASE}/download/vedlegg.pdf/",
+            f"{BASE}/pdf/",
+            f"{BASE}/tjenester/pdf-skjema",
+            f"{BASE}/bilder/kart.png",
+            f"{BASE}/download/tabell.xlsx",
+            f"{BASE}/sok?format=.pdf",
+        ],
+    )
+    def test_only_a_path_ending_in_a_document_suffix_counts(self, url: str) -> None:
         assert not selects(url)
 
 
@@ -269,3 +411,56 @@ class TestChoose:
         listed = Candidate(url=NEWS, discovery_method="sitemap", found_in=LISTING)
 
         assert choose(_discovered(listed), (), enabled=True).chosen == ()
+
+
+def _known(url: str, *, document: bool) -> CaptureState:
+    return CaptureState({}, {}, {url: ContentRun("a" * 64, 0, document)})
+
+
+class TestKnownDocuments:
+    """#507: a URL whose latest capture was a PDF or DOCX is selected whatever
+    its path — 2,732 of the archive's 4,365 PDF URLs end in a slash, so the
+    suffix rule alone would miss most of them."""
+
+    def test_a_url_last_captured_as_a_document_is_known(self) -> None:
+        assert known_document(NEWS, _known(NEWS, document=True))
+
+    def test_a_url_last_captured_as_a_page_is_not(self) -> None:
+        assert not known_document(NEWS, _known(NEWS, document=False))
+
+    def test_a_url_never_captured_is_not(self) -> None:
+        assert not known_document(NEWS, _known(CLUB, document=True))
+        assert not known_document(NEWS, CaptureState.empty())
+
+    def test_on_a_known_document_on_an_unselected_path_is_chosen(self) -> None:
+        candidates = (_sitemap_candidate(NEWS), _sitemap_candidate(CLUB))
+
+        selection = choose(
+            _discovered(*candidates), (), enabled=True, state=_known(NEWS, document=True)
+        )
+
+        assert selection.chosen == (candidates[0],)
+        assert (selection.proposed, selection.matching, selection.unselected) == (2, 1, 1)
+
+    def test_off_a_known_document_is_counted_as_one_selection_would_keep(self) -> None:
+        candidates = (_sitemap_candidate(NEWS), _sitemap_candidate(CLUB))
+
+        selection = choose(
+            _discovered(*candidates), (), enabled=False, state=_known(NEWS, document=True)
+        )
+
+        assert selection.chosen == candidates
+        assert selection.matching == 1
+
+    def test_a_known_page_is_not_rescued(self) -> None:
+        selection = choose(
+            _discovered(_sitemap_candidate(NEWS)),
+            (),
+            enabled=True,
+            state=_known(NEWS, document=False),
+        )
+
+        assert selection.chosen == ()
+
+    def test_without_a_state_nothing_is_known(self) -> None:
+        assert choose(_discovered(_sitemap_candidate(NEWS)), (), enabled=True).chosen == ()

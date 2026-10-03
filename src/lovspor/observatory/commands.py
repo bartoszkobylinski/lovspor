@@ -294,7 +294,7 @@ def capture(
         typer.echo(f"Refused: {exc}", err=True)
         raise typer.Exit(1) from exc
     _require_documents(record, result, starts.probed)
-    selection = choose(result, record.listing_entry_points, selection_enabled())
+    selection = choose(result, record.listing_entry_points, selection_enabled(), state)
     counts = capture_proposals(fetcher, selection, state, limit)
     typer.echo(capture_summary(counts))
     _refuse_incomplete(record, counts)
@@ -395,7 +395,7 @@ def _sweep_one(
             f"  refused: {record.authority_id} {_no_documents_reason(starts.probed)}", err=True
         )
         return SweepTotals(refused=1)
-    selection = choose(result, record.listing_entry_points, selection_enabled())
+    selection = choose(result, record.listing_entry_points, selection_enabled(), state)
     counts = capture_proposals(fetcher, selection, state, limit)
     typer.echo(capture_summary(counts))
     if counts.capped:

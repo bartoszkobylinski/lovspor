@@ -25,6 +25,7 @@ import re
 import unicodedata
 from datetime import date
 
+from lovspor.promotion.dates import DATE, parse_stated_date
 from lovspor.promotion.models import (
     Authority,
     ExtractedRegulation,
@@ -35,34 +36,11 @@ from lovspor.promotion.models import (
     MintedIdentity,
 )
 
-_MONTHS = {
-    name: number
-    for number, name in enumerate(
-        (
-            "januar",
-            "februar",
-            "mars",
-            "april",
-            "mai",
-            "juni",
-            "juli",
-            "august",
-            "september",
-            "oktober",
-            "november",
-            "desember",
-        ),
-        start=1,
-    )
-}
-_DATE = r"(\d{1,2}\.\s*[^\W\d_]+\s+\d{4}|\d{1,2}\.\d{1,2}\.\d{4}|\d{4}-\d{2}-\d{2})"
-_DATE_NUMBER = _DATE + r"\s+nr\.?\s*(\d{1,6})\b"
+_DATE_NUMBER = DATE + r"\s+nr\.?\s*(\d{1,6})\b"
 _FOR_HEADER = re.compile(r"\s*(?:dato\s*:?\s*)?FOR-(\d{4}-\d{2}-\d{2})-(\d{1,6})\b", re.I)
 _TITLE_LINE = re.compile(r"\s*forskrift\s+(?:av\s+)?" + _DATE_NUMBER, re.I)
 _KUNNGJORT_LINE = re.compile(r"\s*kunngjort\b", re.I)
 _DATE_NUMBER_ANYWHERE = re.compile(_DATE_NUMBER, re.I)
-_TEXTUAL_DATE = re.compile(r"(\d{1,2})\.\s*([^\W\d_]+)\s+(\d{4})")
-_NUMERIC_DATE = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{4})")
 _CENTRAL_REF_ID = re.compile(r"forskrift/(\d{4}-\d{2}-\d{2})-(\d{1,6})")
 _INVISIBLE = dict.fromkeys(map(ord, "\u00ad\u200b\ufeff"))
 _UNIT_SEPARATOR = "\x1f"
@@ -190,14 +168,14 @@ def _candidates(identification_block: str) -> tuple[_LovdataId, ...]:
 def _identification_line_id(line: str) -> _LovdataId | None:
     header = _FOR_HEADER.match(line)
     if header:
-        return _checked(_parse_date(header.group(1)), header.group(2))
+        return _checked(parse_stated_date(header.group(1)), header.group(2))
     title = _TITLE_LINE.match(line)
     if title:
-        return _checked(_parse_date(title.group(1)), title.group(2))
+        return _checked(parse_stated_date(title.group(1)), title.group(2))
     if _KUNNGJORT_LINE.match(line):
         cited = _DATE_NUMBER_ANYWHERE.search(line)
         if cited:
-            return _checked(_parse_date(cited.group(1)), cited.group(2))
+            return _checked(parse_stated_date(cited.group(1)), cited.group(2))
     return None
 
 
@@ -205,27 +183,6 @@ def _checked(day: date | None, number: str) -> _LovdataId | None:
     if day is None or int(number) == 0:
         return None
     return (day, int(number))
-
-
-def _parse_date(text: str) -> date | None:
-    """A real calendar date in one of the three written forms, else ``None``."""
-    try:
-        return _date_parts(text)
-    except ValueError:
-        return None
-
-
-def _date_parts(text: str) -> date | None:
-    textual = _TEXTUAL_DATE.fullmatch(text)
-    if textual:
-        month = _MONTHS.get(textual.group(2).casefold())
-        if month is None:
-            return None
-        return date(int(textual.group(3)), month, int(textual.group(1)))
-    numeric = _NUMERIC_DATE.fullmatch(text)
-    if numeric:
-        return date(int(numeric.group(3)), int(numeric.group(2)), int(numeric.group(1)))
-    return date.fromisoformat(text)
 
 
 def _central_ids(central_ref_ids: frozenset[str]) -> frozenset[_LovdataId]:
@@ -238,7 +195,7 @@ def _central_id(ref_id: str) -> _LovdataId | None:
     match = _CENTRAL_REF_ID.fullmatch(ref_id)
     if match is None:
         return None
-    return _checked(_parse_date(match.group(1)), match.group(2))
+    return _checked(parse_stated_date(match.group(1)), match.group(2))
 
 
 def _lf_id(candidate: _LovdataId) -> str:
