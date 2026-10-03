@@ -15,6 +15,8 @@ assumption, and the tests live here.
 from __future__ import annotations
 
 import importlib.metadata
+import inspect
+import io
 import json
 import re
 import subprocess
@@ -25,16 +27,21 @@ from typing import Any
 
 import httpx
 import pytest
-from lxml import html
+from lxml import etree, html
 from mcp.types import JSONRPCMessage
 from pydantic import ValidationError
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
+from lovspor.parsing.xml_normalizer import safe_parser
+from lovspor.promotion.fields import _ENACTED
 from lovspor.release.envelope import CorpusSummary, Marker, ReleaseRecord
 from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
 from lovspor.site.fingerprint import ReleaseKey
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest, write_manifest
+from tests.unit.promotion_fixtures import minimal_pdf
 from tests.unit.site_fixtures import (
     available_observation,
     capability_document,
@@ -519,3 +526,42 @@ def test_assumption_model_copy_without_updates_is_value_equal_and_writes_the_sam
     assert copied == prior
     assert {"lov-x": copied} == manifest.documents
     assert _rewritten(manifest, copied, tmp_path / "copy.json") == written
+
+
+def test_assumption_pypdf_reads_strict_for_truth_and_defaults_it_off() -> None:
+    """Pins the argument that waives the ``strict=False`` -> ``strict=None`` and the
+    dropped-argument mutants in ``promotion/source_text.py::pdf_lines``: pypdf's
+    ``PdfReader`` defaults ``strict`` to ``False`` and reads it only for truth, so
+    ``None``, ``False`` and the default all repair a PDF that ``strict=True`` refuses."""
+    broken = minimal_pdf().replace(b"startxref\n", b"startxref\n1")
+    lenient: dict[str, Any] = {"strict": None}
+
+    assert inspect.signature(PdfReader).parameters["strict"].default is False
+    with pytest.raises(PdfReadError):
+        _ = PdfReader(io.BytesIO(broken), strict=True).pages[0]
+    expected = [page.extract_text() for page in PdfReader(io.BytesIO(broken), strict=False).pages]
+    for reader in (PdfReader(io.BytesIO(broken)), PdfReader(io.BytesIO(broken), **lenient)):
+        assert [page.extract_text() for page in reader.pages] == expected
+
+
+def test_assumption_lxml_reads_remove_blank_text_for_truth() -> None:
+    """Pins the argument that waives the ``remove_blank_text=False`` ->
+    ``remove_blank_text=None`` mutant in ``promotion/source_text.py::docx_lines``:
+    lxml's ``XMLParser`` reads the flag for truth, so ``None`` keeps the blank text
+    that ``True`` strips — here a word space before a comment inside a run."""
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    document = f'<w:t xmlns:w="{w}"> <!--x--></w:t>'.encode()
+
+    def text(flag: Any) -> str | None:
+        return etree.fromstring(document, parser=safe_parser(remove_blank_text=flag)).text
+
+    assert text(True) is None
+    assert text(None) == text(False) == " "
+
+
+def test_assumption_the_enactment_pattern_has_only_the_organ_and_date_groups() -> None:
+    """Pins the argument that waives the ``groups()[-1]`` -> ``groups()[+1]`` mutant in
+    ``promotion/fields.py::_enactment``: with exactly two groups, index 1 and index -1
+    name the same one, the date. A third group would make the mutant a real defect."""
+    assert _ENACTED.groups == 2
+    assert _ENACTED.groupindex == {"organ": 1}
