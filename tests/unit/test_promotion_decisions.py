@@ -23,6 +23,7 @@ from lovspor.promotion.decisions import (
 
 KEY = ArtifactKey(authority_id="0301", sha256="a" * 64, source_url="https://x.invalid/f")
 AT = datetime(2026, 10, 3, 9, 0, tzinfo=UTC)
+ROLE = "project owner"
 
 
 def _log(tmp_path: Path) -> DecisionLog:
@@ -31,7 +32,12 @@ def _log(tmp_path: Path) -> DecisionLog:
 
 def _decision(decision: Decision = Decision.REJECT, at: datetime = AT) -> HumanDecision:
     return HumanDecision(
-        artifact=KEY, decision=decision, decided_by="Kari", decided_at=at, reason="Ikke vedtatt."
+        artifact=KEY,
+        decision=decision,
+        decided_by="Kari",
+        reviewer_role=ROLE,
+        decided_at=at,
+        reason="Ikke vedtatt.",
     )
 
 
@@ -115,7 +121,12 @@ def test_an_approval_must_name_the_text_it_read() -> None:
 def test_a_decision_is_a_persons(name: str) -> None:
     with pytest.raises(ValidationError):
         HumanDecision(
-            artifact=KEY, decision=Decision.REJECT, decided_by=name, decided_at=AT, reason="r"
+            artifact=KEY,
+            decision=Decision.REJECT,
+            decided_by=name,
+            reviewer_role=ROLE,
+            decided_at=AT,
+            reason="r",
         )
 
 
@@ -138,7 +149,12 @@ def test_utc_text_ignores_the_process_time_zone(monkeypatch: pytest.MonkeyPatch)
 def test_a_machine_reviewer_is_refused_with_the_rule() -> None:
     with pytest.raises(ValidationError) as refused:
         HumanDecision(
-            artifact=KEY, decision=Decision.REJECT, decided_by="auto", decided_at=AT, reason="r"
+            artifact=KEY,
+            decision=Decision.REJECT,
+            decided_by="auto",
+            reviewer_role=ROLE,
+            decided_at=AT,
+            reason="r",
         )
 
     assert "decided_by must name a person, not 'auto' (ADR-0016 4c)" in str(refused.value)
@@ -160,6 +176,7 @@ def test_the_log_is_utf8_whatever_the_locale(tmp_path: Path, c_locale: None) -> 
         artifact=KEY,
         decision=Decision.REJECT,
         decided_by="Åse Ødegård",
+        reviewer_role=ROLE,
         decided_at=AT,
         reason="Kilden er ikke kunngjort på nett.",
     )

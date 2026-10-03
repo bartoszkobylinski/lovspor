@@ -165,9 +165,10 @@ def _decision_document(path: Path) -> DecisionDocument:
     except ValidationError as exc:
         msg = f"the decision document does not validate: {exc}"
         raise PromotionRefusedError(msg) from exc
-    if screen_personal_data(document.reason):
-        msg = "the reason carries personal data; it is published with the audit record"
-        raise PromotionRefusedError(msg)
+    for field, text in document.published().items():
+        if screen_personal_data(text):
+            msg = f"the {field} carries personal data; it is published with the audit record"
+            raise PromotionRefusedError(msg)
     return document
 
 
@@ -191,18 +192,16 @@ def approve_impl(authority_id: str, artifact: str, document_path: Path, now: dat
     approving = document.decision is Decision.APPROVE
     decision = HumanDecision(
         artifact=key,
-        decision=document.decision,
-        decided_by=document.decided_by,
         decided_at=now,
-        reason=document.reason,
         content_hash=_reviewed_text(log, fetches, key) if approving else None,
         extractor_version=EXTRACTOR_VERSION if approving else None,
-        classifier=document.classifier,
+        **document.model_dump(),
     )
     decisions = DecisionLog(root)
     decisions.append(decision)
     typer.echo(f"Recorded {decision.decision.value} of {key.sha256} at {key.source_url}")
-    typer.echo(f"by {decision.decided_by} at {utc_text(now)} in {decisions.path}")
+    who = f"{decision.decided_by} ({decision.reviewer_role})"
+    typer.echo(f"by {who} at {utc_text(now)} in {decisions.path}")
 
 
 def preview_impl(request: Request) -> None:
@@ -330,7 +329,9 @@ def approve(
     artifact: _Artifact,
     decision: Annotated[
         Path,
-        typer.Option("--decision", help="JSON: decision, decided_by, reason[, classifier]."),
+        typer.Option(
+            "--decision", help="JSON: decision, decided_by, reviewer_role, reason[, classifier]."
+        ),
     ],
 ) -> None:
     """Record a reviewer's approve/reject/hold of one artifact in the decision log."""

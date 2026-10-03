@@ -4,9 +4,10 @@ Three files, all under ``lokale-forskrifter/`` and nowhere else:
 
 * ``<authority_id>/<slug>.md`` — the rendering of the version;
 * ``<authority_id>/observations/<slug>.json`` — the observation axis of every
-  promoted version, each with its audit record (``promotion``): who approved
-  it and when, the classifier evidence if supplied, the extractor, renderer
-  and identity that produced it, and the archive records it was read from;
+  promoted version, each with its audit record (``promotion``): the role of
+  who approved it — never the name — and when, the classifier evidence if
+  supplied, the extractor, renderer and identity that produced it, and the
+  archive records it was read from;
 * ``manifest.json`` — the local dataset's membership.
 
 Every byte is a function of the inputs: the artifact's observations up to the
@@ -116,7 +117,7 @@ def _audit(
     identity = prepared.identity
     return PromotionAudit(
         decision=decision.decision,
-        decided_by=decision.decided_by,
+        reviewed_by_role=decision.reviewer_role,
         decided_at=utc_text(decision.decided_at),
         reason=decision.reason,
         reviewed_in_sample=True,

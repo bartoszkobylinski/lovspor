@@ -22,6 +22,7 @@ from tests.unit.promotion_cli_fixtures import (
     AUTHORITY,
     PAGE_URL,
     REVIEWER,
+    REVIEWER_ROLE,
     Decision,
     approve,
     git,
@@ -246,7 +247,7 @@ class TestApprove:
         [decision] = _log(root)
         assert result.stdout == (
             f"Recorded approve of {sha256} at {PAGE_URL}\n"
-            f"by {REVIEWER} at {decision['decided_at']} in {_log_path(root)}\n"
+            f"by {REVIEWER} ({REVIEWER_ROLE}) at {decision['decided_at']} in {_log_path(root)}\n"
         )
         assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z", str(decision["decided_at"]))
 

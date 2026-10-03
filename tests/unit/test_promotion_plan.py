@@ -106,6 +106,7 @@ def _decision(decision: Decision, content_hash: str | None, extractor: int | Non
         artifact=ArtifactKey(authority_id="0301", sha256="a" * 64, source_url="https://x.invalid"),
         decision=decision,
         decided_by="Kari Gjennomgang",
+        reviewer_role="project owner",
         decided_at=DECIDED_AT,
         reason="Lest.",
         content_hash=content_hash,

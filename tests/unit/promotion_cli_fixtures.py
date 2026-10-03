@@ -30,6 +30,7 @@ FIRST_SEEN = datetime(2026, 8, 19, 15, 17, 23, tzinfo=UTC)
 PAGE_URL = "https://eksempel.kommune.invalid/forskrifter/renovasjon"
 CENTRAL_DOC_ID = "sf-20200114-0063"
 REVIEWER = "Kari Gjennomgang"
+REVIEWER_ROLE = "project owner"
 
 runner = CliRunner()
 
@@ -141,6 +142,7 @@ class Decision:
     decided_by: str = REVIEWER
     reason: str = "Vedtatt forskrift; kilden lest i sin helhet."
     classifier: dict[str, object] | None = None
+    reviewer_role: str | None = REVIEWER_ROLE
 
     def write(self, directory: Path) -> Path:
         path = directory / f"decision-{self.decision}.json"
@@ -149,6 +151,8 @@ class Decision:
             "decided_by": self.decided_by,
             "reason": self.reason,
         }
+        if self.reviewer_role is not None:
+            body["reviewer_role"] = self.reviewer_role
         if self.classifier is not None:
             body["classifier"] = self.classifier
         path.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")

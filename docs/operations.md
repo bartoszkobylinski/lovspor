@@ -1048,6 +1048,7 @@ cat > decision-0301.json <<'JSON'
 {
   "decision": "approve",
   "decided_by": "<your name>",
+  "reviewer_role": "project owner",
   "reason": "Enacted forskrift; text read against the source page in full.",
   "classifier": {"classifier_version": "<version>", "class_name": "forskrift", "evidence": ["<rule id or phrase>"]}
 }
@@ -1057,18 +1058,29 @@ uv run lovspor promote approve --authority 0301 --artifact <sha256-or-url> --dec
 
 `decision` is `approve`, `reject` or `hold`; `classifier` is optional (leave
 it out when no classifier output was reviewed). `decided_by` must be a person
-— `classifier`, `lovspor` and similar names are refused. The `reason` is
-published in the audit record, so a reason carrying personal data (an e-mail
-address, a phone number) is refused. An `approve` is bound to the text it was
-given for — its content hash and extractor version — and a text the pipeline
-holds cannot be approved. The last decision on an artifact is the one that
+— `classifier`, `lovspor` and similar names are refused.
+
+`reviewer_role` is required: `lovverk` is public and its history is never
+rewritten, so the audit record published there names the reviewer by **role**
+(`reviewed_by_role`), never by name (owner decision on PR #517). The name in
+`decided_by` is written only to `promotions.jsonl` in the archive root. A
+document without a role is refused (`reviewer_role is required: the published
+audit names the reviewer by role, never by name`), and so is a role that is a
+machine name or carries personal data. Everything published — the role, the
+`reason` and the classifier evidence — is refused when it carries personal
+data (an e-mail address, a phone number) or any word of two letters or more
+from `decided_by`.
+
+An `approve` is bound to the text it was given for — its content hash and
+extractor version — and a text the pipeline holds cannot be approved. The last decision on an artifact is the one that
 stands; a later `reject` keeps it out.
 
 The record appended to `promotions.jsonl`:
 
 ```json
 {"kind": "decision", "artifact": {"authority_id": "0301", "sha256": "…", "source_url": "https://…"},
- "decision": "approve", "decided_by": "…", "decided_at": "2026-10-03T09:00:00Z", "reason": "…",
+ "decision": "approve", "decided_by": "…", "reviewer_role": "project owner",
+ "decided_at": "2026-10-03T09:00:00Z", "reason": "…",
  "content_hash": "…", "extractor_version": 1, "classifier": null}
 ```
 
@@ -1086,9 +1098,9 @@ It writes, under `lokale-forskrifter/` only:
   `retrieved_at` and no `observed_at_last`);
 * `<authority_id>/observations/<slug>.json` — per version: content hash,
   first and last observation, observation count, primary and corroborating
-  URLs, source blob, and `promotion`, the audit record: decision, reviewer,
-  decision time, reason, `reviewed_in_sample`, classifier evidence (or
-  `null`), extractor/renderer versions, source form, identity (scheme, id,
+  URLs, source blob, and `promotion`, the audit record: decision, the
+  reviewer's role (`reviewed_by_role` — never the name), decision time,
+  reason, `reviewed_in_sample`, classifier evidence (or `null`), extractor/renderer versions, source form, identity (scheme, id,
   ref-id, candidates), and the archive records it was read from;
 * `manifest.json` — the record keyed by id (`generated_at` is the decision
   time, not the clock).

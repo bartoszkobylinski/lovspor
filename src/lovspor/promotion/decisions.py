@@ -6,12 +6,19 @@
 record kinds, discriminated by ``kind``:
 
 * ``decision`` — a human act on one artifact: ``approve``, ``reject`` or
-  ``hold``, with who decided, when and why. ``decided_by`` is a person; a
-  machine name is refused, because a decision the log attributes to a human
-  must have been one (ADR-0016 4c). An ``approve`` names the content hash and
-  extractor version of the text the reviewer read, so a later run cannot
-  promote a different text under it.
+  ``hold``, with who decided, in what role, when and why. ``decided_by`` is a
+  person; a machine name is refused, because a decision the log attributes to
+  a human must have been one (ADR-0016 4c). An ``approve`` names the content
+  hash and extractor version of the text the reviewer read, so a later run
+  cannot promote a different text under it.
 * ``promoted`` — what a promotion run wrote, with its audit record (4d).
+
+The reviewer's name lives here and nowhere else. The audit record published
+into ``lovverk`` names the reviewer by ``reviewed_by_role`` — ``lovverk`` is
+public and its history is never rewritten (ADR-0003), so a personal name
+written there could never be taken back (owner decision on PR #517,
+2026-10-03). Every field that is published — the role, the reason and the
+classifier evidence — is refused when it carries the reviewer's name.
 * ``held`` — a promotion run that stopped at a hold, with the stage and the
   reason (4h). Holds are recorded, never dropped.
 
@@ -24,6 +31,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -44,6 +52,7 @@ from lovspor.errors import DecisionLogError, StorageBoundaryError
 from lovspor.observatory.fields import TrimmedNonBlankStr
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.promotion.models import IdScheme, PersonalDataHit
+from lovspor.promotion.personal_data import screen_personal_data
 
 DECISIONS_FILENAME = "promotions.jsonl"
 
@@ -63,6 +72,33 @@ def _a_person(value: str) -> str:
 
 
 PersonName = Annotated[TrimmedNonBlankStr, AfterValidator(_a_person)]
+
+ROLE_REQUIRED = (
+    "reviewer_role is required: the published audit names the reviewer by role, never by name"
+)
+_WORD = re.compile(r"\w{2,}")
+
+
+def _a_role(value: str) -> str:
+    if value.casefold() in MACHINE_NAMES:
+        msg = f"reviewer_role must name a human role, not {value!r} (ADR-0016 4c)"
+        raise ValueError(msg)
+    if screen_personal_data(value):
+        msg = "reviewer_role carries personal data; it is published with the audit record"
+        raise ValueError(msg)
+    return value
+
+
+ReviewerRole = Annotated[TrimmedNonBlankStr, AfterValidator(_a_role)]
+
+
+def _refuse_the_name(decided_by: str, published: dict[str, str]) -> None:
+    """Refuse a published field sharing a word with the reviewer's name."""
+    name = set(_WORD.findall(decided_by.casefold()))
+    for field, text in published.items():
+        if name & set(_WORD.findall(text.casefold())):
+            msg = f"{field} carries the reviewer's name; the corpus is given the role, not the name"
+            raise ValueError(msg)
 
 
 def utc_text(moment: datetime) -> str:
@@ -99,6 +135,19 @@ class ClassifierEvidence(BaseModel):
     class_name: TrimmedNonBlankStr
     evidence: tuple[TrimmedNonBlankStr, ...] = ()
 
+    def published(self) -> dict[str, str]:
+        """Each field as the audit record publishes it, by its path in the decision."""
+        fields = {
+            "classifier.classifier_version": self.classifier_version,
+            "classifier.class_name": self.class_name,
+        }
+        return fields | {f"classifier.evidence[{i}]": e for i, e in enumerate(self.evidence)}
+
+
+def _published(role: str, reason: str, classifier: ClassifierEvidence | None) -> dict[str, str]:
+    fields = {"reviewer_role": role, "reason": reason}
+    return fields | (classifier.published() if classifier is not None else {})
+
 
 class DecisionDocument(BaseModel):
     """The reviewer's decision as the operator hands it over: a JSON file.
@@ -111,8 +160,25 @@ class DecisionDocument(BaseModel):
 
     decision: Decision
     decided_by: PersonName
+    reviewer_role: ReviewerRole
     reason: TrimmedNonBlankStr
     classifier: ClassifierEvidence | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _names_a_role(cls, data: object) -> object:
+        if isinstance(data, dict) and "reviewer_role" not in data:
+            raise ValueError(ROLE_REQUIRED)
+        return data
+
+    @model_validator(mode="after")
+    def _keeps_the_name_private(self) -> DecisionDocument:
+        _refuse_the_name(self.decided_by, self.published())
+        return self
+
+    def published(self) -> dict[str, str]:
+        """The fields the audit record publishes into ``lovverk``, by their path here."""
+        return _published(self.reviewer_role, self.reason, self.classifier)
 
 
 class HumanDecision(BaseModel):
@@ -124,11 +190,18 @@ class HumanDecision(BaseModel):
     artifact: ArtifactKey
     decision: Decision
     decided_by: PersonName
+    reviewer_role: ReviewerRole
     decided_at: AwareDatetime
     reason: TrimmedNonBlankStr
     content_hash: str | None = Field(default=None, pattern=_SHA256)
     extractor_version: int | None = None
     classifier: ClassifierEvidence | None = None
+
+    @model_validator(mode="after")
+    def _keeps_the_name_private(self) -> HumanDecision:
+        published = _published(self.reviewer_role, self.reason, self.classifier)
+        _refuse_the_name(self.decided_by, published)
+        return self
 
     @model_validator(mode="after")
     def _approval_names_the_text(self) -> HumanDecision:
@@ -160,12 +233,16 @@ class ObservationUsed(BaseModel):
 
 
 class PromotionAudit(BaseModel):
-    """Why a version was promoted (ADR-0016 4d): the versions, the evidence, the human."""
+    """Why a version was promoted (ADR-0016 4d): the versions, the evidence, the human's role.
+
+    Published into ``lovverk``, so it names the reviewer by role only; the
+    name stays in the decision log's ``decision`` record.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     decision: Decision
-    decided_by: str
+    reviewed_by_role: str
     decided_at: str
     reason: str
     reviewed_in_sample: bool

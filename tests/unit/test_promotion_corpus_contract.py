@@ -74,6 +74,20 @@ RECORD_FIELDS = {
     "version",
     "extractor_version",
 }
+AUDIT_FIELDS = {
+    "decision",
+    "reviewed_by_role",
+    "decided_at",
+    "reason",
+    "reviewed_in_sample",
+    "classifier",
+    "extractor_version",
+    "renderer_version",
+    "source_form",
+    "identity",
+    "observations_through",
+    "observations",
+}
 SECOND_URL = "https://eksempel.kommune.invalid/forskrifter/renovasjon-2021"
 LATER_DATED = (
     REGULATION_LINES[0],
@@ -192,6 +206,8 @@ def test_the_audit_record_says_who_approved_what_and_from_which_observations(
     assert version["primary_url"] == PAGE_URL
     assert version["observed_at_first"] == "2026-08-19T15:17:23Z"
     assert audit["decision"] == "approve"
+    assert audit["reviewed_by_role"] == "project owner"
+    assert set(audit) == AUDIT_FIELDS
     assert audit["reviewed_in_sample"] is True
     assert audit["extractor_version"] == 1
     assert audit["renderer_version"] == 1
