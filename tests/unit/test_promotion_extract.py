@@ -24,6 +24,7 @@ from tests.unit.promotion_fixtures import (
     html_page,
     minimal_docx,
     minimal_pdf,
+    pdf_pages,
 )
 
 HTML = "text/html; charset=utf-8"
@@ -137,6 +138,43 @@ def test_placeholder_date_is_held() -> None:
 def test_lovdata_print_is_held() -> None:
     lines = ("Utskrift fra Lovdata - 03.10.2026 12:00", *REGULATION_LINES)
     assert _held(html_page(lines)).reason == ExtractionHoldReason.LOVDATA_COPY
+
+
+LOVDATA_URL = "https://lovdata.no/dokument/OV/forskrift/2010-02-11-169"
+
+
+@pytest.mark.parametrize(
+    "chrome",
+    [
+        f"29.04.2019{LOVDATA_URL}?q=forskrift gran kommune",
+        "27.03.2014 http://lovdata.no/dokument/OV/forskrift/2007-02-21-212",
+        f"{LOVDATA_URL} 1/2",
+        "Side 1 av 2Lovdata - Forskrift om gebyrer for saksbehandling, Gran ko...",
+        "03.10.2026, 12:00 Lovdata - Forskrift om renovasjon og slam",
+    ],
+)
+def test_a_browser_print_of_lovdata_is_held(chrome: str) -> None:
+    pages = (REGULATION_LINES[:3], (*REGULATION_LINES[3:], chrome))
+    held = _held(pdf_pages(*pages), PDF)
+    assert (held.reason, held.detail) == (
+        ExtractionHoldReason.LOVDATA_COPY,
+        "the text is a print out of Lovdata",
+    )
+
+
+@pytest.mark.parametrize(
+    "mention",
+    [
+        "Se også lovdata.no",
+        LOVDATA_URL,
+        f"Forskriften er kunngjort i Norsk Lovtidend, se {LOVDATA_URL}",
+        f"For ev. rettelser se nederst i den elektroniske versjonen: {LOVDATA_URL}",
+        "Forskrift om rammeplan for skolefritidsordningen - Lovdata",
+        "Alle lover kan søkes opp på nettadresse: www.lovdata.no.",
+    ],
+)
+def test_a_regulation_that_cites_lovdata_is_not_a_copy(mention: str) -> None:
+    assert isinstance(_extracted(html_page((*REGULATION_LINES, mention))), ExtractedDocument)
 
 
 def test_no_first_section_is_held() -> None:
