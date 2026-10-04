@@ -218,3 +218,11 @@ def test_nynorsk_contact_line_is_a_hit(line: str) -> None:
 
 def test_an_organ_word_as_a_compound_tail_still_names_a_unit() -> None:
     assert screen_personal_data("Publisert av Eksempel Bystyre\nSkrevet av Ola Helsesenteret") == ()
+
+
+@pytest.mark.parametrize(
+    "line", ["Publisert av Teknisk Etat Nord", "Oppdatert av Plan-Kontoret Sør"]
+)
+def test_an_organ_word_before_the_last_word_still_names_a_unit(line: str) -> None:
+    """Each word is judged on its own, so an organ word mid-name is not hidden by the next."""
+    assert screen_personal_data(line) == ()
