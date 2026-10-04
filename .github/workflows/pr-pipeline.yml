@@ -101,6 +101,7 @@ jobs:
       author: ${{ steps.author.outputs.author }}
       before_sha: ${{ steps.base.outputs.before_sha }}
       patch: ${{ steps.patch.outputs.patch }}
+      not_run: ${{ steps.ran.outputs.not_run }}
     steps:
       # Head branch (not merge ref). No credentials persist on this lane: it
       # writes a patch, it does not push.
@@ -249,6 +250,31 @@ jobs:
           else
             echo "author=codex" >> "$GITHUB_OUTPUT"
           fi
+
+      # Issue #489: on PR #469 (run 36677467828) the author could not run one
+      # command — `codex-code-mode-host` was missing (#448) — yet `codex exec`
+      # exited 0, and this lane and `codex-tests` went green: a check claiming
+      # an independent review nobody made. A round whose transcript holds no
+      # `exec` line, or that left no transcript, fails here. The Claude
+      # fallback's transcript has no such marker, so Codex rounds only (#472).
+      - name: Fail a round that executed no command
+        id: ran
+        if: steps.author.outputs.author == 'codex'
+        run: |
+          log="$RUNNER_TEMP/codex-author.log"
+          if [ -x scripts/ci/author_transcript.py ]; then
+            reason="$(python3 scripts/ci/author_transcript.py --log "$log")" && exit 0
+            reason="${reason#not_run=}"
+          elif [ -s "$log" ] && grep -Eq '^([0-9TZ:.-]+ )?exec$' "$log"; then
+            # A head cut before the helper landed: the same marker, by hand.
+            exit 0
+          else
+            reason="the agent executed no command"
+          fi
+          reason="${reason:-author_transcript.py gave no reason}"
+          echo "not_run=$reason" >> "$GITHUB_OUTPUT"
+          echo "::error::The independent test author executed no command (#489): $reason. No test reviewed this PR, so this lane must not pass."
+          exit 1
 
       - name: Stop the memory sampler
         if: always() && steps.sampler.outputs.pid != ''
@@ -572,9 +598,10 @@ jobs:
       # pinned action download. This job cannot read the jobs API to tell that
       # apart, and its generic round made the hosted reporter stand down on the
       # label. `codex-tests-report` fires on exactly that author failure and
-      # classifies it, so it owns the report.
+      # classifies it, so it owns the report. So does an author round that ran
+      # no command (#489): `not_run` set means the reporter names it.
       - name: Escalate — the pipeline failed before the tests ran
-        if: failure() && steps.verdict.outcome != 'failure' && !(needs.codex-author.result == 'failure' && needs.codex-author.outputs.skip == '')
+        if: failure() && steps.verdict.outcome != 'failure' && !(needs.codex-author.result == 'failure' && needs.codex-author.outputs.skip == '') && needs.codex-author.outputs.not_run == ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -723,6 +750,30 @@ jobs:
               echo "\`gh run rerun ${{ github.run_id }} --failed\`"
               echo "If the rerun fails in the same place, read that job's log: an action reference"
               echo "that cannot be resolved fails here too, and no rerun clears it."
+              echo ""
+              echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } > "$RUNNER_TEMP/lane-escalation.md"
+          elif [ "${{ steps.classify.outputs.kind }}" = "runner_tool" ]; then
+            {
+              echo "codex-tests BLOCKED by an INFRASTRUCTURE failure — the runner's Codex install, not the diff."
+              echo ""
+              echo "Codex could not start its execution tool (\`failed to spawn code-mode host\`): the"
+              echo "independent test author ran no command, so **no independent test reviewed this PR**."
+              echo "The runner needs \`codex-code-mode-host\` next to \`codex\`: docs/agentic-ci.md, Mac mini"
+              echo "runner, operator step 3 (#448). Then re-run:"
+              echo "\`gh run rerun ${{ github.run_id }} --failed\`"
+              echo ""
+              echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } > "$RUNNER_TEMP/lane-escalation.md"
+          elif [ "${{ steps.classify.outputs.kind }}" = "agent_did_not_run" ]; then
+            {
+              echo "codex-tests BLOCKED — the independent test author ran no command. A lane failure, not the diff."
+              echo ""
+              echo "\`codex exec\` exited 0, but job \`${{ steps.classify.outputs.job }}\` found no executed command"
+              echo "in its transcript (or no transcript at all), so **no independent test reviewed this PR** (#489)."
+              echo "A green check here would claim a review that never happened. The job's log holds"
+              echo "Codex's own account of why; once that cause is cleared, re-run:"
+              echo "\`gh run rerun ${{ github.run_id }} --failed\`"
               echo ""
               echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             } > "$RUNNER_TEMP/lane-escalation.md"

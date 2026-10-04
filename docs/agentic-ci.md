@@ -498,6 +498,22 @@ Two rules follow, and they are pinned by tests:
   it, and with `kind=runner_setup` it names the runner and the rerun instead of
   "ended 'failure' without reporting its own state". Its label stays
   `needs-human:mutation`.
+- **A test-author round that ran no command fails the lane (issue #489).** On PR #469
+  (head 99e00f7, run 36677467828) `codex-author` and `codex-tests` were green while the
+  independent author never executed a command: `codex-code-mode-host` was missing
+  (#448) and `codex exec` exited 0. After a Codex round, the step `Fail a round that
+  executed no command` hands `$RUNNER_TEMP/codex-author.log` to
+  `scripts/ci/author_transcript.py`, which reuses `remediation_transcript.py`'s `exec`
+  marker check (#472) and, unlike the remediation lane, also fails closed on a missing
+  or empty transcript — this lane's green check is itself the claim. The step writes
+  the reason to the job output `not_run` and an `##[error]` annotation carrying `The
+  independent test author executed no command (#489)`. `codex-tests`' generic pre-test
+  escalation stands down when `not_run` is set, and `codex-tests-report` classifies:
+  with the `failed to spawn code-mode host` line in the log it is `runner_tool` (the
+  runner's Codex install, #448), otherwise `agent_did_not_run` (a lane failure). Both
+  say that no independent test reviewed the PR and give the rerun; the label stays
+  `needs-human:pipeline`. The Claude fallback's transcript has no `exec` marker, so the
+  check runs on Codex rounds only.
 - **A rejected credential is an operator action, not a pipeline failure (issue
   #270).** When the lane reached its own failure, `codex-tests-report` also fetches
   that job's log (`actions: read`) and hands it to the classifier with `--log`. A
