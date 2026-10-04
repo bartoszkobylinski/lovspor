@@ -13,7 +13,7 @@ classification study measured 65-85 % accuracy per field, its §4). Each is
 what the text states, verbatim or as a parsed date, or empty:
 
 * ``title`` — the title line;
-* ``hjemmel`` — ``Hjemmel: LOV-…`` header references and ``med hjemmel i …`` /
+* ``hjemmel`` — ``Hjemmel: LOV-…`` header references and ``med hjemmel (i) …`` /
   ``i medhold av …`` phrases in the block, to the end of their sentence;
 * ``vedtatt`` / ``vedtatt_av`` — the first ``vedtatt av <organ> <dato>``
   (or ``fastsatt``, ``vedteke``) in the block;
@@ -41,8 +41,12 @@ _TITLE = re.compile(
 _FIRST_SECTION = re.compile(r"(?:§\s*1(?!\d)|kap(?:ittel|\.)\s*(?:1|I)(?![\w]))", re.I)
 _HJEMMEL_HEADER = re.compile(r"(?:hjemmel|heimel)\s*:\s*((?:LOV|FOR)-.+)", re.I)
 _LOVDATA_REFERENCE_SPLIT = re.compile(r",\s*(?=(?:LOV|FOR)-)")
+# "med hjemmel lov 9. juni 2023" drops the "i"; without it, the phrase must
+# name a law or a regulation, so "med hjemmel som nevnt" is not a hjemmel.
+_LAW_NAME = r"\S*(?:lov|lova|loven|forskrift|forskrifta|forskriften)\b"
 _HJEMMEL_PHRASE = re.compile(
-    r"(?:med\s+(?:hjemmel|heimel)\s+i|i\s+med(?:hold|hald)\s+av)\s+(.+?)"
+    rf"(?:med\s+(?:hjemmel|heimel)\s+(?:i\s+|(?={_LAW_NAME}))"
+    r"|i\s+med(?:hold|hald)\s+av\s+)(.+?)"
     r"(?:\.(?=\s+(?-i:[A-ZÆØÅ]))|\.?\s*$)",
     re.I,
 )

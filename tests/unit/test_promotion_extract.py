@@ -239,3 +239,47 @@ def test_split_and_personal_data_holds_keep_the_form() -> None:
     ):
         held = _held(minimal_docx(lines), DOCX)
         assert (held.reason, held.source_form) == (reason, SourceForm.DOCX)
+
+
+WRAPPED_PDF_LINES = (
+    "Forskrift om permisjon fra grunnskoleopplæringa i Eksempel",
+    "kommune",
+    "Fastsatt av kommunestyret i Eksempel kommune 21.06.2024 med hjemmel i lov 9. juni",
+    "2023 nr. 30 om grunnskolen og den vidaregåande opplæringa (opplæringslova) § 2-2 fjerde",
+    "ledd.",
+    "§ 1 Formål",
+    "Forskriften skal bidra til høy grad av skolenærvær og å redusere fravær for alle",
+    "elever ved de kommunale grunnskolene i Eksempel kommune.",
+    "§ 2 Iverksetting",
+    "Forskriften trer i kraft 01.08.2024.",
+)
+
+
+def test_pdf_title_takes_its_wrapped_continuation() -> None:
+    document = _extracted(minimal_pdf(WRAPPED_PDF_LINES), PDF)
+    assert document.fields.title == (
+        "Forskrift om permisjon fra grunnskoleopplæringa i Eksempel kommune"
+    )
+    assert document.regulation.body.split("\n")[1] == (
+        "Forskriften skal bidra til høy grad av skolenærvær og å redusere fravær for alle "
+        "elever ved de kommunale grunnskolene i Eksempel kommune."
+    )
+    assert document.fields.hjemmel == (
+        "lov 9. juni 2023 nr. 30 om grunnskolen og den vidaregåande opplæringa "
+        "(opplæringslova) § 2-2 fjerde ledd",
+    )
+
+
+def test_wrapped_pdf_extraction_is_deterministic() -> None:
+    pdf = minimal_pdf(WRAPPED_PDF_LINES)
+    assert extract_regulation(pdf, PDF) == extract_regulation(pdf, PDF)
+
+
+def test_a_cms_feedback_widget_is_not_part_of_the_body() -> None:
+    page = html_page((*REGULATION_LINES, "Fant du det du trengte?"))
+    assert _extracted(page).regulation == _extracted(html_page()).regulation
+
+
+def test_a_byline_still_reaches_the_regulation_text() -> None:
+    page = html_page((*REGULATION_LINES, "Publisert av Ola Nordmann"))
+    assert _extracted(page).regulation.body.endswith("Publisert av Ola Nordmann")

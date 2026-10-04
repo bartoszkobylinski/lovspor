@@ -15,13 +15,19 @@ regulation's text, and so cannot mint a version.
 
 **PDF.** ``pypdf``, pinned exactly: the page text stream, never the document
 metadata (Author, Creator), which names people and is not the regulation.
+The page's hard line wraps are rejoined, so a wrapped title or paragraph is
+one line again; a section heading, a list item, an enactment line and a new
+sentence after a full line stay lines of their own. HTML and DOCX already
+carry their author's paragraphs and are never rejoined.
 
 **DOCX.** ``word/document.xml`` read in memory — nothing is extracted to
 disk — under a size cap, through the pipeline's hardened XML parser.
 
-Lines that are page furniture rather than law — update stamps, "Skriv ut",
-page numbers — are dropped in every form: a stamp that changes daily would
-otherwise change the content hash daily.
+Lines that are page furniture rather than law — update stamps ("Sist
+endra"), "Skriv ut", "Del på", "Til toppen", a CMS feedback widget ("Fant du
+det du trengte?"), page numbers — are dropped in every form: a stamp that
+changes daily would otherwise change the content hash daily. A byline is kept,
+because the personal-data gate must see it.
 """
 
 from __future__ import annotations
@@ -58,13 +64,33 @@ _CHROME_CLASS_WORDS = frozenset({"sidebar", "breadcrumb", "breadcrumbs", "cookie
 _CLASS_WORD = re.compile(r"[a-z]+")
 _WHITESPACE = re.compile(r"\s+")
 
-# Whole lines only. Each is page furniture a reader never takes for law.
+# Whole lines only. Each is page furniture a reader never takes for law, in
+# bokmål and nynorsk. A byline ("Publisert av ...") is not furniture: it may
+# name a person, and the personal-data gate must see it.
 _FURNITURE_LINE = re.compile(
-    r"(?:(?:sist\s+)?(?:oppdatert|endret|publisert|revidert)\b\s*:?\s*\d.*"
-    r"|skriv\s+ut|del\s+denne\s+siden|del\s+siden|til\s+toppen"
+    r"(?:(?:sist\s+)?(?:oppdatert|endret|endra|publisert|revidert)\b\s*:?\s*\d.*"
+    r"|(?:skriv\s+ut|del|tips\s+(?:en|ein)\s+venn)(?:\s+(?:denne|dette)?\s*(?:siden|sida))?"
+    r"|del\s+på(?:\s+(?:facebook|twitter|x|linkedin|e-post|epost|messenger))?"
+    r"|(?:(?:tilbake|gå)\s+)?til\s+toppen"
+    r"|fan[tn]\s+du\s+det\s+du\s+\w+(?:\s+etter)?\s*\?"
+    r"|var\s+(?:denne\s+(?:siden|sida)|informasjonen|innhaldet|innholdet)\s+nyttig\s*\?"
     r"|side\s+\d+(?:\s+av\s+\d+)?|\d{1,3})",
     re.IGNORECASE,
 )
+
+# A PDF breaks lines where the page ends, not where the text does. A line
+# continues the one before it unless it starts a unit of its own or follows a
+# section heading: lowercase, a digit or "(" after a word, anything after a
+# comma. Uppercase after a full line is a new paragraph, so a title is joined
+# only when its continuation reads as one.
+_SECTION_START = re.compile(r"§|kap(?:ittel|\.)\s*(?:\d|[IVXLC]+\b)", re.IGNORECASE)
+_MONTH = r"(?:jan|feb|mar|apr|mai|jun|jul|aug|sep|okt|nov|des)"
+_BULLET = r"[-\u2013\u2014\u2022\u25aa*]\s"
+_LIST_ITEM = re.compile(
+    rf"{_BULLET}|\(?[a-zæøå]{{1,2}}\)\s|\(?\d+[.)]\s(?!{_MONTH})", re.IGNORECASE
+)
+_ENACTMENT_START = re.compile(r"(?:vedtatt|vedteke|vedteken|fastsatt|fastsett)\b", re.IGNORECASE)
+_MAX_HEADING_CHARS = 100
 
 
 def source_form(content_type: str) -> SourceForm | None:
@@ -97,7 +123,7 @@ def pdf_lines(payload: bytes) -> tuple[str, ...]:
         # pypdf reports a malformed file through its own errors and, deeper in
         # the object graph, through these builtins; each is "cannot read".
         raise UnreadableSourceError(f"PDF did not parse: {error}") from error
-    return _clean_lines("\n".join(pages).split("\n"))
+    return _rejoined(_clean_lines("\n".join(pages).split("\n")))
 
 
 def docx_lines(payload: bytes) -> tuple[str, ...]:
@@ -166,3 +192,30 @@ def _spaced(text: str | None) -> str:
 def _clean_lines(lines: Iterable[str]) -> tuple[str, ...]:
     collapsed = (" ".join(line.split()) for line in lines)
     return tuple(line for line in collapsed if line and not _FURNITURE_LINE.fullmatch(line))
+
+
+def _rejoined(lines: tuple[str, ...]) -> tuple[str, ...]:
+    joined: list[str] = []
+    for line in lines:
+        if joined and _continues(joined[-1], line):
+            joined[-1] = f"{joined[-1]} {line}"
+        else:
+            joined.append(line)
+    return tuple(joined)
+
+
+def _continues(previous: str, line: str) -> bool:
+    if _starts_a_unit(line) or _is_section_heading(previous):
+        return False
+    if line[0].islower() or previous.endswith(","):
+        return True
+    return (line[0].isdigit() or line[0] == "(") and previous[-1].isalnum()
+
+
+def _starts_a_unit(line: str) -> bool:
+    return any(pattern.match(line) for pattern in (_SECTION_START, _LIST_ITEM, _ENACTMENT_START))
+
+
+def _is_section_heading(line: str) -> bool:
+    short = len(line) <= _MAX_HEADING_CHARS and not line.endswith((".", ","))
+    return short and _SECTION_START.match(line) is not None

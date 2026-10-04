@@ -202,3 +202,26 @@ def test_ikraft_phrase_ends_at_its_sentence_when_the_next_starts_a_new_line() ->
         "Samtidig oppheves forskrift om gebyr.",
     )
     assert (fields.ikraft, fields.ikraft_text) == (None, "straks")
+
+
+@pytest.mark.parametrize(
+    ("phrase", "expected"),
+    [
+        ("med hjemmel lov 9. juni 2023 nr. 30 § 15-2.", "lov 9. juni 2023 nr. 30 § 15-2"),
+        (
+            "med heimel forskrift 26. juni 2009 nr. 864 § 18.",
+            "forskrift 26. juni 2009 nr. 864 § 18",
+        ),
+        ("med hjemmel opplæringslova § 15-2.", "opplæringslova § 15-2"),
+        ("med hjemmel forurensningsloven § 30.", "forurensningsloven § 30"),
+        ("med heimel forskrifta om gebyr § 3.", "forskrifta om gebyr § 3"),
+    ],
+)
+def test_hjemmel_phrase_without_i_before_a_law_or_regulation(phrase: str, expected: str) -> None:
+    fields = _read("Forskrift om gebyr", f"Fastsatt av kommunestyret 1.2.2020 {phrase}", "§ 1")
+    assert fields.hjemmel == (expected,)
+
+
+def test_hjemmel_phrase_without_i_needs_a_law_or_regulation() -> None:
+    fields = _read("Forskrift om gebyr", "Vedtatt med hjemmel som nevnt i saken.", "§ 1")
+    assert fields.hjemmel == ()
