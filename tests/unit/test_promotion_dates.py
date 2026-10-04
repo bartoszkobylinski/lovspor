@@ -34,6 +34,18 @@ def test_parse_stated_date(text: str, expected: date | None) -> None:
         ("vedtatt __.__.2016", True),
         ("vedtatt 12.12.2016", False),
         ("Box.xx.2016", False),
+        ("fastsatt av kommunestyret den xx xx xxxx med hjemmel", True),
+        ("vedtatt XX XX 2016", True),
+        ("vedtatt xx  xx\nxxxx", True),
+        ("kapittel X X 2016", False),
+        ("boxx xx xxxx", False),
+        ("xx xx xxxxx", False),
+        ("Fastsett av kommunestyret i Bremanger kommune (dato) med heimel i lov", True),
+        ("Vedtatt av bystyret\n( Dato ) med hjemmel i lov", True),
+        ("Vedteke av kommunestyret (dato).", True),
+        ("Underskrift og (dato) skal stå på søknaden.", False),
+        ("Fastsatt av kommunestyret 1. mars 2020. Søknaden merkes (dato).", False),
+        ("Fastsatt av kommunestyret (datoen for vedtaket)", False),
     ],
 )
 def test_placeholder_dates(text: str, expected: bool) -> None:
