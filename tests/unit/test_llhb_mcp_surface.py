@@ -255,7 +255,7 @@ class TestToolConfig:
         assert names and all(re.match(pattern, name) for name in names)
 
     def test_the_frozen_surface_document_is_what_the_code_serves(self, tmp_path: Path) -> None:
-        """tool-surface-v5.json is the expectation check_fairness compares a
+        """tool-surface-v6.json is the expectation check_fairness compares a
         run's declaration against, so it must be the code's own account,
         re-derived here on every run. Two corpora with disjoint content are
         the witness that the surface comes from build_server, not from the
@@ -307,16 +307,26 @@ class TestToolConfig:
         implementation itself, before any benchmark run that would
         straddle the surface change (ADR-0012 point 11).
 
-        v1 through v4 stay committed untouched so the runs that recorded
+        v5 -> v6 (2026-10-04): ADR-0016 slice S5 — get_law, get_section
+        and search_laws serve the local-regulations dataset opt-in (a
+        <authority_id>/<slug> or lf-/lk- address, dataset
+        "lokale-forskrifter"). Three descriptions change for that, and the
+        get_temporal_events description gains its gate-era outcome
+        (UnattestedGateStateError), queued for this bump by owner decision
+        2026-09-27 (#440); no tool name and no input or output schema
+        changes, and existing calls answer byte-identically
+        (test_mcp_existing_calls.py). Taken with the S5 implementation.
+
+        v1 through v5 stay committed untouched so the runs that recorded
         their hashes remain verifiable (check_fairness --surface-path);
-        this test guards the CURRENT apparatus, which v5 describes."""
+        this test guards the CURRENT apparatus, which v6 describes."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
                 / "benchmarks"
                 / "llhb"
                 / "runner"
-                / "tool-surface-v5.json"
+                / "tool-surface-v6.json"
             ).read_text(encoding="utf-8")
         )
         corpora = (

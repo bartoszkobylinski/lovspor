@@ -383,7 +383,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/mcp.py"
-value = 4953
+value = 4947
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -530,14 +530,14 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 rule = "function-complexity"
 path = "src/lovspor/mcp.py"
 name = "build_server"
-value = 22
+value = 21
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
 rule = "function-lines"
 path = "src/lovspor/mcp.py"
 name = "build_server"
-value = 743
+value = 739
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]

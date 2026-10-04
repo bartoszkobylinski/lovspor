@@ -1,0 +1,26 @@
+{
+  "description": "Apparatus surface after ADR-0016 slice S5: local regulations are served opt-in. No tool NAME changes (seventeen tools, as in v5) and no input or output schema changes; four descriptions do. get_law and get_section also accept a local regulation addressed <authority_id>/<slug> or by its lf-/lk- id (never a bare slug) and label it with an observation block (basis observed, asserted false); search_laws accepts dataset=\"lokale-forskrifter\" to search ONLY the local dataset. With those addresses and that dataset value absent, every call answers byte-identically to v5 (pinned by tests/unit/test_mcp_existing_calls.py). get_temporal_events now documents its fail-closed outcome for a gate-era state with no attestation (UnattestedGateStateError, ADR-0012 Amendment 1), queued for this bump by owner decision 2026-09-27 (issue #440); its behaviour is unchanged. Supersedes tool-surface-v5.json for FUTURE runs; v1-v5 stay committed untouched because the runs that recorded their hashes must remain verifiable (pass --surface-path for a re-check against any of them). Taken WITH the S5 implementation, before any benchmark run that would straddle the surface change. The surface is corpus-independent (the schemas come from build_server, not the documents) but interpreter-dependent: tool descriptions come from docstrings, and CPython 3.13 dedents docstrings at compile time, so the hash is only defined together with the `python` field below. A unit test regenerates this document from the code on every run — names on every interpreter, hash on the apparatus interpreter; if the served surface changes, that test fails and changing this file is an explicit apparatus decision, not drift. check_fairness.py reads this document as the expectation the declared tool_config is compared against.",
+  "generated_by": "lovspor.llhb.mcp_surface.tool_surface()/allowed_tools() on branch feat/mcp-local-dataset-s5 (ADR-0016 slice S5, lovspor-notebook)",
+  "python": "3.12",
+  "server": "lovverk",
+  "tool_schema_sha256": "1f0c4f37ab5876d90733cace1ac6ef4e56b20f7233cd2214153fe1347c80f2c2",
+  "tools": [
+    "mcp__lovverk__corpus_status",
+    "mcp__lovverk__diff_law_versions",
+    "mcp__lovverk__get_eu_basis",
+    "mcp__lovverk__get_law",
+    "mcp__lovverk__get_law_at",
+    "mcp__lovverk__get_law_history",
+    "mcp__lovverk__get_section",
+    "mcp__lovverk__get_temporal_events",
+    "mcp__lovverk__list_law_versions",
+    "mcp__lovverk__list_recent_changes",
+    "mcp__lovverk__list_sections",
+    "mcp__lovverk__search_body",
+    "mcp__lovverk__search_eu_implementations",
+    "mcp__lovverk__search_laws",
+    "mcp__lovverk__semantic_search",
+    "mcp__lovverk__validate_citation",
+    "mcp__lovverk__verify_quote"
+  ]
+}

@@ -40,11 +40,11 @@ from lovspor.llhb.schema import load_schema, validate_case
 LLHB_DIR = Path(__file__).resolve().parents[1]
 RUNS_ROOT = LLHB_DIR / "results" / "runs"
 SCHEMA_DIR = LLHB_DIR / "schema"
-# v5 is the post-ADR-0012 apparatus (get_temporal_events added — the first
-# tool-name change since v1). Earlier runs recorded earlier hashes —
-# re-verifying one needs ``--surface-path`` pointed at its own version,
-# which stays committed untouched.
-SURFACE_PATH = LLHB_DIR / "runner" / "tool-surface-v5.json"
+# v6 is the post-ADR-0016 S5 apparatus (local regulations served opt-in:
+# three descriptions change, no tool name or schema does). Earlier runs
+# recorded earlier hashes — re-verifying one needs ``--surface-path``
+# pointed at its own version, which stays committed untouched.
+SURFACE_PATH = LLHB_DIR / "runner" / "tool-surface-v6.json"
 FROZEN_DIR = LLHB_DIR / "dataset" / "frozen"
 FROZEN_CASES_PATH = FROZEN_DIR / "llhb-v1.jsonl"
 FROZEN_LOCK_PATH = FROZEN_DIR / "llhb-v1.lock.json"
@@ -70,7 +70,7 @@ def parse_args() -> argparse.Namespace:
         default=SURFACE_PATH,
         help="apparatus surface document to compare declarations against "
         "(default: the current apparatus; pass runner/tool-surface-v1.json, "
-        "-v2 or -v3 to re-verify a pair recorded under "
+        "-v2 ... -v5 to re-verify a pair recorded under "
         "an earlier surface)",
     )
     return parser.parse_args()

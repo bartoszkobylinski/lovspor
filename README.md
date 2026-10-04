@@ -68,8 +68,10 @@ forskrifter*) from Lovdata's public-data API, re-synced daily at 04:00 UTC, each
 structured per-act change history. Live count: the `corpus_status` tool.
 
 **Not inside:** court decisions, preparatory works (*forarbeider*), agency circulars
-(*rundskriv*), municipal regulations. A rule can be binding and absent here — an empty
-result is not evidence that no such rule exists.
+(*rundskriv*), and municipal regulations beyond a small, opt-in set of local regulations
+observed on the authorities' own websites (ADR-0016; served only by qualified address or
+`dataset="lokale-forskrifter"`, labelled `asserted: false` — see `docs/mcp.md`). A rule can
+be binding and absent here — an empty result is not evidence that no such rule exists.
 
 ## Optional: search by meaning
 

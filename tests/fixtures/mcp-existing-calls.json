@@ -1,0 +1,490 @@
+[
+  {
+    "arguments": {
+      "slug": "proveloven"
+    },
+    "tool": "get_law",
+    "wire": {
+      "content": [
+        {
+          "text": "---\nid: \"nl-19990101-001\"\ntitle: \"Lov om pr\\u00f8ver (pr\\u00f8veloven)\"\n---\n\n# Lov om prøver (prøveloven)\n\n## Kapittel 1. Innledning\n\n### § 1. Formål\n\nLoven skal sikre at prøver blir gjennomført på en ordnet måte.\n\n### § 2. Virkeområde\n\nLoven gjelder for alle prøver, jf. § 1 og prøveforskriften § 3.\n",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "result": "---\nid: \"nl-19990101-001\"\ntitle: \"Lov om pr\\u00f8ver (pr\\u00f8veloven)\"\n---\n\n# Lov om prøver (prøveloven)\n\n## Kapittel 1. Innledning\n\n### § 1. Formål\n\nLoven skal sikre at prøver blir gjennomført på en ordnet måte.\n\n### § 2. Virkeområde\n\nLoven gjelder for alle prøver, jf. § 1 og prøveforskriften § 3.\n"
+      }
+    }
+  },
+  {
+    "arguments": {
+      "slug": "finnesikke"
+    },
+    "tool": "get_law",
+    "wire": {
+      "error": "Error executing tool get_law: no current law with slug 'finnesikke'; use search_laws or list_recent_changes to discover slugs"
+    }
+  },
+  {
+    "arguments": {
+      "slug": "forskrift-om-lekeplasser-i-provestad-kommune"
+    },
+    "tool": "get_law",
+    "wire": {
+      "error": "Error executing tool get_law: no current law with slug 'forskrift-om-lekeplasser-i-provestad-kommune'; use search_laws or list_recent_changes to discover slugs"
+    }
+  },
+  {
+    "arguments": {
+      "section_id": "2",
+      "slug": "proveloven"
+    },
+    "tool": "get_section",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"slug\": \"proveloven\",\n  \"section_id\": \"2\",\n  \"occurrence\": 1,\n  \"heading\": \"§ 2. Virkeområde\",\n  \"parent_chapter\": \"Kapittel 1. Innledning\",\n  \"layer\": \"main\",\n  \"body\": \"Loven gjelder for alle prøver, jf. § 1 og prøveforskriften § 3.\",\n  \"cross_references\": [\n    {\n      \"text\": \"§ 1\",\n      \"target_slug\": \"proveloven\",\n      \"target_section_id\": \"1\",\n      \"valid\": true,\n      \"reason\": null\n    },\n    {\n      \"text\": \"§ 3\",\n      \"target_slug\": \"proveloven\",\n      \"target_section_id\": \"3\",\n      \"valid\": false,\n      \"reason\": \"§ 3 not found in 'proveloven'\"\n    }\n  ],\n  \"temporal_notice\": null\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "body": "Loven gjelder for alle prøver, jf. § 1 og prøveforskriften § 3.",
+        "cross_references": [
+          {
+            "reason": null,
+            "target_section_id": "1",
+            "target_slug": "proveloven",
+            "text": "§ 1",
+            "valid": true
+          },
+          {
+            "reason": "§ 3 not found in 'proveloven'",
+            "target_section_id": "3",
+            "target_slug": "proveloven",
+            "text": "§ 3",
+            "valid": false
+          }
+        ],
+        "heading": "§ 2. Virkeområde",
+        "layer": "main",
+        "occurrence": 1,
+        "parent_chapter": "Kapittel 1. Innledning",
+        "section_id": "2",
+        "slug": "proveloven",
+        "temporal_notice": null
+      }
+    }
+  },
+  {
+    "arguments": {
+      "section_id": "§ 1.",
+      "slug": "ordensloven"
+    },
+    "tool": "get_section",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"slug\": \"ordensloven\",\n  \"section_id\": \"1\",\n  \"occurrence\": 1,\n  \"heading\": \"§ 1. Ordning\",\n  \"parent_chapter\": \"\",\n  \"layer\": \"main\",\n  \"body\": \"Hver sak skal ha en saksmappe.\",\n  \"cross_references\": [],\n  \"temporal_notice\": null\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "body": "Hver sak skal ha en saksmappe.",
+        "cross_references": [],
+        "heading": "§ 1. Ordning",
+        "layer": "main",
+        "occurrence": 1,
+        "parent_chapter": "",
+        "section_id": "1",
+        "slug": "ordensloven",
+        "temporal_notice": null
+      }
+    }
+  },
+  {
+    "arguments": {
+      "section_id": "99",
+      "slug": "proveloven"
+    },
+    "tool": "get_section",
+    "wire": {
+      "error": "Error executing tool get_section: section '99' not found in 'proveloven'; available: § 1, § 2"
+    }
+  },
+  {
+    "arguments": {
+      "section_id": "1",
+      "slug": "forskrift-om-lekeplasser-i-provestad-kommune"
+    },
+    "tool": "get_section",
+    "wire": {
+      "error": "Error executing tool get_section: no current law with slug 'forskrift-om-lekeplasser-i-provestad-kommune'; use search_laws or list_recent_changes to discover slugs"
+    }
+  },
+  {
+    "arguments": {
+      "slug": "proveforskriften"
+    },
+    "tool": "list_sections",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"section_id\": \"1\",\n  \"occurrence\": 1,\n  \"heading\": \"§ 1. Formål\",\n  \"parent_chapter\": \"\",\n  \"layer\": \"main\",\n  \"kind\": \"section\"\n}",
+          "type": "text"
+        },
+        {
+          "text": "{\n  \"section_id\": \"3\",\n  \"occurrence\": 1,\n  \"heading\": \"§ 3. Prøvetid\",\n  \"parent_chapter\": \"\",\n  \"layer\": \"main\",\n  \"kind\": \"section\"\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "result": [
+          {
+            "heading": "§ 1. Formål",
+            "kind": "section",
+            "layer": "main",
+            "occurrence": 1,
+            "parent_chapter": "",
+            "section_id": "1"
+          },
+          {
+            "heading": "§ 3. Prøvetid",
+            "kind": "section",
+            "layer": "main",
+            "occurrence": 1,
+            "parent_chapter": "",
+            "section_id": "3"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "arguments": {
+      "slug": "ordensloven"
+    },
+    "tool": "get_law_history",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"doc_id\": \"nl-20000202-002\",\n  \"events\": [\n    {\n      \"commit\": \"abc1234\",\n      \"date\": \"2026-04-27\",\n      \"subject\": \"add(lov): ordensloven\",\n      \"type\": \"added\"\n    }\n  ],\n  \"schema_version\": 1,\n  \"slug\": \"ordensloven\"\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "doc_id": "nl-20000202-002",
+        "events": [
+          {
+            "commit": "abc1234",
+            "date": "2026-04-27",
+            "subject": "add(lov): ordensloven",
+            "type": "added"
+          }
+        ],
+        "schema_version": 1,
+        "slug": "ordensloven"
+      }
+    }
+  },
+  {
+    "arguments": {},
+    "tool": "list_recent_changes",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"slug\": \"ordensloven\",\n  \"doc_id\": \"nl-20000202-002\",\n  \"title\": \"Lov om orden (ordensloven)\",\n  \"dataset\": \"lover\",\n  \"last_changed\": \"2026-05-15\",\n  \"total_changes\": 2\n}",
+          "type": "text"
+        },
+        {
+          "text": "{\n  \"slug\": \"proveloven\",\n  \"doc_id\": \"nl-19990101-001\",\n  \"title\": \"Lov om prøver (prøveloven)\",\n  \"dataset\": \"lover\",\n  \"last_changed\": \"2026-04-15\",\n  \"total_changes\": 2\n}",
+          "type": "text"
+        },
+        {
+          "text": "{\n  \"slug\": \"proveforskriften\",\n  \"doc_id\": \"sf-20100303-0003\",\n  \"title\": \"Forskrift om prøver (prøveforskriften)\",\n  \"dataset\": \"forskrifter\",\n  \"last_changed\": \"2026-03-15\",\n  \"total_changes\": 2\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "result": [
+          {
+            "dataset": "lover",
+            "doc_id": "nl-20000202-002",
+            "last_changed": "2026-05-15",
+            "slug": "ordensloven",
+            "title": "Lov om orden (ordensloven)",
+            "total_changes": 2
+          },
+          {
+            "dataset": "lover",
+            "doc_id": "nl-19990101-001",
+            "last_changed": "2026-04-15",
+            "slug": "proveloven",
+            "title": "Lov om prøver (prøveloven)",
+            "total_changes": 2
+          },
+          {
+            "dataset": "forskrifter",
+            "doc_id": "sf-20100303-0003",
+            "last_changed": "2026-03-15",
+            "slug": "proveforskriften",
+            "title": "Forskrift om prøver (prøveforskriften)",
+            "total_changes": 2
+          }
+        ]
+      }
+    }
+  },
+  {
+    "arguments": {
+      "dataset": "forskrifter"
+    },
+    "tool": "list_recent_changes",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"slug\": \"proveforskriften\",\n  \"doc_id\": \"sf-20100303-0003\",\n  \"title\": \"Forskrift om prøver (prøveforskriften)\",\n  \"dataset\": \"forskrifter\",\n  \"last_changed\": \"2026-03-15\",\n  \"total_changes\": 2\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "result": [
+          {
+            "dataset": "forskrifter",
+            "doc_id": "sf-20100303-0003",
+            "last_changed": "2026-03-15",
+            "slug": "proveforskriften",
+            "title": "Forskrift om prøver (prøveforskriften)",
+            "total_changes": 2
+          }
+        ]
+      }
+    }
+  },
+  {
+    "arguments": {
+      "query": "lov"
+    },
+    "tool": "search_laws",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"slug\": \"proveloven\",\n  \"doc_id\": \"nl-19990101-001\",\n  \"title\": \"Lov om prøver (prøveloven)\",\n  \"dataset\": \"lover\",\n  \"last_changed\": \"2026-04-15\",\n  \"total_changes\": 2\n}",
+          "type": "text"
+        },
+        {
+          "text": "{\n  \"slug\": \"ordensloven\",\n  \"doc_id\": \"nl-20000202-002\",\n  \"title\": \"Lov om orden (ordensloven)\",\n  \"dataset\": \"lover\",\n  \"last_changed\": \"2026-05-15\",\n  \"total_changes\": 2\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "result": [
+          {
+            "dataset": "lover",
+            "doc_id": "nl-19990101-001",
+            "last_changed": "2026-04-15",
+            "slug": "proveloven",
+            "title": "Lov om prøver (prøveloven)",
+            "total_changes": 2
+          },
+          {
+            "dataset": "lover",
+            "doc_id": "nl-20000202-002",
+            "last_changed": "2026-05-15",
+            "slug": "ordensloven",
+            "title": "Lov om orden (ordensloven)",
+            "total_changes": 2
+          }
+        ]
+      }
+    }
+  },
+  {
+    "arguments": {
+      "dataset": "lover",
+      "query": "pr"
+    },
+    "tool": "search_laws",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"slug\": \"proveloven\",\n  \"doc_id\": \"nl-19990101-001\",\n  \"title\": \"Lov om prøver (prøveloven)\",\n  \"dataset\": \"lover\",\n  \"last_changed\": \"2026-04-15\",\n  \"total_changes\": 2\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "result": [
+          {
+            "dataset": "lover",
+            "doc_id": "nl-19990101-001",
+            "last_changed": "2026-04-15",
+            "slug": "proveloven",
+            "title": "Lov om prøver (prøveloven)",
+            "total_changes": 2
+          }
+        ]
+      }
+    }
+  },
+  {
+    "arguments": {
+      "query": "lekeplasser"
+    },
+    "tool": "search_laws",
+    "wire": {
+      "content": [],
+      "structured": {
+        "result": []
+      }
+    }
+  },
+  {
+    "arguments": {
+      "dataset": "kommunale",
+      "query": "lov"
+    },
+    "tool": "search_laws",
+    "wire": {
+      "error": "Error executing tool search_laws: unknown dataset 'kommunale'; use one of: lover, forskrifter"
+    }
+  },
+  {
+    "arguments": {
+      "query": "prøve"
+    },
+    "tool": "search_body",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"slug\": \"proveforskriften\",\n  \"doc_id\": \"sf-20100303-0003\",\n  \"title\": \"Forskrift om prøver (prøveforskriften)\",\n  \"dataset\": \"forskrifter\",\n  \"match_count\": 3,\n  \"snippet\": \"## § 1. Formål Forskriften utfyller prøveloven. ## § 3. Prøvetid Prøvetiden er seks måned...\"\n}",
+          "type": "text"
+        },
+        {
+          "text": "{\n  \"slug\": \"proveloven\",\n  \"doc_id\": \"nl-19990101-001\",\n  \"title\": \"Lov om prøver (prøveloven)\",\n  \"dataset\": \"lover\",\n  \"match_count\": 3,\n  \"snippet\": \"...Innledning ### § 1. Formål Loven skal sikre at prøver blir gjennomført på en ordnet måte. ### § 2. Vi...\"\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "result": [
+          {
+            "dataset": "forskrifter",
+            "doc_id": "sf-20100303-0003",
+            "match_count": 3,
+            "slug": "proveforskriften",
+            "snippet": "## § 1. Formål Forskriften utfyller prøveloven. ## § 3. Prøvetid Prøvetiden er seks måned...",
+            "title": "Forskrift om prøver (prøveforskriften)"
+          },
+          {
+            "dataset": "lover",
+            "doc_id": "nl-19990101-001",
+            "match_count": 3,
+            "slug": "proveloven",
+            "snippet": "...Innledning ### § 1. Formål Loven skal sikre at prøver blir gjennomført på en ordnet måte. ### § 2. Vi...",
+            "title": "Lov om prøver (prøveloven)"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "arguments": {
+      "query": "lekeplass"
+    },
+    "tool": "search_body",
+    "wire": {
+      "content": [],
+      "structured": {
+        "result": []
+      }
+    }
+  },
+  {
+    "arguments": {
+      "citation": "proveloven § 2"
+    },
+    "tool": "validate_citation",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"valid\": true,\n  \"slug\": \"proveloven\",\n  \"section_id\": \"2\",\n  \"heading\": \"§ 2. Virkeområde\",\n  \"reason\": null\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "heading": "§ 2. Virkeområde",
+        "reason": null,
+        "section_id": "2",
+        "slug": "proveloven",
+        "valid": true
+      }
+    }
+  },
+  {
+    "arguments": {
+      "quote": "arkiveres i ti år",
+      "section_id": "2",
+      "slug": "ordensloven"
+    },
+    "tool": "verify_quote",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"verified\": true,\n  \"slug\": \"ordensloven\",\n  \"section_id\": \"2\",\n  \"reason\": null\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "reason": null,
+        "section_id": "2",
+        "slug": "ordensloven",
+        "verified": true
+      }
+    }
+  },
+  {
+    "arguments": {
+      "slug": "proveloven"
+    },
+    "tool": "get_eu_basis",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"slug\": \"proveloven\",\n  \"doc_id\": \"nl-19990101-001\",\n  \"title\": \"Lov om prøver (prøveloven)\",\n  \"dataset\": \"lover\",\n  \"eu_basis\": [\n    \"32016R0679\"\n  ]\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "dataset": "lover",
+        "doc_id": "nl-19990101-001",
+        "eu_basis": [
+          "32016R0679"
+        ],
+        "slug": "proveloven",
+        "title": "Lov om prøver (prøveloven)"
+      }
+    }
+  },
+  {
+    "arguments": {
+      "eu_doc_id": "32016R0679"
+    },
+    "tool": "search_eu_implementations",
+    "wire": {
+      "content": [
+        {
+          "text": "{\n  \"slug\": \"proveloven\",\n  \"doc_id\": \"nl-19990101-001\",\n  \"title\": \"Lov om prøver (prøveloven)\",\n  \"dataset\": \"lover\"\n}",
+          "type": "text"
+        }
+      ],
+      "structured": {
+        "result": [
+          {
+            "dataset": "lover",
+            "doc_id": "nl-19990101-001",
+            "slug": "proveloven",
+            "title": "Lov om prøver (prøveloven)"
+          }
+        ]
+      }
+    }
+  }
+]
