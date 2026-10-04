@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -102,6 +103,57 @@ def test_fast_ci_runs_the_fail_closed_security_scan() -> None:
 
     assert "scripts/quality/check_security_scan.py" in scan["run"]
     assert names.index(scan["name"]) < names.index("Unit tests")
+
+
+_REGISTER_STEP = "Mutation-equivalents register is current"
+_REGISTER_CHECK = "uv run python scripts/ci/mutation_to_json.py --check-equivalents"
+
+
+def test_fast_ci_fails_on_a_stale_or_refused_equivalents_entry() -> None:
+    """Issue #535: `--check-equivalents` ran in no job, so the stale
+    `scan_into` waiver of #443 sat on main until someone ran it by hand. It is
+    a fast-ci step because the ruleset requires fast-ci by name. The step calls
+    the CLI and never names the register's path, so it holds whether the
+    register is one file or a directory (#516)."""
+    steps = _steps("pr-pipeline.yml", "fast-ci")
+    names = [step.get("name") for step in steps]
+    check = _named_step(steps, _REGISTER_STEP)
+
+    assert check["run"].strip() == _REGISTER_CHECK
+    assert "continue-on-error" not in check
+    assert "if" not in check
+    assert names.index(_REGISTER_STEP) < names.index("Unit tests")
+
+
+@pytest.mark.parametrize(
+    ("register", "verdict"),
+    [
+        (
+            '[[equivalent]]\nfile = "m.py"\nsymbol = "f"\nregistered = "2026-10-04, test"\n'
+            'mutation = """\n-x = 1\n+x = 2\n"""\njustification = "the line moved on"\n',
+            "1 stale",
+        ),
+        ("[[equivalent]]\nfile = 3\n", "1 refused"),
+    ],
+)
+def test_the_register_step_fails_on_what_the_check_reports(
+    tmp_path: Path, register: str, verdict: str
+) -> None:
+    """The step's own command, run against a register the check rejects."""
+    ci = tmp_path / "scripts" / "ci"
+    ci.mkdir(parents=True)
+    shutil.copy2(_REPO / "scripts" / "ci" / "mutation_to_json.py", ci / "mutation_to_json.py")
+    (tmp_path / "m.py").write_text("x = 3\n", encoding="utf-8")
+    (tmp_path / "mutation-equivalents.toml").write_text(register, encoding="utf-8")
+    run = _named_step(_steps("pr-pipeline.yml", "fast-ci"), _REGISTER_STEP)["run"]
+    command = run.replace("uv run python", shlex.quote(sys.executable))
+
+    done = subprocess.run(
+        ["bash", "-e", "-c", command], cwd=tmp_path, capture_output=True, text=True, check=False
+    )
+
+    assert done.returncode == 1
+    assert verdict in done.stdout
 
 
 @pytest.mark.parametrize(
