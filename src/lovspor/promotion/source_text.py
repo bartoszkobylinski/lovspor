@@ -94,6 +94,8 @@ _BULLET = r"[-\u2013\u2014\u2022\u25aa*]\s"
 _LIST_ITEM = re.compile(
     rf"{_BULLET}|\(?[a-zæøå]{{1,2}}\)\s|\(?\d+[.)]\s(?!{_MONTH})", re.IGNORECASE
 )
+# "8.4 Avkorting": a numbered subsection, never a date ("1.1.2010.") or an amount.
+_NUMBERED_HEADING = re.compile(r"\d+(?:\.\d+)+\s+[A-ZÆØÅ]")
 _ENACTMENT_START = re.compile(r"(?:vedtatt|vedteke|vedteken|fastsatt|fastsett)\b", re.IGNORECASE)
 _MAX_HEADING_CHARS = 100
 
@@ -221,7 +223,10 @@ def _continues(previous: str, line: str) -> bool:
 
 
 def _starts_a_unit(line: str) -> bool:
-    return any(pattern.match(line) for pattern in (_SECTION_START, _LIST_ITEM, _ENACTMENT_START))
+    return any(
+        pattern.match(line)
+        for pattern in (_SECTION_START, _LIST_ITEM, _NUMBERED_HEADING, _ENACTMENT_START)
+    )
 
 
 def _is_section_heading(line: str) -> bool:

@@ -577,3 +577,15 @@ def test_html_br_rejoining_is_deterministic() -> None:
 def test_html_line_separator_in_source_text_is_a_space_not_a_br() -> None:
     page = _main("<p>Kommunen\u2028Fylket</p>")
     assert html_lines(page, "text/html") == ("Kommunen Fylket",)
+
+
+def test_a_dotted_section_number_starts_a_line_of_its_own() -> None:
+    lines = ("Tapet dekkes etter punkt 3.2", "8.4 Avkorting i ytelser dekkes fullt ut.")
+    assert html_lines(_main("<p>" + "<br>".join(lines) + "</p>"), "text/html") == lines
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_a_dotted_date_after_a_word_is_still_a_wrap() -> None:
+    lines = ("Forskrifta trer i kraft", "1.1.2010.")
+    page = _main("<p>" + "<br>".join(lines) + "</p>")
+    assert html_lines(page, "text/html") == ("Forskrifta trer i kraft 1.1.2010.",)
