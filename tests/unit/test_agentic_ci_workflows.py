@@ -126,25 +126,32 @@ def test_fast_ci_fails_on_a_stale_or_refused_equivalents_entry() -> None:
 
 
 @pytest.mark.parametrize(
-    ("register", "verdict"),
+    ("register", "verdict", "diagnostic"),
     [
         (
             '[[equivalent]]\nfile = "m.py"\nsymbol = "f"\nregistered = "2026-10-04, test"\n'
             'mutation = """\n-x = 1\n+x = 2\n"""\njustification = "the line moved on"\n',
-            "1 stale",
+            "1 registered, 0 refused, 1 stale",
+            "STALE: m.py f: removed line not in file — 'x = 1'",
         ),
-        ("[[equivalent]]\nfile = 3\n", "1 refused"),
+        (
+            "[[equivalent]]\nfile = 3\n",
+            "0 registered, 1 refused, 0 stale",
+            "mutation-equivalents/m/f-00000000.toml: 3: missing",
+        ),
     ],
 )
 def test_the_register_step_fails_on_what_the_check_reports(
-    tmp_path: Path, register: str, verdict: str
+    tmp_path: Path, register: str, verdict: str, diagnostic: str
 ) -> None:
     """The step's own command, run against a register the check rejects."""
     ci = tmp_path / "scripts" / "ci"
     ci.mkdir(parents=True)
     shutil.copy2(_REPO / "scripts" / "ci" / "mutation_to_json.py", ci / "mutation_to_json.py")
     (tmp_path / "m.py").write_text("x = 3\n", encoding="utf-8")
-    (tmp_path / "mutation-equivalents.toml").write_text(register, encoding="utf-8")
+    entry = tmp_path / "mutation-equivalents" / "m" / "f-00000000.toml"
+    entry.parent.mkdir(parents=True)
+    entry.write_text(register, encoding="utf-8")
     run = _named_step(_steps("pr-pipeline.yml", "fast-ci"), _REGISTER_STEP)["run"]
     command = run.replace("uv run python", shlex.quote(sys.executable))
 
@@ -154,6 +161,7 @@ def test_the_register_step_fails_on_what_the_check_reports(
 
     assert done.returncode == 1
     assert verdict in done.stdout
+    assert diagnostic in done.stderr
 
 
 @pytest.mark.parametrize(
