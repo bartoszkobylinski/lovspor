@@ -387,6 +387,21 @@ def test_recorded_at_is_never_used_as_the_evaluation_date(
     assert calls == [mcp_module.evaluation_date_today()]
 
 
+def test_validate_citation_tool_answers_from_the_recorded_state(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, sha1, _ = corpus
+    validate = _tool_fn(repo, "validate_citation")
+
+    historical = validate(citation="testloven § 9-9", recorded_at="2026-05-05")
+    current = validate(citation="testloven § 9-9")
+
+    assert historical["valid"] is True
+    assert historical["corpus_commit"] == sha1
+    assert current["valid"] is False
+    assert "corpus_commit" not in current
+
+
 def test_search_body_tool_shape_is_conditional_on_recorded_at(
     corpus: tuple[Path, str, str],
 ) -> None:

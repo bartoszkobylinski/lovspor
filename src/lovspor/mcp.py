@@ -114,11 +114,8 @@ from lovspor.snapshot import (
 )
 from lovspor.state_cache import STATE_OVERHEAD_BYTES, ByteBudgetCache, state_bytes
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
-from lovspor.temporal import (
-    append_notice,
-    build_notice,
-    evaluation_date_today,
-)
+from lovspor.temporal import build_notice
+from lovspor.temporal import evaluation_date_today as evaluation_date_today  # noqa: PLC0414
 from lovspor.temporal_attestation import AttestationError
 from lovspor.temporal_events import (
     ServedTemporalLayer,
@@ -4106,9 +4103,10 @@ def build_server(
     start the whole server over one optional dependency would be
     user-hostile.
     """
+    from lovspor.mcp_local import ServedCorpus  # noqa: PLC0415 — mcp_local builds on this module
+
     reader = CorpusReader(corpus_path, embedder=_build_embedder())
-    if http is not None:
-        reader.warm()
+    served = ServedCorpus(reader, warm=http is not None)
     bind = http or HttpConfig()
     store = CredentialStore(bind.credentials_path) if bind.credentials_path else None
     verifier, metering = _build_verifier(bind, store)
@@ -4160,8 +4158,14 @@ def build_server(
         after the legal text, evaluated against today's date (stated in
         the block). Text listed there is not part of the law in force;
         do not present it as such (ADR-0009 §3b).
+
+        A local regulation (ADR-0016) is addressed ``<authority_id>/<slug>``
+        or by its ``lf-``/``lk-`` id, never by a bare slug; find one with
+        ``search_laws(dataset="lokale-forskrifter")``. It ends with an
+        **Observation** block instead: observed on the authority's website,
+        ``asserted: false`` — not verified, not asserted to be in force.
         """
-        return append_notice(reader.get_law(slug), evaluation_date_today())
+        return served.get_law(slug)
 
     @_tool()
     def get_section(
@@ -4240,17 +4244,13 @@ def build_server(
         — no in-force evaluation is performed against a historical
         state. Dates before the corpus start fail with the boundary
         outcome; future dates are refused.
+
+        ``slug`` may address a local regulation as ``get_law`` describes;
+        the response then carries ``doc_id``, ``dataset`` and
+        ``observation`` (``asserted: false``) instead of
+        ``temporal_notice``, and ``recorded_at`` is refused for it.
         """
-        return (
-            _stamp_not_evaluated(
-                reader.at_state(recorded_at).get_section(slug, section_id, occurrence),
-            )
-            if recorded_at is not None
-            else _with_section_notice(
-                reader.get_section(slug, section_id, occurrence),
-                evaluation_date_today(),
-            )
-        )
+        return served.get_section(slug, section_id, occurrence, recorded_at)
 
     @_tool()
     def list_sections(slug: str) -> list[dict[str, Any]]:
@@ -4522,9 +4522,12 @@ def build_server(
         Use ``get_law(slug)`` to fetch the full text of any result.
 
         ``dataset`` (optional): ``lover`` or ``forskrifter`` to filter.
+        ``lokale-forskrifter`` searches ONLY the observed local regulations
+        (never included otherwise); each hit's ``slug`` is its
+        ``<authority_id>/<slug>`` and it carries ``observation``.
         ``limit``: max results (default 20, capped).
         """
-        return reader.search_laws(query, dataset=dataset, limit=limit)
+        return served.search_laws(query, dataset, limit)
 
     @_tool()
     def search_body(
@@ -4585,11 +4588,7 @@ def build_server(
         historical search per state bulk-loads that state's bodies —
         comparable cost to this tool's own cold start.
         """
-        return (
-            reader.at_state(recorded_at).search_body(query, dataset=dataset, limit=limit)
-            if recorded_at is not None
-            else reader.search_body(query, dataset=dataset, limit=limit)
-        )
+        return served.search_body(query, dataset, limit, recorded_at)
 
     @_tool()
     def semantic_search(
@@ -4703,11 +4702,7 @@ def build_server(
         corpus start fail with the boundary outcome; future dates are
         refused.
         """
-        return (
-            reader.at_state(recorded_at).validate_citation(citation)
-            if recorded_at is not None
-            else reader.validate_citation(citation)
-        )
+        return served.validate_citation(citation, recorded_at)
 
     @_tool()
     def verify_quote(
