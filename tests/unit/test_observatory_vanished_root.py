@@ -157,6 +157,21 @@ class TestTheRootIsNeverCreated:
 
         assert not (tmp_path / "elsewhere").exists()
 
+    @pytest.mark.parametrize("parts", [("..", "elsewhere"), ("blobs", "..", "..", "elsewhere")])
+    def test_a_parent_step_out_of_the_root_is_refused_before_any_mkdir(
+        self, tmp_path: Path, parts: tuple[str, ...]
+    ) -> None:
+        """``relative_to`` is lexical: ``root/../elsewhere`` passed it, and the
+        walk made ``elsewhere`` beside the root (Codex test on PR #544)."""
+        root = tmp_path / "observatory"
+        root.mkdir()
+
+        with pytest.raises(StorageBoundaryError):
+            ensure_below_root(_checked(root), root.joinpath(*parts))
+
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["observatory"]
+        assert list(root.iterdir()) == []
+
     def test_the_failure_is_an_observatory_error(self) -> None:
         assert issubclass(StorageUnavailableError, ObservatoryError)
 

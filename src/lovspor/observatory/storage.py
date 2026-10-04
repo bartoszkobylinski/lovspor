@@ -118,12 +118,14 @@ def ensure_below_root(root: ObservatoryRoot, directory: Path) -> None:
 
     Raises:
         StorageUnavailableError: the root, or a level of the walk, is gone.
-        StorageBoundaryError: ``directory`` is not inside the root.
+        StorageBoundaryError: ``directory`` is not inside the root, ``..``
+            resolved first — ``relative_to`` alone is lexical and let
+            ``root/../x`` walk out of the root.
     """
     if not root.path.is_dir():
         raise StorageUnavailableError(f"observatory root {root.path} is gone; {directory} not made")
     try:
-        relative = directory.relative_to(root.path)
+        relative = Path(os.path.normpath(directory)).relative_to(root.path)
     except ValueError as exc:
         raise StorageBoundaryError(f"{directory} is outside observatory root {root.path}") from exc
     current = root.path
