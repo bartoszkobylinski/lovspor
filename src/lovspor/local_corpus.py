@@ -43,6 +43,7 @@ __all__ = [
     "LocalDataset",
     "LocalRecord",
     "Observation",
+    "ObservationLabel",
     "ServedLocal",
     "is_local_address",
 ]
@@ -56,7 +57,8 @@ OBSERVATION_NOTICE = (
 
 _LOCAL_ID = re.compile(r"lf-\d{8}-\d{4,}|lk-\d{2}(?:\d{2})?-[0-9a-f]{12}")
 _FLOW_PAIR = re.compile(r'(\w+): ("(?:[^"\\]|\\.)*"|null)')
-_FRONT_MATTER_END = "\n---\n"
+_FRONT_MATTER_OPEN = "---\n"
+_FRONT_MATTER_CLOSE = "\n---\n"
 
 LocalEntry = tuple[str, LocalRecord]
 
@@ -86,6 +88,18 @@ class Observation(BaseModel):
     observed_at_first: str
     observed_at_last: str
     notice: str = OBSERVATION_NOTICE
+
+    def label(self) -> dict[str, Any]:
+        """The block as a response carries it; every field is already JSON-native."""
+        return self.model_dump()
+
+
+class ObservationLabel(BaseModel):
+    """``{"observation": ...}``, the JSON block ``get_law`` appends to a local text."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    observation: Observation
 
 
 class ServedLocal(BaseModel):
@@ -201,7 +215,7 @@ class LocalDataset:
             "dataset": LOCAL_DATASET,
             "authority_id": record.authority_id,
             "version": record.version,
-            "observation": served.observation.model_dump(mode="json"),
+            "observation": served.observation.label(),
         }
 
     def _observation(self, doc_id: str, markdown_path: Path, markdown: str) -> Observation:
@@ -234,7 +248,7 @@ def _read_manifest(path: Path) -> LocalManifest:
 
 def _read_text(path: Path) -> str:
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_bytes().decode()
     except FileNotFoundError as exc:
         raise LocalCorpusError(
             f"the local manifest references {path} but the file is missing; "
@@ -251,11 +265,14 @@ def _front_matter(path: Path, markdown: str) -> _FrontMatter:
 
 def _front_matter_fields(markdown: str) -> dict[str, Any]:
     """The front matter the local renderer writes: JSON scalars, one flow mapping."""
-    end = markdown.find(_FRONT_MATTER_END, 3)
-    if not markdown.startswith("---\n") or end < 0:
+    opening, separator, rest = markdown.partition(_FRONT_MATTER_OPEN)
+    if opening or not separator:
         raise ValueError("no front matter block")
+    block, separator, _ = rest.partition(_FRONT_MATTER_CLOSE)
+    if not separator:
+        raise ValueError("front matter block is not closed")
     fields: dict[str, Any] = {}
-    for line in markdown[4:end].split("\n"):
+    for line in block.split("\n"):
         key, separator, value = line.partition(": ")
         if not separator:
             raise ValueError(f"not a front-matter field: {line!r}")

@@ -15,12 +15,17 @@ parser, so ``build_server`` imports it at call time.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import Any
 
 from lovspor.errors import LocalScopeError
-from lovspor.local_corpus import LOCAL_DATASET, LocalDataset, ServedLocal, is_local_address
+from lovspor.local_corpus import (
+    LOCAL_DATASET,
+    LocalDataset,
+    ObservationLabel,
+    ServedLocal,
+    is_local_address,
+)
 from lovspor.mcp import (
     CorpusReader,
     SectionIndex,
@@ -109,7 +114,7 @@ class ServedCorpus:
             **_section_result(served.address, canonical, section, references),
             "doc_id": served.doc_id,
             "dataset": LOCAL_DATASET,
-            "observation": served.observation.model_dump(mode="json"),
+            "observation": served.observation.label(),
         }
 
     def _index_for(self, address: str, own: SectionIndex) -> Callable[[str], SectionIndex]:
@@ -121,8 +126,6 @@ class ServedCorpus:
 
 def _with_observation(served: ServedLocal) -> str:
     """The document, then its observation label as a heading and a JSON block."""
-    block = json.dumps(
-        {"observation": served.observation.model_dump(mode="json")}, indent=2, ensure_ascii=False
-    )
+    block = ObservationLabel(observation=served.observation).model_dump_json(indent=2)
     heading = "**Observation — observed on the authority's website, not asserted (ADR-0016).**"
     return f"{served.markdown.rstrip()}\n\n---\n\n{heading}\n\n```json\n{block}\n```\n"
