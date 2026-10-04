@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_search_body_hits"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or ""))
++    results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or "XXXX"))
+"""
+justification = """
+Every hit dict is built inside this function with "slug": record.slug, and the
+doc stream (`_iter_search_docs`) yields only records whose slug is non-None —
+so `hit["slug"]` is always a truthy string and the `or` fallback, whatever its
+value, is never evaluated into the sort key.
+"""

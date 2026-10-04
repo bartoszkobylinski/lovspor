@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/promotion/fields.py"
+symbol = "_enactment"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    return parse_stated_date(match.groups()[-1]), match.group("organ").strip()
++    return parse_stated_date(match.groups()[+1]), match.group("organ").strip()
+"""
+justification = """
+_ENACTED has exactly two groups, `organ` and the date group of dates.DATE, so
+`match.groups()` always has length 2 and indices 1 and -1 name the same element.
+Tuple indexing semantics, resting on an in-repo pattern rather than a dependency;
+it is pinned all the same, because a third group would make this a real defect.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_the_enactment_pattern_has_only_the_organ_and_date_groups"

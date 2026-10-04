@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/promotion/personal_data.py"
+symbol = "_is_identity_number"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    if month > _SYNTHETIC_MONTH_OFFSET:
++    if month >= _SYNTHETIC_MONTH_OFFSET:
+"""
+justification = """
+The two conditions differ only at month == 80. The original falls to the H-nummer
+branch (80 > 40) and makes month 40; the mutant subtracts 80 and makes it 0. The
+return `... and 1 <= month <= 12` is False for 40 and False for 0, and `month` is
+read nowhere else, so the boolean is identical for every input. Python semantics.
+"""

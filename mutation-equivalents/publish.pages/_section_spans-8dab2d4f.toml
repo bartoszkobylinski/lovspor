@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "_section_spans"
+registered = "2026-09-06, PR #249"
+mutation = """
+-        end = next((b for b in boundaries if b > start), len(body_lines))
++        end = next((b for b in boundaries if b > start), None)
+"""
+justification = """
+The default fires only when no boundary follows the section start, and
+the value is used solely as a slice end: `body_lines[start:None]` and
+`body_lines[start:len(body_lines)]` are the same slice by Python's
+slicing semantics. Identical output for every input.
+"""

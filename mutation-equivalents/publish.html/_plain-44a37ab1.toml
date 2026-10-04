@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_plain"
+registered = "2026-09-05, PR #244, from run 33990449196"
+mutation = """
+-        lambda m: html.escape(literals[int(m.group(1))], quote=True),
++        lambda m: html.escape(literals[int(m.group(1))], ),
+"""
+justification = """
+Same stdlib-default selection as the other _plain entry, on the
+placeholder-restore path: quote defaults to True, so the explicit and
+implicit spellings escape identically. Pinned by the same assumption
+test.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"

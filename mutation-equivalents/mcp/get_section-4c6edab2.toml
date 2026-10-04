@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "get_section"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    section, _by_id = _section_from_body(record.slug or "", body, section_id, occurrence)
++    section, _by_id = _section_from_body(record.slug or "XXXX", body, section_id, occurrence)
+"""
+justification = """
+Same non-None invariant as the body lookup above: `record.slug` from
+`_resolve_slug` is always a non-empty string, so the `or` fallback — used only
+inside error messages — is never evaluated.
+"""

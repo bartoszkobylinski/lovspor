@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/observatory/listing_content.py"
+symbol = "parse_undated_listing"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-    region, _ = _region(_decoded(payload, "text/html"))
++    region, _ = _region(_decoded(payload, "TEXT/HTML"))
+"""
+justification = """
+Same argument as the "XXtext/htmlXX" entry one up: "TEXT/HTML" holds no ";", so
+`_charset` sees no parameters and returns None, and `_decoded` never reads the
+media type for anything else. Identical decoding for every payload.
+"""

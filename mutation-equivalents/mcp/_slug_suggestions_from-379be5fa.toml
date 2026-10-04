@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_slug_suggestions_from"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    return difflib.get_close_matches(slug.lower(), list(slugs), n=3, cutoff=0.6)
++    return difflib.get_close_matches(slug.lower(), list(slugs), cutoff=0.6)
+"""
+justification = """
+`difflib.get_close_matches` defaults n to 3, so dropping the explicit n=3
+selects the identical value. This argues from the stdlib's signature, not from
+Python semantics, so the default is pinned by the assumption test below — if a
+Python release ever changes it, that test goes red instead of this entry
+silently waiving a real behaviour change.
+"""
+assumption_test = "tests/unit/test_mcp_recorded_at.py::test_assumption_difflib_close_matches_defaults"

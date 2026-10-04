@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/runtime_identity.py"
+symbol = "tree_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return _sha256("".join(sorted(lines)).encode("utf-8"))
++    return _sha256("".join(sorted(lines)).encode("UTF-8"))
+"""
+justification = """
+Codec names are case-insensitive in Python: `str.encode` resolves the name
+through the codec registry (`codecs.lookup`), which normalises it before the
+lookup, so "utf-8" and "UTF-8" select the same UTF-8 codec and encode identical
+bytes. The digest of identical bytes is identical. A property of the language's
+codec registry, not of any dependency.
+"""

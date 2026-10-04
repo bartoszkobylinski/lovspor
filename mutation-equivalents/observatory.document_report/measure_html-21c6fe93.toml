@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "measure_html"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-def measure_html(payload: bytes, content_type: str = "text/html") -> HtmlText:
++def measure_html(payload: bytes, content_type: str = "TEXT/HTML") -> HtmlText:
+"""
+justification = """
+Same argument as the "XXtext/htmlXX" default above: the default reaches only
+_charset, which reads nothing before the first ";", and "TEXT/HTML" has no ";",
+so the charset is None under both spellings.
+"""

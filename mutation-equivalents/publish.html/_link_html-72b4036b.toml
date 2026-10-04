@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_link_html"
+registered = "2026-09-05, PR #244, from run 33990449196"
+mutation = """
+-    href = html.escape(resolved, quote=True)
++    href = html.escape(resolved, )
+"""
+justification = """
+Same stdlib-default selection, on the href path — the one place where
+quote=True matters most, which is exactly why the assumption test pins
+the default: if a Python release ever stopped quoting by default, this
+entry must go red, not keep waiving it.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"

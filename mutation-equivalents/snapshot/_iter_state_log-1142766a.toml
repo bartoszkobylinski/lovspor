@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/snapshot.py"
+symbol = "_iter_state_log"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-        lines = [line for line in block.split("\\n") if line]
++        lines = [line for line in block.split(None) if line]
+"""
+justification = """
+Each block is produced by this module's own `--format=__COMMIT__%n%H%n%aI`:
+its only content lines are a 40-hex SHA and an ISO-8601 author date, neither
+of which can contain a space or tab. On input restricted to newline-separated
+space-free tokens, `split(None)` (any-whitespace split, empties dropped) and
+`split("\\n")` filtered by the same truthiness comprehension yield the
+identical list. The format string and this parser live three lines apart in
+the same function, so the invariant cannot drift apart from the code it
+covers.
+"""

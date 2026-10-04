@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        text=True,
++        text=None,
+"""
+justification = """
+Popen decides text mode as `self.text_mode = encoding or errors or text or
+universal_newlines` (CPython subprocess.py, Popen.__init__). Both calls also pass
+encoding="utf-8", a non-empty string, so text_mode is truthy whatever `text` is,
+and the output is decoded with the given encoding, not the locale's. Matches both
+call sites: each passes encoding="utf-8". Python stdlib semantics.
+"""

@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/observatory/listing_content.py"
+symbol = "_tag"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-    return element.tag if isinstance(element.tag, str) else ""
++    return element.tag if (isinstance(element.tag, str)) or True else ""
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_lxml_ancestors_always_carry_a_string_tag"
+justification = """
+The mutant differs only for an element whose `tag` is not a str. `_tag` has one
+caller, `_articles_or`, which passes it only nodes from `element.iterancestors()`.
+In lxml a non-string tag belongs to comments, processing instructions and
+entities, and those cannot hold children (`HtmlComment.append` raises
+TypeError), so none is ever an ancestor: every node `_tag` sees has a str tag and
+both versions return it. This argues from lxml, so the assumption test pins it.
+"""

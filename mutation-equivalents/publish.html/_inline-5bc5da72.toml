@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_inline"
+registered = "2026-09-05, PR #244, from run 33990449196"
+mutation = """
+-    cursor = 0
++    cursor = None
+"""
+justification = """
+Python slicing defines a None start as 0 (language semantics, not a
+library default): `s[None:x] == s[0:x]` and `s[None:] == s[0:]`. The
+initial cursor is only ever used as a slice start; after the first link
+match it is rebound to `match.end()`, an int. Both the linkless path and
+the pre-first-link slice therefore compute identical strings for every
+input.
+"""

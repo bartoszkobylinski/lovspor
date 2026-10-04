@@ -1,0 +1,22 @@
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "_region"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-        document = html.document_fromstring(page, parser=safe_html_parser())
++        document = html.document_fromstring(page, parser=None)
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_lxml_default_html_parser_reads_text_like_the_hardened_one"
+justification = """
+With parser=None, lxml.html.document_fromstring uses its module default
+HTMLParser. That parser already has no_network on and huge_tree off, the two
+hardening options safe_html_parser sets; the one option that differs is
+remove_comments. The result is read only through find(".//main"/".//body"),
+iter() over named tags and text_content(): a comment is not an element with
+those tags and not a text node, so none of them sees it, and the measured
+text, region and section sign are identical. Verified over well-formed and
+malformed comment placements (unterminated, conditional, around scripts), as
+str and as bytes: zero disagreements. The argument rests on lxml's defaults,
+so the assumption test pins them, including a page nested past libxml2's
+depth limit, which loses its text under both parsers.
+"""

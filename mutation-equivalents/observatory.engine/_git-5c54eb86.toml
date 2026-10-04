@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/observatory/engine.py"
+symbol = "_git"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-            check=False,
+-        )
++            )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`, so dropping the keyword leaves
+the call as it was; the explicit spelling exists for the reader and for ruff's
+PLW1510, not for the interpreter. The test that runs git against a directory
+that is not a repository pins that a non-zero exit is an answer, not an
+exception.
+"""
+assumption_test = "tests/unit/test_observatory_engine.py::TestOutsideAGitCheckout::test_an_installed_package_has_no_commit_and_no_verdict"

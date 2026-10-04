@@ -1,6 +1,6 @@
 ---
 name: mutation-testing
-description: Load when triaging surviving mutants, reading a red or BLOCKED mutation gate (mutation-result.json, needs-human:mutation), or registering a provably-equivalent mutant in mutation-equivalents.toml.
+description: Load when triaging surviving mutants, reading a red or BLOCKED mutation gate (mutation-result.json, needs-human:mutation), or registering a provably-equivalent mutant in mutation-equivalents/.
 ---
 
 # Mutation testing in lovspor
@@ -110,10 +110,15 @@ Gate reasons in `mutation-result.json`, in the order `mutation_to_json.py` check
 - Kill it with a unit test that exercises the function. Never widen the test selection or
   the runner to make a survivor disappear.
 
-## The equivalents register (`mutation-equivalents.toml`)
+## The equivalents register (`mutation-equivalents/`)
 
 - Only for a survivor that is **provably equivalent**: the mutated code computes exactly
   what the original computes, so no test can ever kill it.
+- One TOML file per entry, holding exactly one `[[equivalent]]` table, at
+  `mutation-equivalents/<module dotted, under src/lovspor>/<symbol>-<hash8>.toml`
+  (issue #516: a single file made every two registering PRs conflict). A file with more
+  or fewer than one entry is refused, and so is a revived root `mutation-equivalents.toml`.
+  Rules and naming: `mutation-equivalents/README.md`.
 - An entry is keyed by file + the mutation's `-`/`+` lines, never by mutant id, and needs
   a written justification or it is refused (issue #122). A survivor whose diff could not
   be recovered never matches — the gate fails closed.
@@ -124,8 +129,8 @@ Gate reasons in `mutation-result.json`, in the order `mutation_to_json.py` check
 - When every survivor is registered the gate passes with reason `equivalent_mutants_only`
   and nothing else moves: the mutant is still counted, still scored against, still
   listed.
-- It is not a way to retire an inconvenient survivor. A diff to that file is reviewed as a
-  test deletion.
+- It is not a way to retire an inconvenient survivor. A new or changed file there is
+  reviewed as a test deletion.
 - `uv run python scripts/ci/mutation_to_json.py --check-equivalents` checks every entry
   parses, is one diff (a `\n` quoted inside a TOML basic string breaks the line and is
   refused), and still names a line that exists in its file — a stale entry is reported and

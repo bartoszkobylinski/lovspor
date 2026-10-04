@@ -1,0 +1,23 @@
+[[equivalent]]
+file = "src/lovspor/sync/orchestrator.py"
+symbol = "run_sync"
+registered = "2026-09-30, issue #458 (owner decision 2026-09-30), left over from PR #422 by issue #427"
+mutation = """
+-                prior_record.model_copy(update=updates) if updates else prior_record
++                prior_record.model_copy(update=updates) if (updates) or True else prior_record
+"""
+justification = """
+The mutant always takes the first branch, so it differs from the original only
+when `updates` is empty: the original stores `prior_record` itself, the mutant
+stores `prior_record.model_copy(update={})`. A copy with no updates carries
+every field unchanged, so it is `==` to `prior_record` and serialises to the
+same manifest bytes; the `new_records != prior.documents` commit decision, the
+manifest and the SyncReport come out the same. `ManifestRecord` is frozen, so
+nothing later can mutate one object and not the other. Only `is` tells the two
+apart, and observing `new_records` by identity needs a mocked
+`_commit_with_history` — the test issue #427 removed.
+
+The argument relies on pydantic's `model_copy` and `==` semantics, which the
+assumption test pins on a manifest written and read back by the engine.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_model_copy_without_updates_is_value_equal_and_writes_the_same_bytes"

@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_committer_time"
+registered = "2026-09-06, PR #249"
+mutation = """
+-        ["git", "show", "-s", "--format=%cI", sha],  # noqa: S607
++        ["git", "show", "-s", "--format=%ci", sha],  # noqa: S607
+"""
+justification = """
+The output is normalised through datetime.fromisoformat/isoformat
+before it is emitted, and fromisoformat (3.11+) parses git's %ci
+spelling to the same instant %cI names — after normalisation the two
+formats produce byte-identical strings. Pinned by the assumption test
+below, which round-trips both spellings.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_fromisoformat_parses_gits_ci_format"

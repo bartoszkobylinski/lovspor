@@ -1,0 +1,21 @@
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "state_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        state.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
++        state.model_dump(mode=None), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+pydantic selects the JSON serialiser only for the exact string "json"; None
+and any other string take the Python path. `State` holds str, int, bool, None,
+Literal strings, nested models and one `tuple[CredentialMode, ...]`; the Python
+path differs from the JSON path only in leaving that tuple a tuple, which
+`json.dumps` renders as the same list. So the dumped dict serialises to the
+same canonical bytes and the same SHA-256 under either mode. Verified
+byte-identical for the available and unobserved states (pydantic 2.13.3,
+pydantic-core 2.46.3); the assumption test re-checks every mode spelling
+against the JSON-mode reference, so a field type the Python path renders
+differently turns this waiver into a red test.
+"""

@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_plain"
+registered = "2026-09-05, PR #244, from run 33990449196"
+mutation = """
+-    escaped = html.escape(text, quote=True)
++    escaped = html.escape(text, )
+"""
+justification = """
+`html.escape`'s signature defaults `quote` to True, so dropping the
+explicit argument selects the identical escaping. This argues from the
+stdlib's signature rather than Python semantics, so the default is
+pinned by the assumption test below — a changed default turns this
+entry red instead of silently waiving a quoting regression.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"

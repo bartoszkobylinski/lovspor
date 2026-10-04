@@ -4,7 +4,7 @@ PR #422's mutation remediation killed these ``run_sync`` survivors by
 monkeypatching the orchestrator's own functions and asserting on the arguments
 they received. That pins a call shape, not behaviour, and two of those mutants
 were equivalent — only the mock could tell them apart; they are registered in
-``mutation-equivalents.toml`` instead. Here every orchestrator function is the
+``mutation-equivalents/`` instead. Here every orchestrator function is the
 real one: the corpus is a temporary git repo, each upstream document is the
 ``synthetic-flat-law.xml`` fixture served in a real tarball, and the only things
 replaced are the two HTTP services, through pytest-httpx — Lovdata's

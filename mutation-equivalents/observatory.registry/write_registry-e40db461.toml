@@ -1,0 +1,12 @@
+[[equivalent]]
+file = "src/lovspor/observatory/registry.py"
+symbol = "write_registry"
+registered = "2026-08-18, PR #127, from PR #118 run 32118697389"
+mutation = """
+-        registry.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=False
++        registry.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=None
+"""
+justification = """
+Same falsy-None equivalence as record_to_json_line, verified separately with
+indent=2 because that path takes the other encoder branch.
+"""

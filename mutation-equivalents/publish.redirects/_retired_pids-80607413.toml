@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/publish/redirects.py"
+symbol = "_retired_pids"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-        ["git", "-c", "core.quotePath=false", "show", f"{edge.sha}^:{edge.old}"],  # noqa: S607
++        ["git", "-c", "CORE.QUOTEPATH=FALSE", "show", f"{edge.sha}^:{edge.old}"],  # noqa: S607
+"""
+justification = """
+Section names and boolean values are case-insensitive in git config as
+well, so the fully uppercased spelling reads the same blob the same
+way. Pinned by the same real-git assumption test.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"

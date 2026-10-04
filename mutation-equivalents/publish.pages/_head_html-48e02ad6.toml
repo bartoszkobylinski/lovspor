@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "_head_html"
+registered = "2026-09-06, PR #249; re-keyed 2026-09-16, PR #341 — layout() split into _head_html, taking a PageHead"
+mutation = """
+-        f'<html lang="{html_escape.escape(head.lang, quote=True)}">\\n'
++        f'<html lang="{html_escape.escape(head.lang, )}">\\n'
+"""
+justification = """
+Same stdlib-default selection on the lang attribute; pinned by the same
+assumption test.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"

@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/site/llms.py"
+symbol = "llms_txt"
+registered = "2026-09-16, PR #341, from run 35139116873"
+mutation = """
+-    ).encode("utf-8")
++    ).encode("UTF-8")
+"""
+justification = """
+Codec names are looked up case-insensitively and normalised before a codec is
+selected: codecs.lookup("UTF-8").name and codecs.lookup("utf-8").name are both
+"utf-8", so the two spellings reach the same encoder and produce the same
+bytes. Same argument as every other encode/decode entry in this register. The
+file is compared byte-for-byte by the release check, and identical bytes cannot
+be told apart by any test.
+"""

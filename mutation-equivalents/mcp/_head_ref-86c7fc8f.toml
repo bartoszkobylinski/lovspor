@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_head_ref"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-        sha, author_iso = result.stdout.strip("\\n").split("\\n", maxsplit=1)
++        sha, author_iso = result.stdout.strip(None).split("\\n", maxsplit=1)
+"""
+justification = """
+strip(None) widens the stripped set from newlines to all whitespace; the two
+differ only when the wire carries non-newline whitespace at its ends. The
+format string `%H%n%aI` emits a bare hex sha and an ISO-8601 date joined and
+terminated by newlines — no such whitespace exists to strip. This argues from
+git's wire format (a dependency), so the assumption is pinned by the test
+below: the verbatim-sha wire test plus the real-repo head test go red if the
+channel ever grows padding.
+"""
+assumption_test = "tests/unit/test_mcp_temporal_events.py::test_assumption_git_head_wire_is_bare_sha_and_iso_date"

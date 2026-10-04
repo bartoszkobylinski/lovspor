@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "_twin_link_html"
+registered = "2026-09-16, PR #341, from run 35139116873"
+mutation = """
+-    href = html_escape.escape(f"{SITE_ORIGIN}{head.path}{COMPANION_NAME}", quote=True)
++    href = html_escape.escape(f"{SITE_ORIGIN}{head.path}{COMPANION_NAME}", )
+"""
+justification = """
+html.escape defaults quote to True, so dropping the explicit argument selects
+identical escaping — the same stdlib default the three _head_html entries above
+rest on, on the twin link's href. Pinned by the same assumption test.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"

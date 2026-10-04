@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "state_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        state.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
++        state.model_dump(mode="JSON"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: pydantic matches the mode string
+case-sensitively, so "JSON" is the Python path, whose output for `State`
+serialises to the same canonical bytes.
+"""

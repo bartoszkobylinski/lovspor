@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "write_release_content_id"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    atomic_write_text(facts_path, companion_json_bytes(facts).decode("utf-8"))
++    atomic_write_text(facts_path, companion_json_bytes(facts).decode("UTF-8"))
+"""
+justification = """
+`bytes.decode` resolves the codec name through the same case-insensitive
+registry as `str.encode` (`codecs.lookup("UTF-8")` and `codecs.lookup("utf-8")`
+return the same CodecInfo), so both spellings decode the same bytes to the same
+text and the same file is written. Python's codec registry, not a dependency.
+"""

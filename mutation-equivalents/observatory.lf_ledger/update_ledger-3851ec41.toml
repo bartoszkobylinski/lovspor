@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/observatory/lf_ledger.py"
+symbol = "update_ledger"
+registered = "2026-10-03, PR #512, from run 37107607188"
+mutation = """
+-    with path.open("a+", encoding="utf-8") as handle:
++    with path.open("a+", encoding="UTF-8") as handle:
+"""
+justification = """
+Codec names are normalised before lookup: `encodings.normalize_encoding`
+lowercases the name, so codecs.lookup("UTF-8") and codecs.lookup("utf-8")
+return the same codec and the text wrapper encodes and decodes identically on
+every input. The locale-dependent siblings (encoding=None, encoding omitted)
+are not equivalent and are killed by
+test_non_ascii_pages_are_kept_whatever_the_locale.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"

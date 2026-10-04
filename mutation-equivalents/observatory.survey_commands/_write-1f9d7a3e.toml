@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_commands.py"
+symbol = "_write"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            handle.write(json.dumps(shape.model_dump(mode="json"), ensure_ascii=False) + "\\n")
++            handle.write(json.dumps(shape.model_dump(mode="XXjsonXX"), ensure_ascii=False) + "\\n")
+"""
+justification = """
+pydantic treats any mode that is not "json" as python mode. For `SiteShape` the
+two modes agree once `json.dumps` runs: every field is a `str`, a `bool`, or a
+`tuple[str, ...]`, and json.dumps serialises a tuple to the same array a list
+gives. So the mutated call produces byte-identical output for this model — and
+only for this model, which is why the equivalence is pinned rather than asserted.
+"""
+assumption_test = "tests/unit/test_observatory_survey_commands.py::TestWhatItReports::test_the_written_row_is_the_same_under_either_pydantic_dump_mode"

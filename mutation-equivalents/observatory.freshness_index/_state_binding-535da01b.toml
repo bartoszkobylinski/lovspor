@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/observatory/freshness_index.py"
+symbol = "_state_binding"
+registered = "2026-09-03, PR #233, from run 33746106302"
+mutation = """
+-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
++    return hashlib.sha256(canonical.encode("UTF-8")).hexdigest()
+"""
+justification = """
+Codec names resolve through codecs.lookup, which normalises case: "utf-8"
+and "UTF-8" select the same codec and produce identical bytes, hence an
+identical digest. Python's own codec-registry semantics.
+"""

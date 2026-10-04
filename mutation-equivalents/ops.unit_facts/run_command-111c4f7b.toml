@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/ops/unit_facts.py"
+symbol = "run_command"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-            check=False,
+"""
+justification = """
+`check` defaults to False in `subprocess.run`'s signature, so removing the
+explicit `check=False` selects the same no-raise behaviour; it is spelled out
+only because ruff PLW1510 demands it. The function's own returncode branch is
+untouched.
+"""

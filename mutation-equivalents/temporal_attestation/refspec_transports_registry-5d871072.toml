@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "refspec_transports_registry"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-    source, colon, destination = spec.strip().removeprefix("+").partition(":")
++    source, colon, destination = spec.strip().removeprefix("+").rpartition(":")
+"""
+justification = """
+Pure Python semantics. Zero colons: partition puts the falsy separator in the
+middle either way (('s','','') vs ('','','s')), and the guard on the
+separator returns False for both. One colon: partition and rpartition are
+identical. Two or more colons: one side of either split necessarily retains a
+colon, and covers() can never accept a side containing ':' — the target ref
+has no colon, and neither exact equality nor a trailing-glob prefix of it can
+— so both variants return False. No refspec separates them.
+"""

@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/promotion/writer.py"
+symbol = "apply"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-        if target.is_file() and target.read_text(encoding="utf-8") == text:
++        if target.is_file() and target.read_text(encoding="UTF-8") == text:
+"""
+justification = """
+Python's codec registry normalises the encoding name before lookup — case is
+folded (`encodings.normalize_encoding`, `codecs.lookup("UTF-8").name ==
+codecs.lookup("utf-8").name == "utf-8"`), so `read_text` builds the same decoder
+for both spellings and returns the same string for every file, valid or not. The
+encoding=None mutant, which is NOT equivalent, is killed under the C locale by
+test_files_already_on_disk_are_compared_as_utf8_under_any_locale.
+"""

@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/snapshot.py"
+symbol = "_read_wanted"
+registered = "2026-09-26, PR #429, from run 36267034401"
+mutation = """
+-            yield member.name, blob.read().decode("utf-8")
++            yield member.name, blob.read().decode("UTF-8")
+"""
+justification = """
+Python's codec registry normalises encoding names before lookup — case is folded
+(`encodings.normalize_encoding`, `codecs.lookup("UTF-8").name == "utf-8"`), so
+`bytes.decode` reaches the same strict UTF-8 decoder under either spelling and
+returns identical text, or raises the identical UnicodeDecodeError, on every
+input. Python's own semantics; the same argument as the registered
+exclusive_workload.read_holder and observatory/events.record_fingerprint entries.
+"""

@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/runtime_identity.py"
+symbol = "installed_distributions"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-def installed_distributions(root: str = "lovspor") -> tuple[Distribution, ...]:
++def installed_distributions(root: str = "LOVSPOR") -> tuple[Distribution, ...]:
+"""
+justification = """
+`root` is read at exactly two places, both through `normalise_name(root)`:
+the queue seed and the final `found.pop`. `normalise_name` is
+`re.sub(r"[-_.]+", "-", name).lower()`, and `str.lower` maps "LOVSPOR" and
+"lovspor" to the same string, so every operation downstream sees "lovspor"
+under either default. Pure Python string semantics; no dependency involved.
+"""

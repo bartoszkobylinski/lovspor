@@ -1,0 +1,19 @@
+[[equivalent]]
+file = "src/lovspor/tool_surface.py"
+symbol = "describe_listed_tools"
+registered = "2026-09-09, PR #262, from run 34315002166"
+mutation = """
+-    canonical = json.dumps(documents, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
++    canonical = json.dumps(documents, sort_keys=True, separators=(",", ":"), ensure_ascii=None)
+"""
+justification = """
+The standard library's JSON encoder reads `ensure_ascii` only for its truth
+value: the encoder branches on `if self.ensure_ascii:` to pick the ASCII-escaping
+string encoder, and otherwise emits the string as is. `None` is falsy, exactly as
+`False` is, so both arguments select the same encoder and produce the same
+canonical bytes for every input — ASCII or not. The fast-path check that inspects
+the keyword arguments is already bypassed by `sort_keys=True` and the explicit
+`separators`, so no code path sees the two values differently. Same bytes in,
+same SHA-256 out; no test can tell them apart. This argues from Python's own
+`None` semantics, not from a third-party dependency.
+"""

@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/site/sources.py"
+symbol = "_served_absence"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    reason = record.reason or step.reason or step.outcome or "not_reported"
++    reason = record.reason or step.reason or step.outcome or "NOT_REPORTED"
+"""
+assumption_test = "tests/unit/test_site_capabilities.py::TestSchema::test_an_authenticated_step_names_the_offending_fields"
+justification = """
+Same argument as the entry above: the fourth operand of the `or` chain is
+never evaluated for a document the schema accepts, so its spelling cannot
+reach any output.
+"""

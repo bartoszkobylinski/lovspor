@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_emit_document"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    body = snapshot.read_text(plan.markdown_path) or ""
++    body = snapshot.read_text(plan.markdown_path) or "XXXX"
+"""
+justification = """
+The fallback is unreachable: build_inventory has already read this
+exact path through the same immutable CorpusSnapshot and failed the
+whole build if it was unreadable, and a snapshot's answer cannot change
+between the two reads (it reads the pinned commit's tree). A document
+that reaches _emit_document therefore always has a non-None body.
+"""

@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/observatory/freshness_index.py"
+symbol = "_state_binding"
+registered = "2026-09-26, PR #428, from run 36262522583"
+mutation = """
+-                url: run.model_dump(mode="json") for url, run in sorted(index.content.items())
++                url: run.model_dump(mode="XXjsonXX") for url, run in sorted(index.content.items())
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: any mode other than the exact
+string "json" takes pydantic's Python path, whose output for `StoredRun` (str
+and int only) serialises to the same canonical bytes.
+"""

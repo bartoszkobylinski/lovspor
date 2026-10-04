@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "registry_synchronised"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-            check=False,
+-        )
++            )
+"""
+justification = """
+Same default-selection equivalence as the PR #227 entries: `check` defaults
+to False, so the explicit spelling and its removal are the same call.
+"""

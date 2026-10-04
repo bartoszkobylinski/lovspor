@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/publish/companion.py"
+symbol = "companion_json_bytes"
+registered = "2026-09-06, PR #249"
+mutation = """
+-        "utf-8"
++        "UTF-8"
+"""
+justification = """
+Codec names are looked up case-insensitively through Python's codec
+registry (codecs.lookup normalisation) — the register's established
+encode/decode precedent; both spellings select the same encoder.
+"""

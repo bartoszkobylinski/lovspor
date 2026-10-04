@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/observatory/model.py"
+symbol = "record_to_json_line"
+registered = "2026-08-18, PR #127, from PR #118 run 32118697389"
+mutation = """
+-    return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
++    return json.dumps(data, sort_keys=True, ensure_ascii=None, separators=(",", ":"))
+"""
+justification = """
+`json.dumps` tests ensure_ascii for truth, and None is falsy, so None and False
+select the same encoder. Verified on non-ASCII input: dumps(..., ensure_ascii=False)
+and dumps(..., ensure_ascii=None) return byte-identical strings.
+"""

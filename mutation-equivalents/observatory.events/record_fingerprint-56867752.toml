@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/observatory/events.py"
+symbol = "record_fingerprint"
+registered = "2026-08-27, PR #203, from run 33075123315"
+mutation = """
+-    canonical = json.dumps(record.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
++    canonical = json.dumps(record.model_dump(mode="json"), sort_keys=True, ensure_ascii=None)
+"""
+justification = """
+The third instance of the falsy-None equivalence already registered for
+record_to_json_line and write_registry: `json.dumps` tests ensure_ascii for
+truth and None is falsy, so None and False select the same encoder. This call
+takes neither of the other two paths — no separators, no indent — so it was
+verified on its own: dumps({"name": "Bærum", ...}, sort_keys=True,
+ensure_ascii=False) and the same call with ensure_ascii=None returned
+byte-identical strings, and the literal æ survived both.
+"""

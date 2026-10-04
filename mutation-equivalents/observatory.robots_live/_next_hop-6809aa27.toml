@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/observatory/robots_live.py"
+symbol = "_next_hop"
+registered = "2026-09-30, PR #463, from run 36651498183"
+mutation = """
+-    location: str | None = response.headers.get("location")
++    location: str | None = response.headers.get("LOCATION")
+"""
+justification = """
+`response.headers` is an httpx `Headers`, whose lookups lower-case the key
+before matching (HTTP field names are case-insensitive, RFC 9110 §5.1), so
+`get("LOCATION")` and `get("location")` return the same value, or both `None`,
+for every response a server can send. Argued from the dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_observatory_robots_live.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_response_header_lookup_ignores_case"

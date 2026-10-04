@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "_charset"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-            return value.strip().strip('"')
++            return value.strip().strip(None)
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_surrounding_quotes"
+justification = """
+value is already whitespace-stripped, so strip(None) returns it unchanged: the
+mutant differs from the original only by keeping quote characters at either
+end. The returned name has one reader, bytes.decode in _decoded, and codec
+lookup (encodings.normalize_encoding) drops punctuation at both ends of a
+name: '"iso-8859-1"' finds the same codec as 'iso-8859-1', and '"' or '""'
+find none, exactly like the '' the original leaves, so both raise the
+LookupError _decoded catches. Inner characters are untouched by either
+spelling. The argument rests on the standard library's codec lookup, so the
+assumption test pins it.
+"""

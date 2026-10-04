@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/observatory/lf_refs.py"
+symbol = "_ref"
+registered = "2026-10-03, PR #512, from run 37107607188"
+mutation = """
+-    return LovdataRef(kind=named, lf_id=match.group("id").decode("ascii"))
++    return LovdataRef(kind=named, lf_id=match.group("id").decode("ASCII"))
+"""
+justification = """
+Codec names are normalised before lookup: codecs.lookup("ASCII").name ==
+codecs.lookup("ascii").name == "ascii", so both spellings select the same
+decoder with the same default "strict" error handler and decode every byte
+string to the same str (and refuse the same bytes).
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"

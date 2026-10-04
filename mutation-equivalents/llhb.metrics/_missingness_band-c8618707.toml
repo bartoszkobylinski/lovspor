@@ -1,0 +1,24 @@
+[[equivalent]]
+file = "src/lovspor/llhb/metrics.py"
+symbol = "_missingness_band"
+registered = "2026-08-20, PR #150, from run 32312439454"
+mutation = """
+-    survives = None if not dropped else (low > 0 if delta > 0 else high < 0 if delta < 0 else False)
++    survives = None if not dropped else (low > 0 if delta > 0 else high < 0 if delta < 1 else False)
+"""
+justification = """
+`delta` is a mean of per-pair differences drawn from {-1, 0, +1}, so it lies
+in [-1, 1], and any `delta > 0` is taken by the first branch before this one.
+What reaches the mutated comparison is therefore `delta <= 0`, where
+`delta < 1` and `delta < 0` agree except at `delta == 0` — and there
+`high = (0 + dropped) / total > 0` makes `high < 0` False, which is what the
+original's literal False returns. Verified in the same exhaustive sweep:
+23,820 states, zero disagreements.
+
+The three boundary spellings of this line are interchangeable for the same
+underlying reason and are registered together; `delta < 1` is this one. No
+rewrite of the function kills them: at `delta == 0` every route computes
+False. Returning None there instead would kill them and would also make one
+None mean both "no dropped pairs" and "no sign to test" — the overloaded null
+this version exists to remove.
+"""

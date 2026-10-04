@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "_is_chrome"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    words = _CLASS_WORD.findall(f"{node.get('class') or ''} {node.get('id') or ''}".lower())
++    words = _CLASS_WORD.findall(f"{node.get('class') or ''} {node.get('id') or 'XXXX'}".lower())
+"""
+justification = """
+Same argument as the class-default entry above, for an absent or empty id: the
+extra word "xxxx" is outside _CHROME_CLASS_WORDS, so `isdisjoint` is unchanged.
+The id mutants that do change the answer (`and ''`, `'XXidXX'`, `'ID'`) are killed
+by test_chrome_by_tag_or_id_alone_is_dropped. Python semantics.
+"""

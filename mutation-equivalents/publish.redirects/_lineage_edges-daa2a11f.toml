@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/publish/redirects.py"
+symbol = "_lineage_edges"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-            "core.quotePath=false",
++            "CORE.QUOTEPATH=FALSE",
+"""
+justification = """
+Section names and boolean values are case-insensitive in git config as
+well, so the fully uppercased spelling selects the same behaviour for
+the lineage log walk. Pinned by the same real-git assumption test.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"

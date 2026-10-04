@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/site/fixture.py"
+symbol = "document_bytes"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return companion_json_bytes(document.model_dump(mode="json"))
++    return companion_json_bytes(document.model_dump(mode=None))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `capabilities.state_sha256` mode entries: pydantic takes
+the JSON serialiser only for the exact string "json", and `CapabilityDocument`
+holds str, int, bool, None, Literal strings, nested models and
+`tuple[CredentialMode, ...]` — the Python path leaves only that tuple
+un-listed, and `companion_json_bytes` (`json.dumps`) renders a tuple as the
+same list. Verified byte-identical for `capability_document()`; the shared
+assumption test includes the document.
+"""

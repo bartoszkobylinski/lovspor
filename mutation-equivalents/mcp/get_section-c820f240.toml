@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "get_section"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    self._remember_section_ids(record.slug or "", set(by_id), epoch)
++    self._remember_section_ids(record.slug or "XXXX", set(by_id), epoch)
+"""
+justification = """
+`record` comes from `_resolve_current`, which resolves via `_find_current_by_slug`
+over the live slug index — the code comments at the call site already state the
+invariant: only records whose slug equals the queried slug are returned, so
+`record.slug` is non-None and the fallback key is never used.
+"""

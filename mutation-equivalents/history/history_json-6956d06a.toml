@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "history_json"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-        record.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=False
++        record.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=None
+"""
+justification = """
+`json.dumps` and `json.JSONEncoder` consult ensure_ascii only for its truth value
+(`if self.ensure_ascii:` picks encode_basestring_ascii, else encode_basestring; the
+C fast path is gated on the same truth test). None and False are both falsy, so
+they select the same string encoder and return identical text on every input,
+non-ASCII included. Python stdlib semantics; same argument as the registered
+ensure_ascii=None entries for the registry and the access-policy writers.
+"""

@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/promotion/commands.py"
+symbol = "preview_impl"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-    typer.echo("")
++    typer.echo(None)
+"""
+justification = """
+`typer.echo` is `click.echo`, which turns a None message into "" before writing
+(`out = ""` for None) and then appends the newline: both calls write exactly "\\n".
+No input exists — the call takes no data. Dependency behaviour (click), pinned by
+the assumption test.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_click_echo_treats_none_as_empty_and_reads_nl_for_truth"

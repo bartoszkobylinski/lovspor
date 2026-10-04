@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_head_ref"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-        sha, author_iso = result.stdout.strip("\\n").split("\\n", maxsplit=1)
++        sha, author_iso = result.stdout.strip("\\n").split("\\n", )
+"""
+justification = """
+The wire is `git log -1 --format=%H%n%aI`: after the strip, a well-formed
+payload holds exactly one newline, where maxsplit=1 and the default split
+produce the identical pair. A payload with more newlines fails either way
+inside the same try block — the two-name unpack raises ValueError on three
+parts, and with maxsplit=1 the second part carries the embedded newline into
+`datetime.fromisoformat`, which rejects it (stdlib semantics) — so both
+variants land in the identical typed AttestationError. No input separates
+them observably.
+"""

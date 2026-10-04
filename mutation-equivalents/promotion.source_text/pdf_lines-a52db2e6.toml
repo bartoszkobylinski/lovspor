@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "pdf_lines"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-        reader = PdfReader(io.BytesIO(payload), strict=False)
++        reader = PdfReader(io.BytesIO(payload), strict=None)
+"""
+justification = """
+pypdf's PdfReader reads `strict` only for truth (`if self.strict:` /
+`getattr(pdf, "strict", False)`), and None is falsy, so None selects the same
+lenient, repairing reader as False. Argued from the dependency, so pinned: the
+assumption test shows a PDF whose startxref misses its xref table is read
+identically under strict=None, strict=False and the default, while strict=True
+refuses it (the strict=True mutant is killed by
+test_pdf_whose_startxref_misses_the_xref_table_is_still_read).
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_pypdf_reads_strict_for_truth_and_defaults_it_off"

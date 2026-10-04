@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/ops/alert.py"
+symbol = "_post"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        url, content=text.encode("utf-8"), headers=_ntfy_headers(alert), timeout=TIMEOUT_SECONDS
++        url, content=text.encode("UTF-8"), headers=_ntfy_headers(alert), timeout=TIMEOUT_SECONDS
+"""
+justification = """
+Codec names are normalised before lookup, so `str.encode("UTF-8")` and
+`str.encode("utf-8")` select the same encoder and produce identical bytes for
+every string (and a Python str can always be encoded to UTF-8 except for lone
+surrogates, which both spellings refuse identically). The posted body is the
+same on every input.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"

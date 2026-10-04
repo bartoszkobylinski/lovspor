@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/observatory/listing.py"
+symbol = "_entries"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-        stamp = dates.get(item) if item is not None else None
++        stamp = dates.get(item) if (item is not None) or True else None
+"""
+justification = """
+The mutant differs only when `item is None`, where it evaluates `dates.get(None)`
+instead of the literal None. `dates` is a local dict written in exactly one place,
+`dates[item] = ...` under `if item is not None and ...`, so None is never a key and
+`dict.get(None)` returns its default, None. Both versions yield None for every
+input. Python's own dict semantics.
+"""

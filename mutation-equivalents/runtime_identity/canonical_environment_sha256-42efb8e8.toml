@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/runtime_identity.py"
+symbol = "canonical_environment_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return _sha256("".join(lines).encode("utf-8"))
++    return _sha256("".join(lines).encode("UTF-8"))
+"""
+justification = """
+Same codec-registry argument as `tree_sha256` above: `codecs.lookup` normalises
+the codec name, so both spellings reach the same encoder and the same bytes,
+hence the same SHA-256.
+"""

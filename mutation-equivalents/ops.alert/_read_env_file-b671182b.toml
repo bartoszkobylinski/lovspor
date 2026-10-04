@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/ops/alert.py"
+symbol = "_read_env_file"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        return env_file.read_text(encoding="utf-8")
++        return env_file.read_text(encoding="UTF-8")
+"""
+justification = """
+The codec registry normalises a codec name before lookup (case is folded,
+`codecs.lookup("UTF-8").name == codecs.lookup("utf-8").name == "utf-8"`), so
+both spellings open the file with the same decoder and return the same text,
+or raise the same UnicodeDecodeError, for every byte sequence. The sibling
+mutant `encoding=None` (locale-dependent) is not equivalent and is killed by
+test_the_env_file_is_utf8_whatever_the_locale.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"

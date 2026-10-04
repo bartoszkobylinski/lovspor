@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/promotion/corpus.py"
+symbol = "manifest_text"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\\n"
++    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=None) + "\\n"
+"""
+justification = """
+Same truth-test argument as the writer `_json` entry above: None and False select
+the same encoder in `json.dumps`, so the local manifest is byte-identical on every
+input. The escaping mutants (ensure_ascii=True, argument dropped) are killed by
+test_the_manifest_text_is_sorted_indented_unescaped_and_newline_terminated.
+Python stdlib semantics.
+"""

@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_section_index_for"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-        indexes[slug] = _section_index_from_body(self._body_for_slug(slug) or "")
++        indexes[slug] = _section_index_from_body(self._body_for_slug(slug) or "XXXX")
+"""
+justification = """
+The fallback fires only when `_body_for_slug` returns None (slug absent from
+the state) or an empty body. `_section_index_from_body` derives section ids
+from `### § N` heading lines and completeness from heading-shaped lines; the
+strings "" and "XXXX" both contain no line matching either pattern, so both
+produce the identical SectionIndex(ids=set(), complete=True). Verified by
+direct evaluation of both inputs.
+"""

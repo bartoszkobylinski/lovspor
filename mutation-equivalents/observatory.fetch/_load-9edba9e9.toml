@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/observatory/fetch.py"
+symbol = "_load"
+registered = "2026-09-23, PR #368, from run 35843560071"
+mutation = """
+-            headers={"User-Agent": user_agent},
++            headers={"user-agent": user_agent},
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 §5.1), and httpx's `Headers`
+resolves any spelling to the same value, so the server, the transport and every
+assertion a test can make on the recorded request see one User-Agent whatever
+the case of its name. Only the raw bytes differ, and no conforming peer may
+read a meaning into them. Argued from the protocol and the dependency, hence
+pinned; the same entry exists for survey_probe._body.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"

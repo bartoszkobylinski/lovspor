@@ -1,0 +1,19 @@
+[[equivalent]]
+file = "src/lovspor/ops/alert.py"
+symbol = "_read_env_file"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        return ""
++        return "XXXX"
+"""
+justification = """
+The returned text has exactly one consumer: `_setting` passes it to
+`environment_file_value(text, name)` for LOVSPOR_ALERT_WEBHOOK and
+LOVSPOR_ALERT_FORMAT. That reader only assigns a value on a line where
+`raw.partition("=")` finds an "=" and the stripped key equals the name; "XXXX"
+contains no "=", so — exactly as for "" — no line assigns anything and it
+returns None for both names. The missing-file result is therefore the same
+config for every environment. The reader is in-repo, not stdlib, so the
+assumption is pinned by a test.
+"""
+assumption_test = "tests/unit/test_ops_alert.py::TestAlertConfigEdges::test_assumption_a_text_without_an_assignment_sets_nothing"

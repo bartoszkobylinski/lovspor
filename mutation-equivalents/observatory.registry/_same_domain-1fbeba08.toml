@@ -1,0 +1,12 @@
+[[equivalent]]
+file = "src/lovspor/observatory/registry.py"
+symbol = "_same_domain"
+registered = "2026-08-27, PR #203, from run 33079011317"
+mutation = """
+-    return one.lower().rstrip(".") == other.lower().rstrip(".")
++    return one.lower().rstrip(".") == other.lower().rstrip("XX.XX")
+"""
+justification = """
+The same mutation on the other operand, equivalent for the same reason:
+lowercased input cannot contain the uppercase X the mutated set adds.
+"""

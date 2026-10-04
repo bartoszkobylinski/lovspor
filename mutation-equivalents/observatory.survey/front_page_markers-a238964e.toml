@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey.py"
+symbol = "front_page_markers"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-    text = payload.decode("utf-8", errors="ignore")
++    text = payload.decode(errors="ignore")
+"""
+justification = """
+`bytes.decode` defaults to UTF-8, so dropping the explicit name selects the
+same codec, and codec lookup is case-insensitive, so "UTF-8" selects it too.
+Neither can differ from the original on any input.
+"""

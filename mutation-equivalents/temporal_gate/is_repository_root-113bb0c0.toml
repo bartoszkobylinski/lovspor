@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/temporal_gate.py"
+symbol = "is_repository_root"
+registered = "2026-09-27, PR #439, from run 36320125682"
+mutation = """
+-        check=False,
+-    )
++        )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`'s signature, so removing the
+explicit `check=False` leaves the call identical in behaviour. Python's own
+semantics; spelled out only because ruff PLW1510 demands an explicit `check`.
+"""

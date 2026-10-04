@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/observatory/lf_ledger.py"
+symbol = "read_ledger"
+registered = "2026-10-03, PR #512, from run 37107607188"
+mutation = """
+-    with path.open(encoding="utf-8") as handle:
++    with path.open(encoding="UTF-8") as handle:
+"""
+justification = """
+Same codec-name normalisation as the update_ledger entry: "UTF-8" and
+"utf-8" select the same decoder, so every ledger line reads to the same str
+and every invalid byte is refused the same way. The encoding=None sibling is
+locale-dependent and is killed by
+test_non_ascii_pages_are_kept_whatever_the_locale.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"

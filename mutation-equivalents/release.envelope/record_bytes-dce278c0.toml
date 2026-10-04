@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/release/envelope.py"
+symbol = "record_bytes"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-    return companion_json_bytes(record.model_dump(mode="json"))
++    return companion_json_bytes(record.model_dump(mode="JSON"))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: pydantic matches the mode string
+case-sensitively, so "JSON" is the Python path, whose output for the record
+and the marker serialises to the same bytes.
+"""

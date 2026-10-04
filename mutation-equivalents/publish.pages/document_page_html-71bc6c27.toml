@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "document_page_html"
+registered = "2026-09-16, PR #337, from run 35116838458"
+mutation = """
+-        render_body_html(heading, resolve, suppressed),
++        render_body_html(heading, resolve, ),
+"""
+justification = """
+A trailing comma in a call is syntax, not semantics: `f(a, b,)` and
+`f(a, b)` parse to the same call with the same two arguments. No input
+can distinguish them, so no test can kill this mutant.
+"""

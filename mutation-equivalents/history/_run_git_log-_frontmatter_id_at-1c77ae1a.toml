@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        text=True,
++        text=False,
+"""
+justification = """
+Same `encoding or errors or text or universal_newlines` test: encoding="utf-8"
+makes text mode truthy before `text` is consulted. The only other read of `text`
+is the universal_newlines disambiguation check, which runs only when
+universal_newlines is not None; neither call passes it. Python stdlib semantics.
+"""

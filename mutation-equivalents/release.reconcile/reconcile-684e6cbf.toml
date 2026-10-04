@@ -1,0 +1,22 @@
+[[equivalent]]
+file = "src/lovspor/release/reconcile.py"
+symbol = "reconcile"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-    plane: ControlPlane, action: ReconcileAction = "report", host: MigrationHost | None = None
++    plane: ControlPlane, action: ReconcileAction = "XXreportXX", host: MigrationHost | None = None
+"""
+justification = """
+`action` is only ever compared to two literals. Tracing every use inside the
+module: `reconcile` passes it to `_reconcile_unmarked` and `_resolve`;
+`_reconcile_unmarked` passes it to `_resolve_window`, which passes it to
+`_resolve_staged`; and the only expressions that read it are `action ==
+"complete"` and `action == "abandon"` in `_resolve` (lines 136, 138) and
+`_resolve_staged` (lines 151, 156). It is never rendered, stored or returned —
+the `action` field of `ReconcileReport` is filled by `_report` from its own
+literal argument ("none", "marker_written", "completed", "abandoned"), not from
+this parameter. So every value that is neither "complete" nor "abandon" drives
+the identical control flow, and "XXreportXX" is such a value exactly as "report"
+is. The default names the reporting run for the reader and for the Literal type;
+it carries no behaviour a test could observe.
+"""

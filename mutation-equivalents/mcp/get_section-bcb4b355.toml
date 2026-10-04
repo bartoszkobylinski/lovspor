@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "get_section"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    body = self._body_for_slug(record.slug or "") or ""
++    body = self._body_for_slug(record.slug or "") or "XXXX"
+"""
+justification = """
+The outer fallback fires only when the resolved record's stripped body is the
+empty string (a None body raises StateIntegrityError inside _body_for_slug
+before reaching it, and an absent slug raises in _resolve_slug earlier). An
+empty body contains no `### §` heading, and so does "XXXX" — for every
+section_id both inputs take the identical not-found path with the identical
+empty available-ids message. No section lookup can distinguish them.
+"""

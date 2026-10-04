@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/site/fixture.py"
+symbol = "document_bytes"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return companion_json_bytes(document.model_dump(mode="json"))
++    return companion_json_bytes(document.model_dump(mode="JSON"))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: pydantic matches the mode string
+case-sensitively, so "JSON" is the Python path, whose output for the document
+serialises to the same bytes.
+"""

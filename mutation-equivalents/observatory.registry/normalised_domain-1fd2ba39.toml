@@ -1,0 +1,24 @@
+[[equivalent]]
+file = "src/lovspor/observatory/registry.py"
+symbol = "normalised_domain"
+registered = "2026-08-31, PR #217, from run 33376430970"
+mutation = """
+-    return domain.lower().rstrip(".")
++    return domain.lower().rstrip("XX.XX")
+"""
+justification = """
+The argument to rstrip is a CHARACTER SET, so "XX.XX" is the set {X, .}. The
+string is lowercased on the same expression, and str.lower never yields an
+uppercase ASCII X, so the X in the set can never match a character that is
+there — the set behaves exactly like {.}. Verified exhaustively over all
+lowercased strings up to 3 characters drawn from ascii_letters + ".æøåX": zero
+disagreements.
+
+This supersedes two entries registered for `_host_matches` in PR #127, which
+argued the identical point about the same two lines. PR #217 moved that
+normalisation into `normalised_domain` so the register's collision check and
+the capture gate could stop deriving it separately (issue #215), and those
+entries no longer match any code in the file. An entry that can never match is
+the drift this register warns about, so they are removed rather than left as
+decoration — the argument itself is unchanged and is restated above.
+"""

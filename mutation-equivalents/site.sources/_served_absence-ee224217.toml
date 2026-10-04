@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/site/sources.py"
+symbol = "_served_absence"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    reason = record.reason or step.reason or step.outcome or "not_reported"
++    reason = record.reason or step.reason or step.outcome or "XXnot_reportedXX"
+"""
+assumption_test = "tests/unit/test_site_capabilities.py::TestSchema::test_an_authenticated_step_names_the_offending_fields"
+justification = """
+The fourth operand is never evaluated. A `TransportRecord` that is unobserved
+carries a non-empty `reason` (`_check_reason`, pinned by the transport case of
+the record-validator tests); one that is observed holds an `AuthenticatedStep`
+that is either unobserved with a non-empty `reason` (`_check_reason` on the
+step) or observed with a non-empty `outcome` (`_require_present`). All three
+are Literal strings, so one of the first three operands is truthy for every
+document the schema accepts, and `or` never reaches the literal. The validators
+are pydantic model validators, so the test that pins the step's two cases is
+named.
+"""

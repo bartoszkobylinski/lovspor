@@ -1198,11 +1198,12 @@ justification = "None is falsy, so it selects the same json encoder as False."
 
 @contextmanager
 def _register(tmp_path: Path, toml: str) -> Iterator[None]:
-    """Point the gate at a register written for this test."""
-    path = tmp_path / "mutation-equivalents.toml"
-    path.write_text(toml)
+    """Point the gate at a register written for this test: one entry file."""
+    register = tmp_path / "mutation-equivalents"
+    (register / "pkg").mkdir(parents=True)
+    (register / "pkg" / "entry.toml").write_text(toml)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(mutation_to_json, "EQUIVALENTS_FILE", path)
+        mp.setattr(mutation_to_json, "EQUIVALENTS_DIR", register)
         yield
 
 
@@ -1357,7 +1358,7 @@ class TestEquivalentRegister:
 
     def test_no_register_file_changes_nothing(self, tmp_path: Path) -> None:
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(mutation_to_json, "EQUIVALENTS_FILE", tmp_path / "absent.toml")
+            mp.setattr(mutation_to_json, "EQUIVALENTS_DIR", tmp_path / "absent")
             result = _run(
                 tmp_path,
                 _progress_line(killed=1, survived=1),
@@ -1390,7 +1391,7 @@ class TestEquivalentRegister:
         )
         with _register(tmp_path, toml):
             equivalents, refused = mutation_to_json.load_equivalents(
-                mutation_to_json.EQUIVALENTS_FILE
+                mutation_to_json.EQUIVALENTS_DIR
             )
 
         assert equivalents == []
@@ -1406,7 +1407,7 @@ class TestEquivalentRegister:
         )
         with _register(tmp_path, toml):
             equivalents, refused = mutation_to_json.load_equivalents(
-                mutation_to_json.EQUIVALENTS_FILE
+                mutation_to_json.EQUIVALENTS_DIR
             )
 
         assert refused == []
@@ -1487,11 +1488,77 @@ class TestEquivalentRegister:
         """The register in the repo root must always parse — a refused entry
         there means the gate is silently applying fewer waivers than it reads."""
         equivalents, refused = mutation_to_json.load_equivalents(
-            Path(__file__).parents[2] / "mutation-equivalents.toml"
+            Path(__file__).parents[2] / "mutation-equivalents"
         )
 
         assert refused == []
         assert equivalents
+
+    def test_every_entry_file_is_read(self, tmp_path: Path) -> None:
+        """Issue #516: one file per entry, so parallel PRs never edit the same file."""
+        register = tmp_path / "mutation-equivalents"
+        (register / "observatory.model").mkdir(parents=True)
+        (register / "observatory.registry").mkdir()
+        (register / "observatory.model" / "a.toml").write_text(MODEL_ENTRY)
+        other = MODEL_ENTRY.replace(MODEL_FILE, REGISTRY_FILE)
+        (register / "observatory.registry" / "b.toml").write_text(other)
+        (register / "README.md").write_text("not an entry\n")
+
+        equivalents, refused = mutation_to_json.load_equivalents(register)
+
+        assert refused == []
+        assert [e.file for e in equivalents] == [MODEL_FILE, REGISTRY_FILE]
+
+    def test_a_file_holding_two_entries_is_refused(self, tmp_path: Path) -> None:
+        """Two entries in one file is the shape that conflicted on every merge."""
+        with _register(tmp_path, MODEL_ENTRY + MODEL_ENTRY):
+            equivalents, refused = mutation_to_json.load_equivalents(
+                mutation_to_json.EQUIVALENTS_DIR
+            )
+
+        assert equivalents == []
+        assert refused == [
+            f"{tmp_path / 'mutation-equivalents' / 'pkg' / 'entry.toml'}: holds 2 entries, "
+            "one file per entry (issue #516)"
+        ]
+
+    def test_a_file_holding_no_entry_is_refused(self, tmp_path: Path) -> None:
+        with _register(tmp_path, "# nothing here\n"):
+            equivalents, refused = mutation_to_json.load_equivalents(
+                mutation_to_json.EQUIVALENTS_DIR
+            )
+
+        assert equivalents == []
+        assert refused[0].endswith("entry.toml: holds 0 entries, one file per entry (issue #516)")
+
+    def test_a_refused_entry_names_its_file(self, tmp_path: Path) -> None:
+        """A --check-equivalents error points at one small file."""
+        with _register(tmp_path, MODEL_ENTRY.replace("justification =", "note =")):
+            _, refused = mutation_to_json.load_equivalents(mutation_to_json.EQUIVALENTS_DIR)
+
+        entry = tmp_path / "mutation-equivalents" / "pkg" / "entry.toml"
+        assert refused == [f"{entry}: {MODEL_FILE}: missing justification"]
+
+    def test_the_old_single_file_register_is_refused_not_silently_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        """A branch from before #516 that re-adds the old file would have its
+        waivers ignored without a word; the refusal makes the summary say so."""
+        (tmp_path / "mutation-equivalents.toml").write_text(MODEL_ENTRY)
+        with _register(tmp_path, MODEL_ENTRY):
+            equivalents, refused = mutation_to_json.load_equivalents(
+                mutation_to_json.EQUIVALENTS_DIR
+            )
+
+        assert len(equivalents) == 1
+        assert refused == [
+            f"{tmp_path / 'mutation-equivalents.toml'}: the single-file register is no "
+            "longer read — move each entry into its own file under mutation-equivalents/ "
+            "(issue #516)"
+        ]
+
+    def test_the_repo_ships_no_single_file_register(self) -> None:
+        assert not (Path(__file__).parents[2] / "mutation-equivalents.toml").exists()
 
     def test_the_summary_shows_what_the_register_did(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -1509,7 +1576,7 @@ class TestEquivalentRegister:
             assert mutation_gate.main() == 0
 
         captured = capsys.readouterr().out
-        assert "- Registered equivalents: 1 (`mutation-equivalents.toml`)" in captured
+        assert "- Registered equivalents: 1 (`mutation-equivalents/`)" in captured
         assert "**equivalent**, 2026-08-18, PR #127" in captured
 
     def test_the_summary_shouts_about_a_refused_entry(
@@ -1619,14 +1686,14 @@ class TestEquivalentRegister:
 class TestShadowTreeCarriesTheRegister:
     """Issue #129: mutmut's clean baseline runs
     test_check_equivalents_accepts_the_register_this_repo_ships against the
-    *shadow* tree, not the checkout — if mutation-equivalents.toml isn't
+    *shadow* tree, not the checkout — if the mutation-equivalents/ register isn't
     also_copy'd in there, that test fails, the baseline aborts, and every PR
     touching src/lovspor/ reports tool_failed on a missing file rather than on
     a real mutant."""
 
     def test_the_repos_mutmut_config_also_copies_the_register(self) -> None:
         """Locks pyproject.toml's [tool.mutmut] also_copy list: dropping
-        "mutation-equivalents.toml" from it reproduces issue #129."""
+        "mutation-equivalents" from it reproduces issue #129."""
         repo_root = Path(__file__).parents[2]
         with pytest.MonkeyPatch.context() as mp:
             mp.chdir(repo_root)
@@ -1636,17 +1703,17 @@ class TestShadowTreeCarriesTheRegister:
             finally:
                 reset_mutmut_config()
 
-        assert Path("mutation-equivalents.toml") in also_copy
+        assert Path("mutation-equivalents") in also_copy
 
     def test_also_copy_lands_the_register_inside_mutants(self, tmp_path: Path) -> None:
         """Exercises mutmut's own copy_also_copy_files() the way the mutation
-        run does: also_copy naming a file is only useful if that file
-        actually ends up under mutants/."""
+        run does: also_copy naming the register is only useful if every entry
+        file, nested ones included, actually ends up under mutants/ (#516)."""
         (tmp_path / "pyproject.toml").write_text(
-            '[tool.mutmut]\nsource_paths = ["src/pkg/"]\n'
-            'also_copy = ["mutation-equivalents.toml"]\n'
+            '[tool.mutmut]\nsource_paths = ["src/pkg/"]\nalso_copy = ["mutation-equivalents"]\n'
         )
-        (tmp_path / "mutation-equivalents.toml").write_text("[[equivalent]]\n")
+        (tmp_path / "mutation-equivalents" / "pkg").mkdir(parents=True)
+        (tmp_path / "mutation-equivalents" / "pkg" / "entry.toml").write_text("[[equivalent]]\n")
         (tmp_path / "mutants").mkdir()
 
         with pytest.MonkeyPatch.context() as mp:
@@ -1657,16 +1724,15 @@ class TestShadowTreeCarriesTheRegister:
             finally:
                 reset_mutmut_config()
 
-        copied = tmp_path / "mutants" / "mutation-equivalents.toml"
+        copied = tmp_path / "mutants" / "mutation-equivalents" / "pkg" / "entry.toml"
         assert copied.read_text() == "[[equivalent]]\n"
 
     def test_also_copy_skips_a_register_that_does_not_exist(self, tmp_path: Path) -> None:
         """copy_also_copy_files() silently no-ops on a missing source path —
-        confirms the fix relies on the file being present in the checkout,
+        confirms the fix relies on the register being present in the checkout,
         not on mutmut inventing it."""
         (tmp_path / "pyproject.toml").write_text(
-            '[tool.mutmut]\nsource_paths = ["src/pkg/"]\n'
-            'also_copy = ["mutation-equivalents.toml"]\n'
+            '[tool.mutmut]\nsource_paths = ["src/pkg/"]\nalso_copy = ["mutation-equivalents"]\n'
         )
         (tmp_path / "mutants").mkdir()
 
@@ -1678,7 +1744,7 @@ class TestShadowTreeCarriesTheRegister:
             finally:
                 reset_mutmut_config()
 
-        assert not (tmp_path / "mutants" / "mutation-equivalents.toml").exists()
+        assert not (tmp_path / "mutants" / "mutation-equivalents").exists()
 
 
 # Issue #338: what the shadow tree has to carry is read off the suite itself,
@@ -1815,7 +1881,7 @@ class TestShadowTreeCarriesRepoState:
         found = _repo_state_the_unit_suite_reads(Path(__file__).parent)
 
         assert ".pre-commit-config.yaml" in found
-        assert "mutation-equivalents.toml" in found
+        assert "mutation-equivalents" in found
         assert "pyproject.toml" in found
 
     def test_the_repos_config_copies_the_hook_config_into_the_shadow_tree(

@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/model.py"
+symbol = "OpenAIEmbedder._truncate_to_tokens"
+registered = "2026-09-06, PR #252, from PR #252 run 34059471495"
+mutation = """
+-        "utf-8", errors="ignore"
++        errors="ignore"
+"""
+justification = """
+Same argument as the module-level `truncate_to_tokens` entry above: "utf-8" is
+`bytes.decode`'s documented default, so writing it and omitting it select the
+same codec. This call site was corrected in the same commit and carries the same
+mutation.
+"""

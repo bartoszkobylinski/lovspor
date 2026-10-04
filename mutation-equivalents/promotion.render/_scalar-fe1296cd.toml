@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/promotion/render.py"
+symbol = "_scalar"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    return json.dumps(value, ensure_ascii=False)
++    return json.dumps(value, ensure_ascii=None)
+"""
+justification = """
+`json.dumps` tests ensure_ascii for truth (`if self.ensure_ascii:` in the encoder,
+`ensure_ascii and ...` on the cached-encoder fast path), and None is falsy, so None
+and False select the same non-escaping encoder and return identical strings — the
+argument of the existing observatory/model.py entry. Stdlib semantics. The other
+two `ensure_ascii` mutants (dropped, True) are killed by
+test_front_matter_writes_non_ascii_as_itself_not_as_escapes.
+"""

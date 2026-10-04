@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/model.py"
+symbol = "truncate_to_tokens"
+registered = "2026-09-06, PR #252, from PR #252 run 34059471495"
+mutation = """
+-    return encoding.decode_bytes(tokens[:max_tokens]).decode("utf-8", errors="ignore"), True
++    return encoding.decode_bytes(tokens[:max_tokens]).decode("UTF-8", errors="ignore"), True
+"""
+justification = """
+Codec names are normalised before lookup — case is folded and separators are
+equalised — so "utf-8" and "UTF-8" resolve to one codec. `codecs.lookup` is
+documented to do this, and `"utf-8" != "UTF-8"` is the only difference the
+mutant introduces; it never reaches behaviour.
+"""

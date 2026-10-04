@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "_is_chrome"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    words = _CLASS_WORD.findall(f"{node.get('class') or ''} {node.get('id') or ''}".lower())
++    words = _CLASS_WORD.findall(f"{node.get('class') or 'XXXX'} {node.get('id') or ''}".lower())
+"""
+justification = """
+The default is used only when the class attribute is absent or empty. Then the
+original contributes no word and the mutant contributes the one word "xxxx", which
+is not in _CHROME_CLASS_WORDS ({sidebar, breadcrumb, breadcrumbs, cookie, share}).
+`isdisjoint` answers the same with or without a word outside the set, so the
+returned boolean is identical. Python semantics over a fixed frozenset.
+"""

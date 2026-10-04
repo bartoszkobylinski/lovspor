@@ -824,7 +824,7 @@ def test_citation_hint_caps_at_three_suggestions() -> None:
 
 def test_assumption_difflib_close_matches_defaults() -> None:
     # Pins the stdlib defaults two registered equivalent mutants argue from
-    # (mutation-equivalents.toml, issue #132): dropping n=3 or cutoff=0.6
+    # (mutation-equivalents/, issue #132): dropping n=3 or cutoff=0.6
     # from a get_close_matches call changes nothing ONLY while these hold.
     sig = inspect.signature(difflib.get_close_matches)
     assert sig.parameters["n"].default == 3

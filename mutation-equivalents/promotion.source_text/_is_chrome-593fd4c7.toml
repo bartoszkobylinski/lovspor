@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "_is_chrome"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    if (node.get("role") or "").strip().lower() in _CHROME_ROLES:
++    if (node.get("role") or "XXXX").strip().lower() in _CHROME_ROLES:
+"""
+justification = """
+The default is used only when the role attribute is absent or empty. Then the
+original tests "" and the mutant "xxxx" for membership in _CHROME_ROLES
+({navigation, complementary, banner, contentinfo, search}); neither is a member,
+so both conditions are False. A present, non-empty role is read identically.
+Python `or`/`in` semantics over a fixed frozenset.
+"""

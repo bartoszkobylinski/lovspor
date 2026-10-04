@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/promotion/writer.py"
+symbol = "_json"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\\n"
++    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=None) + "\\n"
+"""
+justification = """
+`json.dumps` tests ensure_ascii only for truth: None and False are both falsy and
+select the same non-escaping string encoder, so the observations file is
+byte-identical under both on every input, non-ASCII included (the ensure_ascii=True
+and dropped-argument mutants, which DO escape, are killed by
+test_promotion_writer.py's canonical-JSON tests). Python stdlib semantics.
+"""

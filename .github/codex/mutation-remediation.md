@@ -6,7 +6,7 @@ of what the mutation changed — work from that. `uv run mutmut show <id>` adds 
 unless the mutmut cache is present, and ids renumber, so quote the diff, not the id.
 
 Skip any survivor whose `equivalent` field is set: it is already registered in
-`mutation-equivalents.toml` as provably equivalent, no test can kill it, and the gate
+`mutation-equivalents/` as provably equivalent, no test can kill it, and the gate
 is not failing because of it.
 
 Your allowed action is to add or strengthen tests that correctly specify existing
@@ -18,7 +18,7 @@ Hard constraints:
 - do not weaken or delete existing assertions;
 - do not skip/xfail tests to satisfy the gate;
 - do not change mutation thresholds;
-- do not add an equivalent-mutant waiver — `mutation-equivalents.toml` is owner-reviewed
+- do not add an equivalent-mutant waiver — `mutation-equivalents/` is owner-reviewed
   and outside your scope; report `likely_equivalent` and let a human decide;
 - do not change methodology or frozen benchmark decisions.
 

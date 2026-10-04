@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/observatory/listing_content.py"
+symbol = "parse_undated_listing"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-    region, _ = _region(_decoded(payload, "text/html"))
++    region, _ = _region(_decoded(payload, "XXtext/htmlXX"))
+"""
+justification = """
+`_decoded` reads its content-type argument only through `_charset`, which looks at
+`content_type.split(";")[1:]` — the parameters after the media type. A string with
+no ";" splits into one part, so the slice is empty and `_charset` returns None for
+"text/html" and "XXtext/htmlXX" alike; `_decoded` then tries UTF-8 and falls back
+to the raw bytes identically. The media type itself is never compared to anything.
+Python's str.split semantics over this module's own code.
+"""

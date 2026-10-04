@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "_read_entries"
+registered = "2026-09-02, PR #227, from run 33619976486"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+`subprocess.run` tests `check` for truth, and None is falsy, so None and
+False select the same no-raise behaviour — the register's ensure_ascii
+precedent, on the same stdlib truthiness contract. Matches both
+`check=False` call sites in this function (the commit probe and the
+notes read); each is followed by an explicit returncode branch, which is
+the behaviour the flag's falsiness preserves.
+"""

@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_commands.py"
+symbol = "_write"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            handle.write(json.dumps(shape.model_dump(mode="json"), ensure_ascii=False) + "\\n")
++            handle.write(json.dumps(shape.model_dump(mode="json"), ensure_ascii=None) + "\\n")
+"""
+justification = """
+`json.dumps` tests ensure_ascii for truth and None is falsy, so None and False
+select the same encoder — the same equivalence already registered for
+`record_to_json_line` and `write_registry`. Verified here on a row carrying
+`kunngjøring`: both spellings produce byte-identical output.
+"""

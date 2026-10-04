@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/promotion/decisions.py"
+symbol = "records"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-        lines = self._path.read_text(encoding="utf-8").split("\\n")
++        lines = self._path.read_text(encoding="UTF-8").split("\\n")
+"""
+justification = """
+Same codec-name normalisation as the `append` entry above: both spellings select
+the one utf-8 decoder, so every log reads back identically. encoding=None is
+killed under the C locale by test_the_log_is_utf8_whatever_the_locale.
+Python codec semantics.
+"""

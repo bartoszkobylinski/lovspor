@@ -1,0 +1,12 @@
+[[equivalent]]
+file = "src/lovspor/publish/inventory.py"
+symbol = "_front_matter_fields"
+registered = "2026-09-06, PR #244, from run on d0e1597"
+mutation = """
+-            key = line.split(":", 1)[0].strip()
++            key = line.split(":", 2)[0].strip()
+"""
+justification = """
+Same head-element argument as the maxsplit-dropped entry: [0] is the
+text before the first ":" for maxsplit 1, 2 or unbounded alike.
+"""

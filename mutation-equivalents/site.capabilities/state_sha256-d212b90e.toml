@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "state_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        state.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
++        state.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=None
+"""
+justification = """
+`json.dumps` reads `ensure_ascii` only for its truth value, and `None` is
+falsy exactly as `False` is, so both select the encoder that keeps non-ASCII as
+is and produce byte-identical output for every input. Same argument as the
+registered `observatory/model.record_to_json_line` entry; Python's own `None`
+semantics, not a dependency. (`ensure_ascii` removed or `True` is NOT
+equivalent and is killed by a non-ASCII challenge.)
+"""

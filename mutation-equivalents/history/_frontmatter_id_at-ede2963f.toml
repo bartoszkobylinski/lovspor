@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+`subprocess.run` reads check only as `if check and retcode:`; None and False are
+both falsy, so both return the CompletedProcess and never raise. The returncode
+branch that follows is what handles a missing blob. Python stdlib semantics.
+"""

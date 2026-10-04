@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_link_html"
+registered = "2026-09-06, PR #244, from run on d0e1597"
+mutation = """
+-    href = html.escape(resolved, quote=True)
++    href = html.escape(resolved, quote=False)
+"""
+justification = """
+Same whitelist-invariant argument as the quote=None entry: the
+canonical charset contains nothing html.escape would rewrite, so both
+flag values produce the identical href for every input the gate admits.
+"""

@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "read"
+registered = "2026-09-22, PR #353, from run 35688797552"
+mutation = """
+-    self._owes_delay = False
++    self._owes_delay = None
+"""
+justification = """
+The only reader is `_wait`, which tests the attribute with `if self._owes_delay:`
+and then sets it to True. `None` and `False` are both falsy, so the first request
+to the host owes no delay under either value and every later one owes it. The
+attribute is annotated `bool` for mypy; nothing compares it by identity.
+"""

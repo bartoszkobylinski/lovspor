@@ -1,0 +1,21 @@
+[[equivalent]]
+file = "src/lovspor/site/drift.py"
+symbol = "state_differences"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-    return tuple(_differences(served.model_dump(mode="json"), observed.model_dump(mode="json"), ""))
++    return tuple(_differences(served.model_dump(mode="json"), observed.model_dump(mode="json"), None))
+"""
+assumption_test = "tests/unit/test_site_drift.py::TestStateDifferences::test_names_every_differing_leaf_by_its_dotted_path_sorted"
+justification = """
+`_differences` reads its `path` argument in two places. In the dict branch it
+is read for truth only — `f"{path}.{key}" if path else key` — and `None` is
+falsy exactly as `""` is, so the first level of keys becomes the same bare
+names and every deeper call receives a non-empty string, never the root value
+again. The other read, `yield path`, is the leaf branch, reached at the root
+only if the two arguments are not both dicts; they are two `model_dump`
+results of `State`, and the pydantic dump of a model is a dict, so the leaf
+branch is never entered with the root value. The named test pins that the
+walk recurses from the root (the paths it asserts are dotted from the first
+level; a non-dict root would yield the root value alone).
+"""

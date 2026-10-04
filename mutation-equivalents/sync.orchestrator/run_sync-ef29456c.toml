@@ -1,0 +1,31 @@
+[[equivalent]]
+file = "src/lovspor/sync/orchestrator.py"
+symbol = "run_sync"
+registered = "2026-09-30, issue #427 (owner decision 2026-09-29), from PR #422's survivor list"
+mutation = """
+-        if _rerender_is_noop(settings, upstream_doc, now, prior_record):
++        if _rerender_is_noop(settings, upstream_doc, None, prior_record):
+"""
+justification = """
+`_rerender_is_noop` reads `now` in one place: `_frontmatter_context` builds
+`retrieved_at=upstream.retrieved_at or now`, so `now` matters only when
+`upstream.retrieved_at` is None. Two paths reach that line or not:
+
+- `upstream.xml_hash != prior.xml_hash`: the function returns False on its
+  first line, before `now` is read.
+- The hashes match: then `upstream_doc` is what `_rerender_upstream` returned
+  for that same equality, which is `_with_retrieved_at(doc,
+  _preserved_observation(...))`. `_preserved_observation` returns the file's
+  own `retrieved_at` or else `prior.last_seen`; `last_seen` is a required
+  `datetime` field of ManifestRecord, and a datetime is always truthy, so
+  `retrieved_at` is a datetime and `or now` never evaluates `now`.
+
+The two paths leave nothing out, so passing None for `now` changes no input
+`_rerender_is_noop` acts on. PR #422's remediation "killed" this mutant only
+by replacing `_rerender_is_noop` with a recorder and asserting on the `now` it
+received; that test is removed (issue #427). The argument rests on
+`_rerender_upstream` always carrying an observation when the hashes match,
+with the published file present and with it gone, which the assumption test
+pins by driving a real sync.
+"""
+assumption_test = "tests/unit/test_sync_orchestrator_real_corpus.py::test_assumption_a_hash_matched_rerender_always_carries_an_observation"

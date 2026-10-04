@@ -15,12 +15,12 @@ lovspor practice (no numeric threshold was ever set, decisions.md §9c):
   folded into the killed count (CLAUDE.md testing strategy).
 
 The one exception is the register of provably-equivalent mutants (issue #122):
-a survivor whose mutation is recorded in `mutation-equivalents.toml`, with a
-written justification, stops failing the gate. It does NOT stop being reported.
-Counts, score and the survivor list are untouched — the raw signal is the point
-(decisions.md §9c: "equivalent survivors are registered, not chased") — only the
-pass/fail verdict moves, and each excused survivor carries the justification
-that excused it.
+a survivor whose mutation is recorded in `mutation-equivalents/` (one TOML file
+per entry, issue #516), with a written justification, stops failing the gate. It
+does NOT stop being reported. Counts, score and the survivor list are untouched —
+the raw signal is the point (decisions.md §9c: "equivalent survivors are
+registered, not chased") — only the pass/fail verdict moves, and each excused
+survivor carries the justification that excused it.
 """
 
 from __future__ import annotations
@@ -55,7 +55,9 @@ _WRAPPER_VERDICTS = frozenset({0, 2, 4, 6, 8, 10, 12, 14})
 ALLOWED_TOOL_EXIT_CODES = _WRAPPER_VERDICTS | frozenset(code | 16 for code in _WRAPPER_VERDICTS)
 
 
-EQUIVALENTS_FILE = Path("mutation-equivalents.toml")
+# One TOML file per entry (issue #516): every PR appended to the end of a single
+# file, so any two PRs registering equivalents conflicted on each other's merge.
+EQUIVALENTS_DIR = Path("mutation-equivalents")
 EQUIVALENT_FIELDS = ("file", "symbol", "mutation", "justification")
 
 
@@ -260,7 +262,7 @@ def stale_entries(equivalents: list[Equivalent], root: Path) -> list[str]:
     return reports
 
 
-def load_equivalents(path: Path) -> tuple[list[Equivalent], list[str]]:
+def load_equivalents(register: Path) -> tuple[list[Equivalent], list[str]]:
     """(registered equivalents, refused entries with the reason).
 
     A refused entry is never applied: silencing a survivor is a decision, and
@@ -268,17 +270,38 @@ def load_equivalents(path: Path) -> tuple[list[Equivalent], list[str]]:
     reported rather than raised — a broken register must not cost the run its
     verdict, it must cost the entry its effect.
     """
-    if not path.exists():
-        return [], []
+    legacy = register.with_suffix(".toml")
+    refused = [_legacy_refusal(legacy)] if legacy.is_file() else []
+    if not register.is_dir():
+        return [], refused
+    parsed = [_entry_file(path) for path in sorted(register.rglob("*.toml"))]
+    return (
+        [e for e in parsed if isinstance(e, Equivalent)],
+        refused + [r for r in parsed if isinstance(r, str)],
+    )
+
+
+def _legacy_refusal(legacy: Path) -> str:
+    # A branch cut before #516 that re-adds the single file would otherwise
+    # lose its waivers without a word.
+    return (
+        f"{legacy}: the single-file register is no longer read — move each entry "
+        "into its own file under mutation-equivalents/ (issue #516)"
+    )
+
+
+def _entry_file(path: Path) -> Equivalent | str:
+    """Parse one register file, which holds exactly one entry, or say why it is refused."""
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as e:
-        return [], [f"unreadable register {path}: {e}"]
-    parsed = [_equivalent(raw) for raw in data.get("equivalent", [])]
-    return (
-        [e for e in parsed if isinstance(e, Equivalent)],
-        [r for r in parsed if isinstance(r, str)],
-    )
+        return f"unreadable register entry {path}: {e}"
+    entries = data.get("equivalent", [])
+    if not isinstance(entries, list) or len(entries) != 1:
+        count = len(entries) if isinstance(entries, list) else 0
+        return f"{path}: holds {count} entries, one file per entry (issue #516)"
+    parsed = _equivalent(entries[0])
+    return parsed if isinstance(parsed, Equivalent) else f"{path}: {parsed}"
 
 
 def _match(survivor: dict[str, object], equivalents: list[Equivalent]) -> Equivalent | None:
@@ -386,7 +409,7 @@ def build_result(
     counts, run_finished = parse_counts(raw)
     health = _health(raw, tool_exit_code, run_finished)
     survivors = parse_survivors(survivors_file)
-    equivalents, refused = load_equivalents(EQUIVALENTS_FILE)
+    equivalents, refused = load_equivalents(EQUIVALENTS_DIR)
     registered, unexplained = annotate_equivalents(survivors, equivalents)
     # Pessimistic score: only 🎉 counts as killed. Timeout and suspicious fail
     # the gate anyway (mutmut exit bits 4 and 8), so they never inflate the score.
@@ -416,17 +439,17 @@ def build_result(
 
 def _report_register() -> int:
     """`--check-equivalents`: does the register parse, and what does it excuse?"""
-    equivalents, refused = load_equivalents(EQUIVALENTS_FILE)
+    equivalents, refused = load_equivalents(EQUIVALENTS_DIR)
     for entry in equivalents:
         print(f"registered: {entry.file} {entry.symbol} — {' '.join(entry.change)}")
     for reason in refused:
         print(f"REFUSED: {reason}", file=sys.stderr)
-    stale = stale_entries(equivalents, EQUIVALENTS_FILE.parent)
+    stale = stale_entries(equivalents, EQUIVALENTS_DIR.parent)
     for reason in stale:
         print(f"STALE: {reason}", file=sys.stderr)
     print(
         f"{len(equivalents)} registered, {len(refused)} refused, {len(stale)} stale "
-        f"({EQUIVALENTS_FILE})"
+        f"({EQUIVALENTS_DIR}/)"
     )
     return 1 if refused or stale else 0
 

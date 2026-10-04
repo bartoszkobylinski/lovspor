@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "source_form"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    media = content_type.split(";", 1)[0].strip().lower()
++    media = content_type.split(";", )[0].strip().lower()
+"""
+justification = """
+Element [0] of `str.split(sep, maxsplit)` is the text before the first `sep` for
+every maxsplit >= 1 and for the unbounded default alike; only later elements
+depend on the limit, and only [0] is read. Same argument as the registered
+`line.split(":", 1)[0]` entries. Python's own semantics.
+"""

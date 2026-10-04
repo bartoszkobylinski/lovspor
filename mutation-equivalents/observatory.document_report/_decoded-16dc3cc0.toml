@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "_decoded"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-    for encoding in (_charset(content_type), "utf-8"):
++    for encoding in (_charset(content_type), "UTF-8"):
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"
+justification = """
+The name is used once, as bytes.decode(encoding). The codec registry lower-cases
+a name before looking it up (codecs.lookup, encodings.normalize_encoding), so
+"UTF-8" and "utf-8" resolve to the same utf_8 codec: the same text for valid
+bytes, the same UnicodeDecodeError for invalid ones. The argument rests on the
+standard library's codec lookup rather than on language semantics, so the
+assumption test pins it.
+"""

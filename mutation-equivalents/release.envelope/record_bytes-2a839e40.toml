@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/release/envelope.py"
+symbol = "record_bytes"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-    return companion_json_bytes(record.model_dump(mode="json"))
++    return companion_json_bytes(record.model_dump(mode=None))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+pydantic selects the JSON serialiser only for the exact string "json"; None
+and any other string take the Python path. `ReleaseRecord` holds str, int,
+a `Literal["1"]`, None and nested models of the same, and `Marker` two str
+fields — nothing the Python path renders differently from the JSON path, so
+`companion_json_bytes` (`json.dumps`) produces the same bytes under either
+mode. Same argument as the registered `site/fixture.document_bytes` entries;
+the shared assumption test dumps a record and a marker under every mode
+spelling against the JSON-mode reference, so a field type the Python path
+leaves as an object turns this waiver into a red test.
+"""

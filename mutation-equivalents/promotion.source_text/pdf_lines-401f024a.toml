@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "pdf_lines"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-        reader = PdfReader(io.BytesIO(payload), strict=False)
++        reader = PdfReader(io.BytesIO(payload), )
+"""
+justification = """
+pypdf's PdfReader declares `strict: bool = False`, so dropping the argument passes
+the same False. Argued from the dependency's default, so pinned: the assumption
+test asserts the signature default is False and that the default reader repairs
+what strict=True refuses, exactly as strict=False does.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_pypdf_reads_strict_for_truth_and_defaults_it_off"
