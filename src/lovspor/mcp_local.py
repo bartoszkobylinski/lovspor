@@ -27,6 +27,7 @@ from lovspor.mcp import (
     _bounded_limit,
     _cross_references_for,
     _normalize_section_id,
+    _parse_valid_at,
     _section_from_body,
     _section_index_from_body,
     _section_result,
@@ -81,6 +82,13 @@ class ServedCorpus:
             state = self._reader.at_state(recorded_at)
             return state.search_body(query, dataset=dataset, limit=limit)
         return self._reader.search_body(query, dataset=dataset, limit=limit)
+
+    def get_temporal_events(
+        self, slug: str, section_id: str | None, recorded_at: str | None, valid_at: str | None
+    ) -> dict[str, Any]:
+        state = self._reader if recorded_at is None else self._reader.at_state(recorded_at)
+        evaluated = None if valid_at is None else _parse_valid_at(valid_at)
+        return state.get_temporal_events(slug, section_id, evaluated)
 
     def validate_citation(self, citation: str, recorded_at: str | None) -> dict[str, Any]:
         if recorded_at is not None:

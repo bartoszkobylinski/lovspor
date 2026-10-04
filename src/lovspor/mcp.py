@@ -4360,19 +4360,18 @@ def build_server(
         state's body, with full provenance. A checkout that never
         synchronised the attestation registry (a plain clone; use
         ``lovspor fetch-corpus``) gets a typed error instead — a missing
-        evidence channel is never reported as ``unattested``. ``events: []`` is a successful answer
+        evidence channel is never reported as ``unattested``. A state at
+        or after the gate epoch with no attestation is a typed
+        ``UnattestedGateStateError`` ("unattested gate-era state: ..."):
+        the channel works and says this state is unproven — unlike
+        ``unattested`` (pre-epoch states only) or ``AttestationError``
+        (registry not synchronised, or no epoch recorded). ``events: []`` is a successful answer
         ("no amendment facts attributed"), distinct from the typed
         failures: unknown act, unknown section, and a document whose
         derivation fails loudly (an unrecognised commencement marker is
         an error naming its line, never a partial or guessed answer).
         """
-        return (
-            reader if recorded_at is None else reader.at_state(recorded_at)
-        ).get_temporal_events(
-            slug,
-            section_id,
-            None if valid_at is None else _parse_valid_at(valid_at),
-        )
+        return served.get_temporal_events(slug, section_id, recorded_at, valid_at)
 
     @_tool()
     def get_law_at(slug: str, target_date: str) -> str:

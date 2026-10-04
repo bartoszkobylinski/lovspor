@@ -514,7 +514,7 @@ Return the source-derived temporal events of one act — amendments, insertions 
 
 **Outcomes stay distinct:** unknown act (naming the requested date and `corpus_commit` when historical); unknown section (listing the act's inventory); `events: []` as a *successful* answer ("no amendment facts attributed"); a typed derivation failure for a document whose commencement marker the parser does not recognise — never a partial or guessed answer; the scope error above for a forskrift; the evidence-channel `AttestationError`; and the gate-era `UnattestedGateStateError`.
 
-The tool's own description (its docstring, served to clients) is unchanged by the epoch: descriptions are part of the frozen LLHB apparatus document `benchmarks/llhb/runner/tool-surface-v5.json`, whose hash covers them, and no input or output schema changes — the new outcome is an error, never a response shape.
+The tool's own description (its docstring, served to clients) names this outcome since `tool-surface-v6` (`benchmarks/llhb/runner/tool-surface-v6.json`, issue #440); under v5 it was documented here only, because descriptions are part of the frozen LLHB apparatus whose hash covers them. No input or output schema changes — the new outcome is an error, never a response shape.
 
 **Sample call:** `get_temporal_events("advokatloven", section_id="73", valid_at="2026-08-15")`
 

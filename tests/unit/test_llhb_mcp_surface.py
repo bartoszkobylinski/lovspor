@@ -310,10 +310,12 @@ class TestToolConfig:
         v5 -> v6 (2026-10-04): ADR-0016 slice S5 — get_law, get_section
         and search_laws serve the local-regulations dataset opt-in (a
         <authority_id>/<slug> or lf-/lk- address, dataset
-        "lokale-forskrifter"). Three descriptions change; no tool name and
-        no input or output schema does, and existing calls answer
-        byte-identically (test_mcp_existing_calls.py). Taken with the S5
-        implementation itself.
+        "lokale-forskrifter"). Three descriptions change for that, and the
+        get_temporal_events description gains its gate-era outcome
+        (UnattestedGateStateError), queued for this bump by owner decision
+        2026-09-27 (#440); no tool name and no input or output schema
+        changes, and existing calls answer byte-identically
+        (test_mcp_existing_calls.py). Taken with the S5 implementation.
 
         v1 through v5 stay committed untouched so the runs that recorded
         their hashes remain verifiable (check_fairness --surface-path);
