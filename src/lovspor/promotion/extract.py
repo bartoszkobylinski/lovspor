@@ -94,6 +94,17 @@ _FUNCTION_WORDS = frozenset(
 _WORD = re.compile(r"[^\W\d_]+")
 _UNPRINTABLE = frozenset({"Cc", "Co", "Cn", "Cs"})
 _LOVDATA_PRINT = re.compile(r"utskrift\s+fra\s+lovdata", re.IGNORECASE)
+# A browser print of lovdata.no stamps every page with chrome: a print date or a
+# page counter beside the page URL or the ``Lovdata - <title>`` page title (#519).
+# Requiring the chrome keeps a regulation that merely links Lovdata in its body
+# from being held: a bare URL, or ``<title> - Lovdata`` as a link's text, is not one.
+_PRINT_CHROME = r"(?:\d{1,2}[./]\d{1,2}[./]\d{2,4}(?:,?\s*\d{1,2}:\d{2})?|side\s+\d+\s+av\s+\d+)"
+_LOVDATA_PAGE = r"(?:https?://)?(?:www\.)?lovdata\.no/\S+"
+_LOVDATA_PRINT_CHROME = re.compile(
+    rf"^[ \t]*{_PRINT_CHROME}[ \t]*(?:{_LOVDATA_PAGE}|lovdata\s+-\s)"
+    rf"|(?:^|\s){_LOVDATA_PAGE}[ \t]+\d+/\d+[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 _READERS: dict[SourceForm, Callable[[bytes, str], tuple[str, ...]]] = {
     SourceForm.HTML: html_lines,
@@ -127,7 +138,7 @@ def _text_hold(text: str) -> tuple[ExtractionHoldReason, str] | None:
         return ExtractionHoldReason.EMPTY_TEXT, f"under {MIN_TEXT_CHARS} characters of text"
     if _is_garbled(text):
         return ExtractionHoldReason.GARBLED_TEXT, "text does not read as Norwegian prose"
-    if _LOVDATA_PRINT.search(text):
+    if _LOVDATA_PRINT.search(text) or _LOVDATA_PRINT_CHROME.search(text):
         return ExtractionHoldReason.LOVDATA_COPY, "the text is a print out of Lovdata"
     if has_placeholder_date(text):
         return ExtractionHoldReason.PLACEHOLDER_DATE, "a date is a draft's placeholder"
