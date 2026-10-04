@@ -1192,6 +1192,7 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
             "author": "${{ steps.author.outputs.author }}",
             "before_sha": "${{ steps.base.outputs.before_sha }}",
             "patch": "${{ steps.patch.outputs.patch }}",
+            "not_run": "${{ steps.ran.outputs.not_run }}",
         }
         assert upload["with"]["name"] == artifact
         assert download["with"]["name"] == artifact
@@ -1553,7 +1554,8 @@ class TestARunnerSetUpFailureIsNamedAsTheRunner:
 
         assert fallback["if"] == (
             "failure() && steps.verdict.outcome != 'failure' && "
-            "!(needs.codex-author.result == 'failure' && needs.codex-author.outputs.skip == '')"
+            "!(needs.codex-author.result == 'failure' && needs.codex-author.outputs.skip == '') "
+            "&& needs.codex-author.outputs.not_run == ''"
         )
         assert "needs.codex-author.result == 'failure'" in reporter["if"]
 
@@ -2664,4 +2666,134 @@ class TestAMissingToolHostFailsTheRemediationLane:
         body = self._escalate(tmp_path, "in_job")
 
         assert body.startswith("Mutation remediation run FAILED before completing")
+        assert _RUN_URL in body
+
+
+_AUTHOR_STEP = "Codex — independent PR test author"
+_AUTHOR_RAN = "Fail a round that executed no command"
+_AUTHOR_NOT_RUN = "The independent test author executed no command (#489)"
+
+
+class TestAnAuthorRoundThatRanNoCommandFails:
+    """Issue #489: on PR #469 (head 99e00f7, run 36677467828) `codex-author`
+    and `codex-tests` were green while the independent test author never ran a
+    command — `codex-code-mode-host` was missing (#448) and `codex exec` exited
+    0. A round with no executed command, or with no transcript at all, now
+    fails the author lane, and the hosted reporter names it a lane failure."""
+
+    FALLBACK = "Escalate — the pipeline failed before the tests ran"
+
+    def _stop(
+        self, tmp_path: Path, transcript: str | None, *, helper: bool = True
+    ) -> tuple[subprocess.CompletedProcess[str], str]:
+        if transcript is not None:
+            shutil.copy(_REMEDIATION_FIXTURES / transcript, tmp_path / "codex-author.log")
+        if helper:
+            ci = tmp_path / "scripts" / "ci"
+            ci.mkdir(parents=True)
+            for name in ("author_transcript.py", "remediation_transcript.py", "mutation_gate.py"):
+                shutil.copy2(_REPO / "scripts" / "ci" / name, ci / name)
+        out = tmp_path / "out"
+        out.touch()
+        env = {"PATH": _SYSTEM_PATH, "RUNNER_TEMP": str(tmp_path), "GITHUB_OUTPUT": str(out)}
+        step = _named_step(_steps("pr-pipeline.yml", "codex-author"), _AUTHOR_RAN)
+        done = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return done, out.read_text(encoding="utf-8")
+
+    def test_the_stop_reads_the_transcript_the_codex_step_keeps(self) -> None:
+        steps = _steps("pr-pipeline.yml", "codex-author")
+        names = [step.get("name") for step in steps]
+        author = _named_step(steps, _AUTHOR_STEP)
+        stop = _named_step(steps, _AUTHOR_RAN)
+
+        assert '| tee "$RUNNER_TEMP/codex-author.log"' in author["run"]
+        assert "status=${PIPESTATUS[0]}" in author["run"]
+        assert names.index(_AUTHOR_STEP) < names.index(_AUTHOR_RAN) < names.index("Scope guard")
+        # The Claude fallback's transcript has no `exec` marker (#472).
+        assert stop["if"] == "steps.author.outputs.author == 'codex'"
+        assert stop["id"] == "ran"
+
+    def test_the_pr_469_round_fails_the_lane_and_names_the_runner(self, tmp_path: Path) -> None:
+        done, out = self._stop(tmp_path, "codex-no-command-run-36670610064.log")
+
+        assert done.returncode == 1
+        assert f"::error::{_AUTHOR_NOT_RUN}" in done.stdout
+        assert "codex-code-mode-host is missing" in done.stdout
+        assert out.startswith("not_run=the runner's Codex CLI could not start its execution tool")
+
+    def test_a_round_that_ran_commands_passes_silently(self, tmp_path: Path) -> None:
+        done, out = self._stop(tmp_path, "codex-ran-commands-run-36531263464.log")
+
+        assert done.returncode == 0
+        assert "::error::" not in done.stdout
+        assert out == ""
+
+    def test_a_missing_transcript_fails_closed(self, tmp_path: Path) -> None:
+        done, out = self._stop(tmp_path, None)
+
+        assert done.returncode == 1
+        assert f"::error::{_AUTHOR_NOT_RUN}: the round left no transcript" in done.stdout
+        assert out == "not_run=the round left no transcript\n"
+
+    @pytest.mark.parametrize(
+        ("transcript", "status"),
+        [
+            ("codex-ran-commands-run-36531263464.log", 0),
+            ("codex-no-command-run-36670610064.log", 1),
+            (None, 1),
+        ],
+    )
+    def test_a_head_without_the_helper_still_fails_closed(
+        self, tmp_path: Path, transcript: str | None, status: int
+    ) -> None:
+        """A branch cut before the helper landed runs this workflow with its
+        own scripts/ci; the guard's fallback must not turn into a pass."""
+        done, _out = self._stop(tmp_path, transcript, helper=False)
+
+        assert done.returncode == status
+
+    def test_the_annotation_carries_the_classifiers_signature(self) -> None:
+        stop = _named_step(_steps("pr-pipeline.yml", "codex-author"), _AUTHOR_RAN)
+        classifier = (_CI_SCRIPTS / "classify_lane_failure.py").read_text(encoding="utf-8")
+
+        assert f"::error::{_AUTHOR_NOT_RUN}" in stop["run"]
+        assert f'AGENT_NOT_RUN_SIGNATURE = "{_AUTHOR_NOT_RUN}"' in classifier
+
+    def test_the_reason_reaches_the_verifier_which_leaves_it_to_the_reporter(self) -> None:
+        """`codex-tests` cannot read the jobs API: its generic round would claim
+        the label first and make the classifying reporter stand down."""
+        author = _workflow("pr-pipeline.yml")["jobs"]["codex-author"]
+        fallback = _named_step(_steps("pr-pipeline.yml", "codex-tests"), self.FALLBACK)
+
+        assert author["outputs"]["not_run"] == "${{ steps.ran.outputs.not_run }}"
+        assert fallback["if"].endswith("&& needs.codex-author.outputs.not_run == ''")
+
+    def _report(self, tmp_path: Path, kind: str) -> str:
+        return TestARunnerSetUpFailureIsNamedAsTheRunner()._report(tmp_path, kind, _AUTHOR_RAN)
+
+    def test_a_no_command_round_is_reported_as_a_lane_failure(self, tmp_path: Path) -> None:
+        body = self._report(tmp_path, "agent_did_not_run")
+
+        assert body.startswith("codex-tests BLOCKED — the independent test author ran no command")
+        assert "no independent test reviewed this PR" in body
+        assert "#489" in body
+        assert "`gh run rerun 1 --failed`" in body
+        assert _RUN_URL in body
+        assert "pr edit 482 --add-label needs-human:pipeline" in (tmp_path / "gh-calls").read_text()
+
+    def test_a_missing_tool_host_is_reported_as_the_runners_install(self, tmp_path: Path) -> None:
+        body = self._report(tmp_path, "runner_tool")
+
+        assert body.startswith("codex-tests BLOCKED by an INFRASTRUCTURE failure")
+        assert "the runner's Codex install, not the diff" in body
+        assert "no independent test reviewed this PR" in body
+        assert "#448" in body
+        assert "`gh run rerun 1 --failed`" in body
         assert _RUN_URL in body

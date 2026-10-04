@@ -546,3 +546,70 @@ def test_the_cli_names_a_remediate_lane_that_died_in_set_up_job(
         "step=Set up job",
         "signature=",
     ]
+
+
+# Issue #489, the author lane's own stop: `codex exec` exited 0 but its
+# transcript held no executed command, and the lane's stop step annotated why.
+# The job log as the jobs API serves it: GitHub's timestamp, then the annotation.
+_AUTHOR_STOP = "Fail a round that executed no command"
+_NO_COMMAND_LOG = (
+    "2026-09-30T06:17:57.0829650Z I couldn't inspect or modify the repository.\n"
+    "2026-09-30T06:17:58.0000000Z ##[error]The independent test author executed no"
+    " command (#489): the agent executed no command. No test reviewed this PR.\n"
+)
+
+
+def _author_noop() -> list[dict[str, Any]]:
+    return [
+        _job(
+            "codex-author",
+            "failure",
+            [
+                ("Codex — independent PR test author", "completed", "success"),
+                (_AUTHOR_STOP, "completed", "failure"),
+                ("Scope guard", "completed", "skipped"),
+            ],
+        )
+    ]
+
+
+def test_an_author_round_that_ran_no_command_is_a_lane_failure() -> None:
+    lanes = ["codex-author", "codex-tests"]
+
+    verdict = classify_lane_failure.classify(_author_noop(), lanes, _NO_COMMAND_LOG)
+
+    assert verdict.kind == "agent_did_not_run"
+    assert verdict.job == "codex-author"
+    assert verdict.step == _AUTHOR_STOP
+    assert verdict.signature == classify_lane_failure.AGENT_NOT_RUN_SIGNATURE
+    assert verdict.is_infrastructure is False
+
+
+def test_a_missing_tool_host_names_the_runner_before_the_no_command_stop() -> None:
+    """The host line says why no command ran: the runner's install, #448."""
+    log = _CODE_MODE_HOST_LOG + _NO_COMMAND_LOG
+
+    verdict = classify_lane_failure.classify(_author_noop(), ["codex-author"], log)
+
+    assert verdict.kind == "runner_tool"
+    assert verdict.is_infrastructure is True
+
+
+def test_the_no_command_phrase_outside_an_annotation_is_not_evidence() -> None:
+    """A test printing this phrase is still a code failure."""
+    log = (
+        "2026-09-30T06:17:58.0Z E   assert 'The independent test author executed no"
+        " command (#489)' in body\n"
+    )
+
+    verdict = classify_lane_failure.classify(_author_noop(), ["codex-author"], log)
+
+    assert verdict.kind == "in_job"
+
+
+def test_a_credential_refusal_still_wins_over_the_no_command_stop() -> None:
+    log = _EXPIRED_TOKEN_LOG + _NO_COMMAND_LOG
+
+    verdict = classify_lane_failure.classify(_author_noop(), ["codex-author"], log)
+
+    assert verdict.kind == "credential"

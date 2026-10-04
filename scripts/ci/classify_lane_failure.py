@@ -24,6 +24,11 @@ A job can also fail before any step of the workflow runs (#493): GitHub's own
 `Set up job` failed because the runner could not download a pinned action. That
 is `runner_setup` — no checkout and no Codex round happened, and a rerun of the
 failed jobs is the remedy.
+
+A test-author round can also end with `codex exec` exiting 0 and no command run
+(#489). The author lane's own stop annotates that, and the log makes it
+`agent_did_not_run` — a lane failure, nobody reviewed the diff — or, with
+codex's `failed to spawn code-mode host` line, `runner_tool` (#448).
 """
 
 from __future__ import annotations
@@ -60,6 +65,12 @@ RUNNER_TOOL_SIGNATURE = "failed to spawn code-mode host"
 _RUNNER_TOOL_ERROR = re.compile(
     r"^(?:\S+Z )?\S+Z ERROR codex_core::tools::router: error=failed to spawn code-mode host /"
 )
+
+# Issue #489: `codex exec` exited 0 but the test author's transcript held no
+# executed command, and the author lane's own stop step annotated that. A lane
+# failure — nobody reviewed the diff — never a verdict about it. Evidence is the
+# runner's error annotation only, as for the credential class.
+AGENT_NOT_RUN_SIGNATURE = "The independent test author executed no command (#489)"
 
 
 @dataclass(frozen=True)
@@ -134,6 +145,15 @@ def runner_tool_signature(log: str) -> str:
     return ""
 
 
+def agent_not_run_signature(log: str) -> str:
+    """Return the constant signature when the author lane stopped a no-command round."""
+    for line in log.splitlines():
+        annotation = _ERROR_ANNOTATION.match(line)
+        if annotation and AGENT_NOT_RUN_SIGNATURE in annotation.group("message"):
+            return AGENT_NOT_RUN_SIGNATURE
+    return ""
+
+
 def _in_job(job: dict[str, Any], lane: str, log: str) -> Verdict:
     signature = credential_signature(log)
     if signature:
@@ -142,6 +162,9 @@ def _in_job(job: dict[str, Any], lane: str, log: str) -> Verdict:
         return Verdict(
             "runner_tool", job=lane, step=_failed_step(job), signature=RUNNER_TOOL_SIGNATURE
         )
+    if agent_not_run_signature(log):
+        step = _failed_step(job)
+        return Verdict("agent_did_not_run", job=lane, step=step, signature=AGENT_NOT_RUN_SIGNATURE)
     return Verdict("in_job", job=lane)
 
 
