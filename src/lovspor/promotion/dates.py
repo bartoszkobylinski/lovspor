@@ -40,6 +40,18 @@ _PLACEHOLDER_DATE = re.compile(
     r"(?<![\w.])(?:[xX]{1,2}|dd|_{1,2})\.\s?(?:[xX]{1,2}|mm|_{1,2})\.\s?"
     r"(?:\d{4}|[xX]{4}|åååå|yyyy)(?!\w)"
 )
+# The same blank written with spaces, "xx xx xxxx". Two x's each for day and
+# month: a lone "X" is a roman numeral ("kapittel X").
+_SPACED_PLACEHOLDER_DATE = re.compile(
+    r"(?<![\w.])[xX]{2}\s{1,3}[xX]{2}\s{1,3}(?:\d{4}|[xX]{4})(?!\w)"
+)
+# "(dato)" left blank in the enactment clause: "Fastsett av kommunestyret
+# (dato)". Bound to the clause, since a form in an annex may ask for "(dato)".
+_BLANK_ENACTMENT_DATE = re.compile(
+    r"\b(?:fastsatt|fastsett|vedtatt|vedteke|vedteken|vedtekne)\b[^.]{0,120}?\(\s*dato\s*\)",
+    re.IGNORECASE,
+)
+_PLACEHOLDERS = (_PLACEHOLDER_DATE, _SPACED_PLACEHOLDER_DATE, _BLANK_ENACTMENT_DATE)
 
 
 def parse_stated_date(text: str) -> date | None:
@@ -52,7 +64,7 @@ def parse_stated_date(text: str) -> date | None:
 
 def has_placeholder_date(text: str) -> bool:
     """True when the text carries a draft's blank date, such as ``X.X.2016``."""
-    return _PLACEHOLDER_DATE.search(text) is not None
+    return any(pattern.search(text) is not None for pattern in _PLACEHOLDERS)
 
 
 def _date_parts(text: str) -> date | None:
