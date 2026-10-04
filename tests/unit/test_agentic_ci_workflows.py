@@ -144,7 +144,9 @@ def test_the_register_step_fails_on_what_the_check_reports(
     ci.mkdir(parents=True)
     shutil.copy2(_REPO / "scripts" / "ci" / "mutation_to_json.py", ci / "mutation_to_json.py")
     (tmp_path / "m.py").write_text("x = 3\n", encoding="utf-8")
-    (tmp_path / "mutation-equivalents.toml").write_text(register, encoding="utf-8")
+    entry = tmp_path / "mutation-equivalents" / "m" / "f-00000000.toml"
+    entry.parent.mkdir(parents=True)
+    entry.write_text(register, encoding="utf-8")
     run = _named_step(_steps("pr-pipeline.yml", "fast-ci"), _REGISTER_STEP)["run"]
     command = run.replace("uv run python", shlex.quote(sys.executable))
 
