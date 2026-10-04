@@ -66,6 +66,25 @@ class AmbiguousSlugError(CorpusNotFoundError):
     """
 
 
+class LocalCorpusError(CorpusNotFoundError):
+    """A file of the local-regulations dataset is absent or not its contracted shape.
+
+    A subclass so every tool keeps reporting it as a corpus error; distinct
+    from "no such regulation" because the regulation is listed and its files
+    disagree with the listing (ADR-0016 Decision 3). Serving it anyway would
+    serve text without the observation label it must carry.
+    """
+
+
+class LocalScopeError(LovsporError):
+    """A capability asked of a local regulation that this engine does not serve for it.
+
+    Local regulations are served opt-in and slice by slice (ADR-0016 5, 7); a
+    parameter that is only defined for the central corpus is refused for a
+    local document rather than silently answered from the central path.
+    """
+
+
 class UnsupportedSidecarVersionError(LovsporError):
     """A sidecar is stored in a format version this engine does not read.
 
