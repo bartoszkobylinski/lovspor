@@ -1,0 +1,19 @@
+[[equivalent]]
+file = "src/lovspor/release/migrate.py"
+symbol = "_install_files"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-    _load_drop_in(plane, host, with_exec_reload=False)
++    _load_drop_in(plane, host, with_exec_reload=None)
+"""
+justification = """
+`with_exec_reload` is consumed in exactly one place. `_load_drop_in` passes it
+straight to `drop_in_text`, whose only use of it is `if with_exec_reload:` —
+a truth test, never a comparison to False or an is-check. None and False are
+both falsy, so the same branch is taken and `drop_in_text` returns the same
+string; `_load_drop_in` then writes that string and runs `daemon-reload`, both
+independent of the argument. Nothing else in the package reads the value
+(`grep with_exec_reload src/` finds the parameter, the truth test and the three
+call sites). The same falsy-None equivalence is already registered for
+`ensure_ascii=None` and `check=None`.
+"""

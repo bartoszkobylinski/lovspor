@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "_head_html"
+registered = "2026-09-06, PR #249; re-keyed 2026-09-16, PR #341 — layout() split into _head_html, taking a PageHead"
+mutation = """
+-    safe_title = html_escape.escape(head.title, quote=True)
++    safe_title = html_escape.escape(head.title, )
+"""
+justification = """
+html.escape defaults quote to True; dropping the explicit argument
+selects identical escaping. Pinned by the existing assumption test.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"

@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/observatory/engine.py"
+symbol = "describe_engine"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-    if _git(root, "symbolic-ref", "-q", "HEAD") is not None:
++    if _git(root, "symbolic-ref", "HEAD") is not None:
+"""
+justification = """
+`git symbolic-ref -q` differs from the bare form only in what it prints to
+stderr when HEAD is detached: with `-q` it exits 1 silently, without it exits
+128 with "fatal: ref HEAD is not a symbolic ref". `_git` captures stderr and
+maps every non-zero exit to None, so both spellings answer None on a detached
+HEAD and the branch name on a branch. Argued from git, hence pinned by the
+test that needs a detached HEAD to read as "not a symbolic ref".
+"""
+assumption_test = "tests/unit/test_observatory_engine.py::TestPinnedCheckout::test_a_detached_clean_checkout_is_pinned_and_names_its_commit"

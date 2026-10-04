@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/promotion/personal_data.py"
+symbol = "_is_identity_number"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    day -= _D_NUMMER_DAY_OFFSET if day > _D_NUMMER_DAY_OFFSET else 0
++    day -= _D_NUMMER_DAY_OFFSET if day >= _D_NUMMER_DAY_OFFSET else 0
+"""
+justification = """
+The two conditions differ only at day == 40. There the original leaves day at 40
+and the mutant makes it 0; the function then returns `1 <= day <= 31 and ...`,
+which is False for 40 (above 31) and False for 0 (below 1). `day` is read nowhere
+else, so the returned boolean is identical for every eleven-digit input. The live
+boundaries of the D-nummer gate (day 31 and day 71 both hits, day 32 not) are
+pinned by tests in test_promotion_personal_data.py. Python comparison semantics.
+"""

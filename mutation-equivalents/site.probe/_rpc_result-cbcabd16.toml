@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "_rpc_result"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-    content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
++    content_type = response.headers.get("CONTENT-TYPE", "").split(";")[0].strip().lower()
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_httpx_header_lookup_is_case_insensitive"
+justification = """
+`response.headers` is an httpx `Headers`, whose lookup lower-cases the
+requested name before comparing it with the stored lower-cased names, so
+`get("CONTENT-TYPE")` and `get("content-type")` return the same value for the
+same response and the media type is read identically. A property of httpx,
+so the assumption test pins it.
+"""

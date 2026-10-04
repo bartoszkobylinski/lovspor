@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_source_revisions"
+registered = "2026-09-06, PR #249"
+mutation = """
+-            "core.quotePath=false",
++            "core.quotepath=false",
+"""
+justification = """
+git config variable names are case-insensitive, so core.quotepath and
+core.quotePath select the same setting. This argues from git's
+behaviour, not Python's, so it is pinned by the assumption test below
+against a real repository with a non-ASCII path.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"

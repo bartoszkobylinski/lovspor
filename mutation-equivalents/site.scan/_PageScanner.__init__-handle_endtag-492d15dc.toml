@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/site/scan.py"
+symbol = "_PageScanner.__init__ / handle_endtag"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        self._in_body = False
++        self._in_body = None
+"""
+justification = """
+`_in_body` is assigned False at construction and at `</body>` (this one
+mutation text matches both sites) and True at `<body>`, and it is read at
+exactly one place, `if (self._in_body or self._in_title()) and ...`, i.e. only
+for its truth value. `None` is falsy exactly as `False` is, so every read sees
+the same branch. Pure Python truth semantics; no dependency.
+"""

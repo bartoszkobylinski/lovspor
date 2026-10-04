@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_body"
+registered = "2026-09-22, PR #353, from run 35688797552"
+mutation = """
+-                "GET",
++                "get",
+"""
+justification = """
+httpx upper-cases the method when it builds the request (`httpx.Request.method`
+is "GET" for either spelling), so the bytes on the wire, the recorded request a
+test can inspect, and the server's view are identical. Argued from the
+dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_upper_cases_the_request_method"

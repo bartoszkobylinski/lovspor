@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-            "core.quotePath=false",
++            "CORE.QUOTEPATH=FALSE",
+"""
+justification = """
+Section and key names are case-insensitive and git's boolean parsing case-folds
+"FALSE", so the uppercased spelling selects the same unquoted output. Pinned by
+the same real-git assumption test.
+"""
+assumption_test = "tests/unit/test_history_utf8.py::test_assumption_git_reads_the_quotepath_setting_case_insensitively"

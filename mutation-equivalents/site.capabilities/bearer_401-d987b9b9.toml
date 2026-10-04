@@ -1,0 +1,22 @@
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "bearer_401"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-        and _BEARER.search(_QUOTED.sub('""', step.challenge)) is not None
++        and _BEARER.search(_QUOTED.sub('XX""XX', step.challenge)) is not None
+"""
+justification = """
+The substituted text is read by exactly one consumer, `_BEARER.search`, whose
+pattern `(?:^|,)\\s*Bearer(?=\\s|,|$)` (IGNORECASE) consumes only start-of-string,
+a comma, whitespace and the letters of "bearer", and looks ahead for
+whitespace, a comma or end-of-string. Both replacements, `""` and `XX""XX`, are
+non-empty, contain no newline, no comma, no whitespace and no letter of
+"bearer", so no match can begin inside, end inside or span across a replaced
+span, and everything outside the replaced spans is identical in the two
+strings. A match therefore exists in one exactly when it exists in the other,
+and the function's boolean is the same for every challenge. Pure Python `re`
+semantics, no dependency; checked by a 200,000-string fuzz over the pattern's
+alphabet (quotes, commas, spaces, backslashes, "Bearer" in both cases, "X")
+with zero disagreements.
+"""

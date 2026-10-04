@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "emit_site"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-        _write(out / route / "index.html", browse_index_html(route, inventory).encode("utf-8"))
++        _write(out / route / "index.html", browse_index_html(route, inventory).encode("UTF-8"))
+"""
+justification = """
+Same codec-registry case-insensitivity as every encode/decode entry in
+this register: both spellings reach the same encoder, so the browse
+index bytes on disk are identical.
+"""

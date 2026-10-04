@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/temporal_gate.py"
+symbol = "is_repository_root"
+registered = "2026-09-27, PR #439, from run 36320125682"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+`subprocess.run` tests `check` for truth (`if check and retcode:` in
+subprocess.py) and never compares it to False, so None and False select the
+same path: return the CompletedProcess, never raise. Python's own semantics;
+the argument is spelled out only because ruff PLW1510 demands an explicit
+`check`. Same argument as the registered llhb/pair_manifest._git entry.
+"""

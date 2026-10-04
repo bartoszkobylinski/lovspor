@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "observe_transport"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-        run.client, run.request("POST", run.settings.public_mcp_url, json=body, headers=headers)
++        run.client, run.request("post", run.settings.public_mcp_url, json=body, headers=headers)
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_httpx_still_normalises_the_request_method"
+justification = """
+Same argument as the two GET entries above, for the one POST the probe builds
+outside `_McpSession`: httpx upper-cases the method in Request.__init__, so
+"post" and "POST" build the identical request. The assumption test covers
+"post" as well as "get".
+"""

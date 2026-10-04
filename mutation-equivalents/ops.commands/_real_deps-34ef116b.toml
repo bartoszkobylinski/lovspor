@@ -1,0 +1,21 @@
+[[equivalent]]
+file = "src/lovspor/ops/commands.py"
+symbol = "_real_deps"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        clock=lambda: datetime.now(UTC),
++        clock=lambda: datetime.now(None),
+"""
+justification = """
+The clock's value reaches exactly one place: `Alert.at`, read only by
+`alert._utc`, which returns `at.astimezone(UTC).strftime(...)`.
+`datetime.now(None)` is the naive local time of the same instant, with `fold`
+set for an ambiguous wall time (PEP 495: `now()` goes through `fromtimestamp`,
+which sets fold), and `astimezone` on a naive datetime interprets it as local
+time honouring `fold`, so it converts back to the identical UTC instant; a
+`now()` instant is never inside a DST gap. Both versions therefore print the
+same UTC string. Verified by round-tripping `fromtimestamp(t)` against
+`fromtimestamp(t, UTC)` every 7 s across both 2026 DST transitions in
+Europe/Oslo, America/New_York, Australia/Lord_Howe (30-minute shift) and
+Asia/Kolkata: zero disagreements.
+"""

@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "registry_synchronised"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`subprocess.run` truth-tests `check`; None and False select the identical
+no-raise behaviour. Same falsy-None equivalence as the PR #227
+`_read_entries` entries.
+"""

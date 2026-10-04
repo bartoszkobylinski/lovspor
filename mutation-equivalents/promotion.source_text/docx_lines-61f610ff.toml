@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "docx_lines"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-        root = etree.fromstring(_docx_part(payload), parser=safe_parser(remove_blank_text=False))
++        root = etree.fromstring(_docx_part(payload), parser=safe_parser(remove_blank_text=None))
+"""
+justification = """
+`safe_parser` passes the flag straight to lxml's XMLParser, which reads
+remove_blank_text for truth; None is falsy, so None keeps blank text exactly as
+False does. Argued from the dependency, so pinned: the assumption test shows a
+blank word-space before a comment inside a run kept under None and False and
+stripped under True (the True mutant is killed by
+test_docx_keeps_a_blank_run_beside_a_comment_as_the_word_space).
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_lxml_reads_remove_blank_text_for_truth"

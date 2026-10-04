@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "release_content_id"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return _sha256("".join(lines).encode("utf-8"))
++    return _sha256("".join(lines).encode("UTF-8"))
+"""
+justification = """
+Same codec-registry argument: `codecs.lookup` normalises the codec name, so
+both spellings reach the same UTF-8 encoder, the same bytes and the same
+SHA-256 over the listing.
+"""

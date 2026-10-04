@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/ops/alert.py"
+symbol = "_ntfy_headers"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        "Title": title(alert).encode("ascii", "replace").decode("ascii"),
++        "Title": title(alert).encode("ASCII", "replace").decode("ascii"),
+"""
+justification = """
+Codec names are normalised before lookup: `codecs.lookup("ASCII").name ==
+codecs.lookup("ascii").name == "ascii"`. Both spellings select the same
+encoder with the same "replace" error handler (error-handler names are NOT
+normalised, which is why the "REPLACE"/"XXreplaceXX" siblings are killed by
+test_a_non_ascii_title_is_sent_with_replacement_marks), so the Title header
+is identical for every title.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"

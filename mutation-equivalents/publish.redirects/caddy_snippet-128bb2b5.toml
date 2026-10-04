@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/publish/redirects.py"
+symbol = "caddy_snippet"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-    return ("\\n".join(lines) + "\\n").encode("utf-8")
++    return ("\\n".join(lines) + "\\n").encode("UTF-8")
+"""
+justification = """
+Same codec-registry case-insensitivity as every encode/decode entry in
+this register: codecs.lookup normalises both spellings to "utf-8", so
+the same encoder produces the same bytes for the Caddy snippet.
+"""

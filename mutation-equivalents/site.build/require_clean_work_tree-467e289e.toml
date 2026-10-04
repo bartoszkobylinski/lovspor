@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/site/build.py"
+symbol = "require_clean_work_tree"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    head = _git(root, "rev-parse", "--verify", "HEAD^{commit}")
++    head = _git(root, "rev-parse", "HEAD^{commit}")
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_git_rev_parse_fails_on_an_unborn_head_without_verify"
+justification = """
+With exactly one fixed revision argument, `git rev-parse` exits non-zero when
+the revision does not resolve whether or not `--verify` is given (without the
+flag it additionally echoes the argument to stdout, which `_git` discards
+because it returns None on any non-zero exit), and when HEAD resolves both
+spellings print the same full sha. `--verify` only adds the single-argument /
+valid-object check that one literal argument already satisfies. So `_git`
+returns the same value under both, for an unborn HEAD and a committed one. This
+argues from git's behaviour, an external tool, so the assumption test runs both
+spellings in an unborn and in a committed repository.
+"""

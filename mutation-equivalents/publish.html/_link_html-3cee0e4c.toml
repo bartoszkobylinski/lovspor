@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_link_html"
+registered = "2026-09-06, PR #244, from run on d0e1597"
+mutation = """
+-    href = html.escape(resolved, quote=True)
++    href = html.escape(resolved, quote=None)
+"""
+justification = """
+The href reaching this line has passed _is_site_relative, whose
+_CANONICAL_HREF fullmatch admits only [a-z0-9æøåü-] segments joined by
+slashes — no quote, ampersand or angle bracket can be present, so
+html.escape is an identity function on every reachable input and its
+quote flag selects nothing. The escape call stays as defence in depth;
+the flag's value is unobservable behind the whitelist invariant of the
+same module.
+"""

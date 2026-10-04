@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "_rpc_result"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-    content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
++    content_type = response.headers.get("content-type", "XXXX").split(";")[0].strip().lower()
+"""
+justification = """
+The default is reached only when the answer carries no Content-Type, and it is
+consumed by nothing but the two equality tests that follow: after
+`.split(";")[0].strip().lower()`, "" stays "" and "XXXX" becomes "xxxx", and
+neither equals "application/json" or "text/event-stream", so both fall through
+to `return None`. The string is not stored or reported. Pure Python string
+semantics; the no-header case itself is pinned by
+`test_an_answer_without_a_content_type_is_a_protocol_error`.
+"""

@@ -1,0 +1,19 @@
+[[equivalent]]
+file = "src/lovspor/publish/redirects.py"
+symbol = "_route_slug"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-    folder, _, name = path.partition("/")
++    folder, _, name = path.rpartition("/")
+"""
+justification = """
+Pure Python case analysis over the guard chain. Exactly one slash:
+partition and rpartition split at the same (only) slash, so folder and
+name are identical. Two or more slashes: partition leaves a slash in
+`name` and the `"/" in name` guard refuses; rpartition puts the slash
+in `folder`, which is then not in _FOLDER_ROUTES and the route guard
+refuses — both return None. No slash: partition yields empty `name`
+(fails the .md check), rpartition yields empty `folder` (fails the
+route lookup) — both return None. Every input class returns the same
+value, so no test can distinguish the spellings.
+"""

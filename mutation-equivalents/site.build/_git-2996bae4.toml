@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/site/build.py"
+symbol = "_git"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`subprocess.run` reads `check` only for its truth value (`if check and
+retcode:`), and `None` is falsy exactly as `False` is, so neither raises on a
+non-zero exit; the caller reads `returncode` itself either way. Same argument
+as the registered `llhb/pair_manifest._git` entry; Python's own `None`
+semantics, not a dependency.
+"""

@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/corpus_fetch.py"
+symbol = "_ensure_attestation_refspec"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-    existing = _git_capture(["config", "--get-all", "remote.origin.fetch"], dest) or ""
++    existing = _git_capture(["config", "--get-all", "remote.origin.fetch"], dest) or "XXXX"
+"""
+justification = """
+The fallback constant is consumed only by splitlines() and the notes-ref
+scan. Neither "" (no lines) nor "XXXX" (one line that does not name the
+notes ref and transports nothing) triggers a removal, and both leave the
+transports-check False so the canonical refspec is added — the observable
+git calls are identical for every value the capture can return.
+"""

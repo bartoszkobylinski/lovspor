@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        encoding="utf-8",
++        encoding="UTF-8",
+"""
+justification = """
+Codec names are normalised and case-folded before lookup: codecs.lookup("UTF-8")
+and codecs.lookup("utf-8") return the same CodecInfo, so subprocess's
+`data.decode(encoding, errors)` picks the same decoder on every input. The
+encoding=None and dropped-argument mutants, which do change the decoder, are
+killed by tests/unit/test_history_utf8.py under the C locale. Python codec
+semantics.
+"""

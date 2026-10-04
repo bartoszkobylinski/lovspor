@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/site/build.py"
+symbol = "_git"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-            check=False,
+-        )
++            )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`'s signature, so removing the
+explicit `check=False` leaves the call byte-for-byte equivalent in behaviour.
+It is spelled out only because ruff PLW1510 demands an explicit `check`. Same
+argument as the registered `llhb/pair_manifest._git` entry.
+"""

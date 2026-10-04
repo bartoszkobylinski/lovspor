@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/observatory/engine.py"
+symbol = "_git"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`subprocess.run` truth-tests `check` before raising CalledProcessError, and
+None is as false as False. The explicit `check=False` is there for the
+reader (and for ruff's PLW1510), not for the interpreter.
+"""
+assumption_test = "tests/unit/test_observatory_engine.py::TestOutsideAGitCheckout::test_an_installed_package_has_no_commit_and_no_verdict"

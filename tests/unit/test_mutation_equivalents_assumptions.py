@@ -1,4 +1,4 @@
-"""The assumptions mutation-equivalents.toml entries stand on (issue #132).
+"""The assumptions mutation-equivalents/ entries stand on (issue #132).
 
 A registered equivalent mutant waives a required check for good. Four of the
 register's entries argue from Python's own semantics — a falsy ``None``, the
@@ -53,13 +53,15 @@ from tests.unit.site_fixtures import (
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
-_REGISTER = _ROOT / "mutation-equivalents.toml"
+_REGISTER = _ROOT / "mutation-equivalents"
 _PYPROJECT = _ROOT / "pyproject.toml"
 
 
 def _entries() -> list[dict[str, Any]]:
-    data = tomllib.loads(_REGISTER.read_text(encoding="utf-8"))
-    entries: list[dict[str, Any]] = data.get("equivalent", [])
+    """Every entry of the register, one TOML file per entry (issue #516)."""
+    entries: list[dict[str, Any]] = []
+    for path in sorted(_REGISTER.rglob("*.toml")):
+        entries += tomllib.loads(path.read_text(encoding="utf-8")).get("equivalent", [])
     return entries
 
 
@@ -321,6 +323,12 @@ def test_assumption_lxml_ancestors_always_carry_a_string_tag() -> None:
     assert all(isinstance(ancestor.tag, str) for node in nodes for ancestor in node.iterancestors())
     with pytest.raises(TypeError):
         html.HtmlComment("c").append(html.Element("a"))
+
+
+def test_the_register_reader_sees_entries() -> None:
+    """The two checks below pass vacuously on an empty read; a reader pointed at
+    the wrong path (the single file #516 retired) must fail here instead."""
+    assert _entries()
 
 
 def test_an_entry_arguing_from_a_dependency_names_the_test_that_pins_it() -> None:

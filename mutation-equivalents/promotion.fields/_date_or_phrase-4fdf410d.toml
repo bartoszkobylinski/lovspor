@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/promotion/fields.py"
+symbol = "_date_or_phrase"
+registered = "2026-10-03, PR #513, from run 37106712419"
+mutation = """
+-    return None, _SENTENCE_END.split(rest, maxsplit=1)[0].strip() or None
++    return None, _SENTENCE_END.split(rest, )[0].strip() or None
+"""
+justification = """
+`re.Pattern.split` returns as element [0] the text before the first match for every
+maxsplit (0 meaning unbounded); _SENTENCE_END has no capturing group, so nothing
+is interleaved before that element. Only [0] is read. Python `re` semantics.
+"""

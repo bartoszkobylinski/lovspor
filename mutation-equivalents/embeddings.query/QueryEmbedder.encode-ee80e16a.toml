@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/query.py"
+symbol = "QueryEmbedder.encode"
+registered = "2026-09-06, PR #252, from PR #252 run 34059471495"
+mutation = """
+-            self._cache.popitem(last=False)
++            self._cache.popitem(last=None)
+"""
+justification = """
+`OrderedDict.popitem` tests `last` for truth, and `None` is falsy, so `False`
+and `None` both pop the OLDEST entry — the LRU eviction this line performs.
+A mutant that popped the newest would be caught by
+`test_the_cache_is_bounded_and_evicts_the_coldest_entry`, which asserts the
+recently-used key survives and the cold one is re-embedded; that test passes
+under both spellings because both evict the same entry.
+"""

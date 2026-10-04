@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/promotion/identity.py"
+symbol = "content_hash"
+registered = "2026-10-03, PR #506, from run 37101259342"
+mutation = """
+-    return hashlib.sha256(normalise_text(text).encode("utf-8")).hexdigest()
++    return hashlib.sha256(normalise_text(text).encode("UTF-8")).hexdigest()
+"""
+justification = """
+`str.encode` resolves the encoding name through `codecs.lookup`, which normalises
+case before lookup: `codecs.lookup("UTF-8").name == codecs.lookup("utf-8").name ==
+"utf-8"`. Both spellings select the same encoder and produce the same bytes for every
+string, so the digest is identical. Python's own codec-registry semantics.
+"""

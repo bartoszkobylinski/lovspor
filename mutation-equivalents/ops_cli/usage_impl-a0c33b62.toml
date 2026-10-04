@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/ops_cli.py"
+symbol = "usage_impl"
+registered = "2026-09-30, PR #485, from run 36714819424"
+mutation = """
+-        text = source.read_text(encoding="utf-8")
++        text = source.read_text(encoding="UTF-8")
+"""
+justification = """
+`Path.read_text` opens a `TextIOWrapper`, which resolves the encoding name through
+`codecs.lookup`; the codec registry normalises names before lookup, folding case
+(`codecs.lookup("UTF-8").name == codecs.lookup("utf-8").name == "utf-8"`). Both
+spellings select the same decoder and yield the same text for every file, valid
+or invalid. Python's own semantics. The locale-default mutation on the same line
+(`encoding=None`) is not equivalent and is killed by
+test_impl_reads_a_journal_file_as_utf8_whatever_the_locale.
+"""

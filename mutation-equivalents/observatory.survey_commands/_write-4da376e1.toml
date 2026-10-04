@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_commands.py"
+symbol = "_write"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-    with path.open("a", encoding="utf-8") as handle:
++    with path.open("a", encoding="UTF-8") as handle:
+"""
+justification = """
+Codec names are case-insensitive: `encodings.normalize_encoding` lowercases the
+name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object. No
+input can distinguish them, so no test can.
+"""

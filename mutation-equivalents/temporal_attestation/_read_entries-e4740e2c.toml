@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "_read_entries"
+registered = "2026-09-02, PR #227, from run 33619976486"
+mutation = """
+-        check=False,
+-    )
++        )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`, so removing the explicit
+`check=False` selects the identical default. The explicit spelling
+exists for the reader (this module's contract is that non-zero exits are
+classified, never raised here); dropping it changes no behaviour.
+Matches both call sites in this function.
+"""

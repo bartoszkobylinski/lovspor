@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_head_ref"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-        sha, author_iso = result.stdout.strip("\\n").split("\\n", maxsplit=1)
++        sha, author_iso = result.stdout.strip("\\n").split("\\n", maxsplit=2)
+"""
+justification = """
+Same argument as the maxsplit-removal entry one up: one-newline payloads are
+identical under maxsplit=1 and maxsplit=2, and multi-newline payloads reach
+the same AttestationError through the unpack/fromisoformat pair.
+"""

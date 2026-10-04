@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/ops/unit_facts.py"
+symbol = "run_command"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`subprocess.run` tests `check` for truth (`if check and retcode:`) and never
+compares it to False, so None and False select the same path: return the
+CompletedProcess, never raise CalledProcessError. The function then branches
+on `done.returncode` itself, unchanged. The register's existing check=None
+entries rest on the same stdlib contract.
+"""

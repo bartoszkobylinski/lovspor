@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "_facts_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    canonical = json.dumps(facts, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
++    canonical = json.dumps(facts, sort_keys=True, separators=(",", ":"), ensure_ascii=None)
+"""
+justification = """
+`json.dumps` reads `ensure_ascii` only for its truth value, and `None` is
+falsy exactly as `False` is, so both select the encoder that keeps non-ASCII as
+is and produce byte-identical canonical text. Same argument as the registered
+`observatory/model.record_to_json_line` entry; Python's own `None` semantics.
+(`ensure_ascii` removed or `True` is NOT equivalent and is killed by a facts
+file carrying "æøå".)
+"""

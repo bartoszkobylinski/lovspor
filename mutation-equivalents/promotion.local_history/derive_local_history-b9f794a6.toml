@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/promotion/local_history.py"
+symbol = "derive_local_history"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-        if target.is_file() and target.read_text(encoding="utf-8") == text:
++        if target.is_file() and target.read_text(encoding="UTF-8") == text:
+"""
+justification = """
+Codec names are case-folded before lookup (`codecs.lookup("UTF-8").name ==
+codecs.lookup("utf-8").name`), so both spellings decode an existing history file
+to the same string and the skip decision never differs. Python codec semantics.
+"""

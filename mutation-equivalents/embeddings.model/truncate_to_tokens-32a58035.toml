@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/model.py"
+symbol = "truncate_to_tokens"
+registered = "2026-09-06, PR #252, from PR #252 run 34059471495"
+mutation = """
+-    return encoding.decode_bytes(tokens[:max_tokens]).decode("utf-8", errors="ignore"), True
++    return encoding.decode_bytes(tokens[:max_tokens]).decode(errors="ignore"), True
+"""
+justification = """
+`bytes.decode` documents `encoding="utf-8"` as its default, so passing it and
+omitting it select the same codec. The mutant and the original differ only in
+whether the default is written down. No input can distinguish them: any byte
+sequence that decodes one way under an explicit "utf-8" decodes identically
+under the default, because they are the same codec object after lookup.
+"""

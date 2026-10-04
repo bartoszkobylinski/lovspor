@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/query.py"
+symbol = "_lead"
+registered = "2026-09-07, PR #252, from run 34104847656"
+mutation = """
+-            self._inflight.pop(key, None)
++            self._inflight.pop(key, )
+"""
+justification = """
+`dict.pop`'s default is consulted only when the key is absent, and this
+key cannot be absent here: `_lead` is the in-flight map's only remover,
+it runs once per flight, and every `_lead` call is preceded by its own
+`_claim` inserting the key under the same lock. Both spellings execute
+the identical present-key path on every reachable input; they differ
+only on an unreachable one (KeyError versus a returned None). Argued
+from Python's own dict semantics plus the module's single-remover
+invariant, which the module's concurrency tests pin.
+"""

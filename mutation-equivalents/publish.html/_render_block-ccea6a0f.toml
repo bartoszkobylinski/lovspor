@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_render_block"
+registered = "2026-09-05, PR #244, from run 33990449196"
+mutation = """
+-        return _render_list(lines, index, resolve, ordered=False)
++        return _render_list(lines, index, resolve, ordered=None)
+"""
+justification = """
+`ordered` is tested for truth twice and never compared to False: the
+pattern pick (`_ORDERED_ITEM if ordered else _UNORDERED_ITEM`) and the
+tag pick (`"ol" if ordered else "ul"`). None and False are both falsy,
+so every input renders the identical unordered list — the register's
+check=False/None precedent on this project's own code.
+"""

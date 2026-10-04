@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/site/build.py"
+symbol = "_write_tree"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        target.write_bytes(markup.encode("utf-8"))
++        target.write_bytes(markup.encode("UTF-8"))
+"""
+justification = """
+Codec names are case-insensitive: `str.encode` resolves the name through the
+codec registry, which normalises it, so "utf-8" and "UTF-8" select the same
+codec and write identical bytes. Python's codec registry, not a dependency.
+"""

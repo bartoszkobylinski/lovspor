@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "blob_form"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-    media = content_type.split(";", 1)[0].strip().lower()
++    media = content_type.split(";", 2)[0].strip().lower()
+"""
+justification = """
+Same argument as the unlimited split above: only element [0] is read, and the
+first piece of str.split(";", n) is the text before the first ";" for every
+n >= 1. A limit of 2 instead of 1 changes only the pieces after it.
+"""

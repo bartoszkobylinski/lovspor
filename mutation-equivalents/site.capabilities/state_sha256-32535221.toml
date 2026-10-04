@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "state_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
++    return hashlib.sha256(canonical.encode("UTF-8")).hexdigest()
+"""
+justification = """
+Codec names are case-insensitive: `str.encode` resolves the name through the
+codec registry, which normalises it, so "utf-8" and "UTF-8" encode identical
+bytes and hash to the same digest. Python's codec registry, not a dependency.
+"""

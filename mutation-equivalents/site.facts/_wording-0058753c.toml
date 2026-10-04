@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/site/facts.py"
+symbol = "_wording"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        raise SiteBuildError(f"fact {source.id!r} has no value")
++        raise SiteBuildError(None)
+"""
+assumption_test = "tests/unit/test_site_facts.py::TestFactSource::test_a_source_has_a_value_or_an_unobserved_record_never_both_or_neither"
+justification = """
+The raise is unreachable. `FactSource._one_reading` refuses a source whose
+`value` and `unobserved` are both None (and both set), so every source that
+exists has exactly one of them; `_wording` returns on `unobserved` first, so at
+the `value is None` check `unobserved` is None and therefore `value` is not.
+Both spellings of the unreachable raise compute the same on every reachable
+input. The invariant is a model validator, so the test that pins it is named.
+"""

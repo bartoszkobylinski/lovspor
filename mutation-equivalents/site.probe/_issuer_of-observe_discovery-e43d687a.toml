@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "_issuer_of / observe_discovery"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-    answer = _send(run.client, run.request("GET", url))
++    answer = _send(run.client, run.request("get", url))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_httpx_still_normalises_the_request_method"
+justification = """
+The same line at two sites (the issuer metadata read and the discovery
+document read), the same argument as the `observe_process` entry above:
+httpx upper-cases the method in Request.__init__, so the mutated call builds
+the identical request.
+"""

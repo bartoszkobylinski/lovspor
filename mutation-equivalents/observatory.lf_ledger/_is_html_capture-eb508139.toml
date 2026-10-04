@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/observatory/lf_ledger.py"
+symbol = "_is_html_capture"
+registered = "2026-10-03, PR #512, from run 37107607188"
+mutation = """
+-    media_type = record.content_type.split(";", 1)[0].lower()
++    media_type = record.content_type.split(";", )[0].lower()
+"""
+justification = """
+Only element [0] of the split is read. str.split(sep, maxsplit) cuts at the
+first occurrence of sep before any other, so its first piece is the text up
+to the first ";" (or the whole string when there is none) for every
+maxsplit >= 1 and for the default -1 alike. Dropping the limit changes how
+many further pieces are produced, never the first one. (The rsplit and
+split(None, 1) siblings do change element [0] and are killed by
+test_only_successfully_served_html_is_read.)
+"""

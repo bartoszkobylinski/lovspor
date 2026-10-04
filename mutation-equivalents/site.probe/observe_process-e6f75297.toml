@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "observe_process"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-    answer = _send(run.client, run.request("GET", run.settings.readiness_url))
++    answer = _send(run.client, run.request("get", run.settings.readiness_url))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_httpx_still_normalises_the_request_method"
+justification = """
+httpx normalises the method before the request exists: Request.__init__ does
+`self.method = method.upper()`, so "get" and "GET" build the same request and
+put the same bytes on the wire; a test asserting request.method only ever
+sees the normalised value. Same argument as the registered
+`observatory/fetch._request` entry, pinned by the same assumption test.
+"""

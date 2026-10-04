@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/observatory/listing_content.py"
+symbol = "_tag"
+registered = "2026-10-03, PR #515, from run 37108571033"
+mutation = """
+-    return element.tag if isinstance(element.tag, str) else ""
++    return element.tag if isinstance(element.tag, str) else "XXXX"
+"""
+justification = """
+The fallback only reaches `_articles_or`'s `_tag(ancestor) == "article"`, and
+both "" and "XXXX" compare unequal to "article", so the boolean is identical for
+every node whichever fallback is returned. `_tag` has no other caller. Python's
+own string-equality semantics.
+"""

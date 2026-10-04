@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/promotion/decisions.py"
+symbol = "append"
+registered = "2026-10-03, PR #517, from run 37115997506"
+mutation = """
+-        with self._path.open("a", encoding="utf-8") as handle:
++        with self._path.open("a", encoding="UTF-8") as handle:
+"""
+justification = """
+Codec names are case-folded and normalised before lookup (`codecs.lookup("UTF-8")`
+and `codecs.lookup("utf-8")` return the same CodecInfo), so the append stream
+encodes every record to the same bytes under both spellings. The encoding=None
+and dropped-argument mutants, which are NOT equivalent, are killed under the C
+locale by test_the_log_is_utf8_whatever_the_locale. Python codec semantics.
+"""

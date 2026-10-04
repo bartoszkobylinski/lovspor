@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/sync/git_commit.py"
+symbol = "head_commit_or_none"
+registered = "2026-09-02, PR #227, from run 33619976486"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+Same falsy-None equivalence as the _read_entries entries: `subprocess.run`
+tests `check` for truth, and the function classifies the returncode
+itself on the next line.
+"""

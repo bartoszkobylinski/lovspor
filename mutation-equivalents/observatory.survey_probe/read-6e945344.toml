@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "read"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            domain=domain, robots=robots, conventional_sitemap=False, front_page=b""
++            domain=domain, robots=robots, conventional_sitemap=False, front_page=b"XXXX"
+"""
+justification = """
+This call is only reached when robots is unreadable or refuses the root, and
+`_entry_of` tests both of those before it looks at `conventional_sitemap`, so the
+flag cannot reach the verdict. `front_page` is only used to compute
+`front_page_markers`, and no API marker is a substring of b"XXXX", so the markers
+are the empty tuple either way. Both arguments are therefore unobservable on
+this path; they are passed explicitly because a positional default would hide
+which state the early return represents.
+"""

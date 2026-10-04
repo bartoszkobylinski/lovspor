@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        check=False,
+-    )
++        )
+"""
+justification = """
+Dropping check leaves the default check=False (`def run(..., check=False, ...)`),
+the value written; the `)` lines differ only in indentation. Python stdlib
+semantics.
+"""

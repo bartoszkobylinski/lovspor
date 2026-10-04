@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "_note_objects"
+registered = "2026-09-27, PR #439, from run 36320125682"
+mutation = """
+-        for blob, _, annotated in (line.partition(" ") for line in result.stdout.splitlines())
++        for blob, _, annotated in (line.rpartition(" ") for line in result.stdout.splitlines())
+"""
+justification = """
+partition and rpartition differ only when a line holds two or more spaces.
+Every `git notes list` line is exactly `<note blob id> <annotated object id>`:
+two hex ids and one space, so the first and the last space are the same
+character and both calls return the same (blob, " ", annotated) triple. This
+argues from git's output format, which the assumption test pins on real notes
+attached to a commit, a blob and a tree.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_git_notes_list_prints_two_ids_and_one_space"

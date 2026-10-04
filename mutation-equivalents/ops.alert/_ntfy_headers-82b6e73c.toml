@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/ops/alert.py"
+symbol = "_ntfy_headers"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-        "Title": title(alert).encode("ascii", "replace").decode("ascii"),
++        "Title": title(alert).encode("ascii", "replace").decode("ASCII"),
+"""
+justification = """
+Same codec-name normalisation as the encode("ASCII") entry: the decoder for
+"ASCII" is the one for "ascii". Its input is the output of an ascii encode
+with "replace", so it holds only bytes below 0x80 and both spellings decode
+it to the same str without error.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"

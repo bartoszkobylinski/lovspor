@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/observatory/freshness.py"
+symbol = "is_document_type"
+registered = "2026-10-03, PR #511, from run 37106345163"
+mutation = """
+-    return content_type.split(";", 1)[0].strip().lower() in DOCUMENT_MEDIA_TYPES
++    return content_type.split(";", 2)[0].strip().lower() in DOCUMENT_MEDIA_TYPES
+"""
+justification = """
+Same argument as the unlimited-split entry: `split` works left to right, so with
+maxsplit 1 or 2 element [0] is the text before the first ";" in both cases; only the
+discarded tail differs. Python's own `str.split` semantics. (The `rsplit` sibling is
+not equivalent — it is killed by the two-parameter content type in
+test_pdf_and_word_processor_types_are_documents.)
+"""

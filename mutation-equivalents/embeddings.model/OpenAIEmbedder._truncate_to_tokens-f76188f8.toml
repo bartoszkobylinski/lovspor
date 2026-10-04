@@ -1,0 +1,12 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/model.py"
+symbol = "OpenAIEmbedder._truncate_to_tokens"
+registered = "2026-09-06, PR #252, from PR #252 run 34059471495"
+mutation = """
+-        "utf-8", errors="ignore"
++        "UTF-8", errors="ignore"
+"""
+justification = """
+Codec-name lookup normalises case, so "utf-8" and "UTF-8" are one codec. Same
+argument as the module-level entry; same line, other call site.
+"""

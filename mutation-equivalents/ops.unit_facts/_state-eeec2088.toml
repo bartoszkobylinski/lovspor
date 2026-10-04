@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/ops/unit_facts.py"
+symbol = "_state"
+registered = "2026-10-01, PR #482, from run 36713858585"
+mutation = """
+-    status = fields.get("ExecMainStatus", "").strip()
++    status = fields.get("ExecMainStatus", "XXXX").strip()
+"""
+justification = """
+`status` is read only by `int(status) if status.isdigit() else None`. When the
+key is present both versions see the same value. When it is absent the
+original's "" and the mutant's "XXXX" both fail `str.isdigit()` ("" because
+isdigit is False on the empty string, "XXXX" because X is not a digit), so both
+return None. No input reaches a different result. The Result-default siblings
+are not equivalent ("XXXX" is truthy and would replace "unknown") and are
+killed by test_a_missing_result_line_is_unknown.
+"""

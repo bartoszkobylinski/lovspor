@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/site/scan.py"
+symbol = "_PageScanner._check_element"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        if _STYLE_IMPORT.search(attributes.get("style") or ""):
++        if _STYLE_IMPORT.search(attributes.get("style") or "XXXX"):
+"""
+justification = """
+The fallback is reached only when the element has no `style` attribute (or an
+empty one), and its only use is as the subject of `_STYLE_IMPORT.search`, whose
+pattern is `@import|url\\(\\s*['"]?(?:https?:)?//`. Neither "" nor "XXXX"
+contains "@import" or "url(", so the search returns None for both and no
+finding is appended; the string is not stored or reported anywhere. Pure
+Python: `x or y` yields `y` only when `x` is falsy, and a regex with no match
+on either literal.
+"""

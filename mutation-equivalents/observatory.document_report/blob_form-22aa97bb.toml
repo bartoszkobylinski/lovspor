@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "blob_form"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-    media = content_type.split(";", 1)[0].strip().lower()
++    media = content_type.split(";", )[0].strip().lower()
+"""
+justification = """
+Only element [0] of the split is read. str.split(sep, maxsplit) cuts at the
+first occurrence of sep before any other, so its first piece is the text up
+to the first ";" (or the whole string when there is none) for every
+maxsplit >= 1 and for the default -1 alike. Dropping the limit changes how
+many further pieces are produced, never the first one.
+"""

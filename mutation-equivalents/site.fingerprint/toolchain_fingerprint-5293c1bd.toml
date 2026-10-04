@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "toolchain_fingerprint"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    jinja2_version = importlib.metadata.version("jinja2")
++    jinja2_version = importlib.metadata.version("JINJA2")
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_importlib_metadata_lookup_is_case_insensitive"
+justification = """
+`importlib.metadata` normalises the requested distribution name (PEP 503:
+case-folded, runs of `-`, `_` and `.` as one `-`) before it searches, so
+`version("JINJA2")`, `version("Jinja2")` and `version("jinja2")` find the same
+installed jinja2 distribution and return the same version string, which is
+then hashed and recorded identically. The lookup is a standard-library
+behaviour and the distribution is a dependency, so the assumption test pins
+that all three spellings resolve to one version.
+"""

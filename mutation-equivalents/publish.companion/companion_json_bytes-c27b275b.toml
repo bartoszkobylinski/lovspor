@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/publish/companion.py"
+symbol = "companion_json_bytes"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    return (json.dumps(envelope, sort_keys=True, ensure_ascii=False, indent=1) + "\\n").encode(
++    return (json.dumps(envelope, sort_keys=True, ensure_ascii=None, indent=1) + "\\n").encode(
+"""
+justification = """
+json.dumps tests ensure_ascii for truth and None is falsy — the
+register's oldest precedent (record_to_json_line), verified again here
+by the golden companion test carrying non-ASCII text through this call.
+"""

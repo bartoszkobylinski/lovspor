@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_slug_suggestions_from"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    return difflib.get_close_matches(slug.lower(), list(slugs), n=3, cutoff=0.6)
++    return difflib.get_close_matches(slug.lower(), list(slugs), n=3, )
+"""
+justification = """
+Same shape as the n=3 entry: `get_close_matches` defaults cutoff to 0.6, so the
+explicit cutoff=0.6 and the default select the same threshold. Stdlib-signature
+argument, pinned by the same assumption test.
+"""
+assumption_test = "tests/unit/test_mcp_recorded_at.py::test_assumption_difflib_close_matches_defaults"

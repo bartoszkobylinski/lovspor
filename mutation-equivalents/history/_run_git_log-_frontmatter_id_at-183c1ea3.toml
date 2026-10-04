@@ -1,0 +1,12 @@
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log, _frontmatter_id_at"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-        text=True,
+"""
+justification = """
+Dropping the argument leaves text at its default None, the case of the text=None
+entry: encoding="utf-8" alone selects text mode and the UTF-8 decode
+(`encoding or errors or text or universal_newlines`). Python stdlib semantics.
+"""

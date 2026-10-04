@@ -126,7 +126,7 @@ def _register_lines(equivalents: object) -> list[str]:
     refused = equivalents.get("refused")
     lines = []
     if isinstance(registered, int) and registered:
-        lines.append(f"- Registered equivalents: {registered} (`mutation-equivalents.toml`)")
+        lines.append(f"- Registered equivalents: {registered} (`mutation-equivalents/`)")
     if isinstance(refused, list):
         lines += [f"- ⚠ Refused register entry: {r}" for r in refused if isinstance(r, str)]
     return lines

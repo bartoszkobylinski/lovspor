@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "get_section"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-        record.slug or "",
++        record.slug or "XXXX",
+"""
+justification = """
+Two call sites carry this line (the live reader's get_section and the snapshot
+state's get_section, both passing the current-act slug into cross-reference
+extraction), and the same invariant covers both: the record was resolved
+through a slug index that only admits records with a non-None slug, so the
+`or` fallback is dead on either path.
+"""

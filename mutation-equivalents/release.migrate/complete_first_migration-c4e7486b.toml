@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/release/migrate.py"
+symbol = "complete_first_migration"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-    _load_drop_in(plane, host, with_exec_reload=False)
++    _load_drop_in(plane, host, with_exec_reload=None)
+"""
+justification = """
+The second call site of the same argument as in `_install_files`, and the same
+argument holds: `drop_in_text` truth-tests the value and nothing else reads it,
+so None and False produce the same drop-in text. Registered separately because
+the register is keyed by file and symbol, and this call is on the crash-recovery
+path rather than the install path. The `with_exec_reload=True` mutant of this
+same line is NOT equivalent — it is killed by
+`tests/unit/test_release_migrate.py::TestReconcileWindow::test_completing_repeats_the_install_without_the_pair`.
+"""

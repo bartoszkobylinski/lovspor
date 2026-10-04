@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "toolchain_fingerprint"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        fingerprint=_sha256(canonical.encode("utf-8")),
++        fingerprint=_sha256(canonical.encode("UTF-8")),
+"""
+justification = """
+Codec names are case-insensitive: `str.encode` resolves the name through the
+codec registry, which normalises it, so "utf-8" and "UTF-8" encode identical
+bytes and the fingerprint is the same digest. Python's codec registry, not a
+dependency.
+"""

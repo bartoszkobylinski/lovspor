@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/release/reconcile.py"
+symbol = "reconcile"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-    plane: ControlPlane, action: ReconcileAction = "report", host: MigrationHost | None = None
++    plane: ControlPlane, action: ReconcileAction = "REPORT", host: MigrationHost | None = None
+"""
+justification = """
+The case-folded spelling of the same default, equivalent for the same reason:
+`action` reaches only `action == "complete"` and `action == "abandon"` in
+`_resolve` and `_resolve_staged`, and `str.__eq__` is case-sensitive, so
+"REPORT" is unequal to both exactly as "report" is. Same control flow on every
+input, and the value is never rendered or stored.
+"""

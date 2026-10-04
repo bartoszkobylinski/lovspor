@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "measure_html"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-def measure_html(payload: bytes, content_type: str = "text/html") -> HtmlText:
++def measure_html(payload: bytes, content_type: str = "XXtext/htmlXX") -> HtmlText:
+"""
+justification = """
+content_type is read in one place: _decoded passes it to _charset, which looks
+only at content_type.split(";")[1:]. Neither "text/html" nor "XXtext/htmlXX"
+contains a ";", so that slice is empty for both, _charset returns None for
+both, and _decoded then tries UTF-8 alone either way. blob_form, the only
+reader of the media type itself, is called by _measure_into on the recorded
+type, never on this default. So the default's media type is never read.
+"""

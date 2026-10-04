@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/release/check.py"
+symbol = "_check_site_tree"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-        pages[page.path] = path.read_text(encoding="utf-8")
++        pages[page.path] = path.read_text(encoding="UTF-8")
+"""
+justification = """
+Codec names are case-insensitive: `Path.read_text` hands the name to the text
+wrapper, which resolves it through the codec registry, and the registry
+normalises the name, so both spellings decode the same page bytes to the same
+markup. Python's codec registry, not a dependency. (`encoding=None` is NOT
+equivalent — it is the locale's codec — and is killed under the C locale by
+`test_the_pages_are_read_as_utf_8_whatever_the_process_locale`.)
+"""

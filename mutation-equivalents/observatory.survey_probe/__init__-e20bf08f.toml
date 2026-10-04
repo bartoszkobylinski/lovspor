@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "__init__"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-    self._owes_delay = False
++    self._owes_delay = None
+"""
+justification = """
+A dead store. `read` assigns `self._owes_delay = False` as its first statement,
+before any path can read it, so the value set in `__init__` is never observed.
+The assignment stays because the attribute belongs in the constructor for
+readability and for mypy, not because any behaviour depends on it.
+"""

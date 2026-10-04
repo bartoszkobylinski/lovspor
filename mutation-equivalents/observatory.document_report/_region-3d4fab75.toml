@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/observatory/document_report.py"
+symbol = "_region"
+registered = "2026-09-30, PR #464, from run 36653212780"
+mutation = """
+-        document = html.document_fromstring(page, parser=safe_html_parser())
++        document = html.document_fromstring(page, )
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_lxml_default_html_parser_reads_text_like_the_hardened_one"
+justification = """
+Omitting the argument is parser=None, the mutant registered above: the module
+default HTMLParser, which differs from safe_html_parser only in keeping
+comments, and comments never reach the measured text.
+"""

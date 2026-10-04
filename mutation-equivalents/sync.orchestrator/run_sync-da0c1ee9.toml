@@ -1,0 +1,23 @@
+[[equivalent]]
+file = "src/lovspor/sync/orchestrator.py"
+symbol = "run_sync"
+registered = "2026-09-30, issue #427 (owner decision 2026-09-29), from PR #422's survivor list"
+mutation = """
+-    sprint9_target = space_id_of(sprint9_embedder) if sprint9_embedder is not None else None
++    sprint9_target = space_id_of(sprint9_embedder) if (sprint9_embedder is not None) or True else None
+"""
+justification = """
+The mutant always takes the first branch, so it differs from the original only
+when `sprint9_embedder is None`: the original then yields the literal None, the
+mutant yields `space_id_of(None)`. `space_id_of` opens with
+`if embedder is None: return None` (embeddings/provider.py), so both yield None
+and nothing else in the call can differ — it has no side effect. The two
+spellings compute the same value for every embedder, present or absent.
+
+PR #422's remediation "killed" this mutant only by replacing `space_id_of` with
+a function that fails when called, which pins whether the call happens, not
+what `run_sync` does. That test is removed (issue #427). The argument leans on
+another module's function rather than on Python alone, so the test pinning
+`space_id_of(None) is None` is named below.
+"""
+assumption_test = "tests/unit/test_embeddings_provider.py::test_an_adapter_declaring_no_space_is_treated_as_unknown"

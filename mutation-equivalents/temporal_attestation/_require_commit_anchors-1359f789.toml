@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "_require_commit_anchors"
+registered = "2026-09-27, PR #439, from run 36320125682"
+mutation = """
+-        name, _, kind = line.partition(" ")
++        name, _, kind = line.rpartition(" ")
+"""
+justification = """
+partition and rpartition differ only when a line holds two or more spaces.
+With the format `%(objectname) %(objecttype)`, `git cat-file --batch-check`
+prints `<id> <type>` per present object and `<id> missing` per absent one:
+an id has no space and neither does a type name or `missing`, so each line
+holds exactly one space and both calls return the same (name, " ", kind).
+This argues from git's output format, which the assumption test pins on a
+real commit, a tree and an absent id.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_git_batch_check_prints_id_and_type_with_one_space"

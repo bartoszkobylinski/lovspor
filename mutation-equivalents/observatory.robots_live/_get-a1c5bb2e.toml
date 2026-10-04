@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/observatory/robots_live.py"
+symbol = "_get"
+registered = "2026-09-30, PR #463, from run 36651498183"
+mutation = """
+-        return client.get(url, headers={"User-Agent": user_agent}, follow_redirects=False)
++        return client.get(url, headers={"User-Agent": user_agent}, follow_redirects=None)
+"""
+justification = """
+httpx 0.28 `Client.send` substitutes the client's own setting only when the
+argument is the `USE_CLIENT_DEFAULT` sentinel (`isinstance(follow_redirects,
+UseClientDefault)`); `None` is not that sentinel, so it is passed through, and
+`_send_handling_redirects` then tests it with a bare `if follow_redirects:`.
+`None` and `False` are both falsy, so the redirect is returned unfollowed in
+both cases, even on a client built with `follow_redirects=True`. The sibling
+mutant that drops the argument (and so does take the client default) is
+killed by test_a_client_that_follows_redirects_still_has_each_hop_checked.
+Argued from the dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_observatory_robots_live.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_reads_follow_redirects_none_as_do_not_follow"

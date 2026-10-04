@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey.py"
+symbol = "front_page_markers"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-    text = payload.decode("utf-8", errors="ignore")
++    text = payload.decode("UTF-8", errors="ignore")
+"""
+justification = """
+Codec names are case-insensitive: `encodings.normalize_encoding` lowercases the
+name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object. No
+input can distinguish them, so no test can.
+"""

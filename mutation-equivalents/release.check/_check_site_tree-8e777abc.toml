@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/release/check.py"
+symbol = "_check_site_tree"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-        path = site / page.path.lstrip("/") / "index.html"
++        path = site / page.path.lstrip("XX/XX") / "index.html"
+"""
+assumption_test = "tests/unit/test_site_routes.py::TestSiteRoute::test_rejects_a_path_outside_the_directory_shape"
+justification = """
+The argument to `str.lstrip` is a CHARACTER SET, so "XX/XX" is the set {X, /}.
+`page` ranges over `emitted_pages()`, whose paths are `SiteRoute.path` values —
+the `RoutePath` pattern `^/(?:[a-z0-9-]+/)*$` restricts them to "/" and
+lower-case ASCII segments — or that path behind the "/en" prefix. No such
+string can carry an upper-case X anywhere, let alone at its front, so the X in
+the set never matches and the set strips exactly what {/} strips. Same argument
+as the registered `site/build._write_tree` entry, which reads the same paths;
+the path shape is a pydantic constraint, so the route-shape test that rejects
+"/Status/" is named as the assumption test.
+"""

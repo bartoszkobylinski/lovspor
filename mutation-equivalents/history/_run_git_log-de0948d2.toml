@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/history.py"
+symbol = "_run_git_log"
+registered = "2026-10-03, PR #517, from run 37120843625"
+mutation = """
+-            "core.quotePath=false",
++            "core.quotepath=false",
+"""
+justification = """
+git config section and key names are case-insensitive, so core.quotepath and
+core.quotePath name the same setting and the numstat rows carry the same raw
+UTF-8 paths. Argues from git, not Python, so it is pinned by a real-git
+assumption test over an æøå path, compared with the quoted default as control.
+"""
+assumption_test = "tests/unit/test_history_utf8.py::test_assumption_git_reads_the_quotepath_setting_case_insensitively"

@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/publish/browse.py"
+symbol = "_group_html"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-    safe = html_escape.escape(letter, quote=True)
++    safe = html_escape.escape(letter, )
+"""
+justification = """
+Same stdlib-default selection as the html.py and pages.py entries:
+`html.escape` defaults `quote` to True, so dropping the explicit
+argument escapes identically. Pinned by the same assumption test — a
+changed default turns this entry red instead of waiving a quoting
+regression on the group label.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"

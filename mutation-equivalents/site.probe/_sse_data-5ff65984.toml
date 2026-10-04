@@ -1,0 +1,24 @@
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "_sse_data"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-        data = "\\n".join(line[5:].removeprefix(" ") for line in lines if line.startswith("data:"))
++        data = "\\n".join(line[5:].removesuffix(" ") for line in lines if line.startswith("data:"))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_the_json_rpc_parser_ignores_a_space_at_a_line_margin"
+justification = """
+The two spellings differ on one line's value by at most one U+0020 at one
+margin: the original drops a leading space, the mutant a trailing one, and
+for a value that is a lone space both produce "". The joined payload is
+consumed in two ways only. For truth (`and data`): it is empty in one exactly
+when it is empty in the other, since a line's value is empty after either
+rule only when it was "" or " ". By `JSONRPCMessage.model_validate_json`: a
+space at a line margin is outside every JSON token, because a JSON string
+cannot contain a raw line break and so never straddles two `data:` lines,
+and the parser (pydantic's) treats a U+0020 before or after a token as
+insignificant whitespace — pinned by the assumption test — so the parsed
+message, or the validation failure, is the same. `lstrip()` was the earlier
+spelling and had no provable twin: it also removed non-breaking spaces,
+which the parser does not ignore; the spec-exact rule replaced it.
+"""
