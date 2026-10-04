@@ -589,3 +589,8 @@ def test_a_dotted_date_after_a_word_is_still_a_wrap() -> None:
     lines = ("Forskrifta trer i kraft", "1.1.2010.")
     page = _main("<p>" + "<br>".join(lines) + "</p>")
     assert html_lines(page, "text/html") == ("Forskrifta trer i kraft 1.1.2010.",)
+
+
+def test_html_text_after_a_closing_block_is_kept_on_a_line_of_its_own() -> None:
+    page = _main("<div><p>§ 1 Formål</p>Forskrifta gjeld heile kommunen.</div>")
+    assert html_lines(page, "text/html") == ("§ 1 Formål", "Forskrifta gjeld heile kommunen.")
