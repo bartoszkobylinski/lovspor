@@ -36,7 +36,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from lovspor.atomic_io import atomic_write_text
+from lovspor.atomic_io import atomic_write_bytes
 from lovspor.errors import LogIntegrityError
 from lovspor.observatory.lf_refs import LF_ID_PATTERN, LovdataKind, LovdataRef, extract_lovdata_refs
 from lovspor.observatory.log import ObservationLog
@@ -266,7 +266,9 @@ def _load_cursor(path: Path) -> LedgerCursor | None:
 def _write_cursor(log: ObservationLog, offset: int) -> None:
     digest = _prefix_digest(log.log_path, offset)
     cursor = LedgerCursor(log_offset=offset, prefix_sha256=digest)
-    atomic_write_text(ledger_cursor_path(log), cursor.model_dump_json() + "\n")
+    # The cursor sits in the root, which a write never creates (#534).
+    payload = (cursor.model_dump_json() + "\n").encode()
+    atomic_write_bytes(ledger_cursor_path(log), payload, make_parents=False)
 
 
 def _prefix_digest(log_path: Path, offset: int) -> str:

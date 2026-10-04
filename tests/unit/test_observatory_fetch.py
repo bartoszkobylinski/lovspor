@@ -118,6 +118,8 @@ def _settings(clock: _Clock | None = None, max_bytes: int = 1024) -> CaptureSett
 
 @pytest.fixture
 def log(tmp_path: Path) -> ObservationLog:
+    # A mounted archive: a write never creates the root (#534).
+    (tmp_path / "observatory").mkdir()
     return ObservationLog(ObservatoryRoot(tmp_path / "observatory", forbidden=[]))
 
 

@@ -9,7 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.errors import LogIntegrityError, StorageBoundaryError, TombstonedArtifactError
+from lovspor.errors import (
+    LogIntegrityError,
+    StorageBoundaryError,
+    StorageUnavailableError,
+    TombstonedArtifactError,
+)
 from lovspor.observatory.log import ObservationLog, verify_snapshot
 from lovspor.observatory.model import (
     ArtifactObservation,
@@ -103,23 +108,6 @@ class TestAppendOnly:
         assert log.root == tmp_path
         assert log.log_path.parent == tmp_path
         assert log.blob_path("ab" + "c" * 62).parent == tmp_path / "blobs" / "ab"
-
-    def test_append_creates_missing_nested_parent_directories(self, tmp_path: Path) -> None:
-        """The root itself may not exist yet — only its own parents (mkdir
-        without ``parents=True`` would stop at the first missing level)."""
-        log = make_log(tmp_path / "a" / "b" / "c")
-
-        log.append(
-            FetchFailure(
-                authority_id="9999",
-                url="https://example.invalid/f",
-                observed_at=OBSERVED_AT,
-                provenance=provenance(),
-                outcome="timeout",
-            ),
-        )
-
-        assert log.log_path.exists()
 
     def test_append_writes_with_explicit_utf8_encoding(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -635,34 +623,38 @@ class TestReadingNeverStopsEarly:
         assert verify_snapshot(log).artifacts_checked == 2
 
 
-class TestLogCreatesItsOwnRoot:
-    def test_appending_a_record_creates_a_root_several_levels_deep(self, tmp_path: Path) -> None:
-        """The observatory root normally does not exist before the first capture.
+class TestLogNeverCreatesItsRoot:
+    """The root must already exist (#534): a missing one is a vanished volume.
 
-        Exercised through `append`, not `append_artifact`: the latter writes a blob
-        first, which creates the root as a side effect and hides whether `append`
-        can stand up its own directory."""
+    Until #534 the first capture stood up its own root several levels deep.
+    On 2026-10-04 that same walk tried to recreate ``/Volumes/T7`` under a
+    running sweep; on a writable parent it would have started a second,
+    partial archive on the internal disk instead.
+    """
+
+    def test_appending_a_record_does_not_create_a_missing_root(self, tmp_path: Path) -> None:
         log = ObservationLog(ObservatoryRoot(tmp_path / "a" / "b" / "observatory", []))
 
-        log.append(
-            FetchFailure(
-                authority_id="9999",
-                url="https://example.invalid/missing",
-                observed_at=OBSERVED_AT,
-                provenance=provenance(),
-                outcome="timeout",
-            ),
-        )
+        with pytest.raises(StorageUnavailableError):
+            log.append(
+                FetchFailure(
+                    authority_id="9999",
+                    url="https://example.invalid/missing",
+                    observed_at=OBSERVED_AT,
+                    provenance=provenance(),
+                    outcome="timeout",
+                ),
+            )
 
-        assert log.log_path.exists()
-        assert len(list(log.records())) == 1
+        assert not (tmp_path / "a").exists()
 
-    def test_first_capture_creates_a_root_several_levels_deep(self, tmp_path: Path) -> None:
+    def test_first_capture_does_not_create_a_missing_root(self, tmp_path: Path) -> None:
         log = ObservationLog(ObservatoryRoot(tmp_path / "c" / "d" / "observatory", []))
 
-        log.append_artifact(observation(b"a"), b"a")
+        with pytest.raises(StorageUnavailableError):
+            log.append_artifact(observation(b"a"), b"a")
 
-        assert log.log_path.exists()
+        assert not (tmp_path / "c").exists()
 
 
 class TestCrashRecovery:

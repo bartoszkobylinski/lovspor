@@ -140,6 +140,18 @@ class StorageBoundaryError(ObservatoryError):
     """
 
 
+class StorageUnavailableError(ObservatoryError):
+    """The archive could not take a write: its root is gone, or a write under it failed.
+
+    The archive lives on external storage (ADR-0010 §5), so a volume that goes
+    away mid-run is an ordinary event. It is never answered by creating the
+    root again: on 2026-10-04 the blob writer's ``mkdir(parents=True)`` walked
+    up and tried to recreate ``/Volumes/T7`` under a running sweep, and on a
+    writable parent the same walk would have started a second, partial archive
+    (issue #534). The sweep ends on this error and says so.
+    """
+
+
 class LogIntegrityError(ObservatoryError):
     """The observation log or its blob store is not in an auditable state.
 

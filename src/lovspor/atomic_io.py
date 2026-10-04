@@ -45,7 +45,9 @@ def atomic_write_text(
     atomic_write_bytes(path, text.encode(encoding), mode=mode)
 
 
-def atomic_write_bytes(path: Path, payload: bytes, *, mode: int | None = None) -> None:
+def atomic_write_bytes(
+    path: Path, payload: bytes, *, mode: int | None = None, make_parents: bool = True
+) -> None:
     """Write ``payload`` to ``path`` atomically via a staging file beside it.
 
     Used by the observatory blob store, where the stored object is a captured
@@ -53,7 +55,10 @@ def atomic_write_bytes(path: Path, payload: bytes, *, mode: int | None = None) -
     re-encoded on the way to disk (ADR-0010 §2: raw bytes exactly as
     received).
 
-    Parent directories are created if missing. The staging file lives in the
+    Parent directories are created if missing, unless ``make_parents`` is
+    False: then a missing directory raises ``FileNotFoundError`` and nothing is
+    created — the observatory's archive root must never be stood up again by a
+    write under it (issue #534). The staging file lives in the
     same directory as ``path`` so ``replace`` stays on one filesystem. On any
     ``OSError`` it is removed and the error re-raised, so a failed write
     neither corrupts the target nor leaves behind the file this call made — a
@@ -62,7 +67,8 @@ def atomic_write_bytes(path: Path, payload: bytes, *, mode: int | None = None) -
     is never observed with the umask's mode; ``None`` leaves the umask's,
     except on the stepped-aside path of :func:`_stage_beside`.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if make_parents:
+        path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, staged = _stage(path, mode)
     try:
         _fill(descriptor, payload, mode)

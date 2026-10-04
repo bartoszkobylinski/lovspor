@@ -29,7 +29,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 
 from lovspor.errors import LogIntegrityError
 from lovspor.observatory.fields import NonBlankStr
-from lovspor.observatory.storage import ObservatoryRoot
+from lovspor.observatory.storage import ObservatoryRoot, storage_failure
 
 SWEEPS_FILENAME = "sweep-runs.jsonl"
 
@@ -233,14 +233,22 @@ def append_sweep_run(root: ObservatoryRoot, run: SweepRun) -> None:
     Locked and fsynced like the observation log: the nightly job and an
     operator running a sweep by hand are two writers, and a torn line here
     costs the answer to when the archive was last healthy.
+
+    Never creates the root (issue #534): a run recorded into a directory this
+    call made would read later as the archive's history when it is not.
+
+    Raises:
+        StorageUnavailableError: the root is gone or the write failed.
     """
     path = sweeps_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        handle.write(run.model_dump_json() + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    try:
+        with path.open("a", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            handle.write(run.model_dump_json() + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        raise storage_failure(root, path, exc) from exc
 
 
 def read_sweep_runs(path: Path) -> list[SweepRun]:

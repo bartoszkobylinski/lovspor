@@ -20,7 +20,7 @@ import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from lovspor.errors import ConfigError, StorageBoundaryError
+from lovspor.errors import ConfigError, StorageBoundaryError, StorageUnavailableError
 
 ENV_OBSERVATORY_ROOT = "LOVSPOR_OBSERVATORY_ROOT"
 ENV_CORPUS_ROOT = "LOVSPOR_OUTPUT_REPO_PATH"
@@ -106,6 +106,42 @@ def _reject_forbidden(root: Path, forbidden: Sequence[Path]) -> Path:
                 "material outside the engine repository and the lovverk corpus",
             )
     return root
+
+
+def ensure_below_root(root: ObservatoryRoot, directory: Path) -> None:
+    """Create ``directory`` and its missing parents, strictly below the root.
+
+    The root itself is checked, never made (issue #534): a missing root is a
+    volume that went away, and recreating it would start a second archive.
+    Each level is made without ``parents``, so a root that vanishes during the
+    walk fails the next ``mkdir`` instead of being stood up again by it.
+
+    Raises:
+        StorageUnavailableError: the root, or a level of the walk, is gone.
+        StorageBoundaryError: ``directory`` is not inside the root.
+    """
+    if not root.path.is_dir():
+        raise StorageUnavailableError(f"observatory root {root.path} is gone; {directory} not made")
+    try:
+        relative = directory.relative_to(root.path)
+    except ValueError as exc:
+        raise StorageBoundaryError(f"{directory} is outside observatory root {root.path}") from exc
+    current = root.path
+    for part in relative.parts:
+        current = current / part
+        try:
+            current.mkdir(exist_ok=True)
+        except FileNotFoundError as exc:
+            raise storage_failure(root, current, exc) from exc
+
+
+def storage_failure(root: ObservatoryRoot, target: Path, exc: OSError) -> StorageUnavailableError:
+    """The typed failure of a write under ``root``, naming whether the root vanished."""
+    if not root.path.is_dir():
+        return StorageUnavailableError(
+            f"observatory root {root.path} is gone; {target} not written: {exc}"
+        )
+    return StorageUnavailableError(f"cannot write {target} under {root.path}: {exc}")
 
 
 def forbidden_trees(env: Mapping[str, str] | None = None) -> list[Path]:

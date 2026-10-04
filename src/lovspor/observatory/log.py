@@ -41,7 +41,7 @@ from lovspor.observatory.model import (
     Tombstone,
     record_to_json_line,
 )
-from lovspor.observatory.storage import ObservatoryRoot
+from lovspor.observatory.storage import ObservatoryRoot, ensure_below_root, storage_failure
 
 LOG_FILENAME = "observations.jsonl"
 BLOBS_DIRNAME = "blobs"
@@ -159,6 +159,7 @@ class ObservationLog:
                 f"ObservationLog requires an ObservatoryRoot, got {type(root).__name__}; "
                 "resolve the root through observatory_root() so ADR-0010 §5 is checked",
             )
+        self._checked = root
         self._root = root.path
         self._tombstones: set[str] = set()
         self._tombstones_through = 0
@@ -195,18 +196,27 @@ class ObservationLog:
         per-source rate limit measured in seconds between requests, so an
         fsync per record is unmeasurable against the waiting the crawler is
         already doing.
+
+        Raises:
+            StorageUnavailableError: the root vanished or the write failed.
         """
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.log_path.open("a", encoding="utf-8") as handle:
-            # One archive serves several capture processes — one per source —
-            # and O_APPEND only keeps their lines whole while a record fits in
-            # one write() call. That held by arithmetic, not by contract, and
-            # a torn interleaved line costs the whole snapshot (issue #152).
-            # The lock is held through fsync and released by close.
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            handle.write(record_to_json_line(record) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+        line = record_to_json_line(record) + "\n"
+        # No mkdir: the log sits directly in the root, and the root is never
+        # created by a write (issue #534). A vanished root fails the open.
+        try:
+            with self.log_path.open("a", encoding="utf-8") as handle:
+                # One archive serves several capture processes — one per
+                # source — and O_APPEND only keeps their lines whole while a
+                # record fits in one write() call. That held by arithmetic,
+                # not by contract, and a torn interleaved line costs the whole
+                # snapshot (issue #152). The lock is held through fsync and
+                # released by close.
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            raise storage_failure(self._checked, self.log_path, exc) from exc
 
     def append_artifact(self, record: ArtifactObservation, payload: bytes) -> None:
         """Store captured bytes, then append the record that describes them.
@@ -223,6 +233,7 @@ class ObservationLog:
                 tombstone. Re-storing them because the source still serves
                 them would silently reverse a legal or privacy removal, which
                 is precisely what the tombstone exists to prevent.
+            StorageUnavailableError: the root vanished or a write failed.
         """
         digest = hashlib.sha256(payload).hexdigest()
         if digest != record.sha256:
@@ -234,10 +245,23 @@ class ObservationLog:
                 f"{digest} was removed under a tombstone; re-storing it would reverse a "
                 "sanctioned removal (ADR-0010 §7)",
             )
-        blob = self.blob_path(digest)
-        if not blob.exists():
-            atomic_write_bytes(blob, payload)
+        self._store_blob(self.blob_path(digest), payload)
         self.append(record)
+
+    def _store_blob(self, blob: Path, payload: bytes) -> None:
+        """Write a blob whose shard may not exist yet, never creating the root.
+
+        The shard directory is made below the root and the write then makes no
+        directory at all, so a volume that vanishes between the two fails the
+        write instead of being recreated by it (issue #534).
+        """
+        if blob.exists():
+            return
+        try:
+            ensure_below_root(self._checked, blob.parent)
+            atomic_write_bytes(blob, payload, make_parents=False)
+        except OSError as exc:
+            raise storage_failure(self._checked, blob, exc) from exc
 
     def tombstoned_hashes(self) -> frozenset[str]:
         """Hashes retired by a tombstone, and therefore closed to re-capture.
