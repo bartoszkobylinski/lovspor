@@ -17,8 +17,10 @@ regulation's text, and so cannot mint a version.
 metadata (Author, Creator), which names people and is not the regulation.
 The page's hard line wraps are rejoined, so a wrapped title or paragraph is
 one line again; a section heading, a list item, an enactment line and a new
-sentence after a full line stay lines of their own. HTML and DOCX already
-carry their author's paragraphs and are never rejoined.
+sentence after a full line stay lines of their own. A page pasted from Word
+into a CMS keeps the same hard wraps as ``<br>``; those are rejoined by the
+same rules, but only inside one block element, never across two. DOCX
+carries its author's paragraphs and is never rejoined.
 
 **DOCX.** ``word/document.xml`` read in memory — nothing is extracted to
 disk — under a size cap, through the pipeline's hardened XML parser.
@@ -55,7 +57,7 @@ _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 _BLOCK_TAGS = frozenset(
     {"p", "div", "section", "article", "header", "main", "li", "ul", "ol", "dl", "dt", "dd"}
-    | {"h1", "h2", "h3", "h4", "h5", "h6", "table", "tr", "td", "th", "pre", "blockquote", "br"}
+    | {"h1", "h2", "h3", "h4", "h5", "h6", "table", "tr", "td", "th", "pre", "blockquote"}
 )
 _CHROME_TAGS = ("nav", "aside", "footer", "form", "button", "select", "iframe", "svg")
 _INVISIBLE_TAGS = ("script", "style", "noscript", "template")
@@ -63,6 +65,9 @@ _CHROME_ROLES = frozenset({"navigation", "complementary", "banner", "contentinfo
 _CHROME_CLASS_WORDS = frozenset({"sidebar", "breadcrumb", "breadcrumbs", "cookie", "share"})
 _CLASS_WORD = re.compile(r"[a-z]+")
 _WHITESPACE = re.compile(r"\s+")
+# Whitespace in source text is collapsed to one space first, so this
+# separator can only come from a <br>.
+_BR = "\u2028"
 
 # Whole lines only. Each is page furniture a reader never takes for law, in
 # bokmål and nynorsk. A byline ("Publisert av ...") is not furniture: it may
@@ -111,7 +116,8 @@ def html_lines(payload: bytes, content_type: str) -> tuple[str, ...]:
     if region is None:
         raise UnreadableSourceError("HTML has no document region (<main> or <body>)")
     _drop_chrome(region)
-    return _clean_lines(_block_text(_narrowed(region)).split("\n"))
+    blocks = _block_text(_narrowed(region)).split("\n")
+    return tuple(line for block in blocks for line in _rejoined(_clean_lines(block.split(_BR))))
 
 
 def pdf_lines(payload: bytes) -> tuple[str, ...]:
@@ -182,6 +188,8 @@ def _block_text(region: html.HtmlElement) -> str:
         if isinstance(node.tag, str) and node.tag in _BLOCK_TAGS:
             node.text = "\n" + node.text
             node.tail = "\n" + node.tail
+        elif node.tag == "br":
+            node.tail = _BR + node.tail
     return str(region.text_content())
 
 
