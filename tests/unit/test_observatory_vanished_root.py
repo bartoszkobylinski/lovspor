@@ -21,6 +21,7 @@ from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 import lovspor.observatory.commands as observatory_commands
+import lovspor.observatory.log as observation_log
 from lovspor.cli import app
 from lovspor.errors import ObservatoryError, StorageBoundaryError, StorageUnavailableError
 from lovspor.observatory.catch_up import catch_up_blocker, skip_catch_up
@@ -161,6 +162,40 @@ class TestTheRootIsNeverCreated:
 
 
 class TestTheLogRefusesAVanishedRoot:
+    @pytest.mark.parametrize("vanish_after", ["mkdir", "before_write"])
+    def test_a_root_vanishing_during_blob_setup_is_not_recreated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, vanish_after: str
+    ) -> None:
+        """Issue #534 requires safety between the root check and the write too."""
+        root = tmp_path / "observatory"
+        root.mkdir()
+        log = ObservationLog(_checked(root))
+        if vanish_after == "mkdir":
+            original_mkdir = Path.mkdir
+
+            def mkdir_then_vanish(
+                self: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False
+            ) -> None:
+                original_mkdir(self, mode=mode, parents=parents, exist_ok=exist_ok)
+                if self == root / "blobs":
+                    shutil.rmtree(root)
+
+            monkeypatch.setattr(Path, "mkdir", mkdir_then_vanish)
+        else:
+            original_ensure = ensure_below_root
+
+            def ensure_then_vanish(checked: ObservatoryRoot, directory: Path) -> None:
+                original_ensure(checked, directory)
+                shutil.rmtree(root)
+
+            monkeypatch.setattr(observation_log, "ensure_below_root", ensure_then_vanish)
+
+        with pytest.raises(StorageUnavailableError, match="is gone") as caught:
+            log.append_artifact(_observation(b"x"), b"x")
+
+        assert isinstance(caught.value.__cause__, FileNotFoundError)
+        assert not root.exists()
+
     def test_a_blob_write_after_the_root_vanished_raises_and_recreates_nothing(
         self, tmp_path: Path
     ) -> None:
@@ -201,6 +236,27 @@ class TestTheLogRefusesAVanishedRoot:
 
 
 class TestTheRunRecordRefusesAVanishedRoot:
+    @pytest.mark.parametrize("writer", ["observation", "sweep"])
+    def test_a_sync_failure_is_typed_and_preserves_its_cause(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer: str
+    ) -> None:
+        """The PR promises typed errors for failed writes with the root present."""
+        failure = OSError("archive fsync failed")
+
+        def fail_sync(descriptor: int) -> None:
+            raise failure
+
+        monkeypatch.setattr(observation_log.os, "fsync", fail_sync)
+        checked = _checked(tmp_path)
+        with pytest.raises(StorageUnavailableError, match="cannot write") as caught:
+            if writer == "observation":
+                ObservationLog(checked).append(_failure())
+            else:
+                append_sweep_run(checked, _run(BOOT))
+
+        assert caught.value.__cause__ is failure
+        assert tmp_path.is_dir()
+
     def test_a_run_is_not_appended_to_a_vanished_root(self, tmp_path: Path) -> None:
         root = tmp_path / "observatory"
 
