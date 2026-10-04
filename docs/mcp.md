@@ -267,7 +267,7 @@ All seventeen are read-only. None mutate the corpus or trigger a sync. Sixteen a
 
 Return the full Markdown of a Norwegian law or regulation.
 
-- **`slug`** — the human-readable kortform identifier, e.g. `skatteloven`, `opplæringslova`, `trafikkforskriften`. Use `search_laws` or `list_recent_changes` to discover valid slugs.
+- **`slug`** — the human-readable kortform identifier, e.g. `skatteloven`, `opplæringslova`, `trafikkforskriften`. Use `search_laws` or `list_recent_changes` to discover valid slugs. A local regulation is addressed `<authority_id>/<slug>` or by its `lf-`/`lk-` id instead — see [Local regulations](#local-regulations-adr-0016).
 
 **Ambiguous slugs (issue #243).** Slug collisions are resolved per dataset at render time, so a lov and a forskrift can carry the same slug — the corpus has one such pair, `bergverksordning-for-svalbard`. Every slug-taking tool (`get_law`, `get_section`, `list_sections`, `get_eu_basis`, `get_law_at`, the `recorded_at` state views, …) then raises `AmbiguousSlugError` (a `CorpusNotFoundError`) instead of silently serving one of them: `slug 'bergverksordning-for-svalbard' names 2 current documents: <doc_id> (lov), <doc_id> (forskrift); no tool accepts a doc_id yet, so none of them can be fetched by slug — search_laws lists them all with their doc_id and dataset`. `search_laws` still returns both records; `search_body` and `semantic_search` report no hits under an ambiguous slug, because a hit there could not be followed up by slug. A type-qualified address is the deliberate follow-up, not a hidden precedence rule.
 
@@ -1081,6 +1081,36 @@ Search the corpus for laws whose slug or title contains `query` (case-insensitiv
 
 Use `get_law(slug)` to fetch the full text of any result.
 
+With `dataset="lokale-forskrifter"` the search covers **only** the local regulations — see below.
+
+---
+
+### Local regulations (ADR-0016)
+
+Regulations enacted by a kommune or fylkeskommune and promoted from the local-law observatory live in `lovverk/lokale-forskrifter/`, a dataset of their own with its own `manifest.json`. They are served **opt-in**: no existing call changes, and nothing local appears unless it is asked for.
+
+- **Addressing.** `<authority_id>/<slug>` — the SSB KLASS code of the authority, then the slug — or the document id (`lk-<authority_id>-<12 hex>`, or `lf-yyyymmdd-nnnn` when the text carries a Lovtidend number). A bare slug never resolves to a local regulation, even when no central law has that slug.
+- **`search_laws(query, dataset="lokale-forskrifter")`** — matches the qualified slug and the title of the current local regulations, and only those. Each hit: `slug` (the qualified address), `doc_id`, `title`, `dataset`, `authority_id`, `version`, `observation`.
+- **`get_law(address)`** — the rendered Markdown (front matter with `basis: "observed"`, `asserted: false`, `source_license: "åndsverkloven § 14"`), followed by an **Observation** block holding the label below as JSON. No temporal notice is composed: no valid-time fact is evaluated for local text.
+- **`get_section(address, section_id, occurrence?)`** — the usual section shape plus `doc_id`, `dataset` and `observation`, and without `temporal_notice`. Cross-references are validated against the local document itself and the central corpus. `recorded_at` is refused for a local regulation (`LocalScopeError`).
+
+Every response carrying local content carries this label; `asserted` is always `false`:
+
+```json
+"observation": {
+  "basis": "observed", "asserted": false,
+  "authority": {"id": "3118", "type": "kommune", "name": "Indre Østfold"},
+  "source_url": "https://…",
+  "observed_at_first": "2026-08-24T11:05:06.922416Z",
+  "observed_at_last": "2026-08-24T11:05:06.922416Z",
+  "notice": "Observert på myndighetens nettsted; ikke kontrollert mot Norsk Lovtidend eller Lovdata. Lovspor hevder ikke at forskriften gjelder. / Observed on the authority's website; not verified against Norsk Lovtidend or Lovdata. Lovspor does not assert that this regulation is in force."
+}
+```
+
+`observed_at_first` is the first observation of the served version (front matter); `observed_at_last` comes from `observations/<slug>.json` and is refreshed by the corpus at most weekly. Between observations nothing is asserted. A listed document whose files are missing or disagree with the manifest is an error (`LocalCorpusError`), never served unlabelled.
+
+Not yet served for local regulations (later ADR-0016 slices): `list_sections`, `verify_quote`, `validate_citation`, `search_body`, `list_recent_changes`, `semantic_search`, the version tools, `recorded_at`, an `authority` filter, local counts in `corpus_status`, and `get_observation_history`.
+
 ---
 
 ## Discovery flow
@@ -1126,7 +1156,7 @@ The server also runs from a clone of this repo instead of the PyPI release — t
 ## Limitations
 
 - **Current laws only, with git-history point-in-time.** The corpus mirrors `gjeldende-lover` and `gjeldende-sentrale-forskrifter` — laws and central regulations as currently in force (no repealed acts). The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) reconstruct an act's text as of a past date, but only back to the **earliest corpus revision** — a law's text as of 2018-06-01 predates lovspor's tracking window and is not retrievable. Results are corpus states, not legal-applicability determinations, and the `date_in_force` frontmatter field is descriptive metadata only — it is not used to reconstruct validity history (ADR-0002).
-- **No local or municipal regulations.** Only `sentrale forskrifter` are tracked.
+- **Local regulations are partial, observed and opt-in.** Only regulations promoted from the observatory are present (one kommune at first), reachable only by a qualified address or `dataset="lokale-forskrifter"`, and labelled observed-not-asserted. A local regulation absent here may well exist. See [Local regulations](#local-regulations-adr-0016).
 - **`search_laws` matches metadata only.** A law mentioning "klima" in its body but not its title or slug will not be found via `search_laws("klima")` — use `search_body` for that. (The two tools are complementary; `search_laws` is fast, `search_body` is thorough.)
 - **No Stortinget enrichment.** Parliamentary metadata (saker, voteringer, publikasjoner) is not surfaced. See [`docs/decisions.md` §3](decisions.md) for the rationale.
 - **Limited body-level analytics.** `search_body` finds substrings; `semantic_search` (Sprint 9) finds section-level cosine matches; `get_section` retrieves one `§ N-M` and lists its internal cross-references. Cross-act analytics that go beyond per-section retrieval — e.g. "find every act citing Skatteloven", topic clustering across the whole corpus — are not in scope and would need a richer index than the current per-doc binary embedding files.
@@ -1180,6 +1210,8 @@ The legal text served by this MCP comes from [Lovdata](https://lovdata.no)'s pub
 The `lovspor` engine code (this repo) is licensed **AGPL-3.0** (`LICENSE`); versions up to and including commit `632dae8` were MIT. The `lovverk` corpus structure is CC0; the legal text within it remains under NLOD 2.0.
 
 This project follows the conservative legal stance documented in [`docs/decisions.md` §4](decisions.md): only the Markdown derivative is published, never Lovdata's raw XML.
+
+Local regulations (`lokale-forskrifter/`) are not Lovdata data and carry no NLOD: they are published on the basis of åndsverkloven § 14 (`source_license: "åndsverkloven § 14"`), observed on the authority's own website and labelled `asserted: false` (ADR-0016).
 
 ---
 
