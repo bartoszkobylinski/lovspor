@@ -2867,6 +2867,7 @@ _ESCAPE_REFUSAL = (
     "to output it anyway"
 )
 _FAKE_GH_API = f"""\
+import json
 import os
 import sys
 from pathlib import Path
@@ -2877,6 +2878,12 @@ if endpoint.endswith("/jobs"):
     sys.stdout.write(Path(os.environ["FAKE_JOBS"]).read_text(encoding="utf-8"))
     raise SystemExit(0)
 flagged = "{_ESCAPE_FLAG}" in args
+with (Path(os.environ["RUNNER_TEMP"]) / "log-fetches.jsonl").open("a") as calls:
+    calls.write(json.dumps(args) + "\\n")
+if os.environ["FAKE_GH"] == "unavailable":
+    sys.stdout.buffer.write(Path(os.environ["FAKE_LOG"]).read_bytes())
+    sys.stderr.write("log download interrupted\\n")
+    raise SystemExit(1)
 if os.environ["FAKE_GH"] == "old" and flagged:
     sys.stderr.write("unknown flag: {_ESCAPE_FLAG}\\n")
     raise SystemExit(1)
@@ -2947,7 +2954,14 @@ class TestTheReporterReadsTheLaneLogGitHubsCliRefused:
         }
         step = _named_step(_steps(workflow, job), "Classify the lane failure")
         values = {"github.repository": "o/r", "github.run_id": "1"}
-        _run_step(_render(step["run"], values), tmp_path, env)
+        result = subprocess.run(
+            ["bash", "-eu", "-o", "pipefail", "-c", _render(step["run"], values)],
+            cwd=tmp_path,
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        (tmp_path / "classify-stdout").write_bytes(result.stdout)
         return dict(line.split("=", 1) for line in output.read_text().splitlines())
 
     @staticmethod
@@ -3000,3 +3014,46 @@ class TestTheReporterReadsTheLaneLogGitHubsCliRefused:
             run = _named_step(_steps(workflow, job), "Classify the lane failure")["run"]
 
             assert "::warning::" in run
+
+    @pytest.mark.parametrize("where", [_REPORTER, _VERIFIER], ids=["reporter", "verifier"])
+    def test_failed_fetches_discard_partial_evidence_and_warn(
+        self, tmp_path: Path, where: tuple[str, str, str]
+    ) -> None:
+        """Both workflows promise an empty log and a warning after two failures.
+
+        A failed download can still emit the host-error signature: it must not
+        refine the verdict using evidence from an incomplete response.
+        """
+        out = self._classify(tmp_path, self._log(host_missing=True), "unavailable", where)
+
+        assert (tmp_path / "lane.log").read_bytes() == b""
+        assert out["kind"] == "in_job"
+        assert out["job"] == where[2]
+        warning = (tmp_path / "classify-stdout").read_text(encoding="utf-8")
+        assert warning == (
+            f"::warning::could not fetch the {where[2]} log; classifying without it\n"
+        )
+        calls = [
+            json.loads(line) for line in (tmp_path / "log-fetches.jsonl").read_text().splitlines()
+        ]
+        endpoint = "repos/o/r/actions/jobs/111445054823/logs"
+        assert calls == [["api", _ESCAPE_FLAG, endpoint], ["api", endpoint]]
+
+    @pytest.mark.parametrize("gh", ["strict", "old"])
+    @pytest.mark.parametrize("where", [_REPORTER, _VERIFIER], ids=["reporter", "verifier"])
+    def test_successful_fetch_keeps_all_bytes_and_stops_retrying(
+        self, tmp_path: Path, gh: str, where: tuple[str, str, str]
+    ) -> None:
+        log = self._log(host_missing=True)
+        self._classify(tmp_path, log, gh, where)
+
+        assert (tmp_path / "lane.log").read_bytes() == log
+        assert (tmp_path / "classify-stdout").read_bytes() == b""
+        calls = [
+            json.loads(line) for line in (tmp_path / "log-fetches.jsonl").read_text().splitlines()
+        ]
+        endpoint = "repos/o/r/actions/jobs/111445054823/logs"
+        expected = [["api", _ESCAPE_FLAG, endpoint]]
+        if gh == "old":
+            expected.append(["api", endpoint])
+        assert calls == expected
