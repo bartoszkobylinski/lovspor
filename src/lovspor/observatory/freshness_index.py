@@ -42,7 +42,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from lovspor.atomic_io import atomic_write_bytes
+from lovspor.atomic_io import atomic_replace_bytes
 from lovspor.observatory.freshness import (
     CaptureState,
     ContentRun,
@@ -274,4 +274,4 @@ def _write_index(path: Path, index: FreshnessIndex) -> None:
     both are correct derivations, one merely further along)."""
     payload = (index.model_dump_json() + "\n").encode()
     # The index sits in the root, which a write never creates (#534).
-    atomic_write_bytes(path, payload, make_parents=False)
+    atomic_replace_bytes(path, payload)

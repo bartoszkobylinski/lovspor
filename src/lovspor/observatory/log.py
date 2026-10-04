@@ -26,7 +26,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
-from lovspor.atomic_io import atomic_write_bytes
+from lovspor.atomic_io import atomic_replace_bytes
 from lovspor.errors import LogIntegrityError, StorageBoundaryError, TombstonedArtifactError
 from lovspor.observatory.corrections import (
     CorrectionSet,
@@ -259,7 +259,7 @@ class ObservationLog:
             return
         try:
             ensure_below_root(self._checked, blob.parent)
-            atomic_write_bytes(blob, payload, make_parents=False)
+            atomic_replace_bytes(blob, payload)
         except OSError as exc:
             raise storage_failure(self._checked, blob, exc) from exc
 

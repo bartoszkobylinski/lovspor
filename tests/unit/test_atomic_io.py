@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.atomic_io import atomic_write_bytes, atomic_write_text
+from lovspor.atomic_io import atomic_replace_bytes, atomic_write_bytes, atomic_write_text
 
 
 @pytest.fixture
@@ -487,22 +487,22 @@ class TestMode:
         assert stat.S_IMODE((tmp_path / "t").stat().st_mode) == 0o600
 
 
-def test_a_write_told_not_to_make_parents_creates_no_directory(tmp_path: Path) -> None:
+def test_a_replace_creates_no_directory(tmp_path: Path) -> None:
     """The observatory writes under a root that must already exist (#534):
     a missing directory is the caller's evidence the volume went away."""
     target = tmp_path / "gone" / "blobs" / "d8" / "d8ff"
 
     with pytest.raises(FileNotFoundError):
-        atomic_write_bytes(target, b"x", make_parents=False)
+        atomic_replace_bytes(target, b"x")
 
     assert not (tmp_path / "gone").exists()
 
 
-def test_a_write_told_not_to_make_parents_still_writes_into_an_existing_one(
+def test_a_replace_writes_into_an_existing_directory(
     tmp_path: Path,
 ) -> None:
     target = tmp_path / "f.bin"
 
-    atomic_write_bytes(target, b"x", make_parents=False)
+    atomic_replace_bytes(target, b"x")
 
     assert target.read_bytes() == b"x"
