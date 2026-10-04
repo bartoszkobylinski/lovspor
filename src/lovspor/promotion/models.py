@@ -140,6 +140,7 @@ class PersonalDataKind(StrEnum):
     POSTAL_ADDRESS = "postal_address"
     CONTACT_LINE = "contact_line"
     SIGNATURE = "signature"
+    BYLINE = "byline"
 
 
 class PersonalDataHit(BaseModel):

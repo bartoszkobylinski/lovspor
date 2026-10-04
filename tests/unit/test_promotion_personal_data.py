@@ -158,3 +158,71 @@ def test_signature_hit_names_the_name_line_not_the_title_line() -> None:
 
 def test_a_word_that_only_starts_with_an_office_title_is_not_one() -> None:
     assert screen_personal_data("Kari Testperson\nordførerX") == ()
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Publisert av Kari Testperson",
+        "Skrevet av Ola Testperson-Hansen",
+        "Skrive av Ola Testperson",
+        "Sist endret av Kari Anne Testperson",
+        "Sist endra av Kari Testperson",
+        "Oppdatert av: Ola Testperson",
+        "Publisert 12.03.2020 av Kari Testperson",
+        "Sist endra 13.10.2017 08.44 av Ola Testperson",
+        "Publisert av Kari Testperson 12.03.2020",
+        "Ansvarlig: Kari Testperson",
+        "Ansvarleg Ola Testperson",
+        "Ansvarlig redaktør: Kari Testperson",
+        "Sist oppdatert 01.02.2024 | Publisert av Ola Testperson",
+    ],
+)
+def test_byline_naming_a_person_is_a_hit(line: str) -> None:
+    assert _kinds(line) == {PersonalDataKind.BYLINE}
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Publisert av Teknisk etat",
+        "Publisert av Eksempel Kommune",
+        "Sist endret av Plan- og byggesaksavdelingen",
+        "Oppdatert av Servicetorget",
+        "Skrevet av Kommunestyret",
+        "Publisert av Kari",
+        "Ansvarlig myndighet er kommunestyret.",
+        "Ansvarleg for tiltaket er Eksempel kommune.",
+        "Forskriften er fastsatt av Kommunestyret i Eksempel kommune.",
+        "Vedtatt av Eksempel Kommunestyre 12.03.2020.",
+        "Endret av Statsforvalteren i Trøndelag.",
+        "Publisert av Eksempel Bystyre",
+        "Sist endret 13.10.2017 08.44",
+    ],
+)
+def test_byline_naming_no_person_is_not_a_hit(line: str) -> None:
+    assert screen_personal_data(line) == ()
+
+
+def test_byline_hit_carries_its_line_never_the_name() -> None:
+    text = "§ 1 Formål\nForskriften gjelder i hele kommunen.\nPublisert av Kari Testperson"
+    hits = screen_personal_data(text)
+    assert hits == (PersonalDataHit(kind=PersonalDataKind.BYLINE, line=3),)
+    assert "Testperson" not in repr(hits)
+
+
+@pytest.mark.parametrize("line", ["Sakshandsamar: Kari Testperson", "Kontaktperson Ola"])
+def test_nynorsk_contact_line_is_a_hit(line: str) -> None:
+    assert _kinds(line) == {PersonalDataKind.CONTACT_LINE}
+
+
+def test_an_organ_word_as_a_compound_tail_still_names_a_unit() -> None:
+    assert screen_personal_data("Publisert av Eksempel Bystyre\nSkrevet av Ola Helsesenteret") == ()
+
+
+@pytest.mark.parametrize(
+    "line", ["Publisert av Teknisk Etat Nord", "Oppdatert av Plan-Kontoret Sør"]
+)
+def test_an_organ_word_before_the_last_word_still_names_a_unit(line: str) -> None:
+    """Each word is judged on its own, so an organ word mid-name is not hidden by the next."""
+    assert screen_personal_data(line) == ()

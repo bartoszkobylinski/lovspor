@@ -18,9 +18,17 @@ What counts as a hit, each deliberately narrow and deterministic:
   (``12 34 56 78``, ``123 45 678``); an amount like ``12 345 678`` is not;
 * ``postal_address`` — street, house number and four-digit postcode, or a
   ``Postboks``; a street name alone is a regulation's legal content;
-* ``contact_line`` — a ``Kontaktperson``/``Saksbehandler``/``Kontakt:`` line;
+* ``contact_line`` — a ``Kontaktperson``/``Saksbehandler``/``Sakshandsamar``/
+  ``Kontakt:`` line;
 * ``signature`` — a line that is only a personal name, next to a line that
-  is only an office title (``Kari Nordmann`` / ``ordfører``).
+  is only an office title (``Kari Nordmann`` / ``ordfører``);
+* ``byline`` — a web page's author line naming a person: ``Publisert``,
+  ``Skrevet``/``Skrive``, ``Sist endret``/``Sist endra`` or ``Oppdatert``,
+  an optional date stamp, then ``av``; or a line opening with
+  ``Ansvarlig``/``Ansvarleg`` (``redaktør``). It is a hit only when two to
+  four capitalised words follow and none of them is an organ word
+  (``kommune``, ``etat``, ``avdeling``, ``-styret`` …): ``Publisert av Teknisk
+  etat`` names a unit, ``fastsatt av kommunestyret`` is legal content.
 
 Property identifiers (gnr./bnr.) and Lovdata references are legal content
 and are never hits. A personal name elsewhere in running text is not
@@ -58,7 +66,20 @@ _POSTAL_ADDRESS = re.compile(
     r"\b[A-ZÆØÅ][\wæøå.-]*" + _STREET_SUFFIX + r"\s+\d+\s?[A-Za-z]?,?\s+\d{4}\s+[A-ZÆØÅ]"
     r"|\b(?i:postboks)\s+\d+"
 )
-_CONTACT_LINE = re.compile(r"(?:kontaktperson|saksbehandler)\b\s*:?\s*\S|kontakt\s*:\s*\S", re.I)
+_CONTACT_LINE = re.compile(
+    r"(?:kontaktperson|saksbehandler|sakshandsamar)\b\s*:?\s*\S|kontakt\s*:\s*\S", re.I
+)
+_NAME_WORD = r"[A-ZÆØÅ][a-zæøåéü]+(?:-[A-ZÆØÅ][a-zæøåéü]+)?"
+_BYLINE = re.compile(
+    r"(?i:\b(?:publisert|skrevet|skrive|sist\s+endret|sist\s+endra|oppdatert)"
+    r"(?:\s+[\d.:]+)*\s+av|^\s*ansvarl[ie]g(?:\s+redaktør)?)\b\s*:?\s*"
+    r"(" + _NAME_WORD + r"(?: " + _NAME_WORD + r"){1,3})(?![\w-])"
+)
+_ORGAN_WORD = re.compile(
+    r"(?:kommune|styre|skap|ting|etat|avdeling|kontor|seksjon|enhet|eining|utvalg|utval"
+    r"|sektor|direktorat|departement|forvalter|forvaltar|tjeneste|teneste|torg|senter"
+    r"|nemnd|administrasjon|redaksjon|sekretariat)(?:a|e|en|et|ene|ane|n|r|t)?$"
+)
 _PERSONAL_NAME = re.compile(r"[A-ZÆØÅ][a-zæøå]+(?:[ -][A-ZÆØÅ][a-zæøå]+){1,3}")
 _OFFICE_TITLE = re.compile(
     r"(?:vara)?ordfører|rådmann|kommunedirektør|kommunalsjef|fylkesordfører|fylkesdirektør"
@@ -89,7 +110,17 @@ def _line_kinds(line: str) -> set[PersonalDataKind]:
     kinds = {kind for kind, match in found.items() if match is not None}
     if _has_identity_number(line):
         kinds.add(PersonalDataKind.FODSELSNUMMER)
+    if _has_personal_byline(line):
+        kinds.add(PersonalDataKind.BYLINE)
     return kinds
+
+
+def _has_personal_byline(line: str) -> bool:
+    """A byline whose words name a person; one organ word makes them a unit's name."""
+    return any(
+        not any(_ORGAN_WORD.search(word.lower()) for word in re.split(r"[ -]", match[1]))
+        for match in _BYLINE.finditer(line)
+    )
 
 
 def _has_identity_number(line: str) -> bool:
