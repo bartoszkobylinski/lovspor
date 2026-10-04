@@ -484,3 +484,32 @@ def test_pdf_rejoins_a_parenthesis_wrapped_after_a_word_but_not_after_a_full_sto
         "Fastsatt med hjemmel i lov om eigedomsregistrering (matrikkellova).",
         "(Endret 2020.)",
     )
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "§ 2 Kommunen kan kreve gebyr for behandlingen,",
+        "§ 4 Vedtaket kan påklages etter forvaltningsloven kap. 6.",
+    ],
+)
+def test_pdf_a_section_line_ending_in_punctuation_is_prose_and_takes_its_wrap(section: str) -> None:
+    pdf = minimal_pdf(("§ 1 Formål", section, "jf. forurensningsloven § 34."))
+    assert pdf_lines(pdf) == ("§ 1 Formål", f"{section} jf. forurensningsloven § 34.")
+
+
+def test_pdf_a_section_heading_of_exactly_the_heading_limit_takes_no_wrap() -> None:
+    heading = "§ 3 " + "Gebyr for tømming av slamavskillere og tette tanker i hele kommunen " * 2
+    heading = heading[:100]
+    assert len(heading) == 100 and heading[-1].isalpha()
+    pdf = minimal_pdf((heading, "forskriften gjelder alle."))
+    assert pdf_lines(pdf) == (heading, "forskriften gjelder alle.")
+
+
+def test_pdf_a_section_line_over_the_heading_limit_takes_its_wrap() -> None:
+    line = ("§ 3 " + "Gebyr for tømming av slamavskillere og tette tanker i hele kommunen " * 2)[
+        :101
+    ]
+    assert line[-1].isalpha()
+    pdf = minimal_pdf((line, "gjelder alle."))
+    assert pdf_lines(pdf) == (f"{line} gjelder alle.",)
