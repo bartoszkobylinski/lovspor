@@ -74,21 +74,23 @@ def test_outside_directory_error_names_both_paths(tmp_path: Path) -> None:
     assert str(caught.value) == f"{directory} is outside observatory root {tmp_path}"
 
 
-def test_root_disappearing_at_mkdir_preserves_target_and_cause(tmp_path: Path) -> None:
+@pytest.mark.parametrize("depth", [1, 2])
+def test_root_disappearing_at_mkdir_preserves_target_and_cause(tmp_path: Path, depth: int) -> None:
     # Audit hooks observe real OS operations; isolate the hook in a child so it
     # cannot affect later tests. Remove the real volume at the mkdir boundary.
     script = """
 import sys
+import shutil
 from pathlib import Path
 from lovspor.observatory.storage import ObservatoryRoot, ensure_below_root
 from lovspor.errors import StorageUnavailableError
 root = Path(sys.argv[1]) / "archive"
 root.mkdir()
 checked = ObservatoryRoot(root, [])
-target = root / "blobs"
+target = root.joinpath(*(["blobs", "shard"][:int(sys.argv[2])]))
 def vanish(event, args):
     if event == "os.mkdir" and args[0] == str(target):
-        root.rmdir()
+        shutil.rmtree(root)
 sys.addaudithook(vanish)
 try:
     ensure_below_root(checked, target)
@@ -100,7 +102,7 @@ else:
 assert not root.exists()
 """
     result = subprocess.run(
-        [sys.executable, "-c", script, str(tmp_path)],
+        [sys.executable, "-c", script, str(tmp_path), str(depth)],
         check=False,
         capture_output=True,
         text=True,
@@ -157,3 +159,53 @@ def test_blob_write_preserves_payload_and_record(tmp_path: Path) -> None:
     log.append_artifact(record, payload)
     assert log.blob_path(record.sha256).read_bytes() == payload
     assert list(log.records()) == [record]
+
+
+@pytest.mark.parametrize("writer", ["blob", "index", "cursor"])
+def test_archive_vanishing_at_staging_is_not_recreated(tmp_path: Path, writer: str) -> None:
+    # Delete actual directories at the OS open boundary, after shard setup.
+    # The subprocess confines the audit hook to this single write.
+    script = """
+import shutil
+import sys
+from pathlib import Path
+from lovspor.errors import StorageUnavailableError
+from lovspor.observatory.freshness_index import indexed_capture_state
+from lovspor.observatory.lf_ledger import _write_cursor
+from lovspor.observatory.log import ObservationLog
+from lovspor.observatory.storage import ObservatoryRoot
+root = Path(sys.argv[1]) / "archive"
+root.mkdir()
+log = ObservationLog(ObservatoryRoot(root, []))
+writer = sys.argv[2]
+def vanish(event, args):
+    if event == "open" and isinstance(args[0], str):
+        path = Path(args[0])
+        if root in path.parents and path.name.endswith(".tmp"):
+            shutil.rmtree(root)
+sys.addaudithook(vanish)
+try:
+    if writer == "blob":
+        log._store_blob(log.blob_path("a" * 64), b"evidence")
+    elif writer == "index":
+        indexed_capture_state(log)
+    else:
+        _write_cursor(log, 0)
+except StorageUnavailableError as exc:
+    assert writer == "blob"
+    assert isinstance(exc.__cause__, FileNotFoundError)
+except FileNotFoundError:
+    assert writer != "blob"
+else:
+    raise AssertionError("write succeeded after archive vanished")
+assert not root.exists()
+assert list(root.parent.iterdir()) == []
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path), writer],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
