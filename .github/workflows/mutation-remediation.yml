@@ -601,8 +601,12 @@ jobs:
           # cannot be fetched stays empty: no evidence, the old wording.
           id="$(jq -rn 'first(inputs | .jobs[] | select(.name == "remediate") | .id)' \
             "$RUNNER_TEMP/jobs.json")"
-          gh api "repos/$GH_REPO/actions/jobs/$id/logs" > "$RUNNER_TEMP/lane.log" \
-            || : > "$RUNNER_TEMP/lane.log"
+          # Issue #542: job logs hold terminal escapes, which the runner
+          # image's gh refuses to print without the flag; an older gh rejects it.
+          logs="repos/$GH_REPO/actions/jobs/$id/logs"
+          gh api --allow-escape-sequences "$logs" > "$RUNNER_TEMP/lane.log" \
+            || gh api "$logs" > "$RUNNER_TEMP/lane.log" \
+            || { : > "$RUNNER_TEMP/lane.log"; echo "::warning::could not fetch the remediate log; classifying without it"; }
           python3 scripts/ci/classify_lane_failure.py \
             --jobs "$RUNNER_TEMP/jobs.json" --lane remediate \
             --log "$RUNNER_TEMP/lane.log" >> "$GITHUB_OUTPUT"

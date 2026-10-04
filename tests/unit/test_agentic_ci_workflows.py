@@ -2857,3 +2857,203 @@ class TestAnAuthorRoundThatRanNoCommandFails:
         assert "#448" in body
         assert "`gh run rerun 1 --failed`" in body
         assert _RUN_URL in body
+
+
+_JOB_LOG_FIXTURE = "codex-author-job-log-run-37205273475.log"
+_ESCAPE_FLAG = "--allow-escape-sequences"
+# Verbatim from the codex-tests-report job of run 37205273475 (attempt 1).
+_ESCAPE_REFUSAL = (
+    "the response contains terminal escape sequences; pass --allow-escape-sequences "
+    "to output it anyway"
+)
+_FAKE_GH_API = f"""\
+import json
+import os
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+endpoint = next(arg for arg in args if arg.startswith("repos/"))
+if endpoint.endswith("/jobs"):
+    sys.stdout.write(Path(os.environ["FAKE_JOBS"]).read_text(encoding="utf-8"))
+    raise SystemExit(0)
+flagged = "{_ESCAPE_FLAG}" in args
+with (Path(os.environ["RUNNER_TEMP"]) / "log-fetches.jsonl").open("a") as calls:
+    calls.write(json.dumps(args) + "\\n")
+if os.environ["FAKE_GH"] == "unavailable":
+    sys.stdout.buffer.write(Path(os.environ["FAKE_LOG"]).read_bytes())
+    sys.stderr.write("log download interrupted\\n")
+    raise SystemExit(1)
+if os.environ["FAKE_GH"] == "old" and flagged:
+    sys.stderr.write("unknown flag: {_ESCAPE_FLAG}\\n")
+    raise SystemExit(1)
+log = Path(os.environ["FAKE_LOG"]).read_bytes()
+if os.environ["FAKE_GH"] == "strict" and b"\\x1b" in log and not flagged:
+    sys.stderr.write("{_ESCAPE_REFUSAL}\\n")
+    raise SystemExit(1)
+sys.stdout.buffer.write(log)
+"""
+
+
+def _lane_jobs(lane: str, failed_step: str) -> dict[str, Any]:
+    """The run's jobs payload as the classifier reads it: the lane failed in
+    its own step, and every step completed."""
+    steps = [
+        {"name": "Set up job", "status": "completed", "conclusion": "success"},
+        {"name": failed_step, "status": "completed", "conclusion": "failure"},
+        {"name": "Complete job", "status": "completed", "conclusion": "success"},
+    ]
+    job = {"id": 111445054823, "name": lane, "conclusion": "failure", "steps": steps}
+    return {"total_count": 1, "jobs": [job]}
+
+
+class TestTheReporterReadsTheLaneLogGitHubsCliRefused:
+    """Issue #542. On PR #541 (run 37205273475, attempt 1) `codex-author`
+    stopped a round whose Codex could not spawn `codex-code-mode-host` (#448),
+    and the hosted reporter still posted the generic "reported nothing itself"
+    comment. The classifier was never handed the log: the runner image's `gh`
+    refuses to print a response holding terminal escape sequences —
+
+        the response contains terminal escape sequences; pass
+        --allow-escape-sequences to output it anyway
+
+    — and every job log holds them (the runner echoes each `run:` script in
+    `ESC[36;1m`). The fetch's `|| : >` fallback then left `lane.log` empty, so
+    the verdict was `in_job`. The fixture is lines 409-448 of that run's
+    `codex-author` log, escape bytes included. An older `gh` (2.96 here) has
+    no such flag and rejects it, so the fetch must work with both."""
+
+    _REPORTER = ("pr-pipeline.yml", "codex-tests-report", "codex-author")
+    _VERIFIER = ("mutation-remediation.yml", "remediate-verify", "remediate")
+
+    def _classify(
+        self, tmp_path: Path, log: bytes, gh: str, where: tuple[str, str, str]
+    ) -> dict[str, str]:
+        workflow, job, lane = where
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir(parents=True)
+        fake = bin_dir / "gh"
+        fake.write_text(f"#!{sys.executable}\n{_FAKE_GH_API}", encoding="utf-8")
+        fake.chmod(0o755)
+        (tmp_path / "lane-job.log").write_bytes(log)
+        jobs = _lane_jobs(lane, _AUTHOR_RAN)
+        (tmp_path / "jobs-payload.json").write_text(json.dumps(jobs), encoding="utf-8")
+        ci = tmp_path / "scripts" / "ci"
+        ci.mkdir(parents=True)
+        shutil.copy2(_CI_SCRIPTS / "classify_lane_failure.py", ci)
+        output = tmp_path / "github-output"
+        env = {
+            "PATH": f"{bin_dir}:{_SYSTEM_PATH}",
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
+            "GH_REPO": "o/r",
+            "GITHUB_RUN_ID": "1",
+            "FAKE_GH": gh,
+            "FAKE_LOG": str(tmp_path / "lane-job.log"),
+            "FAKE_JOBS": str(tmp_path / "jobs-payload.json"),
+        }
+        step = _named_step(_steps(workflow, job), "Classify the lane failure")
+        values = {"github.repository": "o/r", "github.run_id": "1"}
+        result = subprocess.run(
+            ["bash", "-eu", "-o", "pipefail", "-c", _render(step["run"], values)],
+            cwd=tmp_path,
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        (tmp_path / "classify-stdout").write_bytes(result.stdout)
+        return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+    @staticmethod
+    def _log(*, host_missing: bool) -> bytes:
+        log = (_REMEDIATION_FIXTURES / _JOB_LOG_FIXTURE).read_bytes()
+        if host_missing:
+            return log
+        # The same round without codex's spawn error: a no-`exec` round (#489).
+        lines = log.splitlines(keepends=True)
+        return b"".join(line for line in lines if b"codex_core::tools::router" not in line)
+
+    def test_the_fixture_has_the_shape_the_cli_refuses(self) -> None:
+        assert b"\x1b[36;1m" in self._log(host_missing=True)
+
+    @pytest.mark.parametrize("gh", ["strict", "old"])
+    @pytest.mark.parametrize("where", [_REPORTER, _VERIFIER], ids=["reporter", "verifier"])
+    def test_a_missing_code_mode_host_is_the_runners_tool(
+        self, tmp_path: Path, gh: str, where: tuple[str, str, str]
+    ) -> None:
+        out = self._classify(tmp_path, self._log(host_missing=True), gh, where)
+
+        assert out["kind"] == "runner_tool"
+        assert out["signature"] == "failed to spawn code-mode host"
+
+    @pytest.mark.parametrize("gh", ["strict", "old"])
+    def test_a_round_with_no_exec_is_an_agent_that_did_not_run(
+        self, tmp_path: Path, gh: str
+    ) -> None:
+        out = self._classify(tmp_path, self._log(host_missing=False), gh, self._REPORTER)
+
+        assert out["kind"] == "agent_did_not_run"
+        assert out["step"] == _AUTHOR_RAN
+
+    def test_the_pr_541_round_gets_the_comment_naming_the_missing_binary(
+        self, tmp_path: Path
+    ) -> None:
+        log = self._log(host_missing=True)
+        out = self._classify(tmp_path / "classify", log, "strict", self._REPORTER)
+        (tmp_path / "report").mkdir()
+        report = TestARunnerSetUpFailureIsNamedAsTheRunner()._report
+
+        body = report(tmp_path / "report", out["kind"], out["step"])
+
+        assert "`codex-code-mode-host`" in body
+        assert "#448" in body
+        assert "reported nothing itself" not in body
+
+    def test_a_log_that_cannot_be_fetched_is_said_out_loud(self) -> None:
+        for workflow, job, _lane in (self._REPORTER, self._VERIFIER):
+            run = _named_step(_steps(workflow, job), "Classify the lane failure")["run"]
+
+            assert "::warning::" in run
+
+    @pytest.mark.parametrize("where", [_REPORTER, _VERIFIER], ids=["reporter", "verifier"])
+    def test_failed_fetches_discard_partial_evidence_and_warn(
+        self, tmp_path: Path, where: tuple[str, str, str]
+    ) -> None:
+        """Both workflows promise an empty log and a warning after two failures.
+
+        A failed download can still emit the host-error signature: it must not
+        refine the verdict using evidence from an incomplete response.
+        """
+        out = self._classify(tmp_path, self._log(host_missing=True), "unavailable", where)
+
+        assert (tmp_path / "lane.log").read_bytes() == b""
+        assert out["kind"] == "in_job"
+        assert out["job"] == where[2]
+        warning = (tmp_path / "classify-stdout").read_text(encoding="utf-8")
+        assert warning == (
+            f"::warning::could not fetch the {where[2]} log; classifying without it\n"
+        )
+        calls = [
+            json.loads(line) for line in (tmp_path / "log-fetches.jsonl").read_text().splitlines()
+        ]
+        endpoint = "repos/o/r/actions/jobs/111445054823/logs"
+        assert calls == [["api", _ESCAPE_FLAG, endpoint], ["api", endpoint]]
+
+    @pytest.mark.parametrize("gh", ["strict", "old"])
+    @pytest.mark.parametrize("where", [_REPORTER, _VERIFIER], ids=["reporter", "verifier"])
+    def test_successful_fetch_keeps_all_bytes_and_stops_retrying(
+        self, tmp_path: Path, gh: str, where: tuple[str, str, str]
+    ) -> None:
+        log = self._log(host_missing=True)
+        self._classify(tmp_path, log, gh, where)
+
+        assert (tmp_path / "lane.log").read_bytes() == log
+        assert (tmp_path / "classify-stdout").read_bytes() == b""
+        calls = [
+            json.loads(line) for line in (tmp_path / "log-fetches.jsonl").read_text().splitlines()
+        ]
+        endpoint = "repos/o/r/actions/jobs/111445054823/logs"
+        expected = [["api", _ESCAPE_FLAG, endpoint]]
+        if gh == "old":
+            expected.append(["api", endpoint])
+        assert calls == expected
