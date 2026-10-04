@@ -22,6 +22,7 @@ from tests.unit.local_dataset_fixtures import (
     OBSERVED_LAST,
     add_local_dataset,
     build_central,
+    front_matter,
     local_record,
     observations,
     write_local_document,
@@ -314,3 +315,67 @@ class TestSearch:
             "version": 1,
             "observation": OBSERVATION,
         }
+
+
+class TestExactErrors:
+    def test_an_ambiguous_address_names_every_candidate(self, corpus: Path) -> None:
+        other = "lk-9999-ffffffffffff"
+        write_local_manifest(corpus, {LOCAL_ID: local_record(), other: local_record()})
+
+        with pytest.raises(AmbiguousSlugError) as raised:
+            LocalDataset(corpus).resolve(ADDRESS)
+
+        assert str(raised.value) == f"local address {ADDRESS!r} names 2: {LOCAL_ID}, {other}"
+
+    def test_a_missing_file_names_itself_and_the_remedy(self, corpus: Path) -> None:
+        path = corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md"
+        path.unlink()
+
+        with pytest.raises(LocalCorpusError) as raised:
+            LocalDataset(corpus).document(ADDRESS)
+
+        assert str(raised.value) == (
+            f"the local manifest references {path.resolve()} but the file is missing; "
+            "run 'git pull' in the corpus to refresh"
+        )
+
+    def test_a_non_utf8_file_is_not_read_in_another_encoding(self, corpus: Path) -> None:
+        path = corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md"
+        path.write_bytes(path.read_text("utf-8").encode("latin-1"))
+
+        with pytest.raises(UnicodeDecodeError):
+            LocalDataset(corpus).document(ADDRESS)
+
+    def test_an_unreadable_front_matter_names_the_file(self, corpus: Path) -> None:
+        path = corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md"
+        path.write_text("# no front matter\n", "utf-8")
+
+        with pytest.raises(LocalCorpusError) as raised:
+            LocalDataset(corpus).document(ADDRESS)
+
+        assert str(raised.value).startswith(f"{path.resolve()} has no readable front matter: ")
+
+
+class TestFrontMatterGrammar:
+    @pytest.mark.parametrize(
+        ("markdown", "reason"),
+        [
+            ("# tittel\n" + front_matter(), "no front matter block"),
+            ("ingen front matter\n", "no front matter block"),
+            ('---\nid: "x"\n', "front matter block is not closed"),
+            ('---\nid: "x"\nnot a field\n---\n', "not a front-matter field: 'not a field'"),
+        ],
+    )
+    def test_each_refusal_says_why(self, corpus: Path, markdown: str, reason: str) -> None:
+        (corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md").write_text(markdown, "utf-8")
+
+        with pytest.raises(LocalCorpusError) as raised:
+            LocalDataset(corpus).document(ADDRESS)
+
+        assert str(raised.value).endswith(f"has no readable front matter: {reason}")
+
+    def test_a_rule_in_the_body_does_not_end_the_front_matter_late(self, corpus: Path) -> None:
+        path = corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md"
+        path.write_text(path.read_text("utf-8") + "\n---\n\nEtter en linje.\n", "utf-8")
+
+        assert LocalDataset(corpus).document(ADDRESS).observation.model_dump() == OBSERVATION

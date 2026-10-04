@@ -6,7 +6,9 @@ calls that existed before the dataset are pinned in
 """
 
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -256,3 +258,123 @@ class TestServedCorpus:
         assert cold._body_index is None
         assert warm._slug_index is not None
         assert warm._body_index is not None
+
+
+OBSERVATION_HEADING = (
+    "**Observation — observed on the authority's website, not asserted (ADR-0016).**"
+)
+DUPLICATED_SECTION = "\n## § 2. Arkiv\n\nEn annen paragraf med samme nummer.\n"
+COMMIT_DATE = "2026-09-02T10:00:00Z"
+
+
+def _append(path: Path, text: str) -> None:
+    path.write_text(path.read_text("utf-8") + text, "utf-8")
+
+
+def _git(corpus: Path, *args: str) -> None:
+    stamp = {"GIT_AUTHOR_DATE": COMMIT_DATE, "GIT_COMMITTER_DATE": COMMIT_DATE}
+    env = {**os.environ, **stamp}
+    subprocess.run(["git", *args], cwd=corpus, check=True, capture_output=True, env=env)
+
+
+@pytest.fixture
+def versioned(corpus: Path) -> Path:
+    """The fixture corpus as one commit, so ``recorded_at`` can select it."""
+    _append(corpus / "lover" / "ordensloven.md", DUPLICATED_SECTION)
+    _git(corpus, "init", "-q", "-b", "main")
+    _git(corpus, "config", "user.email", "test@example.com")
+    _git(corpus, "config", "user.name", "Test")
+    _git(corpus, "config", "commit.gpgsign", "false")
+    _git(corpus, "add", "-A")
+    _git(corpus, "commit", "-q", "-m", "corpus")
+    return corpus
+
+
+class TestExactWire:
+    def test_the_observation_block_is_byte_exact(self, corpus: Path) -> None:
+        markdown = (corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md").read_text("utf-8")
+        block = json.dumps({"observation": OBSERVATION}, indent=2, ensure_ascii=False)
+
+        text = _text(corpus, "get_law", slug=ADDRESS)
+
+        assert text == (
+            f"{markdown.rstrip()}\n\n---\n\n{OBSERVATION_HEADING}\n\n```json\n{block}\n```\n"
+        )
+        assert '"name": "Prøvestad"' in text
+
+    def test_the_recorded_at_refusal_is_exact(self, corpus: Path) -> None:
+        error = _call(
+            corpus, "get_section", slug=LOCAL_ID, section_id="1", recorded_at="2026-09-01"
+        )
+
+        assert error == {
+            "error": "Error executing tool get_section: recorded_at is not served for local "
+            "regulations yet (ADR-0016 S5); omit it to read the current version"
+        }
+
+
+class TestPassThrough:
+    def test_a_local_section_honours_occurrence(self, corpus: Path) -> None:
+        _append(corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md", DUPLICATED_SECTION)
+
+        second = _structured(corpus, "get_section", slug=ADDRESS, section_id="2", occurrence=2)
+
+        assert second["occurrence"] == 2
+        assert "En annen paragraf" in second["body"]
+
+    def test_a_central_section_honours_occurrence(self, versioned: Path) -> None:
+        second = _structured(
+            versioned, "get_section", slug="ordensloven", section_id="2", occurrence=2
+        )
+
+        assert second["occurrence"] == 2
+        assert "En annen paragraf" in second["body"]
+
+    def test_a_recorded_central_section_honours_occurrence(self, versioned: Path) -> None:
+        second = _structured(
+            versioned,
+            "get_section",
+            slug="ordensloven",
+            section_id="2",
+            occurrence=2,
+            recorded_at="2026-09-03",
+        )
+
+        assert second["occurrence"] == 2
+        assert "En annen paragraf" in second["body"]
+        assert second["temporal_notice"]["status"] == "not_evaluated"
+
+    def test_a_central_search_keeps_its_limit(self, corpus: Path) -> None:
+        hits = _structured(corpus, "search_laws", query="lov", limit=1)["result"]
+
+        assert len(hits) == 1
+
+    @pytest.mark.parametrize("recorded_at", [None, "2026-09-03"])
+    def test_search_body_keeps_dataset_and_limit(
+        self, versioned: Path, recorded_at: str | None
+    ) -> None:
+        stamp = {} if recorded_at is None else {"recorded_at": recorded_at}
+
+        def slugs(**arguments: Any) -> list[str]:
+            result = _structured(versioned, "search_body", query="prøve", **arguments, **stamp)
+            rows = result["result"]
+            rows = rows["results"] if isinstance(rows, dict) else rows
+            return sorted(row["slug"] for row in rows)
+
+        assert slugs() == ["proveforskriften", "proveloven"]
+        assert slugs(dataset="forskrifter") == ["proveforskriften"]
+        assert len(slugs(limit=1)) == 1
+
+    def test_a_cross_reference_to_a_central_law_reads_the_central_index(self, corpus: Path) -> None:
+        _append(
+            corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md",
+            "\n## § 3 Hjemmel\n\nSe ordensloven § 3.\n",
+        )
+
+        references = _structured(corpus, "get_section", slug=ADDRESS, section_id="3")[
+            "cross_references"
+        ]
+
+        assert [(r["target_slug"], r["target_section_id"], r["valid"]) for r in references] == [
+            ("ordensloven", "3", False)
+        ]
