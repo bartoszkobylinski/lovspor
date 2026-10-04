@@ -411,7 +411,7 @@ class TestPoliteness:
 
 
 class TestWhatTheEquivalentsRegisterAssumes:
-    """`mutation-equivalents.toml` waives three `_body` mutants on the strength of
+    """`mutation-equivalents/` waives three `_body` mutants on the strength of
     httpx and of HTTP, not of Python (issue #132). A dependency bump that changes
     either fact must show up here as a red test, never as a stale waiver."""
 

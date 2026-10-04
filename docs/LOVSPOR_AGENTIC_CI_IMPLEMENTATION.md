@@ -625,7 +625,7 @@ Obok `survivors` raport niesie `equivalents`:
   "equivalents": { "registered": 4, "refused": [] }
 ```
 
-`registered` to liczba survivorów pokrytych wpisem w `mutation-equivalents.toml`
+`registered` to liczba survivorów pokrytych wpisem w `mutation-equivalents/`
 (mutanty równoważne — issue #122); `refused` to wpisy, które rejestr odrzucił i
 których NIE zastosował (brak uzasadnienia, brak pola, nieparsowalny plik).
 Gdy każdy survivor jest zarejestrowany, bramka przechodzi z `reason:

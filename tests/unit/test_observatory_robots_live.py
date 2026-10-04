@@ -222,7 +222,7 @@ class TestReadRobots:
 
 
 class TestWhatTheEquivalentsRegisterAssumes:
-    """`mutation-equivalents.toml` waives ``_get``'s ``follow_redirects=None``
+    """`mutation-equivalents/` waives ``_get``'s ``follow_redirects=None``
     mutant and ``_next_hop``'s ``"LOCATION"`` mutant on the strength of httpx,
     not of Python (issue #132)."""
 

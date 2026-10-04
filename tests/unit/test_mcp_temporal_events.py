@@ -775,7 +775,7 @@ def test_assumption_git_head_wire_is_bare_sha_and_iso_date(
     corpus: tuple[Path, str, str],
 ) -> None:
     """Pins the wire shape the strip(None) equivalent entry argues from
-    (mutation-equivalents.toml, _head_ref): `git log -1 --format=%H%n%aI`
+    (mutation-equivalents/, _head_ref): `git log -1 --format=%H%n%aI`
     emits a bare 40-hex sha and a tz-aware ISO date with no padding."""
     repo, _sha1, sha2 = corpus
     ref = CorpusReader(repo)._head_ref()

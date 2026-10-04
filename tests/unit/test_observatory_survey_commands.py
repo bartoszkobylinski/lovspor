@@ -333,7 +333,7 @@ class TestWhatItReports:
     def test_the_written_row_is_the_same_under_either_pydantic_dump_mode(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
-        """Assumption test for the `mode="json"` equivalence in mutation-equivalents.toml.
+        """Assumption test for the `mode="json"` equivalence in mutation-equivalents/.
 
         SiteShape holds only strings, bools and tuples of strings, so pydantic's
         python mode and json mode serialise identically once json.dumps turns a
