@@ -280,6 +280,9 @@ def test_a_cms_feedback_widget_is_not_part_of_the_body() -> None:
     assert _extracted(page).regulation == _extracted(html_page()).regulation
 
 
-def test_a_byline_still_reaches_the_regulation_text() -> None:
-    page = html_page((*REGULATION_LINES, "Publisert av Ola Nordmann"))
-    assert _extracted(page).regulation.body.endswith("Publisert av Ola Nordmann")
+def test_a_byline_survives_the_furniture_filter_and_reaches_the_personal_data_gate() -> None:
+    held = _held(html_page((*REGULATION_LINES, "Publisert av Ola Nordmann")))
+    assert held.reason == ExtractionHoldReason.PERSONAL_DATA
+    assert [(hit.kind, hit.line) for hit in held.personal_data] == [
+        (PersonalDataKind.BYLINE, len(REGULATION_LINES) + 1)
+    ]
