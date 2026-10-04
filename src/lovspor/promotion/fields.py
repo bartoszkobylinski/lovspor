@@ -16,7 +16,10 @@ what the text states, verbatim or as a parsed date, or empty:
 * ``hjemmel`` — ``Hjemmel: LOV-…`` header references and ``med hjemmel (i) …`` /
   ``i medhold av …`` phrases in the block, to the end of their sentence;
 * ``vedtatt`` / ``vedtatt_av`` — the first ``vedtatt av <organ> <dato>``
-  (or ``fastsatt``, ``vedteke``) in the block;
+  (or ``fastsatt``, ``vedteke``) in the block, else the body's
+  ``Forskriften er vedtatt av <organ> den <dato>``. The organ stops at
+  ``med hjemmel`` / ``i medhold av``, and a date right after a law's name is
+  that statute's date, never the vedtaksdato;
 * ``ikraft`` / ``ikraft_text`` — an ``Ikrafttredelse:`` header, else the first
   ``trer i kraft …`` clause anywhere: a date when one is stated, otherwise the
   phrase verbatim ("straks").
@@ -50,11 +53,20 @@ _HJEMMEL_PHRASE = re.compile(
     r"(?:\.(?=\s+(?-i:[A-ZÆØÅ]))|\.?\s*$)",
     re.I,
 )
-_ENACTED = re.compile(
-    r"\b(?:fastsatt|fastsett|vedtatt|vedteke|vedteken)\s+(?:av|i)\s+"
-    r"(?P<organ>[^\d.]{1,90}?)(?:\s+(?:i\s+møte|den))?[\s,]*" + DATE,
-    re.I,
+# The organ never runs into a hjemmel phrase, and a date right after a law's
+# name ("lov av 14. juni 2002") is that statute's date, not the adoption's.
+_HJEMMEL_START = r"\bmed\s+(?:hjemmel|heimel)\b|\bmed(?:hold|hald)\s+av\b"
+_ENACTMENT = (
+    r"(?:fastsatt|fastsett|vedtatt|vedteke|vedteken)\s+(?:av|i)\s+"
+    rf"(?P<organ>(?:(?!{_HJEMMEL_START})[^\d.]){{1,90}}?)(?:\s+(?:i\s+møte|den))?[\s,]*" + DATE
 )
+_ENACTED = re.compile(r"\b" + _ENACTMENT, re.I)
+# In the body only the regulation's own adoption counts: "Forskriften er
+# vedtatt av …", never a repealed one's "som blei vedteke i …".
+_SELF_ENACTED = re.compile(
+    r"\b(?:denne\s+)?forskrift(?:en|a)?\s+(?:er|ble|blei|vart|vert)\s+" + _ENACTMENT, re.I
+)
+_STATUTE_BEFORE_DATE = re.compile(rf"{_LAW_NAME}(?:\s+av)?\s*$", re.I)
 _IKRAFT_HEADER = re.compile(r"(?:ikrafttredelse|ikraftsetjing|ikraftsetting)\s*:\s*(.+)", re.I)
 _IKRAFT_CLAUSE = re.compile(r"\b(?:trer|trår)\s+i\s+kraft\s+(.{1,200})", re.I)
 _DATE_FIRST = re.compile(
@@ -97,7 +109,7 @@ def _first_title(lines: tuple[str, ...]) -> int | None:
 
 
 def _fields(block: tuple[str, ...], body: tuple[str, ...]) -> RegulationFields:
-    vedtatt, vedtatt_av = _enactment(" ".join(block))
+    vedtatt, vedtatt_av = _enactment(" ".join(block), " ".join(body))
     ikraft, ikraft_text = _in_force(block, " ".join((*block, *body)))
     return RegulationFields(
         title=block[0],
@@ -121,11 +133,19 @@ def _hjemmel(block: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(found)
 
 
-def _enactment(text: str) -> tuple[date | None, str | None]:
-    match = _ENACTED.search(text)
+def _enactment(block: str, body: str) -> tuple[date | None, str | None]:
+    """The block's enactment clause, else the body's statement of the regulation's own."""
+    match = _first_enactment(_ENACTED, block) or _first_enactment(_SELF_ENACTED, body)
     if match is None:
         return None, None
     return parse_stated_date(match.groups()[-1]), match.group("organ").strip()
+
+
+def _first_enactment(pattern: re.Pattern[str], text: str) -> re.Match[str] | None:
+    return next(
+        (m for m in pattern.finditer(text) if not _STATUTE_BEFORE_DATE.search(m.group("organ"))),
+        None,
+    )
 
 
 def _in_force(block: tuple[str, ...], text: str) -> tuple[date | None, str | None]:
