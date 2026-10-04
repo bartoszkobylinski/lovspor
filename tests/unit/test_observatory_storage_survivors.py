@@ -1,0 +1,159 @@
+"""Behavioral regressions for the storage and failed-sweep survivor diffs."""
+
+import hashlib
+import subprocess
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+import typer
+
+from lovspor.errors import StorageBoundaryError, StorageUnavailableError
+from lovspor.observatory.freshness_index import indexed_capture_state
+from lovspor.observatory.lf_ledger import _write_cursor
+from lovspor.observatory.log import ObservationLog
+from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance
+from lovspor.observatory.storage import ObservatoryRoot, ensure_below_root
+from lovspor.observatory.sweep_failures import end_unswept, failed_run, refuse_sweep
+from lovspor.observatory.sweeps import append_sweep_run, read_sweep_runs, sweeps_path
+
+START = datetime(2026, 10, 4, tzinfo=UTC)
+
+
+def artifact(payload: bytes) -> ArtifactObservation:
+    return ArtifactObservation(
+        authority_id="9999",
+        url="https://example.invalid/f",
+        observed_at=START,
+        provenance=RetrievalProvenance(
+            adapter="generic-html",
+            channel="http",
+            discovery_method="sitemap",
+            user_agent="lovspor-observatory/0.1",
+            rate_limit_seconds=2.0,
+        ),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        content_type="text/html",
+        http_status=200,
+    )
+
+
+@pytest.mark.parametrize("writer", ["observation", "sweep", "blob"])
+def test_storage_failure_names_target_and_os_error(tmp_path: Path, writer: str) -> None:
+    root = ObservatoryRoot(tmp_path, [])
+    log = ObservationLog(root)
+    payload = b"evidence"
+    target = {
+        "observation": log.log_path,
+        "sweep": sweeps_path(root),
+        "blob": log.blob_path(hashlib.sha256(payload).hexdigest()),
+    }[writer]
+    if writer == "blob":
+        # A file where shard directories belong forces a real filesystem error.
+        log.blobs_dir.write_bytes(b"blocked")
+    else:
+        target.mkdir()
+    with pytest.raises(StorageUnavailableError) as caught:
+        if writer == "observation":
+            log.append(artifact(payload))
+        elif writer == "sweep":
+            append_sweep_run(root, failed_run(START, "storage_write_failed", "abc"))
+        else:
+            log.append_artifact(artifact(payload), payload)
+    cause = caught.value.__cause__
+    assert isinstance(cause, OSError)
+    assert str(caught.value) == f"cannot write {target} under {root.path}: {cause}"
+    assert root.path.is_dir()
+
+
+def test_outside_directory_error_names_both_paths(tmp_path: Path) -> None:
+    directory = tmp_path.parent / "outside"
+    with pytest.raises(StorageBoundaryError) as caught:
+        ensure_below_root(ObservatoryRoot(tmp_path, []), directory)
+    assert str(caught.value) == f"{directory} is outside observatory root {tmp_path}"
+
+
+def test_root_disappearing_at_mkdir_preserves_target_and_cause(tmp_path: Path) -> None:
+    # Audit hooks observe real OS operations; isolate the hook in a child so it
+    # cannot affect later tests. Remove the real volume at the mkdir boundary.
+    script = """
+import sys
+from pathlib import Path
+from lovspor.observatory.storage import ObservatoryRoot, ensure_below_root
+from lovspor.errors import StorageUnavailableError
+root = Path(sys.argv[1]) / "archive"
+root.mkdir()
+checked = ObservatoryRoot(root, [])
+target = root / "blobs"
+def vanish(event, args):
+    if event == "os.mkdir" and args[0] == str(target):
+        root.rmdir()
+sys.addaudithook(vanish)
+try:
+    ensure_below_root(checked, target)
+except StorageUnavailableError as exc:
+    assert isinstance(exc.__cause__, FileNotFoundError)
+    assert str(exc) == f"observatory root {root} is gone; {target} not written: {exc.__cause__}"
+else:
+    raise AssertionError("missing archive accepted")
+assert not root.exists()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("writer", ["index", "cursor"])
+def test_sidecar_write_never_recreates_missing_root(tmp_path: Path, writer: str) -> None:
+    root = tmp_path / "archive"
+    log = ObservationLog(ObservatoryRoot(root, []))
+    with pytest.raises(FileNotFoundError):
+        if writer == "index":
+            indexed_capture_state(log)
+        else:
+            _write_cursor(log, 0)
+    assert not root.exists()
+
+
+def test_refused_sweep_names_expected_root_on_stderr(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LOVSPOR_OBSERVATORY_HEARTBEAT_URL", raising=False)
+    root = ObservatoryRoot(tmp_path, [])
+    with pytest.raises(typer.Exit) as caught:
+        refuse_sweep(root, failed_run(START, "storage_write_failed", "abc"))
+    assert caught.value.exit_code == 1
+    output = capsys.readouterr()
+    assert f"expected: {root.path}\n" in output.err
+    assert f"expected: {root.path}" not in output.out
+    assert read_sweep_runs(sweeps_path(root))[0].failure_reason == "storage_write_failed"
+
+
+def test_unswept_record_preserves_engine_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LOVSPOR_OBSERVATORY_HEARTBEAT_URL", raising=False)
+    root = ObservatoryRoot(tmp_path, [])
+    with pytest.raises(typer.Exit):
+        end_unswept(root, START, StorageUnavailableError("disk refused write"), "a1b2c3")
+    [run] = read_sweep_runs(sweeps_path(root))
+    assert run.engine_commit == "a1b2c3"
+    assert run.failure_reason == "storage_write_failed"
+
+
+def test_blob_write_preserves_payload_and_record(tmp_path: Path) -> None:
+    log = ObservationLog(ObservatoryRoot(tmp_path, []))
+    payload = b"raw evidence\x00\xff"
+    record = artifact(payload)
+    log.append_artifact(record, payload)
+    assert log.blob_path(record.sha256).read_bytes() == payload
+    assert list(log.records()) == [record]
