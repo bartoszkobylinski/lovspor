@@ -517,7 +517,11 @@ Two rules follow, and they are pinned by tests:
   check runs on Codex rounds only.
 - **A rejected credential is an operator action, not a pipeline failure (issue
   #270).** When the lane reached its own failure, `codex-tests-report` also fetches
-  that job's log (`actions: read`) and hands it to the classifier with `--log`. A
+  that job's log (`actions: read`) and hands it to the classifier with `--log`. The
+  fetch passes `gh api --allow-escape-sequences` (every job log holds the runner's
+  colour escapes, and the runner image's `gh` refuses to print them otherwise — the
+  empty log that made PR #541's #448 round read `in_job`, issue #542), retries without
+  the flag for an older `gh`, and warns when neither returns the log. A
   `##[error]` annotation carrying git's refusal of the credential — `could not read
   Username for 'https://github.com': terminal prompts disabled`, verbatim from the
   expired `LOVSPOR_CI_PUSH_TOKEN` of 2026-09-10, or `Authentication failed for

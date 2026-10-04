@@ -703,8 +703,13 @@ jobs:
           if [ -n "$job" ]; then
             id="$(jq -rn --arg name "$job" \
               'first(inputs | .jobs[] | select(.name == $name) | .id)' "$RUNNER_TEMP/jobs.json")"
-            gh api "repos/${{ github.repository }}/actions/jobs/$id/logs" \
-              > "$RUNNER_TEMP/lane.log" || : > "$RUNNER_TEMP/lane.log"
+            # Issue #542: every job log holds terminal escapes (the runner
+            # echoes each script in colour), and the runner image's gh refuses
+            # to print them without the flag; an older gh rejects the flag.
+            logs="repos/${{ github.repository }}/actions/jobs/$id/logs"
+            gh api --allow-escape-sequences "$logs" > "$RUNNER_TEMP/lane.log" \
+              || gh api "$logs" > "$RUNNER_TEMP/lane.log" \
+              || { : > "$RUNNER_TEMP/lane.log"; echo "::warning::could not fetch the $job log; classifying without it"; }
           fi
           classify --log "$RUNNER_TEMP/lane.log" >> "$GITHUB_OUTPUT"
 
