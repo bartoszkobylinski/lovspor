@@ -452,7 +452,7 @@ def test_pdf_rejoins_across_a_page_break_and_a_page_number() -> None:
     assert pdf_lines(pdf) == ("§ 1 Formål", "Forskriften gjelder for hele kommunen.")
 
 
-def test_html_and_docx_lines_are_never_rejoined() -> None:
+def test_html_blocks_and_docx_lines_are_never_rejoined() -> None:
     lines = ("§ 1 Formål", "Forskriften gjelder for", "hele kommunen.")
     page = "<html><body><main>" + "".join(f"<p>{line}</p>" for line in lines) + "</main></body>"
     assert html_lines(page.encode(), "text/html") == lines
@@ -513,3 +513,84 @@ def test_pdf_a_section_line_over_the_heading_limit_takes_its_wrap() -> None:
     assert line[-1].isalpha()
     pdf = minimal_pdf((line, "gjelder alle."))
     assert pdf_lines(pdf) == (f"{line} gjelder alle.",)
+
+
+# --- HTML <br> hard line wraps (#523) -----------------------------------------
+
+
+def _main(body: str) -> bytes:
+    return f"<html><body><main>{body}</main></body></html>".encode()
+
+
+def test_html_rejoins_br_wraps_within_one_paragraph() -> None:
+    page = _main(
+        "<p>Fastsett av kommunestyret med heimel i forskrift 26. juni 2009<br />"
+        "nr. 864 om eigedomsregistrering.</p>"
+        "<h2>§ 2. Utsett tidsfrist</h2>"
+        "<p>Tidsfristen gjeld ikkje i perioden 1.<br />november til 15. mai. Der vegar er "
+        "stengde gjeld<br>ikkje tidsfristen,<br>Kommunen avgjer.</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Fastsett av kommunestyret med heimel i forskrift 26. juni 2009 nr. 864 om "
+        "eigedomsregistrering.",
+        "§ 2. Utsett tidsfrist",
+        "Tidsfristen gjeld ikkje i perioden 1. november til 15. mai. Der vegar er stengde "
+        "gjeld ikkje tidsfristen, Kommunen avgjer.",
+    )
+
+
+def test_html_keeps_br_breaks_before_headings_list_items_and_new_sentences() -> None:
+    lines = (
+        "§ 1 Formål",
+        "forskrifta gjeld heile kommunen.",
+        "Kommunen kan gi fritak for:",
+        "a) bygning,",
+        "1. søknad,",
+        "- kopi til eigar,",
+        "§ 2 Gebyr",
+        "Gebyret er kr 100.",
+        "Klage sendast kommunen.",
+        "vedteke av kommunestyret 1.2.2020.",
+    )
+    assert html_lines(_main("<p>" + "<br>".join(lines) + "</p>"), "text/html") == lines
+
+
+def test_html_never_rejoins_across_block_elements() -> None:
+    page = _main("<p>Forskrifta gjeld for<br>heile</p><p>kommunen.</p><div>og fylket</div>")
+    assert html_lines(page, "text/html") == ("Forskrifta gjeld for heile", "kommunen.", "og fylket")
+
+
+def test_html_br_rejoin_drops_furniture_first_and_keeps_inline_markup() -> None:
+    page = _main("<p>Forskrifta gjeld for<br>Del på<br><strong>heile</strong> kommunen.</p>")
+    assert html_lines(page, "text/html") == ("Forskrifta gjeld for heile kommunen.",)
+
+
+def test_html_br_rejoining_is_deterministic() -> None:
+    page = _main("<p>Forskrift om gebyr i<br>kommunen<br>§ 1 Formål<br>gebyret er 1.</p>")
+    assert (
+        html_lines(page, "text/html")
+        == html_lines(page, "text/html")
+        == ("Forskrift om gebyr i kommunen", "§ 1 Formål", "gebyret er 1.")
+    )
+
+
+def test_html_line_separator_in_source_text_is_a_space_not_a_br() -> None:
+    page = _main("<p>Kommunen\u2028Fylket</p>")
+    assert html_lines(page, "text/html") == ("Kommunen Fylket",)
+
+
+def test_a_dotted_section_number_starts_a_line_of_its_own() -> None:
+    lines = ("Tapet dekkes etter punkt 3.2", "8.4 Avkorting i ytelser dekkes fullt ut.")
+    assert html_lines(_main("<p>" + "<br>".join(lines) + "</p>"), "text/html") == lines
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_a_dotted_date_after_a_word_is_still_a_wrap() -> None:
+    lines = ("Forskrifta trer i kraft", "1.1.2010.")
+    page = _main("<p>" + "<br>".join(lines) + "</p>")
+    assert html_lines(page, "text/html") == ("Forskrifta trer i kraft 1.1.2010.",)
+
+
+def test_html_text_after_a_closing_block_is_kept_on_a_line_of_its_own() -> None:
+    page = _main("<div><p>§ 1 Formål</p>Forskrifta gjeld heile kommunen.</div>")
+    assert html_lines(page, "text/html") == ("§ 1 Formål", "Forskrifta gjeld heile kommunen.")

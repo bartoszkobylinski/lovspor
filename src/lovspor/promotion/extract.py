@@ -47,7 +47,7 @@ from lovspor.promotion.source_text import docx_lines, html_lines, pdf_lines, sou
 #: Bump on any change that can change extracted text for the same bytes,
 #: including a pypdf bump (``source_text.PDF_LIBRARY_VERSION``). A bump is a
 #: ``migration:`` commit across the dataset, never new versions (ADR-0016 4e).
-EXTRACTOR_VERSION = 3
+EXTRACTOR_VERSION = 4
 MIN_TEXT_CHARS = 200
 
 # Measured 2026-10-03 over the archive's extracted texts longer than 200
