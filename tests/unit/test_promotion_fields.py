@@ -127,6 +127,58 @@ def test_impossible_vedtaksdato_is_none_but_organ_is_kept() -> None:
     assert (fields.vedtatt, fields.vedtatt_av) == (None, "kommunestyret")
 
 
+_SAUDA_HJEMMEL = (
+    "Hjemmel: Fastsatt av Sauda kommunestyre med hjemmel i lov av 14. juni 2002 nr 20"
+    " om vern mot brann (brann- og eksplosjonsvernloven) § 11 og § 28."
+)
+
+
+def test_a_hjemmel_law_date_is_never_the_vedtaksdato() -> None:
+    fields = _read("Forskrift om feiing", _SAUDA_HJEMMEL, "§ 1 Formål")
+    assert (fields.vedtatt, fields.vedtatt_av) == (None, None)
+
+
+def test_the_regulation_stating_its_own_adoption_in_the_body_gives_the_vedtaksdato() -> None:
+    fields = _read(
+        "Forskrift om feiing",
+        _SAUDA_HJEMMEL,
+        "§ 1 Formål",
+        "Feie- og tilsynsgebyret fastsettes av Sauda kommunestyre.",
+        "§ 6 Ikrafttredelse",
+        "Forskriften er vedtatt av kommunestyret i Sauda den 7. februar 2018.",
+    )
+    assert (fields.vedtatt, fields.vedtatt_av) == (date(2018, 2, 7), "kommunestyret i Sauda")
+
+
+def test_an_older_regulation_adopted_in_the_body_is_not_the_vedtaksdato() -> None:
+    fields = _read(
+        "Forskrift om skulereglar",
+        "Fastsett av kommunestyret (dato) med heimel i lov 9. juni 2023 nr. 30 § 10-7.",
+        "§ 1 Formål",
+        "Samtidig opphøyrer «Ordensreglar» som blei vedteke i kommunestyret 13.02.2020.",
+    )
+    assert (fields.vedtatt, fields.vedtatt_av) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Vedtatt i medhold av lov 14. juni 2002 nr. 20 § 11.",
+        "Vedtatt i medhald av lova 14. juni 2002 nr. 20 § 11.",
+        "Fastsatt av bystyret etter lov av 14. juni 2002 nr. 20 § 11.",
+        "Fastsatt av kommunestyret den xx med hjemmel i forskrift 26. juni 2002 nr. 922.",
+    ],
+)
+def test_a_statute_date_after_the_organ_is_never_the_vedtaksdato(line: str) -> None:
+    assert _read("Forskrift om gebyr", line, "§ 1").vedtatt is None
+
+
+def test_vedtatt_before_the_hjemmel_phrase_is_kept() -> None:
+    line = "Fastsatt av bystyret 12.12.2019 med hjemmel i lov 14. juni 2002 nr. 20 § 11."
+    fields = _read("Forskrift om gebyr", line, "§ 1")
+    assert (fields.vedtatt, fields.vedtatt_av) == (date(2019, 12, 12), "bystyret")
+
+
 def test_no_enactment_line_leaves_both_empty() -> None:
     fields = _read("Forskrift om gebyr", "§ 1 Gebyr")
     assert fields == RegulationFields(title="Forskrift om gebyr")
