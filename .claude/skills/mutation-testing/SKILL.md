@@ -129,7 +129,8 @@ Gate reasons in `mutation-result.json`, in the order `mutation_to_json.py` check
 - `uv run python scripts/ci/mutation_to_json.py --check-equivalents` checks every entry
   parses, is one diff (a `\n` quoted inside a TOML basic string breaks the line and is
   refused), and still names a line that exists in its file — a stale entry is reported and
-  fails the check (#366).
+  fails the check (#366). fast-ci runs it on every PR (#535), so a stale or refused
+  entry fails the PR.
 
 ## Tool version
 
