@@ -1,8 +1,11 @@
 """Behavioral regressions for the storage and failed-sweep survivor diffs."""
 
 import hashlib
+import os
+import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -74,41 +77,56 @@ def test_outside_directory_error_names_both_paths(tmp_path: Path) -> None:
     assert str(caught.value) == f"{directory} is outside observatory root {tmp_path}"
 
 
+_VANISH_AT: list[tuple[Path, Path]] = []
+"""The (mkdir target, root) the audit hook removes the root at; empty = disarmed."""
+
+
+def _vanish_at_mkdir(event: str, args: tuple[object, ...]) -> None:
+    if event == "os.mkdir" and _VANISH_AT:
+        target, root = _VANISH_AT[0]
+        if os.fspath(args[0]) == str(target):  # type: ignore[arg-type]
+            _VANISH_AT.clear()
+            shutil.rmtree(root)
+
+
+_HOOK: list[bool] = []
+
+
+@pytest.fixture
+def vanish_at_mkdir() -> Iterator[list[tuple[Path, Path]]]:
+    """Remove the real root at a chosen ``os.mkdir``, in this process.
+
+    An audit hook cannot be removed once added, so one hook is installed for
+    the session and armed per test. In-process on purpose: mutmut swaps code
+    only in the process it runs, so a child interpreter tested the unmutated
+    module and killed nothing (PR #544 survivors).
+    """
+    if not _HOOK:
+        sys.addaudithook(_vanish_at_mkdir)
+        _HOOK.append(True)
+    try:
+        yield _VANISH_AT
+    finally:
+        _VANISH_AT.clear()
+
+
 @pytest.mark.parametrize("depth", [1, 2])
-def test_root_disappearing_at_mkdir_preserves_target_and_cause(tmp_path: Path, depth: int) -> None:
-    # Audit hooks observe real OS operations; isolate the hook in a child so it
-    # cannot affect later tests. Remove the real volume at the mkdir boundary.
-    script = """
-import sys
-import shutil
-from pathlib import Path
-from lovspor.observatory.storage import ObservatoryRoot, ensure_below_root
-from lovspor.errors import StorageUnavailableError
-root = Path(sys.argv[1]) / "archive"
-root.mkdir()
-checked = ObservatoryRoot(root, [])
-target = root.joinpath(*(["blobs", "shard"][:int(sys.argv[2])]))
-def vanish(event, args):
-    if event == "os.mkdir" and args[0] == str(target):
-        shutil.rmtree(root)
-sys.addaudithook(vanish)
-try:
-    ensure_below_root(checked, target)
-except StorageUnavailableError as exc:
-    assert isinstance(exc.__cause__, FileNotFoundError)
-    assert str(exc) == f"observatory root {root} is gone; {target} not written: {exc.__cause__}"
-else:
-    raise AssertionError("missing archive accepted")
-assert not root.exists()
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", script, str(tmp_path), str(depth)],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    assert result.returncode == 0, result.stderr
+def test_root_disappearing_at_mkdir_preserves_target_and_cause(
+    tmp_path: Path, depth: int, vanish_at_mkdir: list[tuple[Path, Path]]
+) -> None:
+    root = tmp_path / "archive"
+    root.mkdir()
+    checked = ObservatoryRoot(root, [])
+    target = root.joinpath(*["blobs", "shard"][:depth])
+    vanish_at_mkdir.append((target, root))
+
+    with pytest.raises(StorageUnavailableError) as caught:
+        ensure_below_root(checked, target)
+
+    cause = caught.value.__cause__
+    assert isinstance(cause, FileNotFoundError)
+    assert str(caught.value) == f"observatory root {root} is gone; {target} not written: {cause}"
+    assert not root.exists()
 
 
 @pytest.mark.parametrize("writer", ["index", "cursor"])
