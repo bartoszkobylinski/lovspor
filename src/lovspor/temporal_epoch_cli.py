@@ -46,16 +46,9 @@ def _corpus(
         typer.Option("--corpus-path", help="A lovverk clone whose origin takes the push."),
     ],
 ) -> None:
-    repo = corpus_path.expanduser()
-    # Both, because a wrong path is a write to some other repository's
-    # notes and a push to its origin: the top of a git clone that also
-    # carries the corpus manifest.
-    if not (is_repository_root(repo) and is_corpus(repo)):
-        raise typer.BadParameter(
-            f"{repo} is not the top level of a lovverk corpus clone (git + manifest.json)",
-            param_hint="--corpus-path",
-        )
-    ctx.obj = repo
+    # Checked in _run, not here: click runs this callback before the
+    # subcommand validates its own options, and the check runs git.
+    ctx.obj = corpus_path.expanduser()
 
 
 @temporal_epoch_app.command(name="record-sync-run")
@@ -106,14 +99,26 @@ def backfill(
 
 def _usage_error(exc: ValidationError) -> NoReturn:
     """Malformed input: exit 2, the usage-error code, before anything is
-    fetched, written or pushed (the --corpus-path check is the only git
-    that has run, and it only reads)."""
+    fetched, written or pushed, and before any git command runs."""
     typer.echo(f"error: {exc}", err=True)
     raise typer.Exit(code=2) from exc
 
 
-def _run(action: Callable[[Path], EpochReport]) -> None:
+def _corpus_clone() -> Path:
     repo: Path = click.get_current_context().obj
+    # Both, because a wrong path is a write to some other repository's
+    # notes and a push to its origin: the top of a git clone that also
+    # carries the corpus manifest.
+    if not (is_repository_root(repo) and is_corpus(repo)):
+        raise typer.BadParameter(
+            f"{repo} is not the top level of a lovverk corpus clone (git + manifest.json)",
+            param_hint="--corpus-path",
+        )
+    return repo
+
+
+def _run(action: Callable[[Path], EpochReport]) -> None:
+    repo = _corpus_clone()
     try:
         report = action(repo)
     except AttestationError as exc:

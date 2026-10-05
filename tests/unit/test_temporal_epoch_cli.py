@@ -561,10 +561,20 @@ def test_backfill_malformed_argument_is_a_usage_error_with_nothing_written(
     assert not _origin_has_epoch_ref(origin)
 
 
-@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+@pytest.mark.parametrize(
+    "args",
+    [
+        _backfill_args(**{"--sync-run": "not-a-run-id"}),
+        _backfill_args(**{"--epoch-at": "2026-05-09"}),
+        _backfill_args(**{"--boundary-commit": "HEAD"}),
+        ["record-sync-run", "--sync-run", "not-a-run-id"],
+    ],
+    ids=["backfill-sync-run", "backfill-epoch-at", "backfill-boundary-commit", "record-sync-run"],
+)
 def test_malformed_argument_is_rejected_before_any_git_command(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    args: list[str],
 ) -> None:
     """The CLI contract says malformed input exits 2 before git runs."""
     origin, _shas = _origin(tmp_path, gate_ran=True)
@@ -580,7 +590,7 @@ def test_malformed_argument_is_rejected_before_any_git_command(
 
     monkeypatch.setattr(subprocess, "run", observe_git)
 
-    code, output = _cli(clone, *_backfill_args(**{"--sync-run": "not-a-run-id"}))
+    code, output = _cli(clone, *args)
 
     assert code == 2, output
     assert git_commands == []
