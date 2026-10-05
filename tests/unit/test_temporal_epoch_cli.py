@@ -732,9 +732,15 @@ def test_corpus_path_must_be_the_top_of_a_git_clone(tmp_path: Path, command: str
     _git(not_a_corpus, "init", "-b", "main")
 
     for corpus in (plain, clone / "lover", a_file, tmp_path / "missing", not_a_corpus):
-        code, output = _cli(corpus, *args)
-        assert code == 2, (corpus, output)
-        assert said("--corpus-path", output)
+        result = _invoke(corpus, *args)
+        assert result.exit_code == 2, (corpus, result.output)
+        assert result.stdout == ""
+        assert said("--corpus-path", result.stderr)
+        assert said("Invalid value for --corpus-path:", result.stderr)
+        assert said(
+            f"{corpus} is not the top level of a lovverk corpus clone (git + manifest.json)",
+            result.stderr,
+        )
     assert read_gate_epochs(clone) == {}
     assert not _origin_has_epoch_ref(origin)
 
