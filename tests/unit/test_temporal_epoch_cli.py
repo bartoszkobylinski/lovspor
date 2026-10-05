@@ -596,6 +596,67 @@ def test_malformed_argument_is_rejected_before_any_git_command(
     assert git_commands == []
 
 
+@pytest.mark.parametrize(
+    ("args", "request_model", "field"),
+    [
+        (_backfill_args(**{"--sync-run": "bad"}), "BackfillRequest", "sync_run"),
+        (_backfill_args(**{"--epoch-at": "2026-05-09"}), "BackfillRequest", "epoch_at"),
+        (_backfill_args(**{"--boundary-commit": "HEAD"}), "BackfillRequest", "boundary_commit"),
+        (["record-sync-run", "--sync-run", "bad"], "SyncRunRequest", "sync_run"),
+    ],
+)
+def test_argument_validation_precedes_invalid_corpus_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    args: list[str],
+    request_model: str,
+    field: str,
+) -> None:
+    """Malformed input must fail before even the corpus's read-only git check."""
+
+    def unexpected_run(*args: object, **kwargs: object) -> None:
+        pytest.fail("argument validation ran a subprocess")
+
+    monkeypatch.setattr(subprocess, "run", unexpected_run)
+
+    result = _invoke(tmp_path / "missing", *args)
+
+    assert result.exit_code == 2, result.output
+    assert result.stdout == ""
+    assert result.stderr.startswith(f"error: 1 validation error for {request_model}")
+    assert f"\n{field}\n" in result.stderr
+    assert "--corpus-path" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["record-sync-run"],
+        ["backfill", "--epoch-at", EPOCH_AT, "--sync-run", "77"],
+    ],
+)
+def test_missing_required_option_is_rejected_before_any_git_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    args: list[str],
+) -> None:
+    """Click's required-option validation also precedes the corpus check."""
+
+    def unexpected_run(*args: object, **kwargs: object) -> None:
+        pytest.fail("missing-option validation ran a subprocess")
+
+    monkeypatch.setattr(subprocess, "run", unexpected_run)
+
+    result = _invoke(tmp_path / "missing", *args)
+
+    assert result.exit_code == 2, result.output
+    assert result.stdout == ""
+    assert said("Missing option", result.stderr)
+    missing_option = "--sync-run" if args[0] == "record-sync-run" else "--boundary-commit"
+    assert said(missing_option, result.stderr)
+    assert "not the top level" not in result.stderr
+
+
 @pytest.mark.parametrize("sync_run", ["0", "-5", " 77", "77 ", "007", "77\n", "9" * 21, "1_000"])
 def test_record_sync_run_malformed_run_id_is_a_usage_error(tmp_path: Path, sync_run: str) -> None:
     origin, _shas = _origin(tmp_path, gate_ran=False)
