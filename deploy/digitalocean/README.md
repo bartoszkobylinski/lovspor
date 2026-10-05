@@ -265,9 +265,16 @@ first migration below. Until a box has been migrated, `lovspor release commit`
 refuses there with "does the Caddyfile import the fragment?" and nothing
 public changes.
 
-The unit `Conflicts=` with `lovspor-fetch-corpus.service`: a build must not read
-a clone mid-fetch. There is no timer yet — publishing is an operator command
-until the first releases have shown what a rebuild costs on this box.
+The unit is ordered `After=lovspor-fetch-corpus.service`: a release started
+while a fetch runs waits for the fetch to finish (`systemctl start` blocks
+until then), so the build never resolves `HEAD` in a clone mid-pull. A fetch
+that starts during a release (the 05:30 timer, or a retry) runs alongside it
+and cannot change what the release publishes: the build has already pinned
+`HEAD` to a commit and emits from that commit's objects. No unit lists a
+release or a fetch in `Conflicts=` (#545): it is symmetric, so starting either
+side would stop the other mid-run. There is no timer yet — publishing is an
+operator command until the first releases have shown what a rebuild costs on
+this box.
 
 **Corpus refresh** is automatic — `lovspor-fetch-corpus.timer` runs daily at
 05:30 UTC and the running server picks up changes on the next query (no restart).
@@ -322,7 +329,11 @@ systemctl show -p OnFailure lovspor-fetch-corpus lovspor-publish lovspor-site-dr
 
 `lovspor-site-drift` fails hourly while drift lasts (and before the first
 release), so it alerts hourly — the same truthful state `systemctl --failed`
-shows. `lovspor-mcp` has no `OnFailure=`: it restarts itself every 5 s
+shows. It never stops a release and never alerts because one is running
+(#545): a check fired at `:17` during a release waits behind it (`After=`), and
+its `ExecCondition=` skips the run if `lovspor-publish` is still busy —
+`journalctl -u lovspor-site-drift` then shows the condition failing and the unit
+goes back to `inactive`, not `failed`. `lovspor-mcp` has no `OnFailure=`: it restarts itself every 5 s
 (`Restart=on-failure`), which never reaches `failed` under the default start
 limit, so the hook would either never fire or fire on every crash; its
 availability is an external probe's job. Exit codes of `lovspor ops alert`: 0

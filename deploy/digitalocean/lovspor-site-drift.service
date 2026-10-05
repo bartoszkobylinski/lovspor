@@ -4,9 +4,12 @@ Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/docs/mcp.md
 After=network-online.target
 Wants=network-online.target
 # The release rewrites the served document; a check that straddles the switch
-# would compare a fresh observation with a document about to be replaced.
+# would compare a fresh observation with a document about to be replaced. The
+# check yields to a release and never stops one (#545): After= holds a start
+# job behind a release's start job, and ExecCondition= below skips a check that
+# finds a release running anyway. Conflicts= is symmetric and would instead
+# stop the release in flight, as the 08:17 check did on 2026-10-05.
 After=lovspor-publish.service
-Conflicts=lovspor-publish.service
 # Drift, an unreadable served document or an unmet socket precondition is a
 # failed unit, and a failed unit tells the operator (#478) — hourly while it lasts.
 OnFailure=lovspor-alert@%n.service
@@ -28,6 +31,12 @@ WorkingDirectory=/opt/lovspor/app
 # Rotation: `lovspor tokens issue --label site-probe --expires-in-days 30`,
 # then a release. See docs/mcp.md § Release probe and drift check.
 LoadCredential=site-probe:/etc/lovspor/credentials/site-probe
+# Skip while a release runs: an ExecCondition= exit of 1-254 skips the unit
+# without marking it failed, so OnFailure= stays quiet (255 or a signal would be
+# a failure; systemd.service(5)). A running oneshot is `activating`, for which
+# `systemctl is-active` exits 3 exactly as for `inactive`, so the printed state
+# is matched, not that exit code: grep exits 1 on a busy state, 0 otherwise.
+ExecCondition=/bin/sh -c 'systemctl is-active lovspor-publish.service | grep -qvxE "activating|active|reloading|refreshing|deactivating"'
 ExecStart=/opt/lovspor/app/.venv/bin/lovspor site-drift-check --served-url https://lovspor.no/deployment-capabilities.json --observer drift-timer
 # The check's FIRST action is the admin socket's four facts (ADR-0014 Decision 4
 # / Decision 6): mode 0660, the release group, root can GET /config/ over it,

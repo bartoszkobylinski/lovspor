@@ -203,7 +203,8 @@ class TestUnit:
         ]
         assert _directive(text, "User") == ["root"]
         assert _directive(text, "Type") == ["oneshot"]
-        assert "lovspor-fetch-corpus.service" in _directive(text, "Conflicts")
+        assert "lovspor-fetch-corpus.service" in _directive(text, "After")
+        assert not _directive(text, "Conflicts")
 
     def test_receives_the_probe_credential_like_the_drift_unit(self) -> None:
         text = _UNIT.read_text(encoding="utf-8")

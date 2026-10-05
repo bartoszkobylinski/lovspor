@@ -1,10 +1,16 @@
 [Unit]
 Description=Publish the lovverk corpus and the site as one release envelope (build, validate, config swap)
 Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/deploy/digitalocean/README.md
-# The build reads the corpus clone; publishing a half-fetched clone would
-# validate fine and still be wrong, so never overlap the two.
+# The build resolves HEAD of the corpus clone; resolving it mid-fetch would
+# validate fine and still be stale. After= holds a release's start job until a
+# running fetch's job ends, so it builds on the finished pull. A fetch that
+# starts during a release cannot change what it publishes: the build pins HEAD
+# to a commit and emits from that commit's objects, and the fetch only
+# fast-forwards. At worst a pull rewriting manifest.json fails the build before
+# the switch, which leaves the live release untouched and alerts. No Conflicts=:
+# it is symmetric, so the 05:30 timer (or a fetch retry) would stop a release in
+# flight, and a release would stop a running fetch (#545).
 After=lovspor-fetch-corpus.service
-Conflicts=lovspor-fetch-corpus.service
 # A failed release tells the operator (#478); the live release is untouched.
 OnFailure=lovspor-alert@%n.service
 
