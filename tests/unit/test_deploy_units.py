@@ -251,6 +251,31 @@ class TestDriftYieldsToRelease:
     def test_an_idle_release_unit_lets_the_check_run(self, tmp_path: Path, state: str) -> None:
         assert _run_condition(tmp_path, state) == 0
 
+    @pytest.mark.parametrize("state", ("active", "reloading", "refreshing"))
+    def test_a_successful_busy_status_still_skips_the_check(
+        self, tmp_path: Path, state: str
+    ) -> None:
+        """The unit promises to match printed state, independent of exit status.
+
+        The existing exit-3 cases cover the running oneshot; a successful
+        status query must not accidentally admit a check during a busy release.
+        """
+        stub = tmp_path / "systemctl"
+        stub.write_text(
+            '#!/bin/sh\n[ "$1 $2" = "is-active lovspor-publish.service" ] || exit 64\n'
+            f"echo {state}\nexit 0\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+
+        result = subprocess.run(
+            ["/bin/sh", "-c", _condition_script()],
+            env={"PATH": f"{tmp_path}:/usr/bin:/bin"},
+            check=False,
+        )
+
+        assert 1 <= result.returncode <= 254, result.returncode
+
 
 _LONG_RUNNING = ("lovspor-publish.service", "lovspor-fetch-corpus.service")
 
