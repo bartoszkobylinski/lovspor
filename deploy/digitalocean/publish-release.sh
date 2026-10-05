@@ -84,8 +84,8 @@ LOCK=/run/lock/lovspor-publish.lock
 log() { printf '%s publish-release: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 die() { log "ERROR: $*" >&2; exit 1; }
 
-# One publish at a time on this box. systemd's Conflicts= keeps the unit off
-# the corpus fetch; the lock keeps a manual run off the unit.
+# One publish at a time on this box. The unit's After= holds a release behind a
+# running corpus fetch; the lock keeps a manual run off the unit.
 exec 9>"$LOCK"
 flock -n 9 || die "another publish holds $LOCK"
 

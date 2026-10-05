@@ -8,7 +8,11 @@ test rather than a droplet.
 """
 
 import re
+import shlex
+import subprocess
 from pathlib import Path
+
+import pytest
 
 _DEPLOY = Path(__file__).resolve().parents[2] / "deploy" / "digitalocean"
 _TIMER = _DEPLOY / "lovspor-site-drift.timer"
@@ -68,11 +72,13 @@ class TestDriftService:
         assert "--served-url https://lovspor.no/deployment-capabilities.json" in exec_start
         assert "--probe-token-file" not in exec_start
 
-    def test_never_overlaps_a_release(self) -> None:
+    def test_is_ordered_after_a_release_and_never_stops_one(self) -> None:
+        """After= holds a timer-fired check behind an in-flight release's start
+        job; Conflicts= would instead stop the release (#545)."""
         text = _SERVICE.read_text(encoding="utf-8")
 
-        assert "lovspor-publish.service" in _directive(text, "Conflicts")
         assert "lovspor-publish.service" in _directive(text, "After")
+        assert "lovspor-publish.service" not in " ".join(_directive(text, "Conflicts"))
 
     def test_is_bounded(self) -> None:
         (timeout,) = _directive(_SERVICE.read_text(encoding="utf-8"), "TimeoutStartSec")
@@ -189,3 +195,116 @@ class TestFailureAlerts:
         assert _directive(text, "User") == ["root"]
         assert not _directive(text, "EnvironmentFile")
         assert int(timeout) <= 120
+
+
+_BUSY_STATES = ("activating", "active", "reloading", "refreshing", "deactivating")
+_IDLE_STATES = ("inactive", "failed")
+
+
+def _condition_script() -> str:
+    """The shell script of the drift unit's one ExecCondition=, as systemd hands it to sh."""
+    (condition,) = _directive(_SERVICE.read_text(encoding="utf-8"), "ExecCondition")
+    argv = shlex.split(condition)
+    assert argv[:2] == ["/bin/sh", "-c"], condition
+    (script,) = argv[2:]
+    return script
+
+
+def _run_condition(tmp_path: Path, state: str) -> int:
+    """Run the condition with a stub systemctl reporting ``state`` for the publish unit."""
+    stub = tmp_path / "systemctl"
+    stub.write_text(
+        '#!/bin/sh\n[ "$1 $2" = "is-active lovspor-publish.service" ] || exit 64\n'
+        f"echo {state}\nexit 3\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    env = {"PATH": f"{tmp_path}:/usr/bin:/bin"}
+    script = _condition_script()
+    return subprocess.run(["/bin/sh", "-c", script], env=env, check=False).returncode
+
+
+class TestDriftYieldsToRelease:
+    """A running release skips the check; it is never stopped and never alerts (#545).
+
+    ExecCondition= exit 1-254 skips the unit without marking it failed, so
+    OnFailure= does not fire; 255 or a signal is a failure (systemd.service(5)).
+    A running oneshot is ``activating``, for which ``systemctl is-active``
+    exits 3, so the condition reads the printed state, not that exit code.
+    """
+
+    def test_the_condition_names_the_release_unit_without_systemd_expansions(self) -> None:
+        (condition,) = _directive(_SERVICE.read_text(encoding="utf-8"), "ExecCondition")
+
+        assert "lovspor-publish.service" in condition
+        # systemd rewrites $ and % in Exec lines before sh ever sees them.
+        assert "$" not in condition
+        assert "%" not in condition
+
+    @pytest.mark.parametrize("state", _BUSY_STATES)
+    def test_a_running_release_skips_the_check(self, tmp_path: Path, state: str) -> None:
+        code = _run_condition(tmp_path, state)
+
+        assert 1 <= code <= 254, code
+
+    @pytest.mark.parametrize("state", _IDLE_STATES)
+    def test_an_idle_release_unit_lets_the_check_run(self, tmp_path: Path, state: str) -> None:
+        assert _run_condition(tmp_path, state) == 0
+
+    @pytest.mark.parametrize("state", ("active", "reloading", "refreshing"))
+    def test_a_successful_busy_status_still_skips_the_check(
+        self, tmp_path: Path, state: str
+    ) -> None:
+        """The unit promises to match printed state, independent of exit status.
+
+        The existing exit-3 cases cover the running oneshot; a successful
+        status query must not accidentally admit a check during a busy release.
+        """
+        stub = tmp_path / "systemctl"
+        stub.write_text(
+            '#!/bin/sh\n[ "$1 $2" = "is-active lovspor-publish.service" ] || exit 64\n'
+            f"echo {state}\nexit 0\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+
+        result = subprocess.run(
+            ["/bin/sh", "-c", _condition_script()],
+            env={"PATH": f"{tmp_path}:/usr/bin:/bin"},
+            check=False,
+        )
+
+        assert 1 <= result.returncode <= 254, result.returncode
+
+
+_LONG_RUNNING = ("lovspor-publish.service", "lovspor-fetch-corpus.service")
+
+
+class TestNoUnitStopsALongRunningJob:
+    """Conflicts= is symmetric: starting either unit enqueues a stop of the other.
+
+    Naming a long-running oneshot there lets a timer kill it mid-run, as the
+    08:17 drift check cancelled a release on 2026-10-05 (#545).
+    """
+
+    def test_the_long_running_units_are_oneshots(self) -> None:
+        for name in _LONG_RUNNING:
+            text = (_DEPLOY / name).read_text(encoding="utf-8")
+
+            assert _directive(text, "Type") == ["oneshot"], name
+
+    def test_no_unit_conflicts_with_a_long_running_unit(self) -> None:
+        for path in sorted(_DEPLOY.glob("*.service")):
+            text = path.read_text(encoding="utf-8")
+            conflicts = " ".join(_directive(text, "Conflicts")).split()
+
+            assert not set(conflicts) & set(_LONG_RUNNING), f"{path.name}: {conflicts}"
+            if path.name in _LONG_RUNNING:
+                assert not conflicts, f"{path.name}: {conflicts}"
+
+    def test_a_release_waits_for_a_running_fetch(self) -> None:
+        """After= alone holds the publish start job until the fetch's job ends,
+        so a build never resolves HEAD in a clone mid-pull."""
+        text = _PUBLISH.read_text(encoding="utf-8")
+
+        assert "lovspor-fetch-corpus.service" in _directive(text, "After")
