@@ -802,6 +802,7 @@ def _observation(payload: bytes, url: str = "https://baerum.kommune.no/f") -> Ar
 
 def _archive(root: Path, payload: bytes = b"first") -> ObservationLog:
     """A real archive with one stored observation, under the configured root."""
+    root.mkdir(parents=True, exist_ok=True)
     log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
     log.append_artifact(_observation(payload), payload)
     return log
@@ -2887,6 +2888,7 @@ class TestCaptureAll:
     def test_a_zero_source_sweep_is_recorded_as_failed(self, root: Path) -> None:
         """A sweep that observed nothing must not leave green telemetry."""
         started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
+        root.mkdir()
 
         _record_sweep(ObservatoryRoot(root, ()), started, 0, SweepTotals())
 
@@ -2901,6 +2903,7 @@ class TestCaptureAll:
 
     def test_recorded_sweep_preserves_deferred_count(self, root: Path) -> None:
         started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
+        root.mkdir()
 
         run = _record_sweep(ObservatoryRoot(root, ()), started, 1, SweepTotals(deferred=3))
 

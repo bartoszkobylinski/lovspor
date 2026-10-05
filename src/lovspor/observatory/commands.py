@@ -11,7 +11,7 @@ and no cycle is possible.
 
 import os
 from datetime import UTC, datetime
-from typing import Annotated, NamedTuple, NoReturn
+from typing import Annotated, NamedTuple
 
 import httpx
 import typer
@@ -20,6 +20,7 @@ from lovspor.errors import (
     AmbiguousSourceError,
     LogIntegrityError,
     StaleSourceError,
+    StorageUnavailableError,
 )
 from lovspor.exclusive_workload import ExclusiveWorkloadHeldError, exclusive_workload
 
@@ -54,6 +55,14 @@ from lovspor.observatory.registry_io import (
 from lovspor.observatory.selection import choose, selection_enabled
 from lovspor.observatory.status_report import echo_status_report
 from lovspor.observatory.storage import ObservatoryRoot
+from lovspor.observatory.sweep_failures import (
+    EXCLUSIVE_WORKLOAD,
+    STORAGE_UNAVAILABLE,
+    end_unswept,
+    failed_run,
+    refuse_sweep,
+    storage_reason,
+)
 from lovspor.observatory.sweeps import (
     NO_ACTIVE_SOURCES,
     RunContext,
@@ -469,7 +478,10 @@ def capture_all(
     except ExclusiveWorkloadHeldError as exc:
         # A hand-run sweep defers exactly like the scheduled one; it just has
         # no run record to leave, because it never had one for failures.
-        typer.echo(f"OBSERVATORY SWEEP DEFERRED\nreason: {_EXCLUSIVE_WORKLOAD}\n{exc}", err=True)
+        typer.echo(f"OBSERVATORY SWEEP DEFERRED\nreason: {EXCLUSIVE_WORKLOAD}\n{exc}", err=True)
+        raise typer.Exit(1) from exc
+    except StorageUnavailableError as exc:
+        typer.echo(f"OBSERVATORY SWEEP FAILED\nreason: {storage_reason(root)}\n{exc}", err=True)
         raise typer.Exit(1) from exc
     if run.status != "success":
         # The exit code follows the recorded status, and a capped source makes
@@ -608,7 +620,6 @@ def _sweep_runs(root: ObservatoryRoot) -> list[SweepRun]:
 
 #: Preflight verdicts. Strings rather than an enum because they are written
 #: into the run record and read by a human at 03:00, not branched on.
-_STORAGE_UNAVAILABLE = "storage_unavailable"
 _REGISTRY_MISSING = "registry_missing"
 _LOG_DAMAGED = "observation_log_damaged"
 _ENGINE_NOT_PINNED = "engine_not_pinned"
@@ -617,9 +628,6 @@ _ENGINE_NOT_PINNED = "engine_not_pinned"
 #: because every developer checkout is on a branch and `nightly` must stay
 #: runnable there; the launchd template arms it.
 ENV_REQUIRE_PINNED_ENGINE = "LOVSPOR_OBSERVATORY_REQUIRE_PINNED_ENGINE"
-#: Not a preflight verdict: the ground was fine, the host was reserved. The
-#: sweep did not start and says so (issue #169).
-_EXCLUSIVE_WORKLOAD = "deferred_exclusive_workload"
 #: The name a sweep writes into the host lock, so a refused benchmark can say
 #: who held it.
 OBSERVATORY_WORKLOAD = "observatory-sweep"
@@ -639,7 +647,7 @@ def _preflight(root: ObservatoryRoot) -> str | None:
     name for a state nothing could ever write.
     """
     if not root.path.exists():
-        return _STORAGE_UNAVAILABLE
+        return STORAGE_UNAVAILABLE
     if not registry_path(root).exists():
         return _REGISTRY_MISSING
     if not any(record.active for record in _load(registry_path(root)).sources.values()):
@@ -665,39 +673,6 @@ def _engine_pin_verdict() -> str | None:
         typer.echo(f"engine: {checkout.reason} ({checkout.commit})", err=True)
         return _ENGINE_NOT_PINNED
     return None
-
-
-def _failed_run(started_at: datetime, reason: str) -> SweepRun:
-    """A run that could not sweep anything, as a record.
-
-    Built before it is stored, because the case that most needs reporting —
-    the archive is not mounted — is exactly the case with nowhere to store it.
-    The dead-man switch does not need the archive to speak.
-    """
-    return SweepRun(
-        run_id=started_at.isoformat(),
-        started_at=started_at,
-        finished_at=datetime.now(UTC),
-        active_sources=0,
-        sources_completed=0,
-        sources_refused=0,
-        captured=0,
-        failed_fetches=0,
-        unchanged=0,
-        status="failed",
-        failure_reason=reason,
-        engine_commit=describe_engine().commit,
-    )
-
-
-def _refuse_sweep(root: ObservatoryRoot, started_at: datetime, reason: str) -> NoReturn:
-    typer.echo(f"OBSERVATORY SWEEP FAILED\nreason: {reason}", err=True)
-    typer.echo(f"expected: {root.path}", err=True)
-    failed = _failed_run(started_at, reason)
-    if reason != _STORAGE_UNAVAILABLE:
-        append_sweep_run(root, failed)
-    report_run(failed)
-    raise typer.Exit(1)
 
 
 @observatory_app.command("nightly")
@@ -736,21 +711,19 @@ def nightly(
         return
     reason = _preflight(root)
     if reason is not None:
-        _refuse_sweep(root, started_at, reason)
+        refuse_sweep(root, failed_run(started_at, reason, describe_engine().commit))
     # After preflight, not before: the deferral record needs an archive to
     # land in, and preflight is what establishes there is one. Held across the
     # whole sweep — a benchmark starting mid-sweep is the overlap the lock is
     # for (issue #169). Held by the benchmark -> defer: record it, exit 1, the
     # next scheduled sweep picks up. Never wait.
+    # A volume lost mid-run ends the same way, recorded while the root is
+    # still there and never into one recreated for it (issue #534).
     try:
         with exclusive_workload(OBSERVATORY_WORKLOAD):
             run = _sweep(root, limit)
-    except ExclusiveWorkloadHeldError as exc:
-        typer.echo(f"OBSERVATORY SWEEP DEFERRED\nreason: {_EXCLUSIVE_WORKLOAD}\n{exc}", err=True)
-        deferred = _failed_run(started_at, _EXCLUSIVE_WORKLOAD)
-        append_sweep_run(root, deferred)
-        report_run(deferred)
-        raise typer.Exit(1) from exc
+    except (ExclusiveWorkloadHeldError, StorageUnavailableError) as exc:
+        end_unswept(root, started_at, exc, describe_engine().commit)
     # Reported from the record this invocation holds, never from whatever the
     # log happens to end with. A degraded sweep still reports: it ran, and
     # liveness is what the switch guards. The LF ledger (#509) reads after it.

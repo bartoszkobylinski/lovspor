@@ -42,7 +42,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from lovspor.atomic_io import atomic_write_text
+from lovspor.atomic_io import atomic_replace_bytes
 from lovspor.observatory.freshness import (
     CaptureState,
     ContentRun,
@@ -272,4 +272,6 @@ def _write_index(path: Path, index: FreshnessIndex) -> None:
     """Atomic replace: a reader never observes a half-written index, and two
     concurrent rebuilds each leave a whole, valid document (last one wins —
     both are correct derivations, one merely further along)."""
-    atomic_write_text(path, index.model_dump_json() + "\n")
+    payload = (index.model_dump_json() + "\n").encode()
+    # The index sits in the root, which a write never creates (#534).
+    atomic_replace_bytes(path, payload)

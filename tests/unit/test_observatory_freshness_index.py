@@ -40,6 +40,8 @@ NOW = datetime(2026, 9, 3, 8, 0, tzinfo=UTC)
 
 
 def make_log(root: Path) -> ObservationLog:
+    # A mounted archive: a write never creates the root (#534).
+    root.mkdir(parents=True, exist_ok=True)
     return ObservationLog(ObservatoryRoot(root, []))
 
 

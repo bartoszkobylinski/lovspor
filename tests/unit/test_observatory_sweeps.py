@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lovspor.errors import LogIntegrityError
+from lovspor.errors import LogIntegrityError, StorageUnavailableError
 from lovspor.observatory import sweeps
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
 from lovspor.observatory.sweeps import (
@@ -36,6 +36,8 @@ START = datetime(2026, 8, 25, 1, 0, tzinfo=UTC)
 def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ObservatoryRoot:
     monkeypatch.delenv(ENV_CORPUS_ROOT, raising=False)
     monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(tmp_path / "observatory"))
+    # A mounted archive: a write never creates the root (#534).
+    (tmp_path / "observatory").mkdir()
     return ObservatoryRoot(tmp_path / "observatory", ())
 
 
@@ -129,12 +131,14 @@ class TestAppendOnly:
 
         assert encodings == ["utf-8"]
 
-    def test_a_deep_archive_root_is_created_for_the_first_run(self, tmp_path: Path) -> None:
+    def test_a_missing_archive_root_is_not_created_for_a_run(self, tmp_path: Path) -> None:
+        """#534: a run recorded into a root this call made would read as history."""
         root = ObservatoryRoot(tmp_path / "archive" / "lovspor" / "observatory", ())
 
-        append_sweep_run(root, _run())
+        with pytest.raises(StorageUnavailableError):
+            append_sweep_run(root, _run())
 
-        assert read_sweep_runs(sweeps_path(root)) == [_run()]
+        assert not (tmp_path / "archive").exists()
 
     def test_a_written_run_round_trips_without_losing_fields(self, root: ObservatoryRoot) -> None:
         run = _run(refused=1, completed=1).model_copy(update={"engine_commit": "a" * 40})

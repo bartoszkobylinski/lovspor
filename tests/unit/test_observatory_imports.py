@@ -62,6 +62,7 @@ _MODULES = (
     "lovspor.observatory.survey_commands",
     "lovspor.observatory.survey_probe",
     "lovspor.observatory.status_report",
+    "lovspor.observatory.sweep_failures",
     "lovspor.observatory.sweeps",
     "lovspor.observatory.triggers",
 )

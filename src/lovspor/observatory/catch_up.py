@@ -12,7 +12,8 @@ when no sweep has started in the last 24 hours. "Started" is read from two
 traces, because a sweep killed by the shutdown never writes its run record:
 
 * ``sweep-runs.jsonl`` — every sweep that reached its end. A ``failed`` run
-  (deferred, refused at preflight) observed nothing, so it is not a sweep.
+  (deferred, refused at preflight, or lost its archive mid-run, #534) is not a
+  sweep: the night counts as missed and the next load catches it up.
 * the host's exclusive workload lock — its advisory record names when the
   sweep holding it began, and only a clean exit empties it.
 

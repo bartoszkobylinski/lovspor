@@ -1269,9 +1269,21 @@ wrong place:
 | `registry_missing` | the archive is there, the source registry is not |
 | `observation_log_damaged` | the log does not scan clean; run `observatory verify` |
 | `deferred_exclusive_workload` | the ground was fine, but the host is reserved: an LLHB benchmark arm holds the exclusive workload lock (issue #169). The sweep did not start; the next scheduled one picks up |
+| `storage_write_failed` | mid-run, not preflight: the archive is still there, but a write under it failed (issue #534) |
 
 Each writes a `failed` run carrying its reason — **except `storage_unavailable`**, which
-by definition has nowhere to write. The deferral is checked *after* the ground checks for
+by definition has nowhere to write.
+
+The archive can also go away *during* a sweep (issue #534: T7 vanished at 09:36 on
+2026-10-04). The engine never creates the archive root or anything above it — only
+directories below an existing root — so a vanished volume ends the run with a typed
+storage error and exit 1, not a traceback. The run is then `failed` with
+`storage_unavailable` when the root is gone, and `storage_write_failed` when the root is
+there but a write under it failed. The record is written only in the second case: a
+vanished root gets no record, never one in a recreated or fallback directory that would
+later read as the archive's history. Its reason still reaches stderr and the dead-man
+switch's `/fail` body. Either way `--catch-up` treats the night as missed: a `failed` run
+is not a sweep start. The deferral is checked *after* the ground checks for
 the same reason: its record needs an archive to land in. It still pings the dead-man
 switch's `/fail` URL — truthfully, the sweep did not run — so a deferred night shows up
 as red, and whoever reserved the host is the one looking at it.
