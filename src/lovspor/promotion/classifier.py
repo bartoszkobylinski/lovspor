@@ -157,7 +157,7 @@ def read_classifier_output(path: Path, classifier_version: str) -> ClassifierOut
         msg = f"cannot read the classifier output at {path}: {exc}"
         raise ClassifierOutputError(msg) from exc
     try:
-        text = raw.decode("utf-8")
+        text = raw.decode()
     except UnicodeDecodeError as exc:
         msg = f"the classifier output at {path} is not UTF-8: {exc}"
         raise ClassifierOutputError(msg) from exc

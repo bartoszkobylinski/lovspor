@@ -67,4 +67,4 @@ def draw_sample(
 
 def _rank(seed: str, key: ArtifactKey) -> str:
     material = _SEPARATOR.join((seed, key.sha256, key.source_url))
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return hashlib.sha256(material.encode()).hexdigest()
