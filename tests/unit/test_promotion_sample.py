@@ -70,6 +70,21 @@ class TestSampleSize:
 
 
 class TestDrawSample:
+    def test_empty_population_draws_nothing(self) -> None:
+        assert draw_sample(iter(()), "batch", Decimal(1)) == ()
+
+    def test_duplicates_do_not_inflate_fractional_sample_size(self) -> None:
+        unique = POPULATION[:3]
+        duplicated = iter((*unique, *unique, *unique))
+
+        drawn = draw_sample(duplicated, "batch", Decimal("0.5"))
+
+        assert len(drawn) == 2
+        assert drawn == draw_sample(unique, "batch", Decimal("0.5"))
+
+    def test_tiny_positive_rate_draws_one_item(self) -> None:
+        assert len(draw_sample(POPULATION, "batch", parse_sample_rate("1e-100"))) == 1
+
     def test_the_same_seed_draws_the_same_sample(self) -> None:
         first = draw_sample(POPULATION, "batch-0301-1", Decimal("0.25"))
         again = draw_sample(POPULATION, "batch-0301-1", Decimal("0.25"))

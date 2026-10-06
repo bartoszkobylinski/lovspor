@@ -8,6 +8,7 @@ invented.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -130,6 +131,38 @@ class TestClassifiedArtifact:
 
 
 class TestReadClassifierOutput:
+    @pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+    def test_hash_covers_exact_utf8_file_bytes(self, tmp_path: Path, newline: bytes) -> None:
+        path = tmp_path / "predictions.jsonl"
+        raw = (
+            json.dumps(row(url="https://eksempel.invalid/blå"), ensure_ascii=False).encode("utf-8")
+            + newline
+        )
+        path.write_bytes(raw)
+
+        output = read_classifier_output(path, f"  {VERSION}  ")
+
+        assert output.source_sha256 == hashlib.sha256(raw).hexdigest()
+        assert output.classifier_version == VERSION
+        assert output.artifacts[0].url == "https://eksempel.invalid/blå"
+        assert read_classifier_output(path, VERSION) == output
+
+    @pytest.mark.parametrize("field", ["authority", "sha", "url", "form", "r1", "r2"])
+    def test_missing_required_field_refuses_whole_file(self, tmp_path: Path, field: str) -> None:
+        incomplete = row(SHA_B)
+        del incomplete[field]
+        path = write(tmp_path, row(), incomplete, row(SHA_C))
+
+        with pytest.raises(ClassifierOutputError, match="line 2"):
+            read_classifier_output(path, VERSION)
+
+    def test_observation_metadata_does_not_change_classification(self, tmp_path: Path) -> None:
+        path = write(tmp_path, row(), row(first="different", last=None, nversions=99))
+
+        assert read_classifier_output(path, VERSION).artifacts == (
+            ClassifiedArtifact.model_validate(row()),
+        )
+
     def test_every_row_is_read_with_the_version_and_the_file_hash(self, tmp_path: Path) -> None:
         path = write(tmp_path, row(SHA_A), row(SHA_B, r1=False))
 
@@ -195,6 +228,25 @@ class TestReadClassifierOutput:
 
 
 class TestCandidates:
+    def test_same_bytes_at_distinct_urls_remain_distinct_candidates(self, tmp_path: Path) -> None:
+        path = write(
+            tmp_path,
+            row(SHA_A, url="https://eksempel.invalid/z"),
+            row(SHA_A, url="https://eksempel.invalid/a"),
+            row(SHA_B, url="https://eksempel.invalid/a"),
+        )
+        output = read_classifier_output(path, VERSION)
+
+        assert [(a.url, a.sha256) for a in output.candidates("0301")] == [
+            ("https://eksempel.invalid/a", SHA_A),
+            ("https://eksempel.invalid/a", SHA_B),
+            ("https://eksempel.invalid/z", SHA_A),
+        ]
+        assert len(output.candidates("0301", (SHA_A,))) == 2
+        assert output.candidates("9999") == ()
+        with pytest.raises(ClassifierOutputError, match=SHA_A):
+            output.candidates("9999", (SHA_A,))
+
     def test_only_enacted_regulations_of_the_authority_in_stable_order(
         self, tmp_path: Path
     ) -> None:
