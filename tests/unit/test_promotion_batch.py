@@ -20,7 +20,7 @@ from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
 from lovspor.promotion import plan
 from lovspor.promotion.batch import BatchAssessment, BatchSpec
 from lovspor.promotion.batch_commands import BLOCKED_EXIT_CODE, _spec
-from lovspor.promotion.batch_report import report_markdown
+from lovspor.promotion.batch_report import report_json, report_markdown
 from lovspor.promotion.decisions import DECISIONS_FILENAME
 from lovspor.promotion.sample import parse_sample_rate
 from tests.unit.promotion_cli_fixtures import (
@@ -598,6 +598,24 @@ def test_report_preserves_trailing_hold_detail(batch: Batch, corpus: Path, suffi
         {k: v for k, v in report.items() if k not in {"summary", "holds_by_reason"}}
     )
     assert report_markdown(assessment, corpus) == _expected_markdown(report, corpus)
+
+
+@pytest.mark.parametrize("detail", ["Blåbær fra Tromsø", "日本語", "Review 🔍"])
+def test_report_json_preserves_literal_unicode(batch: Batch, corpus: Path, detail: str) -> None:
+    batch.add(page(TITLES[0], "Utskrift fra Lovdata"), "held")
+    batch.run(corpus)
+    report = batch.report()
+    report["items"][-1]["detail"] = detail
+    assessment = BatchAssessment.model_validate(
+        {k: v for k, v in report.items() if k not in {"summary", "holds_by_reason"}}
+    )
+
+    rendered = report_json(assessment)
+
+    assert detail in rendered
+    assert "\\u" not in rendered
+    assert json.loads(rendered)["items"][-1]["detail"] == detail
+    assert report_json(assessment) == rendered
 
 
 def test_missing_spec_diagnostic(batch: Batch) -> None:
