@@ -1526,3 +1526,35 @@ class TestTheCanonicalDomainIsABareHost:
         fields = eligible_source().model_dump() | {"canonical_domain": host}
 
         assert SourceRecord.model_validate(fields).canonical_domain == host
+
+    @pytest.mark.parametrize(
+        "not_a_host",
+        ["testby.example.invalid@evil.example", "testby.example.invalid:443", "testby .invalid"],
+    )
+    def test_a_stored_non_host_is_refused_without_rewriting_the_registry(
+        self, tmp_path: Path, not_a_host: str
+    ) -> None:
+        """The cleared-domain boundary also applies to records loaded from disk."""
+        path = tmp_path / "sources.json"
+        fields = eligible_source().model_dump(mode="json") | {"canonical_domain": not_a_host}
+        document = json.dumps({"version": 1, "sources": {"9999": fields}}).encode("utf-8")
+        path.write_bytes(document)
+
+        with pytest.raises(ParseError, match="a host without scheme or path was expected"):
+            read_registry(path)
+
+        assert path.read_bytes() == document
+
+    @pytest.mark.parametrize("host", ["TESTBY.example.invalid", "testby.example.invalid."])
+    def test_an_accepted_host_spelling_survives_a_registry_round_trip(
+        self, tmp_path: Path, host: str
+    ) -> None:
+        fields = eligible_source().model_dump() | {"canonical_domain": host}
+        registry = SourceRegistry(sources={"9999": SourceRecord.model_validate(fields)})
+        path = tmp_path / "sources.json"
+
+        write_registry(registry, path)
+        loaded = read_registry(path)
+
+        assert loaded == registry
+        assert loaded.sources["9999"].canonical_domain == host

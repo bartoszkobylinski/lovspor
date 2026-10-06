@@ -371,6 +371,31 @@ class TestWhatItReports:
 
 
 class TestWhereTheListComesFrom:
+    @pytest.mark.parametrize("not_a_host", ["", "\t", "\N{NO-BREAK SPACE}", f"{DOMAIN}\n"])
+    def test_an_empty_or_whitespace_host_refuses_the_entire_named_batch(
+        self, root: Path, not_a_host: str
+    ) -> None:
+        """The shared check must refuse all invalid hosts before any probe (#557)."""
+        with patch("lovspor.observatory.survey_commands.SiteProbe.read") as read:
+            result = runner.invoke(
+                app,
+                [
+                    "observatory",
+                    "survey",
+                    "--domain",
+                    OTHER,
+                    "--domain",
+                    not_a_host,
+                    "--delay",
+                    "0",
+                ],
+            )
+
+        read.assert_not_called()
+        assert result.exit_code == 2
+        assert "a host without scheme or path was expected" in result.output
+        assert not (root / "survey").exists()
+
     def test_indented_comments_are_not_domains(self, tmp_path: Path) -> None:
         listing = tmp_path / "domains.txt"
         listing.write_text("   # operator note\nexample.invalid\n", encoding="utf-8")
