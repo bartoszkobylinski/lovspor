@@ -23,6 +23,7 @@ from lovspor.promotion.extract import EXTRACTOR_VERSION
 from tests.unit.promotion_cli_fixtures import (
     AUTHORITY,
     FIRST_SEEN,
+    PAGE_URL,
     Decision,
     approve,
     git,
@@ -108,6 +109,24 @@ def _backfill_all(corpus: Path, sha256: str) -> list[str]:
 
 
 class TestBackfillWritesOneVersionPerRunInOrder:
+    def test_captures_after_approval_do_not_change_backfill_files(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        a = store(root, html_page())
+        _approve(a, tmp_path)
+        other = make_corpus(tmp_path / "other")
+        first = promote("backfill", a, corpus)
+        assert first.exit_code == 0, first.output
+        store(root, html_page(), observed_at=datetime.now(UTC) + DAY)
+
+        second = promote("backfill", a, other)
+
+        assert second.exit_code == 0, second.output
+        assert tree(other) == tree(corpus)
+        [version] = _observations(other)["versions"]
+        assert version["observation_count"] == 1
+        assert version["observed_at_last"] == "2026-08-19T15:17:23Z"
+
     def test_a_then_b_then_a_is_committed_as_v1_v2_v3(
         self, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
@@ -204,6 +223,71 @@ class TestBackfillWritesOneVersionPerRunInOrder:
 
 
 class TestHolds:
+    @pytest.mark.parametrize(
+        "decision, reason", [("reject", "rejected"), ("hold", "held_by_reviewer")]
+    )
+    def test_a_later_review_revokes_approval_without_writing(
+        self, root: Path, corpus: Path, tmp_path: Path, decision: str, reason: str
+    ) -> None:
+        a = store(root, html_page())
+        _approve(a, tmp_path)
+        _approve(a, tmp_path, decision=decision)
+        before = tree(corpus)
+        log_before = (root / DECISIONS_FILENAME).read_bytes()
+
+        result = promote("backfill", a, corpus)
+
+        assert result.exit_code == HELD_EXIT_CODE, result.output
+        assert f"Holds by reason: {reason}: 1" in result.output
+        assert tree(corpus) == before
+        assert (root / DECISIONS_FILENAME).read_bytes() == log_before
+
+    def test_reapproval_replaces_a_rejection(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        a = store(root, html_page())
+        _approve(a, tmp_path, decision="reject")
+        _approve(a, tmp_path)
+
+        result = promote("backfill", a, corpus)
+
+        assert result.exit_code == 0, result.output
+        assert "Holds by reason: none" in result.output
+        [record] = _manifest(corpus).values()
+        assert record["version"] == 1
+
+    def test_approval_of_a_later_blob_covers_the_same_text_run(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        first = store(root, html_page(updated="Sist oppdatert 01.09.2026"))
+        later = store(
+            root, html_page(updated="Sist oppdatert 02.09.2026"), observed_at=FIRST_SEEN + DAY
+        )
+        _approve(later, tmp_path)
+
+        result = promote("backfill", first, corpus)
+
+        assert result.exit_code == 0, result.output
+        [version] = _observations(corpus)["versions"]
+        assert version["source_sha256s"] == [first, later]
+        assert version["observation_count"] == 2
+
+    def test_approval_at_another_url_does_not_cover_the_primary(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        store(root, html_page())
+        copy_url = "https://eksempel.kommune.invalid/kopi/renovasjon"
+        store(root, html_page(), url=copy_url, observed_at=FIRST_SEEN + DAY)
+        result = approve(copy_url, Decision().write(tmp_path))
+        assert result.exit_code == 0, result.output
+        before = tree(corpus)
+
+        result = promote("backfill", PAGE_URL, corpus)
+
+        assert result.exit_code == HELD_EXIT_CODE, result.output
+        assert "Holds by reason: not_approved: 1" in result.output
+        assert tree(corpus) == before
+
     def test_an_unapproved_version_is_held_and_stops_every_later_one(
         self, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
@@ -345,6 +429,32 @@ class TestPreview:
 
 
 class TestObserveRefresh:
+    def test_a_new_text_waits_for_backfill_and_only_observations_are_written(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        self._promoted(root, corpus, tmp_path)
+        store(root, html_page(), observed_at=FIRST_SEEN + DAY)
+        store(root, html_page(CHANGED), observed_at=FIRST_SEEN + 2 * DAY)
+        before = tree(corpus)
+        log_before = (root / DECISIONS_FILENAME).read_bytes()
+
+        result = invoke("promote", "observe", "--corpus", str(corpus))
+
+        assert result.exit_code == 0, result.output
+        after = tree(corpus)
+        changed = {
+            path for path in before.keys() | after.keys() if before.get(path) != after.get(path)
+        }
+        assert len(changed) == 1
+        [path] = changed
+        assert path.startswith(f"{LOCAL}/{AUTHORITY}/observations/")
+        assert path.endswith(".json")
+        [version] = _observations(corpus)["versions"]
+        assert version["observed_at_last"] == "2026-08-20T15:17:23Z"
+        assert version["observation_count"] == 2
+        assert version["version"] == 1
+        assert (root / DECISIONS_FILENAME).read_bytes() == log_before
+
     def _promoted(self, root: Path, corpus: Path, tmp_path: Path) -> str:
         a = store(root, html_page())
         _approve(a, tmp_path)
