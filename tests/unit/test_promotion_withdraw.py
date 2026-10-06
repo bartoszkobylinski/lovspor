@@ -696,3 +696,31 @@ def test_log_refusal_explains_when_and_why_a_document_cannot_return(
     ) in result.output
     assert tree(fresh) == before
     assert _log_lines(root) == log_before
+
+
+@pytest.mark.parametrize("command", ["preview", "local"])
+def test_a_withdrawal_does_not_block_an_unrelated_approved_document(
+    root: Path, corpus: Path, tmp_path: Path, command: str
+) -> None:
+    _one_withdrawn(root, corpus, tmp_path)
+    artifact = store(root, html_page(), url=f"{PAGE_URL}-other")
+    assert approve(artifact, Decision().write(tmp_path)).exit_code == 0
+    fresh = make_corpus(tmp_path / "fresh")
+    before, log_before = tree(fresh), _log_lines(root)
+
+    result = promote(command, artifact, fresh)
+
+    assert result.exit_code == 0, result.output
+    assert "was withdrawn" not in result.output
+    assert LF_ID not in _manifest(fresh)
+    if command == "preview":
+        assert "content_hash:" in result.output
+        assert tree(fresh) == before
+        assert _log_lines(root) == log_before
+    else:
+        documents = _manifest(fresh)
+        assert len(documents) == 1
+        record = next(iter(documents.values()))
+        assert record["status"] != "removed"
+        assert (fresh / record["markdown_path"]).is_file()
+        assert _log_lines(root)[-1]["kind"] == "promoted"
