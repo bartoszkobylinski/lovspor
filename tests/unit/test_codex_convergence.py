@@ -112,7 +112,57 @@ def test_failures_are_read_from_junit_with_params_stripped(tmp_path: Path) -> No
     ]
 
 
+def test_failing_cases_of_one_parametrized_test_are_one_failure(tmp_path: Path) -> None:
+    """The marker lands on the function, so N failing cases are one test: N
+    entries would stack N identical xfail markers on it (issue #549)."""
+    junit = tmp_path / "j.xml"
+    junit.write_text(
+        "<testsuites><testsuite>"
+        + "".join(
+            f'<testcase classname="tests.unit.test_thing" name="test_cases[{case}]">'
+            '<failure message="x">x</failure></testcase>'
+            for case in ("a", "b", "c")
+        )
+        + '<testcase classname="tests.unit.test_thing" name="test_other">'
+        '<failure message="x">x</failure></testcase>'
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+
+    assert cc.failed_tests(junit) == [
+        cc.TestId("tests/unit/test_thing.py", "test_cases"),
+        cc.TestId("tests/unit/test_thing.py", "test_other"),
+    ]
+
+
 # --- the verdict ---------------------------------------------------------------
+
+
+def test_deduplication_preserves_distinct_files_and_classes(tmp_path: Path) -> None:
+    """One per function (docs/agentic-ci.md), not one per bare method name."""
+    junit = tmp_path / "j.xml"
+    cases = [
+        ("tests.unit.test_thing.TestOne", "a", "failure"),
+        ("tests.unit.test_thing.TestTwo", "a", "error"),
+        ("tests.unit.test_other.TestOne", "a", "failure"),
+        ("tests.unit.test_thing.TestOne", "b", "error"),
+    ]
+    junit.write_text(
+        "<testsuites><testsuite>"
+        + "".join(
+            f'<testcase classname="{classname}" name="test_cases[{case}]">'
+            f'<{outcome} message="x">x</{outcome}></testcase>'
+            for classname, case, outcome in cases
+        )
+        + "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+
+    assert cc.failed_tests(junit) == [
+        cc.TestId("tests/unit/test_thing.py", "TestOne.test_cases"),
+        cc.TestId("tests/unit/test_thing.py", "TestTwo.test_cases"),
+        cc.TestId("tests/unit/test_other.py", "TestOne.test_cases"),
+    ]
 
 
 def _repo_with(tmp_path: Path, source: str) -> Path:
@@ -176,7 +226,6 @@ def test_a_proposal_marker_with_arguments_still_counts(tmp_path: Path) -> None:
     assert cc.is_proposal(repo, cc.TestId("tests/unit/test_thing.py", "test_new_contract"))
 
 
-@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
 def test_a_proposal_marker_on_a_class_applies_to_its_test_methods(tmp_path: Path) -> None:
     """Pytest class markers are inherited by every test method in the class."""
     repo = _repo_with(
@@ -211,6 +260,53 @@ def test_only_the_documented_pytest_proposal_marker_is_advisory(tmp_path: Path) 
 
     assert verdict.blocking == [test]
     assert not verdict.advisory
+
+
+def test_class_proposals_follow_only_the_exact_enclosing_chain(tmp_path: Path) -> None:
+    """An enclosing class declares a proposal; unrelated classes do not."""
+    repo = _repo_with(
+        tmp_path,
+        "import pytest\n\n"
+        "@pytest.mark.codex_proposal\n"
+        "class TestOuter:\n"
+        "    class TestInner:\n"
+        "        async def test_contract(self): ...\n\n"
+        "class TestOther:\n"
+        "    class TestInner:\n"
+        "        async def test_contract(self): ...\n",
+    )
+    proposed = cc.TestId("tests/unit/test_thing.py", "TestOuter.TestInner.test_contract")
+    blocking = cc.TestId("tests/unit/test_thing.py", "TestOther.TestInner.test_contract")
+    verdict = cc.classify(
+        round_number=1, cap=3, failures=[proposed, blocking], added={proposed, blocking}, repo=repo
+    )
+
+    assert verdict.advisory == [proposed]
+    assert verdict.blocking == [blocking]
+    assert verdict.blocks
+    assert not cc.is_proposal(
+        repo, cc.TestId("tests/unit/test_thing.py", "TestOuter.TestInner.test_missing")
+    )
+
+
+@pytest.mark.parametrize("condition", ["False", "True", '"False"'])
+def test_keyword_conditional_xfail_is_not_a_prior_proposal(tmp_path: Path, condition: str) -> None:
+    """The documented prior marker is unconditional, including keyword syntax."""
+    repo, before = _committed_repo(
+        tmp_path,
+        "import pytest\n\n"
+        f"@pytest.mark.xfail(condition={condition}, strict=True, "
+        'reason="codex proposal, round 4 — owner decision")\n'
+        "def test_existing():\n    assert False\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_existing")
+    verdict = cc.classify(
+        round_number=1, cap=3, failures=[test], added=set(), repo=repo, before_sha=before
+    )
+
+    assert verdict.foreign == [test]
+    assert verdict.advisory == []
+    assert verdict.blocks
 
 
 def test_only_pytest_mark_xfail_can_preserve_a_proposal(tmp_path: Path) -> None:
@@ -277,7 +373,6 @@ def test_a_non_strict_xfail_at_the_baseline_is_not_an_inherited_proposal(
     assert verdict.blocks
 
 
-@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
 def test_an_inactive_xfail_at_the_baseline_is_not_an_inherited_proposal(
     tmp_path: Path,
 ) -> None:
@@ -479,6 +574,49 @@ def test_cli_marks_advisory_proposals_and_writes_the_verdict(tmp_path: Path) -> 
     }
     assert "@pytest.mark.xfail(strict=True" in (repo / "tests/unit/test_thing.py").read_text()
     assert "ADVISORY" in (tmp_path / "c.md").read_text(encoding="utf-8")
+
+
+def test_cli_writes_one_marker_for_every_failing_case_of_one_test(tmp_path: Path) -> None:
+    """Three failing parametrize cases of an advisory test get one strict xfail,
+    not three stacked copies of it (issue #549)."""
+    repo = _repo_with(tmp_path, "def test_existing(): ...\n")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    before = _git(repo, "rev-parse", "HEAD")
+    (repo / "tests/unit/test_thing.py").write_text(
+        "import pytest\n\n\ndef test_existing(): ...\n\n\n"
+        '@pytest.mark.parametrize("x", ["a", "b", "c"])\n'
+        'def test_cases(x: str) -> None:\n    assert x == "z"\n',
+        encoding="utf-8",
+    )
+    junit = tmp_path / "junit.xml"
+    junit.write_text(
+        "<testsuites><testsuite>"
+        + "".join(
+            f'<testcase classname="tests.unit.test_thing" name="test_cases[{case}]">'
+            '<failure message="x">x</failure></testcase>'
+            for case in ("a", "b", "c")
+        )
+        + "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+    sticky = tmp_path / "sticky.md"
+    sticky.write_text("\n".join([cc.BLOCKED_PHRASE] * 3), encoding="utf-8")  # cap reached
+
+    cc.main(
+        [
+            *("--repo", str(repo), "--before-sha", before, "--junit", str(junit)),
+            *("--sticky-body", str(sticky), "--cap", "3"),
+            *("--verdict", str(tmp_path / "v.json"), "--comment", str(tmp_path / "c.md")),
+            "--apply",
+        ]
+    )
+
+    verdict = json.loads((tmp_path / "v.json").read_text(encoding="utf-8"))
+    assert verdict["advisory"] == ["tests/unit/test_thing.py::test_cases"]
+    text = (repo / "tests/unit/test_thing.py").read_text(encoding="utf-8")
+    assert text.count("@pytest.mark.xfail(strict=True") == 1
 
 
 def test_cli_sees_tests_in_a_brand_new_untracked_file(tmp_path: Path) -> None:
