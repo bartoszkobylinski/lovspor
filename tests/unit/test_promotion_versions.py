@@ -148,6 +148,29 @@ class TestVersionsAreRunsOfOneContent:
 
 
 class TestTombstonedBlobs:
+    def test_altered_blob_refuses_the_read(self, root: Path) -> None:
+        sha256 = store(root, html_page())
+        _log(root).blob_path(sha256).write_bytes(html_page(CHANGED))
+
+        with pytest.raises(PromotionRefusedError, match="no longer hashes to its name"):
+            _history(root)
+
+    def test_only_tombstoned_captures_leave_no_versions(self, root: Path) -> None:
+        sha256 = store(root, html_page())
+        store(root, html_page(), observed_at=FIRST_SEEN + DAY)
+        _tombstone(root, sha256)
+        _log(root).blob_path(sha256).unlink()
+
+        history = _history(root)
+
+        assert history.versions == ()
+        assert [e.sha256 for e in history.excluded] == [sha256, sha256]
+        assert [e.observed_at for e in history.excluded] == [
+            "2026-08-19T15:17:23Z",
+            "2026-08-20T15:17:23Z",
+        ]
+        assert history.source_status.outcome == "retrieved"
+
     def test_are_excluded_from_the_comparison_and_listed(self, root: Path) -> None:
         store(root, html_page())
         gone = store(root, html_page(CHANGED), observed_at=FIRST_SEEN + DAY)
@@ -173,6 +196,37 @@ class TestTombstonedBlobs:
 
 
 class TestTheCutOff:
+    def test_exact_cutoff_includes_capture_but_not_later_failure_or_copy(self, root: Path) -> None:
+        sha256 = store(root, html_page())
+        store(root, html_page(), observed_at=FIRST_SEEN + DAY)
+        store(root, html_page(), url=COPY_URL, observed_at=FIRST_SEEN + 2 * DAY)
+        store_failure(root, FIRST_SEEN + 3 * DAY)
+        # A damaged future capture must not be read in this snapshot.
+        future = store(root, html_page(CHANGED), observed_at=FIRST_SEEN + 4 * DAY)
+        _log(root).blob_path(future).unlink()
+
+        history = _history(root, through_days=1)
+
+        [version] = history.versions
+        assert version.observed_at_last == FIRST_SEEN + DAY
+        assert len(version.sightings) == 2
+        assert version.source_sha256s == (sha256,)
+        assert version.corroborating_urls == ()
+        assert history.source_status.outcome == "retrieved"
+        assert history.source_status.observed_at == "2026-08-20T15:17:23Z"
+
+    def test_failure_only_history_has_status_but_no_version(self, root: Path) -> None:
+        store_failure(root, FIRST_SEEN)
+
+        history = _history(root)
+
+        assert history.versions == ()
+        assert history.excluded == ()
+        assert history.source_status.outcome == "http_error"
+        assert history.source_status.http_status == 404
+        with pytest.raises(PromotionRefusedError, match="no observation"):
+            _history(root, through_days=-1)
+
     def test_observations_after_it_are_not_read(self, root: Path) -> None:
         store(root, html_page())
         store(root, html_page(CHANGED), observed_at=FIRST_SEEN + 2 * DAY)
@@ -202,6 +256,16 @@ class TestTheCutOff:
 
 
 class TestCorroboratingUrls:
+    def test_same_text_in_different_bytes_does_not_corroborate(self, root: Path) -> None:
+        primary = store(root, html_page())
+        copy = store(root, html_page(updated="Sist oppdatert 02.09.2026"), url=COPY_URL)
+        assert primary != copy
+
+        [version] = _history(root).versions
+
+        assert version.corroborating_urls == ()
+        assert len(version.sightings) == 1
+
     def test_another_url_serving_the_very_bytes_corroborates(self, root: Path) -> None:
         store(root, html_page())
         store(root, html_page(), url=COPY_URL, observed_at=FIRST_SEEN + DAY)
@@ -214,6 +278,28 @@ class TestCorroboratingUrls:
 
 
 class TestDeriveVersionsIsPure:
+    def test_empty_input_has_no_versions(self) -> None:
+        assert derive_versions(PAGE_URL, iter(())) == ()
+
+    def test_repeated_held_bytes_are_one_run(self) -> None:
+        sightings = tuple(
+            Sighting(
+                observed_at=FIRST_SEEN + n * DAY,
+                sha256="a" * 64,
+                content_hash=None,
+                held_reason="empty_text",
+                held_detail="No regulation text",
+            )
+            for n in (0, 1)
+        )
+
+        [version] = derive_versions(PAGE_URL, sightings)
+
+        assert version.sightings == sightings
+        assert version.held == sightings[0]
+        assert version.source_sha256s == ("a" * 64,)
+        assert version.through(FIRST_SEEN + DAY) == version
+
     def test_input_order_does_not_matter(self) -> None:
         sightings = [
             Sighting(observed_at=FIRST_SEEN + n * DAY, sha256=f"{n}" * 64, content_hash=h)

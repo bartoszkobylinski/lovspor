@@ -73,6 +73,23 @@ def _history(root: Path) -> PrimaryHistory:
 
 
 class TestRefreshedIntervals:
+    def test_refresh_is_idempotent_and_does_not_mutate_the_committed_file(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        path = _promoted(root, corpus, tmp_path, store(root, html_page()))
+        original_bytes = path.read_bytes()
+        existing = _file(path)
+        before = existing.model_dump(mode="json")
+        store(root, html_page(), observed_at=FIRST_SEEN + DAY)
+        history = _history(root)
+
+        refreshed = with_intervals(existing, history)
+
+        assert refreshed.versions[0].observation_count == 2
+        assert with_intervals(refreshed, history) == refreshed
+        assert existing.model_dump(mode="json") == before
+        assert path.read_bytes() == original_bytes
+
     def test_later_observations_of_the_same_text_extend_the_interval(
         self, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
@@ -148,6 +165,9 @@ class TestExcludedObservations:
 
         text = observations_text(with_intervals(_file(path), _history(root)))
 
+        document = ObservationsFile.model_validate_json(text)
+        assert document == with_intervals(_file(path), _history(root))
+        assert observations_text(document) == text
         [excluded] = json.loads(text)["excluded"]
         assert excluded == {
             "observed_at": "2026-08-20T15:17:23Z",
