@@ -11,6 +11,7 @@ from the scripts' own control flow rather than from reading their text.
 from __future__ import annotations
 
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -296,6 +297,53 @@ class TestDeepGate:
         assert run.fail_lines() == [f"FAIL mypy: stub: {FAST_CHECKS['mypy']} failed (exit 3)"]
         assert UNIT_SUITE not in run.commands
         assert SECURITY_SCAN not in run.commands
+
+    def test_a_stale_equivalents_register_stops_before_push_time_checks(
+        self, tmp_path: Path
+    ) -> None:
+        """§9d: the newly added commit check must also block the push gate."""
+        run = _run_gate(DEEP, tmp_path, failing=(FAST_CHECKS["equivalents"],))
+
+        assert run.returncode != 0
+        assert run.fail_lines() == [
+            f"FAIL equivalents: stub: {FAST_CHECKS['equivalents']} failed (exit 3)"
+        ]
+        assert run.commands == list(FAST_CHECKS.values())
+        assert SECURITY_SCAN not in run.commands
+        assert UNIT_SUITE not in run.commands
+
+
+@pytest.mark.parametrize("script", [FAST, DEEP], ids=["commit", "push"])
+@pytest.mark.parametrize("marker", ["<<<<<<< HEAD", ">>>>>>> branch"])
+def test_real_conflict_markers_fail_local_gates_without_stopping_fast_checks(
+    tmp_path: Path, script: Path, marker: str
+) -> None:
+    """§9d/#558: the shared conflict check blocks both local gates.
+
+    Use a disposable repository so no conflict text or index changes touch
+    the checkout. Only the external tools are stubbed; git and the shared
+    conflict-marker script run for real.
+    """
+    repo = tmp_path / "repo"
+    quality = repo / "scripts" / "quality"
+    quality.mkdir(parents=True)
+    for source in (FAST, DEEP, FAST.parent / "gate.sh", REPO_ROOT / CONFLICT_MARKERS):
+        shutil.copy2(source, quality / source.name)
+    subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
+    (repo / "tracked.txt").write_text(f"ordinary text\n{marker}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
+
+    run = _run_gate(quality / script.name, tmp_path)
+
+    assert run.returncode == 1, run.output
+    assert f"tracked.txt:2:{marker}" in run.output
+    assert run.fail_lines() == [
+        "FAIL conflict-markers: ::error::unresolved merge-conflict markers are committed (exit 1)"
+    ]
+    assert run.commands == list(FAST_CHECKS.values())
+    assert run.cwds == {str(repo.resolve())}
+    assert SECURITY_SCAN not in run.commands
+    assert UNIT_SUITE not in run.commands
 
 
 PIPELINE = REPO_ROOT / ".github" / "workflows" / "pr-pipeline.yml"
