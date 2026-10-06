@@ -1,0 +1,21 @@
+[[equivalent]]
+file = "src/lovspor/release/envelope.py"
+symbol = "read_fragment_file"
+registered = "2026-09-09, PR #268, from run 34397173401; re-keyed 2026-10-06 (#555) when read_fragment, control._stage and control.revert_source began reading through read_fragment_file"
+mutation = """
+-        return path.read_text(encoding="utf-8")
++        return path.read_text(encoding="UTF-8")
+"""
+justification = """
+Codec names are case-insensitive: `Path.read_text` resolves the name through
+the codec registry, which normalises it, so both spellings decode the
+fragment's bytes to the same text — the envelope's fragment, the foreign active
+fragment kept as `.previous`, and that kept copy read back on a revert alike.
+Python's codec registry, not a dependency. (`encoding=None` is NOT equivalent —
+it is the locale's codec, and the fragment's header carries an em dash — and is
+killed under the C locale by `test_is_read_as_utf_8_whatever_the_process_locale`,
+`test_the_kept_copy_is_read_as_utf_8_whatever_the_process_locale` and
+`test_the_kept_copy_is_restored_byte_for_byte_whatever_the_process_locale`.)
+This one entry replaces three registered in PR #268 (read_fragment-6465cdfd,
+_stage-c3ce0316, revert_source-48de87da): their three lines are now this one.
+"""

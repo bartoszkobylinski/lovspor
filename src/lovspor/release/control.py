@@ -46,6 +46,7 @@ from lovspor.release.envelope import (
     fragment_release_id,
     is_complete,
     read_fragment,
+    read_fragment_file,
     read_marker,
     release_dir,
     write_marker,
@@ -176,7 +177,7 @@ def live_release(plane: ControlPlane) -> str | None:
 def _stage(plane: ControlPlane, text: str, marker: Marker | None) -> None:
     """``.next`` beside the active fragment; a foreign active fragment is kept for a revert."""
     if marker is None and plane.fragment.is_file():
-        atomic_write_text(plane.previous_fragment, plane.fragment.read_text(encoding="utf-8"))
+        atomic_write_text(plane.previous_fragment, read_fragment_file(plane.fragment))
     # The rename in _commit carries this mode to the active fragment, which the
     # reload line reads as User=caddy — under any umask the operator's shell set.
     atomic_write_text(plane.next_fragment, text, mode=WORLD_READABLE)
@@ -201,7 +202,7 @@ def revert_source(plane: ControlPlane, marker: Marker | None) -> str:
     if marker is not None:
         return read_fragment(release_dir(plane.releases, marker.active))
     if plane.previous_fragment.is_file():
-        return plane.previous_fragment.read_text(encoding="utf-8")
+        return read_fragment_file(plane.previous_fragment)
     raise ControlPlaneError("no previous fragment to restore: nothing was live before")
 
 
