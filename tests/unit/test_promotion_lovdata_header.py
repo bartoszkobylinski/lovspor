@@ -13,7 +13,7 @@ import pytest
 from lovspor.promotion import ExtractedDocument, ExtractionHoldReason, HeldExtraction
 from lovspor.promotion.extract import extract_regulation
 from lovspor.promotion.lovdata_header import has_lovdata_header
-from tests.unit.promotion_fixtures import REGULATION_LINES, html_page, pdf_pages
+from tests.unit.promotion_fixtures import REGULATION_LINES, html_page, minimal_docx, pdf_pages
 
 HEADER = (
     "Dato: FOR-2010-12-17-9001",
@@ -189,3 +189,39 @@ def test_an_html_pasted_copy_is_held_deterministically() -> None:
         "the text carries Lovdata's metadata block",
     )
     assert extract_regulation(payload, "text/html; charset=utf-8") == held
+
+
+def test_a_docx_pasted_copy_is_held_as_a_lovdata_copy() -> None:
+    payload = minimal_docx((*HEADER, *REGULATION_LINES))
+    held = extract_regulation(
+        payload, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert isinstance(held, HeldExtraction)
+    assert (held.reason, held.detail) == (
+        ExtractionHoldReason.LOVDATA_COPY,
+        "the text carries Lovdata's metadata block",
+    )
+
+
+@pytest.mark.parametrize("dated", ["Dato", "Dato:"])
+def test_a_municipal_submission_template_with_blank_dato_still_extracts(dated: str) -> None:
+    # The detector's documented exception: publication has not assigned an id.
+    lines = (dated, *HEADER[1:], *REGULATION_LINES)
+    result = extract_regulation(html_page(lines), "text/html; charset=utf-8")
+    assert isinstance(result, ExtractedDocument)
+
+
+@pytest.mark.parametrize(
+    "extra, expected_detail",
+    [
+        ("Utskrift fra Lovdata", "the text is a print out of Lovdata"),
+        ("Vedtatt X.X.2016", "the text carries Lovdata's metadata block"),
+    ],
+)
+def test_metadata_header_preserves_the_documented_hold_order(
+    extra: str, expected_detail: str
+) -> None:
+    payload = html_page((extra, *HEADER, *REGULATION_LINES))
+    held = extract_regulation(payload, "text/html; charset=utf-8")
+    assert isinstance(held, HeldExtraction)
+    assert (held.reason, held.detail) == (ExtractionHoldReason.LOVDATA_COPY, expected_detail)
