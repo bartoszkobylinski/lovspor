@@ -138,6 +138,33 @@ def test_failing_cases_of_one_parametrized_test_are_one_failure(tmp_path: Path) 
 # --- the verdict ---------------------------------------------------------------
 
 
+def test_deduplication_preserves_distinct_files_and_classes(tmp_path: Path) -> None:
+    """One per function (docs/agentic-ci.md), not one per bare method name."""
+    junit = tmp_path / "j.xml"
+    cases = [
+        ("tests.unit.test_thing.TestOne", "a", "failure"),
+        ("tests.unit.test_thing.TestTwo", "a", "error"),
+        ("tests.unit.test_other.TestOne", "a", "failure"),
+        ("tests.unit.test_thing.TestOne", "b", "error"),
+    ]
+    junit.write_text(
+        "<testsuites><testsuite>"
+        + "".join(
+            f'<testcase classname="{classname}" name="test_cases[{case}]">'
+            f'<{outcome} message="x">x</{outcome}></testcase>'
+            for classname, case, outcome in cases
+        )
+        + "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+
+    assert cc.failed_tests(junit) == [
+        cc.TestId("tests/unit/test_thing.py", "TestOne.test_cases"),
+        cc.TestId("tests/unit/test_thing.py", "TestTwo.test_cases"),
+        cc.TestId("tests/unit/test_other.py", "TestOne.test_cases"),
+    ]
+
+
 def _repo_with(tmp_path: Path, source: str) -> Path:
     (tmp_path / "tests" / "unit").mkdir(parents=True)
     (tmp_path / "tests" / "unit" / "test_thing.py").write_text(source, encoding="utf-8")
@@ -233,6 +260,53 @@ def test_only_the_documented_pytest_proposal_marker_is_advisory(tmp_path: Path) 
 
     assert verdict.blocking == [test]
     assert not verdict.advisory
+
+
+def test_class_proposals_follow_only_the_exact_enclosing_chain(tmp_path: Path) -> None:
+    """An enclosing class declares a proposal; unrelated classes do not."""
+    repo = _repo_with(
+        tmp_path,
+        "import pytest\n\n"
+        "@pytest.mark.codex_proposal\n"
+        "class TestOuter:\n"
+        "    class TestInner:\n"
+        "        async def test_contract(self): ...\n\n"
+        "class TestOther:\n"
+        "    class TestInner:\n"
+        "        async def test_contract(self): ...\n",
+    )
+    proposed = cc.TestId("tests/unit/test_thing.py", "TestOuter.TestInner.test_contract")
+    blocking = cc.TestId("tests/unit/test_thing.py", "TestOther.TestInner.test_contract")
+    verdict = cc.classify(
+        round_number=1, cap=3, failures=[proposed, blocking], added={proposed, blocking}, repo=repo
+    )
+
+    assert verdict.advisory == [proposed]
+    assert verdict.blocking == [blocking]
+    assert verdict.blocks
+    assert not cc.is_proposal(
+        repo, cc.TestId("tests/unit/test_thing.py", "TestOuter.TestInner.test_missing")
+    )
+
+
+@pytest.mark.parametrize("condition", ["False", "True", '"False"'])
+def test_keyword_conditional_xfail_is_not_a_prior_proposal(tmp_path: Path, condition: str) -> None:
+    """The documented prior marker is unconditional, including keyword syntax."""
+    repo, before = _committed_repo(
+        tmp_path,
+        "import pytest\n\n"
+        f"@pytest.mark.xfail(condition={condition}, strict=True, "
+        'reason="codex proposal, round 4 — owner decision")\n'
+        "def test_existing():\n    assert False\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_existing")
+    verdict = cc.classify(
+        round_number=1, cap=3, failures=[test], added=set(), repo=repo, before_sha=before
+    )
+
+    assert verdict.foreign == [test]
+    assert verdict.advisory == []
+    assert verdict.blocks
 
 
 def test_only_pytest_mark_xfail_can_preserve_a_proposal(tmp_path: Path) -> None:
