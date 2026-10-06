@@ -254,6 +254,25 @@ class TestCommit:
         assert not host.plane.previous_fragment.exists()
         assert not host.plane.next_fragment.exists()
 
+    @pytest.mark.parametrize("invalid", [b"\xe2\x82", b"\xc0\xaf"])
+    def test_invalid_foreign_fragment_preserves_existing_staging_files(
+        self, host: Host, invalid: bytes
+    ) -> None:
+        """#555 promises refusal before either staging file is written, even if it exists."""
+        host.plane.fragment.write_bytes(b"# foreign\n" + invalid)
+        host.plane.previous_fragment.write_bytes(b"# previous saved fragment\n")
+        host.plane.next_fragment.write_bytes(b"# existing staged fragment\n")
+        before = host.snapshot()
+
+        with pytest.raises(IncompleteEnvelopeError) as caught:
+            _stage(host.plane, host.fragment_of(host.a), None)
+
+        assert host.plane.fragment.name + " is not UTF-8" in str(caught.value)
+        assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+        assert caught.value.__cause__.object.endswith(invalid)
+        assert host.snapshot() == before
+        assert host.caddy.reloads == 0
+
     def test_the_fragment_and_the_marker_are_world_readable_whatever_the_umask(
         self, live_a: Host, strict_umask: None
     ) -> None:
@@ -908,6 +927,25 @@ class TestForeign:
         assert situation(read_triple(host.plane)) == Situation.staged
         with pytest.raises(IncompleteEnvelopeError, match="release.caddy.previous is not UTF-8"):
             reconcile(host.plane, "abandon")
+
+    def test_invalid_kept_copy_abandon_preserves_disk_and_running_configuration(
+        self, host: Host
+    ) -> None:
+        """The named read refusal must precede the restore's write and reload."""
+        host.plane.fragment.write_text(host.fragment_of(host.b), encoding="utf-8")
+        host.plane.previous_fragment.write_bytes(b"# kept copy\n\xe2\x82")
+        host.plane.next_fragment.write_bytes(b"# existing staged fragment\n")
+        before = host.snapshot()
+        running = host.running()
+
+        with pytest.raises(IncompleteEnvelopeError) as caught:
+            reconcile(host.plane, "abandon")
+
+        assert host.plane.previous_fragment.name + " is not UTF-8" in str(caught.value)
+        assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+        assert host.snapshot() == before
+        assert host.running() == running
+        assert host.caddy.reloads == 0
 
     def test_abandon_with_nothing_ever_live_needs_the_kept_copy(self, host: Host) -> None:
         host.plane.fragment.write_text(host.fragment_of(host.b), encoding="utf-8")

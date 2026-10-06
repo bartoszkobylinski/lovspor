@@ -238,6 +238,16 @@ class TestFragment:
 
         assert str(caught.value).startswith(f"caddy: {FRAGMENT_NAME}.previous {reason}: ")
 
+    @pytest.mark.parametrize("text", ["", "# Ørsta — saved fragment\n"])
+    def test_arbitrary_fragment_path_reads_utf_8_under_c_locale(
+        self, tmp_path: Path, c_locale: None, text: str
+    ) -> None:
+        """The shared guard keeps explicit UTF-8 decoding for saved fragments too (#555)."""
+        path = tmp_path / f"{FRAGMENT_NAME}.previous"
+        path.write_bytes(text.encode("utf-8"))
+
+        assert read_fragment_file(path) == text
+
 
 class TestRecord:
     def test_round_trips_with_sorted_keys_and_no_builder_clock(self, tmp_path: Path) -> None:
