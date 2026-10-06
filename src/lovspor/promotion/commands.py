@@ -106,7 +106,9 @@ class Request:
 
 
 @dataclass(frozen=True)
-class _Context:
+class PromotionContext:
+    """Everything one artifact's promotion reads: the archive, its fetches, the corpus."""
+
     root: ObservatoryRoot
     log: ObservationLog
     fetches: tuple[Fetch, ...]
@@ -124,14 +126,14 @@ def _refusing(action: Callable[[], None]) -> None:
         raise typer.Exit(1) from exc
 
 
-def _context(request: Request) -> _Context:
+def _context(request: Request) -> PromotionContext:
     root = _root()
     log = ObservationLog(root)
     fetches = authority_fetches(log, request.authority_id)
     key = locate(fetches, request.authority_id, request.artifact)
     corpus = CorpusCheckout(request.corpus, [engine_root(), root.path])
     authority = _authority(root, request.authority_id, request.klass_version)
-    return _Context(root, log, fetches, key, corpus, authority)
+    return PromotionContext(root, log, fetches, key, corpus, authority)
 
 
 def _authority(root: ObservatoryRoot, authority_id: str, klass_version: str) -> Authority:
@@ -224,7 +226,11 @@ def preview_impl(request: Request) -> None:
 
 def local_impl(request: Request, now: datetime) -> None:
     """Promote one approved artifact into the corpus checkout, or record why not."""
-    context = _context(request)
+    promote_one(_context(request), now)
+
+
+def promote_one(context: PromotionContext, now: datetime) -> None:
+    """Write one approved artifact, or record its hold; ``promote local`` and ``batch`` share it."""
     decisions = DecisionLog(context.root)
     decision = decisions.latest_decision(context.key)
     through = decision.decided_at if decision is not None else None
