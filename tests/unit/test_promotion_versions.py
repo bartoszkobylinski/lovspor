@@ -137,6 +137,7 @@ class TestVersionsAreRunsOfOneContent:
         held = versions[1].held
         assert held is not None
         assert held.held_reason == "empty_text"
+        assert held.held_detail == "under 200 characters of text"
         assert versions[0].held is None
 
     def test_the_text_hash_is_the_extractors(self, root: Path) -> None:

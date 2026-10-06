@@ -196,8 +196,12 @@ class TestDivergenceIsRefused:
         sha256 = store(root, html_page(), observed_at=FIRST_SEEN + DAY)
         path = _promoted(root, corpus, tmp_path, sha256)
 
-        with pytest.raises(PromotionRefusedError, match="another text"):
+        with pytest.raises(PromotionRefusedError, match="another text") as refused:
             with_intervals(_file(path), _history(root))
+        assert str(refused.value) == (
+            "promoted version 1 does not match the log: "
+            "the log's version of that number has another text"
+        )
 
     def test_an_earlier_capture_of_the_same_text_moves_the_first_and_is_refused(
         self, root: Path, corpus: Path, tmp_path: Path
@@ -233,8 +237,11 @@ class TestDivergenceIsRefused:
             update={"versions": (entry, entry.model_copy(update={"version": 2}))}
         )
 
-        with pytest.raises(PromotionRefusedError, match="no such version"):
+        with pytest.raises(PromotionRefusedError, match="no such version") as refused:
             with_intervals(extra, _history(root))
+        assert str(refused.value) == (
+            "promoted version 2 does not match the log: the log has no such version at this URL"
+        )
 
     def test_a_version_at_another_url_is_refused(
         self, root: Path, corpus: Path, tmp_path: Path
