@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
+from lovspor.promotion import plan
 from lovspor.promotion.batch_commands import BLOCKED_EXIT_CODE
 from lovspor.promotion.decisions import DECISIONS_FILENAME
 from tests.unit.promotion_cli_fixtures import (
@@ -195,6 +196,20 @@ class TestAssessment:
 
 
 class TestSample:
+    def test_reports_are_byte_identical_for_an_unchanged_batch(
+        self, batch: Batch, corpus: Path
+    ) -> None:
+        batch.add(page(TITLES[0]), "a")
+        batch.add(page(TITLES[1], FNR_LINE), "b")
+        batch.run(corpus)
+        before = tree(batch.report_dir)
+
+        batch.run(corpus)
+
+        assert tree(batch.report_dir) == before
+        assert set(before) == {"batch-0301-test-1.md", "batch-0301-test-1.json"}
+        assert all(b"01019012480" not in content for content in before.values())
+
     def test_the_same_seed_gives_the_same_sample(self, batch: Batch, corpus: Path) -> None:
         for n, title in enumerate(TITLES):
             batch.add(page(title), f"p{n}")
@@ -234,6 +249,57 @@ class TestSample:
 
 
 class TestGate:
+    def test_approval_for_another_extractor_blocks_the_sample(
+        self,
+        batch: Batch,
+        corpus: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _approve(batch.add(page(TITLES[0]), "a"), tmp_path)
+        monkeypatch.setattr(plan, "EXTRACTOR_VERSION", plan.EXTRACTOR_VERSION + 1)
+        before = tree(corpus)
+
+        code, output = batch.run(corpus, "--write")
+
+        assert code == BLOCKED_EXIT_CODE, output
+        report = batch.report()
+        assert report["items"][0]["review"] == "approval_for_another_text"
+        assert len(report["gate"]["awaiting_review"]) == 1
+        assert report["summary"]["would_write"] == 0
+        assert tree(corpus) == before
+
+    def test_a_passing_partial_sample_never_promotes_an_unreviewed_item(
+        self, batch: Batch, corpus: Path, tmp_path: Path
+    ) -> None:
+        for n, title in enumerate(TITLES):
+            batch.add(page(title), f"p{n}")
+        batch.run(corpus, sample_rate="0.1")
+        sampled = _sampled(batch.report())
+        assert len(sampled) == 1
+        _approve(sampled[0], tmp_path)
+
+        code, output = batch.run(corpus, "--write", sample_rate="0.1")
+
+        assert code == 0, output
+        report = batch.report()
+        assert report["gate"]["verdict"] == "pass"
+        assert report["summary"]["would_write"] == 1
+        assert len(_documents(corpus)) == 1
+        git(corpus, "add", "-A")
+        git(corpus, "commit", "-q", "-m", "promote sampled item")
+        before = tree(corpus)
+
+        code, output = batch.run(corpus, "--write", sample_rate="0.1")
+
+        assert code == 0, output
+        assert _sampled(batch.report()) == sampled
+        assert batch.report()["gate"]["verdict"] == "pass"
+        assert batch.report()["summary"]["unchanged"] == 1
+        assert batch.report()["summary"]["ready"] == 2
+        assert batch.report()["summary"]["would_write"] == 0
+        assert tree(corpus) == before
+
     def test_one_rejected_sample_item_blocks_the_batch(
         self, batch: Batch, corpus: Path, tmp_path: Path
     ) -> None:
@@ -326,6 +392,28 @@ class TestGate:
 
 
 class TestReportPlacement:
+    def test_a_symlink_into_the_corpus_is_refused(self, batch: Batch, corpus: Path) -> None:
+        batch.add(page(TITLES[0]), "a")
+        alias = batch.base / "corpus-alias"
+        alias.symlink_to(corpus, target_is_directory=True)
+        batch.report_dir = alias / "reports"
+        before = tree(corpus)
+
+        code, output = batch.run(corpus)
+
+        assert code == 1
+        assert "report names archive material" in output
+        assert tree(corpus) == before
+
+    def test_a_relative_report_dir_is_refused(self, batch: Batch, corpus: Path) -> None:
+        batch.add(page(TITLES[0]), "a")
+        batch.report_dir = Path("reports")
+
+        code, output = batch.run(corpus)
+
+        assert code == 1
+        assert "--report-dir must be an absolute path" in output
+
     def test_a_report_dir_inside_the_corpus_is_refused(self, batch: Batch, corpus: Path) -> None:
         batch.add(page(TITLES[0]), "a")
         batch.report_dir = corpus / "reports"
