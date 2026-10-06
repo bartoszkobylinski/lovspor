@@ -1,10 +1,10 @@
 [[equivalent]]
 file = "src/lovspor/release/check.py"
-symbol = "_check_site_tree"
-registered = "2026-09-09, PR #268, from run 34397173401"
+symbol = "_page_markup"
+registered = "2026-09-09, PR #268, from run 34397173401; moved 2026-10-06 to _page_markup (PR #554)"
 mutation = """
--        pages[page.path] = path.read_text(encoding="utf-8")
-+        pages[page.path] = path.read_text(encoding="UTF-8")
+-        return path.read_text(encoding="utf-8")
++        return path.read_text(encoding="UTF-8")
 """
 justification = """
 Codec names are case-insensitive: `Path.read_text` hands the name to the text
