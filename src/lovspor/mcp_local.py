@@ -8,6 +8,11 @@ byte-identical. A local answer always carries the observation label and
 never the central temporal notice: the source markers that notice reads are
 Lovdata's, and no valid-time fact is evaluated for local text (ADR-0016 2).
 
+Two time axes reach a local document, never fused (ADR-0016 2):
+``recorded_at`` on ``get_section`` is the corpus (git) axis and reads the
+document from the resolved commit, exactly as for a central act (ADR-0011);
+the observation axis stays in the observation files and never picks a commit.
+
 A sibling of ``mcp.py`` rather than a section of it, for the reason
 ``tool_surface.py`` gives (issue #102). It builds on ``mcp.py``'s section
 parser, so ``build_server`` imports it at call time.
@@ -15,10 +20,9 @@ parser, so ``build_server`` imports it at call time.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Iterable
+from typing import Any, NamedTuple
 
-from lovspor.errors import LocalScopeError
 from lovspor.local_corpus import (
     LOCAL_DATASET,
     LocalDataset,
@@ -43,6 +47,13 @@ from lovspor.mcp import (
 from lovspor.temporal import append_notice, evaluation_date_today
 
 
+class _Central(NamedTuple):
+    """The central namespace a local section's cross-references are validated against."""
+
+    slugs: Callable[[], Iterable[str]]
+    index_for: Callable[[str], SectionIndex]
+
+
 class ServedCorpus:
     """The central reader and the local dataset of one corpus, routed per call."""
 
@@ -62,12 +73,7 @@ class ServedCorpus:
         self, slug: str, section_id: str, occurrence: int | None, recorded_at: str | None
     ) -> dict[str, Any]:
         if is_local_address(slug):
-            if recorded_at is not None:
-                raise LocalScopeError(
-                    "recorded_at is not served for local regulations yet (ADR-0016 S5); "
-                    "omit it to read the current version",
-                )
-            return self._local_section(slug, section_id, occurrence)
+            return self._local_section(slug, (section_id, occurrence), recorded_at)
         if recorded_at is not None:
             state = self._reader.at_state(recorded_at)
             return _stamp_not_evaluated(state.get_section(slug, section_id, occurrence))
@@ -101,27 +107,46 @@ class ServedCorpus:
         return self._reader.validate_citation(citation)
 
     def _local_section(
-        self, address: str, section_id: str, occurrence: int | None
+        self, address: str, where: tuple[str, int | None], recorded_at: str | None
     ) -> dict[str, Any]:
-        served = self._local.document(address)
-        body = _strip_frontmatter_and_h1(served.markdown)
-        canonical = _normalize_section_id(section_id)
-        section, _ = _section_from_body(served.address, body, canonical, occurrence)
-        known = {*self._reader._load_slug_index(), served.address}
-        index_for = self._index_for(served.address, _section_index_from_body(body))
-        references = _cross_references_for(section["body"], served.address, known, index_for)
-        return {
-            **_section_result(served.address, canonical, section, references),
-            "doc_id": served.doc_id,
-            "dataset": LOCAL_DATASET,
-            "observation": served.observation.label(),
-        }
+        """Live, or from the corpus commit ``recorded_at`` resolves to (ADR-0011)."""
+        if recorded_at is None:
+            served = self._local.document(address)
+            reader = self._reader
+            central = _Central(reader._load_slug_index, reader._section_index_for)
+            return _local_section(served, where, central)
+        state = self._reader.at_state(recorded_at)
+        served = self._local.at(state._data.snapshot, f"at {recorded_at}").document(address)
+        central = _Central(state._slug_index, state._section_index_for)
+        section = state._stamp(_local_section(served, where, central), None)
+        return {**section, "content_hash": served.record.content_hash}
 
-    def _index_for(self, address: str, own: SectionIndex) -> Callable[[str], SectionIndex]:
-        def index_for(slug: str) -> SectionIndex:
-            return own if slug == address else self._reader._section_index_for(slug)
 
-        return index_for
+def _local_section(
+    served: ServedLocal, where: tuple[str, int | None], central: _Central
+) -> dict[str, Any]:
+    section_id, occurrence = where
+    body = _strip_frontmatter_and_h1(served.markdown)
+    canonical = _normalize_section_id(section_id)
+    section, _ = _section_from_body(served.address, body, canonical, occurrence)
+    index_for = _index_for(served.address, _section_index_from_body(body), central.index_for)
+    known = {*central.slugs(), served.address}
+    references = _cross_references_for(section["body"], served.address, known, index_for)
+    return {
+        **_section_result(served.address, canonical, section, references),
+        "doc_id": served.doc_id,
+        "dataset": LOCAL_DATASET,
+        "observation": served.observation.label(),
+    }
+
+
+def _index_for(
+    address: str, own: SectionIndex, central: Callable[[str], SectionIndex]
+) -> Callable[[str], SectionIndex]:
+    def index_for(slug: str) -> SectionIndex:
+        return own if slug == address else central(slug)
+
+    return index_for
 
 
 def _with_observation(served: ServedLocal) -> str:
