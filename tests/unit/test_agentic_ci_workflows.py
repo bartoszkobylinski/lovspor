@@ -52,7 +52,7 @@ def test_fast_ci_rejects_committed_conflict_markers_before_lint(tmp_path: Path) 
     subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
 
     result = subprocess.run(
-        ["bash", "-eu", "-o", "pipefail", "-c", gate["run"]],
+        [str(_WORKFLOWS.parents[1] / gate["run"].strip())],
         cwd=tmp_path,
         text=True,
         capture_output=True,
@@ -82,7 +82,7 @@ def test_fast_ci_conflict_marker_gate_accepts_non_marker_boundaries(
     subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
 
     result = subprocess.run(
-        ["bash", "-eu", "-o", "pipefail", "-c", gate["run"]],
+        [str(_WORKFLOWS.parents[1] / gate["run"].strip())],
         cwd=tmp_path,
         text=True,
         capture_output=True,
