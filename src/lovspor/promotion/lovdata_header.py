@@ -31,7 +31,7 @@ _LOVDATA_ID = re.compile(r"[ \t]*(?:LOV|FOR)-\d{4}-\d{2}-\d{2}-\d+")
 
 class _Field(NamedTuple):
     line: int
-    name: str
+    name: tuple[str, ...]
     dated: bool
 
 
@@ -46,8 +46,10 @@ def _field_lines(text: str) -> tuple[_Field, ...]:
     for number, line in enumerate(text.splitlines()):
         match = _FIELD.match(line)
         if match is not None:
-            name = " ".join(match.group(1).split())
-            dated = name == "Dato" and _LOVDATA_ID.match(match.group(2)) is not None
+            # The words, not a re-joined string: "Sist  endret" and "Sist endret"
+            # are one field, and no separator literal is left to mean anything.
+            name = tuple(match.group(1).split())
+            dated = name == ("Dato",) and _LOVDATA_ID.match(match.group(2)) is not None
             found.append(_Field(number, name, dated))
     return tuple(found)
 
