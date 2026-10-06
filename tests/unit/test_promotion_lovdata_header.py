@@ -145,6 +145,36 @@ def test_field_names_embedded_in_prose_do_not_form_a_block() -> None:
     assert not has_lovdata_header("\n".join(lines))
 
 
+def test_all_field_names_preserve_identity_across_horizontal_spacing() -> None:
+    names = (
+        "Dato",
+        "Departement",
+        "Publisert",
+        "Ikrafttredelse",
+        "Sist endret",
+        "Endrer",
+        "Gjelder for",
+        "Hjemmel",
+        "Kunngjort",
+        "Korttittel",
+        "Journalnummer",
+        "Rettelse",
+    )
+    for name in names:
+        repeated = (
+            HEADER[0],
+            *(f"{spacing.join(name.split())}: Eksempel" for spacing in (" ", "  ", "\t", " \t ")),
+        )
+        # The anchor and repeated variants provide at most two distinct names.
+        assert not has_lovdata_header("\n".join(repeated)), name
+        for other in names:
+            expected = len({"Dato", name, other}) >= 3
+            assert has_lovdata_header("\n".join((*repeated, f"{other}: Eksempel"))) is expected, (
+                name,
+                other,
+            )
+
+
 @pytest.mark.parametrize("dated", ["Dato: FOR-2010-12-17", "Dato: FOR-2010-12-17-", "Dato:"])
 def test_an_incomplete_id_does_not_anchor_a_block(dated: str) -> None:
     assert not has_lovdata_header("\n".join((dated, *HEADER[1:])))
