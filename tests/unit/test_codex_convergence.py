@@ -112,6 +112,29 @@ def test_failures_are_read_from_junit_with_params_stripped(tmp_path: Path) -> No
     ]
 
 
+def test_failing_cases_of_one_parametrized_test_are_one_failure(tmp_path: Path) -> None:
+    """The marker lands on the function, so N failing cases are one test: N
+    entries would stack N identical xfail markers on it (issue #549)."""
+    junit = tmp_path / "j.xml"
+    junit.write_text(
+        "<testsuites><testsuite>"
+        + "".join(
+            f'<testcase classname="tests.unit.test_thing" name="test_cases[{case}]">'
+            '<failure message="x">x</failure></testcase>'
+            for case in ("a", "b", "c")
+        )
+        + '<testcase classname="tests.unit.test_thing" name="test_other">'
+        '<failure message="x">x</failure></testcase>'
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+
+    assert cc.failed_tests(junit) == [
+        cc.TestId("tests/unit/test_thing.py", "test_cases"),
+        cc.TestId("tests/unit/test_thing.py", "test_other"),
+    ]
+
+
 # --- the verdict ---------------------------------------------------------------
 
 
@@ -477,6 +500,49 @@ def test_cli_marks_advisory_proposals_and_writes_the_verdict(tmp_path: Path) -> 
     }
     assert "@pytest.mark.xfail(strict=True" in (repo / "tests/unit/test_thing.py").read_text()
     assert "ADVISORY" in (tmp_path / "c.md").read_text(encoding="utf-8")
+
+
+def test_cli_writes_one_marker_for_every_failing_case_of_one_test(tmp_path: Path) -> None:
+    """Three failing parametrize cases of an advisory test get one strict xfail,
+    not three stacked copies of it (issue #549)."""
+    repo = _repo_with(tmp_path, "def test_existing(): ...\n")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    before = _git(repo, "rev-parse", "HEAD")
+    (repo / "tests/unit/test_thing.py").write_text(
+        "import pytest\n\n\ndef test_existing(): ...\n\n\n"
+        '@pytest.mark.parametrize("x", ["a", "b", "c"])\n'
+        'def test_cases(x: str) -> None:\n    assert x == "z"\n',
+        encoding="utf-8",
+    )
+    junit = tmp_path / "junit.xml"
+    junit.write_text(
+        "<testsuites><testsuite>"
+        + "".join(
+            f'<testcase classname="tests.unit.test_thing" name="test_cases[{case}]">'
+            '<failure message="x">x</failure></testcase>'
+            for case in ("a", "b", "c")
+        )
+        + "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+    sticky = tmp_path / "sticky.md"
+    sticky.write_text("\n".join([cc.BLOCKED_PHRASE] * 3), encoding="utf-8")  # cap reached
+
+    cc.main(
+        [
+            *("--repo", str(repo), "--before-sha", before, "--junit", str(junit)),
+            *("--sticky-body", str(sticky), "--cap", "3"),
+            *("--verdict", str(tmp_path / "v.json"), "--comment", str(tmp_path / "c.md")),
+            "--apply",
+        ]
+    )
+
+    verdict = json.loads((tmp_path / "v.json").read_text(encoding="utf-8"))
+    assert verdict["advisory"] == ["tests/unit/test_thing.py::test_cases"]
+    text = (repo / "tests/unit/test_thing.py").read_text(encoding="utf-8")
+    assert text.count("@pytest.mark.xfail(strict=True") == 1
 
 
 def test_cli_sees_tests_in_a_brand_new_untracked_file(tmp_path: Path) -> None:

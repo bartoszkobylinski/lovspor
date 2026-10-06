@@ -289,7 +289,8 @@ sorts every failure into one of three bins:
 
 Advisory tests are not discarded. The verdict marks each one `xfail(strict=True,
 reason="codex proposal, round N — owner decision, see #248")` **in place** and the round
-commits as usual. Only that exact shape — an
+commits as usual. The marker is one per function: the failing cases of a parametrized test
+are one advisory test, and the marker covers every case (#549). Only that exact shape — an
 unconditional strict xfail with the round's reason — reads as a prior proposal; an
 inactive `xfail(False, …)` does not, or `--apply` would write an active one over a
 regression. The proposal stays in the tree, visible in `git blame`, and the day

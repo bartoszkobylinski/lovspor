@@ -216,7 +216,14 @@ def _test_nodes(source: str) -> dict[str, str]:
 
 
 def failed_tests(junit_path: Path) -> list[TestId]:
-    """Failing and erroring testcases from a pytest junit report."""
+    """Failing and erroring tests from a pytest junit report, one per function.
+
+    The parametrize id is dropped and the result deduplicated: the verdict and
+    the xfail marker are per function, so N failing cases are one test, not N
+    copies of the same marker stacked on it (issue #549). The marker therefore
+    covers every case: were one case to pass, its strict xfail would XPASS and
+    fail loudly, never mask anything.
+    """
     root = ET.parse(junit_path).getroot()  # noqa: S314 - pytest-written file on the runner
     failures: list[TestId] = []
     for case in root.iter("testcase"):
@@ -238,7 +245,7 @@ def failed_tests(junit_path: Path) -> list[TestId]:
             file = "/".join(parts[:split]) + ".py"
             classes = ".".join(parts[split:])
         failures.append(TestId(file, f"{classes}.{name}" if classes else name))
-    return failures
+    return list(dict.fromkeys(failures))
 
 
 def is_proposal(repo: Path, test: TestId, before_sha: str | None = None) -> bool:
