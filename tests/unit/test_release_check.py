@@ -446,8 +446,9 @@ class TestTheRecord:
         record["observer"] = "drift-timer"
         _rewrite(envelope / RECORD_NAME, record)
 
-        with pytest.raises(EnvelopeError, match="release.json observer"):
+        with pytest.raises(EnvelopeError, match="release.json observer") as caught:
             check_envelope(envelope)
+        assert str(caught.value) == "release.json observer is not the capability document's"
 
 
 class TestTheTrees:
