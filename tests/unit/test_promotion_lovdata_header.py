@@ -127,6 +127,19 @@ def test_spacing_variants_of_one_field_still_count_as_one_name() -> None:
     assert has_lovdata_header("\r\n".join((*lines, "\tSist\tendret : x")))
 
 
+@pytest.mark.parametrize("field", ["Gjelder for", "Sist endret"])
+def test_multiword_field_spacing_preserves_the_distinct_field_threshold(field: str) -> None:
+    first, second = field.split()
+    lines = (
+        HEADER[0],
+        *(f"{first}{spacing}{second}: Eksempel" for spacing in (" ", "  ", "\t", " \t ")),
+    )
+    # Repeated spellings of one field cannot supply the third distinct field.
+    assert not has_lovdata_header("\n".join(lines))
+    other_field = "Sist endret" if field == "Gjelder for" else "Gjelder for"
+    assert has_lovdata_header("\n".join((*lines, f"{other_field}: Eksempel")))
+
+
 def test_field_names_embedded_in_prose_do_not_form_a_block() -> None:
     lines = (HEADER[0], "Se Publisert: II 2010 hefte 5", "Se Korttittel: Eksempel")
     assert not has_lovdata_header("\n".join(lines))
