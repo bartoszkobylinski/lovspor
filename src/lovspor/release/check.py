@@ -190,14 +190,20 @@ def check_structure(root: Path) -> Structure:
     return Structure(facts, manifest, document, key)
 
 
+def _page_markup(site: Path, route: str) -> str:
+    """One emitted page's text; a codec error is a named refusal, not a traceback."""
+    path = site / route.lstrip("/") / "index.html"
+    if not path.is_file():
+        raise EnvelopeError(f"{SITE_DIR}/: page {route} is not in the tree")
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise EnvelopeError(f"{SITE_DIR}/: page {route} is not UTF-8: {error}") from error
+
+
 def _check_site_tree(site: Path) -> int:
     """The route closure, re-scanned from the bytes on disk."""
-    pages: dict[str, str] = {}
-    for page in emitted_pages():
-        path = site / page.path.lstrip("/") / "index.html"
-        if not path.is_file():
-            raise EnvelopeError(f"{SITE_DIR}/: page {page.path} is not in the tree")
-        pages[page.path] = path.read_text(encoding="utf-8")
+    pages = {page.path: _page_markup(site, page.path) for page in emitted_pages()}
     try:
         for name, markup in pages.items():
             scan_page(name, markup)
