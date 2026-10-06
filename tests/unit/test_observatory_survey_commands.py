@@ -524,6 +524,36 @@ class TestWhereTheListComesFrom:
         assert f"kommune.no@{DOMAIN}" in result.output
         assert not (root / "survey").exists()
 
+    @pytest.mark.parametrize("suffix", ["?preview=true", "#section", "?", "#"])
+    def test_listed_query_or_fragment_refuses_the_entire_population(
+        self, root: Path, tmp_path: Path, httpx_mock: HTTPXMock, suffix: str
+    ) -> None:
+        """URL components in --from must be refused before any host is probed."""
+        invalid = f"{OTHER}{suffix}"
+        listing = tmp_path / "domains.txt"
+        listing.write_text(f"{DOMAIN}\n{invalid}\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["observatory", "survey", "--from", str(listing)])
+
+        assert result.exit_code == 2
+        assert invalid in result.stderr
+        assert httpx_mock.get_requests() == []
+        assert not (root / "survey").exists()
+
+    @pytest.mark.parametrize("invalid", [f"{OTHER}?", f"{OTHER}#", f"{DOMAIN}@{OTHER}"])
+    def test_later_invalid_domain_refuses_before_probing_an_earlier_valid_domain(
+        self, root: Path, httpx_mock: HTTPXMock, invalid: str
+    ) -> None:
+        """The host gate promises refusal before any request, across all arguments."""
+        result = runner.invoke(
+            app, ["observatory", "survey", "--domain", DOMAIN, "--domain", invalid]
+        )
+
+        assert result.exit_code == 2
+        assert invalid in result.stderr
+        assert httpx_mock.get_requests() == []
+        assert not (root / "survey").exists()
+
     def test_naming_no_host_at_all_is_refused(self, root: Path) -> None:
         result = runner.invoke(app, ["observatory", "survey"])
 
