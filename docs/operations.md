@@ -1208,6 +1208,72 @@ python3 scripts/check_corpus_integrity.py
 python3 scripts/check_dataset_separation.py origin/main HEAD
 ```
 
+### Backfill — every observed version, one commit each (ADR-0016 S6)
+
+`promote local` writes the one version you approved. `promote backfill`
+writes **every** version observed at the artifact's URL since the first
+capture (2026-08-19), in observation order, one per run. A version is a run of
+one text (`content_hash` of the extracted regulation) at that URL; bytes that
+change without the text changing (a date stamp, a menu) are one version, and
+a text that comes back after another (A→B→A) is a new version: v1, v2, v3.
+
+```bash
+uv run lovspor promote backfill-preview --authority 0301 --artifact <sha256> \
+  --corpus /absolute/path/to/lovverk --klass-version <klass-vintage>
+```
+
+The preview prints each version with its first and last observation and
+count, its standing approval or its hold, the observations excluded from the
+comparison (a tombstoned blob, ADR-0010 §7 — listed, never bridged), the last
+outcome at the URL (a 404 is `source_status`, never a repeal), holds counted
+by reason, and the version the next run would write. It writes and records
+nothing.
+
+Each version needs its own approval: `promote approve` on one of its blobs
+(the preview names them by observation), bound to that text and the running
+extractor, given after the version was first observed — an approval of A
+given before A came back does not cover v3. Holds, by reason:
+`extraction:<reason>`, `rejected`, `held_by_reviewer`, `approval_stale`,
+`not_approved`, `identity:<reason>`, `identity_changed` (the text is named
+as another document), and `after_earlier_hold` for every version behind the
+first hold — versions are numbered by observation, so none is written past a
+hold.
+
+```bash
+uv run lovspor promote backfill --authority 0301 --artifact <sha256> \
+  --corpus /absolute/path/to/lovverk --klass-version <klass-vintage>
+```
+
+A run writes the **next** version the checkout does not hold (the same three
+files as `promote local`, with every version's interval re-read from the log),
+records it in `promotions.jsonl`, and prints the commit to make, then the
+ordered `backfill` / `git add` / `git commit` lines for every further approved
+version. Run them in that order; each commit is dated when you make it. A
+rerun on a finished backfill writes nothing; a checkout whose versions the log
+does not reproduce (say, `promote local` put a later text in as v1) is
+refused, never patched. The observations read are those up to the latest
+approval among the versions written, so later captures change nothing until
+the refresh.
+
+### Observation refresh — weekly
+
+```bash
+uv run lovspor promote observe --corpus /absolute/path/to/lovverk [--authority 0301]
+git -C /absolute/path/to/lovverk add -- lokale-forskrifter
+git -C /absolute/path/to/lovverk commit -m 'observe: refresh observation intervals (<n> documents)'
+```
+
+`observe` re-reads every current local document's version intervals from the
+log — last observation, count, blobs, byte-identical copies, `source_status`,
+excluded observations — and rewrites only the `observations/<slug>.json`
+files that changed. It adds no version and touches no document or manifest; a
+new text at the URL ends the current version's interval where the new text
+begins and waits for a backfill. A document the log does not reproduce (another
+text, another first observation, another extractor version — that is a
+migration) is skipped with the reason. Use the subject it prints: `observe: …`
+is no history event. Run it at most weekly (ADR-0016 Decision 3); scheduling
+it is not automated yet.
+
 ## Observatory: the 24-hour observation SLA (issue #167)
 
 > **Every active source is observed at least once per 24 hours.**
