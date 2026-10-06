@@ -10,11 +10,14 @@ from the scripts' own control flow rather than from reading their text.
 
 from __future__ import annotations
 
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import pytest
+import yaml  # type: ignore[import-untyped]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FAST = REPO_ROOT / "scripts" / "quality" / "verify-fast.sh"
@@ -25,12 +28,15 @@ FAST_CHECKS = {
     "ruff-check": "uv run ruff check",
     "ruff-format": "uv run ruff format --check",
     "mypy": "uv run mypy src/",
+    "equivalents": "uv run python scripts/ci/mutation_to_json.py --check-equivalents",
     "ratchets": "uv run python scripts/quality/check_ratchets.py",
     "boundaries": "uv run python scripts/quality/check_boundaries.py",
     "release-contracts": (
         "uv run pytest tests/unit/test_release_contracts.py -q -p no:cacheprovider"
     ),
 }
+# Not a stubbed tool: the gate runs the real script, which asks the real git.
+CONFLICT_MARKERS = "scripts/quality/check_conflict_markers.sh"
 RELEASE_CONTRACTS = REPO_ROOT / "tests" / "unit" / "test_release_contracts.py"
 # `-m "not network"`: a test that needs a live third-party credential answers
 # for the operator's key, not for the change being pushed (issue #359).
@@ -161,6 +167,19 @@ class TestFastGate:
 
         assert FAST_CHECKS["boundaries"] in run.commands
 
+    def test_runs_the_equivalents_register_check_at_commit_time(self, tmp_path: Path) -> None:
+        """Issue #558: fast-ci failed PR #554 on two stale entries every local
+        gate had passed, because only fast-ci ran the check."""
+        run = _run_gate(FAST, tmp_path)
+
+        assert FAST_CHECKS["equivalents"] in run.commands
+
+    def test_runs_the_conflict_marker_script_fast_ci_runs(self, tmp_path: Path) -> None:
+        run = _run_gate(FAST, tmp_path)
+
+        assert f"==> conflict-markers: {CONFLICT_MARKERS}\n" in run.output
+        assert not any(line.startswith("FAIL conflict-markers") for line in run.fail_lines())
+
     def test_never_runs_the_security_scan(self, tmp_path: Path) -> None:
         """It belongs to the push gate; the commit loop stays about a second."""
         run = _run_gate(FAST, tmp_path)
@@ -278,3 +297,119 @@ class TestDeepGate:
         assert run.fail_lines() == [f"FAIL mypy: stub: {FAST_CHECKS['mypy']} failed (exit 3)"]
         assert UNIT_SUITE not in run.commands
         assert SECURITY_SCAN not in run.commands
+
+    def test_a_stale_equivalents_register_stops_before_push_time_checks(
+        self, tmp_path: Path
+    ) -> None:
+        """§9d: the newly added commit check must also block the push gate."""
+        run = _run_gate(DEEP, tmp_path, failing=(FAST_CHECKS["equivalents"],))
+
+        assert run.returncode != 0
+        assert run.fail_lines() == [
+            f"FAIL equivalents: stub: {FAST_CHECKS['equivalents']} failed (exit 3)"
+        ]
+        assert run.commands == list(FAST_CHECKS.values())
+        assert SECURITY_SCAN not in run.commands
+        assert UNIT_SUITE not in run.commands
+
+
+@pytest.mark.parametrize("script", [FAST, DEEP], ids=["commit", "push"])
+@pytest.mark.parametrize("marker", ["<<<<<<< HEAD", ">>>>>>> branch"])
+def test_real_conflict_markers_fail_local_gates_without_stopping_fast_checks(
+    tmp_path: Path, script: Path, marker: str
+) -> None:
+    """§9d/#558: the shared conflict check blocks both local gates.
+
+    Use a disposable repository so no conflict text or index changes touch
+    the checkout. Only the external tools are stubbed; git and the shared
+    conflict-marker script run for real.
+    """
+    repo = tmp_path / "repo"
+    quality = repo / "scripts" / "quality"
+    quality.mkdir(parents=True)
+    for source in (FAST, DEEP, FAST.parent / "gate.sh", REPO_ROOT / CONFLICT_MARKERS):
+        shutil.copy2(source, quality / source.name)
+    subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
+    (repo / "tracked.txt").write_text(f"ordinary text\n{marker}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
+
+    run = _run_gate(quality / script.name, tmp_path)
+
+    assert run.returncode == 1, run.output
+    assert f"tracked.txt:2:{marker}" in run.output
+    assert run.fail_lines() == [
+        "FAIL conflict-markers: ::error::unresolved merge-conflict markers are committed (exit 1)"
+    ]
+    assert run.commands == list(FAST_CHECKS.values())
+    assert run.cwds == {str(repo.resolve())}
+    assert SECURITY_SCAN not in run.commands
+    assert UNIT_SUITE not in run.commands
+
+
+PIPELINE = REPO_ROOT / ".github" / "workflows" / "pr-pipeline.yml"
+
+# fast-ci `run:` steps with no counterpart in verify-fast.sh, each with the
+# reason. Anything not listed here must run locally at commit time, by the
+# same command, or the parity test below fails (issue #558: the register check
+# ran only in fast-ci, so PR #554 passed every local gate and failed CI).
+CI_ONLY = {
+    "Sync dependencies": (
+        "provisions the hosted runner's venv; locally every check's `uv run` syncs it"
+    ),
+}
+# fast-ci steps that run locally at push instead of commit, mapped to the
+# verify-deep.sh command that is their counterpart.
+PUSH_TIME = {
+    # ~2 s; §9f placed it at push and test_never_runs_the_security_scan pins it.
+    "Security scan (fail-closed)": SECURITY_SCAN,
+    # ~260 s: the cost §9d moved out of the commit loop. Locally without the
+    # network-marked tests, which answer for a credential CI does not hold (#359).
+    "Unit tests": UNIT_SUITE,
+}
+
+
+def _gate_checks(script: Path) -> list[str]:
+    """Each `check NAME COMMAND...` line of a gate script, as the command it runs."""
+    lines = script.read_text(encoding="utf-8").splitlines()
+    return [" ".join(shlex.split(line)[2:]) for line in lines if line.startswith("check ")]
+
+
+def _fast_ci_run_steps() -> dict[str, str]:
+    workflow: dict[str, Any] = yaml.safe_load(PIPELINE.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["fast-ci"]["steps"]
+    return {step["name"]: step["run"].strip() for step in steps if "run" in step}
+
+
+def _command(run: str) -> str:
+    """A one-line step as the argv a gate would pass; a script block stays as written."""
+    return " ".join(shlex.split(run)) if "\n" not in run else run
+
+
+class TestFastCiParity:
+    """verify-fast.sh mirrors fast-ci (issue #558), read from the real workflow."""
+
+    def test_every_fast_ci_step_runs_in_the_fast_gate_or_is_listed(self) -> None:
+        local = set(_gate_checks(FAST))
+        listed = CI_ONLY.keys() | PUSH_TIME.keys()
+
+        missing = [
+            name
+            for name, run in _fast_ci_run_steps().items()
+            if _command(run) not in local and name not in listed
+        ]
+
+        assert missing == [], f"fast-ci steps with no verify-fast.sh counterpart: {missing}"
+
+    def test_the_lists_name_only_fast_ci_steps_the_fast_gate_lacks(self) -> None:
+        """A listed step that was renamed, removed or moved into the fast gate
+        would otherwise keep excusing a step that no longer needs it."""
+        steps = _fast_ci_run_steps()
+        local = set(_gate_checks(FAST))
+
+        for name in CI_ONLY.keys() | PUSH_TIME.keys():
+            assert name in steps, name
+            assert _command(steps[name]) not in local, name
+
+    @pytest.mark.parametrize(("name", "command"), sorted(PUSH_TIME.items()))
+    def test_a_push_time_step_runs_in_the_deep_gate(self, name: str, command: str) -> None:
+        assert command in _gate_checks(DEEP), name
