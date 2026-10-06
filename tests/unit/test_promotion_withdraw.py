@@ -22,9 +22,15 @@ from lovspor.errors import CorpusNotFoundError
 from lovspor.mcp import CorpusReader
 from lovspor.mcp_local import ServedCorpus
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
-from lovspor.promotion.corpus import LocalRecord
-from lovspor.promotion.decisions import DECISIONS_FILENAME, ArtifactKey, WithdrawalRecord
+from lovspor.promotion.corpus import CorpusCheckout, LocalRecord
+from lovspor.promotion.decisions import (
+    DECISIONS_FILENAME,
+    ArtifactKey,
+    WithdrawalDocument,
+    WithdrawalRecord,
+)
 from lovspor.promotion.models import RemovedReason
+from lovspor.promotion.withdraw import apply_withdrawal, locate_document, withdrawal_record
 from tests.unit.promotion_cli_fixtures import (
     AUTHORITY,
     FIRST_SEEN,
@@ -584,3 +590,109 @@ class TestModels:
         assert withdrawal.withdraws(other, LF_ID)
         assert not withdrawal.withdraws(other, None)
         assert not withdrawal.withdraws(other, "lf-20200101-0001")
+
+
+@pytest.mark.parametrize("markdown_present", [True, False])
+def test_withdrawal_reports_only_markdown_it_actually_deleted(
+    root: Path, corpus: Path, tmp_path: Path, markdown_present: bool
+) -> None:
+    _promoted(root, corpus, tmp_path, html_page(LF_LINES), PAGE_URL)
+    checkout = CorpusCheckout(corpus, [])
+    record = checkout.local_manifest().documents[LF_ID]
+    markdown = corpus / record.markdown_path
+    if not markdown_present:
+        markdown.unlink()
+    document = WithdrawalDocument.model_validate_json(_withdrawal(tmp_path).read_bytes())
+    withdrawal = withdrawal_record(
+        checkout,
+        locate_document(checkout.local_manifest(), AUTHORITY, record.slug),
+        document,
+        FIRST_SEEN,
+    )
+
+    result = apply_withdrawal(checkout, withdrawal)
+
+    assert result.deleted == ((record.markdown_path,) if markdown_present else ())
+    assert not markdown.exists()
+    assert checkout.local_manifest().documents[LF_ID].status == "removed"
+
+
+def test_withdrawal_prints_the_record_location_and_every_changed_path(
+    root: Path, corpus: Path, tmp_path: Path
+) -> None:
+    _promoted(root, corpus, tmp_path, html_page(LF_LINES), PAGE_URL)
+    record = _manifest(corpus)[LF_ID]
+    result = _withdraw(corpus, record["slug"], _withdrawal(tmp_path))
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines()[:4] == [
+        f"Withdrew {LF_ID} (withdrawn_misclassified; recorded in {root / DECISIONS_FILENAME})",
+        f"wrote {LOCAL}/{AUTHORITY}/observations/{record['slug']}.json",
+        f"wrote {LOCAL}/manifest.json",
+        f"deleted {record['markdown_path']}",
+    ]
+
+
+def test_personal_data_refusal_names_the_published_withdrawal_field(
+    root: Path, corpus: Path, tmp_path: Path
+) -> None:
+    before = tree(corpus)
+    result = _withdraw(
+        corpus, "unused", _withdrawal(tmp_path, reason="Contact ola@eksempel.kommune.invalid.")
+    )
+    assert result.exit_code == 1, result.output
+    assert "the reason carries personal data; it is published with the withdrawal" in result.output
+    assert tree(corpus) == before
+
+
+@pytest.mark.parametrize("reason", [None, "withdrawn_legal"])
+def test_removed_manifest_refusal_and_rerun_explain_the_recorded_reason(
+    root: Path, corpus: Path, tmp_path: Path, reason: str | None
+) -> None:
+    sha256 = _promoted(root, corpus, tmp_path, html_page(LF_LINES), PAGE_URL)
+    path = corpus / LOCAL / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    record = manifest["documents"][LF_ID]
+    record.update(status="removed", removed_reason=reason)
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    before, log_before = tree(corpus), _log_lines(root)
+    expected = reason or "no reason recorded"
+
+    for command in ("preview", "local"):
+        result = promote(command, sha256, corpus)
+        assert result.exit_code == 1, result.output
+        assert (
+            f"{LF_ID} was withdrawn ({expected}); it is never promoted again (4f)" in result.output
+        )
+    result = _withdraw(corpus, record["slug"], _withdrawal(tmp_path))
+    assert result.exit_code == 0, result.output
+    assert result.output == (
+        f"Unchanged: {LF_ID} is already withdrawn ({expected}); nothing written,\n"
+        "nothing recorded, nothing to commit.\n"
+    )
+    assert tree(corpus) == before
+    assert _log_lines(root) == log_before
+
+
+@pytest.mark.parametrize("command", ["preview", "local"])
+@pytest.mark.parametrize("same_artifact", [True, False])
+def test_log_refusal_explains_when_and_why_a_document_cannot_return(
+    root: Path, corpus: Path, tmp_path: Path, command: str, same_artifact: bool
+) -> None:
+    _, _, original = _one_withdrawn(root, corpus, tmp_path)
+    withdrawal = _log_lines(root)[-1]
+    if same_artifact:
+        artifact = original
+    else:
+        changed = (*LF_LINES[:-1], "Forskriften trer i kraft 1. februar 2020.")
+        artifact = store(root, html_page(changed), observed_at=FIRST_SEEN + timedelta(days=5))
+        assert approve(artifact, Decision().write(tmp_path)).exit_code == 0
+    fresh = make_corpus(tmp_path / "fresh")
+    before, log_before = tree(fresh), _log_lines(root)
+    result = promote(command, artifact, fresh)
+    assert result.exit_code == 1, result.output
+    assert (
+        f"{LF_ID} was withdrawn (withdrawn_misclassified, {withdrawal['decided_at']}); "
+        "a withdrawn document is never promoted again (ADR-0016 4f)"
+    ) in result.output
+    assert tree(fresh) == before
+    assert _log_lines(root) == log_before
