@@ -1157,7 +1157,7 @@ after the approval changes nothing. It then appends a `promoted` record (with
 the same audit) to `promotions.jsonl` and prints the commit to make.
 
 Refused, with nothing written: no decision recorded, a standing `reject` or
-`hold`, an approval for another text, a withdrawn id, an id filed under
+`hold`, an approval for another text, a withdrawn id or artifact (step 6), an id filed under
 another authority, content first observed before the current version (the
 backfill slice orders that), any output that would mention NLOD.
 
@@ -1200,6 +1200,57 @@ writes `<authority_id>/history/<slug>.json` (JSON only — the central
 `history/<slug>.md` carries Lovdata's licence in its front matter). It needs
 the promotion commit to exist; before it, there is nothing to write. A rerun
 on a committed history prints `History is current`.
+
+### 6. Withdraw — undo a promotion forward (ADR-0016 4f, S9)
+
+`lovverk` history is never rewritten, so a wrong promotion (misclassified,
+wrong identity, personal data, a legal objection) is undone by a later
+commit. The reviewer's decision is a JSON document, as for `approve`:
+
+```bash
+cat > withdrawal-0301.json <<'JSON'
+{
+  "decision": "withdraw",
+  "removed_reason": "withdrawn_misclassified",
+  "decided_by": "<your name>",
+  "reviewer_role": "project owner",
+  "reason": "The page is a høring, not an enacted forskrift."
+}
+JSON
+uv run lovspor promote withdraw --authority 0301 --slug <slug> \
+  --corpus /absolute/path/to/lovverk --decision withdrawal-0301.json
+```
+
+`removed_reason` is a closed set: `withdrawn_misclassified`,
+`withdrawn_identity`, `withdrawn_personal_data`, `withdrawn_legal`. An archive
+tombstone of a promoted source (ADR-0010 §7) is withdrawn under the reason the
+tombstone states. The same rules as `approve` hold for `decided_by`,
+`reviewer_role` and `reason`: a person, a role, and nothing published that
+carries personal data or the reviewer's name.
+
+The command first appends a `withdrawal` record to `promotions.jsonl` (the
+document's id and slug, the reason, the reviewer's name and role, and every
+archived artifact the document was promoted from), then, in the checkout:
+
+* `manifest.json` — the record becomes `status: "removed"` with its
+  `removed_reason` (`generated_at` is the decision time);
+* `<authority_id>/<slug>.md` — deleted, so the MCP server no longer serves
+  it (`get_law`, `get_section` and `search_laws` answer as for an unknown
+  document);
+* `<authority_id>/observations/<slug>.json` — kept, every version intact,
+  with a `withdrawal` block (reason, `reviewed_by_role`, decision time — never
+  the name);
+* `<authority_id>/history/<slug>.json` — kept untouched.
+
+It never commits; commit with the subject it prints,
+`withdraw(lokal-forskrift): <authority_id>/<slug>` (a `removed` event in the
+history grammar). A rerun on a withdrawn document prints `Unchanged`, writes
+nothing and records nothing.
+
+A withdrawal is permanent. `preview` and `local` refuse, before reading
+anything, an artifact a withdrawal names or whose standing decision is
+`reject`; and after extraction, any artifact whose id a withdrawal names — a
+new approval does not bring it back, and neither does a fresh checkout.
 
 Before pushing, run the corpus checks in the `lovverk` checkout:
 

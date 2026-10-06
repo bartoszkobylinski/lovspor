@@ -21,6 +21,10 @@ written there could never be taken back (owner decision on PR #517,
 classifier evidence — is refused when it carries the reviewer's name.
 * ``held`` — a promotion run that stopped at a hold, with the stage and the
   reason (4h). Holds are recorded, never dropped.
+* ``withdrawal`` — a human act on one promoted document (4f): its id, the
+  closed-set ``removed_reason``, and every archived artifact it was promoted
+  from, so no later run promotes the document again — under its id or from
+  any of those artifacts, in any checkout. Signed like a ``decision``.
 
 A run that would append an outcome identical to the artifact's last one
 (apart from ``recorded_at``) appends nothing, so a rerun leaves the log as it
@@ -51,7 +55,7 @@ from pydantic import (
 from lovspor.errors import DecisionLogError, StorageBoundaryError
 from lovspor.observatory.fields import TrimmedNonBlankStr
 from lovspor.observatory.storage import ObservatoryRoot
-from lovspor.promotion.models import IdScheme, PersonalDataHit
+from lovspor.promotion.models import IdScheme, PersonalDataHit, RemovedReason
 from lovspor.promotion.personal_data import screen_personal_data
 
 DECISIONS_FILENAME = "promotions.jsonl"
@@ -285,8 +289,62 @@ class HeldRecord(BaseModel):
     personal_data: tuple[PersonalDataHit, ...] = ()
 
 
+class WithdrawalDocument(BaseModel):
+    """The reviewer's withdrawal of one promoted document, as the operator hands it over."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decision: Literal["withdraw"]
+    removed_reason: RemovedReason
+    decided_by: PersonName
+    reviewer_role: ReviewerRole
+    reason: TrimmedNonBlankStr
+
+    @model_validator(mode="before")
+    @classmethod
+    def _names_a_role(cls, data: object) -> object:
+        if isinstance(data, dict) and "reviewer_role" not in data:
+            raise ValueError(ROLE_REQUIRED)
+        return data
+
+    @model_validator(mode="after")
+    def _keeps_the_name_private(self) -> WithdrawalDocument:
+        _refuse_the_name(self.decided_by, self.published())
+        return self
+
+    def published(self) -> dict[str, str]:
+        """The fields the withdrawal publishes into ``lovverk``, by their path here."""
+        return _published(self.reviewer_role, self.reason, None)
+
+
+class WithdrawalRecord(BaseModel):
+    """A recorded human withdrawal of one promoted document (ADR-0016 4c, 4f)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["withdrawal"] = "withdrawal"
+    doc_id: TrimmedNonBlankStr
+    authority_id: str = Field(pattern=_AUTHORITY_ID)
+    slug: TrimmedNonBlankStr
+    removed_reason: RemovedReason
+    artifacts: tuple[ArtifactKey, ...]
+    decided_by: PersonName
+    reviewer_role: ReviewerRole
+    decided_at: AwareDatetime
+    reason: TrimmedNonBlankStr
+
+    @model_validator(mode="after")
+    def _keeps_the_name_private(self) -> WithdrawalRecord:
+        _refuse_the_name(self.decided_by, _published(self.reviewer_role, self.reason, None))
+        return self
+
+    def withdraws(self, key: ArtifactKey, doc_id: str | None) -> bool:
+        """True when this withdrawal covers ``key`` or the document ``doc_id``."""
+        return key in self.artifacts or self.doc_id == doc_id
+
+
 DecisionLogRecord = Annotated[
-    HumanDecision | PromotedRecord | HeldRecord, Field(discriminator="kind")
+    HumanDecision | PromotedRecord | HeldRecord | WithdrawalRecord, Field(discriminator="kind")
 ]
 OutcomeRecord = PromotedRecord | HeldRecord
 _RECORD: TypeAdapter[DecisionLogRecord] = TypeAdapter(DecisionLogRecord)
@@ -331,6 +389,13 @@ class DecisionLog:
             r for r in self.records() if isinstance(r, HumanDecision) and r.artifact == artifact
         ]
         return found[-1] if found else None
+
+    def withdrawal_of(self, key: ArtifactKey, doc_id: str | None) -> WithdrawalRecord | None:
+        """The first withdrawal covering ``key`` or ``doc_id``; a withdrawal is never undone."""
+        for record in self.records():
+            if isinstance(record, WithdrawalRecord) and record.withdraws(key, doc_id):
+                return record
+        return None
 
     def record_outcome(self, record: OutcomeRecord) -> bool:
         """Append ``record`` unless it repeats the artifact's last outcome; True if appended."""
