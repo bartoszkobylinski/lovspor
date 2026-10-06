@@ -103,3 +103,9 @@ class TestBareHostStr:
     def test_the_plain_check_refuses_with_the_same_words(self) -> None:
         with pytest.raises(ValueError, match="a host without scheme or path was expected"):
             require_bare_host("kommune.no@evil.example")
+
+    def test_the_plain_check_refuses_an_empty_host(self) -> None:
+        """The survey calls the check without NonBlankStr in front of it, so
+        ``--domain ""`` was probed as a host (Codex test on PR #560)."""
+        with pytest.raises(ValueError, match="a host without scheme or path was expected"):
+            require_bare_host("")

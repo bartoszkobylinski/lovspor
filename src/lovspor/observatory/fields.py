@@ -52,7 +52,7 @@ def require_bare_host(value: str) -> str:
     ``kommune.no@evil.example`` there sends the request to evil.example under
     kommune.no's name. Refused, never rewritten — the caller sees what it typed.
     """
-    if _NOT_IN_A_HOST.intersection(value) or any(char.isspace() for char in value):
+    if not value or _NOT_IN_A_HOST.intersection(value) or any(char.isspace() for char in value):
         raise ValueError(f"a host without scheme or path was expected, got: {value!r}")
     return value
 
