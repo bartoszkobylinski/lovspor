@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from decimal import Decimal, localcontext
 
 import pytest
@@ -126,8 +127,30 @@ class TestDrawSample:
 
     @pytest.mark.parametrize("seed", ["", "  "])
     def test_a_blank_seed_is_refused(self, seed: str) -> None:
-        with pytest.raises(PromotionRefusedError, match="seed"):
+        with pytest.raises(PromotionRefusedError, match="seed") as exc_info:
             draw_sample(POPULATION, seed, Decimal(1))
+
+        assert str(exc_info.value) == "the sample seed (the batch id) must not be blank"
+
+    def test_unicode_seed_and_urls_follow_the_documented_utf8_rank(self) -> None:
+        seed = "blå-批次"
+        population = tuple(
+            ArtifactKey(
+                authority_id="0301",
+                sha256=f"{n:064x}",
+                source_url=f"https://eksempel.invalid/§/規則/{n}",
+            )
+            for n in range(8)
+        )
+        ranked = sorted(
+            population,
+            key=lambda item: hashlib.sha256(
+                f"{seed}\x1f{item.sha256}\x1f{item.source_url}".encode()
+            ).hexdigest(),
+        )
+        expected = tuple(sorted(ranked[:2], key=lambda item: (item.source_url, item.sha256)))
+
+        assert draw_sample(population, seed, Decimal("0.25")) == expected
 
 
 #: Computed by hand from the documented rank (SHA-256 of seed, hash and URL), not by the code.

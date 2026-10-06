@@ -189,8 +189,10 @@ class TestReadClassifierOutput:
     def test_an_incomplete_last_line_is_refused(self, tmp_path: Path) -> None:
         path = write(tmp_path, row(SHA_A), tail="")
 
-        with pytest.raises(ClassifierOutputError, match="incomplete"):
+        with pytest.raises(ClassifierOutputError, match="incomplete") as exc_info:
             read_classifier_output(path, VERSION)
+
+        assert str(exc_info.value) == f"{path}: the last row is incomplete (no newline)"
 
     def test_a_blank_line_is_refused(self, tmp_path: Path) -> None:
         path = tmp_path / "predictions.jsonl"
@@ -223,8 +225,12 @@ class TestReadClassifierOutput:
 
     @pytest.mark.parametrize("version", ["", "   "])
     def test_the_version_must_be_stated(self, tmp_path: Path, version: str) -> None:
-        with pytest.raises(ClassifierOutputError, match="classifier version"):
+        with pytest.raises(ClassifierOutputError, match="classifier version") as exc_info:
             read_classifier_output(write(tmp_path, row()), version)
+
+        assert str(exc_info.value) == (
+            "the classifier version must be stated; the output file does not name it"
+        )
 
 
 class TestCandidates:
@@ -272,3 +278,13 @@ class TestCandidates:
 
         with pytest.raises(ClassifierOutputError, match=SHA_B):
             output.candidates("0301", (SHA_A, SHA_B))
+
+    def test_all_missing_candidates_are_reported_sorted_once(self, tmp_path: Path) -> None:
+        output = read_classifier_output(write(tmp_path, row(SHA_A)), VERSION)
+
+        with pytest.raises(ClassifierOutputError) as exc_info:
+            output.candidates("0301", (SHA_C, SHA_B, SHA_C, SHA_A))
+
+        assert str(exc_info.value) == (
+            f"not enacted-regulation candidates of 0301: {SHA_B}, {SHA_C}"
+        )
