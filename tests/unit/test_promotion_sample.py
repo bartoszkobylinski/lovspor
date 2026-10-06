@@ -152,6 +152,15 @@ class TestDrawSample:
 
         assert draw_sample(population, seed, Decimal("0.25")) == expected
 
+    def test_a_seed_with_an_unpaired_surrogate_cannot_be_ranked(self) -> None:
+        seed = "batch-\ud800"
+
+        with pytest.raises(UnicodeEncodeError) as exc_info:
+            draw_sample((key(1),), seed, Decimal(1))
+
+        assert exc_info.value.object == f"{seed}\x1f{key(1).sha256}\x1f{key(1).source_url}"
+        assert exc_info.value.reason == "surrogates not allowed"
+
 
 #: Computed by hand from the documented rank (SHA-256 of seed, hash and URL), not by the code.
 PINNED = ["16", "17", "22", "3"]

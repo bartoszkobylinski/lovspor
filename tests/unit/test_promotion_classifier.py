@@ -212,12 +212,18 @@ class TestReadClassifierOutput:
 
         assert len(read_classifier_output(path, VERSION).artifacts) == 1
 
-    def test_bytes_that_are_not_utf8_are_refused(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("raw", [b"\xff\xfe\n", b"\xc3\n", b"\xed\xa0\x80\n"])
+    def test_bytes_that_are_not_utf8_are_refused(self, tmp_path: Path, raw: bytes) -> None:
         path = tmp_path / "predictions.jsonl"
-        path.write_bytes(b"\xff\xfe\n")
+        path.write_bytes(raw)
 
-        with pytest.raises(ClassifierOutputError, match="UTF-8"):
+        with pytest.raises(ClassifierOutputError, match="UTF-8") as exc_info:
             read_classifier_output(path, VERSION)
+
+        cause = exc_info.value.__cause__
+        assert isinstance(cause, UnicodeDecodeError)
+        assert cause.object == raw
+        assert str(exc_info.value) == f"the classifier output at {path} is not UTF-8: {cause}"
 
     def test_a_missing_file_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(ClassifierOutputError, match="cannot read"):
