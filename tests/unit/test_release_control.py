@@ -22,6 +22,7 @@ from lovspor.release.control import (
     ControlPlane,
     Situation,
     Triple,
+    _stage,
     commit_release,
     live_release,
     read_triple,
@@ -236,6 +237,22 @@ class TestCommit:
         commit_release(host.plane, host.a)
 
         assert host.plane.previous_fragment.read_bytes() == NON_ASCII_PLACEHOLDER.encode("utf-8")
+
+    def test_a_foreign_fragment_that_is_not_utf_8_is_refused_before_anything_is_staged(
+        self, host: Host
+    ) -> None:
+        """#555: the kept copy is read through the fragment's decode guard; a stray byte is a
+        named refusal before ``.previous`` or ``.next`` is written, not a traceback. Driven at
+        ``_stage``: the toy adapter decodes the fragment before a commit could reach it."""
+        foreign = b"# \xff foreign\n"
+        host.plane.fragment.write_bytes(foreign)
+
+        with pytest.raises(IncompleteEnvelopeError, match="release.caddy is not UTF-8"):
+            _stage(host.plane, host.fragment_of(host.a), None)
+
+        assert host.plane.fragment.read_bytes() == foreign
+        assert not host.plane.previous_fragment.exists()
+        assert not host.plane.next_fragment.exists()
 
     def test_the_fragment_and_the_marker_are_world_readable_whatever_the_umask(
         self, live_a: Host, strict_umask: None
@@ -881,6 +898,16 @@ class TestForeign:
 
         with pytest.raises(IncompleteEnvelopeError, match="release.caddy is not UTF-8"):
             reconcile(live_a.plane, "abandon")
+
+    def test_abandon_names_a_kept_copy_that_is_not_utf_8(self, host: Host) -> None:
+        """#555: with no marker the way back reads the kept copy; a stray byte there is the
+        same named refusal the marker's fragment gets, not a traceback."""
+        host.plane.fragment.write_text(host.fragment_of(host.b), encoding="utf-8")
+        host.plane.previous_fragment.write_bytes(b"# \xff foreign\n")
+
+        assert situation(read_triple(host.plane)) == Situation.staged
+        with pytest.raises(IncompleteEnvelopeError, match="release.caddy.previous is not UTF-8"):
+            reconcile(host.plane, "abandon")
 
     def test_abandon_with_nothing_ever_live_needs_the_kept_copy(self, host: Host) -> None:
         host.plane.fragment.write_text(host.fragment_of(host.b), encoding="utf-8")

@@ -27,6 +27,7 @@ from lovspor.release.envelope import (
     is_release_id,
     missing_parts,
     read_fragment,
+    read_fragment_file,
     read_marker,
     read_record,
     release_dir,
@@ -218,6 +219,24 @@ class TestFragment:
         assert str(caught.value).startswith(f"{ID_A}: {FRAGMENT_NAME} is not UTF-8: ")
         assert isinstance(caught.value.__cause__, UnicodeDecodeError)
         assert caught.value.__cause__.object.endswith(invalid)
+
+    @pytest.mark.parametrize(
+        ("content", "reason"), [(None, "is unreadable"), (b"# \xff\n", "is not UTF-8")]
+    )
+    def test_a_fragment_at_any_path_is_named_by_that_path(
+        self, tmp_path: Path, content: bytes | None, reason: str
+    ) -> None:
+        """#555: the kept copy beside the active fragment shares the envelope's guard, and
+        the refusal names the file read, not the envelope's fragment name."""
+        path = tmp_path / "caddy" / f"{FRAGMENT_NAME}.previous"
+        path.parent.mkdir()
+        if content is not None:
+            path.write_bytes(content)
+
+        with pytest.raises(IncompleteEnvelopeError) as caught:
+            read_fragment_file(path)
+
+        assert str(caught.value).startswith(f"caddy: {FRAGMENT_NAME}.previous {reason}: ")
 
 
 class TestRecord:

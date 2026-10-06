@@ -208,14 +208,20 @@ def write_fragment(root: Path, text: str) -> None:
 
 
 def read_fragment(root: Path) -> str:
-    """The fragment's text; a codec error is named, since revert and reconcile read it."""
+    """The envelope's fragment text, through :func:`read_fragment_file`'s guard."""
+    return read_fragment_file(root / FRAGMENT_NAME)
+
+
+def read_fragment_file(path: Path) -> str:
+    """A fragment's text at any path; a codec error is named, since revert and reconcile
+    read it — the envelope's, the active one and the kept copy alike (#555)."""
     try:
-        return (root / FRAGMENT_NAME).read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")
     except OSError as error:
-        message = f"{root.name}: {FRAGMENT_NAME} is unreadable: {error}"
+        message = f"{path.parent.name}: {path.name} is unreadable: {error}"
         raise IncompleteEnvelopeError(message) from error
     except UnicodeDecodeError as error:
-        message = f"{root.name}: {FRAGMENT_NAME} is not UTF-8: {error}"
+        message = f"{path.parent.name}: {path.name} is not UTF-8: {error}"
         raise IncompleteEnvelopeError(message) from error
 
 
