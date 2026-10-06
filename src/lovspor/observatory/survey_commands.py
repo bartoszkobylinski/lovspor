@@ -26,6 +26,7 @@ import httpx
 import typer
 
 from lovspor.observatory.commands import observatory_app
+from lovspor.observatory.fields import require_bare_host
 from lovspor.observatory.registry_io import _root
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.observatory.survey import SiteShape
@@ -98,11 +99,6 @@ def _tally(shapes: list[SiteShape]) -> None:
         typer.echo(f"  {entry}: {count}")
 
 
-#: Characters that end the host part of ``https://{host}/``. A path or scheme
-#: brings ``/``; a query, a fragment and user-info bring the other three.
-_NOT_IN_A_HOST = frozenset("/?#@")
-
-
 def _hosts_only(hosts: list[str]) -> None:
     """Refuse a URL where a host was asked for, before any request is made.
 
@@ -114,10 +110,15 @@ def _hosts_only(hosts: list[str]) -> None:
     sitemap check silently reads the front page instead; user-info is worse:
     ``kommune.no@evil.example`` probes evil.example under kommune.no's name
     (issue #551).
+
+    The check is the register's own (issue #557), so a host the survey probes
+    is one ``register-source`` would accept.
     """
     for host in hosts:
-        if _NOT_IN_A_HOST.intersection(host):
-            _refuse(f"Refused: a host without scheme or path was expected, got: {host}")
+        try:
+            require_bare_host(host)
+        except ValueError as exc:
+            _refuse(f"Refused: {exc}")
 
 
 def _refuse(message: str) -> NoReturn:

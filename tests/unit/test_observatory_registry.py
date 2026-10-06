@@ -1490,3 +1490,39 @@ class TestMandatoryFieldsRefuseWhitespace:
         """The register is fingerprinted and rewritten from what was read, so
         validation refuses blanks without editing anything it accepts."""
         assert check(reviewed_by=" project owner ").reviewed_by == " project owner "
+
+
+class TestTheCanonicalDomainIsABareHost:
+    """Issue #557. The register is the cleared-domain boundary (ADR-0010), so a
+    stored domain that is not a bare host is refused by the type, not three
+    steps later when the robots URL's host fails to match it."""
+
+    @pytest.mark.parametrize(
+        "not_a_host",
+        [
+            "testby.example.invalid/path",
+            "testby.example.invalid?x",
+            "testby.example.invalid#y",
+            "testby.example.invalid@evil.example",
+            "https://testby.example.invalid",
+            "testby.example.invalid:8443",
+            "testby .example.invalid",
+            " testby.example.invalid",
+            "testby.example.invalid\n",
+        ],
+    )
+    def test_a_domain_carrying_anything_but_a_host_is_refused(self, not_a_host: str) -> None:
+        fields = eligible_source().model_dump() | {"canonical_domain": not_a_host}
+
+        with pytest.raises(ValidationError, match="a host without scheme or path"):
+            SourceRecord.model_validate(fields)
+
+    @pytest.mark.parametrize(
+        "host", ["testby.example.invalid", "TESTBY.example.invalid", "testby.example.invalid."]
+    )
+    def test_a_bare_host_is_stored_exactly_as_given(self, host: str) -> None:
+        """Case and a trailing dot are spellings of one host, compared through
+        `normalised_domain`; the type leaves them alone."""
+        fields = eligible_source().model_dump() | {"canonical_domain": host}
+
+        assert SourceRecord.model_validate(fields).canonical_domain == host

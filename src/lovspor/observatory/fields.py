@@ -37,5 +37,28 @@ def _trim_and_refuse_blank(value: str) -> str:
     return _refuse_blank(value.strip())
 
 
+#: Characters that end the host part of ``https://{host}/``. A scheme or path
+#: brings ``/``; a query, a fragment and user-info bring ``? # @``; a port
+#: brings ``:``. No stored domain has ever carried a port (the live register
+#: holds 263 bare hosts), so one is refused rather than kept as an option.
+_NOT_IN_A_HOST = frozenset("/?#@:")
+
+
+def require_bare_host(value: str) -> str:
+    """``value`` when it names a host and nothing else, or ``ValueError``.
+
+    Shared by the register's ``canonical_domain`` and the survey's hosts
+    (issue #557): a domain is interpolated into ``https://{host}/``, and
+    ``kommune.no@evil.example`` there sends the request to evil.example under
+    kommune.no's name. Refused, never rewritten — the caller sees what it typed.
+    """
+    if _NOT_IN_A_HOST.intersection(value) or any(char.isspace() for char in value):
+        raise ValueError(f"a host without scheme or path was expected, got: {value!r}")
+    return value
+
+
 NonBlankStr = Annotated[str, Field(min_length=1), AfterValidator(_refuse_blank)]
 TrimmedNonBlankStr = Annotated[str, Field(min_length=1), AfterValidator(_trim_and_refuse_blank)]
+#: A bare host, stored exactly as given: case and a trailing dot are spellings
+#: of one host, and comparisons normalise them (``registry.normalised_domain``).
+BareHostStr = Annotated[NonBlankStr, AfterValidator(require_bare_host)]

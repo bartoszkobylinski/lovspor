@@ -3,7 +3,12 @@
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from lovspor.observatory.fields import NonBlankStr, TrimmedNonBlankStr
+from lovspor.observatory.fields import (
+    BareHostStr,
+    NonBlankStr,
+    TrimmedNonBlankStr,
+    require_bare_host,
+)
 
 BLANKS = ["", " ", "\t", "\n", " \t ", "\u00a0", "\u2003"]
 
@@ -54,3 +59,47 @@ class TestTrimmedNonBlankStr:
 
     def test_inner_whitespace_is_kept(self) -> None:
         assert _Trimmed(value=" a  b ").value == "a  b"
+
+
+class _Host(BaseModel):
+    value: BareHostStr
+
+
+class TestBareHostStr:
+    """Issue #557: one host check for the register and the survey."""
+
+    @pytest.mark.parametrize(
+        "not_a_host",
+        [
+            "kommune.no/path",
+            "kommune.no?x",
+            "kommune.no#y",
+            "kommune.no@evil.example",
+            "kommune.no:443",
+            "kom mune.no",
+            "kommune.no\t",
+            "\N{NO-BREAK SPACE}kommune.no",
+        ],
+    )
+    def test_anything_but_a_bare_host_is_refused(self, not_a_host: str) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            _Host(value=not_a_host)
+
+        assert exc_info.value.errors()[0]["msg"] == (
+            f"Value error, a host without scheme or path was expected, got: {not_a_host!r}"
+        )
+
+    @pytest.mark.parametrize("blank", BLANKS)
+    def test_a_blank_host_is_refused(self, blank: str) -> None:
+        with pytest.raises(ValidationError):
+            _Host(value=blank)
+
+    def test_a_bare_host_is_kept_as_given(self) -> None:
+        assert _Host(value="Baerum.Kommune.No.").value == "Baerum.Kommune.No."
+
+    def test_the_plain_check_returns_the_host(self) -> None:
+        assert require_bare_host("kommune.no") == "kommune.no"
+
+    def test_the_plain_check_refuses_with_the_same_words(self) -> None:
+        with pytest.raises(ValueError, match="a host without scheme or path was expected"):
+            require_bare_host("kommune.no@evil.example")

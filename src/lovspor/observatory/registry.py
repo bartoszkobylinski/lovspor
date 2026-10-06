@@ -33,7 +33,7 @@ from lovspor.errors import (
     SourceNotActivatedError,
     StaleSourceError,
 )
-from lovspor.observatory.fields import NonBlankStr
+from lovspor.observatory.fields import BareHostStr, NonBlankStr
 from lovspor.observatory.model import AuthorityType, require_utc
 from lovspor.observatory.storage import ObservatoryRoot
 
@@ -192,7 +192,7 @@ class SourceRecord(BaseModel):
     authority_type: AuthorityType
     authority_id: NonBlankStr
     name: NonBlankStr
-    canonical_domain: NonBlankStr
+    canonical_domain: BareHostStr
     #: Overview pages to read as a second entry into discovery (issue #151).
     #: Declared by a human at activation, one per listing, because "this URL is
     #: an index of documents" is a judgement about a page and not something to

@@ -470,6 +470,38 @@ class TestWhereTheListComesFrom:
         assert "scheme" in result.output.lower()
         assert not (root / "survey").exists()
 
+    @pytest.mark.parametrize("not_a_host", [f"{DOMAIN}:8443", "example .invalid", f" {DOMAIN}"])
+    def test_a_port_or_whitespace_is_refused_by_the_shared_host_check(
+        self, root: Path, not_a_host: str
+    ) -> None:
+        """Issue #557: the survey and the register share one host check, so
+        a host the register would refuse is not probed either."""
+        with patch("lovspor.observatory.survey_commands.SiteProbe.read") as read:
+            result = runner.invoke(
+                app, ["observatory", "survey", "--domain", not_a_host, "--delay", "0"]
+            )
+
+        read.assert_not_called()
+        assert result.exit_code == 2
+        assert "host without scheme or path" in result.output
+        assert not (root / "survey").exists()
+
+    def test_a_listed_host_with_a_port_is_refused_before_any_request(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        listing = tmp_path / "domains.txt"
+        listing.write_text(f"{OTHER}\n{DOMAIN}:8443\n", encoding="utf-8")
+
+        with patch("lovspor.observatory.survey_commands.SiteProbe.read") as read:
+            result = runner.invoke(
+                app, ["observatory", "survey", "--from", str(listing), "--delay", "0"]
+            )
+
+        read.assert_not_called()
+        assert result.exit_code == 2
+        assert f"{DOMAIN}:8443" in result.output
+        assert not (root / "survey").exists()
+
     @pytest.mark.parametrize(
         "not_a_host",
         [f"{DOMAIN}?preview=true", f"{DOMAIN}#section", f"operator@{DOMAIN}"],
