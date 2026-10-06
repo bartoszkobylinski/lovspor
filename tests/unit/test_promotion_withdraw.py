@@ -18,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 from typer.testing import Result
 
-from lovspor.errors import CorpusNotFoundError
+from lovspor.errors import CorpusNotFoundError, DecisionLogError
 from lovspor.mcp import CorpusReader
 from lovspor.mcp_local import ServedCorpus
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
@@ -31,6 +31,7 @@ from lovspor.promotion.decisions import (
 )
 from lovspor.promotion.models import RemovedReason
 from lovspor.promotion.withdraw import apply_withdrawal, locate_document, withdrawal_record
+from lovspor.promotion.writer import ObservationsFile, observations_text
 from tests.unit.promotion_cli_fixtures import (
     AUTHORITY,
     FIRST_SEEN,
@@ -53,6 +54,72 @@ LOCAL = "lokale-forskrifter"
 LF_LINES = (REGULATION_LINES[0], "Dato: FOR-2019-12-12-2077", *REGULATION_LINES[1:])
 LF_ID = "lf-20191212-2077"
 WITHDRAW_REASON = "Klassifisert feil: siden er en høring, ikke en vedtatt forskrift."
+
+
+def test_failed_withdrawal_recording_leaves_the_corpus_untouched(
+    root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Operations step 6 records the decision before changing the checkout."""
+    _promoted(root, corpus, tmp_path, html_page(LF_LINES), PAGE_URL)
+    slug = _manifest(corpus)[LF_ID]["slug"]
+    before, log_before = tree(corpus), _log_lines(root)
+
+    def fail_append(self: object, record: WithdrawalRecord) -> None:
+        assert record.doc_id == LF_ID
+        raise DecisionLogError("withdrawal log unavailable")
+
+    monkeypatch.setattr("lovspor.promotion.decisions.DecisionLog.append", fail_append)
+    result = _withdraw(corpus, slug, _withdrawal(tmp_path))
+
+    assert result.exit_code == 1, result.output
+    assert "withdrawal log unavailable" in result.output
+    assert tree(corpus) == before
+    assert _log_lines(root) == log_before
+
+
+def test_withdrawal_is_recorded_before_the_first_corpus_write(
+    root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The durable record must already exist when checkout application begins."""
+    _promoted(root, corpus, tmp_path, html_page(LF_LINES), PAGE_URL)
+    slug = _manifest(corpus)[LF_ID]["slug"]
+    before, log_before = tree(corpus), _log_lines(root)
+    applied: list[WithdrawalRecord] = []
+
+    def checked_apply(checkout: CorpusCheckout, record: WithdrawalRecord) -> object:
+        assert tree(corpus) == before
+        assert _log_lines(root) == [*log_before, record.model_dump(mode="json")]
+        applied.append(record)
+        return apply_withdrawal(checkout, record)
+
+    monkeypatch.setattr("lovspor.promotion.commands.apply_withdrawal", checked_apply)
+    result = _withdraw(corpus, slug, _withdrawal(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    assert len(applied) == 1
+    assert _manifest(corpus)[LF_ID]["status"] == "removed"
+
+
+@pytest.mark.parametrize("withdrawn", [False, True])
+def test_observations_serialization_is_byte_stable_across_round_trips(
+    root: Path, corpus: Path, tmp_path: Path, withdrawn: bool
+) -> None:
+    """The new optional notice preserves canonical bytes, including old files."""
+    _promoted(root, corpus, tmp_path, html_page(LF_LINES), PAGE_URL)
+    slug = _manifest(corpus)[LF_ID]["slug"]
+    if withdrawn:
+        result = _withdraw(corpus, slug, _withdrawal(tmp_path))
+        assert result.exit_code == 0, result.output
+    path = corpus / LOCAL / AUTHORITY / "observations" / f"{slug}.json"
+    original = path.read_bytes()
+    document = ObservationsFile.model_validate_json(original)
+
+    first = observations_text(document).encode("utf-8")
+    second = observations_text(ObservationsFile.model_validate_json(first)).encode("utf-8")
+
+    assert first == second == original
+    assert ("withdrawal" in json.loads(first)) is withdrawn
+    assert first.endswith(b"\n")
 
 
 @pytest.fixture
