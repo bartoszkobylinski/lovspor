@@ -395,9 +395,6 @@ class TestTheRecord:
             check_envelope(envelope)
         assert str(caught.value) == "release.json corpus summary names another corpus commit"
 
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
     @pytest.mark.parametrize(
         ("field", "value"),
         [
@@ -426,7 +423,6 @@ class TestTheRecord:
             check_envelope(envelope)
         assert str(caught.value) == "release.json observed_at is not the capability document's"
 
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
     def test_must_carry_the_documents_observer(self, envelope: Path) -> None:
         """Both observation provenance fields must come from the capability document."""
         record = _json(envelope / RECORD_NAME)
