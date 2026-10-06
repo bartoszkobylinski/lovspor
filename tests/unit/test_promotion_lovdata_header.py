@@ -97,3 +97,52 @@ def test_a_regulation_whose_preamble_names_its_hjemmel_still_extracts() -> None:
     lines = ("Hjemmel: lov 19. juni 2009 nr. 100 § 34", *REGULATION_LINES)
     result = extract_regulation(html_page(lines), "text/html; charset=utf-8")
     assert isinstance(result, ExtractedDocument)
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r\n", "\r"])
+def test_repeated_field_names_do_not_reach_the_distinct_field_threshold(separator: str) -> None:
+    lines = (HEADER[0], HEADER[1], HEADER[1], HEADER[1])
+    assert not has_lovdata_header(separator.join(lines))
+
+
+@pytest.mark.parametrize("distance, expected", [(10, True), (11, False)])
+@pytest.mark.parametrize("anchor_first", [True, False])
+def test_block_window_counts_blank_lines_in_both_directions(
+    distance: int, expected: bool, anchor_first: bool
+) -> None:
+    lines = (HEADER[0], HEADER[1], *("" for _ in range(distance - 2)), HEADER[5])
+    if not anchor_first:
+        lines = tuple(reversed(lines))
+    assert has_lovdata_header("\n".join(lines)) is expected
+
+
+def test_a_later_dated_block_is_found_after_an_isolated_date() -> None:
+    lines = (HEADER[0], *("" for _ in range(11)), *HEADER[:3])
+    assert has_lovdata_header("\n".join(lines))
+
+
+def test_spacing_variants_of_one_field_still_count_as_one_name() -> None:
+    lines = ("\tDato :\tFOR-2010-12-17-9001", " Gjelder\tfor: Eksempel", "Gjelder  for: x")
+    assert not has_lovdata_header("\r\n".join(lines))
+    assert has_lovdata_header("\r\n".join((*lines, "\tSist\tendret : x")))
+
+
+def test_field_names_embedded_in_prose_do_not_form_a_block() -> None:
+    lines = (HEADER[0], "Se Publisert: II 2010 hefte 5", "Se Korttittel: Eksempel")
+    assert not has_lovdata_header("\n".join(lines))
+
+
+@pytest.mark.parametrize("dated", ["Dato: FOR-2010-12-17", "Dato: FOR-2010-12-17-", "Dato:"])
+def test_an_incomplete_id_does_not_anchor_a_block(dated: str) -> None:
+    assert not has_lovdata_header("\n".join((dated, *HEADER[1:])))
+
+
+def test_an_html_pasted_copy_is_held_deterministically() -> None:
+    payload = html_page((*HEADER, *REGULATION_LINES))
+    held = extract_regulation(payload, "text/html; charset=utf-8")
+    assert isinstance(held, HeldExtraction)
+    assert (held.reason, held.detail) == (
+        ExtractionHoldReason.LOVDATA_COPY,
+        "the text carries Lovdata's metadata block",
+    )
+    assert extract_regulation(payload, "text/html; charset=utf-8") == held
