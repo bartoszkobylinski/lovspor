@@ -269,7 +269,8 @@ def preview_impl(request: Request) -> None:
     if isinstance(prepared, Held):
         _echo_held(prepared)
         raise typer.Exit(HELD_EXIT_CODE)
-    refuse_withdrawn(decisions, context.key, prepared.identity.doc_id)
+    # The artifact itself was refused by _standing; only the document is new here.
+    refuse_withdrawn(decisions, None, prepared.identity.doc_id)
     typer.echo(f"id: {prepared.identity.doc_id}  version: {prepared.version}")
     typer.echo(f"path: {prepared.markdown_path}")
     typer.echo(f"content_hash: {prepared.identity.content_hash}")
@@ -291,7 +292,8 @@ def local_impl(request: Request, now: datetime) -> None:
     if isinstance(prepared, Held):
         _record_held(decisions, context.key, prepared, now)
         raise typer.Exit(HELD_EXIT_CODE)
-    refuse_withdrawn(decisions, context.key, prepared.identity.doc_id)
+    # The artifact itself was refused by _standing; only the document is new here.
+    refuse_withdrawn(decisions, None, prepared.identity.doc_id)
     approval = require_approval(decision, prepared)
     if prepared.unchanged:
         typer.echo(f"Unchanged: {prepared.identity.doc_id} v{prepared.version} is already at")

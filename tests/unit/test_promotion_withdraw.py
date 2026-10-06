@@ -590,6 +590,8 @@ class TestModels:
         assert withdrawal.withdraws(other, LF_ID)
         assert not withdrawal.withdraws(other, None)
         assert not withdrawal.withdraws(other, "lf-20200101-0001")
+        assert withdrawal.withdraws(None, LF_ID)
+        assert not withdrawal.withdraws(None, None)
 
 
 @pytest.mark.parametrize("markdown_present", [True, False])

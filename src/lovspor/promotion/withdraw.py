@@ -112,7 +112,7 @@ def apply_withdrawal(corpus: CorpusCheckout, withdrawal: WithdrawalRecord) -> Wi
     )
 
 
-def refuse_withdrawn(decisions: DecisionLog, key: ArtifactKey, doc_id: str | None) -> None:
+def refuse_withdrawn(decisions: DecisionLog, key: ArtifactKey | None, doc_id: str | None) -> None:
     """Refuse to go on with an artifact, or a document, the decision log withdrew."""
     withdrawal = decisions.withdrawal_of(key, doc_id)
     if withdrawal is None:

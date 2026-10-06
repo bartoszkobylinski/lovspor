@@ -338,7 +338,7 @@ class WithdrawalRecord(BaseModel):
         _refuse_the_name(self.decided_by, _published(self.reviewer_role, self.reason, None))
         return self
 
-    def withdraws(self, key: ArtifactKey, doc_id: str | None) -> bool:
+    def withdraws(self, key: ArtifactKey | None, doc_id: str | None) -> bool:
         """True when this withdrawal covers ``key`` or the document ``doc_id``."""
         return key in self.artifacts or self.doc_id == doc_id
 
@@ -390,7 +390,7 @@ class DecisionLog:
         ]
         return found[-1] if found else None
 
-    def withdrawal_of(self, key: ArtifactKey, doc_id: str | None) -> WithdrawalRecord | None:
+    def withdrawal_of(self, key: ArtifactKey | None, doc_id: str | None) -> WithdrawalRecord | None:
         """The first withdrawal covering ``key`` or ``doc_id``; a withdrawal is never undone."""
         for record in self.records():
             if isinstance(record, WithdrawalRecord) and record.withdraws(key, doc_id):
