@@ -26,7 +26,13 @@ import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+)
 
 from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import PromotionRefusedError
@@ -36,6 +42,7 @@ from lovspor.promotion.corpus import manifest_text as render_manifest
 from lovspor.promotion.decisions import HumanDecision, IdentityAudit, PromotionAudit, utc_text
 from lovspor.promotion.plan import Prepared
 from lovspor.promotion.render import LOCAL_RENDERER_VERSION
+from lovspor.promotion.versions import ExcludedObservation
 
 _NLOD = re.compile(r"nlod", re.IGNORECASE)
 
@@ -67,6 +74,15 @@ class ObservationsFile(BaseModel):
     authority_id: str
     versions: tuple[VersionObservations, ...]
     source_status: SourceStatus
+    excluded: tuple[ExcludedObservation, ...] = ()
+
+    @model_serializer(mode="wrap")
+    def _omit_nothing_excluded(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """``excluded`` is written only when something was, so a file without it keeps its bytes."""
+        data: dict[str, object] = handler(self)
+        if not self.excluded:
+            data.pop("excluded", None)
+        return data
 
 
 class WriteSet(BaseModel):
@@ -158,6 +174,11 @@ def _observations(
         versions=(*earlier, entry),
         source_status=artifact.source_status,
     )
+    return _json(document)
+
+
+def observations_text(document: ObservationsFile) -> str:
+    """``observations/<slug>.json`` as it is written: sorted keys, indented, final newline."""
     return _json(document)
 
 
