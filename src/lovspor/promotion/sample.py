@@ -19,8 +19,10 @@ never samples nothing from a non-empty batch.
 from __future__ import annotations
 
 import hashlib
+import math
 from collections.abc import Iterable
-from decimal import ROUND_CEILING, Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 
 from lovspor.errors import PromotionRefusedError
 from lovspor.promotion.decisions import ArtifactKey
@@ -42,8 +44,13 @@ def parse_sample_rate(text: str) -> Decimal:
 
 
 def sample_size(rate: Decimal, population: int) -> int:
-    """The rate times the population, rounded up."""
-    return int((rate * population).to_integral_value(rounding=ROUND_CEILING))
+    """The rate times the population, rounded up.
+
+    Computed as an exact fraction: a Decimal product is first rounded to the
+    context's precision, which can land a rate just above a whole item on it
+    and shrink the review sample by one.
+    """
+    return math.ceil(Fraction(rate) * population)
 
 
 def draw_sample(

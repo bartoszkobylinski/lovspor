@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 import pytest
 
@@ -58,6 +58,15 @@ class TestSampleSize:
         self, rate: Decimal, population: int, expected: int
     ) -> None:
         assert sample_size(rate, population) == expected
+
+    def test_a_rate_past_the_context_precision_still_rounds_up(self) -> None:
+        """A Decimal product is rounded to the context's 28 digits before the
+        ceiling, so 0.5000…0001 x 2 came out as exactly 1 and the review
+        sample shrank by an item (Codex test on PR #564)."""
+        rate = parse_sample_rate("0.50000000000000000000000000001")
+        with localcontext() as context:
+            context.prec = 28
+            assert sample_size(rate, 2) == 2
 
 
 class TestDrawSample:
