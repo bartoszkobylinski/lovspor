@@ -98,15 +98,25 @@ def _tally(shapes: list[SiteShape]) -> None:
         typer.echo(f"  {entry}: {count}")
 
 
+#: Characters that end the host part of ``https://{host}/``. A path or scheme
+#: brings ``/``; a query, a fragment and user-info bring the other three.
+_NOT_IN_A_HOST = frozenset("/?#@")
+
+
 def _hosts_only(hosts: list[str]) -> None:
     """Refuse a URL where a host was asked for, before any request is made.
 
     The probe builds ``https://{host}/`` itself, so a scheme or path here
     yields ``https://https://x/`` — three requests to nothing, an exit code
     of 0, and a log row that says the host was reached and answered nothing.
+
+    A query or fragment swallows the ``/sitemap.xml`` appended after it, so the
+    sitemap check silently reads the front page instead; user-info is worse:
+    ``kommune.no@evil.example`` probes evil.example under kommune.no's name
+    (issue #551).
     """
     for host in hosts:
-        if "/" in host:
+        if _NOT_IN_A_HOST.intersection(host):
             _refuse(f"Refused: a host without scheme or path was expected, got: {host}")
 
 
