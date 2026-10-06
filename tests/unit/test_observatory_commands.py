@@ -109,6 +109,16 @@ ROBOTS_URL = f"https://www.{BAERUM_DOMAIN}/robots.txt"
 USER_AGENT = "lovspor-observatory/0.1 (+https://lovspor.no/observatory)"
 HEARTBEAT = "https://hc.example.invalid/abc123"
 PERMISSIVE_ROBOTS = "User-agent: *\nAllow: /\n"
+#: Every way a --domain can carry more than a host (issue #557).
+NOT_A_HOST = [
+    "baerum.no/path",
+    "baerum.no?x",
+    "baerum.no#y",
+    "baerum.no@evil.example",
+    "https://baerum.no",
+    "baerum.no:8443",
+    "bae rum.no",
+]
 _HTTP: list[HTTPXMock] = []
 _SERVED: list[str] = []
 
@@ -331,6 +341,30 @@ class TestRegisterSource:
 
         assert isinstance(result.exception, SystemExit)
         assert result.exit_code == 1
+        assert not (root / "sources.json").exists()
+
+    @pytest.mark.parametrize("not_a_host", NOT_A_HOST)
+    def test_a_domain_that_is_not_a_bare_host_is_refused(self, root: Path, not_a_host: str) -> None:
+        """Issue #557. The register is the cleared-domain boundary (ADR-0010);
+        `kommune.no@evil.example` is the user-info form that sends httpx to
+        evil.example, so it is refused when written, by the command."""
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                BAERUM_ID,
+                "--name",
+                "Bærum",
+                "--domain",
+                not_a_host,
+            ],
+        )
+
+        assert isinstance(result.exception, SystemExit)
+        assert result.exit_code == 1
+        assert "a host without scheme or path was expected" in result.stderr
         assert not (root / "sources.json").exists()
 
 
@@ -5363,6 +5397,37 @@ class TestReplaceSourceDomain:
         self._replace()
 
         assert read_registry(root / "sources.json").sources[BAERUM_ID].listing_entry_points == ()
+
+    @pytest.mark.parametrize("not_a_host", NOT_A_HOST)
+    def test_a_domain_that_is_not_a_bare_host_is_refused_and_nothing_is_written(
+        self, root: Path, not_a_host: str
+    ) -> None:
+        """Issue #557. Moving onto `baerum.no@evil.example` would store the
+        user-info form as the cleared domain; the move is refused before
+        either half of it — the register or the event — is written."""
+        _activate(root)
+        before = (root / "sources.json").read_bytes()
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                BAERUM_ID,
+                "--domain",
+                not_a_host,
+                "--reason",
+                "moved",
+                "--by",
+                "Bartosz Kobyliński",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "a host without scheme or path was expected" in result.stderr
+        assert (root / "sources.json").read_bytes() == before
+        assert self._events(root) == []
 
     def test_an_unregistered_source_is_refused(self, root: Path) -> None:
         root.mkdir(parents=True, exist_ok=True)
