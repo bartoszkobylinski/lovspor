@@ -391,6 +391,27 @@ class TestPassThrough:
         assert slugs(dataset="forskrifter") == ["proveforskriften"]
         assert len(slugs(limit=1)) == 1
 
+    @pytest.mark.parametrize("recorded_at", [None, "2026-09-03"])
+    def test_verify_quote_keeps_occurrence_and_state(
+        self, versioned: Path, recorded_at: str | None
+    ) -> None:
+        stamp = {} if recorded_at is None else {"recorded_at": recorded_at}
+
+        def verified(occurrence: int) -> Any:
+            return _structured(
+                versioned,
+                "verify_quote",
+                slug="ordensloven",
+                section_id="2",
+                quote="En annen paragraf",
+                occurrence=occurrence,
+                **stamp,
+            )
+
+        assert verified(2)["verified"] is True
+        assert verified(1)["verified"] is False
+        assert verified(2).get("recorded_at") == recorded_at
+
     def test_a_cross_reference_to_a_central_law_reads_the_central_index(self, corpus: Path) -> None:
         _append(
             corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md",

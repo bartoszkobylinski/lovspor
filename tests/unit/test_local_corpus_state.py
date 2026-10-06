@@ -1,4 +1,4 @@
-"""The local dataset read from one corpus commit, for ``recorded_at`` (ADR-0016 5; #569)."""
+"""The local dataset read from one corpus commit, and its observation files (ADR-0016 5; S7)."""
 
 from __future__ import annotations
 
@@ -112,3 +112,71 @@ def local_address_of_commit(corpus: Path) -> str:
     text = dated_git(corpus, "x", "show", f"HEAD:{LOCAL}/manifest.json")
     [record] = json.loads(text)["documents"].values()
     return f"{record['authority_id']}/{record['slug']}"
+
+
+class TestObservations:
+    def test_the_file_reads_with_the_s6_model(self, corpus: Path) -> None:
+        local = LocalDataset(corpus)
+        served = local.document(local_address(corpus))
+
+        observed = local.observations(served)
+
+        assert [v.version for v in observed.versions] == [1, 2, 3]
+        assert observed.doc_id == served.doc_id
+
+    def test_a_file_of_another_document_is_refused(self, corpus: Path) -> None:
+        path = _observations_path(corpus)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        local = LocalDataset(corpus)
+        served = local.document(local_address(corpus))
+        path.write_text(json.dumps({**payload, "doc_id": "lk-0301-000000000000"}), "utf-8")
+
+        with pytest.raises(
+            LocalCorpusError, match="holds the observations of lk-0301-000000000000"
+        ):
+            local.observations(served)
+
+    def test_a_file_without_versions_is_refused(self, corpus: Path) -> None:
+        path = _observations_path(corpus)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        local = LocalDataset(corpus)
+        served = local.document(local_address(corpus))
+        path.write_text(json.dumps({**payload, "versions": []}), "utf-8")
+
+        with pytest.raises(LocalCorpusError, match="lists no promoted version"):
+            local.observations(served)
+
+    def test_a_file_off_its_contract_is_refused(self, corpus: Path) -> None:
+        path = _observations_path(corpus)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        local = LocalDataset(corpus)
+        served = local.document(local_address(corpus))
+        path.write_text(json.dumps({**payload, "schema_version": 2}), "utf-8")
+
+        with pytest.raises(LocalCorpusError, match="does not read as the observations file"):
+            local.observations(served)
+
+
+class TestVersionText:
+    def test_the_current_version_is_the_file_itself(self, corpus: Path) -> None:
+        local = LocalDataset(corpus)
+        served = local.document(local_address(corpus))
+
+        text = local.version_text(served, 3, served.record.content_hash)
+
+        assert text == served.markdown
+
+    def test_a_number_with_another_hash_is_not_that_version(self, corpus: Path) -> None:
+        local = LocalDataset(corpus)
+        served = local.document(local_address(corpus))
+
+        with pytest.raises(LocalCorpusError, match="v2 of .* is not in this checkout's history"):
+            local.version_text(served, 2, served.record.content_hash)
+
+    def test_a_checkout_without_history_cannot_read_an_old_version(self, corpus: Path) -> None:
+        shutil.rmtree(corpus / ".git")
+        local = LocalDataset(corpus)
+        served = local.document(local_address(corpus))
+
+        with pytest.raises(LocalCorpusError, match="has no history to read v1 from"):
+            local.version_text(served, 1, served.record.content_hash)

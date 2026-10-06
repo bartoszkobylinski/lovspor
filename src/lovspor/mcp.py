@@ -3265,7 +3265,7 @@ def _build_embedder() -> EmbeddingModel | None:
     this function used to re-implement provider-side knowledge of.
 
     Returns None rather than raising in every failure mode, because the server
-    hosts sixteen tools that need no embedding provider at all: a missing
+    hosts seventeen tools that need no embedding provider at all: a missing
     credential or a misconfigured provider must cost ``semantic_search`` and
     nothing else. The reason is printed once at startup and repeated in
     ``semantic_search``'s own error, so it is not lost in a scrollback.
@@ -3282,7 +3282,7 @@ def _build_embedder() -> EmbeddingModel | None:
     except ConfigError as exc:
         print(
             f"lovspor mcp: embedding provider not configured: {exc} "
-            "semantic_search will be disabled; the other sixteen tools work normally.",
+            "semantic_search will be disabled; the other seventeen tools work normally.",
             file=sys.stderr,
             flush=True,
         )
@@ -3290,7 +3290,7 @@ def _build_embedder() -> EmbeddingModel | None:
     if embedder is None:
         print(
             "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
-            "but the other sixteen tools work normally. Set OPENAI_API_KEY "
+            "but the other seventeen tools work normally. Set OPENAI_API_KEY "
             "and restart to enable semantic search.",
             file=sys.stderr,
             flush=True,
@@ -4098,7 +4098,7 @@ def build_server(
     the OpenAI embedder at startup (so a malformed key surfaces
     immediately, not on the first tool call); if it is not set we
     log a warning and disable ``semantic_search`` with a clear
-    runtime error. The other sixteen tools do not need the embedder
+    runtime error. The other seventeen tools do not need the embedder
     so they continue to work without an OpenAI key — refusing to
     start the whole server over one optional dependency would be
     user-hostile.
@@ -4248,7 +4248,9 @@ def build_server(
         ``slug`` may address a local regulation as ``get_law`` describes;
         the response then carries ``doc_id``, ``dataset`` and
         ``observation`` (``asserted: false``) instead of
-        ``temporal_notice``, and ``recorded_at`` is refused for it.
+        ``temporal_notice``. ``recorded_at`` works for it as above, plus
+        ``content_hash``: the corpus on that date, never when the website
+        was observed (that is ``get_observation_history``'s ``observed_at``).
         """
         return served.get_section(slug, section_id, occurrence, recorded_at)
 
@@ -4763,11 +4765,7 @@ def build_server(
         resolved in that state — ``xml_hash``. Dates before the corpus
         start fail with the boundary outcome; future dates are refused.
         """
-        return (
-            reader.at_state(recorded_at).verify_quote(slug, section_id, quote, occurrence)
-            if recorded_at is not None
-            else reader.verify_quote(slug, section_id, quote, occurrence)
-        )
+        return served.verify_quote(slug, section_id, quote, (occurrence, recorded_at))
 
     @_tool()
     def get_eu_basis(slug: str) -> dict[str, Any]:
@@ -4865,6 +4863,7 @@ def build_server(
         """
         return reader.corpus_status()
 
+    served.register(_tool)
     return mcp
 
 

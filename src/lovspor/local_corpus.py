@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
@@ -42,7 +43,9 @@ from lovspor.promotion.corpus import (
     LocalManifest,
     LocalRecord,
 )
+from lovspor.promotion.writer import ObservationsFile
 from lovspor.snapshot import CorpusSnapshot, StateIntegrityError
+from lovspor.timetravel import _iter_follow_log, _read_blob
 
 __all__ = [
     "LOCAL_DATASET",
@@ -127,6 +130,7 @@ class _FrontMatter(BaseModel):
     id: str
     authority: ObservedAuthority
     version: int
+    content_hash: str
     observed_at_first: str
     source_url: str
 
@@ -201,6 +205,38 @@ class LocalDataset:
             record=record,
             markdown=markdown,
             observation=self._observation(doc_id, record, (markdown_path, markdown)),
+        )
+
+    def observations(self, served: ServedLocal) -> ObservationsFile:
+        """``observations/<slug>.json`` of ``served``, read with the model S6 writes it with."""
+        path, text = self._read(_observations_path(served.record.markdown_path))
+        try:
+            observed = ObservationsFile.model_validate_json(text)
+        except ValidationError as exc:
+            raise LocalCorpusError(f"{path} does not read as the observations file: {exc}") from exc
+        if observed.doc_id != served.doc_id:
+            raise LocalCorpusError(f"{path} holds the observations of {observed.doc_id}")
+        if not observed.versions:
+            raise LocalCorpusError(f"{path} lists no promoted version of {served.doc_id}")
+        return observed
+
+    def version_text(self, served: ServedLocal, version: int, content_hash: str) -> str:
+        """The rendering of ``version``: the file itself when current, else from its history."""
+        if (served.record.version, served.record.content_hash) == (version, content_hash):
+            return served.markdown
+        relative = served.record.markdown_path
+        try:
+            revisions = _iter_follow_log(self._root, relative)
+        except subprocess.CalledProcessError as exc:
+            raise LocalCorpusError(f"{relative} has no history to read v{version} from") from exc
+        for revision in revisions:
+            text = _read_blob(self._root, revision.sha, revision.path)
+            front = _front_matter(Path(revision.path), text)
+            if (front.version, front.content_hash) == (version, content_hash):
+                return text
+        raise LocalCorpusError(
+            f"v{version} of {served.doc_id} is not in this checkout's history of {relative}; "
+            "a shallow clone cannot reach it",
         )
 
     def matches(self, query: str) -> list[LocalEntry]:

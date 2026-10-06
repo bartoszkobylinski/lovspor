@@ -1,0 +1,27 @@
+{
+  "description": "Apparatus surface after ADR-0016 slice S7: get_observation_history is added, the second tool-NAME change since v1 (seventeen tools become eighteen). It serves ONLY local regulations (an <authority_id>/<slug> or lf-/lk- address): every version observed on the authority's website with its observation interval, and for an observed_at instant one typed outcome (contained, between_observations, before_first_observation, after_last_observation). Its observed_at is the observation axis only and no other tool takes it. One existing description changes: get_section no longer says recorded_at is refused for a local regulation, because it now works for one as ADR-0016 Decision 5 says (issue #569) and returns content_hash; no existing tool's name or input or output schema changes, and existing calls answer byte-identically (pinned by tests/unit/test_mcp_existing_calls.py). Supersedes tool-surface-v6.json for FUTURE runs; v1-v6 stay committed untouched because the runs that recorded their hashes must remain verifiable (pass --surface-path for a re-check against any of them). Taken WITH the S7 implementation, before any benchmark run that would straddle the surface change. The surface is corpus-independent (the schemas come from build_server, not the documents) but interpreter-dependent: tool descriptions come from docstrings, and CPython 3.13 dedents docstrings at compile time, so the hash is only defined together with the `python` field below. A unit test regenerates this document from the code on every run — names on every interpreter, hash on the apparatus interpreter; if the served surface changes, that test fails and changing this file is an explicit apparatus decision, not drift. check_fairness.py reads this document as the expectation the declared tool_config is compared against.",
+  "generated_by": "lovspor.llhb.mcp_surface.tool_surface()/allowed_tools() on branch feat/local-observation-history-s7 (ADR-0016 slice S7, lovspor-notebook)",
+  "python": "3.12",
+  "server": "lovverk",
+  "tool_schema_sha256": "a90112dff38ce1f94181ac724c24bed8954f60d75ca901305c6db37f07509386",
+  "tools": [
+    "mcp__lovverk__corpus_status",
+    "mcp__lovverk__diff_law_versions",
+    "mcp__lovverk__get_eu_basis",
+    "mcp__lovverk__get_law",
+    "mcp__lovverk__get_law_at",
+    "mcp__lovverk__get_law_history",
+    "mcp__lovverk__get_observation_history",
+    "mcp__lovverk__get_section",
+    "mcp__lovverk__get_temporal_events",
+    "mcp__lovverk__list_law_versions",
+    "mcp__lovverk__list_recent_changes",
+    "mcp__lovverk__list_sections",
+    "mcp__lovverk__search_body",
+    "mcp__lovverk__search_eu_implementations",
+    "mcp__lovverk__search_laws",
+    "mcp__lovverk__semantic_search",
+    "mcp__lovverk__validate_citation",
+    "mcp__lovverk__verify_quote"
+  ]
+}

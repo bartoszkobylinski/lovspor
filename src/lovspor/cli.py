@@ -875,11 +875,11 @@ def mcp(
     ``fetch-corpus`` cache (``~/.cache/lovverk``). Does not pull from GitHub
     or trigger an engine sync.
 
-    Sixteen read-only tools are served — see ``docs/mcp.md`` for the
+    Eighteen read-only tools are served — see ``docs/mcp.md`` for the
     full list, sample inputs/outputs, and the Sprint 9 anti-
     hallucination flow (semantic_search → get_section + cross_references
     → verify_quote → validate_citation). ``OPENAI_API_KEY`` is optional;
-    missing key disables only ``semantic_search``, the other fifteen
+    missing key disables only ``semantic_search``, the other seventeen
     tools work normally.
     """
     target = (corpus_path or default_corpus_path()).expanduser()
@@ -938,7 +938,7 @@ def mcp_http(
 ) -> None:
     """Serve the lovverk corpus over the MCP Streamable HTTP transport.
 
-    Exposes the same sixteen read-only tools as ``mcp`` (stdio) to remote
+    Exposes the same eighteen read-only tools as ``mcp`` (stdio) to remote
     clients, authenticated with bearer credentials from the store (see
     ``lovspor tokens issue``). Tool bodies run on worker threads so one slow
     call cannot block other clients.

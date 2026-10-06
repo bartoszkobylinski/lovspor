@@ -78,7 +78,7 @@ class Limits(BaseModel):
     # ~5x a heavy researcher's day (20 calls x 50 questions). Approximate by
     # construction: counters live in memory and reset on restart.
     daily_quota: int = Field(default=5000, ge=1)
-    # Fifteen of the sixteen tools read files and git; one, semantic_search,
+    # Seventeen of the eighteen tools read files and git; one, semantic_search,
     # embeds the caller's query through the operator's OpenAI key. Metering them
     # on one counter prices the free tools as if they cost money and the paid one
     # as if it did not. This is the counter that bounds spend, so it is separate
