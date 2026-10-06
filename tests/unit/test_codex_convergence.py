@@ -176,7 +176,6 @@ def test_a_proposal_marker_with_arguments_still_counts(tmp_path: Path) -> None:
     assert cc.is_proposal(repo, cc.TestId("tests/unit/test_thing.py", "test_new_contract"))
 
 
-@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
 def test_a_proposal_marker_on_a_class_applies_to_its_test_methods(tmp_path: Path) -> None:
     """Pytest class markers are inherited by every test method in the class."""
     repo = _repo_with(
@@ -277,7 +276,6 @@ def test_a_non_strict_xfail_at_the_baseline_is_not_an_inherited_proposal(
     assert verdict.blocks
 
 
-@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
 def test_an_inactive_xfail_at_the_baseline_is_not_an_inherited_proposal(
     tmp_path: Path,
 ) -> None:

@@ -261,24 +261,40 @@ def _declares_proposal(source: str, name: str) -> bool:
         tree = ast.parse(source)
     except SyntaxError:
         return False
-    node = _find_function(tree, name)
-    return node is not None and any(_is_proposal_decorator(d) for d in node.decorator_list)
+    chain = _find_chain(tree, name)
+    # pytest hands a class's marks to every method in it, so a marker on any
+    # enclosing class declares the method a proposal just as its own would.
+    return chain is not None and any(
+        _is_proposal_decorator(d) for node in chain for d in node.decorator_list
+    )
+
+
+Definition = ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
 
 
 def _find_function(tree: ast.Module, dotted: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     """Resolve ``Class.Inner.test_x`` or ``test_x`` to its definition node."""
+    chain = _find_chain(tree, dotted)
+    leaf = chain[-1] if chain else None
+    return leaf if isinstance(leaf, ast.FunctionDef | ast.AsyncFunctionDef) else None
+
+
+def _find_chain(tree: ast.Module, dotted: str) -> list[Definition] | None:
+    """The enclosing classes of ``Class.Inner.test_x``, outermost first, then the function."""
     *classes, leaf = dotted.split(".")
     scope: ast.Module | ast.ClassDef = tree
+    chain: list[Definition] = []
     for name in classes:
         found = next(
             (n for n in scope.body if isinstance(n, ast.ClassDef) and n.name == name), None
         )
         if found is None:
             return None
+        chain.append(found)
         scope = found
     for node in scope.body:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == leaf:
-            return node
+            return [*chain, node]
     return None
 
 
@@ -300,13 +316,18 @@ def _is_proposal_decorator(node: ast.expr) -> bool:
 
 
 def _is_proposal_xfail(call: ast.Call) -> bool:
-    """The xfail :func:`mark_xfail` writes: strict, with the round's reason.
+    """The xfail :func:`mark_xfail` writes: unconditional, strict, with the round's reason.
 
     ``strict`` is half the contract. A non-strict xfail swallows the failure
     whatever the reason says, so reading one as a prior round's proposal would
     let a hand-written marker turn a regression advisory.
+
+    Unconditional is the other half. ``xfail(False, …)`` is inactive: the test
+    runs and fails as a plain failure, and reading it as a proposal would let
+    ``--apply`` write an active strict xfail over that regression.
     """
-    return _is_strict(call) and _reason_is_codex_proposal(call)
+    unconditional = not call.args and all(k.arg != "condition" for k in call.keywords)
+    return unconditional and _is_strict(call) and _reason_is_codex_proposal(call)
 
 
 def _is_strict(call: ast.Call) -> bool:
