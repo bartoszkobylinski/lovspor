@@ -131,6 +131,47 @@ def _one_withdrawn(root: Path, corpus: Path, tmp_path: Path) -> tuple[str, str, 
 
 
 class TestWithdraw:
+    def test_withdrawal_preserves_every_version_and_blocks_every_promoted_artifact(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        first = _promoted(root, corpus, tmp_path, html_page(LF_LINES), PAGE_URL)
+        changed = (*LF_LINES[:-1], "Forskriften trer i kraft 1. februar 2020.")
+        later_url = f"{PAGE_URL}-revidert"
+        second = store(
+            root, html_page(changed), url=later_url, observed_at=FIRST_SEEN + timedelta(days=5)
+        )
+        assert approve(second, Decision().write(tmp_path)).exit_code == 0
+        promoted = promote("local", second, corpus)
+        assert promoted.exit_code == 0, promoted.output
+        slug = _manifest(corpus)[LF_ID]["slug"]
+        path = corpus / LOCAL / AUTHORITY / "observations" / f"{slug}.json"
+        before = json.loads(path.read_text(encoding="utf-8"))
+        assert [v["version"] for v in before["versions"]] == [1, 2]
+        assert "withdrawal" not in before
+
+        result = _withdraw(corpus, slug, _withdrawal(tmp_path))
+
+        assert result.exit_code == 0, result.output
+        after = json.loads(path.read_text(encoding="utf-8"))
+        assert {k: v for k, v in after.items() if k != "withdrawal"} == before
+        withdrawal = _log_lines(root)[-1]
+        assert withdrawal["artifacts"] == [
+            {"authority_id": AUTHORITY, "sha256": first, "source_url": PAGE_URL},
+            {"authority_id": AUTHORITY, "sha256": second, "source_url": later_url},
+        ]
+        manifest = json.loads((corpus / LOCAL / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["generated_at"] == withdrawal["decided_at"]
+        assert manifest["documents"][LF_ID]["version"] == 2
+        fresh = make_corpus(tmp_path / "second")
+        fresh_before, log_before = tree(fresh), _log_lines(root)
+        for artifact in (first, second):
+            for command in ("preview", "local"):
+                refused = promote(command, artifact, fresh)
+                assert refused.exit_code == 1, refused.output
+                assert "was withdrawn" in refused.output
+        assert tree(fresh) == fresh_before
+        assert _log_lines(root) == log_before
+
     def test_the_record_is_removed_with_its_reason_and_the_markdown_deleted(
         self, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
@@ -248,6 +289,26 @@ class TestWithdraw:
 
 
 class TestWithdrawRefusals:
+    @pytest.mark.parametrize("contents", [None, b"{", b"\xff", b"{}"])
+    def test_unreadable_observations_refuse_before_recording_or_writing(
+        self, root: Path, corpus: Path, tmp_path: Path, contents: bytes | None
+    ) -> None:
+        _promoted(root, corpus, tmp_path, html_page(LF_LINES), PAGE_URL)
+        slug = _manifest(corpus)[LF_ID]["slug"]
+        observations = corpus / LOCAL / AUTHORITY / "observations" / f"{slug}.json"
+        if contents is None:
+            observations.unlink()
+        else:
+            observations.write_bytes(contents)
+        before, log_before = tree(corpus), _log_lines(root)
+
+        result = _withdraw(corpus, slug, _withdrawal(tmp_path))
+
+        assert result.exit_code == 1, result.output
+        assert "the withdrawal must name the artifacts it covers" in result.output
+        assert tree(corpus) == before
+        assert _log_lines(root) == log_before
+
     def test_an_unknown_slug_is_refused(self, root: Path, corpus: Path, tmp_path: Path) -> None:
         before = tree(corpus)
 
@@ -312,6 +373,39 @@ class TestWithdrawRefusals:
 
 
 class TestRerunHonoursTheLog:
+    @pytest.mark.parametrize("command", ["preview", "local"])
+    @pytest.mark.parametrize("standing", ["withdrawal", "reject"])
+    def test_artifact_refusal_never_reads_the_archived_payload(
+        self,
+        root: Path,
+        corpus: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        command: str,
+        standing: str,
+    ) -> None:
+        if standing == "withdrawal":
+            _, _, sha256 = _one_withdrawn(root, corpus, tmp_path)
+        else:
+            sha256 = store(root, html_page())
+            rejected = approve(
+                sha256, Decision(decision="reject", reason="Ikke vedtatt.").write(tmp_path)
+            )
+            assert rejected.exit_code == 0, rejected.output
+        before, log_before = tree(corpus), _log_lines(root)
+
+        def unexpected_read(*args: object, **kwargs: object) -> None:
+            pytest.fail("a withdrawn or rejected artifact must be refused before payload access")
+
+        monkeypatch.setattr("lovspor.promotion.commands.read_artifact", unexpected_read)
+        result = promote(command, sha256, corpus)
+
+        assert result.exit_code == 1, result.output
+        expected = "was withdrawn" if standing == "withdrawal" else "standing decision is reject"
+        assert expected in result.output
+        assert tree(corpus) == before
+        assert _log_lines(root) == log_before
+
     def test_a_withdrawn_document_is_not_promoted_again_even_after_a_new_approval(
         self, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
