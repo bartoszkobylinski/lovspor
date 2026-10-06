@@ -194,7 +194,6 @@ class TestFragment:
         with pytest.raises(IncompleteEnvelopeError, match=FRAGMENT_NAME):
             read_fragment(tmp_path)
 
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
     def test_a_fragment_with_malformed_utf_8_is_an_incomplete_envelope(
         self, tmp_path: Path
     ) -> None:
@@ -203,6 +202,22 @@ class TestFragment:
 
         with pytest.raises(IncompleteEnvelopeError, match=FRAGMENT_NAME):
             read_fragment(tmp_path)
+
+    @pytest.mark.parametrize("invalid", [b"\xe2\x82", b"\xc0\xaf"])
+    def test_fragment_codec_refusal_names_the_envelope_and_preserves_the_cause(
+        self, tmp_path: Path, invalid: bytes
+    ) -> None:
+        """Truncated and overlong UTF-8 retain the diagnostic for the way back."""
+        root = tmp_path / ID_A
+        root.mkdir()
+        (root / FRAGMENT_NAME).write_bytes(fragment_text(root, ID_A).encode("utf-8") + invalid)
+
+        with pytest.raises(IncompleteEnvelopeError) as caught:
+            read_fragment(root)
+
+        assert str(caught.value).startswith(f"{ID_A}: {FRAGMENT_NAME} is not UTF-8: ")
+        assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+        assert caught.value.__cause__.object.endswith(invalid)
 
 
 class TestRecord:

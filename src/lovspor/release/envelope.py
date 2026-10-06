@@ -208,10 +208,14 @@ def write_fragment(root: Path, text: str) -> None:
 
 
 def read_fragment(root: Path) -> str:
+    """The fragment's text; a codec error is named, since revert and reconcile read it."""
     try:
         return (root / FRAGMENT_NAME).read_text(encoding="utf-8")
     except OSError as error:
         message = f"{root.name}: {FRAGMENT_NAME} is unreadable: {error}"
+        raise IncompleteEnvelopeError(message) from error
+    except UnicodeDecodeError as error:
+        message = f"{root.name}: {FRAGMENT_NAME} is not UTF-8: {error}"
         raise IncompleteEnvelopeError(message) from error
 
 

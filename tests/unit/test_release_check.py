@@ -395,9 +395,6 @@ class TestTheRecord:
             check_envelope(envelope)
         assert str(caught.value) == "release.json corpus summary names another corpus commit"
 
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
     @pytest.mark.parametrize(
         ("field", "value"),
         [
@@ -426,15 +423,32 @@ class TestTheRecord:
             check_envelope(envelope)
         assert str(caught.value) == "release.json observed_at is not the capability document's"
 
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    def test_names_every_differing_corpus_summary_field(self, envelope: Path) -> None:
+        """The whole-summary refusal identifies each corrupted field in one line."""
+        record = _json(envelope / RECORD_NAME)
+        record["corpus"].update(
+            corpus_commit_time="2030-01-01T00:00:00+00:00",
+            engine_version="tampered",
+            documents=999,
+        )
+        _rewrite(envelope / RECORD_NAME, record)
+
+        with pytest.raises(EnvelopeError) as caught:
+            check_envelope(envelope)
+        assert str(caught.value) == (
+            "release.json corpus summary differs from corpus/site-manifest.json "
+            "on corpus_commit_time, engine_version, documents"
+        )
+
     def test_must_carry_the_documents_observer(self, envelope: Path) -> None:
         """Both observation provenance fields must come from the capability document."""
         record = _json(envelope / RECORD_NAME)
         record["observer"] = "drift-timer"
         _rewrite(envelope / RECORD_NAME, record)
 
-        with pytest.raises(EnvelopeError, match="release.json observer"):
+        with pytest.raises(EnvelopeError, match="release.json observer") as caught:
             check_envelope(envelope)
+        assert str(caught.value) == "release.json observer is not the capability document's"
 
 
 class TestTheTrees:
@@ -450,7 +464,6 @@ class TestTheTrees:
         with pytest.raises(EnvelopeError, match="site/: page /en/ is not in the tree"):
             check_envelope(envelope)
 
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
     def test_a_site_page_with_malformed_utf_8_is_a_named_envelope_refusal(
         self, envelope: Path
     ) -> None:
@@ -459,6 +472,19 @@ class TestTheTrees:
 
         with pytest.raises(EnvelopeError, match=r"site/: page /.*UTF-8"):
             check_envelope(envelope)
+
+    @pytest.mark.parametrize("invalid", [b"\xe2\x82", b"\xc0\xaf"])
+    def test_a_nested_page_codec_error_names_its_route_and_preserves_its_cause(
+        self, envelope: Path, invalid: bytes
+    ) -> None:
+        """Truncated and overlong UTF-8 are named refusals for the affected page."""
+        page = envelope / "site" / "en" / "index.html"
+        page.write_bytes(page.read_bytes() + invalid)
+
+        with pytest.raises(EnvelopeError) as caught:
+            check_envelope(envelope)
+        assert str(caught.value).startswith("site/: page /en/ is not UTF-8: ")
+        assert isinstance(caught.value.__cause__, UnicodeDecodeError)
 
     def test_a_script_on_a_site_page_is_refused(self, envelope: Path) -> None:
         page = envelope / "site" / "index.html"

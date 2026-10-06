@@ -874,6 +874,14 @@ class TestForeign:
         with pytest.raises(IncompleteEnvelopeError, match="release.caddy is unreadable"):
             reconcile(live_a.plane, "abandon")
 
+    def test_abandon_names_a_markers_fragment_that_is_not_utf_8(self, live_a: Host) -> None:
+        """The way back reads M's fragment; a stray byte is a named refusal, not a traceback."""
+        live_a.plane.fragment.write_text(live_a.fragment_of(live_a.b), encoding="utf-8")
+        (live_a.releases / live_a.a / FRAGMENT_NAME).write_bytes(b"vars lovspor_release \xff\n")
+
+        with pytest.raises(IncompleteEnvelopeError, match="release.caddy is not UTF-8"):
+            reconcile(live_a.plane, "abandon")
+
     def test_abandon_with_nothing_ever_live_needs_the_kept_copy(self, host: Host) -> None:
         host.plane.fragment.write_text(host.fragment_of(host.b), encoding="utf-8")
 

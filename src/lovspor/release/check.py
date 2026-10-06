@@ -34,6 +34,7 @@ from lovspor.publish.inventory import PublishError
 from lovspor.release.envelope import (
     CORPUS_DIR,
     SITE_DIR,
+    CorpusSummary,
     ReleaseRecord,
     fragment_paths,
     fragment_release_id,
@@ -189,14 +190,20 @@ def check_structure(root: Path) -> Structure:
     return Structure(facts, manifest, document, key)
 
 
+def _page_markup(site: Path, route: str) -> str:
+    """One emitted page's text; a codec error is a named refusal, not a traceback."""
+    path = site / route.lstrip("/") / "index.html"
+    if not path.is_file():
+        raise EnvelopeError(f"{SITE_DIR}/: page {route} is not in the tree")
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise EnvelopeError(f"{SITE_DIR}/: page {route} is not UTF-8: {error}") from error
+
+
 def _check_site_tree(site: Path) -> int:
     """The route closure, re-scanned from the bytes on disk."""
-    pages: dict[str, str] = {}
-    for page in emitted_pages():
-        path = site / page.path.lstrip("/") / "index.html"
-        if not path.is_file():
-            raise EnvelopeError(f"{SITE_DIR}/: page {page.path} is not in the tree")
-        pages[page.path] = path.read_text(encoding="utf-8")
+    pages = {page.path: _page_markup(site, page.path) for page in emitted_pages()}
     try:
         for name, markup in pages.items():
             scan_page(name, markup)
@@ -208,6 +215,28 @@ def _check_site_tree(site: Path) -> int:
     return len(pages)
 
 
+def _check_summary(summary: CorpusSummary, manifest: CorpusManifest) -> None:
+    """Every field of the record's corpus summary, not only the commit."""
+    if summary.corpus_commit != manifest.corpus_commit:
+        raise EnvelopeError("release.json corpus summary names another corpus commit")
+    expected = CorpusSummary.model_validate(manifest.model_dump()).model_dump()
+    differing = [name for name, value in summary.model_dump().items() if value != expected[name]]
+    if differing:
+        raise EnvelopeError(
+            f"release.json corpus summary differs from {CORPUS_DIR}/{MANIFEST_NAME} "
+            f"on {', '.join(differing)}"
+        )
+
+
+def _check_observation(record: ReleaseRecord, document: CapabilityDocument) -> None:
+    """The observation's instant and its observer, both from the document."""
+    process = document.observation.process
+    if record.observed_at != process.observed_at:
+        raise EnvelopeError("release.json observed_at is not the capability document's")
+    if record.observer != process.observer:
+        raise EnvelopeError("release.json observer is not the capability document's")
+
+
 def _check_record(record: ReleaseRecord, structure: Structure) -> None:
     facts, manifest, document, key = structure
     if record.release_key != key:
@@ -216,10 +245,8 @@ def _check_record(record: ReleaseRecord, structure: Structure) -> None:
         raise EnvelopeError("release.json capability_sha256 differs from site-facts.json")
     if record.site_manifest_sha256 != _fact(facts, "site_manifest_sha256"):
         raise EnvelopeError("release.json site_manifest_sha256 differs from site-facts.json")
-    if record.corpus.corpus_commit != manifest.corpus_commit:
-        raise EnvelopeError("release.json corpus summary names another corpus commit")
-    if record.observed_at != document.observation.process.observed_at:
-        raise EnvelopeError("release.json observed_at is not the capability document's")
+    _check_summary(record.corpus, manifest)
+    _check_observation(record, document)
 
 
 def _check_ids(root: Path, record: ReleaseRecord, facts: dict[str, object]) -> str:

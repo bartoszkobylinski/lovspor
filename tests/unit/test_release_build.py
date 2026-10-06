@@ -211,6 +211,21 @@ class TestTheOrder:
 
         assert list(releases.iterdir()) == []
 
+    def test_a_site_page_that_is_not_utf_8_is_refused_and_its_build_directory_removed(
+        self, world: World, releases: Path
+    ) -> None:
+        """A codec error is outside the cleanup's error family; the check must name it."""
+
+        def corrupt_a_page(step: str) -> None:
+            if step == "linked":
+                (only,) = _build_dirs(releases)
+                (only / "site" / "index.html").write_bytes(b"\xff")
+
+        with pytest.raises(EnvelopeError, match="site/: page / is not UTF-8"):
+            build_release(request_for(world, releases), observer(), None, corrupt_a_page)
+
+        assert list(releases.iterdir()) == []
+
     def test_a_build_directory_pruned_underneath_the_procedure_still_names_the_refusal(
         self, world: World, releases: Path
     ) -> None:
