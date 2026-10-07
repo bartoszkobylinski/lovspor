@@ -16,8 +16,9 @@ A text that could mislead is held, never published, and the reason is typed
 4. ``garbled_text`` — text that is not Norwegian prose: almost no function
    words, or control characters — what a PDF font without a ToUnicode map
    yields (study §6.2);
-5. ``lovdata_copy`` — a print out of Lovdata, whose editorial markup § 14
-   does not cover (ADR-0016 Risks);
+5. ``lovdata_copy`` — a print out of Lovdata, or a copy pasted from it that
+   keeps its metadata block (``lovdata_header.py``), whose editorial markup
+   § 14 does not cover (ADR-0016 Risks);
 6. ``placeholder_date`` — a draft's blank date such as ``X.X.2016`` (§6.4);
 7. ``no_body`` / ``no_title`` — the text cannot be split safely;
 8. ``personal_data`` — the gate of ``personal_data.py`` found something.
@@ -33,6 +34,7 @@ from lovspor.errors import UnreadableSourceError
 from lovspor.promotion.dates import has_placeholder_date
 from lovspor.promotion.fields import read_regulation
 from lovspor.promotion.identity import normalise_text
+from lovspor.promotion.lovdata_header import has_lovdata_header
 from lovspor.promotion.models import (
     ExtractedDocument,
     ExtractionHoldReason,
@@ -140,6 +142,8 @@ def _text_hold(text: str) -> tuple[ExtractionHoldReason, str] | None:
         return ExtractionHoldReason.GARBLED_TEXT, "text does not read as Norwegian prose"
     if _LOVDATA_PRINT.search(text) or _LOVDATA_PRINT_CHROME.search(text):
         return ExtractionHoldReason.LOVDATA_COPY, "the text is a print out of Lovdata"
+    if has_lovdata_header(text):
+        return ExtractionHoldReason.LOVDATA_COPY, "the text carries Lovdata's metadata block"
     if has_placeholder_date(text):
         return ExtractionHoldReason.PLACEHOLDER_DATE, "a date is a draft's placeholder"
     return None
