@@ -130,6 +130,40 @@ class TestVedtatt:
 
 
 class TestIkraft:
+    def test_an_invalid_calendar_date_is_kept_as_a_phrase(self) -> None:
+        regulation = ExtractedRegulation(
+            title="Forskrift om slam",
+            identification_block="Forskrift om slam",
+            body="Forskriften trer i kraft 31. februar 2020. Gebyret fastsettes årlig.",
+        )
+
+        stated = stated_ikraft(regulation)
+
+        assert (stated.status, stated.value, stated.text) == ("text", None, "31. februar 2020")
+        [statement] = stated.statements
+        assert statement.date is None
+        assert statement.text == "31. februar 2020"
+        assert statement.evidence == "trer i kraft 31. februar 2020"
+
+    def test_a_phrase_without_a_sentence_terminator_is_kept(self) -> None:
+        regulation = ExtractedRegulation(
+            title="Forskrift om slam",
+            identification_block="Forskrift om slam",
+            body="Forskriften trer i kraft når departementet bestemmer",
+        )
+
+        stated = stated_ikraft(regulation)
+
+        assert (stated.status, stated.value, stated.text) == (
+            "text",
+            None,
+            "når departementet bestemmer",
+        )
+        [statement] = stated.statements
+        assert statement.date is None
+        assert statement.text == "når departementet bestemmer"
+        assert statement.evidence == "trer i kraft når departementet bestemmer"
+
     def test_a_phrase_stops_before_all_following_sentences(self) -> None:
         regulation = ExtractedRegulation(
             title="Forskrift om slam",
