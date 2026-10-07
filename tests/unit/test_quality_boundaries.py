@@ -227,3 +227,18 @@ class TestLocalDatasetBoundary:
     )
     def test_what_is_not_a_route_to_the_local_dataset_passes(self, path: str, source: str) -> None:
         assert boundaries.violations_in(path, source) == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            '"""Publisher documentation."""\n"lokale-forskrifter"\n',
+            'def render():\n    """Doc."""\n    "lovspor.mcp_local"\n',
+            'class Page:\n    x = 1\n    "lokale-forskrifter"\n',
+        ],
+        ids=["module-second-statement", "function-second-statement", "class-not-first"],
+    )
+    def test_only_the_first_statement_string_is_a_docstring(self, source: str) -> None:
+        """A bare string anywhere else is a literal like any other (Codex test on PR #578)."""
+        assert [v.rule for v in boundaries.violations_in(PUBLISHER, source)] == [
+            "local-dataset-unpublished"
+        ]

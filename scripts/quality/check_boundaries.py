@@ -141,11 +141,17 @@ def reaches_local_dataset(path: str, node: ast.AST) -> bool:
     return any(_is_local_module(name) for name in imported_modules(path, node))
 
 
+_DOCUMENTED = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
 def _docstrings(tree: ast.AST) -> set[int]:
+    """The string constants Python itself treats as docstrings: a body's first statement."""
     return {
-        id(node.value)
+        id(first.value)
         for node in ast.walk(tree)
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+        if isinstance(node, _DOCUMENTED) and node.body
+        for first in node.body[:1]
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
     }
 
 
