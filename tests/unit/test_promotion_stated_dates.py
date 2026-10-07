@@ -42,6 +42,29 @@ class TestTheFixtureRegulation:
 
 class TestVedtatt:
     @pytest.mark.parametrize("in_block", [True, False])
+    @pytest.mark.parametrize("written_date", ["12. desember 2019", "12.12.2019", "2019-12-12"])
+    def test_enactment_keeps_date_and_evidence_for_every_written_form(
+        self, in_block: bool, written_date: str
+    ) -> None:
+        clause = f"Forskriften er vedtatt av\nkommunestyret den {written_date}"
+        regulation = ExtractedRegulation(
+            title="Forskrift om slam",
+            identification_block=clause if in_block else "Forskrift om slam",
+            body="§ 1" if in_block else clause,
+        )
+
+        stated = stated_vedtatt(regulation)
+
+        assert (stated.status, stated.value) == ("stated", date(2019, 12, 12))
+        [statement] = stated.statements
+        assert statement.date == date(2019, 12, 12)
+        assert statement.text is None
+        evidence = clause.replace("\n", " ")
+        assert statement.evidence == (
+            evidence.removeprefix("Forskriften er ") if in_block else evidence
+        )
+
+    @pytest.mark.parametrize("in_block", [True, False])
     def test_a_blank_enactment_date_is_held_not_absent(self, in_block: bool) -> None:
         """A stated draft date is a hold, not an absence (Codex test on PR #577)."""
         clause = "Forskriften er vedtatt av kommunestyret xx.xx.2020."
