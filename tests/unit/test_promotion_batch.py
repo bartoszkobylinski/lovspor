@@ -25,6 +25,7 @@ from lovspor.promotion.batch import (
     BatchSpec,
     CandidateGroup,
     choose_canonical,
+    group_candidates,
     resolve_group,
 )
 from lovspor.promotion.batch_commands import BLOCKED_EXIT_CODE, _spec
@@ -957,3 +958,61 @@ class TestCanonicalSeam:
     def test_a_group_has_at_least_two_pages(self) -> None:
         with pytest.raises(ValidationError):
             CandidateGroup(doc_id=GROUP_ID, content_hash="c" * 64, members=(_member(0, BASE),))
+
+
+class TestGroupingBoundaries:
+    def test_equal_text_with_different_ids_is_not_folded(self) -> None:
+        first = _member(0, f"{BASE}/a")
+        other = _member(1, f"{BASE}/b").model_copy(update={"doc_id": "lk-0301-111111111111"})
+
+        assert group_candidates((first, other)) == (first, other)
+
+    @pytest.mark.parametrize("outcome", ["held", "refused"])
+    def test_nonpromotable_items_keep_their_reason_and_are_not_folded(self, outcome: str) -> None:
+        ready = _member(0, f"{BASE}/a")
+        stopped = _member(1, f"{BASE}/b").model_copy(
+            update={"outcome": outcome, "hold": "request:refused", "detail": "source unavailable"}
+        )
+
+        assert group_candidates((ready, stopped)) == (ready, stopped)
+
+    def test_folded_group_keeps_first_batch_position_and_sorts_equal_urls_by_hash(self) -> None:
+        last_hash = _member(2, f"{BASE}/same")
+        first_hash = _member(1, f"{BASE}/same")
+        other = _member(3, f"{BASE}/other").model_copy(update={"doc_id": "lk-0301-111111111111"})
+
+        grouped = group_candidates((last_hash, other, first_hash))
+
+        assert len(grouped) == 2
+        assert grouped[0].sources == (first_hash.key, last_hash.key)
+        assert grouped[0].key == first_hash.key
+        assert grouped[0].hold == NEEDS_CANONICAL_SOURCE
+        assert grouped[1] == other
+
+    def test_ready_and_unchanged_pages_of_one_text_form_one_held_candidate(self) -> None:
+        ready = _member(0, f"{BASE}/a")
+        unchanged = _member(1, f"{BASE}/b").model_copy(update={"outcome": "unchanged"})
+
+        (grouped,) = group_candidates((ready, unchanged))
+
+        assert grouped.sources == (ready.key, unchanged.key)
+        assert (grouped.outcome, grouped.hold) == ("held", NEEDS_CANONICAL_SOURCE)
+        assert not grouped.promotable
+
+    def test_canonical_page_with_member_url_but_wrong_hash_is_refused(self) -> None:
+        group = _group("a", "b")
+        different_capture = group.sources[0].model_copy(update={"sha256": "e" * 64})
+
+        with pytest.raises(PromotionRefusedError, match="not a page of the group"):
+            resolve_group(group, different_capture)
+
+    def test_resolving_canonical_keeps_the_chosen_pages_assessment(self) -> None:
+        first, chosen = _group("a", "b").members
+        chosen = chosen.model_copy(
+            update={"outcome": "unchanged", "version": 4, "markdown_path": "local.md"}
+        )
+        group = CandidateGroup(doc_id=GROUP_ID, content_hash="c" * 64, members=(first, chosen))
+
+        assert resolve_group(group, chosen.key) == chosen.model_copy(
+            update={"sources": group.sources}
+        )
