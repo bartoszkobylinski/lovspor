@@ -13,14 +13,17 @@ from lovspor.errors import LovsporError, UnreadableSourceError
 from lovspor.promotion import SourceForm
 from lovspor.promotion.source_text import (
     PDF_LIBRARY_VERSION,
+    _lines_of,
     docx_lines,
     html_lines,
     pdf_lines,
     source_form,
 )
 from tests.unit.promotion_fixtures import (
+    FAQ_SIBLINGS,
     REGULATION_LINES,
     docx_with_document,
+    faq_page,
     html_page,
     minimal_docx,
     minimal_pdf,
@@ -115,6 +118,201 @@ def test_html_with_two_articles_reads_the_whole_region() -> None:
         "<article><p>§ 2 Virkeområde</p></article></main></body></html>"
     ).encode()
     assert html_lines(page, "text/html") == ("§ 1 Formål", "§ 2 Virkeområde")
+
+
+_FAQ_TAIL_LINES = (
+    *(line for item in FAQ_SIBLINGS for line in item),
+    "Les mer om følgende emner:",
+    "skole",
+    "Velkommen til Eksempelskolen",
+    "Elevene løp stafett i høstferien",
+)
+
+
+def test_html_reads_the_innermost_article_holding_the_regulation() -> None:
+    lines = html_lines(faq_page(), "text/html")
+    assert lines == ("Hvilke ordensregler gjelder?", *REGULATION_LINES)
+
+
+@pytest.mark.parametrize("teaser_first", [False, True])
+def test_html_unique_holder_is_selected_independently_of_teaser_position(
+    teaser_first: bool,
+) -> None:
+    holder = (
+        "<article><h1>Forskrift om gebyr</h1><h2>§ 1 Gebyr</h2>"
+        "<p>Gebyret betales årlig.</p></article>"
+    )
+    teaser = "<article><p>Nyheter</p></article>"
+    articles = teaser + holder if teaser_first else holder + teaser
+    page = _main(f"<p>Velkommen</p>{articles}<p>Etter artiklene</p>")
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Gebyret betales årlig.",
+    )
+
+
+def test_html_holder_keeps_nested_articles_that_do_not_hold_both_anchors() -> None:
+    """Innermost means innermost matching holder, not innermost article of any kind."""
+    page = _main(
+        "<article><h1>Forskrift om gebyr</h1>"
+        "<article><h2>§ 1 Gebyr</h2><p>Gebyret betales årlig.</p></article>"
+        "<p>§ 2 Ikrafttredelse</p></article>"
+        "<article><p>Nyheter</p></article><p>Etter artiklene</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Gebyret betales årlig.",
+        "§ 2 Ikrafttredelse",
+    )
+
+
+def test_html_nested_and_sibling_holders_are_ambiguous() -> None:
+    """Two innermost holders require fallback even when their depths differ."""
+    anchors = "<h1>Forskrift om gebyr</h1><h2>§ 1 Gebyr</h2>"
+    page = _main(
+        f"<article><p>Innledning</p><article>{anchors}<p>Første tekst</p></article>"
+        f"<p>Etter indre artikkel</p></article><article>{anchors}<p>Andre tekst</p>"
+        "</article><p>Etter artiklene</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Innledning",
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Første tekst",
+        "Etter indre artikkel",
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Andre tekst",
+        "Etter artiklene",
+    )
+
+
+def test_html_duplicate_anchors_in_chrome_do_not_make_holders_ambiguous() -> None:
+    anchors = "<h1>Forskrift om gebyr</h1><h2>§ 1 Gebyr</h2>"
+    page = _main(
+        f"<aside><article>{anchors}<p>Sidefelt</p></article></aside>"
+        f"<article>{anchors}<p>Gebyret betales årlig.</p></article>"
+        "<article><p>Nyheter</p></article><p>Etter artiklene</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Gebyret betales årlig.",
+    )
+
+
+def test_html_innermost_article_drops_sibling_items_and_teasers_after_the_last_section() -> None:
+    lines = html_lines(faq_page(), "text/html")
+    assert lines[-1] == REGULATION_LINES[-1]
+    assert set(lines).isdisjoint(_FAQ_TAIL_LINES)
+
+
+def test_html_innermost_article_is_the_same_whatever_the_page_tail() -> None:
+    assert html_lines(faq_page(tail=""), "text/html") == html_lines(faq_page(), "text/html")
+
+
+def test_html_with_two_articles_holding_the_regulation_reads_the_whole_region() -> None:
+    item = ("Hvilke ordensregler gjelder?", *REGULATION_LINES)
+    lines = html_lines(faq_page(regulation_answers=2), "text/html")
+    assert lines == ("Skole", *item, *item, *_FAQ_TAIL_LINES)
+
+
+def test_html_with_the_title_outside_every_article_reads_the_whole_region() -> None:
+    page = (
+        "<html><body><main><h1>Forskrift om gebyr, Eksempel kommune</h1>"
+        "<article><p>§ 1 Gebyr</p></article><article><p>§ 2 Betaling</p></article>"
+        "<p>Kontakt oss</p></main></body></html>"
+    ).encode()
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr, Eksempel kommune",
+        "§ 1 Gebyr",
+        "§ 2 Betaling",
+        "Kontakt oss",
+    )
+
+
+def test_html_an_article_with_another_regulation_is_not_the_one_read() -> None:
+    page = (
+        "<html><body><main><h1>Forskrift om gebyr, Eksempel kommune</h1><p>§ 1 Gebyr</p>"
+        "<article><p>Forskrift om parkering, Eksempel kommune</p><p>§ 1 Parkering</p></article>"
+        "<article><p>Nyheter</p></article></main></body></html>"
+    ).encode()
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr, Eksempel kommune",
+        "§ 1 Gebyr",
+        "Forskrift om parkering, Eksempel kommune",
+        "§ 1 Parkering",
+        "Nyheter",
+    )
+
+
+def test_html_single_article_is_read_whole_even_past_the_last_section() -> None:
+    page = (
+        "<html><body><main><p>Velkommen</p><article><h1>Forskrift om gebyr, Eksempel kommune</h1>"
+        "<p>§ 1 Gebyr</p><p>Kontakt servicetorget</p></article></main></body></html>"
+    ).encode()
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr, Eksempel kommune",
+        "§ 1 Gebyr",
+        "Kontakt servicetorget",
+    )
+
+
+@pytest.mark.parametrize(
+    ("title", "section"),
+    [
+        ("Forskrift om gebyr", "§ 1 Betaling"),
+        ("Forskrift om parkering", "§ 1 Gebyr"),
+    ],
+)
+def test_html_article_must_match_both_region_anchors(title: str, section: str) -> None:
+    """The PR requires the same title AND first section, not just either anchor."""
+    page = _main(
+        "<h1>Forskrift om gebyr</h1><h2>§ 1 Gebyr</h2>"
+        f"<article><h1>{title}</h1><h2>{section}</h2></article>"
+        "<article><p>Nyheter</p></article><p>Etter regionen</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        title,
+        section,
+        "Nyheter",
+        "Etter regionen",
+    )
+
+
+def test_html_title_after_first_section_does_not_select_an_article() -> None:
+    page = _main(
+        "<article><h2>§ 1 Gebyr</h2><h1>Forskrift om gebyr</h1></article>"
+        "<article><p>Nyheter</p></article><p>Etter regionen</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "§ 1 Gebyr",
+        "Forskrift om gebyr",
+        "Nyheter",
+        "Etter regionen",
+    )
+
+
+@pytest.mark.parametrize("section", ["§ 1 Gebyr", "Kapittel 1 Gebyr", "Kap. I Gebyr"])
+def test_html_nested_article_anchor_reads_preserve_br_wraps(section: str) -> None:
+    """Reading ancestors and candidates must not rewrite the selected article's breaks."""
+    page = _main(
+        "<article><p>Velkommen</p><article><article>"
+        "<h1>Forskrift om gebyr i<br>kommunen</h1>"
+        f"<h2>{section}</h2><p>Gebyret gjelder for<br><strong>hele</strong> kommunen.</p>"
+        "</article><p>Utenfor forskriften</p></article>"
+        "<article><p>Nyheter</p></article></article>"
+    )
+    expected = (
+        "Forskrift om gebyr i kommunen",
+        section,
+        "Gebyret gjelder for hele kommunen.",
+    )
+    assert html_lines(page, "text/html") == html_lines(page, "text/html") == expected
 
 
 def test_html_drops_update_stamps_and_page_furniture_lines() -> None:
@@ -594,3 +792,46 @@ def test_a_dotted_date_after_a_word_is_still_a_wrap() -> None:
 def test_html_text_after_a_closing_block_is_kept_on_a_line_of_its_own() -> None:
     page = _main("<div><p>§ 1 Formål</p>Forskrifta gjeld heile kommunen.</div>")
     assert html_lines(page, "text/html") == ("§ 1 Formål", "Forskrifta gjeld heile kommunen.")
+
+
+def test_reading_article_lines_preserves_nested_tree_for_next_candidate() -> None:
+    region = html.fromstring(
+        '<main data-source="law"><article><h1>Forskrift om gebyr</h1>'
+        "<section><h2>§ 1 Formål</h2><p>Forskrifta <em>gjeld</em><br>"
+        "heile kommunen.</p><!-- original layout --></section></article>"
+        "<article><p>Nyheter</p></article> Etter artiklene.</main>"
+    )
+    article = region[0]
+    before = html.tostring(region)
+    expected = ("Forskrift om gebyr", "§ 1 Formål", "Forskrifta gjeld heile kommunen.")
+
+    assert _lines_of(article) == expected
+    assert html.tostring(region) == before
+    assert _lines_of(article) == expected
+    assert html.tostring(region) == before
+    assert _lines_of(region) == (*expected, "Nyheter", "Etter artiklene.")
+    assert html.tostring(region) == before
+
+
+def test_reading_lines_preserves_live_descendant_text_tails_and_parents() -> None:
+    region = html.fromstring(
+        '<main><article data-source="law"><h1>Forskrift om gebyr</h1>'
+        "<section><h2>§ 1 Formål</h2><p>Forskrifta <em>gjeld</em><br>"
+        "heile <strong>kommunen.</strong></p><!-- original layout -->"
+        "</section></article><p>Nyheter</p></main>"
+    )
+    article = region[0]
+    nodes = tuple(region.iter())
+    before = tuple((node.text, node.tail, dict(node.attrib), node.getparent()) for node in nodes)
+    expected = ("Forskrift om gebyr", "§ 1 Formål", "Forskrifta gjeld heile kommunen.")
+
+    # Keep references to the original descendants while reading overlapping
+    # candidates: rewriting a shared child would corrupt the next candidate.
+    for candidate, lines in ((region, (*expected, "Nyheter")), (article, expected)):
+        assert _lines_of(candidate) == lines
+        assert tuple(region.iter()) == nodes
+        assert (
+            tuple((node.text, node.tail, dict(node.attrib), node.getparent()) for node in nodes)
+            == before
+        )
+        assert _lines_of(candidate) == lines

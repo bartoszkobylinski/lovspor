@@ -209,7 +209,7 @@ def test_the_audit_record_says_who_approved_what_and_from_which_observations(
     assert audit["reviewed_by_role"] == "project owner"
     assert set(audit) == AUDIT_FIELDS
     assert audit["reviewed_in_sample"] is True
-    assert audit["extractor_version"] == 4
+    assert audit["extractor_version"] == 5
     assert audit["renderer_version"] == 1
     assert audit["identity"]["scheme"] == "lk"
     assert audit["observations"] == [

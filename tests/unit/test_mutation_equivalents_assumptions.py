@@ -14,6 +14,7 @@ assumption, and the tests live here.
 
 from __future__ import annotations
 
+import copy
 import importlib.metadata
 import inspect
 import io
@@ -629,3 +630,19 @@ def test_assumption_typer_names_an_unnamed_command_after_its_function() -> None:
 
     assert isinstance(group, click.Group)
     assert sorted(group.commands) == ["backfill", "backfill-preview", "observe"]
+
+
+def test_assumption_lxml_shallow_copy_of_an_element_copies_its_subtree() -> None:
+    """``copy.copy`` of an lxml element is a deep copy: editing it leaves the source.
+
+    Pins the ``source_text._lines_of`` entry (PR #579): ``_block_text`` rewrites
+    the tree it is given, and a copy keeps the region readable for the next
+    candidate article, whichever of ``copy.copy`` / ``copy.deepcopy`` makes it.
+    """
+    source = html.fromstring("<article><p>a<b>x</b></p></article>")
+    shallow = copy.copy(source)
+    shallow.find(".//p").text = "edited"
+    shallow.find(".//b").text = "edited"
+
+    assert html.tostring(source) == b"<article><p>a<b>x</b></p></article>"
+    assert shallow.find(".//b") is not source.find(".//b")
