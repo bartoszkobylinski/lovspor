@@ -91,7 +91,7 @@ class TestTheNameNeverReachesTheCorpus:
         files = tree(promoted)
         written = [path for path in files if path.startswith("lokale-forskrifter/")]
 
-        assert len(written) == 3
+        assert len(written) == 4
         for path, data in files.items():
             text = data.decode("utf-8").casefold()
             for word in ("zbigniewa", "przybyszewska", "ødegårdsen", "decided_by"):

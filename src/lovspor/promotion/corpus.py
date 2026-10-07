@@ -69,6 +69,17 @@ class LocalManifest(BaseModel):
     version: Literal[1] = 1
 
 
+class CentralEntry(BaseModel):
+    """The fields of a central manifest record a relation target is resolved by."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    status: str
+    slug: str | None = None
+    title: str | None = None
+    markdown_path: str | None = None
+
+
 def manifest_text(manifest: LocalManifest) -> str:
     """The manifest as it is written: sorted keys, two-space indent, final newline."""
     payload = manifest.model_dump(mode="json")
@@ -123,6 +134,15 @@ class CorpusCheckout:
             for m in matches
             if m is not None
         )
+
+    def central_entries(self) -> dict[str, CentralEntry]:
+        """Every central record by id, read for resolving a relation's target (S10)."""
+        try:
+            documents = json.loads(self._path.joinpath(MANIFEST_NAME).read_bytes())["documents"]
+            return {doc_id: CentralEntry.model_validate(r) for doc_id, r in documents.items()}
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            msg = f"{self._path / MANIFEST_NAME} does not read as the central manifest"
+            raise PromotionRefusedError(msg) from exc
 
     def inside(self, relative: str) -> Path:
         """``relative`` under the local dataset directory, refusing any escape."""

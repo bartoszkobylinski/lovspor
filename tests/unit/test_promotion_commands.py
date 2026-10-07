@@ -88,6 +88,7 @@ class TestPromoteLocal:
         slug = _manifest(corpus)[doc_id]["slug"]
         assert changed == {
             f"lokale-forskrifter/{AUTHORITY}/{slug}.md",
+            f"lokale-forskrifter/{AUTHORITY}/evidence/{slug}.json",
             f"lokale-forskrifter/{AUTHORITY}/observations/{slug}.json",
             "lokale-forskrifter/manifest.json",
         }

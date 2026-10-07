@@ -343,8 +343,10 @@ class TestWithdraw:
         assert changed == {
             f"{LOCAL}/manifest.json",
             f"{LOCAL}/{AUTHORITY}/{slug}.md",
+            f"{LOCAL}/{AUTHORITY}/evidence/{slug}.json",
             f"{LOCAL}/{AUTHORITY}/observations/{slug}.json",
         }
+        assert f"{LOCAL}/{AUTHORITY}/evidence/{slug}.json" not in after
         assert _manifest(corpus)[other] == other_record
 
     def test_a_rerun_writes_nothing_and_records_nothing(
@@ -662,15 +664,20 @@ class TestModels:
 
 
 @pytest.mark.parametrize("markdown_present", [True, False])
-def test_withdrawal_reports_only_markdown_it_actually_deleted(
-    root: Path, corpus: Path, tmp_path: Path, markdown_present: bool
+@pytest.mark.parametrize("evidence_present", [True, False])
+def test_withdrawal_reports_only_files_it_actually_deleted(
+    root: Path, corpus: Path, tmp_path: Path, markdown_present: bool, evidence_present: bool
 ) -> None:
     _promoted(root, corpus, tmp_path, html_page(LF_LINES), PAGE_URL)
     checkout = CorpusCheckout(corpus, [])
     record = checkout.local_manifest().documents[LF_ID]
     markdown = corpus / record.markdown_path
+    evidence_path = f"{LOCAL}/{AUTHORITY}/evidence/{record.slug}.json"
+    evidence = corpus / evidence_path
     if not markdown_present:
         markdown.unlink()
+    if not evidence_present:
+        evidence.unlink()
     document = WithdrawalDocument.model_validate_json(_withdrawal(tmp_path).read_bytes())
     withdrawal = withdrawal_record(
         checkout,
@@ -681,8 +688,10 @@ def test_withdrawal_reports_only_markdown_it_actually_deleted(
 
     result = apply_withdrawal(checkout, withdrawal)
 
-    assert result.deleted == ((record.markdown_path,) if markdown_present else ())
+    expected = (record.markdown_path,) * markdown_present + (evidence_path,) * evidence_present
+    assert result.deleted == expected
     assert not markdown.exists()
+    assert not evidence.exists()
     assert checkout.local_manifest().documents[LF_ID].status == "removed"
 
 
@@ -693,11 +702,12 @@ def test_withdrawal_prints_the_record_location_and_every_changed_path(
     record = _manifest(corpus)[LF_ID]
     result = _withdraw(corpus, record["slug"], _withdrawal(tmp_path))
     assert result.exit_code == 0, result.output
-    assert result.output.splitlines()[:4] == [
+    assert result.output.splitlines()[:5] == [
         f"Withdrew {LF_ID} (withdrawn_misclassified; recorded in {root / DECISIONS_FILENAME})",
         f"wrote {LOCAL}/{AUTHORITY}/observations/{record['slug']}.json",
         f"wrote {LOCAL}/manifest.json",
         f"deleted {record['markdown_path']}",
+        f"deleted {LOCAL}/{AUTHORITY}/evidence/{record['slug']}.json",
     ]
 
 

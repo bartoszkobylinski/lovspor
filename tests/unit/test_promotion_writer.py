@@ -177,6 +177,7 @@ class TestApply:
         slug = "renovasjonsforskrift-for-eksempel-kommune"
         assert slug > "observations"
         assert written == [
+            f"{LOCAL}/{AUTHORITY}/evidence/{slug}.json",
             f"{LOCAL}/{AUTHORITY}/observations/{slug}.json",
             f"{LOCAL}/{AUTHORITY}/{slug}.md",
         ]
