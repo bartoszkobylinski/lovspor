@@ -11,6 +11,11 @@ rendered (``plan.py``) and written into a ``lovverk`` checkout (``corpus.py``,
 ``writer.py``), and its history derived from the checkout's log
 (``local_history.py``). This package is the only writer of
 ``lovverk/lokale-forskrifter/`` (ADR-0016 4a); MCP serving is a later slice.
+Slice S6 reads every version of a document from its primary URL's
+observations (``versions.py``) and re-reads the promoted versions'
+observation intervals from the log (``intervals.py``); ``backfill.py`` writes
+them one approved version per run, in order, and ``backfill_commands.py``
+adds ``promote backfill``, ``backfill-preview`` and the ``observe`` refresh.
 """
 
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation

@@ -1157,7 +1157,7 @@ after the approval changes nothing. It then appends a `promoted` record (with
 the same audit) to `promotions.jsonl` and prints the commit to make.
 
 Refused, with nothing written: no decision recorded, a standing `reject` or
-`hold`, an approval for another text, a withdrawn id, an id filed under
+`hold`, an approval for another text, a withdrawn id or artifact (step 6), an id filed under
 another authority, content first observed before the current version (the
 backfill slice orders that), any output that would mention NLOD.
 
@@ -1201,12 +1201,129 @@ writes `<authority_id>/history/<slug>.json` (JSON only — the central
 the promotion commit to exist; before it, there is nothing to write. A rerun
 on a committed history prints `History is current`.
 
+### 6. Withdraw — undo a promotion forward (ADR-0016 4f, S9)
+
+`lovverk` history is never rewritten, so a wrong promotion (misclassified,
+wrong identity, personal data, a legal objection) is undone by a later
+commit. The reviewer's decision is a JSON document, as for `approve`:
+
+```bash
+cat > withdrawal-0301.json <<'JSON'
+{
+  "decision": "withdraw",
+  "removed_reason": "withdrawn_misclassified",
+  "decided_by": "<your name>",
+  "reviewer_role": "project owner",
+  "reason": "The page is a høring, not an enacted forskrift."
+}
+JSON
+uv run lovspor promote withdraw --authority 0301 --slug <slug> \
+  --corpus /absolute/path/to/lovverk --decision withdrawal-0301.json
+```
+
+`removed_reason` is a closed set: `withdrawn_misclassified`,
+`withdrawn_identity`, `withdrawn_personal_data`, `withdrawn_legal`. An archive
+tombstone of a promoted source (ADR-0010 §7) is withdrawn under the reason the
+tombstone states. The same rules as `approve` hold for `decided_by`,
+`reviewer_role` and `reason`: a person, a role, and nothing published that
+carries personal data or the reviewer's name.
+
+The command first appends a `withdrawal` record to `promotions.jsonl` (the
+document's id and slug, the reason, the reviewer's name and role, and every
+archived artifact the document was promoted from), then, in the checkout:
+
+* `manifest.json` — the record becomes `status: "removed"` with its
+  `removed_reason` (`generated_at` is the decision time);
+* `<authority_id>/<slug>.md` — deleted, so the MCP server no longer serves
+  it (`get_law`, `get_section` and `search_laws` answer as for an unknown
+  document);
+* `<authority_id>/observations/<slug>.json` — kept, every version intact,
+  with a `withdrawal` block (reason, `reviewed_by_role`, decision time — never
+  the name);
+* `<authority_id>/history/<slug>.json` — kept untouched.
+
+It never commits; commit with the subject it prints,
+`withdraw(lokal-forskrift): <authority_id>/<slug>` (a `removed` event in the
+history grammar). A rerun on a withdrawn document prints `Unchanged`, writes
+nothing and records nothing.
+
+A withdrawal is permanent. `preview` and `local` refuse, before reading
+anything, an artifact a withdrawal names or whose standing decision is
+`reject`; and after extraction, any artifact whose id a withdrawal names — a
+new approval does not bring it back, and neither does a fresh checkout.
+
 Before pushing, run the corpus checks in the `lovverk` checkout:
 
 ```bash
 python3 scripts/check_corpus_integrity.py
 python3 scripts/check_dataset_separation.py origin/main HEAD
 ```
+
+### Backfill — every observed version, one commit each (ADR-0016 S6)
+
+`promote local` writes the one version you approved. `promote backfill`
+writes **every** version observed at the artifact's URL since the first
+capture (2026-08-19), in observation order, one per run. A version is a run of
+one text (`content_hash` of the extracted regulation) at that URL; bytes that
+change without the text changing (a date stamp, a menu) are one version, and
+a text that comes back after another (A→B→A) is a new version: v1, v2, v3.
+
+```bash
+uv run lovspor promote backfill-preview --authority 0301 --artifact <sha256> \
+  --corpus /absolute/path/to/lovverk --klass-version <klass-vintage>
+```
+
+The preview prints each version with its first and last observation and
+count, its standing approval or its hold, the observations excluded from the
+comparison (a tombstoned blob, ADR-0010 §7 — listed, never bridged), the last
+outcome at the URL (a 404 is `source_status`, never a repeal), holds counted
+by reason, and the version the next run would write. It writes and records
+nothing.
+
+Each version needs its own approval: `promote approve` on one of its blobs
+(the preview names them by observation), bound to that text and the running
+extractor, given after the version was first observed — an approval of A
+given before A came back does not cover v3. Holds, by reason:
+`extraction:<reason>`, `rejected`, `held_by_reviewer`, `approval_stale`,
+`not_approved`, `identity:<reason>`, `identity_changed` (the text is named
+as another document), and `after_earlier_hold` for every version behind the
+first hold — versions are numbered by observation, so none is written past a
+hold.
+
+```bash
+uv run lovspor promote backfill --authority 0301 --artifact <sha256> \
+  --corpus /absolute/path/to/lovverk --klass-version <klass-vintage>
+```
+
+A run writes the **next** version the checkout does not hold (the same three
+files as `promote local`, with every version's interval re-read from the log),
+records it in `promotions.jsonl`, and prints the commit to make, then the
+ordered `backfill` / `git add` / `git commit` lines for every further approved
+version. Run them in that order; each commit is dated when you make it. A
+rerun on a finished backfill writes nothing; a checkout whose versions the log
+does not reproduce (say, `promote local` put a later text in as v1) is
+refused, never patched. The observations read are those up to the latest
+approval among the versions written, so later captures change nothing until
+the refresh.
+
+### Observation refresh — weekly
+
+```bash
+uv run lovspor promote observe --corpus /absolute/path/to/lovverk [--authority 0301]
+git -C /absolute/path/to/lovverk add -- lokale-forskrifter
+git -C /absolute/path/to/lovverk commit -m 'observe: refresh observation intervals (<n> documents)'
+```
+
+`observe` re-reads every current local document's version intervals from the
+log — last observation, count, blobs, byte-identical copies, `source_status`,
+excluded observations — and rewrites only the `observations/<slug>.json`
+files that changed. It adds no version and touches no document or manifest; a
+new text at the URL ends the current version's interval where the new text
+begins and waits for a backfill. A document the log does not reproduce (another
+text, another first observation, another extractor version — that is a
+migration) is skipped with the reason. Use the subject it prints: `observe: …`
+is no history event. Run it at most weekly (ADR-0016 Decision 3); scheduling
+it is not automated yet.
 
 ### 6. A batch of classifier candidates (S8)
 

@@ -106,12 +106,12 @@ def read_artifact(
     return ArchivedArtifact(
         key=key,
         content_type=own[0].content_type,
-        payload=_blob(log, key.sha256),
+        payload=read_blob(log, key.sha256),
         observed_at_first=own[0].observed_at,
         observed_at_last=own[-1].observed_at,
         observations=tuple(_used(f) for f in own),
         corroborating_urls=_corroborating(seen, key),
-        source_status=_status(seen, key.source_url),
+        source_status=source_status(seen, key.source_url),
     )
 
 
@@ -145,7 +145,8 @@ def _corroborating(seen: list[Fetch], key: ArtifactKey) -> tuple[str, ...]:
     return tuple(sorted(urls - {key.source_url}))
 
 
-def _status(seen: list[Fetch], url: str) -> SourceStatus:
+def source_status(seen: list[Fetch], url: str) -> SourceStatus:
+    """The last fetch of ``url`` among ``seen``: retrieved, or the failure's outcome."""
     last = sorted((f for f in seen if f.url == url), key=lambda f: f.observed_at)[-1]
     outcome = "retrieved" if isinstance(last, ArtifactObservation) else last.outcome
     return SourceStatus(
@@ -153,7 +154,8 @@ def _status(seen: list[Fetch], url: str) -> SourceStatus:
     )
 
 
-def _blob(log: ObservationLog, sha256: str) -> bytes:
+def read_blob(log: ObservationLog, sha256: str) -> bytes:
+    """The archived bytes of ``sha256``, refused when tombstoned, missing or altered."""
     if sha256 in log.tombstoned_hashes():
         msg = f"{sha256} is tombstoned in the archive; it cannot be re-verified (ADR-0010 §7)"
         raise PromotionRefusedError(msg)

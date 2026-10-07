@@ -24,9 +24,15 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+)
 
 from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import PromotionRefusedError
@@ -34,8 +40,10 @@ from lovspor.promotion.archive import ArchivedArtifact, SourceStatus
 from lovspor.promotion.corpus import LOCAL_DIR, MANIFEST_NAME, CorpusCheckout, LocalRecord
 from lovspor.promotion.corpus import manifest_text as render_manifest
 from lovspor.promotion.decisions import HumanDecision, IdentityAudit, PromotionAudit, utc_text
+from lovspor.promotion.models import RemovedReason
 from lovspor.promotion.plan import Prepared
 from lovspor.promotion.render import LOCAL_RENDERER_VERSION
+from lovspor.promotion.versions import ExcludedObservation
 
 _NLOD = re.compile(r"nlod", re.IGNORECASE)
 
@@ -56,8 +64,27 @@ class VersionObservations(BaseModel):
     promotion: PromotionAudit
 
 
+class WithdrawalNotice(BaseModel):
+    """The withdrawal of a document, as its observations file keeps it (ADR-0016 4f).
+
+    Published, so it names the reviewer by role only; the name stays in the
+    decision log's ``withdrawal`` record.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    removed_reason: RemovedReason
+    reviewed_by_role: str
+    decided_at: str
+    reason: str
+
+
 class ObservationsFile(BaseModel):
-    """``observations/<slug>.json``: every promoted version of one document."""
+    """``observations/<slug>.json``: every promoted version of one document.
+
+    ``withdrawal`` is written only once there is one, so the file of a
+    document that was never withdrawn keeps exactly the bytes it had.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -67,6 +94,19 @@ class ObservationsFile(BaseModel):
     authority_id: str
     versions: tuple[VersionObservations, ...]
     source_status: SourceStatus
+    excluded: tuple[ExcludedObservation, ...] = ()
+    withdrawal: WithdrawalNotice | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """``excluded`` and ``withdrawal`` are written only when present, so a file
+        without them keeps its bytes."""
+        payload: dict[str, Any] = handler(self)
+        if not self.excluded:
+            payload.pop("excluded", None)
+        if self.withdrawal is None:
+            payload.pop("withdrawal", None)
+        return payload
 
 
 class WriteSet(BaseModel):
@@ -158,6 +198,11 @@ def _observations(
         versions=(*earlier, entry),
         source_status=artifact.source_status,
     )
+    return _json(document)
+
+
+def observations_text(document: ObservationsFile) -> str:
+    """An observations file as every writer writes it: sorted keys, indented, final newline."""
     return _json(document)
 
 
