@@ -73,6 +73,47 @@ def _hash(lines: tuple[str, ...]) -> str:
 
 
 class TestVersionsAreRunsOfOneContent:
+    def test_archive_append_order_does_not_define_versions_or_latest_status(
+        self, root: Path
+    ) -> None:
+        store(root, html_page(), observed_at=FIRST_SEEN + 3 * DAY)
+        store_failure(root, FIRST_SEEN + 2 * DAY)
+        store(root, html_page(CHANGED), observed_at=FIRST_SEEN + DAY)
+        store(root, html_page(), observed_at=FIRST_SEEN)
+
+        history = _history(root)
+
+        assert [v.content_hash for v in history.versions] == [
+            _hash(REGULATION_LINES),
+            _hash(CHANGED),
+            _hash(REGULATION_LINES),
+        ]
+        assert [v.version for v in history.versions] == [1, 2, 3]
+        assert [v.observed_at_first for v in history.versions] == [
+            FIRST_SEEN,
+            FIRST_SEEN + DAY,
+            FIRST_SEEN + 3 * DAY,
+        ]
+        assert history.source_status.outcome == "retrieved"
+        assert history.source_status.http_status == 200
+        assert history.source_status.observed_at == "2026-08-22T15:17:23Z"
+
+    def test_repeated_blob_keeps_every_sighting_but_lists_hashes_first_seen_once(
+        self, root: Path
+    ) -> None:
+        first = store(root, html_page())
+        second = store(
+            root, html_page(updated="Sist oppdatert 02.09.2026"), observed_at=FIRST_SEEN + DAY
+        )
+        store(root, html_page(), observed_at=FIRST_SEEN + 2 * DAY)
+
+        [version] = _history(root).versions
+
+        assert version.content_hash == _hash(REGULATION_LINES)
+        assert version.source_sha256s == (first, second)
+        assert [o.sha256 for o in version.observations] == [first, second, first]
+        assert version.observed_at_last == FIRST_SEEN + 2 * DAY
+
     def test_a_then_b_then_a_is_three_versions_not_a_return_to_the_first(self, root: Path) -> None:
         store(root, html_page(), observed_at=FIRST_SEEN)
         store(root, html_page(), observed_at=FIRST_SEEN + DAY)
@@ -197,6 +238,24 @@ class TestTombstonedBlobs:
 
 
 class TestTheCutOff:
+    def test_exact_cutoff_keeps_a_hold_and_excludes_the_later_return(self, root: Path) -> None:
+        store(root, html_page())
+        held_hash = store(root, EMPTY_PAGE, observed_at=FIRST_SEEN + DAY)
+        store(root, html_page(), observed_at=FIRST_SEEN + 2 * DAY)
+
+        history = _history(root, through_days=1)
+
+        assert [v.version for v in history.versions] == [1, 2]
+        first, held = history.versions
+        assert first.observed_at_last == FIRST_SEEN
+        assert held.content_hash is None
+        assert held.source_sha256s == (held_hash,)
+        assert held.held is not None
+        assert held.held.held_reason == "empty_text"
+        assert held.observed_at_first == held.observed_at_last == FIRST_SEEN + DAY
+        assert history.source_status.outcome == "retrieved"
+        assert history.source_status.observed_at == "2026-08-20T15:17:23Z"
+
     def test_exact_cutoff_includes_capture_but_not_later_failure_or_copy(self, root: Path) -> None:
         sha256 = store(root, html_page())
         store(root, html_page(), observed_at=FIRST_SEEN + DAY)

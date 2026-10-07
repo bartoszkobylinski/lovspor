@@ -73,6 +73,36 @@ def _history(root: Path) -> PrimaryHistory:
 
 
 class TestRefreshedIntervals:
+    def test_refresh_rederives_intervals_instead_of_accumulating_stale_facts(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        path = _promoted(root, corpus, tmp_path, store(root, html_page()))
+        original = _file(path)
+        store(root, html_page(), observed_at=FIRST_SEEN + DAY)
+        store(root, html_page(), url=COPY_URL, observed_at=FIRST_SEEN + 2 * DAY)
+        gone = store(root, html_page(CHANGED), observed_at=FIRST_SEEN + 3 * DAY)
+        ObservationLog(ObservatoryRoot(root, [])).append(
+            Tombstone(
+                sha256=gone,
+                removed_at=FIRST_SEEN + 5 * DAY,
+                basis="privacy",
+                authorised_by="owner",
+            )
+        )
+        store_failure(root, FIRST_SEEN + 4 * DAY)
+        latest = with_intervals(original, _history(root))
+        assert latest.versions[0].observation_count == 2
+        assert latest.versions[0].corroborating_urls == (COPY_URL,)
+        assert len(latest.excluded) == 1
+        assert latest.source_status.outcome == "http_error"
+        log = ObservationLog(ObservatoryRoot(root, []))
+        earlier = read_primary(log, authority_fetches(log, AUTHORITY), PAGE_URL, FIRST_SEEN)
+
+        refreshed = with_intervals(latest, earlier)
+
+        assert refreshed == original
+        assert observations_text(refreshed) == path.read_text(encoding="utf-8")
+
     def test_refresh_is_idempotent_and_does_not_mutate_the_committed_file(
         self, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
