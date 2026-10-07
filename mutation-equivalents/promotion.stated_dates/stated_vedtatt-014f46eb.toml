@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/promotion/stated_dates.py"
+symbol = "stated_vedtatt"
+registered = "2026-10-07, PR #577, from run 37630125523"
+mutation = """
+-        DateStatement(date=parse_stated_date(m.groups()[-1]), text=None, evidence=m.group(0))
++        DateStatement(date=parse_stated_date(m.groups()[+1]), text=None, evidence=m.group(0))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_enactment_patterns_hold_exactly_two_groups"
+justification = """
+Every match here comes from ``_ENACTED`` or ``_SELF_ENACTED``, and both patterns
+hold exactly two capturing groups: ``organ`` (1) and the date (2). For a
+two-item tuple, index -1 and index +1 are the same element, so both read the
+date. Python's own indexing; the assumption test pins the group count, so a
+third group breaks this entry instead of silently changing what it waives.
+Codex remediation tried twice to kill it with tests, which cannot work.
+"""
