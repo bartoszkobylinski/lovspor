@@ -1016,3 +1016,66 @@ class TestGroupingBoundaries:
         assert resolve_group(group, chosen.key) == chosen.model_copy(
             update={"sources": group.sources}
         )
+
+
+@pytest.mark.parametrize("missing", ["doc_id", "content_hash"])
+def test_incomplete_identity_pages_are_not_folded(missing: str) -> None:
+    first = _member(0, f"{BASE}/a").model_copy(update={missing: None})
+    second = _member(1, f"{BASE}/b").model_copy(update={missing: None})
+
+    assert group_candidates((first, second)) == (first, second)
+
+
+def test_folded_candidate_preserves_identity_and_explains_canonical_hold() -> None:
+    first, second = _group("a", "b").members
+
+    (folded,) = group_candidates((second, first))
+
+    assert folded == first.model_copy(
+        update={
+            "sources": (first.key, second.key),
+            "outcome": "held",
+            "hold": NEEDS_CANONICAL_SOURCE,
+            "detail": (
+                "2 pages carry this one text; which page is the canonical source "
+                "is the owner's open decision (#566) — every page stays in provenance"
+            ),
+        }
+    )
+
+
+def test_collision_detail_names_the_actual_regulation() -> None:
+    first = _member(0, f"{BASE}/a")
+    second = _member(1, f"{BASE}/b").model_copy(update={"content_hash": "d" * 64})
+
+    folded = group_candidates((first, second))
+
+    assert len(folded) == 2
+    for item in folded:
+        assert item.detail == (
+            f"2 candidates of this batch mint {GROUP_ID}; which URL is primary is a "
+            "recorded human decision (ADR-0016 1d) — promote the primary one alone"
+        )
+
+
+def test_report_keeps_holds_before_and_after_three_page_groups(batch: Batch, corpus: Path) -> None:
+    batch.add(page(TITLES[2], "Utskrift fra Lovdata"), "before")
+    for title, prefix in zip(TITLES[:2], ("first", "second"), strict=True):
+        for n in range(3):
+            batch.add(sidebar_page(title, n), f"{prefix}-{n}")
+    batch.add(page(TITLES[2], FNR_LINE), "after")
+
+    batch.run(corpus)
+
+    report = batch.report()
+    text = (batch.report_dir / "batch-0301-test-1.md").read_text(encoding="utf-8")
+    holds = text.split("## Held and refused\n\n", 1)[1]
+    assert len(report["items"]) == 4
+    for item in report["items"]:
+        assert item["detail"] in holds
+        for key in item["sources"] or [item["key"]]:
+            assert key["source_url"] in holds
+            assert key["sha256"] in holds
+    assert holds.count("1 regulation, 3 pages:") == 2
+    assert "more page(s)" not in holds
+    assert text == _expected_markdown(report, corpus)
