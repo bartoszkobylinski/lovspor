@@ -77,11 +77,22 @@ class LocalCorpusError(CorpusNotFoundError):
 
 
 class LocalScopeError(LovsporError):
-    """A capability asked of a local regulation that this engine does not serve for it.
+    """A capability asked of a document of the dataset it is not served for.
 
     Local regulations are served opt-in and slice by slice (ADR-0016 5, 7); a
     parameter that is only defined for the central corpus is refused for a
-    local document rather than silently answered from the central path.
+    local document rather than silently answered from the central path, and a
+    capability only local documents have (their observation history) is
+    refused for a central one rather than answered with nothing.
+    """
+
+
+class ObservedAtError(LovsporError):
+    """An ``observed_at`` value that is not an observation instant (ADR-0016 2, 5).
+
+    The observation axis is the instants the authority's website was read
+    at. Only an instant with an offset can be placed against those intervals;
+    a calendar date could fall on either side of a version change.
     """
 
 

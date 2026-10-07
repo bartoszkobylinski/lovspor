@@ -1,6 +1,6 @@
 # MCP server — lovverk for AI assistants
 
-`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets seventeen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets eighteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
 > **Distribution (updated 2026-08-03).** The engine is AGPL-3.0-licensed open infrastructure, public on GitHub, and **Lovspor is distributed on PyPI** as [`lovspor`](https://pypi.org/project/lovspor/) — publishing resumed at `0.4.0`, the earlier `0.2.0`–`0.3.0` releases having been withdrawn during a July 2026 pivot. The commands below use the on-demand `uvx lovspor …` form, which resolves the latest release from PyPI — versioned and immutable, and `uvx lovspor@0.4.0 …` pins one; to run unreleased changes, use `uv run --project /path/to/lovspor lovspor …` from a checkout instead — see [§ Running from a local checkout](#running-from-a-local-checkout). Local stdio is a first-class, fully supported path either way. A hosted MCP endpoint (live since 2026-07-18) is an optional operated access layer — see [§ Streamable HTTP transport](#streamable-http-transport).
 
@@ -14,14 +14,14 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio by default (`lovspor mcp`) — each user runs their own copy locally; no inbound network surface, no shared infrastructure, no auth needed. The sole outbound call is [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) embedding your query via OpenAI — see its **Privacy** note. A Streamable HTTP transport (`lovspor mcp-http`) serves the hosted instance, live since 2026-07-18 — see [§ Streamable HTTP transport](#streamable-http-transport).
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user re-runs `lovspor fetch-corpus` (which fast-forwards the cache) to pick up updates.
-- **Tools:** seventeen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Three of the seventeen (`get_law_at`, `list_law_versions`, `diff_law_versions`) are time-machine tools that read past versions of acts directly from the corpus's git history. They answer corpus history — what the corpus contained at the end of a UTC date — never which provisions were legally in force on that date (ADR-0002; see the temporal contract under `get_law_at`).
+- **Tools:** eighteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Three of the eighteen (`get_law_at`, `list_law_versions`, `diff_law_versions`) are time-machine tools that read past versions of acts directly from the corpus's git history. They answer corpus history — what the corpus contained at the end of a UTC date — never which provisions were legally in force on that date (ADR-0002; see the temporal contract under `get_law_at`).
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
 
 ## Streamable HTTP transport
 
-`lovspor mcp-http` serves the same seventeen read-only tools to remote clients over the MCP Streamable HTTP transport. It is what the hosted instance runs:
+`lovspor mcp-http` serves the same eighteen read-only tools to remote clients over the MCP Streamable HTTP transport. It is what the hosted instance runs:
 
 > ✅ **Live since 2026-07-18; the endpoint is `https://lovspor.no/mcp`** — the only name the hosted instance answers to since the personal-domain alias was retired on 2026-09-17. TLS is terminated by Caddy (automatic Let's Encrypt) on a dedicated DigitalOcean droplet provisioned from `deploy/digitalocean/`. **Every request requires authentication** — anonymous and invalid-token calls return 401. The hosted instance accepts **both credential modes** ([§ Authentication](#authentication-two-modes)): operator-issued opaque `lsp_…` bearer tokens (`lovspor tokens issue`), with per-credential quotas and rate limiting, **and hosted OAuth** through WorkOS AuthKit, so chat-app connectors (Claude.ai, ChatGPT) can log in without a pasted token *(owner decision 2026-09-30, which supersedes the 2026-09-26 opaque-token-only decision of #343; that decision in turn superseded the 2026-08-02 statement that both modes were active)*. Observed 2026-09-30: `GET https://lovspor.no/.well-known/oauth-protected-resource/mcp` returned 200 with `resource` = `https://lovspor.no/mcp`, the AuthKit domain as the sole authorization server and `bearer_methods_supported` = `["header"]`; a Claude.ai custom connector (OAuth, "Register automatically") connected and called `search_laws`; a ChatGPT developer-mode connector (OAuth) connected and returned arbeidsmiljøloven § 1-1. The AuthKit environment is WorkOS **Staging** at the time of writing, so its domain is deliberately not written here — read it from the discovery document.
 >
@@ -76,7 +76,7 @@ An unset or empty variable keeps the default; anything that is not a positive in
 
 ### What the hosted endpoint costs to run
 
-Fifteen of the sixteen tools read files and git: they cost the operator nothing per call. `semantic_search` is the exception — it embeds the caller's query through the operator's OpenAI key. The *corpus* vectors are not part of that: they are computed once during sync and shipped as int8 sidecars inside `lovverk`, so a search re-reads them from disk and pays only for the question.
+Seventeen of the eighteen tools read files and git: they cost the operator nothing per call. `semantic_search` is the exception — it embeds the caller's query through the operator's OpenAI key. The *corpus* vectors are not part of that: they are computed once during sync and shipped as int8 sidecars inside `lovverk`, so a search re-reads them from disk and pays only for the question.
 
 Two mechanisms bound that payment, and they answer different halves of it.
 
@@ -224,7 +224,7 @@ Both units receive it through systemd `LoadCredential=site-probe:/etc/lovspor/cr
 
    Contributors, and anyone running unreleased changes, use a checkout instead — see [§ Running from a local checkout](#running-from-a-local-checkout) below.
 
-3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other sixteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
+3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other seventeen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
 
 ---
 
@@ -261,7 +261,7 @@ claude mcp add lovverk -- uvx lovspor mcp
 
 ## Tools
 
-All seventeen are read-only. None mutate the corpus or trigger a sync. Sixteen are pure local (manifest + filesystem + git on the local clone); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
+All eighteen are read-only. None mutate the corpus or trigger a sync. Seventeen are pure local (manifest + filesystem + git on the local clone); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
 
 ### `get_law(slug)`
 
@@ -822,11 +822,11 @@ Score is cosine similarity in `[-1, 1]`; useful matches are usually `> 0.4`. `ci
 
 When `results` is empty the `notice` says why — the AI is expected to report "no strong match" instead of substituting training-data memory.
 
-**Requires** an embedding credential — `OPENAI_API_KEY` — in the environment when the MCP server starts. The adapter (OpenAI `text-embedding-3-large`, 3072-dim, the default and currently only supported provider) is built eagerly at startup, so a malformed key fails fast rather than on the first tool call. A missing key, or a misconfigured provider, disables only this one tool with a clear runtime error naming the cause; the other sixteen keep working without any embedding configuration at all.
+**Requires** an embedding credential — `OPENAI_API_KEY` — in the environment when the MCP server starts. The adapter (OpenAI `text-embedding-3-large`, 3072-dim, the default and currently only supported provider) is built eagerly at startup, so a malformed key fails fast rather than on the first tool call. A missing key, or a misconfigured provider, disables only this one tool with a clear runtime error naming the cause; the other seventeen keep working without any embedding configuration at all.
 
 The provider is selectable via `LOVSPOR_EMBEDDING_*` (see [`docs/embeddings.md`](embeddings.md)). `semantic_search` only searches documents whose recorded **embedding space** matches the configured one: a document embedded by a different model, or one written before the space was recorded, is excluded rather than compared, because comparing vectors across two spaces returns plausible-looking nonsense instead of an error. Exclusions are reported — partial coverage comes back in the `notice` field, and a corpus with no usable document fails with an explanation. A document with no recorded space stays excluded until it is re-embedded through the normal keyed sync lifecycle; in the published corpus every current document has carried the recorded identity since the 2026-08-04 regeneration. See [`docs/embeddings.md`](embeddings.md) for the identity rules, the binary corpus format, and the model choice rationale.
 
-**Privacy:** unlike the other sixteen tools, `semantic_search` is **not fully local** — the query text you pass is sent to the OpenAI embeddings API to be embedded (the corpus vectors were computed once at sync time; only your live query leaves the machine, per call). The Norwegian-law corpus is public, but your *question* is not — avoid pasting confidential or client-identifying text into a `semantic_search` query. Every other tool (`get_law`, `get_section`, `search_body`, …) is filesystem-and-git only and never leaves your machine.
+**Privacy:** unlike the other seventeen tools, `semantic_search` is **not fully local** — the query text you pass is sent to the OpenAI embeddings API to be embedded (the corpus vectors were computed once at sync time; only your live query leaves the machine, per call). The Norwegian-law corpus is public, but your *question* is not — avoid pasting confidential or client-identifying text into a `semantic_search` query. Every other tool (`get_law`, `get_section`, `search_body`, …) is filesystem-and-git only and never leaves your machine.
 
 **Performance:** the embedding index is loaded lazily on the first call (~5-10 s for the production corpus, ~200 MB resident at 3072-dim int8). Each query embeds via OpenAI (~100-300 ms round-trip) and runs a vectorized brute-force cosine scan (well under 100 ms). Per-call OpenAI cost is fractions of a cent.
 
@@ -1092,7 +1092,17 @@ Regulations enacted by a kommune or fylkeskommune and promoted from the local-la
 - **Addressing.** `<authority_id>/<slug>` — the SSB KLASS code of the authority, then the slug — or the document id (`lk-<authority_id>-<12 hex>`, or `lf-yyyymmdd-nnnn` when the text carries a Lovtidend number). A bare slug never resolves to a local regulation, even when no central law has that slug.
 - **`search_laws(query, dataset="lokale-forskrifter")`** — matches the qualified slug and the title of the current local regulations, and only those. Each hit: `slug` (the qualified address), `doc_id`, `title`, `dataset`, `authority_id`, `version`, `observation`.
 - **`get_law(address)`** — the rendered Markdown (front matter with `basis: "observed"`, `asserted: false`, `source_license: "åndsverkloven § 14"`), followed by an **Observation** block holding the label below as JSON. No temporal notice is composed: no valid-time fact is evaluated for local text.
-- **`get_section(address, section_id, occurrence?)`** — the usual section shape plus `doc_id`, `dataset` and `observation`, and without `temporal_notice`. Cross-references are validated against the local document itself and the central corpus. `recorded_at` is refused for a local regulation (`LocalScopeError`).
+- **`get_section(address, section_id, occurrence?, recorded_at?)`** — the usual section shape plus `doc_id`, `dataset` and `observation`, and without `temporal_notice`. Cross-references are validated against the local document itself and the central corpus. With `recorded_at` the document is read from the corpus state at UTC end-of-day on that date, exactly as for a central act (ADR-0011): the local manifest, the document and its `observations/<slug>.json` come from that commit, the response adds `recorded_at`, `corpus_commit` and `content_hash` (there is no `xml_hash`: there is no XML), and cross-references are validated against that state. A regulation promoted after the date is a plain not-found *in that state* (issue #569 fixed the S5 refusal).
+- **`get_observation_history(document, observed_at?, include_text=false)`** — local regulations only (a central slug is refused with `LocalScopeError`; its history is `get_law_history`). Returns `document`, `doc_id`, `dataset`, `versions` (oldest first: `version`, `content_hash`, `observed_at_first`, `observed_at_last`, `observation_count`, `primary_url`, `corroborating_urls`), `source_status`, `excluded` (observations left out of the comparison, such as a tombstoned capture), `observation` and `at`. With `observed_at` — an instant with an offset, e.g. `2026-09-01T12:00:00Z`; a bare date is refused (`ObservedAtError`) because it could fall on either side of a version change — `at` is one typed outcome (`null` without it):
+
+  | `outcome` | when | carries |
+  |---|---|---|
+  | `contained` | inside a version's closed interval `[observed_at_first, observed_at_last]` | `version`; `text` (that version's Markdown) when `include_text=true`, else `null` |
+  | `between_observations` | after one version's last and before the next version's first observation | `before`, `after` — both neighbours, neither asserted at that instant |
+  | `before_first_observation` | before the document's first observation | `observed_at_first`, `observation_floor` (`2026-08-19`, the observatory's first capture) |
+  | `after_last_observation` | after the last observation (the last interval is closed, not open-ended) | `last`, `observed_at_last` — the version last seen, not asserted past it |
+
+  `observed_at` is the **observation axis** only (when the authority's website was read, ADR-0010) and never selects a corpus state; `recorded_at` is the **transaction axis** (git) and never reads an observation interval. No tool takes both. `include_text` needs `observed_at`; an older version's text is read from the checkout's git history, so a shallow clone may not reach it (`LocalCorpusError`).
 
 Every response carrying local content carries this label; `asserted` is always `false`:
 
@@ -1109,7 +1119,7 @@ Every response carrying local content carries this label; `asserted` is always `
 
 `observed_at_first` is the first observation of the served version (front matter); `observed_at_last` comes from `observations/<slug>.json` and is refreshed by the corpus at most weekly. Between observations nothing is asserted. A listed document whose files are missing or disagree with the manifest is an error (`LocalCorpusError`), never served unlabelled.
 
-Not yet served for local regulations (later ADR-0016 slices): `list_sections`, `verify_quote`, `validate_citation`, `search_body`, `list_recent_changes`, `semantic_search`, the version tools, `recorded_at`, an `authority` filter, local counts in `corpus_status`, and `get_observation_history`.
+Not yet served for local regulations (later ADR-0016 slices): `list_sections`, `verify_quote`, `validate_citation`, `search_body`, `list_recent_changes`, `semantic_search`, the version tools, `recorded_at` on any tool but `get_section`, an `authority` filter, and local counts in `corpus_status`.
 
 ---
 
@@ -1130,7 +1140,7 @@ A typical AI-assistant interaction with this server follows the same pattern:
 11. **`search_eu_implementations(eu_doc_id)`** — reverse direction: when the user asks which Norwegian laws implement a given EU document ("which Norwegian laws implement GDPR?"), use the CELEX as the lookup key.
 12. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The seventeen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) extend the same surface to corpus-history research: the AI can answer "what did this corpus hold for Skatteloven on 2026-05-01?" — or "how did the corpus record of Skatteloven change since then?" via `diff_law_versions` — by walking the corpus's git history without any extra plumbing. Per ADR-0002, these answers describe corpus states at UTC dates, never which provisions were legally in force. `get_temporal_events` adds the temporal-events layer on the same surface: what the source *states* about amendments and commencements — at the current state or a historical one — with an explicit, horizon-bounded evaluation date kept strictly separate from the state-selection date (ADR-0012).
+The eighteen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) extend the same surface to corpus-history research: the AI can answer "what did this corpus hold for Skatteloven on 2026-05-01?" — or "how did the corpus record of Skatteloven change since then?" via `diff_law_versions` — by walking the corpus's git history without any extra plumbing. Per ADR-0002, these answers describe corpus states at UTC dates, never which provisions were legally in force. `get_temporal_events` adds the temporal-events layer on the same surface: what the source *states* about amendments and commencements — at the current state or a historical one — with an explicit, horizon-bounded evaluation date kept strictly separate from the state-selection date (ADR-0012).
 
 ---
 

@@ -475,11 +475,11 @@ def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
     monkeypatch.setattr("lovspor.embeddings.model.OpenAIEmbedder", FakeOpenAIEmbedder)
 
     assert _build_embedder() is None
-    # Whole string: this is the operator's only signal that one of the seventeen
+    # Whole string: this is the operator's only signal that one of the eighteen
     # tools is silently unavailable, and the remediation is the point of it.
     assert capsys.readouterr().err == (
         "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
-        "but the other sixteen tools work normally. Set OPENAI_API_KEY "
+        "but the other seventeen tools work normally. Set OPENAI_API_KEY "
         "and restart to enable semantic search.\n"
     )
 
@@ -522,7 +522,7 @@ def test_build_embedder_reports_and_flushes_invalid_configuration(
     assert _build_embedder() is None
     assert stderr.getvalue() == (
         "lovspor mcp: embedding provider not configured: bad provider "
-        "semantic_search will be disabled; the other sixteen tools work normally.\n"
+        "semantic_search will be disabled; the other seventeen tools work normally.\n"
     )
     assert stderr.flush_calls == 1
 
@@ -5171,7 +5171,7 @@ def test_serve_loads_dotenv_before_building_server(
     assert calls == ["load_env", "run"]
 
 
-def test_build_server_registers_seventeen_tools(tmp_path: Path) -> None:
+def test_build_server_registers_eighteen_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -5188,6 +5188,7 @@ def test_build_server_registers_seventeen_tools(tmp_path: Path) -> None:
             "list_sections",
             "get_law_history",
             "get_temporal_events",
+            "get_observation_history",
             "list_recent_changes",
             "search_laws",
             "search_body",
@@ -5455,11 +5456,14 @@ def test_http_mode_registers_offloaded_async_tools_with_intact_schemas(
     server = build_server(tmp_path, http=HttpConfig(host="127.0.0.1", port=9999))
 
     tools = server._tool_manager._tools
-    assert len(tools) == 17
+    assert len(tools) == 18
     assert all(tool.is_async for tool in tools.values())
     get_law = tools["get_law"]
     assert get_law.parameters["required"] == ["slug"]
     assert get_law.parameters["properties"]["slug"]["type"] == "string"
+    history = tools["get_observation_history"].parameters
+    assert history["required"] == ["document"]
+    assert set(history["properties"]) == {"document", "observed_at", "include_text"}
 
 
 def test_stdio_mode_registers_inline_sync_tools(tmp_path: Path) -> None:
@@ -5470,7 +5474,7 @@ def test_stdio_mode_registers_inline_sync_tools(tmp_path: Path) -> None:
     server = build_server(tmp_path)
 
     tools = server._tool_manager._tools
-    assert len(tools) == 17
+    assert len(tools) == 18
     assert not any(tool.is_async for tool in tools.values())
 
 

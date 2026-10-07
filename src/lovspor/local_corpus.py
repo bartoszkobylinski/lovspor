@@ -17,13 +17,20 @@ cannot hold ``true``. Its fields come from the document's front matter and
 its ``observations/<slug>.json``; files that disagree with the manifest, or
 with each other about which document they describe, are a
 :class:`~lovspor.errors.LocalCorpusError`, never served unlabelled.
+
+The same reads run against one resolved corpus commit for ``recorded_at``
+(ADR-0016 5, ADR-0011): :meth:`LocalDataset.at` reads the manifest, the
+document and its observations file from that commit's tree, never the
+working tree. That is the transaction axis; the observation axis stays in
+the files' own ``observed_at`` fields and is never used to pick a commit.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+import subprocess
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -36,6 +43,9 @@ from lovspor.promotion.corpus import (
     LocalManifest,
     LocalRecord,
 )
+from lovspor.promotion.writer import ObservationsFile
+from lovspor.snapshot import CorpusSnapshot, StateIntegrityError
+from lovspor.timetravel import _iter_follow_log, _read_blob
 
 __all__ = [
     "LOCAL_DATASET",
@@ -120,6 +130,7 @@ class _FrontMatter(BaseModel):
     id: str
     authority: ObservedAuthority
     version: int
+    content_hash: str
     observed_at_first: str
     source_url: str
 
@@ -163,6 +174,10 @@ class LocalDataset:
         self._cached = (mtime, manifest)
         return manifest
 
+    def at(self, snapshot: CorpusSnapshot, when: str) -> LocalDataset:
+        """This dataset as the corpus commit ``snapshot`` holds it; ``when`` names it in errors."""
+        return _LocalState(self._root, snapshot, when)
+
     def resolve(self, address: str) -> LocalEntry:
         """The one current record ``address`` names, by qualified slug or id."""
         current = [(i, r) for i, r in self.manifest().documents.items() if r.status == "current"]
@@ -183,14 +198,45 @@ class LocalDataset:
 
     def document(self, address: str) -> ServedLocal:
         doc_id, record = self.resolve(address)
-        markdown_path = self._inside(record.markdown_path)
-        markdown = _read_text(markdown_path)
+        markdown_path, markdown = self._read(record.markdown_path)
         return ServedLocal(
             doc_id=doc_id,
             address=f"{record.authority_id}/{record.slug}",
             record=record,
             markdown=markdown,
-            observation=self._observation(doc_id, markdown_path, markdown),
+            observation=self._observation(doc_id, record, (markdown_path, markdown)),
+        )
+
+    def observations(self, served: ServedLocal) -> ObservationsFile:
+        """``observations/<slug>.json`` of ``served``, read with the model S6 writes it with."""
+        path, text = self._read(_observations_path(served.record.markdown_path))
+        try:
+            observed = ObservationsFile.model_validate_json(text)
+        except ValidationError as exc:
+            raise LocalCorpusError(f"{path} does not read as the observations file: {exc}") from exc
+        if observed.doc_id != served.doc_id:
+            raise LocalCorpusError(f"{path} holds the observations of {observed.doc_id}")
+        if not observed.versions:
+            raise LocalCorpusError(f"{path} lists no promoted version of {served.doc_id}")
+        return observed
+
+    def version_text(self, served: ServedLocal, version: int, content_hash: str) -> str:
+        """The rendering of ``version``: the file itself when current, else from its history."""
+        if (served.record.version, served.record.content_hash) == (version, content_hash):
+            return served.markdown
+        relative = served.record.markdown_path
+        try:
+            revisions = _iter_follow_log(self._root, relative)
+        except subprocess.CalledProcessError as exc:
+            raise LocalCorpusError(f"{relative} has no history to read v{version} from") from exc
+        for revision in revisions:
+            text = _read_blob(self._root, revision.sha, revision.path)
+            front = _front_matter(Path(revision.path), text)
+            if (front.version, front.content_hash) == (version, content_hash):
+                return text
+        raise LocalCorpusError(
+            f"v{version} of {served.doc_id} is not in this checkout's history of {relative}; "
+            "a shallow clone cannot reach it",
         )
 
     def matches(self, query: str) -> list[LocalEntry]:
@@ -218,18 +264,25 @@ class LocalDataset:
             "observation": served.observation.label(),
         }
 
-    def _observation(self, doc_id: str, markdown_path: Path, markdown: str) -> Observation:
-        front = _front_matter(markdown_path, markdown)
-        if front.id != doc_id:
-            raise LocalCorpusError(f"{markdown_path} describes {front.id}, not {doc_id}")
-        path = markdown_path.parent / "observations" / f"{markdown_path.stem}.json"
-        observed_last = _observed_at_last(path, doc_id, front.version)
+    def _observation(
+        self, doc_id: str, record: LocalRecord, markdown: tuple[Path, str]
+    ) -> Observation:
+        markdown_path, text = markdown
+        front = _front_matter(markdown_path, text)
+        _agree_with_record(markdown_path, front, doc_id, record)
+        path, observations = self._read(_observations_path(record.markdown_path))
+        observed_last = _observed_at_last(path, observations, doc_id, front.version)
         return Observation(
             authority=front.authority,
             source_url=front.source_url,
             observed_at_first=front.observed_at_first,
             observed_at_last=observed_last,
         )
+
+    def _read(self, relative: str) -> tuple[Path, str]:
+        """A dataset file: where it is (for messages) and its text."""
+        path = self._inside(relative)
+        return path, _read_text(path)
 
     def _inside(self, relative: str) -> Path:
         dataset = (self._root / LOCAL_DIR).resolve()
@@ -239,11 +292,73 @@ class LocalDataset:
         return target
 
 
+class _LocalState(LocalDataset):
+    """The dataset read from one resolved corpus commit, never the working tree."""
+
+    def __init__(self, corpus_path: Path, snapshot: CorpusSnapshot, when: str) -> None:
+        super().__init__(corpus_path)
+        self._snapshot = snapshot
+        self._when = when
+        self._manifest: LocalManifest | None = None
+
+    def manifest(self) -> LocalManifest:
+        if self._manifest is None:
+            relative = f"{LOCAL_DIR}/{MANIFEST_NAME}"
+            text = self._snapshot.read_text(relative)
+            self._manifest = LocalManifest() if text is None else _parse_manifest(relative, text)
+        return self._manifest
+
+    def resolve(self, address: str) -> LocalEntry:
+        try:
+            return super().resolve(address)
+        except AmbiguousSlugError:
+            raise
+        except CorpusNotFoundError as exc:
+            raise CorpusNotFoundError(
+                f"no current local regulation {address!r} in the corpus state {self._when} "
+                f"(corpus_commit {self._snapshot.sha}); it may have been promoted later — "
+                "omit recorded_at to read the current corpus",
+            ) from exc
+
+    def _read(self, relative: str) -> tuple[Path, str]:
+        parts = PurePosixPath(relative).parts
+        if parts[:1] != (LOCAL_DIR,) or ".." in parts:
+            raise LocalCorpusError(f"manifest path {relative!r} is outside {LOCAL_DIR}/")
+        text = self._snapshot.read_text(relative)
+        if text is None:
+            raise StateIntegrityError(
+                f"corpus state {self._snapshot.sha} is inconsistent: its local manifest "
+                f"references {relative!r}, which is not in the commit's tree",
+            )
+        return Path(relative), text
+
+
+def _agree_with_record(path: Path, front: _FrontMatter, doc_id: str, record: LocalRecord) -> None:
+    """Refuse a document whose front matter names another id, version or text than its record."""
+    if front.id != doc_id:
+        raise LocalCorpusError(f"{path} describes {front.id}, not {doc_id}")
+    if front.version != record.version:
+        raise LocalCorpusError(
+            f"{path} is v{front.version}; the manifest records v{record.version}"
+        )
+    if front.content_hash != record.content_hash:
+        raise LocalCorpusError(f"{path} content_hash disagrees with the manifest record")
+
+
+def _observations_path(markdown_path: str) -> str:
+    path = PurePosixPath(markdown_path)
+    return str(path.parent / "observations" / f"{path.stem}.json")
+
+
 def _read_manifest(path: Path) -> LocalManifest:
+    return _parse_manifest(path, path.read_bytes())
+
+
+def _parse_manifest(where: Path | str, data: bytes | str) -> LocalManifest:
     try:
-        return LocalManifest.model_validate_json(path.read_bytes())
+        return LocalManifest.model_validate_json(data)
     except ValidationError as exc:
-        raise LocalCorpusError(f"{path} does not read as the local manifest: {exc}") from exc
+        raise LocalCorpusError(f"{where} does not read as the local manifest: {exc}") from exc
 
 
 def _read_text(path: Path) -> str:
@@ -284,9 +399,9 @@ def _flow_mapping(value: str) -> dict[str, Any]:
     return {key: json.loads(literal) for key, literal in _FLOW_PAIR.findall(value)}
 
 
-def _observed_at_last(path: Path, doc_id: str, version: int) -> str:
+def _observed_at_last(path: Path, text: str, doc_id: str, version: int) -> str:
     try:
-        observed = _Observations.model_validate_json(_read_text(path))
+        observed = _Observations.model_validate_json(text)
     except ValidationError as exc:
         raise LocalCorpusError(f"{path} does not read as the observations file: {exc}") from exc
     if observed.doc_id != doc_id:

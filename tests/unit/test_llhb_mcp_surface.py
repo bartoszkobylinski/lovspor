@@ -84,8 +84,9 @@ class TestToolSurface:
         assert "get_section" in surface.names
         assert "semantic_search" in surface.names
         assert "get_temporal_events" in surface.names
+        assert "get_observation_history" in surface.names
         assert list(surface.names) == sorted(surface.names)
-        assert len(surface.names) == 17
+        assert len(surface.names) == 18
 
     def test_schema_hash_is_hex_and_reproducible(self, corpus: Path) -> None:
         first = tool_surface(corpus)
@@ -255,7 +256,7 @@ class TestToolConfig:
         assert names and all(re.match(pattern, name) for name in names)
 
     def test_the_frozen_surface_document_is_what_the_code_serves(self, tmp_path: Path) -> None:
-        """tool-surface-v6.json is the expectation check_fairness compares a
+        """tool-surface-v7.json is the expectation check_fairness compares a
         run's declaration against, so it must be the code's own account,
         re-derived here on every run. Two corpora with disjoint content are
         the witness that the surface comes from build_server, not from the
@@ -317,16 +318,23 @@ class TestToolConfig:
         changes, and existing calls answer byte-identically
         (test_mcp_existing_calls.py). Taken with the S5 implementation.
 
-        v1 through v5 stay committed untouched so the runs that recorded
+        v6 -> v7 (2026-10-07): ADR-0016 slice S7 — get_observation_history
+        is added (seventeen tools become eighteen), and get_section's
+        description says recorded_at now works for a local regulation
+        (#569) instead of being refused. No existing tool's name or schema
+        changes; existing calls answer byte-identically. Taken with the S7
+        implementation.
+
+        v1 through v6 stay committed untouched so the runs that recorded
         their hashes remain verifiable (check_fairness --surface-path);
-        this test guards the CURRENT apparatus, which v6 describes."""
+        this test guards the CURRENT apparatus, which v7 describes."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
                 / "benchmarks"
                 / "llhb"
                 / "runner"
-                / "tool-surface-v6.json"
+                / "tool-surface-v7.json"
             ).read_text(encoding="utf-8")
         )
         corpora = (

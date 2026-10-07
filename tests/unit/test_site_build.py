@@ -616,8 +616,8 @@ class TestLanding:
             for original, replacement in (
                 ("~5 900", "1"),
                 ("~5,900", "1"),
-                ("Seksten", "17"),
-                ("Sixteen", "17"),
+                ("Seksten", "18"),
+                ("Sixteen", "18"),
                 ("Kommer snart", "Planlagt"),
                 ("Coming shortly", "Planned"),
             ):
@@ -636,7 +636,7 @@ class TestLanding:
         out = tmp_path / "site"
         world.build(out, observation)
 
-        assert _fact_values(_page(out, "/"), "code.tool_surface.tool_count") == ["17"]
+        assert _fact_values(_page(out, "/"), "code.tool_surface.tool_count") == ["18"]
         assert 'data-kind="hosted"' not in _page(out, "/")
 
 
@@ -891,7 +891,7 @@ class TestStatusPage:
             'data-kind="hosted">17</span>'
         ) in markup
         assert '<span data-fact="hosted.process.tool_count" data-kind="hosted">17</span>' in markup
-        assert '<span data-fact="code.tool_surface.tool_count" data-kind="code">17</span>' in markup
+        assert '<span data-fact="code.tool_surface.tool_count" data-kind="code">18</span>' in markup
 
     def test_manifest_hash_is_shown_and_not_linked(
         self, built: tuple[Path, SiteBuildReport], world: World
@@ -917,7 +917,7 @@ class TestStatusPage:
         assert report.hosted_state == "unavailable"
         assert _fact_values(markup, "hosted.transport.authenticated.served_tool_count") == ["16"]
         assert _fact_values(markup, "hosted.process.tool_count") == ["17"]
-        assert _fact_values(markup, "code.tool_surface.tool_count") == ["17"]
+        assert _fact_values(markup, "code.tool_surface.tool_count") == ["18"]
         assert _fact_values(markup, "hosted.comparisons.transport_surface_match") == ["false"]
         assert _fact_values(markup, "hosted.state") == ["unavailable"]
 
@@ -934,7 +934,7 @@ class TestStatusPage:
         assert _fact_values(markup, "hosted.comparisons.tool_surface_match") == ["false"]
         assert _fact_values(markup, "hosted.comparisons.transport_surface_match") == ["true"]
         assert _fact_values(markup, "hosted.process.tool_count") == ["16"]
-        assert _fact_values(markup, "code.tool_surface.tool_count") == ["17"]
+        assert _fact_values(markup, "code.tool_surface.tool_count") == ["18"]
 
 
 class TestDocsPage:

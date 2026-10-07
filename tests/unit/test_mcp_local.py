@@ -178,12 +178,22 @@ class TestGetSection:
 
         assert f"section '7' not found in '{ADDRESS}'; available: § 1, § 2" in error
 
-    def test_recorded_at_is_refused_for_a_local_regulation(self, corpus: Path) -> None:
+    def test_recorded_at_reads_a_local_section_from_the_corpus_state(self, versioned: Path) -> None:
+        """ADR-0016 5: ``recorded_at`` works on local documents unchanged (#569)."""
+        path = versioned / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md"
+        _append(path, "\n## § 3 Ny\n\nSkrevet etter at korpuset ble registrert.\n")
+
+        section = _structured(
+            versioned, "get_section", slug=ADDRESS, section_id="2", recorded_at="2026-09-03"
+        )
         error = _call(
-            corpus, "get_section", slug=ADDRESS, section_id="1", recorded_at="2026-09-01"
+            versioned, "get_section", slug=ADDRESS, section_id="3", recorded_at="2026-09-03"
         )["error"]
 
-        assert "recorded_at is not served for local regulations" in error
+        assert section["recorded_at"] == "2026-09-03"
+        assert section["observation"] == OBSERVATION
+        assert "kontrolleres hver vår" in section["body"]
+        assert f"section '3' not found in '{ADDRESS}'; available: § 1, § 2" in error
 
     def test_a_central_section_keeps_its_temporal_notice(self, corpus: Path) -> None:
         section = _structured(corpus, "get_section", slug="proveloven", section_id="1")
@@ -302,14 +312,30 @@ class TestExactWire:
         )
         assert '"name": "Prøvestad"' in text
 
-    def test_the_recorded_at_refusal_is_exact(self, corpus: Path) -> None:
-        error = _call(
-            corpus, "get_section", slug=LOCAL_ID, section_id="1", recorded_at="2026-09-01"
+    def test_a_recorded_local_section_is_exact(self, versioned: Path) -> None:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=versioned, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+        section = _structured(
+            versioned, "get_section", slug=LOCAL_ID, section_id="1", recorded_at="2026-09-03"
         )
 
-        assert error == {
-            "error": "Error executing tool get_section: recorded_at is not served for local "
-            "regulations yet (ADR-0016 S5); omit it to read the current version"
+        assert section == {
+            "slug": ADDRESS,
+            "section_id": "1",
+            "occurrence": 1,
+            "heading": "§ 1. Formål",
+            "parent_chapter": "",
+            "layer": "main",
+            "body": "Forskriften skal gi trygge lekeplasser i Prøvestad kommune.",
+            "cross_references": [],
+            "doc_id": LOCAL_ID,
+            "dataset": "lokale-forskrifter",
+            "observation": OBSERVATION,
+            "recorded_at": "2026-09-03",
+            "corpus_commit": head,
+            "content_hash": "c" * 64,
         }
 
 
@@ -364,6 +390,27 @@ class TestPassThrough:
         assert slugs() == ["proveforskriften", "proveloven"]
         assert slugs(dataset="forskrifter") == ["proveforskriften"]
         assert len(slugs(limit=1)) == 1
+
+    @pytest.mark.parametrize("recorded_at", [None, "2026-09-03"])
+    def test_verify_quote_keeps_occurrence_and_state(
+        self, versioned: Path, recorded_at: str | None
+    ) -> None:
+        stamp = {} if recorded_at is None else {"recorded_at": recorded_at}
+
+        def verified(occurrence: int) -> Any:
+            return _structured(
+                versioned,
+                "verify_quote",
+                slug="ordensloven",
+                section_id="2",
+                quote="En annen paragraf",
+                occurrence=occurrence,
+                **stamp,
+            )
+
+        assert verified(2)["verified"] is True
+        assert verified(1)["verified"] is False
+        assert verified(2).get("recorded_at") == recorded_at
 
     def test_a_cross_reference_to_a_central_law_reads_the_central_index(self, corpus: Path) -> None:
         _append(
