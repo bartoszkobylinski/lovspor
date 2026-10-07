@@ -28,7 +28,7 @@ from lovspor.mcp import serve as _mcp_serve
 from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.observatory.entrypoint import observatory_app
 from lovspor.ops_cli import ops_app
-from lovspor.promotion.commands import promote_app
+from lovspor.promotion.backfill_commands import promote_app
 from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError

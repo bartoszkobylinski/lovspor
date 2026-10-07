@@ -1,0 +1,19 @@
+[[equivalent]]
+file = "src/lovspor/promotion/backfill_commands.py"
+symbol = "register_backfill"
+registered = "2026-10-07, PR #568, from run 37552871262"
+mutation = """
+-    app.command("backfill")(backfill)
++    app.command(None)(backfill)
+"""
+justification = """
+With no name, typer names a command after its callback: `get_command_name(
+callback.__name__)`, which lowercases and turns `_` into `-`. The callback is
+`backfill`, so the command is registered as "backfill" either way, with the
+same callback, help and options. The other mutants of this line (a misspelt
+name, a None callback) are killed by
+tests/unit/test_promotion_backfill_output.py::TestRegistration. Dependency
+behaviour (typer), pinned by the assumption test, which also fails if the
+function is renamed.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_typer_names_an_unnamed_command_after_its_function"

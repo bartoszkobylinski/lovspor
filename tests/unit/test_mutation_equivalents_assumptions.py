@@ -38,6 +38,7 @@ from pypdf.errors import PdfReadError
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
 from lovspor.parsing.xml_normalizer import safe_parser
+from lovspor.promotion.backfill_commands import backfill, backfill_preview, observe
 from lovspor.promotion.fields import _ENACTED
 from lovspor.release.envelope import CorpusSummary, Marker, ReleaseRecord
 from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
@@ -611,3 +612,20 @@ def test_assumption_click_echo_treats_none_as_empty_and_reads_nl_for_truth() -> 
     assert typer.echo is click.echo
     assert written(None, True) == written("", True) == "\n"
     assert written("x", None) == written("x", False) == "x"
+
+
+def test_assumption_typer_names_an_unnamed_command_after_its_function() -> None:
+    """``app.command(None)(f)`` registers ``f`` as ``f.__name__`` with ``_`` read as ``-``.
+
+    Pins the three ``register_backfill`` entries (PR #568): each explicit name
+    there is the one typer derives from its callback, so dropping it registers
+    the same command. Fails, too, if a callback is renamed away from its command.
+    """
+    app = typer.Typer()
+    for callback in (backfill_preview, backfill, observe):
+        app.command(None)(callback)
+
+    group = typer.main.get_command(app)
+
+    assert isinstance(group, click.Group)
+    assert sorted(group.commands) == ["backfill", "backfill-preview", "observe"]
