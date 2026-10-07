@@ -76,7 +76,7 @@ def stated_vedtatt(regulation: ExtractedRegulation) -> StatedDate:
         for m in matches
         if not _STATUTE_BEFORE_DATE.search(m.group("organ"))
     )
-    return _verdict(statements or _blank_enactments(block, body))
+    return _verdict((*statements, *_blank_enactments(block, body)))
 
 
 def _blank_enactments(block: str, body: str) -> tuple[DateStatement, ...]:

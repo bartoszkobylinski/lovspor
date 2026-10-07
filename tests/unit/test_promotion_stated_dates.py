@@ -59,6 +59,22 @@ class TestVedtatt:
         assert "xx.xx.2020" in statement.evidence
         assert _evidence_is_verbatim(regulation, stated)
 
+    @pytest.mark.parametrize("blank_in_block", [True, False])
+    def test_a_dated_statement_does_not_hide_a_blank_one(self, blank_in_block: bool) -> None:
+        """Every statement is kept, so one draft blank keeps the date held (Codex, PR #577)."""
+        valid = "Forskriften er vedtatt av kommunestyret 12.12.2019."
+        blank = "Forskriften er vedtatt av kommunestyret xx.xx.2020."
+        regulation = ExtractedRegulation(
+            title="Forskrift om slam",
+            identification_block=blank if blank_in_block else valid,
+            body=valid if blank_in_block else blank,
+        )
+
+        stated = stated_vedtatt(regulation)
+
+        assert (stated.status, stated.hold_reason) == ("held", "placeholder_date")
+        assert sorted(str(s.date) for s in stated.statements) == ["2019-12-12", "None"]
+
     def test_a_blank_date_outside_an_enactment_sentence_is_not_a_statement(self) -> None:
         regulation = ExtractedRegulation(
             title="Forskrift om slam",
