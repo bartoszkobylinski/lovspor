@@ -350,3 +350,41 @@ def test_a_capitalised_next_line_starts_a_new_sentence() -> None:
     )
 
     assert stated_relations(regulation) == ()
+
+
+@pytest.mark.parametrize("connector", ["ved", "av", "gjennom"])
+@pytest.mark.parametrize(
+    ("cue", "kind"),
+    [("endret", RelationKind.AMENDED_BY), ("opphevet", RelationKind.REPEALED_BY)],
+)
+def test_inverse_relations_name_the_changing_act(
+    connector: str, cue: str, kind: RelationKind
+) -> None:
+    """The inverse cues documented in relations.py must preserve their direction."""
+    sentence = f"Forskriften er {cue} {connector} FOR-2004-06-01-930."
+    regulation = _regulation("Forskrift om slam", "Vedtatt 1.1.2020.", sentence)
+
+    [stated] = stated_relations(regulation)
+    relation = resolve(stated, _index(), OWN_ID)
+
+    assert relation.kind is kind
+    assert relation.evidence == sentence
+    assert relation.target_text == "FOR-2004-06-01-930"
+    assert relation.target == LinkedDocument(
+        doc_id="sf-20040601-0930", dataset="forskrifter", address="avfallsforskriften"
+    )
+    assert relation.unresolved is None
+
+
+def test_a_removed_local_target_stays_unresolved() -> None:
+    """Resolution is restricted to current corpus documents, including local ones."""
+    record = _local_record("renovasjonsforskrift").model_copy(update={"status": "removed"})
+    [stated] = stated_relations(
+        _regulation("Forskrift om slam", "Endring i FOR-2019-12-12-2077.", "§ 1")
+    )
+
+    relation = resolve(stated, _index(**{"lf-20191212-2077": record}), OWN_ID)
+
+    assert (relation.target, relation.unresolved) == (None, Unresolved.NOT_IN_CORPUS)
+    assert relation.target_text == stated.target.text
+    assert relation.evidence == stated.evidence

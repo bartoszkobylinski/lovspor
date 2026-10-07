@@ -15,7 +15,8 @@ import pytest
 from lovspor.errors import PromotionRefusedError
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
 from lovspor.promotion.corpus import CentralEntry, CorpusCheckout, LocalManifest
-from lovspor.promotion.evidence import target_index
+from lovspor.promotion.evidence import EvidenceFile, EvidenceSubject, evidence_file, target_index
+from lovspor.promotion.models import ExtractedRegulation
 from tests.unit.promotion_cli_fixtures import (
     AUTHORITY,
     Decision,
@@ -169,3 +170,36 @@ def test_an_unreadable_central_manifest_refuses(tmp_path: Path, contents: str) -
 
     with pytest.raises(PromotionRefusedError, match="central manifest"):
         CorpusCheckout(corpus, []).central_entries()
+
+
+def test_evidence_is_deterministic_and_round_trips_without_losing_statements() -> None:
+    subject = EvidenceSubject(
+        doc_id="lf-20200101-001",
+        version=2,
+        content_hash="a" * 64,
+        regulation=ExtractedRegulation(
+            title="Forskrift om slam",
+            identification_block="Vedtatt 1.1.2020. Med hjemmel i forurensningsloven.",
+            body="Forskriften trer i kraft 1. januar 2020.\n§ 4 trer i kraft 1. juli 2020.",
+        ),
+    )
+    index = target_index(
+        {"nl-19810313-006": CentralEntry.model_validate(FORURENSNINGSLOVEN)}, LocalManifest()
+    )
+
+    first = evidence_file(subject, index)
+    second = evidence_file(subject, index)
+    encoded = first.model_dump_json()
+
+    assert encoded == second.model_dump_json()
+    assert EvidenceFile.model_validate_json(encoded) == first
+    assert (first.ikraft.status, first.ikraft.hold_reason, first.ikraft.value) == (
+        "held",
+        "conflicting_statements",
+        None,
+    )
+    assert len(first.ikraft.statements) == 2
+    [relation] = first.relations
+    assert relation.target is not None
+    assert relation.target.doc_id == "nl-19810313-006"
+    assert (first.version, first.content_hash) == (subject.version, subject.content_hash)
