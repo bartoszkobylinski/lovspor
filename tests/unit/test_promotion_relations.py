@@ -406,3 +406,34 @@ def test_a_removed_local_target_stays_unresolved() -> None:
     assert (relation.target, relation.unresolved) == (None, Unresolved.NOT_IN_CORPUS)
     assert relation.target_text == stated.target.text
     assert relation.evidence == stated.evidence
+
+
+@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+def test_a_date_and_number_shared_by_two_current_documents_is_not_linked() -> None:
+    """relations.py promises resolution only to exactly one current corpus document."""
+    index = _index(**{"lf-20040601-0930": _local_record("local-avfallsforskrift")})
+    [stated] = stated_relations(
+        _regulation("Forskrift om slam", "Endring i FOR-2004-06-01-930.", "§ 1")
+    )
+
+    relation = resolve(stated, index, OWN_ID)
+
+    assert relation.target is None
+    assert relation.unresolved is not None
+    assert relation.target_text == stated.target.text
+    assert relation.evidence == stated.evidence
+
+
+def test_a_removed_duplicate_does_not_hide_the_one_current_date_and_number_target() -> None:
+    removed = _local_record("local-avfallsforskrift").model_copy(update={"status": "removed"})
+    index = _index(**{"lf-20040601-0930": removed})
+    [stated] = stated_relations(
+        _regulation("Forskrift om slam", "Endring i FOR-2004-06-01-930.", "§ 1")
+    )
+
+    relation = resolve(stated, index, OWN_ID)
+
+    assert relation.target == LinkedDocument(
+        doc_id="sf-20040601-0930", dataset="forskrifter", address="avfallsforskriften"
+    )
+    assert relation.unresolved is None
