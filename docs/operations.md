@@ -1363,6 +1363,16 @@ and record the decision with `promote approve` (step 2). Exit status 4 means
 the gate is blocked: **one rejected sampled item blocks the whole batch**, and
 an unreviewed one blocks it until it is reviewed.
 
+One regulation embedded on many pages (a CMS sidebar) is **one** candidate:
+candidates that mint the same id from the same extracted text (`content_hash`)
+are folded into one, with every page in its `sources`. The report shows it as
+one line, "1 regulation, N pages", with the id, the `content_hash` and the
+first pages; the JSON lists them all. It is held as
+`batch:needs_canonical_source` until the owner settles which page is the
+canonical source (#566), and it never enters the sample as more than one item.
+The same id minted from **different** texts stays a real collision,
+`batch:same_id_in_batch`, one hold per distinct text.
+
 Once the gate passes, add `--write`: it writes the **next** approved item
 through the same code as `promote local` and prints its commit. Commit it,
 then rerun the command for the next one — one commit per version. Only items

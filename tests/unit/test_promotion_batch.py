@@ -18,11 +18,19 @@ from pydantic import ValidationError
 from lovspor.errors import PromotionRefusedError
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
 from lovspor.promotion import plan
-from lovspor.promotion.batch import BatchAssessment, BatchSpec
+from lovspor.promotion.batch import (
+    NEEDS_CANONICAL_SOURCE,
+    BatchAssessment,
+    BatchItem,
+    BatchSpec,
+    CandidateGroup,
+    choose_canonical,
+    resolve_group,
+)
 from lovspor.promotion.batch_commands import BLOCKED_EXIT_CODE, _spec
 from lovspor.promotion.batch_report import report_json, report_markdown
-from lovspor.promotion.decisions import DECISIONS_FILENAME
-from lovspor.promotion.sample import parse_sample_rate
+from lovspor.promotion.decisions import DECISIONS_FILENAME, ArtifactKey, ClassifierEvidence
+from lovspor.promotion.sample import draw_sample, parse_sample_rate
 from tests.unit.promotion_cli_fixtures import (
     AUTHORITY,
     KLASS_VERSION,
@@ -182,9 +190,9 @@ class TestAssessment:
 
         assert batch.report()["holds_by_reason"] == {"request:refused": 1}
 
-    def test_two_candidates_minting_one_id_are_both_held(self, batch: Batch, corpus: Path) -> None:
+    def test_two_texts_minting_one_id_are_both_held(self, batch: Batch, corpus: Path) -> None:
         batch.add(page(TITLES[0]), "a")
-        batch.add(page(TITLES[0]), "a-kopi")
+        batch.add(page(TITLES[0], "En ny bestemmelse."), "a-endret")
 
         batch.run(corpus)
 
@@ -514,6 +522,19 @@ def _expected_markdown(report: dict, corpus: Path) -> str:
         if item["hold"] is None:
             continue
         key = item["key"]
+        pages = item["sources"]
+        if pages:
+            holds.append(
+                f"- `{item['hold']}` 1 regulation, {len(pages)} pages: {item['doc_id']}, "
+                f"content_hash {item['content_hash']}: {item['detail']}"
+            )
+            holds += [f"  - {k['source_url']} ({k['sha256']})" for k in pages[:3]]
+            if len(pages) > 3:
+                holds.append(
+                    f"  - and {len(pages) - 3} more page(s), listed in "
+                    f"batch-{spec['batch_id']}.json"
+                )
+            continue
         holds.append(f"- `{item['hold']}` {key['sha256']} {key['source_url']}: {item['detail']}")
         holds += [
             f"  - personal data: {h['kind']} on line {h['line']}" for h in item["personal_data"]
@@ -548,7 +569,7 @@ def test_batch_report_bytes_and_assessment_fields(
         "candidates": len(items),
         "ready": sum(i["outcome"] == "ready" for i in items),
         "unchanged": 0,
-        "held": 2 if scenario == "duplicates" else int(scenario == "mixed"),
+        "held": int(scenario in {"duplicates", "mixed"}),
         "refused": int(scenario == "mixed"),
         "sampled": 1 if scenario in {"duplicates", "listed"} else 2,
         "would_write": 2 if scenario == "approved" else 0,
@@ -776,3 +797,163 @@ def test_same_id_collision_holds_an_unchanged_and_a_ready_candidate(
     assert report["summary"]["would_write"] == 0
     assert tree(corpus) == corpus_before
     assert tree(root) == archive_before
+
+
+def sidebar_page(title: str, n: int) -> bytes:
+    """One regulation inside a different page each time: a CMS sidebar block (#566)."""
+    return html_page((title, *REGULATION_LINES[1:]), sidebar=f"<aside><p>Nyhet nr. {n}</p></aside>")
+
+
+def _items_by_hold(report: dict[str, object]) -> dict[str | None, list[dict]]:
+    items = report["items"]
+    assert isinstance(items, list)
+    held: dict[str | None, list[dict]] = {}
+    for item in items:
+        held.setdefault(item["hold"], []).append(item)
+    return held
+
+
+class TestCandidateGroups:
+    """#566: one regulation embedded on N pages is one candidate with N source pages."""
+
+    def test_one_regulation_on_many_pages_is_one_held_group(
+        self, batch: Batch, corpus: Path
+    ) -> None:
+        shas = {slug: batch.add(sidebar_page(TITLES[0], n), slug) for n, slug in enumerate("dbca")}
+        batch.add(page(TITLES[1]), "other")
+
+        batch.run(corpus)
+
+        report = batch.report()
+        assert len(set(shas.values())) == 4
+        assert report["holds_by_reason"] == {"batch:needs_canonical_source": 1}
+        assert report["summary"]["candidates"] == 2
+        (group,) = _items_by_hold(report)["batch:needs_canonical_source"]
+        assert [k["source_url"] for k in group["sources"]] == [f"{BASE}/{s}" for s in "abcd"]
+        assert [k["sha256"] for k in group["sources"]] == [shas[s] for s in "abcd"]
+        assert group["key"] == group["sources"][0]
+        assert group["outcome"] == "held"
+        assert not group["sampled"]
+        assert group["doc_id"].startswith(f"lk-{AUTHORITY}-")
+        assert len(group["content_hash"]) == 64
+        assert "#566" in group["detail"]
+
+    def test_the_group_does_not_depend_on_the_classifier_row_order(
+        self, batch: Batch, corpus: Path
+    ) -> None:
+        for n, slug in enumerate("cab"):
+            batch.add(sidebar_page(TITLES[0], n), slug)
+        batch.run(corpus)
+        first = batch.report()["items"]
+        batch.rows.reverse()
+
+        batch.run(corpus)
+
+        assert batch.report()["items"] == first
+
+    def test_same_id_with_another_text_stays_a_collision(self, batch: Batch, corpus: Path) -> None:
+        batch.add(sidebar_page(TITLES[0], 1), "a")
+        batch.add(sidebar_page(TITLES[0], 2), "b")
+        batch.add(page(TITLES[0], "En ny bestemmelse."), "c")
+
+        batch.run(corpus)
+
+        report = batch.report()
+        assert report["holds_by_reason"] == {"batch:same_id_in_batch": 2}
+        held = _items_by_hold(report)["batch:same_id_in_batch"]
+        assert sorted(len(i["sources"]) for i in held) == [0, 2]
+        assert len({i["doc_id"] for i in held}) == 1
+        assert len({i["content_hash"] for i in held}) == 2
+        assert all(i["detail"].startswith("2 candidates of this batch mint") for i in held)
+
+    def test_the_markdown_shows_a_group_as_one_line_with_the_first_pages(
+        self, batch: Batch, corpus: Path
+    ) -> None:
+        for n in range(5):
+            batch.add(sidebar_page(TITLES[0], n), f"p{n}")
+
+        batch.run(corpus)
+
+        text = (batch.report_dir / "batch-0301-test-1.md").read_text(encoding="utf-8")
+        (group,) = batch.report()["items"]
+        assert text.count("`batch:needs_canonical_source`") == 1
+        assert f"1 regulation, 5 pages: {group['doc_id']}" in text
+        assert f"content_hash {group['content_hash']}" in text
+        assert all(f"{BASE}/p{n} " in text for n in range(3))
+        assert f"{BASE}/p3" not in text
+        assert "and 2 more page(s), listed in batch-0301-test-1.json" in text
+        assert "| batch:needs_canonical_source | 1 |" in text
+
+    def test_a_group_is_one_item_and_leaves_the_sample_alone(
+        self, batch: Batch, corpus: Path
+    ) -> None:
+        batch.add(page(TITLES[1]), "b")
+        batch.add(page(TITLES[2]), "c")
+        batch.run(corpus, sample_rate="0.5")
+        before = batch.report()
+        for n in range(30):
+            batch.add(sidebar_page(TITLES[0], n), f"sidebar-{n}")
+
+        code, _ = batch.run(corpus, sample_rate="0.5")
+
+        after = batch.report()
+        assert _sampled(after) == _sampled(before)
+        assert len(_sampled(after)) == 1
+        assert after["gate"] == before["gate"]
+        assert after["summary"]["candidates"] == 3
+        assert code == BLOCKED_EXIT_CODE
+
+
+GROUP_ID = "lk-0301-000000000000"
+
+
+def _member(n: int, url: str) -> BatchItem:
+    return BatchItem(
+        key=ArtifactKey(authority_id=AUTHORITY, sha256=f"{n}" * 64, source_url=url),
+        classifier=ClassifierEvidence(classifier_version="r1", class_name="enacted"),
+        outcome="ready",
+        doc_id=GROUP_ID,
+        content_hash="c" * 64,
+    )
+
+
+def _group(*slugs: str) -> CandidateGroup:
+    members = tuple(_member(n, f"{BASE}/{slug}") for n, slug in enumerate(slugs))
+    return CandidateGroup(doc_id=GROUP_ID, content_hash="c" * 64, members=members)
+
+
+class TestCanonicalSeam:
+    """The owner's open decision (#566): today no canonical page is chosen."""
+
+    def test_no_canonical_source_is_chosen_today(self) -> None:
+        assert choose_canonical(_group("a", "b")) is None
+
+    def test_an_unchosen_group_is_held_with_every_page(self) -> None:
+        group = _group("a", "b")
+
+        item = resolve_group(group, None)
+
+        assert (item.outcome, item.hold, item.promotable) == ("held", NEEDS_CANONICAL_SOURCE, False)
+        assert item.key == group.sources[0]
+        assert item.sources == group.sources
+
+    def test_a_chosen_page_makes_the_group_one_promotable_item(self) -> None:
+        group = _group("a", "b", "c")
+
+        item = resolve_group(group, group.sources[1])
+
+        assert (item.key, item.outcome, item.hold) == (group.sources[1], "ready", None)
+        assert item.sources == group.sources
+        population = [i.key for i in (item,) if i.promotable]
+        assert draw_sample(population, "seed", parse_sample_rate("1")) == (group.sources[1],)
+
+    def test_a_chosen_page_outside_the_group_is_refused(self) -> None:
+        group = _group("a", "b")
+        stranger = ArtifactKey(authority_id=AUTHORITY, sha256="e" * 64, source_url=f"{BASE}/x")
+
+        with pytest.raises(PromotionRefusedError, match="not a page of the group"):
+            resolve_group(group, stranger)
+
+    def test_a_group_has_at_least_two_pages(self) -> None:
+        with pytest.raises(ValidationError):
+            CandidateGroup(doc_id=GROUP_ID, content_hash="c" * 64, members=(_member(0, BASE),))
