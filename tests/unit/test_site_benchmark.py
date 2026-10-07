@@ -71,6 +71,20 @@ def _checkout(tmp_path: Path, manifest: dict[str, Any], report: dict[str, Any]) 
 
 
 class TestLoad:
+    @pytest.mark.parametrize(
+        ("raw", "expected"), [(0, 0.0), (1, 100.0), (0.1225, 12.3), (0.0005, 0.1)]
+    )
+    def test_percent_endpoints_and_half_up_ties(
+        self, tmp_path: Path, raw: int | float, expected: float
+    ) -> None:
+        """The module contract specifies [0, 1] and decimal half-up rounding."""
+        entry = _entry(values={"v": {"field": "rate", "format": "percent"}})
+        publication = load_publication(_checkout(tmp_path, _manifest(entry), {"rate": raw}))
+
+        assert publication is not None
+        assert publication.facts[0].value == expected
+        assert type(publication.facts[0].value) is float
+
     @pytest.mark.parametrize("raw", [2**53 + 1, 42, 42.0])
     def test_a_whole_count_is_kept_exact(self, tmp_path: Path, raw: int | float) -> None:
         """An int count never passes through float (Codex test on PR #586)."""
@@ -141,6 +155,37 @@ class TestLoad:
 
 
 class TestRefusals:
+    @pytest.mark.parametrize(
+        "raw", [-0.001, 1.001, True, False, "0.5", None, float("nan"), float("inf")]
+    )
+    def test_percent_requires_a_numeric_rate_in_the_closed_unit_interval(
+        self, tmp_path: Path, raw: object
+    ) -> None:
+        entry = _entry(values={"v": {"field": "rate", "format": "percent"}})
+        checkout = _checkout(tmp_path, _manifest(entry), {"rate": raw})
+
+        with pytest.raises(SiteBuildError, match="not a rate"):
+            load_publication(checkout)
+
+    @pytest.mark.parametrize("bound", ["above", "below"])
+    @pytest.mark.parametrize("raw", [0, True, "0", None])
+    def test_requirement_bounds_are_strict_and_require_numbers(
+        self, tmp_path: Path, bound: str, raw: object
+    ) -> None:
+        entry = _entry(requires=[{"field": "guard", bound: 0}])
+        checkout = _checkout(tmp_path, _manifest(entry), {**_report(), "guard": raw})
+
+        with pytest.raises(SiteBuildError, match="guard .*no longer supports"):
+            load_publication(checkout)
+
+    @pytest.mark.parametrize("raw", [b'{"rate":', b"\xff"])
+    def test_malformed_source_json_names_the_source(self, tmp_path: Path, raw: bytes) -> None:
+        checkout = _checkout(tmp_path, _manifest(), _report())
+        (checkout / _REPORT).write_bytes(raw)
+
+        with pytest.raises(SiteBuildError, match="pair.json is not JSON"):
+            load_publication(checkout)
+
     @pytest.mark.parametrize(
         ("value", "message"),
         [
