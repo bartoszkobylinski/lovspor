@@ -256,7 +256,7 @@ class TestToolConfig:
         assert names and all(re.match(pattern, name) for name in names)
 
     def test_the_frozen_surface_document_is_what_the_code_serves(self, tmp_path: Path) -> None:
-        """tool-surface-v7.json is the expectation check_fairness compares a
+        """tool-surface-v8.json is the expectation check_fairness compares a
         run's declaration against, so it must be the code's own account,
         re-derived here on every run. Two corpora with disjoint content are
         the witness that the surface comes from build_server, not from the
@@ -325,16 +325,23 @@ class TestToolConfig:
         changes; existing calls answer byte-identically. Taken with the S7
         implementation.
 
-        v1 through v6 stay committed untouched so the runs that recorded
+        v7 -> v8 (2026-10-07): ADR-0016 slice S10b — search_laws gains
+        ``authority`` (a KLASS code, only with dataset="lokale-forskrifter")
+        and corpus_status gains ``dataset`` (only "lokale-forskrifter", which
+        adds local counts per authority); both descriptions change. No tool
+        name changes; with the new parameters omitted existing calls answer
+        byte-identically. Taken with the S10b implementation.
+
+        v1 through v7 stay committed untouched so the runs that recorded
         their hashes remain verifiable (check_fairness --surface-path);
-        this test guards the CURRENT apparatus, which v7 describes."""
+        this test guards the CURRENT apparatus, which v8 describes."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
                 / "benchmarks"
                 / "llhb"
                 / "runner"
-                / "tool-surface-v7.json"
+                / "tool-surface-v8.json"
             ).read_text(encoding="utf-8")
         )
         corpora = (
