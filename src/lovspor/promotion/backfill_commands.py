@@ -227,7 +227,8 @@ def _refresh(
     """``refreshed``, ``None`` when the file already says so, or why it was skipped."""
     path = corpus.inside(f"{record.authority_id}/observations/{record.slug}.json")
     try:
-        existing = ObservationsFile.model_validate_json(path.read_bytes())
+        on_disk = path.read_bytes()
+        existing = ObservationsFile.model_validate_json(on_disk)
         urls = {entry.primary_url for entry in existing.versions}
         if len(urls) != 1:
             return "skipped: its versions name more than one primary URL"
@@ -237,7 +238,7 @@ def _refresh(
         return f"skipped: {path} does not read ({type(exc).__name__})"
     except PromotionRefusedError as exc:
         return f"skipped: {exc}"
-    if path.read_text(encoding="utf-8") == text:
+    if on_disk == text.encode():
         return None
     atomic_write_text(path, text)
     return "refreshed"
