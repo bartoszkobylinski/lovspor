@@ -163,11 +163,11 @@ def _is_number(raw: object) -> bool:
 
 
 def _whole_count(raw: object, where: str) -> int:
-    """A count exactly: an int as it is, a float (reports write ``42.0``) through Decimal."""
+    """A count exactly: through Decimal, so neither an int nor a ``42.0`` passes through float."""
     whole = Decimal(str(raw)) if _is_number(raw) else None
     if whole is None or not whole.is_finite() or whole != whole.to_integral_value():
         raise SiteBuildError(f"{where}: {raw!r} is not a whole count")
-    return raw if isinstance(raw, int) else int(whole)
+    return int(whole)
 
 
 def _formatted(raw: object, value_format: ValueFormat, where: str) -> FactValue:
