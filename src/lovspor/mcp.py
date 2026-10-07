@@ -4510,27 +4510,6 @@ def build_server(
         return reader.list_recent_changes(dataset=dataset, since=since, limit=limit)
 
     @_tool()
-    def search_laws(
-        query: str,
-        dataset: str | None = None,
-        limit: int = 20,
-    ) -> list[dict[str, Any]]:
-        """Search the corpus for laws whose slug or title contains ``query``.
-
-        Substring match, case-insensitive, against manifest metadata
-        only (no body-text scan in this MVP). Returns slug, doc_id,
-        title, dataset, last_changed, and total_changes for each hit.
-        Use ``get_law(slug)`` to fetch the full text of any result.
-
-        ``dataset`` (optional): ``lover`` or ``forskrifter`` to filter.
-        ``lokale-forskrifter`` searches ONLY the observed local regulations
-        (never included otherwise); each hit's ``slug`` is its
-        ``<authority_id>/<slug>`` and it carries ``observation``.
-        ``limit``: max results (default 20, capped).
-        """
-        return served.search_laws(query, dataset, limit)
-
-    @_tool()
     def search_body(
         query: str,
         dataset: str | None = None,
@@ -4832,36 +4811,6 @@ def build_server(
         fetch the implementing text.
         """
         return reader.search_eu_implementations(eu_doc_id)
-
-    @_tool()
-    def corpus_status() -> dict[str, Any]:
-        """Return the current state of the local corpus + freshness metadata.
-
-        Call this proactively when:
-        - The user asks "is my corpus current?" or "when was the
-          corpus last updated?".
-        - Other tools (search_laws, list_recent_changes, get_law) return
-          unexpectedly empty or "not found" results — a stale corpus
-          can look indistinguishable from a missing law.
-
-        Returns a dict with: ``manifest_generated_at`` (ISO datetime),
-        ``manifest_age_days`` (int, clamped to 0 for future-dated
-        manifests), ``is_stale`` (bool — true when EITHER the manifest
-        is older than 7 days OR the schema is pre-Sprint-4),
-        ``schema_compatible`` (bool — false when any current record
-        has no slug field, meaning the manifest pre-dates Sprint 4 and
-        the search/get tools cannot operate on it),
-        ``total_current_documents``, ``head_commit`` (short SHA),
-        ``head_commit_date`` (ISO date), ``head_commit_subject``,
-        ``refresh_command`` (a copy-pasteable git command the user can
-        run to refresh), and a human-readable ``notice`` summarizing
-        the status (covers four cases: clock-skew, schema-stale,
-        age-stale, fresh).
-
-        The server itself never mutates the corpus or fetches anything —
-        the user runs the suggested ``refresh_command`` manually.
-        """
-        return reader.corpus_status()
 
     served.register(_tool)
     return mcp

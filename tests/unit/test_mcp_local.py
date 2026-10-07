@@ -203,6 +203,34 @@ class TestGetSection:
 
 
 class TestSearchLaws:
+    def test_omitting_limit_returns_twenty_of_twenty_one_matches(self, corpus: Path) -> None:
+        records = {
+            f"lk-9999-{i:012x}": local_record(slug=f"lekeplasser-{i:02d}") for i in range(21)
+        }
+        original = (corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md").read_text("utf-8")
+        observation_path = corpus / "lokale-forskrifter" / "9999" / "observations"
+        original_observations = (observation_path / f"{LOCAL_SLUG}.json").read_text("utf-8")
+        for doc_id, record in records.items():
+            markdown = original.replace(LOCAL_ID, doc_id).replace(LOCAL_SLUG, record["slug"])
+            (corpus / record["markdown_path"]).write_text(markdown, "utf-8")
+            observation = original_observations.replace(LOCAL_ID, doc_id).replace(
+                LOCAL_SLUG, record["slug"]
+            )
+            (observation_path / f"{record['slug']}.json").write_text(observation, "utf-8")
+        write_local_manifest(corpus, records)
+        served = ServedCorpus(CorpusReader(corpus), warm=False)
+
+        all_hits = served.search_laws("lekeplasser", dataset="lokale-forskrifter", limit=21)
+        default_hits = served.search_laws("lekeplasser", dataset="lokale-forskrifter")
+
+        assert len(all_hits) == 21
+        assert {hit["doc_id"] for hit in all_hits} == set(records)
+        assert len(default_hits) == 20
+        assert default_hits == all_hits[:20]
+        assert _structured(
+            corpus, "search_laws", query="lekeplasser", dataset="lokale-forskrifter"
+        ) == {"result": default_hits}
+
     def test_the_local_dataset_is_searched_only_when_asked(self, corpus: Path) -> None:
         hits = _structured(corpus, "search_laws", query="lekeplasser", dataset="lokale-forskrifter")
 

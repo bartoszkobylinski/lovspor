@@ -989,11 +989,11 @@ Sorted by slug for stable output. Empty list when no current act references the 
 
 Use the returned `slug` values with `get_law` or `get_section` to fetch the implementing text.
 
-### `corpus_status()`
+### `corpus_status(dataset?)`
 
 Return current state of the local corpus plus freshness metadata. Call this proactively when other tools return unexpectedly empty results — a stale corpus (user forgot to `git pull`) is indistinguishable from a missing law from the AI's perspective.
 
-**No parameters.**
+- **`dataset`** *(optional)* — only `lokale-forskrifter`, which adds a `local` block (see [Local regulations](#local-regulations-adr-0016)); any other value is refused with `LocalScopeError`. Omitted, the answer is exactly the central status below, with or without a local dataset in the corpus.
 
 **Sample call:** `corpus_status()`
 
@@ -1054,12 +1054,14 @@ Return current state of the local corpus plus freshness metadata. Call this proa
 
 The server itself **never** runs `git pull` or fetches from the network — `refresh_command` is a copy-pasteable command for the user to run manually.
 
-### `search_laws(query, dataset?)`
+### `search_laws(query, dataset?, limit?, authority?)`
 
 Search the corpus for laws whose slug or title contains `query` (case-insensitive substring match against manifest metadata only — no body-text scan).
 
 - **`query`** — substring to match. Empty / whitespace-only queries return `[]`.
-- **`dataset`** *(optional)* — `lover` or `forskrifter` (or the full Lovdata key) to filter.
+- **`dataset`** *(optional)* — `lover` or `forskrifter` (or the full Lovdata key) to filter; `lokale-forskrifter` for the local regulations only.
+- **`limit`** *(optional)* — max results (default 20, capped).
+- **`authority`** *(optional)* — an SSB KLASS code (4 digits kommune, 2 fylkeskommune), valid only with `dataset="lokale-forskrifter"`: only that authority's regulations. With any other `dataset` it is refused (`LocalScopeError`), as is a value that cannot be a KLASS code.
 
 **Sample call:** `search_laws("jernbane", dataset="forskrifter")`
 
@@ -1090,7 +1092,8 @@ With `dataset="lokale-forskrifter"` the search covers **only** the local regulat
 Regulations enacted by a kommune or fylkeskommune and promoted from the local-law observatory live in `lovverk/lokale-forskrifter/`, a dataset of their own with its own `manifest.json`. They are served **opt-in**: no existing call changes, and nothing local appears unless it is asked for.
 
 - **Addressing.** `<authority_id>/<slug>` — the SSB KLASS code of the authority, then the slug — or the document id (`lk-<authority_id>-<12 hex>`, or `lf-yyyymmdd-nnnn` when the text carries a Lovtidend number). A bare slug never resolves to a local regulation, even when no central law has that slug.
-- **`search_laws(query, dataset="lokale-forskrifter")`** — matches the qualified slug and the title of the current local regulations, and only those. Each hit: `slug` (the qualified address), `doc_id`, `title`, `dataset`, `authority_id`, `version`, `observation`.
+- **`search_laws(query, dataset="lokale-forskrifter", authority?)`** — matches the qualified slug and the title of the current local regulations, and only those; `authority` (KLASS code) narrows it to one authority. Each hit: `slug` (the qualified address), `doc_id`, `title`, `dataset`, `authority_id`, `version`, `observation`.
+- **`corpus_status(dataset="lokale-forskrifter")`** — the central status plus `local`: `dataset`, `manifest_generated_at`, `current_documents`, `removed_documents` (withdrawn), `authorities` (per KLASS code, sorted: `authority_id`, `authority_type`, `current`, `removed`), `asserted: false` and a coverage `notice`. There is no hold count: artifacts held before promotion are counted on the archive by the promotion run report, and the corpus never sees them.
 - **`get_law(address)`** — the rendered Markdown (front matter with `basis: "observed"`, `asserted: false`, `source_license: "åndsverkloven § 14"`), followed by an **Observation** block holding the label below as JSON. No temporal notice is composed: no valid-time fact is evaluated for local text.
 - **`get_section(address, section_id, occurrence?, recorded_at?)`** — the usual section shape plus `doc_id`, `dataset` and `observation`, and without `temporal_notice`. Cross-references are validated against the local document itself and the central corpus. With `recorded_at` the document is read from the corpus state at UTC end-of-day on that date, exactly as for a central act (ADR-0011): the local manifest, the document and its `observations/<slug>.json` come from that commit, the response adds `recorded_at`, `corpus_commit` and `content_hash` (there is no `xml_hash`: there is no XML), and cross-references are validated against that state. A regulation promoted after the date is a plain not-found *in that state* (issue #569 fixed the S5 refusal).
 - **`get_observation_history(document, observed_at?, include_text=false)`** — local regulations only (a central slug is refused with `LocalScopeError`; its history is `get_law_history`). Returns `document`, `doc_id`, `dataset`, `versions` (oldest first: `version`, `content_hash`, `observed_at_first`, `observed_at_last`, `observation_count`, `primary_url`, `corroborating_urls`), `source_status`, `excluded` (observations left out of the comparison, such as a tombstoned capture), `observation` and `at`. With `observed_at` — an instant with an offset, e.g. `2026-09-01T12:00:00Z`; a bare date is refused (`ObservedAtError`) because it could fall on either side of a version change — `at` is one typed outcome (`null` without it):
@@ -1119,7 +1122,7 @@ Every response carrying local content carries this label; `asserted` is always `
 
 `observed_at_first` is the first observation of the served version (front matter); `observed_at_last` comes from `observations/<slug>.json` and is refreshed by the corpus at most weekly. Between observations nothing is asserted. A listed document whose files are missing or disagree with the manifest is an error (`LocalCorpusError`), never served unlabelled.
 
-Not yet served for local regulations (later ADR-0016 slices): `list_sections`, `verify_quote`, `validate_citation`, `search_body`, `list_recent_changes`, `semantic_search`, the version tools, `recorded_at` on any tool but `get_section`, an `authority` filter, and local counts in `corpus_status`.
+Not yet served for local regulations (later ADR-0016 slices): `list_sections`, `verify_quote`, `validate_citation`, `search_body`, `list_recent_changes`, `semantic_search`, the version tools, and `recorded_at` on any tool but `get_section`.
 
 ---
 
