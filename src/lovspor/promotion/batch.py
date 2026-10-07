@@ -153,9 +153,23 @@ class CandidateGroup(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    doc_id: str
-    content_hash: str
     members: tuple[BatchItem, ...] = Field(min_length=2)
+
+    @field_validator("members")
+    @classmethod
+    def _one_regulation(cls, members: tuple[BatchItem, ...]) -> tuple[BatchItem, ...]:
+        """A group is one id from one text; anything else is a real collision."""
+        if len({(m.doc_id, m.content_hash) for m in members}) != 1 or members[0].doc_id is None:
+            raise ValueError("a group's pages must mint one id from one extracted text")
+        return members
+
+    @property
+    def doc_id(self) -> str:
+        return str(self.members[0].doc_id)
+
+    @property
+    def content_hash(self) -> str | None:
+        return self.members[0].content_hash
 
     @property
     def sources(self) -> tuple[ArtifactKey, ...]:
@@ -364,9 +378,7 @@ def _fold(pages: tuple[BatchItem, ...], texts: int) -> BatchItem:
         return first.model_copy(update=sources | _same_id(first.doc_id, texts))
     if len(pages) == 1:
         return first
-    group = CandidateGroup(
-        doc_id=str(first.doc_id), content_hash=str(first.content_hash), members=pages
-    )
+    group = CandidateGroup(members=pages)
     return resolve_group(group, choose_canonical(group))
 
 

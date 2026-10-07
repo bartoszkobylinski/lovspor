@@ -920,7 +920,7 @@ def _member(n: int, url: str) -> BatchItem:
 
 def _group(*slugs: str) -> CandidateGroup:
     members = tuple(_member(n, f"{BASE}/{slug}") for n, slug in enumerate(slugs))
-    return CandidateGroup(doc_id=GROUP_ID, content_hash="c" * 64, members=members)
+    return CandidateGroup(members=members)
 
 
 class TestCanonicalSeam:
@@ -957,7 +957,7 @@ class TestCanonicalSeam:
 
     def test_a_group_has_at_least_two_pages(self) -> None:
         with pytest.raises(ValidationError):
-            CandidateGroup(doc_id=GROUP_ID, content_hash="c" * 64, members=(_member(0, BASE),))
+            CandidateGroup(members=(_member(0, BASE),))
 
 
 class TestGroupingBoundaries:
@@ -1011,7 +1011,7 @@ class TestGroupingBoundaries:
         chosen = chosen.model_copy(
             update={"outcome": "unchanged", "version": 4, "markdown_path": "local.md"}
         )
-        group = CandidateGroup(doc_id=GROUP_ID, content_hash="c" * 64, members=(first, chosen))
+        group = CandidateGroup(members=(first, chosen))
 
         assert resolve_group(group, chosen.key) == chosen.model_copy(
             update={"sources": group.sources}
@@ -1101,3 +1101,13 @@ def test_report_keeps_holds_before_and_after_three_page_groups(batch: Batch, cor
     assert holds.count("1 regulation, 3 pages:") == 2
     assert "more page(s)" not in holds
     assert text == _expected_markdown(report, corpus)
+
+
+@pytest.mark.parametrize("field", ["doc_id", "content_hash"])
+def test_a_group_of_two_regulations_is_refused(field: str) -> None:
+    """A group is one id from one text; the group's own id and hash are its members'."""
+    other = _member(1, f"{BASE}/b").model_copy(update={field: "lk-0301-111111111111"})
+    with pytest.raises(ValueError, match="one id from one extracted text"):
+        CandidateGroup(members=(_member(0, f"{BASE}/a"), other))
+    group = _group("a", "b")
+    assert (group.doc_id, group.content_hash) == (GROUP_ID, "c" * 64)
