@@ -367,3 +367,58 @@ def test_missing_field_error_names_the_source(tmp_path: Path, requirement: bool)
 
     field = "missing.guard" if requirement else "missing.value"
     assert str(raised.value) == f"{_REPORT}: field {field!r} is not in the source"
+
+
+def test_shared_sources_are_hashed_once_without_losing_entry_facts(tmp_path: Path) -> None:
+    """Publication promises every named file's hash and every entry's facts."""
+    other = "benchmarks/llhb/results/reports/a.json"
+    checkout = _checkout(
+        tmp_path,
+        _manifest(_entry(), _entry(id="second"), _entry(id="other", source=other)),
+        _report(),
+    )
+    (checkout / other).write_text(json.dumps(_report()), encoding="utf-8")
+
+    publication = load_publication(checkout)
+
+    assert publication is not None
+    assert publication.source_hashes == tuple(
+        (path, hashlib.sha256((checkout / path).read_bytes()).hexdigest())
+        for path in sorted((_REPORT, other))
+    )
+    assert {fact.id for fact in publication.facts} == {
+        fact_id(entry_id, name)
+        for entry_id in ("rate", "second", "other")
+        for name in ("numerator", "percent", "scorer")
+    }
+    assert {fact.artifact for fact in publication.facts if fact.id.startswith("llhb.other.")} == {
+        other
+    }
+
+
+def test_source_hash_tracks_bytes_even_when_published_values_are_unchanged(tmp_path: Path) -> None:
+    """The publication hashes source artifacts, rather than their selected fields."""
+    checkout = _checkout(tmp_path, _manifest(), _report())
+    before = load_publication(checkout)
+    assert before is not None
+    assert load_publication(checkout) == before
+
+    raw = json.dumps(_report(), indent=2).encode("utf-8") + b"\n"
+    (checkout / _REPORT).write_bytes(raw)
+    after = load_publication(checkout)
+
+    assert after is not None
+    assert after.facts == before.facts
+    assert after.manifest_sha256 == before.manifest_sha256
+    assert after.source_hashes == ((_REPORT, hashlib.sha256(raw).hexdigest()),)
+    assert after.source_hashes != before.source_hashes
+
+
+@pytest.mark.parametrize("raw", [10**1000, -(10**1000)])
+def test_oversized_integer_rate_is_refused_as_a_build_error(tmp_path: Path, raw: int) -> None:
+    """A numeric rate outside the documented [0, 1] interval is invalid input."""
+    entry = _entry(values={"v": {"field": "rate", "format": "percent"}})
+    checkout = _checkout(tmp_path, _manifest(entry), {"rate": raw})
+
+    with pytest.raises(SiteBuildError, match="not a rate"):
+        load_publication(checkout)
