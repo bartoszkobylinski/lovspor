@@ -71,6 +71,23 @@ class TestSampleSize:
 
 
 class TestDrawSample:
+    def test_same_bytes_at_distinct_urls_are_separate_sample_items(self) -> None:
+        population = tuple(
+            ArtifactKey(
+                authority_id="0301",
+                sha256="a" * 64,
+                source_url=f"https://eksempel.invalid/{n}",
+            )
+            for n in range(4)
+        )
+        full = draw_sample(population, "batch", Decimal(1))
+        fractional = draw_sample(iter(reversed(population)), "batch", Decimal("0.5"))
+
+        assert full == population
+        assert len(fractional) == 2
+        assert fractional == draw_sample(population, "batch", Decimal("0.5"))
+        assert set(fractional) <= set(full)
+
     def test_empty_population_draws_nothing(self) -> None:
         assert draw_sample(iter(()), "batch", Decimal(1)) == ()
 

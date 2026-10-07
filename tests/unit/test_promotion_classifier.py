@@ -129,6 +129,28 @@ class TestClassifiedArtifact:
 
         assert "draft" in artifact.signals
 
+    def test_all_documented_signals_are_preserved_in_evidence_order(self) -> None:
+        expected = (
+            "case_doc",
+            "draft",
+            "enacted_by",
+            "forskrift_header",
+            "hjemmel",
+            "ikraft",
+            "lf_id",
+            "lovtidend",
+            "national",
+            "proposal_head",
+            "self_early",
+            "self_operative",
+            "title_forskrift",
+        )
+        artifact = ClassifiedArtifact.model_validate(
+            row(**dict.fromkeys((*expected, "adopted_title", "valid_from"), True))
+        )
+
+        assert artifact.evidence(VERSION).evidence == (*expected, "n_sections=22")
+
 
 class TestReadClassifierOutput:
     @pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
@@ -184,6 +206,29 @@ class TestReadClassifierOutput:
         path = write(tmp_path, row(SHA_A), row(SHA_B) | {"sha": "short"})
 
         with pytest.raises(ClassifierOutputError, match="line 2"):
+            read_classifier_output(path, VERSION)
+
+    @pytest.mark.parametrize("value", [None, [], "artifact", 42, True])
+    def test_non_object_json_refuses_the_whole_file(self, tmp_path: Path, value: object) -> None:
+        path = tmp_path / "predictions.jsonl"
+        path.write_text(
+            "\n".join(json.dumps(item) for item in (row(), value, row(SHA_B))) + "\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ClassifierOutputError, match="line 2"):
+            read_classifier_output(path, VERSION)
+
+    @pytest.mark.parametrize(
+        "change",
+        [{"authority": "4601"}, {"form": "pdf"}, {"n_sections": 23}, {"draft": True}],
+    )
+    def test_duplicate_artifacts_cannot_disagree_on_evidence(
+        self, tmp_path: Path, change: dict[str, object]
+    ) -> None:
+        path = write(tmp_path, row(), row(**change))
+
+        with pytest.raises(ClassifierOutputError, match="line 2: two rows disagree"):
             read_classifier_output(path, VERSION)
 
     def test_an_incomplete_last_line_is_refused(self, tmp_path: Path) -> None:
