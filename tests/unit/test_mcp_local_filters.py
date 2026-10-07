@@ -62,6 +62,22 @@ class TestAuthority:
     def test_it_combines_with_the_limit(self, corpus: Path) -> None:
         assert _found(corpus, dataset=LOCAL, authority="0301", limit=0) == []
 
+    def test_authority_is_filtered_before_the_limit(self, corpus: Path) -> None:
+        # Oslo sorts first in the manifest; limiting before filtering loses 9999.
+        assert _found(corpus, dataset=LOCAL, authority="9999", limit=1) == [LOCAL_ID]
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [("  LEKEPLASSER  ", [LOCAL_ID]), ("9999/", [LOCAL_ID]), ("0301/", []), (" ", [])],
+    )
+    def test_authority_and_query_both_constrain_results(
+        self, corpus: Path, query: str, expected: list[str]
+    ) -> None:
+        result = _call(corpus, "search_laws", query=query, dataset=LOCAL, authority="9999")
+
+        assert "error" not in result, result
+        assert [hit["doc_id"] for hit in result["structured"]["result"]] == expected
+
     @pytest.mark.parametrize("dataset", [None, "lover", "forskrifter"])
     def test_it_is_refused_outside_the_local_dataset(
         self, corpus: Path, dataset: str | None
@@ -121,6 +137,35 @@ class TestCorpusStatus:
             [],
         )
         assert local["manifest_generated_at"] is None
+
+    def test_withdrawn_only_authorities_are_counted_without_document_files(
+        self, tmp_path: Path
+    ) -> None:
+        build_central(tmp_path)
+        # Withdrawn records remain in the manifest even without served files.
+        county = local_record(authority_id="46", status="removed")
+        county["authority_type"] = "fylkeskommune"
+        write_local_manifest(
+            tmp_path,
+            {
+                "lk-9999-ffffffffffff": local_record(status="removed"),
+                "lk-46-ffffffffffff": county,
+                "lk-46-eeeeeeeeeeee": {
+                    **local_record(slug="annen-trukket", authority_id="46", status="removed"),
+                    "authority_type": "fylkeskommune",
+                },
+            },
+        )
+
+        local = _call(tmp_path, "corpus_status", dataset=LOCAL)["structured"]["local"]
+
+        assert local["current_documents"] == 0
+        assert local["removed_documents"] == 3
+        assert local["authorities"] == [
+            {"authority_id": "46", "authority_type": "fylkeskommune", "current": 0, "removed": 2},
+            {"authority_id": "9999", "authority_type": "kommune", "current": 0, "removed": 1},
+        ]
+        assert _found(tmp_path, dataset=LOCAL, authority="46") == []
 
     @pytest.mark.parametrize("dataset", ["lover", "forskrifter", "kommunale"])
     def test_another_dataset_is_refused(self, corpus: Path, dataset: str) -> None:
