@@ -12,6 +12,13 @@ confirmatory `claude-fable-5` replication is preregistered in
 `results/reports/`. See `DECISIONS.md` for the rulings and `PROPOSAL.md`
 for the original design proposal.
 
+What lovspor.no shows of these results is decided by `PUBLICATION.json`
+(ADR-0014): one entry per published value, naming its source file, exact
+field, epistemic label, ruling and wording, with the owner's approval. The
+site builder reads that manifest and the files it names, and nothing else
+under `results/`; a new or re-scored report changes nothing on the site
+until the manifest changes in a reviewed PR.
+
 ## What LLHB is not
 
 LLHB is conceptually separate from the persona-driven eval suite in `evals/`:
