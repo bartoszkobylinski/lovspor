@@ -742,3 +742,27 @@ def test_reading_article_lines_preserves_nested_tree_for_next_candidate() -> Non
     assert html.tostring(region) == before
     assert _lines_of(region) == (*expected, "Nyheter", "Etter artiklene.")
     assert html.tostring(region) == before
+
+
+def test_reading_lines_preserves_live_descendant_text_tails_and_parents() -> None:
+    region = html.fromstring(
+        '<main><article data-source="law"><h1>Forskrift om gebyr</h1>'
+        "<section><h2>§ 1 Formål</h2><p>Forskrifta <em>gjeld</em><br>"
+        "heile <strong>kommunen.</strong></p><!-- original layout -->"
+        "</section></article><p>Nyheter</p></main>"
+    )
+    article = region[0]
+    nodes = tuple(region.iter())
+    before = tuple((node.text, node.tail, dict(node.attrib), node.getparent()) for node in nodes)
+    expected = ("Forskrift om gebyr", "§ 1 Formål", "Forskrifta gjeld heile kommunen.")
+
+    # Keep references to the original descendants while reading overlapping
+    # candidates: rewriting a shared child would corrupt the next candidate.
+    for candidate, lines in ((region, (*expected, "Nyheter")), (article, expected)):
+        assert _lines_of(candidate) == lines
+        assert tuple(region.iter()) == nodes
+        assert (
+            tuple((node.text, node.tail, dict(node.attrib), node.getparent()) for node in nodes)
+            == before
+        )
+        assert _lines_of(candidate) == lines
