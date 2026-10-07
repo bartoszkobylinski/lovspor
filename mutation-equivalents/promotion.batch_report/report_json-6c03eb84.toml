@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/promotion/batch_report.py"
+symbol = "report_json"
+registered = "2026-10-07, PR #565, from run 37552871658"
+mutation = """
+-    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\\n"
++    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=None) + "\\n"
+"""
+justification = """
+`json.dumps` tests ensure_ascii for truth, and None is falsy, so None and False
+select the same encoder (Python's own json module, not a dependency). Same
+argument as the registered observatory.model/record_to_json_line entry.
+"""
