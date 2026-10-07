@@ -166,10 +166,26 @@ def stated_relations(regulation: ExtractedRegulation) -> tuple[StatedRelation, .
     """Every relation the text states, in text order, each with its sentence."""
     found: list[StatedRelation] = []
     for text, in_block in ((regulation.identification_block, True), (regulation.body, False)):
-        for line in text.split("\n"):
+        for line in _logical_lines(text):
             for sentence in _SENTENCE_END.split(line):
                 found.extend(_in_sentence(sentence.strip(), in_block=in_block))
     return tuple(found)
+
+
+def _logical_lines(text: str) -> list[str]:
+    """Lines with a sentence's continuation joined back by a space.
+
+    A line that starts lower-case or with a digit continues the one before it
+    ("… opphever" / "forskrift 1. juli 2001 …"); a capital or ``§`` starts a
+    new heading or paragraph, so a cue never reaches a target across it.
+    """
+    lines: list[str] = []
+    for line in text.split("\n"):
+        if lines and (line[:1].islower() or line[:1].isdigit()):
+            lines[-1] = f"{lines[-1]} {line}"
+        else:
+            lines.append(line)
+    return lines
 
 
 def _in_sentence(sentence: str, *, in_block: bool) -> Iterator[StatedRelation]:

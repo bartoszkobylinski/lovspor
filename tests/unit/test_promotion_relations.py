@@ -323,3 +323,30 @@ class TestResolved:
 def test_short_names_compare_by_words_and_case_only() -> None:
     assert short_name_key("Plan-  og  bygningsloven § 12-2") == "plan- og bygningsloven"
     assert short_name_key("plan- og bygningsloven") == "plan- og bygningsloven"
+
+
+@pytest.mark.parametrize("in_block", [True, False])
+def test_a_sentence_continued_on_the_next_line_keeps_its_relation(in_block: bool) -> None:
+    """A line break inside a sentence must not drop the relation (Codex test on PR #577)."""
+    sentence = "Denne forskriften opphever\nforskrift 1. juli 2001 nr. 55 om slam."
+    regulation = ExtractedRegulation(
+        title="Forskrift om slam",
+        identification_block=sentence if in_block else "Forskrift om slam",
+        body="§ 1" if in_block else sentence,
+    )
+
+    [stated] = stated_relations(regulation)
+
+    assert stated.kind is RelationKind.REPEALS
+    assert stated.evidence == sentence.replace("\n", " ")
+
+
+def test_a_capitalised_next_line_starts_a_new_sentence() -> None:
+    """A heading or new paragraph is not glued to a cue on the line before it."""
+    regulation = ExtractedRegulation(
+        title="Forskrift om slam",
+        identification_block="Forskrift om slam",
+        body="Denne forskriften opphever\n§ 2 Forskrift 1. juli 2001 nr. 55 gjelder fortsatt.",
+    )
+
+    assert stated_relations(regulation) == ()
