@@ -190,6 +190,61 @@ def test_html_single_article_is_read_whole_even_past_the_last_section() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("title", "section"),
+    [
+        ("Forskrift om gebyr", "§ 1 Betaling"),
+        ("Forskrift om parkering", "§ 1 Gebyr"),
+    ],
+)
+def test_html_article_must_match_both_region_anchors(title: str, section: str) -> None:
+    """The PR requires the same title AND first section, not just either anchor."""
+    page = _main(
+        "<h1>Forskrift om gebyr</h1><h2>§ 1 Gebyr</h2>"
+        f"<article><h1>{title}</h1><h2>{section}</h2></article>"
+        "<article><p>Nyheter</p></article><p>Etter regionen</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        title,
+        section,
+        "Nyheter",
+        "Etter regionen",
+    )
+
+
+def test_html_title_after_first_section_does_not_select_an_article() -> None:
+    page = _main(
+        "<article><h2>§ 1 Gebyr</h2><h1>Forskrift om gebyr</h1></article>"
+        "<article><p>Nyheter</p></article><p>Etter regionen</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "§ 1 Gebyr",
+        "Forskrift om gebyr",
+        "Nyheter",
+        "Etter regionen",
+    )
+
+
+@pytest.mark.parametrize("section", ["§ 1 Gebyr", "Kapittel 1 Gebyr", "Kap. I Gebyr"])
+def test_html_nested_article_anchor_reads_preserve_br_wraps(section: str) -> None:
+    """Reading ancestors and candidates must not rewrite the selected article's breaks."""
+    page = _main(
+        "<article><p>Velkommen</p><article><article>"
+        "<h1>Forskrift om gebyr i<br>kommunen</h1>"
+        f"<h2>{section}</h2><p>Gebyret gjelder for<br><strong>hele</strong> kommunen.</p>"
+        "</article><p>Utenfor forskriften</p></article>"
+        "<article><p>Nyheter</p></article></article>"
+    )
+    expected = (
+        "Forskrift om gebyr i kommunen",
+        section,
+        "Gebyret gjelder for hele kommunen.",
+    )
+    assert html_lines(page, "text/html") == html_lines(page, "text/html") == expected
+
+
 def test_html_drops_update_stamps_and_page_furniture_lines() -> None:
     page = (
         "<html><body><main><p>§ 1 Formål</p><p>Sist oppdatert: 3. oktober 2026</p>"
