@@ -75,6 +75,7 @@ _PRE_ENVELOPE = Path(__file__).resolve().parent / "fixtures" / "site" / "pre-env
 _GOLDEN_OBSERVATORY = _PRE_ENVELOPE / "observatory" / "index.html"
 _ROOT_FILES = {"site-facts.json", "sitemap-site.xml", "deployment-capabilities.json", "llms.txt"}
 _LIVE_CLAIMS = re.compile(r"\b(up now|live now|available now|oppe nå|tilgjengelig nå)\b", re.I)
+_CONTACT = "kontakt@lovspor.no"
 _VOID_ELEMENTS = frozenset({"br", "hr", "img", "meta", "link", "input"})
 
 
@@ -558,6 +559,15 @@ class TestTree:
                     or href == "/site-manifest.json"
                 ), (page.path, href)
 
+    def test_no_page_names_a_private_address(self, built: tuple[Path, SiteBuildReport]) -> None:
+        """Owner decision 2026-10-07: the public contact is kontakt@lovspor.no;
+        the owner's private mailbox appears on no built page."""
+        out, _ = built
+        for page in emitted_pages():
+            assert "gmail.com" not in _page(out, page.path), page.path
+        for name in _ROOT_FILES:
+            assert "gmail.com" not in (out / name).read_text(encoding="utf-8"), name
+
     def test_placeholder_pages_carry_the_status_vocabulary(
         self, built: tuple[Path, SiteBuildReport]
     ) -> None:
@@ -868,7 +878,7 @@ class TestConnectPage:
         markup = _page(out, path)
 
         assert 'data-kind="hosted"' not in markup
-        assert "mailto:bartosz.kobylinski@gmail.com" in markup
+        assert "mailto:kontakt@lovspor.no?subject=lovspor%20" in markup
         assert '<span class="tag" data-status="current">' in markup
 
     def test_both_languages_carry_the_same_sections(
@@ -965,8 +975,14 @@ class TestObservatory:
     ) -> None:
         out, _ = built
         golden = _text(_GOLDEN_OBSERVATORY.read_text(encoding="utf-8"))
+        # The one substitution since the migration (owner decision 2026-10-07):
+        # the public contact address replaced the owner's private one.
+        golden = golden.replace("bartosz.kobylinski@gmail.com", _CONTACT)
 
         assert _text(_page(out, "/observatory/")) == golden
+        assert f'href="mailto:{_CONTACT}?subject=lovspor-observatory"' in _page(
+            out, "/observatory/"
+        )
 
     def test_has_no_twin_and_carries_the_norwegian_chrome(
         self, built: tuple[Path, SiteBuildReport]
