@@ -721,3 +721,58 @@ def test_report_inside_engine_tree_is_refused(
     assert not batch.report_dir.exists()
     assert tree(engine) == {}
     assert tree(corpus) == corpus_before
+
+
+def test_empty_classifier_batch_writes_only_empty_reports(
+    batch: Batch, corpus: Path, root: Path
+) -> None:
+    """An empty population is empty, never a passed gate or a corpus write."""
+    corpus_before = tree(corpus)
+    archive_before = tree(root)
+
+    code, output = batch.run(corpus, "--write")
+
+    assert code == 0, output
+    report = batch.report()
+    assert report["items"] == []
+    assert report["gate"] == {"verdict": "empty", "rejected": [], "awaiting_review": []}
+    assert report["holds_by_reason"] == {}
+    assert report["summary"] == dict.fromkeys(
+        ("candidates", "ready", "unchanged", "held", "refused", "sampled", "would_write"), 0
+    )
+    assert tree(corpus) == corpus_before
+    assert tree(root) == archive_before
+    assert set(tree(batch.report_dir)) == {"batch-0301-test-1.md", "batch-0301-test-1.json"}
+
+
+def test_same_id_collision_holds_an_unchanged_and_a_ready_candidate(
+    batch: Batch, corpus: Path, root: Path, tmp_path: Path
+) -> None:
+    """S8 holds every colliding candidate, including an already written version."""
+    first = batch.add(page(TITLES[0]), "a")
+    _approve(first, tmp_path)
+    code, output = batch.run(corpus, "--write")
+    assert code == 0, output
+    git(corpus, "add", "-A")
+    git(corpus, "commit", "-q", "-m", "promote original version")
+    code, output = batch.run(corpus)
+    assert code == 0, output
+    assert batch.report()["items"][0]["outcome"] == "unchanged"
+    second = batch.add(page(TITLES[0], "En ny bestemmelse."), "copy")
+    assert second != first
+    _approve(second, tmp_path)
+    corpus_before = tree(corpus)
+    archive_before = tree(root)
+
+    code, output = batch.run(corpus, "--write")
+
+    assert code == 0, output
+    report = batch.report()
+    assert {i["key"]["sha256"] for i in report["items"]} == {first, second}
+    assert len({i["doc_id"] for i in report["items"]}) == 1
+    assert all(i["outcome"] == "held" and not i["sampled"] for i in report["items"])
+    assert report["holds_by_reason"] == {"batch:same_id_in_batch": 2}
+    assert report["gate"]["verdict"] == "empty"
+    assert report["summary"]["would_write"] == 0
+    assert tree(corpus) == corpus_before
+    assert tree(root) == archive_before
