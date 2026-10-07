@@ -115,6 +115,32 @@ def local_address_of_commit(corpus: Path) -> str:
 
 
 class TestObservations:
+    def test_a_state_reads_its_own_observation_versions_without_the_working_tree(
+        self, corpus: Path
+    ) -> None:
+        state = _state(corpus, 2)
+        address = local_address(corpus)
+        shutil.rmtree(corpus / LOCAL)
+
+        served = state.document(address)
+        observed = state.observations(served)
+
+        assert [entry.version for entry in observed.versions] == [1, 2]
+        assert observed.source_status.observed_at == "2026-08-22T15:17:23Z"
+        assert served.observation.observed_at_last == observed.versions[-1].observed_at_last
+
+    def test_observations_missing_from_a_commit_are_damage_even_if_present_on_disk(
+        self, corpus: Path
+    ) -> None:
+        path = _observations_path(corpus)
+        original = path.read_bytes()
+        path.unlink()
+        dated_git(corpus, "2026-10-02T00:00:00Z", "commit", "-q", "-am", "missing observations")
+        path.write_bytes(original)
+
+        with pytest.raises(StateIntegrityError, match="not in the commit's tree"):
+            _state(corpus, 4).document(local_address(corpus))
+
     def test_the_file_reads_with_the_s6_model(self, corpus: Path) -> None:
         local = LocalDataset(corpus)
         served = local.document(local_address(corpus))

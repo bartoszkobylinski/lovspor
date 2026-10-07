@@ -9,6 +9,7 @@ reads only its own.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -126,6 +127,48 @@ class TestOutcomes:
 
 
 class TestIncludeText:
+    @pytest.mark.parametrize(
+        ("instant", "outcome"),
+        [
+            ("2026-08-18T00:00:00Z", "before_first_observation"),
+            ("2026-08-21T00:00:00Z", "between_observations"),
+            ("2026-08-23T00:00:00Z", "after_last_observation"),
+            ("2026-08-22T15:17:23Z", "contained"),
+        ],
+    )
+    def test_only_older_contained_text_needs_git_history(
+        self, corpus: Path, instant: str, outcome: str
+    ) -> None:
+        shutil.rmtree(corpus / ".git")
+
+        at = _history(corpus, observed_at=instant, include_text=True)["at"]
+
+        assert at["outcome"] == outcome
+        if outcome == "contained":
+            assert "version: 3\n" in at["text"]
+        else:
+            assert "text" not in at
+
+    def test_older_intervals_are_read_without_git_but_their_text_is_refused(
+        self, corpus: Path
+    ) -> None:
+        shutil.rmtree(corpus / ".git")
+        instant = "2026-08-19T15:17:23Z"
+
+        at = _history(corpus, observed_at=instant)["at"]
+        assert at["outcome"] == "contained"
+        assert at["version"]["version"] == 1
+        assert at["text"] is None
+
+        error = _error(
+            corpus,
+            "get_observation_history",
+            document=_address(corpus),
+            observed_at=instant,
+            include_text=True,
+        )
+        assert "has no history to read v1 from" in error
+
     @pytest.mark.parametrize(
         ("instant", "version", "wording"),
         [
