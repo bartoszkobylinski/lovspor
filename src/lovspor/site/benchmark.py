@@ -162,15 +162,21 @@ def _is_number(raw: object) -> bool:
     return isinstance(raw, int | float) and not isinstance(raw, bool)
 
 
+def _whole_count(raw: object, where: str) -> int:
+    """A count exactly: an int as it is, a float (reports write ``42.0``) through Decimal."""
+    whole = Decimal(str(raw)) if _is_number(raw) else None
+    if whole is None or not whole.is_finite() or whole != whole.to_integral_value():
+        raise SiteBuildError(f"{where}: {raw!r} is not a whole count")
+    return raw if isinstance(raw, int) else int(whole)
+
+
 def _formatted(raw: object, value_format: ValueFormat, where: str) -> FactValue:
     if value_format == "text":
         if not isinstance(raw, str):
             raise SiteBuildError(f"{where}: {raw!r} is not text")
         return raw
     if value_format == "count":
-        if not _is_number(raw) or not float(str(raw)).is_integer():
-            raise SiteBuildError(f"{where}: {raw!r} is not a whole count")
-        return int(float(str(raw)))
+        return _whole_count(raw, where)
     if not _is_number(raw) or not 0 <= float(str(raw)) <= 1:
         raise SiteBuildError(f"{where}: {raw!r} is not a rate")
     percent = (Decimal(str(raw)) * 100).quantize(_ONE_DECIMAL, rounding=ROUND_HALF_UP)

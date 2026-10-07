@@ -71,6 +71,16 @@ def _checkout(tmp_path: Path, manifest: dict[str, Any], report: dict[str, Any]) 
 
 
 class TestLoad:
+    @pytest.mark.parametrize("raw", [2**53 + 1, 42, 42.0])
+    def test_a_whole_count_is_kept_exact(self, tmp_path: Path, raw: int | float) -> None:
+        """An int count never passes through float (Codex test on PR #586)."""
+        entry = _entry(values={"v": {"field": "count", "format": "count"}})
+        publication = load_publication(_checkout(tmp_path, _manifest(entry), {"count": raw}))
+
+        assert publication is not None
+        assert publication.facts[0].value == int(raw)
+        assert type(publication.facts[0].value) is int
+
     def test_no_manifest_publishes_nothing(self, tmp_path: Path) -> None:
         assert load_publication(tmp_path) is None
 
@@ -261,3 +271,10 @@ class TestTheRepositoryManifest:
         assert publication is not None
         for path, _ in publication.artifact_hashes():
             assert path.startswith("benchmarks/llhb/"), path
+
+
+@pytest.mark.parametrize("raw", [float("inf"), float("nan"), 4.5, True, "42"])
+def test_a_count_that_is_not_a_finite_whole_number_is_refused(tmp_path: Path, raw: object) -> None:
+    entry = _entry(values={"v": {"field": "count", "format": "count"}})
+    with pytest.raises(SiteBuildError, match="not a whole count"):
+        load_publication(_checkout(tmp_path, _manifest(entry), {"count": raw}))
