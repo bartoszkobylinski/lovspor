@@ -19,8 +19,10 @@ from lovspor.promotion.source_text import (
     source_form,
 )
 from tests.unit.promotion_fixtures import (
+    FAQ_SIBLINGS,
     REGULATION_LINES,
     docx_with_document,
+    faq_page,
     html_page,
     minimal_docx,
     minimal_pdf,
@@ -115,6 +117,77 @@ def test_html_with_two_articles_reads_the_whole_region() -> None:
         "<article><p>§ 2 Virkeområde</p></article></main></body></html>"
     ).encode()
     assert html_lines(page, "text/html") == ("§ 1 Formål", "§ 2 Virkeområde")
+
+
+_FAQ_TAIL_LINES = (
+    *(line for item in FAQ_SIBLINGS for line in item),
+    "Les mer om følgende emner:",
+    "skole",
+    "Velkommen til Eksempelskolen",
+    "Elevene løp stafett i høstferien",
+)
+
+
+def test_html_reads_the_innermost_article_holding_the_regulation() -> None:
+    lines = html_lines(faq_page(), "text/html")
+    assert lines == ("Hvilke ordensregler gjelder?", *REGULATION_LINES)
+
+
+def test_html_innermost_article_drops_sibling_items_and_teasers_after_the_last_section() -> None:
+    lines = html_lines(faq_page(), "text/html")
+    assert lines[-1] == REGULATION_LINES[-1]
+    assert set(lines).isdisjoint(_FAQ_TAIL_LINES)
+
+
+def test_html_innermost_article_is_the_same_whatever_the_page_tail() -> None:
+    assert html_lines(faq_page(tail=""), "text/html") == html_lines(faq_page(), "text/html")
+
+
+def test_html_with_two_articles_holding_the_regulation_reads_the_whole_region() -> None:
+    item = ("Hvilke ordensregler gjelder?", *REGULATION_LINES)
+    lines = html_lines(faq_page(regulation_answers=2), "text/html")
+    assert lines == ("Skole", *item, *item, *_FAQ_TAIL_LINES)
+
+
+def test_html_with_the_title_outside_every_article_reads_the_whole_region() -> None:
+    page = (
+        "<html><body><main><h1>Forskrift om gebyr, Eksempel kommune</h1>"
+        "<article><p>§ 1 Gebyr</p></article><article><p>§ 2 Betaling</p></article>"
+        "<p>Kontakt oss</p></main></body></html>"
+    ).encode()
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr, Eksempel kommune",
+        "§ 1 Gebyr",
+        "§ 2 Betaling",
+        "Kontakt oss",
+    )
+
+
+def test_html_an_article_with_another_regulation_is_not_the_one_read() -> None:
+    page = (
+        "<html><body><main><h1>Forskrift om gebyr, Eksempel kommune</h1><p>§ 1 Gebyr</p>"
+        "<article><p>Forskrift om parkering, Eksempel kommune</p><p>§ 1 Parkering</p></article>"
+        "<article><p>Nyheter</p></article></main></body></html>"
+    ).encode()
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr, Eksempel kommune",
+        "§ 1 Gebyr",
+        "Forskrift om parkering, Eksempel kommune",
+        "§ 1 Parkering",
+        "Nyheter",
+    )
+
+
+def test_html_single_article_is_read_whole_even_past_the_last_section() -> None:
+    page = (
+        "<html><body><main><p>Velkommen</p><article><h1>Forskrift om gebyr, Eksempel kommune</h1>"
+        "<p>§ 1 Gebyr</p><p>Kontakt servicetorget</p></article></main></body></html>"
+    ).encode()
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr, Eksempel kommune",
+        "§ 1 Gebyr",
+        "Kontakt servicetorget",
+    )
 
 
 def test_html_drops_update_stamps_and_page_furniture_lines() -> None:
