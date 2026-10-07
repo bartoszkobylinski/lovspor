@@ -39,6 +39,8 @@ from lovspor.promotion.fields import (
 from lovspor.promotion.models import ExtractedRegulation
 
 _IKRAFT_CUE = re.compile(r"\b(?:trer|trår)\s+i\s+kraft\s+(?=.)", re.IGNORECASE)
+_ENACTMENT_WORD = re.compile(r"\b(?:vedtatt|vedteke[n]?|vedtekne)\b", re.IGNORECASE)
+_SELF_ENACTMENT = re.compile(r"\bforskrift(?:en|a)?\b.*" + _ENACTMENT_WORD.pattern, re.IGNORECASE)
 _CLAUSE_CHARS = 200
 
 HoldReason = Literal["conflicting_statements", "placeholder_date"]
@@ -74,7 +76,20 @@ def stated_vedtatt(regulation: ExtractedRegulation) -> StatedDate:
         for m in matches
         if not _STATUTE_BEFORE_DATE.search(m.group("organ"))
     )
-    return _verdict(statements)
+    return _verdict(statements or _blank_enactments(block, body))
+
+
+def _blank_enactments(block: str, body: str) -> tuple[DateStatement, ...]:
+    """Enactment sentences whose date is a draft blank, which the date patterns never match."""
+    sentences = [
+        *(s for s in _SENTENCE_END.split(block) if _ENACTMENT_WORD.search(s)),
+        *(s for s in _SENTENCE_END.split(body) if _SELF_ENACTMENT.search(s)),
+    ]
+    return tuple(
+        DateStatement(date=None, text=None, evidence=s.strip())
+        for s in sentences
+        if has_placeholder_date(s)
+    )
 
 
 def stated_ikraft(regulation: ExtractedRegulation) -> StatedDate:

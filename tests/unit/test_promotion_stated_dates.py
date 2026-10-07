@@ -41,6 +41,33 @@ class TestTheFixtureRegulation:
 
 
 class TestVedtatt:
+    @pytest.mark.parametrize("in_block", [True, False])
+    def test_a_blank_enactment_date_is_held_not_absent(self, in_block: bool) -> None:
+        """A stated draft date is a hold, not an absence (Codex test on PR #577)."""
+        clause = "Forskriften er vedtatt av kommunestyret xx.xx.2020."
+        regulation = ExtractedRegulation(
+            title="Forskrift om slam",
+            identification_block=clause if in_block else "Forskrift om slam",
+            body="§ 1" if in_block else clause,
+        )
+
+        stated = stated_vedtatt(regulation)
+
+        assert (stated.status, stated.hold_reason) == ("held", "placeholder_date")
+        [statement] = stated.statements
+        assert statement.evidence.startswith("Forskriften er vedtatt")
+        assert "xx.xx.2020" in statement.evidence
+        assert _evidence_is_verbatim(regulation, stated)
+
+    def test_a_blank_date_outside_an_enactment_sentence_is_not_a_statement(self) -> None:
+        regulation = ExtractedRegulation(
+            title="Forskrift om slam",
+            identification_block="Forskrift om slam",
+            body="§ 1 Søknad sendes innen xx.xx.2020.",
+        )
+
+        assert stated_vedtatt(regulation).status == "absent"
+
     def test_the_same_date_stated_twice_is_one_stated_date(self) -> None:
         regulation, _ = _read(
             "Forskrift om slam, Eksempel kommune",
