@@ -1,0 +1,152 @@
+"""vedtatt / ikraft with every statement verbatim; disagreement is held (ADR-0016 Decision 2)."""
+
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+
+from lovspor.promotion.fields import read_regulation
+from lovspor.promotion.models import ExtractedRegulation, RegulationFields
+from lovspor.promotion.stated_dates import StatedDate, stated_ikraft, stated_vedtatt
+from tests.unit.promotion_fixtures import REGULATION_LINES
+
+
+def _read(*lines: str) -> tuple[ExtractedRegulation, RegulationFields]:
+    read = read_regulation(lines)
+    assert isinstance(read, tuple)
+    return read
+
+
+def _flat(regulation: ExtractedRegulation) -> str:
+    return regulation.full_text.replace("\n", " ")
+
+
+def _evidence_is_verbatim(regulation: ExtractedRegulation, stated: StatedDate) -> bool:
+    return all(s.evidence in _flat(regulation) for s in stated.statements)
+
+
+class TestTheFixtureRegulation:
+    def test_both_dates_are_stated_once_and_agree_with_the_front_matter(self) -> None:
+        regulation, fields = _read(*REGULATION_LINES)
+
+        vedtatt, ikraft = stated_vedtatt(regulation), stated_ikraft(regulation)
+
+        assert (vedtatt.status, vedtatt.value) == ("stated", fields.vedtatt)
+        assert (ikraft.status, ikraft.value) == ("stated", fields.ikraft)
+        assert [s.evidence for s in vedtatt.statements] == [
+            "Vedtatt av kommunestyret i møte 12.12.2019"
+        ]
+        assert [s.evidence for s in ikraft.statements] == ["trer i kraft 1. januar 2020"]
+
+
+class TestVedtatt:
+    def test_the_same_date_stated_twice_is_one_stated_date(self) -> None:
+        regulation, _ = _read(
+            "Forskrift om slam, Eksempel kommune",
+            "Vedtatt av kommunestyret 12.12.2019.",
+            "§ 1 Formål",
+            "Forskriften er vedtatt av kommunestyret den 12. desember 2019.",
+        )
+
+        stated = stated_vedtatt(regulation)
+
+        assert (stated.status, stated.value, len(stated.statements)) == (
+            "stated",
+            date(2019, 12, 12),
+            2,
+        )
+        assert _evidence_is_verbatim(regulation, stated)
+
+    def test_two_different_dates_are_held_with_both_kept(self) -> None:
+        regulation, fields = _read(
+            "Forskrift om slam, Eksempel kommune",
+            "Vedtatt av kommunestyret 12.12.2019.",
+            "§ 1 Formål",
+            "Forskriften er vedtatt av bystyret den 3. mars 2020.",
+        )
+
+        stated = stated_vedtatt(regulation)
+
+        assert fields.vedtatt == date(2019, 12, 12)
+        assert (stated.status, stated.value, stated.hold_reason) == (
+            "held",
+            None,
+            "conflicting_statements",
+        )
+        assert [s.date for s in stated.statements] == [date(2019, 12, 12), date(2020, 3, 3)]
+
+    def test_a_statute_date_is_never_the_vedtaksdato(self) -> None:
+        regulation, _ = _read(
+            "Forskrift om slam, Eksempel kommune",
+            "Fastsatt med hjemmel i lov av 14. juni 2002.",
+            "§ 1 Formål",
+        )
+
+        assert stated_vedtatt(regulation) == StatedDate(status="absent")
+
+
+class TestIkraft:
+    def test_a_phrase_without_a_date_is_kept_verbatim(self) -> None:
+        regulation, fields = _read(
+            "Forskrift om slam, Eksempel kommune",
+            "Vedtatt 1.1.2020.",
+            "§ 1",
+            "Trer i kraft straks.",
+        )
+
+        stated = stated_ikraft(regulation)
+
+        assert (stated.status, stated.value, stated.text) == ("text", None, fields.ikraft_text)
+        assert [s.evidence for s in stated.statements] == ["Trer i kraft straks"]
+
+    @pytest.mark.parametrize(
+        "clauses",
+        [
+            ("Forskriften trer i kraft 1. januar 2020.", "§ 4 trer i kraft 1. juli 2020."),
+            ("Forskriften trer i kraft 1. januar 2020.", "§ 4 trer i kraft straks."),
+            ("§ 3 trer i kraft straks.", "§ 4 trer i kraft når departementet bestemmer."),
+        ],
+    )
+    def test_statements_that_disagree_are_held(self, clauses: tuple[str, str]) -> None:
+        regulation, _ = _read(
+            "Forskrift om slam, Eksempel kommune", "Vedtatt 1.1.2020.", "§ 1 Formål", *clauses
+        )
+
+        stated = stated_ikraft(regulation)
+
+        assert (stated.status, stated.value, stated.text) == ("held", None, None)
+        assert len(stated.statements) == 2
+        assert _evidence_is_verbatim(regulation, stated)
+
+    def test_a_header_and_a_clause_that_agree_are_one_date(self) -> None:
+        regulation, _ = _read(
+            "Forskrift om slam, Eksempel kommune",
+            "Ikrafttredelse: 01.01.2020",
+            "§ 1",
+            "Forskriften trer i kraft 1. januar 2020.",
+        )
+
+        stated = stated_ikraft(regulation)
+
+        assert (stated.status, stated.value) == ("stated", date(2020, 1, 1))
+        assert [s.evidence for s in stated.statements] == [
+            "Ikrafttredelse: 01.01.2020",
+            "trer i kraft 1. januar 2020",
+        ]
+
+    def test_a_draft_blank_date_is_held(self) -> None:
+        regulation = ExtractedRegulation(
+            title="Forskrift om slam",
+            identification_block="Forskrift om slam",
+            body="§ 1\nForskriften trer i kraft xx.xx.2020.",
+        )
+
+        stated = stated_ikraft(regulation)
+
+        assert (stated.status, stated.hold_reason) == ("held", "placeholder_date")
+
+    def test_no_statement_is_absent(self) -> None:
+        regulation, _ = _read("Forskrift om slam, Eksempel kommune", "Vedtatt 1.1.2020.", "§ 1")
+
+        assert stated_ikraft(regulation) == StatedDate(status="absent")

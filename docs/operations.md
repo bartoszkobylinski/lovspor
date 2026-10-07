@@ -1149,6 +1149,19 @@ It writes, under `lokale-forskrifter/` only:
   reviewer's role (`reviewed_by_role` — never the name), decision time,
   reason, `reviewed_in_sample`, classifier evidence (or `null`), extractor/renderer versions, source form, identity (scheme, id,
   ref-id, candidates), and the archive records it was read from;
+* `<authority_id>/evidence/<slug>.json` — what this version's text states,
+  verbatim (ADR-0016 S10): `relations` (`hjemmel`, `amends`, `repeals`,
+  `amended_by`, `repealed_by`), each with the sentence that states it and
+  either the one corpus document its target names (`target`: `doc_id`,
+  `dataset`, `address`) or `target: null` with `unresolved` (`no_number`,
+  `not_in_corpus`, `ambiguous_name`, `self_reference`); and `vedtatt` /
+  `ikraft`, every statement of each date with its words and a `status` —
+  `stated`, `text`, `absent`, or `held` (`conflicting_statements`,
+  `placeholder_date`) with `value: null`. It is machine-read
+  (`basis: "source_explicit"`, `reviewed: false`) and a sidecar: the Markdown,
+  its `content_hash` and the manifest record do not depend on it, so no
+  approval goes stale when it is written. Targets resolve against the corpus
+  as it stands at promotion;
 * `manifest.json` — the record keyed by id (`generated_at` is the decision
   time, not the clock).
 
@@ -1237,6 +1250,8 @@ archived artifact the document was promoted from), then, in the checkout:
 * `<authority_id>/<slug>.md` — deleted, so the MCP server no longer serves
   it (`get_law`, `get_section` and `search_laws` answer as for an unknown
   document);
+* `<authority_id>/evidence/<slug>.json` — deleted with it: its spans are the
+  same text;
 * `<authority_id>/observations/<slug>.json` — kept, every version intact,
   with a `withdrawal` block (reason, `reviewed_by_role`, decision time — never
   the name);

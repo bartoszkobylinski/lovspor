@@ -38,6 +38,7 @@ LK_ID = "lk-0301-aa8ae774921d"
 SLUG = "forskrift-om-renovasjon-og-slam-eksempel-kommune"
 MARKDOWN = f"lokale-forskrifter/{AUTHORITY}/{SLUG}.md"
 OBSERVATIONS = f"lokale-forskrifter/{AUTHORITY}/observations/{SLUG}.json"
+EVIDENCE = f"lokale-forskrifter/{AUTHORITY}/evidence/{SLUG}.json"
 HISTORY = f"lokale-forskrifter/{AUTHORITY}/history/{SLUG}.json"
 SUBJECT = f"promote(lokal-forskrift): {AUTHORITY}/{SLUG} v1"
 FNR_LINE = "Søker med fødselsnummer 01019012480 er registrert."
@@ -99,6 +100,7 @@ class TestLocal:
         assert result.exit_code == 0, result.output
         assert result.stdout == (
             f"Promoted {LK_ID} v1 -> {MARKDOWN}\n"
+            f"wrote {EVIDENCE}\n"
             f"wrote {MARKDOWN}\n"
             f"wrote {OBSERVATIONS}\n"
             "wrote lokale-forskrifter/manifest.json\n"

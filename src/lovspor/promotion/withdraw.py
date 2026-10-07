@@ -5,7 +5,8 @@ undone by a later commit that:
 
 * marks the manifest record ``status: "removed"`` with a closed-set
   :class:`~lovspor.promotion.models.RemovedReason`;
-* deletes the document's Markdown, so no reader serves it;
+* deletes the document's Markdown, so no reader serves it, and its
+  ``evidence/<slug>.json``, whose verbatim spans are the same text;
 * keeps ``history/<slug>.json`` untouched and ``observations/<slug>.json``
   with every promoted version, adding the withdrawal — by the reviewer's
   role, never the name.
@@ -39,6 +40,7 @@ from lovspor.promotion.decisions import (
     WithdrawalRecord,
     utc_text,
 )
+from lovspor.promotion.evidence import evidence_path
 from lovspor.promotion.writer import ObservationsFile, WithdrawalNotice, observations_text
 
 WITHDRAW_SUBJECT = "withdraw(lokal-forskrift): {authority_id}/{slug}"
@@ -91,7 +93,7 @@ def withdrawal_record(
 
 
 def apply_withdrawal(corpus: CorpusCheckout, withdrawal: WithdrawalRecord) -> Withdrawn:
-    """Write the removed record and the kept observations; delete the Markdown."""
+    """Write the removed record and the kept observations; delete the Markdown and evidence."""
     manifest = corpus.local_manifest()
     record = manifest.documents[withdrawal.doc_id]
     files = {
@@ -100,9 +102,9 @@ def apply_withdrawal(corpus: CorpusCheckout, withdrawal: WithdrawalRecord) -> Wi
     }
     for relative, text in sorted(files.items()):
         atomic_write_text(corpus.inside(relative.removeprefix(f"{LOCAL_DIR}/")), text)
-    markdown = corpus.inside(record.markdown_path.removeprefix(f"{LOCAL_DIR}/"))
-    deleted = (record.markdown_path,) if markdown.is_file() else ()
-    markdown.unlink(missing_ok=True)
+    deleted = _delete(
+        corpus, (record.markdown_path, evidence_path(record.authority_id, record.slug))
+    )
     subject = WITHDRAW_SUBJECT.format(authority_id=record.authority_id, slug=record.slug)
     return Withdrawn(
         doc_id=withdrawal.doc_id,
@@ -123,6 +125,17 @@ def refuse_withdrawn(decisions: DecisionLog, key: ArtifactKey | None, doc_id: st
         "a withdrawn document is never promoted again (ADR-0016 4f)"
     )
     raise PromotionRefusedError(msg)
+
+
+def _delete(corpus: CorpusCheckout, paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Delete each corpus-relative path that is a file; the paths deleted, in order."""
+    deleted: list[str] = []
+    for relative in paths:
+        target = corpus.inside(relative.removeprefix(f"{LOCAL_DIR}/"))
+        if target.is_file():
+            target.unlink()
+            deleted.append(relative)
+    return tuple(deleted)
 
 
 def _observations_path(record: LocalRecord) -> str:

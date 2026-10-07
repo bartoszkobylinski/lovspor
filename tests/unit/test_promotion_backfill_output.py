@@ -57,6 +57,7 @@ SLUG = "forskrift-om-renovasjon-og-slam-eksempel-kommune"
 SUBJECT = f"promote(lokal-forskrift): {AUTHORITY}/{SLUG}"
 MARKDOWN = f"{LOCAL}/{AUTHORITY}/{SLUG}.md"
 OBSERVATIONS = f"{LOCAL}/{AUTHORITY}/observations/{SLUG}.json"
+EVIDENCE = f"{LOCAL}/{AUTHORITY}/evidence/{SLUG}.json"
 BERGEN = "4601"
 
 
@@ -127,6 +128,7 @@ class TestBackfillOutput:
         assert _lines(result.output) == [
             *_plan_lines("approved", "approved", "approved"),
             "Holds by reason: none",
+            f"wrote {EVIDENCE}",
             f"wrote {MARKDOWN}",
             f"wrote {OBSERVATIONS}",
             f"wrote {LOCAL}/manifest.json",

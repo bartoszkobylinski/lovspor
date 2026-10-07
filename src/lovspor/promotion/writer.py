@@ -1,8 +1,11 @@
 """The files one promoted version writes into ``lokale-forskrifter/`` (ADR-0016 3, 4d).
 
-Three files, all under ``lokale-forskrifter/`` and nowhere else:
+Four files, all under ``lokale-forskrifter/`` and nowhere else:
 
 * ``<authority_id>/<slug>.md`` — the rendering of the version;
+* ``<authority_id>/evidence/<slug>.json`` — what the version's text states
+  about its relations and dates, verbatim (:mod:`~lovspor.promotion.evidence`);
+  a sidecar, so the rendering and its ``content_hash`` do not depend on it;
 * ``<authority_id>/observations/<slug>.json`` — the observation axis of every
   promoted version, each with its audit record (``promotion``): the role of
   who approved it — never the name — and when, the classifier evidence if
@@ -40,6 +43,7 @@ from lovspor.promotion.archive import ArchivedArtifact, SourceStatus
 from lovspor.promotion.corpus import LOCAL_DIR, MANIFEST_NAME, CorpusCheckout, LocalRecord
 from lovspor.promotion.corpus import manifest_text as render_manifest
 from lovspor.promotion.decisions import HumanDecision, IdentityAudit, PromotionAudit, utc_text
+from lovspor.promotion.evidence import EvidenceSubject, corpus_index, evidence_file, evidence_path
 from lovspor.promotion.models import RemovedReason
 from lovspor.promotion.plan import Prepared
 from lovspor.promotion.render import LOCAL_RENDERER_VERSION
@@ -121,7 +125,7 @@ class WriteSet(BaseModel):
 def write_set(
     prepared: Prepared, artifact: ArchivedArtifact, decision: HumanDecision, corpus: CorpusCheckout
 ) -> WriteSet:
-    """The three files of one promoted version, refused if any would mention NLOD."""
+    """The four files of one promoted version, refused if any would mention NLOD."""
     audit = _audit(prepared, artifact, decision)
     authority_dir = f"{LOCAL_DIR}/{prepared.identity.authority.id}"
     files = {
@@ -129,6 +133,7 @@ def write_set(
         f"{authority_dir}/observations/{prepared.slug}.json": _observations(
             corpus, prepared, artifact, audit
         ),
+        evidence_path(prepared.identity.authority.id, prepared.slug): _evidence(corpus, prepared),
         f"{LOCAL_DIR}/{MANIFEST_NAME}": _manifest(corpus, prepared, artifact, decision),
     }
     mentioning = sorted(path for path, text in files.items() if _NLOD.search(text))
@@ -174,6 +179,16 @@ def _audit(
         observations_through=utc_text(decision.decided_at),
         observations=artifact.observations,
     )
+
+
+def _evidence(corpus: CorpusCheckout, prepared: Prepared) -> str:
+    subject = EvidenceSubject(
+        doc_id=prepared.identity.doc_id,
+        version=prepared.version,
+        content_hash=prepared.identity.content_hash,
+        regulation=prepared.extracted.regulation,
+    )
+    return _json(evidence_file(subject, corpus_index(corpus)))
 
 
 def _observations(
