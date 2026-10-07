@@ -43,6 +43,7 @@ from lovspor.promotion.decisions import HumanDecision, IdentityAudit, PromotionA
 from lovspor.promotion.models import RemovedReason
 from lovspor.promotion.plan import Prepared
 from lovspor.promotion.render import LOCAL_RENDERER_VERSION
+from lovspor.promotion.versions import ExcludedObservation
 
 _NLOD = re.compile(r"nlod", re.IGNORECASE)
 
@@ -93,14 +94,17 @@ class ObservationsFile(BaseModel):
     authority_id: str
     versions: tuple[VersionObservations, ...]
     source_status: SourceStatus
+    excluded: tuple[ExcludedObservation, ...] = ()
     withdrawal: WithdrawalNotice | None = None
 
     @model_serializer(mode="wrap")
-    def _without_an_absent_withdrawal(
-        self, handler: SerializerFunctionWrapHandler
-    ) -> dict[str, Any]:
+    def _omit_absent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """``excluded`` and ``withdrawal`` are written only when present, so a file
+        without them keeps its bytes."""
         payload: dict[str, Any] = handler(self)
-        if payload.get("withdrawal") is None:
+        if not self.excluded:
+            payload.pop("excluded", None)
+        if self.withdrawal is None:
             payload.pop("withdrawal", None)
         return payload
 
@@ -198,7 +202,7 @@ def _observations(
 
 
 def observations_text(document: ObservationsFile) -> str:
-    """An observations file as every writer writes it: canonical JSON, final newline."""
+    """An observations file as every writer writes it: sorted keys, indented, final newline."""
     return _json(document)
 
 
