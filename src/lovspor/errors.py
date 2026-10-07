@@ -292,3 +292,11 @@ class DecisionLogError(PromotionError):
     skipped because it does not parse could be the ``reject`` that keeps an
     artifact out of the corpus.
     """
+
+
+class ClassifierOutputError(PromotionError):
+    """The classifier's output file does not read to its end (ADR-0016 4b, S8).
+
+    A row skipped because it does not parse could be the one candidate a
+    batch should have counted, so the file is refused whole, never read past.
+    """
