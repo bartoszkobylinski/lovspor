@@ -437,3 +437,56 @@ def test_a_removed_duplicate_does_not_hide_the_one_current_date_and_number_targe
         doc_id="sf-20040601-0930", dataset="forskrifter", address="avfallsforskriften"
     )
     assert relation.unresolved is None
+
+
+@pytest.mark.parametrize(
+    ("first_cue", "second_cue", "kind"),
+    [
+        ("endres", "oppheves", RelationKind.AMENDS),
+        ("oppheves", "endres", RelationKind.REPEALS),
+    ],
+)
+def test_a_target_without_a_preceding_cue_takes_the_first_passive_cue(
+    first_cue: str, second_cue: str, kind: RelationKind
+) -> None:
+    """relations.py specifies the nearest passive cue after an uncued target."""
+    sentence = f"FOR-2004-06-01-930 {first_cue} og {second_cue}."
+
+    [stated] = stated_relations(_regulation("Forskrift om slam", "Vedtatt 1.1.2020.", sentence))
+
+    assert stated.kind is kind
+    assert stated.target.text == "FOR-2004-06-01-930"
+    assert stated.evidence == sentence
+
+
+@pytest.mark.parametrize("separator", [". ", "\n"])
+def test_a_relation_cue_does_not_reach_a_target_in_the_next_sentence(separator: str) -> None:
+    """The documented cue scope is its sentence, not the entire regulation."""
+    body = (
+        f"Denne forskriften opphever tidligere bestemmelser{separator}FOR-2004-06-01-930 gjelder."
+    )
+
+    assert stated_relations(_regulation("Forskrift om slam", "Vedtatt 1.1.2020.", body)) == ()
+
+
+@pytest.mark.parametrize("removed_first", [True, False])
+def test_a_removed_law_does_not_make_a_current_short_name_ambiguous(removed_first: bool) -> None:
+    """Only current central laws count towards short-name uniqueness (relations.py)."""
+    removed = OPPLARINGSLOVA.model_copy(update={"status": "removed", "slug": "old-law"})
+    entries = [
+        ("nl-19980717-061", removed),
+        ("nl-20230609-030", OPPLARINGSLOVA),
+    ]
+    index = target_index(dict(entries if removed_first else reversed(entries)), LocalManifest())
+    [stated] = stated_relations(
+        _regulation("Forskrift om slam", "Med hjemmel i opplæringslova § 15-2.", "§ 1")
+    )
+
+    relation = resolve(stated, index, OWN_ID)
+
+    assert relation.target == LinkedDocument(
+        doc_id="nl-20230609-030", dataset="lover", address="opplæringslova"
+    )
+    assert relation.unresolved is None
+    assert relation.target_text == "opplæringslova § 15-2"
+    assert relation.evidence == stated.evidence
