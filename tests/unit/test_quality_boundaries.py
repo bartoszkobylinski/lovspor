@@ -150,6 +150,48 @@ LOCAL_READ = (
 
 
 class TestLocalDatasetBoundary:
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "from ...local_corpus import LocalDataset\n",
+            "from ... import mcp_local\n",
+            "from ...promotion.corpus import LOCAL_DIR\n",
+        ],
+        ids=["module", "parent-package", "submodule"],
+    )
+    def test_nested_relative_imports_reach_the_local_dataset(self, source: str) -> None:
+        path = "src/lovspor/publish/templates/page.py"
+        found = boundaries.violations_in(path, source)
+        assert [(v.path, v.line, v.rule) for v in found] == [(path, 1, "local-dataset-unpublished")]
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            'def render():\n    """lokale-forskrifter; lovspor.mcp_local"""\n    return None\n',
+            'async def render():\n    """lokale-forskrifter; lovspor.mcp_local"""\n    return None\n',  # noqa: E501
+            'class Page:\n    """lokale-forskrifter; lovspor.mcp_local"""\n    pass\n',
+        ],
+        ids=["function", "async-function", "class"],
+    )
+    def test_documentation_in_each_python_docstring_scope_is_exempt(self, source: str) -> None:
+        assert boundaries.violations_in(PUBLISHER, source) == []
+
+    def test_both_rules_report_in_source_order_in_one_publisher(self, tmp_path: Path) -> None:
+        source = (
+            'args = ["git", "notes", "show", sha]\n'
+            'LOCAL = "lokale-forskrifter/manifest.json"\n'
+            'other_args = ["notes", "list"]\n'
+        )
+        run = _run(_tree(tmp_path, {PUBLISHER: source}))
+
+        assert run.returncode == 1
+        failures = [line for line in run.stdout.splitlines() if line.startswith("FAIL")]
+        assert len(failures) == 3
+        assert failures[0].startswith(f"FAIL attestation-registry: {PUBLISHER}:1 ")
+        assert failures[1].startswith(f"FAIL local-dataset-unpublished: {PUBLISHER}:2 ")
+        assert failures[2].startswith(f"FAIL attestation-registry: {PUBLISHER}:3 ")
+        assert run.stdout.splitlines()[-1] == "boundaries: 3 violation(s), 2 rules"
+
     def test_a_publisher_reading_the_local_manifest_fails(self, tmp_path: Path) -> None:
         run = _run(_tree(tmp_path, {PUBLISHER: LOCAL_READ}))
 
