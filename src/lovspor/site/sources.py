@@ -23,6 +23,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lovspor.site.benchmark import Publication
 from lovspor.site.capabilities import (
     AuthenticatedStep,
     CapabilityDocument,
@@ -77,6 +78,7 @@ class BuildArtifacts(BaseModel):
     document: CapabilityDocument
     capability_bytes: bytes
     descriptor: ToolSurfaceDescriptor
+    publication: Publication | None = None
 
     @property
     def manifest_sha256(self) -> str:
@@ -91,13 +93,19 @@ class BuildArtifacts(BaseModel):
         return f"{DESCRIPTOR_PREFIX}{self.lovspor_commit}"
 
     def artifact_hashes(self) -> tuple[tuple[str, str], ...]:
-        """``(id, sha256)`` per consumed artifact, sorted by id."""
+        """``(id, sha256)`` per consumed artifact, sorted by id.
+
+        The benchmark manifest and every file it names are artifacts too
+        (ADR:706): a published LLHB value traces to a hashed file.
+        """
+        benchmark = () if self.publication is None else self.publication.artifact_hashes()
         return tuple(
             sorted(
                 (
                     (MANIFEST_ARTIFACT, self.manifest_sha256),
                     (CAPABILITIES_ARTIFACT, self.capability_sha256),
                     (self.descriptor_artifact, self.descriptor.schema_sha256),
+                    *benchmark,
                 )
             )
         )
@@ -239,10 +247,12 @@ def _transport_facts(record: TransportRecord) -> tuple[FactSource, ...]:
 def fact_registry(artifacts: BuildArtifacts) -> FactRegistry:
     """Every fact this build may render, each bound to its artifact and kind."""
     observation = artifacts.document.observation
+    publication = artifacts.publication
     return FactRegistry(
         sources=(
             *_corpus_facts(artifacts),
             *_code_facts(artifacts),
+            *(() if publication is None else publication.facts),
             *_state_facts(artifacts.document),
             *_process_facts(observation.process),
             *_transport_facts(observation.transport),

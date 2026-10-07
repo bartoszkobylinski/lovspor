@@ -12,6 +12,7 @@ import html.parser
 import json
 import re
 import shutil
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -51,6 +52,7 @@ from tests.unit.site_fixtures import (
     INTERPRETER,
     OBSERVED_AT,
     TREE,
+    add_publication,
     available_observation,
     checkout_for,
     commit_all,
@@ -118,7 +120,8 @@ class World(NamedTuple):
 @pytest.fixture(scope="module")
 def world(tmp_path_factory: pytest.TempPathFactory) -> World:
     root = tmp_path_factory.mktemp("world")
-    checkout, lovspor_commit = throwaway_checkout(root / "lovspor")
+    checkout, _ = throwaway_checkout(root / "lovspor")
+    lovspor_commit = add_publication(checkout)
     corpus, corpus_commit = throwaway_corpus(root / "lovverk")
     corpus_site = root / "corpus-site"
     emit_site(corpus, corpus_commit, corpus_site)
@@ -568,62 +571,136 @@ class TestTree:
                 assert page.route.status in badges, page.path
 
 
+_QUOTE = (
+    "«For å få rett til sykepenger fra arbeidsgiveren må arbeidstakeren ha vært ansatt hos "
+    "arbeidsgiveren i minst fire uker (opptjeningstid).»"
+)
+_SECTIONS = {
+    "/": [
+        "Et spørsmål du kan stille",
+        "Koble til",
+        "Hvor godt virker det?",
+        "Kilder",
+        "Hva det dekker — ærlig",
+        "Åpen kildekode",
+    ],
+    "/en/": [
+        "A question you can ask",
+        "Connect",
+        "How well does it work?",
+        "Sources",
+        "What it covers — honestly",
+        "Open source",
+    ],
+}
+
+
+def _h2s(markup: str) -> list[str]:
+    return [" ".join(part.split()) for part in re.findall(r"<h2>(.*?)</h2>", markup, re.S)]
+
+
+def _rebased(world: World, root: Path, publication: bool, extra: dict[str, str]) -> World:
+    """The same world, built from a fresh checkout carrying ``extra`` files."""
+    checkout, commit = throwaway_checkout(root / "lovspor")
+    for relative, text in extra.items():
+        (checkout / relative).parent.mkdir(parents=True, exist_ok=True)
+        (checkout / relative).write_text(text, encoding="utf-8")
+    if extra:
+        commit = commit_all(checkout, "extra")
+    if publication:
+        commit = add_publication(checkout)
+    return world._replace(checkout=checkout, lovspor_commit=commit)
+
+
 class TestLanding:
-    def test_norwegian_landing_reads_the_two_facts_and_marks_its_literals(
-        self, built: tuple[Path, SiteBuildReport], world: World
+    """One page, six sections (owner decision 2026-10-07)."""
+
+    @pytest.mark.parametrize("path", ["/", "/en/"])
+    def test_the_sections_are_the_six_in_order(
+        self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
-        out, _ = built
-        markup = _page(out, "/")
+        markup = _page(built[0], path)
+
+        assert _h2s(markup) == _SECTIONS[path]
+        assert markup.count("<h1>") == 1
+
+    @pytest.mark.parametrize("path", ["/", "/en/"])
+    def test_reads_the_two_counts_as_facts(
+        self, built: tuple[Path, SiteBuildReport], world: World, path: str
+    ) -> None:
+        markup = _page(built[0], path)
 
         assert _fact_values(markup, "corpus.documents") == ["1"]
         assert _fact_values(markup, "code.tool_surface.tool_count") == [
             str(world.descriptor.tool_count)
         ]
-        assert "Seksten" not in markup and "~5" not in markup
-        assert "<span data-literal>folketrygdloven § 8-18</span>" in markup
         assert "<span data-literal>AGPL-3.0</span>" in markup
-        assert "(<span data-literal>NLOD 2.0</span>)" in markup
-        assert (
-            '<em><span class="tag" data-status="planned">Planlagt</span> — slik de fleste vil '
-            "bruke det.</em>"
-        ) in markup
-        assert "Kommer snart" not in markup
+        assert "<span data-literal>NLOD 2.0</span>" in markup
 
-    def test_english_landing_mirrors_the_substitutions(
-        self, built: tuple[Path, SiteBuildReport], world: World
+    @pytest.mark.parametrize("path", ["/", "/en/"])
+    def test_the_example_quotes_section_8_18_and_links_its_page(
+        self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
-        out, _ = built
-        markup = _page(out, "/en/")
+        markup = _page(built[0], path)
 
-        assert _fact_values(markup, "corpus.documents") == ["1"]
-        assert "Sixteen" not in markup and "~5" not in markup
-        assert (
-            '<em><span class="tag" data-status="planned">Planned</span> — the way most people '
-            "will use it.</em>"
-        ) in markup
-        assert "Coming shortly" not in markup
-        assert 'href="https://modelcontextprotocol.io"' in markup
-        assert 'href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20access"' in markup
+        assert f"<blockquote><p>{_QUOTE}</p></blockquote>" in markup
+        assert '<a href="/lov/folketrygdloven-ftrl/paragraf/8-18/">' in markup
+        assert "<span data-literal>folketrygdloven § 8-99</span>" in markup
+        assert "<span data-literal>§ 8-7</span>" in markup
 
-    def test_the_rest_of_the_landing_copy_is_verbatim(
-        self, built: tuple[Path, SiteBuildReport]
+    @pytest.mark.parametrize(
+        ("path", "claim"),
+        [
+            ("/", "Som connector i Claude.ai og ChatGPT virker det i dag"),
+            ("/en/", "As a connector in Claude.ai and ChatGPT it works today"),
+        ],
+    )
+    def test_the_connector_works_today_when_the_release_attests_oauth(
+        self, built: tuple[Path, SiteBuildReport], path: str, claim: str
     ) -> None:
-        out, _ = built
-        for path, source in (("/", "index.html"), ("/en/", "en/index.html")):
-            golden = (_PRE_ENVELOPE / source).read_text(encoding="utf-8")
-            golden_main = _text(golden)
-            built_main = _text(_page(out, path))
-            for original, replacement in (
-                ("~5 900", "1"),
-                ("~5,900", "1"),
-                ("Seksten", "18"),
-                ("Sixteen", "18"),
-                ("Kommer snart", "Planlagt"),
-                ("Coming shortly", "Planned"),
-            ):
-                golden_main = golden_main.replace(original, replacement)
+        markup = _page(built[0], path)
 
-            assert built_main == golden_main, path
+        assert claim in markup
+        assert "https://lovspor.no/mcp" in markup
+        assert "Register automatically" in markup
+        assert "claude mcp add lovverk -- uvx lovspor mcp" in markup
+        assert 'data-status="planned"' not in markup
+        assert "Privat beta" not in markup and "Private beta" not in markup
+        assert not re.search(r'class="cta"[^>]*href="mailto:', markup)
+
+    @pytest.mark.parametrize(
+        ("path", "claim", "caveat"),
+        [
+            ("/", "virker det i dag", "Ved denne utgivelsen er innloggingen ikke bekreftet"),
+            ("/en/", "it works today", "At this release the sign-in is not attested"),
+        ],
+    )
+    def test_the_connector_claim_follows_the_oauth_comparison(
+        self, world: World, tmp_path: Path, path: str, claim: str, caveat: str
+    ) -> None:
+        """The claim reads ``oauth_discovery_consistent``: a release whose
+        probe did not see OAuth stops saying it works."""
+        out = tmp_path / "site"
+        world.build(out, world.observation(unobserved_transport("timeout")))
+        markup = _page(out, path)
+
+        assert claim not in markup
+        assert caveat in markup
+        assert _fact_values(markup, "hosted.comparisons.oauth_discovery_consistent") == ["unknown"]
+
+    def test_the_oauth_reading_is_ledgered_for_the_landing(
+        self, fresh_build: tuple[Path, SiteBuildReport]
+    ) -> None:
+        entries = [entry for entry in _facts(fresh_build[0])["facts"] if entry["page"] == "/"]
+
+        assert {
+            "page": "/",
+            "artifact": "deployment-capabilities.json",
+            "field": "state.comparisons.oauth_discovery_consistent",
+            "kind": "hosted",
+            "value": "true",
+            "unobserved": None,
+        } in entries
 
     def test_the_tool_count_is_a_code_fact_never_the_hosted_count(
         self, world: World, tmp_path: Path
@@ -637,7 +714,95 @@ class TestLanding:
         world.build(out, observation)
 
         assert _fact_values(_page(out, "/"), "code.tool_surface.tool_count") == ["18"]
-        assert 'data-kind="hosted"' not in _page(out, "/")
+        assert "served_tool_count" not in _page(out, "/")
+
+
+class TestLandingBenchmark:
+    """LLHB values reach the landing only through ``PUBLICATION.json`` (ADR:706)."""
+
+    @pytest.mark.parametrize(
+        ("path", "control", "treatment"),
+        [("/", "19,5", "12,0"), ("/en/", "19.5", "12.0")],
+    )
+    def test_the_values_are_facts_read_from_the_manifest(
+        self, built: tuple[Path, SiteBuildReport], path: str, control: str, treatment: str
+    ) -> None:
+        markup = _page(built[0], path)
+        rate = "llhb.citation_hallucination_rate"
+
+        assert _fact_values(markup, f"{rate}.control_numerator") == ["42"]
+        assert _fact_values(markup, f"{rate}.control_denominator") == ["215"]
+        assert _fact_values(markup, f"{rate}.treatment_numerator") == ["30"]
+        assert _fact_values(markup, f"{rate}.treatment_denominator") == ["249"]
+        assert _fact_values(markup, f"{rate}.control_percent") == [control, control]
+        assert _fact_values(markup, f"{rate}.treatment_percent") == [treatment, treatment]
+        assert _fact_values(markup, "llhb.citation_accuracy.treatment_numerator") == ["431"]
+        assert _fact_values(markup, "llhb.model.model") == ["claude-opus-5"]
+        assert _fact_values(markup, "llhb.pair.cases") == ["250"]
+
+    @pytest.mark.parametrize(
+        ("path", "label", "resolved"),
+        [
+            ("/", "post hoc-diagnostisk resultat, ikke et bekreftende", "avgjorte tilfeller"),
+            ("/en/", "post-hoc diagnostic result, not a confirmatory one", "resolved-case"),
+        ],
+    )
+    def test_the_label_and_the_caveats_are_shown(
+        self, built: tuple[Path, SiteBuildReport], path: str, label: str, resolved: str
+    ) -> None:
+        markup = _page(built[0], path)
+
+        assert f'<span class="tag">{label}</span>' in markup
+        assert resolved in markup
+        assert _fact_values(markup, "llhb.no_invention_rate.treatment_denominator") == ["11"]
+        assert _fact_values(markup, "llhb.c2_hallucination.treatment_numerator") == ["8"]
+        assert _fact_values(markup, "llhb.stability.repeats") == ["5"]
+
+    @pytest.mark.parametrize("path", ["/", "/en/"])
+    def test_the_comparison_links_every_external_figure(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+
+        for href in (
+            "https://doi.org/10.1093/jla/laae003",
+            "https://doi.org/10.1111/jels.12413",
+            "https://arxiv.org/abs/2401.01301",
+            "https://arxiv.org/abs/2405.20362",
+        ):
+            assert f'href="{href}"' in markup, href
+
+    def test_every_named_file_is_hashed_into_site_facts(
+        self, fresh_build: tuple[Path, SiteBuildReport]
+    ) -> None:
+        artifacts = {entry["id"]: entry["sha256"] for entry in _facts(fresh_build[0])["artifacts"]}
+        manifest = json.loads((_REPO / "benchmarks" / "llhb" / "PUBLICATION.json").read_text())
+
+        for relative in {"benchmarks/llhb/PUBLICATION.json"} | {
+            entry["source"] for entry in manifest["entries"]
+        }:
+            assert artifacts[relative] == _sha((_REPO / relative).read_bytes()), relative
+
+    def test_without_a_manifest_the_section_is_absent(self, world: World, tmp_path: Path) -> None:
+        out = tmp_path / "site"
+        _rebased(world, tmp_path, publication=False, extra={}).build(out)
+
+        assert "Hvor godt virker det?" not in _page(out, "/")
+        assert "How well does it work?" not in _page(out, "/en/")
+        assert not [e for e in _facts(out)["artifacts"] if e["id"].startswith("benchmarks/")]
+
+    def test_an_unlisted_report_changes_no_page(
+        self, world: World, built: tuple[Path, SiteBuildReport], tmp_path: Path
+    ) -> None:
+        stray = {"benchmarks/llhb/results/reports/unlisted.json": '{"metrics": "not read"}'}
+        out = tmp_path / "site"
+        rebased = _rebased(world, tmp_path, publication=True, extra=stray)
+        rebased.build(out)
+
+        for page in emitted_pages():
+            moved = _page(out, page.path).replace(rebased.lovspor_commit, world.lovspor_commit)
+            assert moved == _page(built[0], page.path), page.path
+        assert "unlisted" not in (out / "site-facts.json").read_text(encoding="utf-8")
 
 
 class TestConnectPage:
@@ -1052,8 +1217,6 @@ class TestDegradation:
         world.build(two, world.observation(unobserved_transport("timeout")))
 
         for path in (
-            "/",
-            "/en/",
             "/observatory/",
             "/connect/",
             "/en/connect/",
@@ -1062,6 +1225,7 @@ class TestDegradation:
         ):
             assert _page(one, path) == _page(two, path), path
         assert _page(one, "/status/") != _page(two, "/status/")
+        assert _page(one, "/") != _page(two, "/")
 
 
 class TestDeterminism:
@@ -1213,7 +1377,7 @@ class TestSiteFacts:
         assert facts["capability"]["observed_runtime_identity"] == identity
         assert document["observation"]["process"]["runtime_identity"] == identity
         assert all(set(entry) == {"id", "sha256"} for entry in facts["artifacts"])
-        assert len(facts["artifacts"]) == 3
+        assert len(facts["artifacts"]) == 3 + len(_publication_files())
         assert all(
             set(entry) == {"page", "artifact", "field", "kind", "value", "unobserved"}
             for entry in facts["facts"]
@@ -1233,6 +1397,9 @@ class TestSiteFacts:
                 (out / "deployment-capabilities.json").read_bytes()
             ),
             f"tool-surface@{world.lovspor_commit}": world.descriptor.schema_sha256,
+        } | {
+            relative: _sha((world.checkout / relative).read_bytes())
+            for relative in _publication_files()
         }
 
     def test_no_string_is_an_absolute_path_or_a_hostname(
@@ -1279,6 +1446,8 @@ class TestSiteFacts:
                 assert entry["artifact"] == "deployment-capabilities.json", entry
             elif entry["kind"] == "corpus":
                 assert entry["artifact"] == "corpus/site-manifest.json", entry
+            elif entry["artifact"].startswith("benchmarks/"):
+                assert entry["artifact"] in _publication_files(), entry
             else:
                 assert entry["artifact"] == f"tool-surface@{world.lovspor_commit}", entry
 
@@ -1324,6 +1493,34 @@ def _strings(node: object) -> list[str]:
     return []
 
 
+def _publication_files() -> set[str]:
+    manifest = "benchmarks/llhb/PUBLICATION.json"
+    entries = json.loads((_REPO / manifest).read_text(encoding="utf-8"))["entries"]
+    return {manifest} | {entry["source"] for entry in entries}
+
+
+def _resolve_benchmark(artifact: str, field: str, checkout: Path) -> object:
+    """Read the field back from the checkout and apply the manifest's
+    documented format: ``count`` as an int, ``percent`` as the rate times 100,
+    rounded half-up to one decimal, ``text`` verbatim."""
+    manifest = json.loads((checkout / "benchmarks/llhb/PUBLICATION.json").read_text())
+    (value_format,) = {
+        spec["format"]
+        for entry in manifest["entries"]
+        if entry["source"] == artifact
+        for spec in entry["values"].values()
+        if spec["field"] == field
+    }
+    node: Any = json.loads((checkout / artifact).read_text(encoding="utf-8"))
+    for part in field.split("."):
+        node = node[part]
+    if value_format == "count":
+        return int(node)
+    if value_format == "percent":
+        return float((Decimal(str(node)) * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+    return node
+
+
 def _resolve(
     entry: dict[str, Any], world: World, document: dict[str, Any], manifest_bytes: bytes
 ) -> object:
@@ -1337,6 +1534,8 @@ def _resolve(
         for part in field.split("."):
             node = node[part]
         return node
+    if artifact.startswith("benchmarks/"):
+        return _resolve_benchmark(artifact, field, world.checkout)
     commit = artifact.removeprefix("tool-surface@")
     assert commit == world.lovspor_commit
     if field == "lovspor_commit":

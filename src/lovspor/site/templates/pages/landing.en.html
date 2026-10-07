@@ -1,25 +1,86 @@
-{#- The English landing, migrated from deploy/digitalocean/site/en/index.html:71-122
-    (that tree was retired in the first-migration PR; see git history, and
-    tests/unit/fixtures/site/pre-envelope/en/index.html for the golden copy)
-    word for word (owner decision 2026-09-09) with exactly these substitutions:
-    the document count and the tool count are facts, example and identifier
-    digits are marked literals, and "Coming shortly" is the planned badge. -#}
+{#- The English landing, the twin of landing.nb.html section for section
+    (owner decision 2026-10-07, superseding the word-for-word migration of
+    2026-09-09). Every count is a fact; every digit in an example, a
+    quotation or an external citation is a marked literal. The connector
+    claim is gated on the release observation (oauth_discovery_consistent).
+    LLHB values come from benchmarks/llhb/PUBLICATION.json through
+    `benchmark`, and the section is absent when no manifest exists (ADR-0014,
+    ADR:706). The quoted law text stays in Norwegian, verbatim from the corpus;
+    the English beside it is a translation, marked as one. -#}
 {% extends "_base.html" %}
 {% block main %}
-    <span class="tag">Private beta</span>
+{% set oauth = reading("hosted.comparisons.oauth_discovery_consistent", kind="hosted") %}
     <h1>Norwegian law your AI won't hallucinate.</h1>
-    <p class="lede">lovspor gives ChatGPT, Claude and the AI tools you already use the <strong>actual text</strong> of Norwegian statutes and regulations — with exact citations you can verify, not invented paragraph numbers.</p>
+    <p class="lede">lovspor gives ChatGPT, Claude and the AI tools you already use the <strong>actual text</strong> of Norwegian statutes and regulations — with exact citations you can verify, not invented paragraph numbers. It is an open <a href="https://modelcontextprotocol.io">MCP</a> server over {{ fact("corpus.documents", kind="corpus") }} acts and central regulations, with {{ fact("code.tool_surface.tool_count", kind="code") }} tools that look up, search and verify.</p>
 
+    <h2>A question you can ask</h2>
     <div class="panel">
-      Ask a general AI about <code><span data-literal>folketrygdloven § 8-18</span></code> and it answers confidently — and often cites paragraphs that don't exist. <span class="accent">For law, a plausible answer is a dangerous answer.</span> lovspor makes the AI quote the real provision, or say it doesn't know.
+      <p><strong>“Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?”</strong> <span class="muted">(How long must I have worked to get sick pay from my employer?)</span></p>
+      <p>With lovspor the model looks up <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span> “Sykepenger fra arbeidsgiveren”</a> and quotes it:</p>
+      <blockquote><p>«For å få rett til sykepenger fra arbeidsgiveren må arbeidstakeren ha vært ansatt hos arbeidsgiveren i minst fire uker (opptjeningstid).»</p></blockquote>
+      <p class="muted">Translation: to be entitled to sick pay from the employer, the employee must have been employed by that employer for at least four weeks (the qualifying period).</p>
+      <p>The tool also checks the provision's own cross-reference, to <span data-literal>§ 8-7</span>.</p>
+      <p>Ask instead about <span data-literal>folketrygdloven § 8-99</span>, and the tool answers that the section does not exist. <span class="accent">For law, a plausible answer is a dangerous answer.</span></p>
     </div>
 
-    <h2>What it is</h2>
-    <p>An <a href="https://modelcontextprotocol.io">MCP</a> server over a continuously-refreshed, hash-verified corpus of Norwegian law — <strong>{{ fact("corpus.documents", kind="corpus") }} acts and central regulations</strong> currently in force. {{ fact("code.tool_surface.tool_count", kind="code") }} tools: semantic search, exact citation &amp; quote verification, section lookup, law history and diffs. Every answer traces back to the verbatim source text.</p>
+    <h2>Connect</h2>
+{% if oauth == "true" %}
+    <p>As a connector in Claude.ai and ChatGPT it works today: you sign in, and need no token.</p>
+{% else %}
+    <p>As a connector in Claude.ai and ChatGPT you sign in instead of pasting a token. <span class="accent">At this release the sign-in is not attested</span> (the comparison reads {{ fact("hosted.comparisons.oauth_discovery_consistent", kind="hosted") }}); see <a href="/en/status/">status</a>.</p>
+{% endif %}
+    <ol>
+      <li>Add a custom connector with the address <code>https://lovspor.no/mcp</code> (in ChatGPT: turn on developer mode first, and choose <strong>OAuth</strong>).</li>
+      <li>In Claude: choose <strong>Register automatically</strong> for client registration.</li>
+      <li>Sign in on the page that opens.</li>
+    </ol>
+    <p>Or run it yourself in Claude Code, with no account and no token:</p>
+    <pre>uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+    <p>A token is only for clients without <span data-literal>OAuth</span> sign-in. We have tested the hosted service in Claude Code with a token, in one line:</p>
+    <pre>claude mcp add --transport http lovverk \
+  https://lovspor.no/mcp \
+  --header "Authorization: Bearer YOUR_TOKEN"</pre>
+    <p><a href="/en/connect/">Every tested procedure, client by client →</a> For a token, <a href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20access">email me</a>.</p>
+{% if benchmark %}
 
-    <h2>Who it's for</h2>
-    <p><strong>Anyone.</strong> The engine is open source under <span data-literal>AGPL-3.0</span> and the corpus is built from Lovdata's open data. If you need Norwegian legal text inside an AI tool, you can run the whole thing yourself — without asking anyone, and without paying for it.</p>
-    <p>The hosted service is in private beta because one person operates it. <span class="accent">The code is not.</span></p>
+    <h2>How well does it work?</h2>
+    <p>We measure it with LLHB: the same questions about Norwegian law, put to {{ fact(benchmark.model.ids.model, kind="code") }} without and with lovspor's tools, {{ fact(benchmark.pair.ids.cases, kind="code") }} {{ benchmark.pair.wording }}. Every citation in an answer is checked mechanically against the legal text; no language model judges. <span class="tag">{{ benchmark.pair.label }}</span></p>
+    <table>
+      <thead><tr><th></th><th>Without tools</th><th>With lovspor</th></tr></thead>
+      <tbody>
+{% for key in ["citation_hallucination_rate", "citation_accuracy"] %}
+{% set row = benchmark[key] %}
+        <tr><td>{{ row.wording }}</td><td>{{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }} ({{ fact(row.ids.control_percent, kind="code") }}%)</td><td>{{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }} ({{ fact(row.ids.treatment_percent, kind="code") }}%)</td></tr>
+{% endfor %}
+{% for key in ["correct_provision_identification", "false_premise_rejection_rate"] %}
+{% set row = benchmark[key] %}
+        <tr><td>{{ row.wording }}</td><td>{{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }}</td><td>{{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }}</td></tr>
+{% endfor %}
+      </tbody>
+    </table>
+    <p><strong>What did not improve.</strong></p>
+    <ul>
+{% set row = benchmark.no_invention_rate %}
+      <li>{{ row.wording }}: {{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }} without tools, {{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }} with ({{ row.label }}).</li>
+{% set row = benchmark.c2_hallucination %}
+      <li>{{ row.wording }}: {{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }} without tools, {{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }} with.</li>
+      <li>Across {{ fact(benchmark.stability.ids.repeats, kind="code") }} {{ benchmark.stability.wording }} the gain in citation accuracy holds, but the reduction in invented citations does not hold every time ({{ benchmark.stability.label }}).</li>
+    </ul>
+    <p class="muted">LLHB measures behaviour on this benchmark. It does not show that lovspor eliminates hallucinations or guarantees legally correct answers.</p>
+
+    <h3>How it compares</h3>
+{% set row = benchmark.citation_hallucination_rate %}
+    <p>Legal hallucination is well documented, but almost only for US law in English. <a href="https://doi.org/10.1093/jla/laae003">Dahl et al. (<span data-literal>2024</span>)</a> found that general-purpose models answering without sources hallucinated in <span data-literal>58–88%</span> of answers about US federal court cases. <a href="https://doi.org/10.1111/jels.12413">Magesh et al. (<span data-literal>2025</span>)</a> found that commercial legal research tools using retrieval (RAG) still hallucinated in <span data-literal>17–33%</span> of responses. Established benchmarks such as <a href="https://arxiv.org/abs/2308.11462">LegalBench</a> and <a href="https://arxiv.org/abs/2110.00976">LexGLUE</a> measure legal reasoning and classification, not invented citations. LLHB is complementary: Norwegian statutes and regulations in bokmål, the same model with and without lovspor's tools, and every citation checked mechanically against a pinned legal text. In a post-hoc diagnostic run, answers containing an invented citation fell from {{ fact(row.ids.control_percent, kind="code") }}% to {{ fact(row.ids.treatment_percent, kind="code") }}%, but the difference was not stable across five repeats. The figures are not directly comparable: the jurisdiction, language, task definition, models and dates all differ.</p>
+    <p class="muted">References: Dahl, Magesh, Suzgun and Ho, “Large Legal Fictions”, <em>Journal of Legal Analysis</em> (<a href="https://arxiv.org/abs/2401.01301">arXiv</a>); Magesh, Surani, Dahl, Suzgun, Manning and Ho, “Hallucination-Free?”, <em>Journal of Empirical Legal Studies</em> (<a href="https://arxiv.org/abs/2405.20362">arXiv</a>).</p>
+{% endif %}
+
+    <h2>Sources</h2>
+    <ul>
+      <li><strong>Acts and central regulations:</strong> Lovdata's open data (publicData), under <span data-literal>NLOD 2.0</span>.</li>
+      <li><strong>EU and EEA:</strong> links to the EU acts a Norwegian act implements, as CELEX identifiers.</li>
+      <li><strong>Local regulations:</strong> observed on the municipalities' own websites and published on the basis of <span data-literal>åndsverkloven § 14</span>, labelled as observed, not asserted to be in force. In MCP you get them only when you ask for them, and they are not published on this website.</li>
+    </ul>
 
     <h2>What it covers — honestly</h2>
     <div class="cover">
@@ -40,20 +101,9 @@
         </ul>
       </div>
     </div>
-    <p class="muted">Source: Lovdata open data (<span data-literal>NLOD 2.0</span>). lovspor is a research tool that surfaces the law — it is not legal advice.</p>
+    <p class="muted">lovspor is a research tool that surfaces the law — it is not legal advice.</p>
 
-    <h2>How you use it</h2>
-    <p>Inside the AI you already work in — no new app to learn.</p>
-    <ul>
-      <li><strong>As a connector in ChatGPT &amp; Claude</strong> — one click, nothing to configure. <em>{{ badge("planned") }} — the way most people will use it.</em></li>
-      <li><strong>In Claude Code, Codex or Cursor</strong> — works today; add your token in one line:</li>
-    </ul>
-    <pre>claude mcp add --transport http lovverk \
-  https://lovspor.no/mcp \
-  --header "Authorization: Bearer YOUR_TOKEN"</pre>
-
-    <h2>Get access</h2>
-    <p>Private beta. Email me for a token.</p>
-    <p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20access">Email for a beta token →</a></p>
-    <p class="muted">Or run it yourself — the engine is open source under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+    <h2>Open source</h2>
+    <p>The engine is open source under <span data-literal>AGPL-3.0</span> and the corpus is built from Lovdata's open data. If you need Norwegian legal text inside an AI tool, you can run the whole thing yourself — without asking anyone, and without paying for it: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+    <p class="muted">One person operates the service. Questions and feedback: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
 {% endblock %}

@@ -230,6 +230,24 @@ def throwaway_checkout(root: Path) -> tuple[Path, str]:
     return root, commit_all(root)
 
 
+def add_publication(checkout: Path) -> str:
+    """Copy the repository's benchmark manifest and every file it names into
+    ``checkout``, commit, and return the new HEAD.
+
+    The builder reads LLHB values from ``benchmarks/llhb/PUBLICATION.json``
+    only (ADR-0014, ADR:706); a site test that wants the benchmark section
+    therefore carries the real, owner-approved manifest and its sources.
+    """
+    repo = Path(__file__).resolve().parents[2]
+    manifest = "benchmarks/llhb/PUBLICATION.json"
+    named = {entry["source"] for entry in json.loads((repo / manifest).read_text())["entries"]}
+    for relative in sorted({manifest, *named}):
+        target = checkout / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((repo / relative).read_bytes())
+    return commit_all(checkout, "publication")
+
+
 def throwaway_corpus(root: Path) -> tuple[Path, str]:
     """A one-document lovverk repository both ``emit_site`` and ``build_server`` accept."""
     (root / "lover").mkdir(parents=True)
