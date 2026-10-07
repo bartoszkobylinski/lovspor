@@ -17,6 +17,7 @@ from lovspor.site.facts import (
     KindMismatchError,
     LedgerEntry,
     Unobserved,
+    fact_reader,
     fact_renderer,
     fact_text_renderer,
 )
@@ -346,6 +347,52 @@ class TestFactTextRenderer:
         assert markup_ledger.entries == text_ledger.entries
 
 
+class TestFactReader:
+    """``reading`` lets a template branch on a status without leaving the ledger."""
+
+    def test_returns_the_value_and_ledgers_it(self, registry: FactRegistry) -> None:
+        ledger = FactLedger()
+        reading = fact_reader("/", registry, ledger)
+
+        assert reading("hosted.oauth", kind="hosted") is True
+        assert [(entry.page, entry.field) for entry in ledger.entries] == [
+            ("/", "observation.process.oauth_configured")
+        ]
+
+    def test_an_unobserved_value_reads_as_none(self, registry: FactRegistry) -> None:
+        ledger = FactLedger()
+
+        assert (
+            fact_reader("/", registry, ledger)("hosted.process.tool_count", kind="hosted") is None
+        )
+        assert ledger.entries[0].unobserved is not None
+
+    def test_a_kind_mismatch_fails(self, registry: FactRegistry) -> None:
+        with pytest.raises(KindMismatchError):
+            fact_reader("/", registry, FactLedger())("hosted.oauth", kind="code")
+
+
+class TestPercentValues:
+    @pytest.mark.parametrize(("lang", "text"), [("nb", "19,5"), ("en", "19.5")])
+    def test_a_float_renders_one_decimal_in_the_page_language(self, lang: str, text: str) -> None:
+        source = FactSource(
+            id="llhb.rate", kind="code", artifact="benchmarks/llhb/r.json", field="rate", value=19.5
+        )
+        fact = fact_renderer("/", lang, FactRegistry(sources=(source,)), FactLedger())  # type: ignore[arg-type]
+
+        assert fact("llhb.rate", kind="code") == (
+            f'<span data-fact="llhb.rate" data-kind="code">{text}</span>'
+        )
+
+    def test_a_whole_float_keeps_its_decimal(self) -> None:
+        source = FactSource(
+            id="llhb.rate", kind="code", artifact="benchmarks/llhb/r.json", field="rate", value=12.0
+        )
+        fact = fact_renderer("/", "en", FactRegistry(sources=(source,)), FactLedger())
+
+        assert "12.0</span>" in fact("llhb.rate", kind="code")
+
+
 class TestBadge:
     @pytest.mark.parametrize(
         ("status", "lang", "label"),
@@ -385,6 +432,7 @@ class TestSiteEnvironment:
         assert "now" not in environment.globals
         assert "badge" not in environment.globals
         assert "fact" not in environment.globals
+        assert "reading" not in environment.globals
 
     def test_page_globals_bind_fact_and_badge_to_the_page(self, registry: FactRegistry) -> None:
         ledger = FactLedger()
