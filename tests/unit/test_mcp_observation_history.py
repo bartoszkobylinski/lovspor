@@ -21,6 +21,7 @@ from tests.unit.backfilled_corpus_fixtures import (
     INTERVALS,
     LOCAL,
     backfilled_corpus,
+    dated_git,
     local_address,
 )
 from tests.unit.local_dataset_fixtures import wire
@@ -35,6 +36,42 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _without_history(corpus: Path) -> None:
     """Move .git aside rather than delete it: a rename cannot race a late writer (#582)."""
     (corpus / ".git").rename(corpus.parent / f"{corpus.name}-git-removed")
+
+
+class TestHistoryFixtureSafety:
+    @pytest.mark.parametrize(
+        ("setting", "enabled", "disabled"),
+        [("gc.auto", "1", "0"), ("maintenance.auto", "true", "false")],
+    )
+    def test_dated_git_overrides_enabled_repository_maintenance(
+        self, tmp_path: Path, setting: str, enabled: str, disabled: str
+    ) -> None:
+        date = "2026-09-01T12:00:00Z"
+        dated_git(tmp_path, date, "init", "-q")
+        dated_git(tmp_path, date, "config", "--local", setting, enabled)
+
+        assert dated_git(tmp_path, date, "config", "--local", "--get", setting).strip() == enabled
+        assert dated_git(tmp_path, date, "config", "--get", setting).strip() == disabled
+
+    def test_removing_history_preserves_a_late_writer_and_corpus_files(
+        self, tmp_path: Path
+    ) -> None:
+        checkout = tmp_path / "corpus"
+        git_dir = checkout / ".git"
+        git_dir.mkdir(parents=True)
+        document = checkout / "regulation.md"
+        document.write_bytes(b"regulation\n")
+        pending = git_dir / "pending.lock"
+        pending.write_bytes(b"before\n")
+
+        with pending.open("ab") as writer:
+            _without_history(checkout)
+            writer.write(b"after\n")
+
+        assert not git_dir.exists()
+        moved = tmp_path / "corpus-git-removed"
+        assert (moved / "pending.lock").read_bytes() == b"before\nafter\n"
+        assert document.read_bytes() == b"regulation\n"
 
 
 def _address(corpus: Path) -> str:
