@@ -9,7 +9,6 @@ reads only its own.
 from __future__ import annotations
 
 import asyncio
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -31,6 +30,11 @@ from tests.unit.promotion_cli_fixtures import AUTHORITY, PAGE_URL
 @pytest.fixture
 def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return backfilled_corpus(tmp_path, monkeypatch)
+
+
+def _without_history(corpus: Path) -> None:
+    """Move .git aside rather than delete it: a rename cannot race a late writer (#582)."""
+    (corpus / ".git").rename(corpus.parent / f"{corpus.name}-git-removed")
 
 
 def _address(corpus: Path) -> str:
@@ -139,7 +143,7 @@ class TestIncludeText:
     def test_only_older_contained_text_needs_git_history(
         self, corpus: Path, instant: str, outcome: str
     ) -> None:
-        shutil.rmtree(corpus / ".git")
+        _without_history(corpus)
 
         at = _history(corpus, observed_at=instant, include_text=True)["at"]
 
@@ -152,7 +156,7 @@ class TestIncludeText:
     def test_older_intervals_are_read_without_git_but_their_text_is_refused(
         self, corpus: Path
     ) -> None:
-        shutil.rmtree(corpus / ".git")
+        _without_history(corpus)
         instant = "2026-08-19T15:17:23Z"
 
         at = _history(corpus, observed_at=instant)["at"]
