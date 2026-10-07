@@ -27,6 +27,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from lovspor.errors import PromotionRefusedError
+from lovspor.promotion.models import RemovedReason
 
 LOCAL_DIR = "lokale-forskrifter"
 LOCAL_DATASET = "lokale-forskrifter"
@@ -52,7 +53,7 @@ class LocalRecord(BaseModel):
     markdown_path: str
     renderer_version: int
     last_seen: str
-    removed_reason: str | None = None
+    removed_reason: RemovedReason | None = None
     authority_id: str
     authority_type: str
     content_hash: str

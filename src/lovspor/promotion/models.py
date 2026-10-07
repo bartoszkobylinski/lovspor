@@ -23,6 +23,20 @@ class AuthorityType(StrEnum):
     FYLKESKOMMUNE = "fylkeskommune"
 
 
+class RemovedReason(StrEnum):
+    """Why a local document left the served dataset (ADR-0016 4f): a closed set.
+
+    Every value is a withdrawal — a human decision recorded in the decision
+    log. A promoted source whose archive blob is tombstoned (ADR-0010 §7) is
+    withdrawn on the basis the tombstone states, under one of these.
+    """
+
+    WITHDRAWN_MISCLASSIFIED = "withdrawn_misclassified"
+    WITHDRAWN_IDENTITY = "withdrawn_identity"
+    WITHDRAWN_PERSONAL_DATA = "withdrawn_personal_data"
+    WITHDRAWN_LEGAL = "withdrawn_legal"
+
+
 class Authority(BaseModel):
     """The publishing authority (ADR-0016 1c).
 

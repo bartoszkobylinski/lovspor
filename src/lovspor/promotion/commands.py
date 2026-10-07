@@ -17,6 +17,13 @@ ADR-0016 slice S3. Four commands, in the order an operator runs them:
     commit to make, at promotion time.
 ``history``
     After that commit, derive ``history/<slug>.json`` from git.
+``withdraw``
+    Undo a promotion forward (S9): record the reviewer's withdrawal — a JSON
+    document with a closed-set ``removed_reason`` — in the decision log, mark
+    the manifest record removed, delete the Markdown and keep the history
+    and observations. It never commits. ``preview`` and ``local`` refuse a
+    withdrawn artifact or document, and an artifact whose standing decision
+    is ``reject``, before reading anything.
 
 The archive root comes from ``LOVSPOR_OBSERVATORY_ROOT`` (ADR-0010 §5); the
 corpus from ``--corpus``, which must be a separate ``lovverk`` checkout. The
@@ -59,6 +66,7 @@ from lovspor.promotion.decisions import (
     HumanDecision,
     PromotedRecord,
     PromotionAudit,
+    WithdrawalDocument,
     utc_text,
 )
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
@@ -67,6 +75,13 @@ from lovspor.promotion.local_history import HISTORY_SUBJECT, derive_local_histor
 from lovspor.promotion.models import Authority, AuthorityType, HeldExtraction
 from lovspor.promotion.personal_data import screen_personal_data
 from lovspor.promotion.plan import Held, Prepared, prepare, require_approval
+from lovspor.promotion.withdraw import (
+    Withdrawn,
+    apply_withdrawal,
+    locate_document,
+    refuse_withdrawn,
+    withdrawal_record,
+)
 from lovspor.promotion.writer import apply, write_set
 
 #: Exit status of a run that stopped at a hold: not a failure of the command,
@@ -88,6 +103,19 @@ _Artifact = Annotated[
 ]
 _Corpus = Annotated[
     Path, typer.Option("--corpus", help="Absolute path to a lovverk checkout (never this repo).")
+]
+_Decision = Annotated[
+    Path,
+    typer.Option(
+        "--decision", help="JSON: decision, decided_by, reviewer_role, reason[, classifier]."
+    ),
+]
+_Withdrawal = Annotated[
+    Path,
+    typer.Option(
+        "--decision",
+        help='JSON: decision ("withdraw"), removed_reason, decided_by, reviewer_role, reason.',
+    ),
 ]
 _KlassVersion = Annotated[
     str,
@@ -172,6 +200,33 @@ def _decision_document(path: Path) -> DecisionDocument:
     return document
 
 
+def _withdrawal_document(path: Path) -> WithdrawalDocument:
+    try:
+        document = WithdrawalDocument.model_validate_json(path.read_bytes())
+    except OSError as exc:
+        msg = f"cannot read the withdrawal document at {path}: {exc}"
+        raise PromotionRefusedError(msg) from exc
+    except ValidationError as exc:
+        msg = f"the withdrawal document does not validate: {exc}"
+        raise PromotionRefusedError(msg) from exc
+    for field, text in document.published().items():
+        if screen_personal_data(text):
+            msg = f"the {field} carries personal data; it is published with the withdrawal"
+            raise PromotionRefusedError(msg)
+    return document
+
+
+def _standing(decisions: DecisionLog, key: ArtifactKey) -> HumanDecision | None:
+    """The standing decision on ``key``, refusing a withdrawn or rejected artifact."""
+    refuse_withdrawn(decisions, key, None)
+    decision = decisions.latest_decision(key)
+    if decision is not None and decision.decision is Decision.REJECT:
+        when = utc_text(decision.decided_at)
+        msg = f"the standing decision is reject ({decision.decided_by}, {when})"
+        raise PromotionRefusedError(msg)
+    return decision
+
+
 def _reviewed_text(log: ObservationLog, fetches: tuple[Fetch, ...], key: ArtifactKey) -> str:
     """The content hash of the text an approval is given for; a held text cannot be approved."""
     artifact = read_artifact(log, fetches, key, None)
@@ -207,11 +262,15 @@ def approve_impl(authority_id: str, artifact: str, document_path: Path, now: dat
 def preview_impl(request: Request) -> None:
     """Print what ``local`` would write for this artifact; write and record nothing."""
     context = _context(request)
+    decisions = DecisionLog(context.root)
+    _standing(decisions, context.key)
     artifact = read_artifact(context.log, context.fetches, context.key, None)
     prepared = prepare(artifact, context.authority, context.corpus)
     if isinstance(prepared, Held):
         _echo_held(prepared)
         raise typer.Exit(HELD_EXIT_CODE)
+    # The artifact itself was refused by _standing; only the document is new here.
+    refuse_withdrawn(decisions, None, prepared.identity.doc_id)
     typer.echo(f"id: {prepared.identity.doc_id}  version: {prepared.version}")
     typer.echo(f"path: {prepared.markdown_path}")
     typer.echo(f"content_hash: {prepared.identity.content_hash}")
@@ -226,13 +285,15 @@ def local_impl(request: Request, now: datetime) -> None:
     """Promote one approved artifact into the corpus checkout, or record why not."""
     context = _context(request)
     decisions = DecisionLog(context.root)
-    decision = decisions.latest_decision(context.key)
+    decision = _standing(decisions, context.key)
     through = decision.decided_at if decision is not None else None
     artifact = read_artifact(context.log, context.fetches, context.key, through)
     prepared = prepare(artifact, context.authority, context.corpus)
     if isinstance(prepared, Held):
         _record_held(decisions, context.key, prepared, now)
         raise typer.Exit(HELD_EXIT_CODE)
+    # The artifact itself was refused by _standing; only the document is new here.
+    refuse_withdrawn(decisions, None, prepared.identity.doc_id)
     approval = require_approval(decision, prepared)
     if prepared.unchanged:
         typer.echo(f"Unchanged: {prepared.identity.doc_id} v{prepared.version} is already at")
@@ -273,6 +334,46 @@ def history_impl(corpus_path: Path) -> None:
         typer.echo(f"wrote {path}")
     subject = HISTORY_SUBJECT.format(count=len(written))
     _echo_commit(corpus, subject)
+
+
+@dataclass(frozen=True)
+class WithdrawRequest:
+    """One promoted document to withdraw, and the reviewer's decision to do it."""
+
+    authority_id: str
+    slug: str
+    corpus: Path
+    decision: Path
+
+
+def withdraw_impl(request: WithdrawRequest, now: datetime) -> None:
+    """Withdraw one local document: decision log first, then the checkout. Never commits."""
+    root = _root()
+    corpus = CorpusCheckout(request.corpus, [engine_root(), root.path])
+    document = _withdrawal_document(request.decision)
+    located = locate_document(corpus.local_manifest(), request.authority_id, request.slug)
+    doc_id, record = located
+    if record.status == "removed":
+        reason = record.removed_reason.value if record.removed_reason else "no reason recorded"
+        typer.echo(f"Unchanged: {doc_id} is already withdrawn ({reason}); nothing written,")
+        typer.echo("nothing recorded, nothing to commit.")
+        return
+    withdrawal = withdrawal_record(corpus, located, document, now)
+    decisions = DecisionLog(root)
+    decisions.append(withdrawal)
+    withdrawn = apply_withdrawal(corpus, withdrawal)
+    _echo_withdrawn(
+        corpus, withdrawn, f"{withdrawal.removed_reason.value}; recorded in {decisions.path}"
+    )
+
+
+def _echo_withdrawn(corpus: CorpusCheckout, withdrawn: Withdrawn, how: str) -> None:
+    typer.echo(f"Withdrew {withdrawn.doc_id} ({how})")
+    for path in withdrawn.written:
+        typer.echo(f"wrote {path}")
+    for path in withdrawn.deleted:
+        typer.echo(f"deleted {path}")
+    _echo_commit(corpus, withdrawn.commit_subject)
 
 
 def _record_held(decisions: DecisionLog, key: ArtifactKey, held: Held, now: datetime) -> None:
@@ -327,12 +428,7 @@ def preview(
 def approve(
     authority: _Authority,
     artifact: _Artifact,
-    decision: Annotated[
-        Path,
-        typer.Option(
-            "--decision", help="JSON: decision, decided_by, reviewer_role, reason[, classifier]."
-        ),
-    ],
+    decision: _Decision,
 ) -> None:
     """Record a reviewer's approve/reject/hold of one artifact in the decision log."""
     _refusing(lambda: approve_impl(authority, artifact, decision, datetime.now(UTC)))
@@ -351,3 +447,15 @@ def local(
 def history(corpus: _Corpus) -> None:
     """Derive history/<slug>.json for the local dataset from the checkout's git log."""
     _refusing(lambda: history_impl(corpus))
+
+
+@promote_app.command("withdraw")
+def withdraw(
+    authority: _Authority,
+    slug: Annotated[str, typer.Option("--slug", help="The document's slug under the authority.")],
+    corpus: _Corpus,
+    decision: _Withdrawal,
+) -> None:
+    """Withdraw one promoted local regulation, forward only. Never commits."""
+    request = WithdrawRequest(authority, slug, corpus, decision)
+    _refusing(lambda: withdraw_impl(request, datetime.now(UTC)))

@@ -15,8 +15,10 @@ Placement, for the one version this slice writes:
   nothing is rendered or written, which is what makes a rerun a no-op;
 * an id already current with another ``content_hash`` is the next version,
   under the slug it already has (renames move nothing, ADR-0016 1b);
-* a withdrawn id, or one filed under another authority, is refused: both are
-  decisions of later slices (withdrawal, interkommunal attribution).
+* a withdrawn id is refused: a withdrawal is forward-only and permanent
+  (ADR-0016 4f, ``lovspor promote withdraw``);
+* an id filed under another authority is refused: interkommunal attribution
+  is a decision of a later slice.
 """
 
 from __future__ import annotations
@@ -130,7 +132,8 @@ def _placement(
     if existing is None:
         return _free_slug(manifest, identity, extracted), 1, False
     if existing.status == "removed":
-        msg = f"{identity.doc_id} was withdrawn; re-promoting it is the withdrawal slice's decision"
+        reason = existing.removed_reason.value if existing.removed_reason else "no reason recorded"
+        msg = f"{identity.doc_id} was withdrawn ({reason}); it is never promoted again (4f)"
         raise PromotionRefusedError(msg)
     if existing.authority_id != identity.authority.id:
         msg = f"{identity.doc_id} is filed under authority {existing.authority_id}, not this one"
