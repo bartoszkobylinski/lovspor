@@ -13,6 +13,7 @@ from lovspor.errors import LovsporError, UnreadableSourceError
 from lovspor.promotion import SourceForm
 from lovspor.promotion.source_text import (
     PDF_LIBRARY_VERSION,
+    _lines_of,
     docx_lines,
     html_lines,
     pdf_lines,
@@ -722,3 +723,22 @@ def test_a_dotted_date_after_a_word_is_still_a_wrap() -> None:
 def test_html_text_after_a_closing_block_is_kept_on_a_line_of_its_own() -> None:
     page = _main("<div><p>§ 1 Formål</p>Forskrifta gjeld heile kommunen.</div>")
     assert html_lines(page, "text/html") == ("§ 1 Formål", "Forskrifta gjeld heile kommunen.")
+
+
+def test_reading_article_lines_preserves_nested_tree_for_next_candidate() -> None:
+    region = html.fromstring(
+        '<main data-source="law"><article><h1>Forskrift om gebyr</h1>'
+        "<section><h2>§ 1 Formål</h2><p>Forskrifta <em>gjeld</em><br>"
+        "heile kommunen.</p><!-- original layout --></section></article>"
+        "<article><p>Nyheter</p></article> Etter artiklene.</main>"
+    )
+    article = region[0]
+    before = html.tostring(region)
+    expected = ("Forskrift om gebyr", "§ 1 Formål", "Forskrifta gjeld heile kommunen.")
+
+    assert _lines_of(article) == expected
+    assert html.tostring(region) == before
+    assert _lines_of(article) == expected
+    assert html.tostring(region) == before
+    assert _lines_of(region) == (*expected, "Nyheter", "Etter artiklene.")
+    assert html.tostring(region) == before
