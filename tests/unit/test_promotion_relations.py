@@ -325,6 +325,24 @@ def test_short_names_compare_by_words_and_case_only() -> None:
     assert short_name_key("plan- og bygningsloven") == "plan- og bygningsloven"
 
 
+def test_short_name_discards_everything_from_the_first_section_sign() -> None:
+    assert short_name_key(" Opplæringslova § 15-2 § 16-1 ") == "opplæringslova"
+
+
+@pytest.mark.parametrize("separator", ["", " ", "\t", ","])
+def test_passive_cue_requires_a_word_boundary_after_the_target(separator: str) -> None:
+    sentence = f"FOR-2002-05-02-33{separator}oppheves."
+    found = stated_relations(_regulation("Forskrift om slam", "Vedtatt 1.1.2020.", sentence))
+
+    if not separator:
+        assert found == ()
+    else:
+        [relation] = found
+        assert relation.kind is RelationKind.REPEALS
+        assert relation.target.text == "FOR-2002-05-02-33"
+        assert relation.evidence == sentence
+
+
 @pytest.mark.parametrize("in_block", [True, False])
 def test_a_sentence_continued_on_the_next_line_keeps_its_relation(in_block: bool) -> None:
     """A line break inside a sentence must not drop the relation (Codex test on PR #577)."""

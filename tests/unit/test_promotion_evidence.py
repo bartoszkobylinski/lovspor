@@ -163,6 +163,26 @@ def test_only_a_current_central_record_in_a_dataset_directory_is_a_target() -> N
     ]
 
 
+@pytest.mark.parametrize("title", [None, "", "XXXX"])
+def test_a_law_without_a_parenthesised_title_has_only_an_id_target(title: str | None) -> None:
+    entry = CentralEntry.model_validate({**FORURENSNINGSLOVEN, "title": title})
+
+    index = target_index({"nl-19810313-006": entry}, LocalManifest())
+
+    assert [linked.doc_id for linked in index.by_lovdata.values()] == ["nl-19810313-006"]
+    assert index.by_short_name == {}
+
+
+@pytest.mark.parametrize("path", [None, "", "XXXX"])
+def test_a_law_without_a_dataset_path_has_no_target(path: str | None) -> None:
+    entry = CentralEntry.model_validate({**FORURENSNINGSLOVEN, "markdown_path": path})
+
+    index = target_index({"nl-19810313-006": entry}, LocalManifest())
+
+    assert index.by_lovdata == {}
+    assert index.by_short_name == {}
+
+
 @pytest.mark.parametrize("contents", ["{", "[]", '{"documents": []}', '{"documents": {"x": 1}}'])
 def test_an_unreadable_central_manifest_refuses(tmp_path: Path, contents: str) -> None:
     corpus = make_corpus(tmp_path)

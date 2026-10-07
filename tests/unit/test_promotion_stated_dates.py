@@ -130,6 +130,23 @@ class TestVedtatt:
 
 
 class TestIkraft:
+    def test_a_phrase_stops_before_all_following_sentences(self) -> None:
+        regulation = ExtractedRegulation(
+            title="Forskrift om slam",
+            identification_block="Forskrift om slam",
+            body=(
+                "Forskriften trer i kraft straks. Gebyret fastsettes årlig. Klage sendes kommunen."
+            ),
+        )
+
+        stated = stated_ikraft(regulation)
+
+        assert (stated.status, stated.text) == ("text", "straks")
+        [statement] = stated.statements
+        assert statement.date is None
+        assert statement.text == "straks"
+        assert statement.evidence == "trer i kraft straks"
+
     def test_a_phrase_without_a_date_is_kept_verbatim(self) -> None:
         regulation, fields = _read(
             "Forskrift om slam, Eksempel kommune",
