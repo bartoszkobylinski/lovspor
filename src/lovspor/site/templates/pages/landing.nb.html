@@ -3,7 +3,9 @@
     fact; every digit in an example, a quotation or an external citation is a
     marked literal. The connector claim is gated on the release observation
     (oauth_discovery_consistent), so the page stops saying "works today" the
-    release OAuth stops being attested. LLHB values come from
+    release OAuth stops being attested, and points to running it locally.
+    Access is through the OAuth connector only (owner decision 2026-10-07):
+    the page offers no other way into the hosted service. LLHB values come from
     benchmarks/llhb/PUBLICATION.json through `benchmark`, and the section is
     absent when no manifest exists (ADR-0014, ADR:706). The quoted law text
     is folketrygdloven § 8-18 first paragraph, verbatim from the corpus. -#}
@@ -24,23 +26,19 @@
 
     <h2>Koble til</h2>
 {% if oauth == "true" %}
-    <p>Som connector i Claude.ai og ChatGPT virker det i dag: du logger inn, og trenger ikke noe token.</p>
+    <p>Som connector i Claude.ai og ChatGPT virker det i dag: du logger inn, og har ingenting å lime inn.</p>
 {% else %}
-    <p>Som connector i Claude.ai og ChatGPT logger du inn i stedet for å lime inn et token. <span class="accent">Ved denne utgivelsen er innloggingen ikke bekreftet</span> (sammenligningen er {{ fact("hosted.comparisons.oauth_discovery_consistent", kind="hosted") }}); se <a href="/status/">status</a>.</p>
+    <p><span class="accent">Den driftede connectoren er ikke tilgjengelig akkurat nå</span>: ved denne utgivelsen er innloggingen ikke bekreftet (sammenligningen er {{ fact("hosted.comparisons.oauth_discovery_consistent", kind="hosted") }}; se <a href="/status/">status</a>). Kjør det selv i mellomtiden, som under.</p>
 {% endif %}
     <ol>
       <li>Legg til en egendefinert connector med adressen <code>https://lovspor.no/mcp</code> (i ChatGPT: slå på utviklermodus først, og velg <strong>OAuth</strong>).</li>
       <li>I Claude: velg <strong>Register automatically</strong> for klientregistrering.</li>
       <li>Logg inn på siden som åpnes.</li>
     </ol>
-    <p>Eller kjør det selv i Claude Code, uten konto og uten token:</p>
+    <p>Eller kjør det selv, uten konto. I Claude Code er det to linjer:</p>
     <pre>uvx lovspor fetch-corpus
 claude mcp add lovverk -- uvx lovspor mcp</pre>
-    <p>Et token trenger du bare i klienter uten innlogging med <span data-literal>OAuth</span>. Den driftede tjenesten i Claude Code har vi testet med token, på én linje:</p>
-    <pre>claude mcp add --transport http lovverk \
-  https://lovspor.no/mcp \
-  --header "Authorization: Bearer YOUR_TOKEN"</pre>
-    <p><a href="/connect/">Alle testede framgangsmåter, klient for klient →</a> Token får du ved å <a href="mailto:kontakt@lovspor.no?subject=lovspor%20tilgang">sende meg en e-post</a>.</p>
+    <p><a href="/connect/">Alle testede framgangsmåter, klient for klient →</a></p>
 {% if benchmark %}
 
     <h2>Hvor godt virker det?</h2>

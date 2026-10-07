@@ -2,7 +2,9 @@
     (owner decision 2026-10-07, superseding the word-for-word migration of
     2026-09-09). Every count is a fact; every digit in an example, a
     quotation or an external citation is a marked literal. The connector
-    claim is gated on the release observation (oauth_discovery_consistent).
+    claim is gated on the release observation (oauth_discovery_consistent),
+    and access is through the OAuth connector only (owner decision
+    2026-10-07).
     LLHB values come from benchmarks/llhb/PUBLICATION.json through
     `benchmark`, and the section is absent when no manifest exists (ADR-0014,
     ADR:706). The quoted law text stays in Norwegian, verbatim from the corpus;
@@ -25,23 +27,19 @@
 
     <h2>Connect</h2>
 {% if oauth == "true" %}
-    <p>As a connector in Claude.ai and ChatGPT it works today: you sign in, and need no token.</p>
+    <p>As a connector in Claude.ai and ChatGPT it works today: you sign in, and there is nothing to paste.</p>
 {% else %}
-    <p>As a connector in Claude.ai and ChatGPT you sign in instead of pasting a token. <span class="accent">At this release the sign-in is not attested</span> (the comparison reads {{ fact("hosted.comparisons.oauth_discovery_consistent", kind="hosted") }}); see <a href="/en/status/">status</a>.</p>
+    <p><span class="accent">The hosted connector is unavailable right now</span>: at this release the sign-in is not attested (the comparison reads {{ fact("hosted.comparisons.oauth_discovery_consistent", kind="hosted") }}; see <a href="/en/status/">status</a>). Run it yourself in the meantime, as below.</p>
 {% endif %}
     <ol>
       <li>Add a custom connector with the address <code>https://lovspor.no/mcp</code> (in ChatGPT: turn on developer mode first, and choose <strong>OAuth</strong>).</li>
       <li>In Claude: choose <strong>Register automatically</strong> for client registration.</li>
       <li>Sign in on the page that opens.</li>
     </ol>
-    <p>Or run it yourself in Claude Code, with no account and no token:</p>
+    <p>Or run it yourself, with no account. In Claude Code it is two lines:</p>
     <pre>uvx lovspor fetch-corpus
 claude mcp add lovverk -- uvx lovspor mcp</pre>
-    <p>A token is only for clients without <span data-literal>OAuth</span> sign-in. We have tested the hosted service in Claude Code with a token, in one line:</p>
-    <pre>claude mcp add --transport http lovverk \
-  https://lovspor.no/mcp \
-  --header "Authorization: Bearer YOUR_TOKEN"</pre>
-    <p><a href="/en/connect/">Every tested procedure, client by client →</a> For a token, <a href="mailto:kontakt@lovspor.no?subject=lovspor%20access">email me</a>.</p>
+    <p><a href="/en/connect/">Every tested procedure, client by client →</a></p>
 {% if benchmark %}
 
     <h2>How well does it work?</h2>

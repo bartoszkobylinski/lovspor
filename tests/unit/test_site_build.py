@@ -681,8 +681,8 @@ class TestLanding:
     @pytest.mark.parametrize(
         ("path", "claim", "caveat"),
         [
-            ("/", "virker det i dag", "Ved denne utgivelsen er innloggingen ikke bekreftet"),
-            ("/en/", "it works today", "At this release the sign-in is not attested"),
+            ("/", "virker det i dag", "ved denne utgivelsen er innloggingen ikke bekreftet"),
+            ("/en/", "it works today", "at this release the sign-in is not attested"),
         ],
     )
     def test_the_connector_claim_follows_the_oauth_comparison(
@@ -821,15 +821,13 @@ class TestConnectPage:
     named as untested — the page never carries a plausible-looking recipe."""
 
     @pytest.mark.parametrize("path", ["/connect/", "/en/connect/"])
-    def test_shows_the_hosted_one_liner_and_the_tokenless_local_path(
+    def test_shows_the_connector_address_and_the_local_path(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
         out, _ = built
         markup = _page(out, path)
 
-        assert "claude mcp add --transport http lovverk" in markup
         assert "https://lovspor.no/mcp" in markup
-        assert "Authorization: Bearer YOUR_TOKEN" in markup
         assert "uvx lovspor fetch-corpus" in markup
         assert "claude mcp add lovverk -- uvx lovspor mcp" in markup
 
@@ -869,7 +867,7 @@ class TestConnectPage:
         assert "<strong>OAuth</strong>" in markup
 
     @pytest.mark.parametrize("path", ["/connect/", "/en/connect/"])
-    def test_makes_no_hosted_claim_and_asks_for_a_token_by_email(
+    def test_makes_no_hosted_claim_and_names_the_contact_address(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
         """A procedure page states no observation of the running service:
@@ -878,7 +876,7 @@ class TestConnectPage:
         markup = _page(out, path)
 
         assert 'data-kind="hosted"' not in markup
-        assert "mailto:kontakt@lovspor.no?subject=lovspor%20" in markup
+        assert '<a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>' in markup
         assert '<span class="tag" data-status="current">' in markup
 
     def test_both_languages_carry_the_same_sections(
@@ -888,6 +886,52 @@ class TestConnectPage:
         out, _ = built
 
         assert _page(out, "/connect/").count("<h2>") == _page(out, "/en/connect/").count("<h2>")
+
+
+class TestNoTokenAccess:
+    """Owner decision 2026-10-07: the hosted service is reached through a
+    connector with OAuth sign-in only. No page that tells a reader how to get
+    in offers a token, a bearer header or a request for one."""
+
+    _ACCESS_PAGES = ("/", "/en/", "/connect/", "/en/connect/", "/docs/", "/en/docs/")
+
+    @pytest.mark.parametrize("path", _ACCESS_PAGES)
+    def test_no_access_page_mentions_a_token_or_a_bearer_header(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        text = _text(_page(built[0], path)).lower()
+
+        assert "token" not in text, path
+        assert "bearer" not in text, path
+        assert "--header" not in text, path
+
+    def test_no_page_offers_a_token_or_asks_for_access_by_email(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        for page in emitted_pages():
+            markup = _page(built[0], page.path)
+            assert "YOUR_TOKEN" not in markup, page.path
+            assert "beta-token" not in markup and "beta token" not in markup, page.path
+            assert "subject=lovspor%20tilgang" not in markup, page.path
+            assert "subject=lovspor%20access" not in markup, page.path
+
+    @pytest.mark.parametrize(
+        ("path", "wording"),
+        [
+            ("/", "Den driftede connectoren er ikke tilgjengelig akkurat nå"),
+            ("/en/", "The hosted connector is unavailable right now"),
+        ],
+    )
+    def test_an_unattested_release_points_to_running_it_locally(
+        self, world: World, tmp_path: Path, path: str, wording: str
+    ) -> None:
+        out = tmp_path / "site"
+        world.build(out, world.observation(unobserved_transport("timeout")))
+        markup = _page(out, path)
+
+        assert wording in markup
+        assert "claude mcp add lovverk -- uvx lovspor mcp" in markup
+        assert "token" not in _text(markup).lower()
 
 
 class TestLegalPages:

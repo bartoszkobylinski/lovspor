@@ -31,11 +31,11 @@
 <p class="muted">Source: Lovdata, licensed under <span data-literal>NLOD 2.0</span>, and every file carries the licence in its own front matter. The corpus is public in <a href="https://github.com/bartoszkobylinski/lovverk">lovverk</a>; the engine that builds it is <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>, under <span data-literal>AGPL-3.0</span>.</p>
 
 <h2>Authentication</h2>
-<p>The hosted service always requires credentials: a call without them gets <span data-literal>401</span> with a Bearer challenge. There are two forms. <strong>Opaque tokens</strong> are handed out by hand, for developer clients. <strong>Hosted OAuth login</strong>, for chat-app connectors such as claude.ai and ChatGPT, is on when the <span data-literal>OAuth 2.1</span> pair is configured on the server — the service then answers <span data-literal>RFC 9728</span> discovery; when it is off, there is no <code>.well-known</code> at all.</p>
-<p>With OAuth on, both forms are accepted at once: a token that already works keeps working. Which state the service was actually <em>observed in</em> at the last release is on <a href="/en/status/">status</a> — not here.</p>
+<p>The hosted service always requires sign-in: a call without credentials gets <span data-literal>401</span>. You sign in with <span data-literal>OAuth 2.1</span> through a connector in a chat app such as claude.ai and ChatGPT; the procedures are on <a href="/en/connect/">Connect</a>. Sign-in is on when the <span data-literal>OAuth 2.1</span> pair is configured on the server — the service then answers <span data-literal>RFC 9728</span> discovery; when it is off, there is no <code>.well-known</code> at all.</p>
+<p>Which state the service was actually <em>observed in</em> at the last release is on <a href="/en/status/">status</a> — not here.</p>
 
 <h2>Quotas</h2>
-<p>Every call is counted in two layers: per credential and per instance. Both bound calls in flight, calls per minute, calls per day and semantic searches per day. The limits are set per token and can be changed without a release, so they travel with the token you are given — not with this page. The counters live in memory: a restart forgives the day.</p>
+<p>Every call is counted in two layers: per credential and per instance. Both bound calls in flight, calls per minute, calls per day and semantic searches per day. The limits are set per credential and can be changed without a release, so they travel with your sign-in — not with this page. The counters live in memory: a restart forgives the day.</p>
 
 <h2>Honest caveats</h2>
 <ul>

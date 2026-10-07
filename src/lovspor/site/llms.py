@@ -87,10 +87,11 @@ _ASK = (
     "\n"
     "https://lovspor.no/mcp is a Model Context Protocol server with {tools}\n"
     "read-only tools: search, retrieval, citation checks, verbatim quote\n"
-    "verification, and the corpus's own history. It requires a token — a call\n"
-    "without credentials is refused — and robots.txt disallows it deliberately,\n"
-    "because it is called, not crawled. How to connect, and what each tool\n"
-    "answers: https://lovspor.no/docs/\n"
+    "verification, and the corpus's own history. It requires an OAuth sign-in\n"
+    "through a connector — a call without credentials is refused — and\n"
+    "robots.txt disallows it deliberately, because it is called, not crawled.\n"
+    "How to connect: https://lovspor.no/connect/ — what each tool answers:\n"
+    "https://lovspor.no/docs/\n"
 )
 
 _LIMITS = (
