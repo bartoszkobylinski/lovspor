@@ -279,6 +279,34 @@ class TestCorroboratingUrls:
 
 
 class TestDeriveVersionsIsPure:
+    def test_equal_timestamp_captures_are_ordered_by_blob_hash_deterministically(self) -> None:
+        low = Sighting(observed_at=FIRST_SEEN, sha256="1" * 64, content_hash="a" * 64)
+        high = Sighting(observed_at=FIRST_SEEN, sha256="2" * 64, content_hash="b" * 64)
+
+        forwards = derive_versions(PAGE_URL, [low, high])
+        backwards = derive_versions(PAGE_URL, [high, low])
+
+        assert forwards == backwards
+        assert [v.version for v in forwards] == [1, 2]
+        assert [v.sightings for v in forwards] == [(low,), (high,)]
+
+    def test_through_includes_the_exact_cutoff_and_preserves_run_identity(self) -> None:
+        sightings = tuple(
+            Sighting(observed_at=FIRST_SEEN + n * DAY, sha256=f"{n}" * 64, content_hash="a" * 64)
+            for n in (1, 2, 3)
+        )
+        [version] = derive_versions(PAGE_URL, sightings)
+        original = version.model_dump()
+
+        cut = version.through(FIRST_SEEN + 2 * DAY)
+
+        assert cut is not None
+        assert cut.sightings == sightings[:2]
+        assert cut.version == version.version
+        assert cut.primary_url == PAGE_URL
+        assert cut.source_sha256s == ("1" * 64, "2" * 64)
+        assert version.model_dump() == original
+
     def test_empty_input_has_no_versions(self) -> None:
         assert derive_versions(PAGE_URL, iter(())) == ()
 

@@ -113,6 +113,50 @@ class TestEveryVersionAfterAHoldIsCounted:
 
 
 class TestStandingDecisions:
+    @pytest.mark.parametrize("refusal", [Decision.REJECT, Decision.HOLD])
+    @pytest.mark.parametrize("refused_blob", [LOW_BLOB, HIGH_BLOB])
+    def test_a_standing_refusal_on_any_blob_holds_the_run_despite_a_later_approval(
+        self, refusal: Decision, refused_blob: str
+    ) -> None:
+        other_blob = HIGH_BLOB if refused_blob == LOW_BLOB else LOW_BLOB
+        refused = _decision(refused_blob, SEEN + 2 * HOUR, refusal)
+        approved = _decision(other_blob, SEEN + 3 * HOUR)
+
+        plan = plan_backfill(_two_blob_history(), [refused, approved])
+
+        reason = "rejected" if refusal is Decision.REJECT else "held_by_reviewer"
+        assert plan.approved == ()
+        assert _holds(plan) == [
+            (1, reason, f"{refusal.value} of {refused_blob} at {utc_text(refused.decided_at)}")
+        ]
+        assert plan.through is None
+
+    def test_an_approval_bound_to_another_text_is_stale_and_blocks_later_versions(self) -> None:
+        first = _version(1, _sighting(LOW_BLOB, SEEN))
+        second = _version(2, _sighting(HIGH_BLOB, SEEN + HOUR, OTHER_TEXT))
+        wrong_text = _decision(LOW_BLOB, SEEN + 2 * HOUR, text=OTHER_TEXT)
+        later = _decision(HIGH_BLOB, SEEN + 3 * HOUR, text=OTHER_TEXT)
+
+        plan = plan_backfill(_history(first, second), [wrong_text, later])
+
+        assert plan.approved == ()
+        assert _holds(plan) == [
+            (1, "approval_stale", f"{LOW_BLOB} was approved for another text"),
+            (2, "after_earlier_hold", "v1 is held (approval_stale)"),
+        ]
+
+    def test_cutoff_is_the_latest_approval_even_when_it_is_for_an_earlier_version(self) -> None:
+        first = _version(1, _sighting(LOW_BLOB, SEEN))
+        second = _version(2, _sighting(HIGH_BLOB, SEEN + HOUR, OTHER_TEXT))
+        second_approval = _decision(HIGH_BLOB, SEEN + 2 * HOUR, text=OTHER_TEXT)
+        first_approval = _decision(LOW_BLOB, SEEN + 3 * HOUR)
+
+        plan = plan_backfill(_history(first, second), [second_approval, first_approval])
+
+        assert plan.holds == ()
+        assert [a.decision for a in plan.approved] == [first_approval, second_approval]
+        assert plan.through == first_approval.decided_at
+
     def test_an_approval_given_the_instant_the_version_was_first_observed_covers_it(
         self,
     ) -> None:
