@@ -1111,3 +1111,85 @@ def test_a_group_of_two_regulations_is_refused(field: str) -> None:
         CandidateGroup(members=(_member(0, f"{BASE}/a"), other))
     group = _group("a", "b")
     assert (group.doc_id, group.content_hash) == (GROUP_ID, "c" * 64)
+
+
+def test_two_duplicated_texts_are_one_collision_hold_each() -> None:
+    """Operations: same id, different texts means one hold per distinct text."""
+    first = tuple(_member(n, f"{BASE}/a{n}") for n in range(2))
+    second = tuple(
+        _member(n + 2, f"{BASE}/b{n}").model_copy(update={"content_hash": "d" * 64})
+        for n in range(3)
+    )
+
+    grouped = group_candidates((second[2], first[1], second[0], first[0], second[1]))
+
+    assert len(grouped) == 2
+    assert [item.content_hash for item in grouped] == ["d" * 64, "c" * 64]
+    assert [item.sources for item in grouped] == [
+        tuple(item.key for item in second),
+        tuple(item.key for item in first),
+    ]
+    assert all(item.hold == "batch:same_id_in_batch" for item in grouped)
+    assert all(item.outcome == "held" and not item.promotable for item in grouped)
+    assert all(item.detail.startswith("2 candidates of this batch mint") for item in grouped)
+
+
+def test_approved_group_is_not_written_when_other_candidate_passes_gate(
+    batch: Batch, corpus: Path, tmp_path: Path, root: Path
+) -> None:
+    """Approval does not settle the open canonical-source decision (#566)."""
+    for n in range(2):
+        _approve(batch.add(sidebar_page(TITLES[0], n), f"group-{n}"), tmp_path)
+    other = batch.add(page(TITLES[1]), "other")
+    _approve(other, tmp_path)
+    archive_before = tree(root)
+    head = git(corpus, "rev-parse", "HEAD")
+
+    code, output = batch.run(corpus, "--write")
+
+    assert code == 0, output
+    report = batch.report()
+    assert report["gate"]["verdict"] == "pass"
+    assert report["summary"]["would_write"] == 1
+    assert _sampled(report) == [other]
+    (held,) = _items_by_hold(report)[NEEDS_CANONICAL_SOURCE]
+    assert held["review"] == "approved"
+    assert held["outcome"] == "held"
+    documents = _documents(corpus)
+    assert len(documents) == 1
+    assert held["doc_id"] not in documents
+    (ready,) = _items_by_hold(report)[None]
+    assert ready["doc_id"] in documents
+    assert TITLES[1] in (corpus / ready["markdown_path"]).read_text(encoding="utf-8")
+    assert git(corpus, "rev-parse", "HEAD") == head
+    archive_after = tree(root)
+    log_before = archive_before.pop(DECISIONS_FILENAME)
+    log_after = archive_after.pop(DECISIONS_FILENAME)
+    assert archive_after == archive_before
+    assert log_after.startswith(log_before)
+    (record,) = [json.loads(line) for line in log_after[len(log_before) :].splitlines()]
+    assert record["kind"] == "promoted"
+    assert record["artifact"]["sha256"] == other
+    assert record["doc_id"] == ready["doc_id"]
+
+
+def test_group_report_repeats_identical_bytes_and_round_trips_all_sources(
+    batch: Batch, corpus: Path
+) -> None:
+    shas = [batch.add(sidebar_page(TITLES[0], n), f"p{n}") for n in range(5)]
+    batch.run(corpus)
+    paths = [batch.report_dir / f"batch-0301-test-1.{suffix}" for suffix in ("md", "json")]
+    before = [path.read_bytes() for path in paths]
+
+    batch.run(corpus)
+
+    assert [path.read_bytes() for path in paths] == before
+    report = batch.report()
+    assessment = BatchAssessment.model_validate(
+        {key: value for key, value in report.items() if key not in {"summary", "holds_by_reason"}}
+    )
+    (item,) = assessment.items
+    assert [key.sha256 for key in item.sources] == shas
+    assert [key.source_url for key in item.sources] == [f"{BASE}/p{n}" for n in range(5)]
+    assert report_json(assessment).encode("utf-8") == before[1]
+    assert report_markdown(assessment, corpus).encode("utf-8") == before[0]
