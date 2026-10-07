@@ -85,7 +85,22 @@ class TestLoad:
         assert publication.facts[0].value == expected
         assert type(publication.facts[0].value) is float
 
-    @pytest.mark.parametrize("raw", [-(2**100), 0, 2**100, 2**53 + 1, 42, 42.0])
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            -(10**1000 + 1),
+            -(2**100),
+            -1,
+            0,
+            1,
+            2**100,
+            2**53 + 1,
+            10**1000 + 1,
+            42,
+            42.0,
+            -0.0,
+        ],
+    )
     def test_a_whole_count_is_kept_exact(self, tmp_path: Path, raw: int | float) -> None:
         """An int count never passes through float (Codex test on PR #586)."""
         entry = _entry(values={"v": {"field": "count", "format": "count"}})
