@@ -128,7 +128,7 @@ class TestAttestationRegistryBoundary:
         failures = [line for line in run.stdout.splitlines() if line.startswith("FAIL")]
         assert failures[0].startswith(f"FAIL attestation-registry: {first}:1 ")
         assert failures[1].startswith(f"FAIL attestation-registry: {second}:1 ")
-        assert run.stdout.splitlines()[-1] == "boundaries: 2 violation(s), 1 rule"
+        assert run.stdout.splitlines()[-1] == "boundaries: 2 violation(s), 2 rules"
 
     def test_an_unparseable_file_is_an_error_not_a_pass(self, tmp_path: Path) -> None:
         run = _run(_tree(tmp_path, {ELSEWHERE: "def broken(:\n"}))
@@ -138,3 +138,149 @@ class TestAttestationRegistryBoundary:
     def test_the_repository_holds_to_its_boundaries(self) -> None:
         run = _run(REPO)
         assert run.returncode == 0, run.stdout
+
+
+PUBLISHER = "src/lovspor/publish/emit.py"
+SITE = "src/lovspor/site/build.py"
+# The read the S11 guard exists to refuse, as a publisher would spell it.
+LOCAL_READ = (
+    "def local_documents(snapshot):\n"
+    '    return snapshot.read_text("lokale-forskrifter/manifest.json")\n'
+)
+
+
+class TestLocalDatasetBoundary:
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "from ...local_corpus import LocalDataset\n",
+            "from ... import mcp_local\n",
+            "from ...promotion.corpus import LOCAL_DIR\n",
+        ],
+        ids=["module", "parent-package", "submodule"],
+    )
+    def test_nested_relative_imports_reach_the_local_dataset(self, source: str) -> None:
+        path = "src/lovspor/publish/templates/page.py"
+        found = boundaries.violations_in(path, source)
+        assert [(v.path, v.line, v.rule) for v in found] == [(path, 1, "local-dataset-unpublished")]
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            'def render():\n    """lokale-forskrifter; lovspor.mcp_local"""\n    return None\n',
+            'async def render():\n    """lokale-forskrifter; lovspor.mcp_local"""\n    return None\n',  # noqa: E501
+            'class Page:\n    """lokale-forskrifter; lovspor.mcp_local"""\n    pass\n',
+        ],
+        ids=["function", "async-function", "class"],
+    )
+    def test_documentation_in_each_python_docstring_scope_is_exempt(self, source: str) -> None:
+        assert boundaries.violations_in(PUBLISHER, source) == []
+
+    def test_both_rules_report_in_source_order_in_one_publisher(self, tmp_path: Path) -> None:
+        source = (
+            'args = ["git", "notes", "show", sha]\n'
+            'LOCAL = "lokale-forskrifter/manifest.json"\n'
+            'other_args = ["notes", "list"]\n'
+        )
+        run = _run(_tree(tmp_path, {PUBLISHER: source}))
+
+        assert run.returncode == 1
+        failures = [line for line in run.stdout.splitlines() if line.startswith("FAIL")]
+        assert len(failures) == 3
+        assert failures[0].startswith(f"FAIL attestation-registry: {PUBLISHER}:1 ")
+        assert failures[1].startswith(f"FAIL local-dataset-unpublished: {PUBLISHER}:2 ")
+        assert failures[2].startswith(f"FAIL attestation-registry: {PUBLISHER}:3 ")
+        assert run.stdout.splitlines()[-1] == "boundaries: 3 violation(s), 2 rules"
+
+    def test_a_publisher_reading_the_local_manifest_fails(self, tmp_path: Path) -> None:
+        run = _run(_tree(tmp_path, {PUBLISHER: LOCAL_READ}))
+
+        assert run.returncode == 1
+        assert f"FAIL local-dataset-unpublished: {PUBLISHER}:2 reaches the local" in run.stdout
+        assert "ADR-0016" in run.stdout
+        assert run.stdout.splitlines()[-1] == "boundaries: 1 violation(s), 2 rules"
+
+    @pytest.mark.parametrize("path", [PUBLISHER, SITE, "src/lovspor/publish/templates/x.py"])
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "import lovspor.local_corpus\n",
+            "import lovspor.mcp_local as served\n",
+            "from lovspor.observation_history import observation_history\n",
+            "from lovspor.promotion.corpus import LOCAL_DIR\n",
+            "from lovspor.promotion import corpus\n",
+            "from lovspor import local_corpus\n",
+            'MODULE = importlib.import_module("lovspor.mcp_local")\n',
+            'DATASET = "lokale-forskrifter"\n',
+        ],
+        ids=[
+            "import",
+            "import-as",
+            "from-import",
+            "from-submodule",
+            "from-package",
+            "from-lovspor",
+            "importlib-literal",
+            "dataset-literal",
+        ],
+    )
+    def test_every_route_to_the_local_dataset_is_caught(self, path: str, source: str) -> None:
+        found = boundaries.violations_in(path, source)
+        assert [(v.path, v.line, v.rule) for v in found] == [(path, 1, "local-dataset-unpublished")]
+
+    @pytest.mark.parametrize(
+        ("path", "source"),
+        [
+            ("src/lovspor/publish/__init__.py", "from ..promotion import corpus\n"),
+            (PUBLISHER, "from .. import mcp_local\n"),
+            (PUBLISHER, "from ..local_corpus import LocalDataset\n"),
+        ],
+        ids=["package-init", "parent-package", "parent-module"],
+    )
+    def test_a_relative_import_is_resolved_before_it_is_judged(
+        self, path: str, source: str
+    ) -> None:
+        assert [v.rule for v in boundaries.violations_in(path, source)] == [
+            "local-dataset-unpublished"
+        ]
+
+    @pytest.mark.parametrize(
+        ("path", "source"),
+        [
+            ("src/lovspor/mcp.py", "from lovspor.mcp_local import ServedCorpus\n"),
+            ("src/lovspor/cli.py", 'LOCAL = "lokale-forskrifter"\n'),
+            ("src/lovspor/publisher.py", "import lovspor.local_corpus\n"),
+            (PUBLISHER, "from lovspor.promotional import banner\n"),
+            (PUBLISHER, "from lovspor.publish.pages import layout\n"),
+            (PUBLISHER, "from . import pages\n"),
+            (PUBLISHER, '"""Local regulations (lokale-forskrifter) are never emitted."""\n'),
+            (SITE, 'LEAD = "lokale forskrifter fra kommunenes nettsider"\n'),
+        ],
+        ids=[
+            "mcp-may-serve-local",
+            "cli-may-name-the-dataset",
+            "lookalike-module-path",
+            "lookalike-package-name",
+            "central-import",
+            "relative-sibling",
+            "docstring-prose",
+            "site-prose-without-hyphen",
+        ],
+    )
+    def test_what_is_not_a_route_to_the_local_dataset_passes(self, path: str, source: str) -> None:
+        assert boundaries.violations_in(path, source) == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            '"""Publisher documentation."""\n"lokale-forskrifter"\n',
+            'def render():\n    """Doc."""\n    "lovspor.mcp_local"\n',
+            'class Page:\n    x = 1\n    "lokale-forskrifter"\n',
+        ],
+        ids=["module-second-statement", "function-second-statement", "class-not-first"],
+    )
+    def test_only_the_first_statement_string_is_a_docstring(self, source: str) -> None:
+        """A bare string anywhere else is a literal like any other (Codex test on PR #578)."""
+        assert [v.rule for v in boundaries.violations_in(PUBLISHER, source)] == [
+            "local-dataset-unpublished"
+        ]
