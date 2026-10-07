@@ -122,6 +122,30 @@ class TestAfterLastObservation:
 
 class TestParseObservedAt:
     @pytest.mark.parametrize(
+        ("instant", "expected"),
+        [
+            ("2026-08-19T17:17:22.999999+02:00", "before_first_observation"),
+            ("2026-08-19T17:17:23+02:00", "contained"),
+            ("2026-08-20T10:17:23-05:00", "contained"),
+            ("2026-08-20T10:17:23.000001-05:00", "between_observations"),
+            ("2026-08-30T11:00:00+02:00", "contained"),
+            ("2026-08-30T11:00:00.000001+02:00", "after_last_observation"),
+        ],
+    )
+    def test_offset_instants_preserve_closed_interval_microsecond_boundaries(
+        self, instant: str, expected: str
+    ) -> None:
+        """docs/mcp.md: bounds are included and offset instants select observations."""
+        parsed = parse_observed_at(instant)
+        canonical = parsed.isoformat().replace("+00:00", "Z")
+
+        outcome = locate(VERSIONS, parsed)
+
+        assert outcome.outcome == expected
+        assert outcome.observed_at == canonical
+        assert outcome == locate(VERSIONS, parse_observed_at(canonical))
+
+    @pytest.mark.parametrize(
         ("text", "expected"),
         [
             ("2026-09-01T12:00:00Z", datetime(2026, 9, 1, 12, tzinfo=UTC)),
