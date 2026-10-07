@@ -85,7 +85,7 @@ class TestLoad:
         assert publication.facts[0].value == expected
         assert type(publication.facts[0].value) is float
 
-    @pytest.mark.parametrize("raw", [2**53 + 1, 42, 42.0])
+    @pytest.mark.parametrize("raw", [-(2**100), 0, 2**100, 2**53 + 1, 42, 42.0])
     def test_a_whole_count_is_kept_exact(self, tmp_path: Path, raw: int | float) -> None:
         """An int count never passes through float (Codex test on PR #586)."""
         entry = _entry(values={"v": {"field": "count", "format": "count"}})
@@ -152,6 +152,8 @@ class TestLoad:
         assert context["rate"]["label"] == "post-hoc diagnostic"
         assert context["rate"]["ids"]["percent"] == fact_id("rate", "percent")
         assert publication.context("nb")["rate"]["wording"] == "Svar"
+        assert publication.context("nb")["rate"]["label"] == _LABEL["nb"]
+        assert context["rate"]["ruling"] == "DECISIONS.md #30(a)"
 
 
 class TestRefusals:
@@ -323,3 +325,30 @@ def test_a_count_that_is_not_a_finite_whole_number_is_refused(tmp_path: Path, ra
     entry = _entry(values={"v": {"field": "count", "format": "count"}})
     with pytest.raises(SiteBuildError, match="not a whole count"):
         load_publication(_checkout(tmp_path, _manifest(entry), {"count": raw}))
+
+
+@pytest.mark.parametrize("value_format", ["count", "percent", "text"])
+def test_invalid_value_error_names_the_manifest_value(tmp_path: Path, value_format: str) -> None:
+    entry = _entry(values={"bad_value": {"field": "broken", "format": value_format}})
+    checkout = _checkout(tmp_path, _manifest(entry), {"broken": None})
+
+    with pytest.raises(SiteBuildError) as raised:
+        load_publication(checkout)
+
+    assert str(raised.value).startswith("bad_value: None is not ")
+
+
+@pytest.mark.parametrize("requirement", [False, True])
+def test_missing_field_error_names_the_source(tmp_path: Path, requirement: bool) -> None:
+    entry = (
+        _entry(requires=[{"field": "missing.guard", "above": 0}])
+        if requirement
+        else _entry(values={"v": {"field": "missing.value", "format": "count"}})
+    )
+    checkout = _checkout(tmp_path, _manifest(entry), _report())
+
+    with pytest.raises(SiteBuildError) as raised:
+        load_publication(checkout)
+
+    field = "missing.guard" if requirement else "missing.value"
+    assert str(raised.value) == f"{_REPORT}: field {field!r} is not in the source"

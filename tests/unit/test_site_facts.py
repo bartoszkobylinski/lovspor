@@ -474,3 +474,14 @@ class TestSiteEnvironment:
         assert list(parameters) == ["fact_id", "kind"]
         assert parameters["kind"].kind is inspect.Parameter.KEYWORD_ONLY
         assert parameters["kind"].default is inspect.Parameter.empty
+
+
+def test_reader_kind_mismatch_names_page_and_leaves_ledger_empty(registry: FactRegistry) -> None:
+    ledger = FactLedger()
+    reading = fact_reader("/en/status/", registry, ledger)
+
+    with pytest.raises(KindMismatchError) as raised:
+        reading("hosted.oauth", kind="code")
+
+    assert str(raised.value) == "/en/status/: fact 'hosted.oauth' is hosted, rendered as code"
+    assert ledger.entries == ()

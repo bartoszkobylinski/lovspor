@@ -1976,3 +1976,20 @@ class TestCommitAllHelper:
         first = commit_all(tmp_path)
 
         assert re.fullmatch(r"[0-9a-f]{40}", first)
+
+
+@pytest.mark.parametrize(
+    ("path", "label", "wording"),
+    [
+        ("/", "post hoc-diagnostisk resultat, ikke et bekreftende", "avgjorte tilfeller"),
+        ("/en/", "post-hoc diagnostic result, not a confirmatory one", "resolved-case"),
+    ],
+)
+def test_fresh_build_publishes_benchmark_in_page_language(
+    fresh_build: tuple[Path, SiteBuildReport], path: str, label: str, wording: str
+) -> None:
+    markup = _page(fresh_build[0], path)
+
+    assert f'<span class="tag">{label}</span>' in markup
+    assert wording in markup
+    assert _fact_values(markup, "llhb.pair.cases") == ["250"]
