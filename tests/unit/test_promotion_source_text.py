@@ -134,6 +134,75 @@ def test_html_reads_the_innermost_article_holding_the_regulation() -> None:
     assert lines == ("Hvilke ordensregler gjelder?", *REGULATION_LINES)
 
 
+@pytest.mark.parametrize("teaser_first", [False, True])
+def test_html_unique_holder_is_selected_independently_of_teaser_position(
+    teaser_first: bool,
+) -> None:
+    holder = (
+        "<article><h1>Forskrift om gebyr</h1><h2>§ 1 Gebyr</h2>"
+        "<p>Gebyret betales årlig.</p></article>"
+    )
+    teaser = "<article><p>Nyheter</p></article>"
+    articles = teaser + holder if teaser_first else holder + teaser
+    page = _main(f"<p>Velkommen</p>{articles}<p>Etter artiklene</p>")
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Gebyret betales årlig.",
+    )
+
+
+def test_html_holder_keeps_nested_articles_that_do_not_hold_both_anchors() -> None:
+    """Innermost means innermost matching holder, not innermost article of any kind."""
+    page = _main(
+        "<article><h1>Forskrift om gebyr</h1>"
+        "<article><h2>§ 1 Gebyr</h2><p>Gebyret betales årlig.</p></article>"
+        "<p>§ 2 Ikrafttredelse</p></article>"
+        "<article><p>Nyheter</p></article><p>Etter artiklene</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Gebyret betales årlig.",
+        "§ 2 Ikrafttredelse",
+    )
+
+
+def test_html_nested_and_sibling_holders_are_ambiguous() -> None:
+    """Two innermost holders require fallback even when their depths differ."""
+    anchors = "<h1>Forskrift om gebyr</h1><h2>§ 1 Gebyr</h2>"
+    page = _main(
+        f"<article><p>Innledning</p><article>{anchors}<p>Første tekst</p></article>"
+        f"<p>Etter indre artikkel</p></article><article>{anchors}<p>Andre tekst</p>"
+        "</article><p>Etter artiklene</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Innledning",
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Første tekst",
+        "Etter indre artikkel",
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Andre tekst",
+        "Etter artiklene",
+    )
+
+
+def test_html_duplicate_anchors_in_chrome_do_not_make_holders_ambiguous() -> None:
+    anchors = "<h1>Forskrift om gebyr</h1><h2>§ 1 Gebyr</h2>"
+    page = _main(
+        f"<aside><article>{anchors}<p>Sidefelt</p></article></aside>"
+        f"<article>{anchors}<p>Gebyret betales årlig.</p></article>"
+        "<article><p>Nyheter</p></article><p>Etter artiklene</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "Gebyret betales årlig.",
+    )
+
+
 def test_html_innermost_article_drops_sibling_items_and_teasers_after_the_last_section() -> None:
     lines = html_lines(faq_page(), "text/html")
     assert lines[-1] == REGULATION_LINES[-1]
