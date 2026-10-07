@@ -14,6 +14,7 @@ assumption, and the tests live here.
 
 from __future__ import annotations
 
+import copy
 import importlib.metadata
 import inspect
 import io
@@ -39,7 +40,7 @@ from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
 from lovspor.parsing.xml_normalizer import safe_parser
 from lovspor.promotion.backfill_commands import backfill, backfill_preview, observe
-from lovspor.promotion.fields import _ENACTED
+from lovspor.promotion.fields import _ENACTED, _SELF_ENACTED
 from lovspor.promotion.relations import _CUE, _TARGET
 from lovspor.release.envelope import CorpusSummary, Marker, ReleaseRecord
 from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
@@ -676,3 +677,30 @@ def test_assumption_no_relation_cue_starts_where_a_target_ends() -> None:
                 ends = {m.end() for m in _TARGET.finditer(glued)}
                 starts = {m.start() for m in _CUE.finditer(glued)}
                 assert not ends & starts, glued
+
+
+def test_assumption_lxml_shallow_copy_of_an_element_copies_its_subtree() -> None:
+    """``copy.copy`` of an lxml element is a deep copy: editing it leaves the source.
+
+    Pins the ``source_text._lines_of`` entry (PR #579): ``_block_text`` rewrites
+    the tree it is given, and a copy keeps the region readable for the next
+    candidate article, whichever of ``copy.copy`` / ``copy.deepcopy`` makes it.
+    """
+    source = html.fromstring("<article><p>a<b>x</b></p></article>")
+    shallow = copy.copy(source)
+    shallow.find(".//p").text = "edited"
+    shallow.find(".//b").text = "edited"
+
+    assert html.tostring(source) == b"<article><p>a<b>x</b></p></article>"
+    assert shallow.find(".//b") is not source.find(".//b")
+
+
+def test_assumption_enactment_patterns_hold_exactly_two_groups() -> None:
+    """``_ENACTED`` and ``_SELF_ENACTED`` capture ``organ`` then the date, nothing else.
+
+    Pins the ``stated_dates.stated_vedtatt`` entry (PR #577): with two groups,
+    ``m.groups()[-1]`` and ``m.groups()[+1]`` are the same date group. A third
+    group fails this test, and the entry must be argued again.
+    """
+    assert _ENACTED.groups == _SELF_ENACTED.groups == 2
+    assert _ENACTED.groupindex == _SELF_ENACTED.groupindex == {"organ": 1}

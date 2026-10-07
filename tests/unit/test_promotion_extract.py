@@ -21,6 +21,7 @@ from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
 from tests.unit.promotion_fixtures import (
     REGULATION_LINES,
     SIDEBAR,
+    faq_page,
     html_page,
     minimal_docx,
     minimal_pdf,
@@ -42,6 +43,23 @@ def _held(payload: bytes, content_type: str = HTML) -> HeldExtraction:
     result = extract_regulation(payload, content_type)
     assert isinstance(result, HeldExtraction), result
     return result
+
+
+def test_faq_page_full_text_ends_at_the_last_section() -> None:
+    """Issue #576: sibling FAQ items and a teaser list never reach the hashed text."""
+    document = _extracted(faq_page())
+    assert document.regulation.full_text.endswith(REGULATION_LINES[-1])
+    assert document.regulation.title == REGULATION_LINES[0]
+
+
+def test_faq_page_content_hash_does_not_depend_on_the_page_tail() -> None:
+    with_tail = _extracted(faq_page()).regulation.full_text
+    without = _extracted(faq_page(tail="")).regulation.full_text
+    assert content_hash(with_tail) == content_hash(without)
+
+
+def test_extractor_version_is_five_since_the_innermost_article_rule() -> None:
+    assert EXTRACTOR_VERSION == 5
 
 
 def test_html_page_extracts_block_body_and_fields() -> None:

@@ -21,9 +21,11 @@ parser, so ``build_server`` imports it at call time.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from typing import Any, NamedTuple
 
+from lovspor.errors import LocalScopeError
 from lovspor.local_corpus import (
     LOCAL_DATASET,
     LocalDataset,
@@ -50,6 +52,9 @@ from lovspor.temporal import append_notice, evaluation_date_today
 
 ToolDecorator = Callable[[], Callable[[Callable[..., Any]], Callable[..., Any]]]
 
+_AUTHORITY_SCOPE = f"authority filters only dataset={LOCAL_DATASET!r} (ADR-0016 5)"
+_KLASS_CODE = re.compile(r"\d{2}|\d{4}")
+
 
 class _Central(NamedTuple):
     """The central namespace a local section's cross-references are validated against."""
@@ -69,7 +74,10 @@ class ServedCorpus:
             reader.warm()
 
     def register(self, tool: ToolDecorator) -> None:
-        """Add the tools only the local dataset has, through ``build_server``'s decorator."""
+        """Add, through ``build_server``'s decorator, the tools whose surface the local
+        dataset shapes: the one only it has, and two with a parameter only it takes."""
+        tool()(self.search_laws)
+        tool()(self.corpus_status)
         tool()(self.get_observation_history)
 
     def get_law(self, slug: str) -> str:
@@ -88,11 +96,76 @@ class ServedCorpus:
         section = self._reader.get_section(slug, section_id, occurrence)
         return _with_section_notice(section, evaluation_date_today())
 
-    def search_laws(self, query: str, dataset: str | None, limit: int) -> list[dict[str, Any]]:
+    def search_laws(
+        self, query: str, dataset: str | None = None, limit: int = 20, authority: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Search the corpus for laws whose slug or title contains ``query``.
+
+        Substring match, case-insensitive, against manifest metadata
+        only (no body-text scan in this MVP). Returns slug, doc_id,
+        title, dataset, last_changed, and total_changes for each hit.
+        Use ``get_law(slug)`` to fetch the full text of any result.
+
+        ``dataset`` (optional): ``lover`` or ``forskrifter`` to filter.
+        ``lokale-forskrifter`` searches ONLY the observed local regulations
+        (never included otherwise); each hit's ``slug`` is its
+        ``<authority_id>/<slug>`` and it carries ``observation``.
+        ``limit``: max results (default 20, capped).
+        ``authority`` (optional, only with ``dataset="lokale-forskrifter"``):
+        the publishing authority's SSB KLASS code — four digits for a
+        kommune (``"0301"``), two for a fylkeskommune — to search only the
+        regulations it published; refused with any other ``dataset``.
+        """
         if dataset != LOCAL_DATASET:
+            if authority is not None:
+                raise LocalScopeError(_AUTHORITY_SCOPE)
             return self._reader.search_laws(query, dataset=dataset, limit=limit)
         bounded = _bounded_limit(limit)
-        return [self._local.hit(i, r) for i, r in self._local.matches(query)[:bounded]]
+        found = self._local.matches(query, _klass_code(authority))
+        return [self._local.hit(i, r) for i, r in found[:bounded]]
+
+    def corpus_status(self, dataset: str | None = None) -> dict[str, Any]:
+        """Return the current state of the local corpus + freshness metadata.
+
+        Call this proactively when:
+        - The user asks "is my corpus current?" or "when was the
+          corpus last updated?".
+        - Other tools (search_laws, list_recent_changes, get_law) return
+          unexpectedly empty or "not found" results — a stale corpus
+          can look indistinguishable from a missing law.
+
+        Returns a dict with: ``manifest_generated_at`` (ISO datetime),
+        ``manifest_age_days`` (int, clamped to 0 for future-dated
+        manifests), ``is_stale`` (bool — true when EITHER the manifest
+        is older than 7 days OR the schema is pre-Sprint-4),
+        ``schema_compatible`` (bool — false when any current record
+        has no slug field, meaning the manifest pre-dates Sprint 4 and
+        the search/get tools cannot operate on it),
+        ``total_current_documents``, ``head_commit`` (short SHA),
+        ``head_commit_date`` (ISO date), ``head_commit_subject``,
+        ``refresh_command`` (a copy-pasteable git command the user can
+        run to refresh), and a human-readable ``notice`` summarizing
+        the status (covers four cases: clock-skew, schema-stale,
+        age-stale, fresh).
+
+        ``dataset`` (optional): ``lokale-forskrifter`` adds ``local``, the
+        observed local regulations: ``current_documents``,
+        ``removed_documents`` (withdrawn), ``authorities`` (per KLASS code:
+        ``authority_id``, ``authority_type``, ``current``, ``removed``),
+        ``manifest_generated_at``, ``asserted: false`` and a ``notice``.
+        Omitted, the answer is the central status alone. Coverage is not
+        completeness: a regulation absent here may exist, and artifacts
+        held before promotion are counted on the archive, not in the corpus.
+
+        The server itself never mutates the corpus or fetches anything —
+        the user runs the suggested ``refresh_command`` manually.
+        """
+        status = self._reader.corpus_status()
+        if dataset is None:
+            return status
+        if dataset != LOCAL_DATASET:
+            raise LocalScopeError(f"corpus_status takes dataset={LOCAL_DATASET!r} or none")
+        return {**status, "local": self._local.status()}
 
     def search_body(
         self, query: str, dataset: str | None, limit: int, recorded_at: str | None
@@ -217,6 +290,16 @@ def _index_for(
         return own if slug == address else central(slug)
 
     return index_for
+
+
+def _klass_code(authority: str | None) -> str | None:
+    """``authority`` as a KLASS code, refused when it cannot be one."""
+    if authority is not None and _KLASS_CODE.fullmatch(authority) is None:
+        msg = (
+            f"authority is a KLASS code: 4 digits (kommune) or 2 (fylkeskommune), got {authority!r}"
+        )
+        raise LocalScopeError(msg)
+    return authority
 
 
 def _with_observation(served: ServedLocal) -> str:

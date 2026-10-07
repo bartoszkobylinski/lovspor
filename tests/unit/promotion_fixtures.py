@@ -54,6 +54,47 @@ def html_page(
     ).encode()
 
 
+#: Invented FAQ items around the regulation on a CMS "FAQ link collection"
+#: page (issue #576): each a sibling ``<article class="faq">`` in the main column.
+FAQ_SIBLINGS = (
+    ("Hvilken skole hører jeg til?", "Skolekretsene i Eksempel kommune står i kartet."),
+    ("Hvem kan få fri skoleskyss?", "Elever som bor mer enn fire kilometer fra skolen."),
+)
+
+#: A landing page's tag block and news-teaser list, each teaser its own ``<article>``.
+TEASER_TAIL = (
+    "<div class='tags d-print-none'><p>Les mer om følgende emner:</p><p>skole</p></div>"
+    "<div class='articlelist'><article><h3>Velkommen til Eksempelskolen</h3></article>"
+    "<article><h3>Elevene løp stafett i høstferien</h3></article></div>"
+)
+
+
+def faq_page(
+    regulation_answers: int = 1, *, tail: str = TEASER_TAIL, sidebar: str = SIDEBAR
+) -> bytes:
+    """A page whose regulation is the answer of one FAQ item among sibling items.
+
+    Modelled on the structure of the issue #576 pages (Kongsvinger 3401), with
+    invented text: ``main > article.full-view > div.linkcollection >
+    article.faq*``, then a tag block and a teaser list. ``regulation_answers``
+    repeats the regulation's item, so no single article holds it.
+    """
+    paragraphs = "".join(_html_block(line) for line in REGULATION_LINES)
+    item = _faq_item("Hvilke ordensregler gjelder?", paragraphs)
+    siblings = "".join(_faq_item(question, f"<p>{answer}</p>") for question, answer in FAQ_SIBLINGS)
+    return (
+        "<!doctype html><html lang='no'><head><title>Skole - Eksempel kommune</title></head>"
+        f"<body><main>{sidebar}<article class='default full-view'><h1>Skole</h1>"
+        f"<div class='articleelement linkcollection faqarticle'>{item * regulation_answers}"
+        f"{siblings}</div>{tail}</article></main></body></html>"
+    ).encode()
+
+
+def _faq_item(question: str, answer: str) -> str:
+    heading = f"<h3>{escape(question)}</h3>"
+    return f"<article class='faq'>{heading}<div class='answer'>{answer}</div></article>"
+
+
 def _html_block(line: str) -> str:
     tag = "h2" if line.startswith("§") else "p"
     if line.startswith("Forskrift om"):

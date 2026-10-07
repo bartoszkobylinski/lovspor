@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
@@ -50,6 +51,7 @@ from lovspor.timetravel import _iter_follow_log, _read_blob
 __all__ = [
     "LOCAL_DATASET",
     "OBSERVATION_NOTICE",
+    "STATUS_NOTICE",
     "LocalDataset",
     "LocalRecord",
     "Observation",
@@ -63,6 +65,12 @@ OBSERVATION_NOTICE = (
     "Lovspor hevder ikke at forskriften gjelder. / Observed on the authority's website; "
     "not verified against Norsk Lovtidend or Lovdata. "
     "Lovspor does not assert that this regulation is in force."
+)
+
+STATUS_NOTICE = (
+    "Lokale forskrifter observert på myndighetenes nettsteder; dekningen er ikke fullstendig, "
+    "og en forskrift som mangler her kan finnes. / Local regulations observed on the "
+    "authorities' websites; coverage is not completeness, and a regulation absent here may exist."
 )
 
 _LOCAL_ID = re.compile(r"lf-\d{8}-\d{4,}|lk-\d{2}(?:\d{2})?-[0-9a-f]{12}")
@@ -239,8 +247,9 @@ class LocalDataset:
             "a shallow clone cannot reach it",
         )
 
-    def matches(self, query: str) -> list[LocalEntry]:
-        """Current records whose qualified slug or title contains ``query``, in manifest order."""
+    def matches(self, query: str, authority: str | None = None) -> list[LocalEntry]:
+        """Current records whose qualified slug or title contains ``query``, in manifest
+        order; with ``authority``, only that authority's."""
         needle = query.strip().lower()
         if not needle:
             return []
@@ -248,8 +257,30 @@ class LocalDataset:
             (doc_id, record)
             for doc_id, record in self.manifest().documents.items()
             if record.status == "current"
+            and authority in (None, record.authority_id)
             and needle in f"{record.authority_id}/{record.slug} {record.title}".lower()
         ]
+
+    def status(self) -> dict[str, Any]:
+        """``corpus_status``'s ``local`` block: counts per authority, never a hold count.
+
+        Holds happen before promotion, on the archive; the corpus never sees
+        them, so a count here would be invented.
+        """
+        manifest = self.manifest()
+        counts: dict[tuple[str, str], Counter[str]] = {}
+        for record in manifest.documents.values():
+            key = (record.authority_id, record.authority_type)
+            counts.setdefault(key, Counter())[record.status] += 1
+        return {
+            "dataset": LOCAL_DATASET,
+            "manifest_generated_at": manifest.generated_at,
+            "current_documents": sum(c["current"] for c in counts.values()),
+            "removed_documents": sum(c["removed"] for c in counts.values()),
+            "authorities": [_authority_counts(key, c) for key, c in sorted(counts.items())],
+            "asserted": False,
+            "notice": STATUS_NOTICE,
+        }
 
     def hit(self, doc_id: str, record: LocalRecord) -> dict[str, Any]:
         """A ``search_laws`` result row for one local document, labelled."""
@@ -331,6 +362,16 @@ class _LocalState(LocalDataset):
                 f"references {relative!r}, which is not in the commit's tree",
             )
         return Path(relative), text
+
+
+def _authority_counts(key: tuple[str, str], counts: Counter[str]) -> dict[str, Any]:
+    authority_id, authority_type = key
+    return {
+        "authority_id": authority_id,
+        "authority_type": authority_type,
+        "current": counts["current"],
+        "removed": counts["removed"],
+    }
 
 
 def _agree_with_record(path: Path, front: _FrontMatter, doc_id: str, record: LocalRecord) -> None:

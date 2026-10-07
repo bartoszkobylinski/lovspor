@@ -11,7 +11,14 @@ chrome is dropped before any text is read — navigation, sidebars, headers
 without the page title, footers, forms — and a region holding exactly one
 ``<article>`` is narrowed to it. A CMS that embeds another page's teaser in
 every sidebar (the classification study's §6.1) therefore cannot move the
-regulation's text, and so cannot mint a version.
+regulation's text, and so cannot mint a version. A region holding several
+``<article>``s is narrowed to the innermost one whose own lines start the
+regulation exactly where the whole region does — the same title line and
+the same first section (``anchors.py``) — when exactly one such article
+exists; otherwise the whole region is read. A regulation that is one FAQ
+item among sibling items and teasers (issue #576) is then read without what
+follows its last section, which would otherwise change its hash with every
+news item the page lists.
 
 **PDF.** ``pypdf``, pinned exactly: the page text stream, never the document
 metadata (Author, Creator), which names people and is not the regulation.
@@ -34,6 +41,7 @@ because the personal-data gate must see it.
 
 from __future__ import annotations
 
+import copy
 import io
 import re
 import zipfile
@@ -46,6 +54,7 @@ from pypdf.errors import PyPdfError
 from lovspor.errors import UnreadableSourceError
 from lovspor.observatory.document_report import _decoded, _region, blob_form
 from lovspor.parsing.xml_normalizer import safe_parser
+from lovspor.promotion.anchors import anchor_lines
 from lovspor.promotion.models import SourceForm
 
 PDF_LIBRARY_VERSION = "6.19.0"
@@ -118,8 +127,7 @@ def html_lines(payload: bytes, content_type: str) -> tuple[str, ...]:
     if region is None:
         raise UnreadableSourceError("HTML has no document region (<main> or <body>)")
     _drop_chrome(region)
-    blocks = _block_text(_narrowed(region)).split("\n")
-    return tuple(line for block in blocks for line in _rejoined(_clean_lines(block.split(_BR))))
+    return _narrowed_lines(region)
 
 
 def pdf_lines(payload: bytes) -> tuple[str, ...]:
@@ -177,9 +185,35 @@ def _is_chrome(node: html.HtmlElement) -> bool:
     return not _CHROME_CLASS_WORDS.isdisjoint(words)
 
 
-def _narrowed(region: html.HtmlElement) -> html.HtmlElement:
+def _narrowed_lines(region: html.HtmlElement) -> tuple[str, ...]:
     articles = [node for node in region.iter("article") if isinstance(node, html.HtmlElement)]
-    return articles[0] if len(articles) == 1 else region
+    if len(articles) == 1:
+        return _lines_of(articles[0])
+    lines = _lines_of(region)
+    holder = _holding_article(articles, anchor_lines(lines))
+    return lines if holder is None else _lines_of(holder)
+
+
+def _holding_article(
+    articles: list[html.HtmlElement], anchors: tuple[str, str] | None
+) -> html.HtmlElement | None:
+    """The one innermost article starting the regulation where the region does, else ``None``."""
+    if anchors is None:
+        return None
+    holding = [article for article in articles if anchor_lines(_lines_of(article)) == anchors]
+    innermost = [
+        article
+        for article in holding
+        if not any(other in article.iterdescendants() for other in holding)
+    ]
+    return innermost[0] if len(innermost) == 1 else None
+
+
+def _lines_of(element: html.HtmlElement) -> tuple[str, ...]:
+    # _block_text rewrites the tree's text in place; a copy leaves the region
+    # readable again for the next candidate article.
+    blocks = _block_text(copy.deepcopy(element)).split("\n")
+    return tuple(line for block in blocks for line in _rejoined(_clean_lines(block.split(_BR))))
 
 
 def _block_text(region: html.HtmlElement) -> str:

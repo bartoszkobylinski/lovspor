@@ -2,7 +2,9 @@
 
 ``batch-<batch_id>.md`` is what the owner reads before the spot-check: the
 gate, the counts, holds by reason, the sampled items with the command that
-shows each one, and every hold with its reason. ``batch-<batch_id>.json``
+shows each one, and every hold with its reason — a regulation captured on N
+pages is one line naming its id, content_hash and first pages (#566), its
+full page list in the sidecar. ``batch-<batch_id>.json``
 carries the same assessment for scripts. Both are pure functions of the
 assessment — no clock — so an unchanged batch rewrites identical bytes.
 
@@ -22,6 +24,9 @@ from pathlib import Path
 from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import PromotionRefusedError
 from lovspor.promotion.batch import BatchAssessment, BatchItem
+
+#: Pages of a candidate group the Markdown names; the JSON sidecar lists every one (#566).
+FIRST_PAGES = 3
 
 
 def summary(assessment: BatchAssessment) -> dict[str, int]:
@@ -57,7 +62,7 @@ def report_markdown(assessment: BatchAssessment, corpus: Path) -> str:
         *_table(("reason", "count"), assessment.holds_by_reason.items()),
         "",
         *_sample(assessment, corpus),
-        *_holds(assessment.items),
+        *_holds(assessment.items, f"{_stem(assessment)}.json"),
     ]
     return "\n".join(lines).rstrip("\n") + "\n"
 
@@ -68,11 +73,15 @@ def write_report(
     """Write both files under ``directory``, refused inside the corpus or a ``forbidden`` tree."""
     target = _outside(directory, (corpus, *forbidden))
     target.mkdir(parents=True, exist_ok=True)
-    stem = f"batch-{assessment.spec.batch_id}"
+    stem = _stem(assessment)
     markdown, sidecar = target / f"{stem}.md", target / f"{stem}.json"
     atomic_write_text(markdown, report_markdown(assessment, corpus))
     atomic_write_text(sidecar, report_json(assessment))
     return markdown, sidecar
+
+
+def _stem(assessment: BatchAssessment) -> str:
+    return f"batch-{assessment.spec.batch_id}"
 
 
 def _outside(directory: Path, forbidden: Sequence[Path]) -> Path:
@@ -142,9 +151,25 @@ def _preview(assessment: BatchAssessment, item: BatchItem, corpus: Path) -> str:
     return shlex.join([*words, "--klass-version", spec.klass_version])
 
 
-def _holds(items: tuple[BatchItem, ...]) -> list[str]:
+def _holds(items: tuple[BatchItem, ...], sidecar: str) -> list[str]:
     held: list[str] = []
     for item in (i for i in items if i.hold is not None):
+        if item.sources:
+            held += _group_hold(item, sidecar)
+            continue
         held.append(f"- `{item.hold}` {item.key.sha256} {item.key.source_url}: {item.detail}")
         held += [f"  - personal data: {h.kind.value} on line {h.line}" for h in item.personal_data]
     return ["## Held and refused", "", *(held or ["(none)"])]
+
+
+def _group_hold(item: BatchItem, sidecar: str) -> list[str]:
+    """One line for one regulation on N pages (#566): the first pages, the rest in the JSON."""
+    pages = item.sources
+    lines = [
+        f"- `{item.hold}` 1 regulation, {len(pages)} pages: {item.doc_id}, "
+        f"content_hash {item.content_hash}: {item.detail}",
+        *(f"  - {k.source_url} ({k.sha256})" for k in pages[:FIRST_PAGES]),
+    ]
+    if len(pages) > FIRST_PAGES:
+        lines.append(f"  - and {len(pages) - FIRST_PAGES} more page(s), listed in {sidecar}")
+    return lines

@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/promotion/source_text.py"
+symbol = "_lines_of"
+registered = "2026-10-07, PR #579, from run 37605826063"
+mutation = """
+-    blocks = _block_text(copy.deepcopy(element)).split("\\n")
++    blocks = _block_text(copy.copy(element)).split("\\n")
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_lxml_shallow_copy_of_an_element_copies_its_subtree"
+justification = """
+lxml implements ``__copy__`` on an element as a copy of the whole subtree, the
+same as ``__deepcopy__``: editing the copy's descendants never touches the
+source. ``_lines_of`` copies only so that ``_block_text``'s in-place rewrite
+leaves the region readable for the next candidate article, which either copy
+does. Dependency behaviour (lxml), pinned by the assumption test.
+"""
