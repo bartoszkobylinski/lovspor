@@ -1026,18 +1026,40 @@ def test_incomplete_identity_pages_are_not_folded(missing: str) -> None:
     assert group_candidates((first, second)) == (first, second)
 
 
-def test_folded_candidate_preserves_identity_and_explains_canonical_hold() -> None:
-    first, second = _group("a", "b").members
+@pytest.mark.parametrize("page_count", [2, 3, 8])
+@pytest.mark.parametrize("outcome", ["ready", "unchanged"])
+@pytest.mark.parametrize(
+    ("doc_id", "content_hash"),
+    [(GROUP_ID, "c" * 64), ("lk-0301-111111111111", "d" * 64)],
+)
+def test_folded_candidate_preserves_identity_and_explains_canonical_hold(
+    page_count: int, outcome: str, doc_id: str, content_hash: str
+) -> None:
+    members = tuple(
+        BatchItem.model_validate(
+            _member(n, f"{BASE}/{n}").model_dump()
+            | {
+                "doc_id": doc_id,
+                "content_hash": content_hash,
+                "outcome": outcome,
+                "title": "Forskrift om renovasjon, Eksempel kommune",
+                "version": 4,
+                "markdown_path": "lokale-forskrifter/0301/regulation.md",
+            }
+        )
+        for n in range(page_count)
+    )
+    first = members[0]
 
-    (folded,) = group_candidates((second, first))
+    (folded,) = group_candidates(tuple(reversed(members)))
 
     assert folded == first.model_copy(
         update={
-            "sources": (first.key, second.key),
+            "sources": tuple(member.key for member in members),
             "outcome": "held",
             "hold": NEEDS_CANONICAL_SOURCE,
             "detail": (
-                "2 pages carry this one text; which page is the canonical source "
+                f"{page_count} pages carry this one text; which page is the canonical source "
                 "is the owner's open decision (#566) — every page stays in provenance"
             ),
         }
