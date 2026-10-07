@@ -77,7 +77,14 @@ def local_address(corpus: Path) -> str:
 def dated_git(corpus: Path, date: str, *args: str) -> str:
     env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
     done = subprocess.run(
-        ["git", "-c", "user.name=Operator", "-c", "user.email=op@example.invalid", *args],
+        # No auto gc / maintenance: a detached writer would race a test that
+        # removes .git afterwards (#582).
+        [
+            "git",
+            *("-c", "user.name=Operator", "-c", "user.email=op@example.invalid"),
+            *("-c", "gc.auto=0", "-c", "maintenance.auto=false"),
+            *args,
+        ],
         cwd=corpus,
         check=True,
         capture_output=True,
