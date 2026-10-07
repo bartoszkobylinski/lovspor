@@ -20,6 +20,14 @@ branch) is what turns a green pipeline into a merge. It carries four rules:
 a skipped required check blocks a PR forever. It is still read before merging — it is
 the check that says whether the independent author agreed with the implementation.
 
+Every required check runs on pull requests to **any** base, not only `main` (issue #572).
+A stacked PR's base is a feature branch; when that base merges, GitHub retargets the PR to
+`main` and fires only `pull_request: edited`, which no workflow listens to. Check runs are
+attached to the head SHA, so the ones that already ran still count after the retarget —
+but `test.yml` used to filter on `branches: [main]`, so on a stacked PR the `test (3.x)`
+checks never existed and the PR stayed BLOCKED until closed and reopened. `push` stays
+limited to `main`. Pinned by `tests/unit/test_agentic_ci_workflows.py`.
+
 ### The gate was decorative until 2026-08-24 (issue #163)
 
 The ruleset also carried an `update` rule — *restrict updates*, meaning only an actor

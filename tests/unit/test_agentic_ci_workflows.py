@@ -710,6 +710,50 @@ def test_pr_pipeline_workflow_scoped_concurrency_still_cancels_stale_runs() -> N
     assert concurrency["cancel-in-progress"] is True
 
 
+def _triggers(workflow_name: str) -> dict[str, Any]:
+    # PyYAML resolves the bare `on:` key to the boolean True.
+    workflow = _workflow(workflow_name)
+    triggers: dict[str, Any] = workflow.get("on", workflow.get(True))
+    return triggers
+
+
+_DEFAULT_PR_TYPES = {"opened", "synchronize", "reopened"}
+
+
+@pytest.mark.parametrize("workflow_name", ["test.yml", "pr-pipeline.yml"])
+def test_required_checks_run_on_pull_requests_to_any_base(workflow_name: str) -> None:
+    """Issue #572. The main ruleset requires `test (3.x)`, `fast-ci` and
+    `mutation`. A stacked PR's base is a feature branch; when that base merges,
+    GitHub retargets the PR to main and fires only `edited`, which neither
+    workflow listens to. A base-branch filter therefore meant Test never ran on
+    the head SHA and the PR sat BLOCKED until closed and reopened. With no
+    filter, the checks run on the head SHA from the start, and check runs stay
+    attached to that SHA across the retarget."""
+    pull_request = _triggers(workflow_name)["pull_request"] or {}
+
+    assert "branches" not in pull_request
+    assert "branches-ignore" not in pull_request
+    assert set(pull_request.get("types", _DEFAULT_PR_TYPES)) >= _DEFAULT_PR_TYPES
+
+
+def test_test_workflow_still_runs_on_pushes_to_main_only() -> None:
+    """Dropping the pull_request filter must not widen `push`: a push to a
+    feature branch with an open PR would then run the matrix twice."""
+    assert _triggers("test.yml")["push"] == {"branches": ["main"]}
+
+
+def test_test_workflow_never_assumes_the_base_is_main() -> None:
+    """A stacked PR's base is a feature branch, so a job condition or a
+    concurrency group keyed on the base would skip or collide exactly there."""
+    workflow = _workflow("test.yml")
+    conditions = [
+        workflow.get("concurrency"),
+        *(job.get("if") for job in workflow["jobs"].values()),
+    ]
+
+    assert not any("base" in str(condition) for condition in conditions if condition)
+
+
 def _cancel_in_progress_workflows() -> list[str]:
     return sorted(
         path.name

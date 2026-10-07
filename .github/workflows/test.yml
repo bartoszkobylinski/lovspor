@@ -3,8 +3,11 @@ name: Test
 on:
   push:
     branches: [main]
+  # Any base, not only main (issue #572): a stacked PR's base is a feature
+  # branch, and the retarget to main when that base merges fires only `edited`.
+  # A main-only filter left the ruleset-required `test (3.x)` checks missing on
+  # the head SHA, so the PR stayed BLOCKED until closed and reopened.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
