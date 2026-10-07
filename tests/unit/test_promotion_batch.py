@@ -637,3 +637,87 @@ def test_sample_rate_diagnostic(batch: Batch, rate: object) -> None:
     with pytest.raises(ValidationError) as caught:
         BatchSpec.model_validate_json(path.read_bytes())
     assert caught.value.errors()[0]["msg"] == "Value error, " + message
+
+
+def test_invalid_noncandidate_refuses_batch_before_any_write(
+    batch: Batch, corpus: Path, root: Path, tmp_path: Path
+) -> None:
+    """S8 refuses the whole classifier file, even rows outside the batch population."""
+    _approve(batch.add(page(TITLES[0]), "a"), tmp_path)
+    batch.rows.append(batch.rows[0] | {"r1": False, "sha": "invalid"})
+    corpus_before = tree(corpus)
+    archive_before = tree(root)
+
+    code, output = batch.run(corpus, "--write")
+
+    assert code == 1, output
+    assert "line 2" in output
+    assert not batch.report_dir.exists()
+    assert tree(corpus) == corpus_before
+    assert tree(root) == archive_before
+
+
+def test_reordered_classifier_rows_preserve_assessment_and_sample(
+    batch: Batch, corpus: Path
+) -> None:
+    """The stated batch id draws the same items in any classifier input order."""
+    for n, title in enumerate(TITLES):
+        batch.add(page(title), f"p{n}")
+    code, output = batch.run(corpus, sample_rate="0.5")
+    assert code == BLOCKED_EXIT_CODE, output
+    before = batch.report()
+    batch.rows.reverse()
+
+    code, output = batch.run(corpus, sample_rate="0.5")
+
+    assert code == BLOCKED_EXIT_CODE, output
+    after = batch.report()
+    assert after["classifier_output_sha256"] != before["classifier_output_sha256"]
+    assert after["items"] == before["items"]
+    assert after["gate"] == before["gate"]
+    assert after["summary"] == before["summary"]
+    assert len(_sampled(after)) == 2
+
+
+def test_later_rejection_revokes_batch_approval(
+    batch: Batch, corpus: Path, root: Path, tmp_path: Path
+) -> None:
+    """A standing approval must still stand when the batch is assessed for writing."""
+    sha256 = batch.add(page(TITLES[0]), "a")
+    _approve(sha256, tmp_path)
+    code, output = batch.run(corpus)
+    assert code == 0, output
+    assert batch.report()["summary"]["would_write"] == 1
+    _approve(sha256, tmp_path, "reject")
+    corpus_before = tree(corpus)
+    archive_before = tree(root)
+
+    code, output = batch.run(corpus, "--write")
+
+    assert code == BLOCKED_EXIT_CODE, output
+    report = batch.report()
+    assert report["items"][0]["review"] == "rejected"
+    assert report["gate"]["rejected"] == [report["items"][0]["key"]]
+    assert report["summary"]["would_write"] == 0
+    assert tree(corpus) == corpus_before
+    assert tree(root) == archive_before
+
+
+def test_report_inside_engine_tree_is_refused(
+    batch: Batch, corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S8 reports contain archive material and must stay outside the engine tree."""
+    engine = batch.base / "engine"
+    engine.mkdir()
+    monkeypatch.setattr("lovspor.promotion.batch_commands.engine_root", lambda: engine)
+    batch.report_dir = engine / "reports"
+    batch.add(page(TITLES[0]), "a")
+    corpus_before = tree(corpus)
+
+    code, output = batch.run(corpus)
+
+    assert code == 1, output
+    assert "report names archive material" in output
+    assert not batch.report_dir.exists()
+    assert tree(engine) == {}
+    assert tree(corpus) == corpus_before
