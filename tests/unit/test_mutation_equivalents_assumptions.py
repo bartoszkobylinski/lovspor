@@ -40,6 +40,7 @@ from lovspor.observatory.listing import safe_html_parser
 from lovspor.parsing.xml_normalizer import safe_parser
 from lovspor.promotion.backfill_commands import backfill, backfill_preview, observe
 from lovspor.promotion.fields import _ENACTED
+from lovspor.promotion.relations import _CUE, _TARGET
 from lovspor.release.envelope import CorpusSummary, Marker, ReleaseRecord
 from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
 from lovspor.site.fingerprint import ReleaseKey
@@ -629,3 +630,49 @@ def test_assumption_typer_names_an_unnamed_command_after_its_function() -> None:
 
     assert isinstance(group, click.Group)
     assert sorted(group.commands) == ["backfill", "backfill-preview", "observe"]
+
+
+_RELATION_TARGETS = (
+    "LOV-1981-03-13-6",
+    "forskrift 1. juli 2001",
+    "forskrift av 1. juli 2001 nr. 55",
+    "lov 13.03.1981 nr. 6",
+    "forskriften 2001-07-01",
+    "forurensningsloven",
+    "opplæringslova § 15-2a",
+    "plan- og bygningsloven § 12-2",
+)
+_RELATION_CUES = (
+    "med hjemmel i",
+    "i medhold av",
+    "hjemmel:",
+    "endrer",
+    "endring i",
+    "opphever",
+    "oppheving av",
+    "endret ved",
+    "opphevet ved",
+    "endres",
+    "endrast",
+    "vert endra",
+    "blir endret",
+    "oppheves",
+    "opphevast",
+    "oppheva",
+    "opphevet",
+)
+
+
+def test_assumption_no_relation_cue_starts_where_a_target_ends() -> None:
+    """Pins the argument that waives ``cue_start >= end`` -> ``cue_start > end``
+    in ``promotion/relations.py::_kind_for``: every target form ends on a word
+    character and every cue opens on a word boundary before a letter, so no cue
+    can start at a target's end, however the two are put side by side."""
+    for target in _RELATION_TARGETS:
+        assert _TARGET.fullmatch(target) is not None, target
+        for cue in _RELATION_CUES:
+            assert _CUE.fullmatch(cue) is not None, cue
+            for glued in (target + cue, target + cue.upper(), f"{target} {cue}"):
+                ends = {m.end() for m in _TARGET.finditer(glued)}
+                starts = {m.start() for m in _CUE.finditer(glued)}
+                assert not ends & starts, glued

@@ -108,7 +108,9 @@ def target_index(central: dict[str, CentralEntry], local: LocalManifest) -> Targ
         key = _lovdata_key(doc_id)
         if key is not None:
             by_lovdata[key] = linked
-        short = _SHORT_TITLE.search(title or "") if doc_id.startswith("nl-") else None
+        short = (
+            _SHORT_TITLE.search(title) if title is not None and doc_id.startswith("nl-") else None
+        )
         if short is not None:
             by_name[short_name_key(short.group(1))].append(linked)
     names = {name: tuple(found) for name, found in by_name.items()}
@@ -133,7 +135,9 @@ def _linkable(
 
 
 def _central_dataset(entry: CentralEntry) -> Literal["lover", "forskrifter"] | None:
-    path = entry.markdown_path or ""
+    path = entry.markdown_path
+    if path is None:
+        return None
     if path.startswith("lover/"):
         return "lover"
     return "forskrifter" if path.startswith("forskrifter/") else None

@@ -292,5 +292,5 @@ def _link(
 
 def short_name_key(text: str) -> str:
     """A short name as it is compared: its words only, casefolded, ``§`` part dropped."""
-    name = text.split("§", 1)[0]
+    name = text.partition("§")[0]
     return " ".join(re.sub(r"\s*-\s*", "- ", name).split()).casefold()

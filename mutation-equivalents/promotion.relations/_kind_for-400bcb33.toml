@@ -1,0 +1,27 @@
+[[equivalent]]
+file = "src/lovspor/promotion/relations.py"
+symbol = "_kind_for"
+registered = "2026-10-07, PR #577, from the mutation artifact of run 37609788613 at commit 11e9649"
+mutation = """
+-    after = [kind for cue_start, _, (kind, passive) in cues if passive and cue_start >= end]
++    after = [kind for cue_start, _, (kind, passive) in cues if passive and cue_start > end]
+"""
+justification = """
+The two conditions differ only for a passive cue whose start equals the
+target's end, and no such cue can exist. `start`/`end` are a `_TARGET` match
+and `cue_start` a `_CUE` match over the same sentence string (`_in_sentence`).
+Every `_TARGET` alternative ends on a word character: a Lovdata id and a dated
+target end on a digit (every `DATE` alternative in dates.py ends on `\\d{4}`,
+the optional number on `\\d+`), a short name on the literal `loven`/`lova`,
+or on the digit or `[a-z]` closing its optional `_SECTION`. `_CUE` wraps every
+cue pattern as `\\b(?:...)` and every pattern opens on a letter, so a cue
+starts on a word character at a word boundary. At `end` the character before
+is a word character and, for a cue starting there, so is the one after;
+Python's `re` finds no `\\b` between two word characters, so `_CUE` can never
+match at `end`. With equality impossible, `>=` and `>` select the same cues
+for every input. The argument rests on this module's own regexes, so the
+assumption test glues every cue form onto a sample of every target form and
+asserts no cue ever starts where a target ends: a target pattern changed to
+end on punctuation turns it red.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_no_relation_cue_starts_where_a_target_ends"

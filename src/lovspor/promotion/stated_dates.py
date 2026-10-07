@@ -113,7 +113,8 @@ def _statement(text: str, rest_at: int, starts_at: int = 0) -> DateStatement:
         return DateStatement(
             date=parsed, text=None, evidence=text[starts_at : rest_at + stated.end()]
         )
-    phrase = _SENTENCE_END.split(rest, maxsplit=1)[0]
+    sentence_end = _SENTENCE_END.search(rest)
+    phrase = rest[: sentence_end.start()] if sentence_end else rest
     evidence = text[starts_at : rest_at + len(phrase)].strip()
     return DateStatement(date=None, text=phrase.strip() or None, evidence=evidence)
 
