@@ -21,7 +21,7 @@ Python's `re` finds no `\\b` between two word characters, so `_CUE` can never
 match at `end`. With equality impossible, `>=` and `>` select the same cues
 for every input. The argument rests on this module's own regexes, so the
 assumption test glues every cue form onto a sample of every target form and
-asserts no cue ever starts where a target ends: a target pattern changed to
-end on punctuation turns it red.
+asserts no cue ever starts where a target ends; it covers the sampled forms,
+so a new target or cue form needs a sample there before this entry holds.
 """
 assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_no_relation_cue_starts_where_a_target_ends"
