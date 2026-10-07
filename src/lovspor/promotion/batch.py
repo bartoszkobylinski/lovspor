@@ -15,13 +15,20 @@ the personal-data gate, identity, placement — and ends in one outcome:
   population, so the sample stays the same while a batch is written item by
   item;
 * ``held`` — a property of the source stops it (``<stage>:<reason>``, e.g.
-  ``extraction:lovdata_copy``, ``identity:no_identity``), or two candidates
-  of the batch mint one id (``batch:same_id_in_batch``: which URL is primary
-  is a recorded human decision, ADR-0016 1d, never picked here);
+  ``extraction:lovdata_copy``, ``identity:no_identity``), or two different
+  texts of the batch mint one id (``batch:same_id_in_batch``: which URL is
+  primary is a recorded human decision, ADR-0016 1d, never picked here), or
+  one text minting one id was captured on several pages — a regulation in a
+  CMS sidebar — and the group waits for its canonical page
+  (``batch:needs_canonical_source``, #566; see :func:`choose_canonical`);
 * ``refused`` — the request cannot be carried out (not observed, tombstoned,
   withdrawn …), counted under ``request:refused`` with the reason kept.
 
-Holds and refusals are counted by reason, never dropped (4h).
+Candidates that mint one id from one extracted text (same ``content_hash``)
+are folded into **one** candidate listing every page in ``sources``, so a
+regulation on 90 pages is one hold and at most one sample item, not 90.
+
+Holds and refusals are counted by reason, per candidate, never dropped (4h).
 
 The gate (4g): a deterministic sample of the population is drawn; the batch
 **passes** only when every sampled item has a standing human approval of
@@ -64,6 +71,7 @@ from lovspor.promotion.render import LOCAL_RENDERER_VERSION
 from lovspor.promotion.sample import draw_sample, parse_sample_rate
 
 SAME_ID_IN_BATCH = "batch:same_id_in_batch"
+NEEDS_CANONICAL_SOURCE = "batch:needs_canonical_source"
 REFUSED = "request:refused"
 
 
@@ -130,10 +138,42 @@ class BatchItem(BaseModel):
     content_hash: str | None = None
     review: Review = Review.UNREVIEWED
     sampled: bool = False
+    sources: tuple[ArtifactKey, ...] = ()
 
     @property
     def promotable(self) -> bool:
         return self.outcome in {"ready", "unchanged"}
+
+
+class CandidateGroup(BaseModel):
+    """Candidates that mint one id from one extracted text: one regulation on N pages (#566).
+
+    Members are listed by source URL, then hash — a listing order, not a choice.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    members: tuple[BatchItem, ...] = Field(min_length=2)
+
+    @field_validator("members")
+    @classmethod
+    def _one_regulation(cls, members: tuple[BatchItem, ...]) -> tuple[BatchItem, ...]:
+        """A group is one id from one text; anything else is a real collision."""
+        if len({(m.doc_id, m.content_hash) for m in members}) != 1 or members[0].doc_id is None:
+            raise ValueError("a group's pages must mint one id from one extracted text")
+        return members
+
+    @property
+    def doc_id(self) -> str:
+        return str(self.members[0].doc_id)
+
+    @property
+    def content_hash(self) -> str | None:
+        return self.members[0].content_hash
+
+    @property
+    def sources(self) -> tuple[ArtifactKey, ...]:
+        return tuple(m.key for m in self.members)
 
 
 class Gate(BaseModel):
@@ -186,7 +226,7 @@ def assess_batch(spec: BatchSpec, output: ClassifierOutput, inputs: BatchInputs)
     """Prepare every candidate, hold same-id pairs, draw the sample and decide the gate."""
     candidates = output.candidates(spec.authority_id, spec.artifacts)
     prepared = tuple(assess_item(c, inputs, output.classifier_version) for c in candidates)
-    items = _hold_same_ids(prepared)
+    items = group_candidates(prepared)
     population = [i.key for i in items if i.promotable]
     sampled = set(draw_sample(population, spec.batch_id, spec.sample_rate))
     items = tuple(i.model_copy(update={"sampled": i.key in sampled}) for i in items)
@@ -263,15 +303,91 @@ def _review(decision: HumanDecision | None, prepared: Prepared) -> Review:
     return Review.APPROVED
 
 
-def _hold_same_ids(items: tuple[BatchItem, ...]) -> tuple[BatchItem, ...]:
-    """Hold every promotable item whose id another item of the batch also mints."""
-    minted = Counter(i.doc_id for i in items if i.promotable)
-    return tuple(
-        i.model_copy(update=_same_id(i.doc_id, minted[i.doc_id]))
-        if i.promotable and minted[i.doc_id] > 1
-        else i
-        for i in items
+_Text = tuple[str, str]
+
+
+def group_candidates(items: tuple[BatchItem, ...]) -> tuple[BatchItem, ...]:
+    """Fold each id-and-text into one candidate, then hold every id that two texts mint.
+
+    A folded candidate stands where its first member stood in the batch.
+    """
+    members = _members(items)
+    texts = Counter(doc_id for doc_id, _ in members)
+    folded: list[BatchItem] = []
+    for item in items:
+        text = _text(item)
+        if text is None:
+            folded.append(item)
+        elif text in members:
+            folded.append(_fold(members.pop(text), texts[text[0]]))
+    return tuple(folded)
+
+
+def choose_canonical(group: CandidateGroup) -> ArtifactKey | None:
+    """The page a group is promoted from: none today, the owner's open decision (#566).
+
+    Every page stays in provenance whichever rule is chosen. The options in #566:
+
+    * (a) the page that is *about* the regulation — a title match, or the
+      shortest path — deterministic and documented;
+    * (b) the owner picks once per group, recorded in the decision log;
+    * (c) the page with the earliest ObservedAt.
+
+    Until the owner decides, ``None`` holds the group as
+    :data:`NEEDS_CANONICAL_SOURCE`.
+    """
+    del group
+    return None
+
+
+def resolve_group(group: CandidateGroup, canonical: ArtifactKey | None) -> BatchItem:
+    """The group as one candidate: held for the owner's choice, or the chosen page's item."""
+    sources: dict[str, object] = {"sources": group.sources}
+    if canonical is None:
+        return group.members[0].model_copy(update=sources | _needs_canonical(group))
+    chosen = next((m for m in group.members if m.key == canonical), None)
+    if chosen is None:
+        msg = f"{canonical.source_url} is not a page of the group that mints {group.doc_id}"
+        raise PromotionRefusedError(msg)
+    return chosen.model_copy(update=sources)
+
+
+def _text(item: BatchItem) -> _Text | None:
+    if not item.promotable or item.doc_id is None or item.content_hash is None:
+        return None
+    return item.doc_id, item.content_hash
+
+
+def _members(items: tuple[BatchItem, ...]) -> dict[_Text, tuple[BatchItem, ...]]:
+    grouped: dict[_Text, list[BatchItem]] = {}
+    for item in items:
+        text = _text(item)
+        if text is not None:
+            grouped.setdefault(text, []).append(item)
+    return {text: tuple(sorted(group, key=_by_source)) for text, group in grouped.items()}
+
+
+def _by_source(item: BatchItem) -> tuple[str, str]:
+    return item.key.source_url, item.key.sha256
+
+
+def _fold(pages: tuple[BatchItem, ...], texts: int) -> BatchItem:
+    first = pages[0]
+    sources: dict[str, object] = {"sources": tuple(p.key for p in pages)} if len(pages) > 1 else {}
+    if texts > 1:
+        return first.model_copy(update=sources | _same_id(first.doc_id, texts))
+    if len(pages) == 1:
+        return first
+    group = CandidateGroup(members=pages)
+    return resolve_group(group, choose_canonical(group))
+
+
+def _needs_canonical(group: CandidateGroup) -> dict[str, object]:
+    detail = (
+        f"{len(group.members)} pages carry this one text; which page is the canonical source "
+        "is the owner's open decision (#566) — every page stays in provenance"
     )
+    return {"outcome": "held", "hold": NEEDS_CANONICAL_SOURCE, "detail": detail}
 
 
 def _same_id(doc_id: str | None, count: int) -> dict[str, object]:
