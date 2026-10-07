@@ -44,6 +44,25 @@ def _observations_path(corpus: Path) -> Path:
 
 
 class TestState:
+    @pytest.mark.parametrize("committed", [False, True], ids=["working-tree", "commit"])
+    def test_a_front_matter_disagreeing_with_the_manifest_is_refused(
+        self, corpus: Path, committed: bool
+    ) -> None:
+        """The module refuses files that disagree with the manifest; the front
+        matter's content_hash was never compared (Codex test on PR #571)."""
+        address = local_address(corpus)
+        served = LocalDataset(corpus).document(address)
+        line = f'content_hash: "{served.record.content_hash}"\n'
+        path = corpus / served.record.markdown_path
+        path.write_text(served.markdown.replace(line, f'content_hash: "{"0" * 64}"\n', 1))
+        local = LocalDataset(corpus)
+        if committed:
+            dated_git(corpus, "2026-10-02T00:00:00Z", "commit", "-q", "-am", "bad hash")
+            local = _state(corpus, 4)
+
+        with pytest.raises(LocalCorpusError, match="content_hash"):
+            local.document(address)
+
     @pytest.mark.parametrize("version", [1, 2, 3])
     def test_each_commit_serves_the_version_it_recorded(self, corpus: Path, version: int) -> None:
         served = _state(corpus, version).document(local_address(corpus))

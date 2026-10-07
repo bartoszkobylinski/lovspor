@@ -269,8 +269,7 @@ class LocalDataset:
     ) -> Observation:
         markdown_path, text = markdown
         front = _front_matter(markdown_path, text)
-        if front.id != doc_id:
-            raise LocalCorpusError(f"{markdown_path} describes {front.id}, not {doc_id}")
+        _agree_with_record(markdown_path, front, doc_id, record)
         path, observations = self._read(_observations_path(record.markdown_path))
         observed_last = _observed_at_last(path, observations, doc_id, front.version)
         return Observation(
@@ -332,6 +331,18 @@ class _LocalState(LocalDataset):
                 f"references {relative!r}, which is not in the commit's tree",
             )
         return Path(relative), text
+
+
+def _agree_with_record(path: Path, front: _FrontMatter, doc_id: str, record: LocalRecord) -> None:
+    """Refuse a document whose front matter names another id, version or text than its record."""
+    if front.id != doc_id:
+        raise LocalCorpusError(f"{path} describes {front.id}, not {doc_id}")
+    if front.version != record.version:
+        raise LocalCorpusError(
+            f"{path} is v{front.version}; the manifest records v{record.version}"
+        )
+    if front.content_hash != record.content_hash:
+        raise LocalCorpusError(f"{path} content_hash disagrees with the manifest record")
 
 
 def _observations_path(markdown_path: str) -> str:
