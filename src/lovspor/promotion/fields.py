@@ -1,7 +1,8 @@
 """Identification block, body and pre-filled fields from extracted lines (ADR-0016 S2).
 
 The **identification block** runs from the title line to the line before
-the first section (``§ 1``, ``Kapittel 1``); the **body** from there on. What
+the first section (``§ 1``, ``Kapittel 1``); the **body** from there on (both
+anchors are defined in ``anchors.py``, which the HTML reader shares). What
 comes before the title — a page heading, a lead paragraph — is neither: it is
 not the regulation, so it is not hashed and not rendered. A text with no
 first section or no title before it is held, because the identity rules read
@@ -30,6 +31,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
+from lovspor.promotion.anchors import first_section, first_title
 from lovspor.promotion.dates import DATE, parse_stated_date
 from lovspor.promotion.models import (
     ExtractedRegulation,
@@ -37,11 +39,6 @@ from lovspor.promotion.models import (
     RegulationFields,
 )
 
-_MAX_TITLE_CHARS = 250
-_TITLE = re.compile(
-    r"(?:[^\W\d_]+\s+){0,2}[^\W\d_]*forskrift(?:er)?\s+(?:om|for|til|ved|av|\d)", re.I
-)
-_FIRST_SECTION = re.compile(r"(?:§\s*1(?!\d)|kap(?:ittel|\.)\s*(?:1|I)(?![\w]))", re.I)
 _HJEMMEL_HEADER = re.compile(r"(?:hjemmel|heimel)\s*:\s*((?:LOV|FOR)-.+)", re.I)
 _LOVDATA_REFERENCE_SPLIT = re.compile(r",\s*(?=(?:LOV|FOR)-)")
 # "med hjemmel lov 9. juni 2023" drops the "i"; without it, the phrase must
@@ -80,10 +77,10 @@ ReadRegulation = tuple[ExtractedRegulation, RegulationFields]
 
 def read_regulation(lines: tuple[str, ...]) -> ReadRegulation | ExtractionHoldReason:
     """Split ``lines`` and pre-fill the fields; a hold reason when it cannot be split."""
-    body_start = _first_section(lines)
+    body_start = first_section(lines)
     if body_start is None:
         return ExtractionHoldReason.NO_BODY
-    title_index = _first_title(lines[:body_start])
+    title_index = first_title(lines[:body_start])
     if title_index is None:
         return ExtractionHoldReason.NO_TITLE
     block, body = lines[title_index:body_start], lines[body_start:]
@@ -95,17 +92,6 @@ def read_regulation(lines: tuple[str, ...]) -> ReadRegulation | ExtractionHoldRe
         vedtaksdato=fields.vedtatt,
     )
     return regulation, fields
-
-
-def _first_section(lines: tuple[str, ...]) -> int | None:
-    return next((i for i, line in enumerate(lines) if _FIRST_SECTION.match(line)), None)
-
-
-def _first_title(lines: tuple[str, ...]) -> int | None:
-    return next(
-        (i for i, line in enumerate(lines) if len(line) <= _MAX_TITLE_CHARS and _TITLE.match(line)),
-        None,
-    )
 
 
 def _fields(block: tuple[str, ...], body: tuple[str, ...]) -> RegulationFields:
