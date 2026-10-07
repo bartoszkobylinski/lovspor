@@ -1325,6 +1325,50 @@ migration) is skipped with the reason. Use the subject it prints: `observe: …`
 is no history event. Run it at most weekly (ADR-0016 Decision 3); scheduling
 it is not automated yet.
 
+### 6. A batch of classifier candidates (S8)
+
+`lovspor promote batch` runs every enacted-regulation candidate the classifier
+names for one authority (or a listed subset) through the same preparation as
+`preview`, counts the holds by reason, draws the owner's spot-check sample and
+gates the batch on it (ADR-0016 4g, 4h). Write a batch spec:
+
+```json
+{"batch_id": "0301-2026-10-06", "authority_id": "0301", "klass_version": "131-2024",
+ "classifier_output": "/absolute/path/to/predictions_r11.jsonl",
+ "classifier_version": "r1.1-2026-10-03", "sample_rate": "1"}
+```
+
+* `classifier_output` is the classifier's JSON Lines file (one row per
+  artifact: `url`, `authority`, `sha`, `form`, `r1`, `r2` and the rule
+  signals). Only `r1` rows (enacted regulation) are candidates. The file does
+  not name its rule set, so `classifier_version` states it. A row that does
+  not validate refuses the whole file.
+* `sample_rate` is **required and has no default**: a decimal in `(0, 1]`.
+  ADR-0016 4g recommends `"1"` (100 % review) for the first authority and for
+  every new adapter family; a smaller rate is the owner's policy decision
+  (Open Decision 2), so it is stated in every spec and printed in every report.
+* `batch_id` seeds the sample: the same id draws the same items, in any input
+  order. Optional `artifacts` lists SHA-256s to restrict the batch to.
+
+```bash
+uv run lovspor promote batch --spec batch-0301.json \
+  --corpus /absolute/path/to/lovverk --report-dir /absolute/path/to/reports
+```
+
+This writes `batch-<id>.md` (for the owner: gate, counts, holds by reason,
+each sampled item with its `promote preview` command) and `batch-<id>.json`
+into `--report-dir`, which must be outside this repository and the corpus. It
+records nothing and writes nothing to the corpus. Review each sampled item
+and record the decision with `promote approve` (step 2). Exit status 4 means
+the gate is blocked: **one rejected sampled item blocks the whole batch**, and
+an unreviewed one blocks it until it is reviewed.
+
+Once the gate passes, add `--write`: it writes the **next** approved item
+through the same code as `promote local` and prints its commit. Commit it,
+then rerun the command for the next one — one commit per version. Only items
+with their own standing approval are written; an unsampled item without one
+is reported, never promoted on the classifier's word alone.
+
 ## Observatory: the 24-hour observation SLA (issue #167)
 
 > **Every active source is observed at least once per 24 hours.**
