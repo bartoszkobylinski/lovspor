@@ -309,6 +309,80 @@ class TestMigratingAnUnchangedDocument:
 
 
 class TestRefusals:
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_a_refused_document_does_not_prevent_other_documents_migrating(
+        self,
+        root: Path,
+        corpus: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        dry_run: bool,
+    ) -> None:
+        """operations.md: report refusals, migrate the others, and exit 1."""
+        refused_blob = _promoted_once(root, corpus, tmp_path, monkeypatch)
+        refused_id = next(iter(_manifest(corpus)))
+        other = store(root, html_page(OTHER_LINES), url=OTHER_URL)
+        with _earlier_engine(monkeypatch):
+            _approve(other, tmp_path)
+            promoted = promote("local", other, corpus)
+            assert promoted.exit_code == 0, promoted.output
+            _commit_printed(corpus, promoted.output)
+        # Only the second document receives approval at the running extractor.
+        _approve(other, tmp_path)
+        records_before = _manifest(corpus)
+        before, log_before = tree(corpus), _log(root)
+        head = git(corpus, "rev-parse", "HEAD")
+
+        result = _migrate(corpus, *(["--dry-run"] if dry_run else []))
+
+        assert result.exit_code == 1, result.output
+        assert f"Refused: {refused_id}:" in result.output
+        assert "another text or extractor" in result.output
+        assert git(corpus, "rev-parse", "HEAD") == head
+        if dry_run:
+            assert "Dry run: nothing written, nothing recorded" in result.output
+            assert f'+      "extractor_version": {EXTRACTOR_VERSION},' in result.output
+            assert tree(corpus) == before
+            assert _log(root) == log_before
+        else:
+            records_after = _manifest(corpus)
+            assert records_after[refused_id] == records_before[refused_id]
+            [migrated_id] = records_before.keys() - {refused_id}
+            assert records_after[migrated_id] == {
+                **records_before[migrated_id],
+                "extractor_version": EXTRACTOR_VERSION,
+            }
+            slug = records_before[migrated_id]["slug"]
+            after = tree(corpus)
+            assert {p for p in after if after[p] != before.get(p)} == {
+                f"{LOCAL}/manifest.json",
+                f"{LOCAL}/{AUTHORITY}/observations/{slug}.json",
+            }
+            assert _markdown(after) == _markdown(before)
+            assert _log(root).startswith(log_before)
+            [record] = _log(root)[len(log_before) :].decode().splitlines()
+            outcome = json.loads(record)
+            assert outcome["kind"] == "migrated"
+            assert outcome["doc_id"] == migrated_id
+            assert outcome["artifact"]["sha256"] == other
+            assert outcome["artifact"]["sha256"] != refused_blob
+            assert outcome["written"] == [
+                f"{LOCAL}/{AUTHORITY}/observations/{slug}.json",
+                f"{LOCAL}/manifest.json",
+            ]
+
+    def test_a_standing_hold_refuses_without_writing_or_recording(
+        self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """operations.md explicitly refuses a standing hold as well as reject."""
+        a = _promoted_once(root, corpus, tmp_path, monkeypatch)
+        result = approve(a, Decision(decision="hold").write(tmp_path))
+        assert result.exit_code == 0, result.output
+
+        refused = _refused_untouched(root, corpus)
+
+        assert "standing decision is hold" in refused.output
+
     def test_a_text_the_running_extractor_reads_differently_is_a_new_version(
         self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
