@@ -537,6 +537,17 @@ class TestPublishedDocument:
         with pytest.raises(PromotionRefusedError, match="do not read"):
             self._published(corpus)
 
+    def test_a_rendering_that_is_not_utf8_is_refused(
+        self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A decode error is a named refusal, not a traceback (Codex test on PR #594)."""
+        _promoted_once(root, corpus, tmp_path, monkeypatch)
+        [(_, record)] = CorpusCheckout(corpus, []).local_manifest().documents.items()
+        (corpus / record.markdown_path).write_bytes(b"\xff")
+
+        with pytest.raises(PromotionRefusedError, match="do not read"):
+            self._published(corpus)
+
 
 class TestTheMigratedStateIsReachableThroughSupportedInterfacesOnly:
     """Can a promoted document at the running extractor be reached using only commands?"""

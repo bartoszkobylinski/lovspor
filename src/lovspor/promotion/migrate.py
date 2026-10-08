@@ -149,7 +149,7 @@ def published(corpus: CorpusCheckout, doc_id: str, record: LocalRecord) -> Publi
     try:
         markdown = markdown_path.read_text(encoding="utf-8")
         audit = ObservationsFile.model_validate_json(observations.read_bytes())
-    except (OSError, ValidationError) as exc:
+    except (OSError, UnicodeDecodeError, ValidationError) as exc:
         msg = f"{doc_id}: its rendering or observations do not read ({type(exc).__name__})"
         raise PromotionRefusedError(msg) from exc
     return Published(
