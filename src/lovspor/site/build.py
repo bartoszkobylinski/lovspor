@@ -25,7 +25,9 @@ exists to exclude (ADR:1109-1117). So:
 The build then asserts the capability document was captured for this
 checkout — ``state.checkout.lovspor_commit`` is ``HEAD`` and
 ``expected_tool_surface_sha256`` is the descriptor recomputed against
-the corpus (plan F.3) — renders every route in both languages through
+the corpus (plan F.3) — reads the LLHB publication manifest from the
+checkout (``lovspor.site.benchmark``; absent manifest, no benchmark
+section), renders every route in both languages through
 the fact mechanism, scans every page (``lovspor.site.scan``), and
 writes the tree: pages, ``sitemap-site.xml``, ``llms.txt``
 (``lovspor.site.llms``, whose counts are read through the same ledger),
@@ -44,6 +46,7 @@ from pydantic import BaseModel, ConfigDict
 
 import lovspor
 from lovspor.publish.companion import companion_json_bytes
+from lovspor.site.benchmark import load_publication
 from lovspor.site.capabilities import CapabilityDocument, HostedState, load_capabilities
 from lovspor.site.errors import SiteBuildError
 from lovspor.site.facts import FactLedger
@@ -181,9 +184,12 @@ def _render_pages(artifacts: BuildArtifacts) -> tuple[dict[str, str], bytes, Fac
     environment = site_environment()
     registry = fact_registry(artifacts)
     ledger = FactLedger()
+    publication = artifacts.publication
     pages: dict[str, str] = {}
     for page in emitted_pages():
+        benchmark = None if publication is None else publication.context(page.lang)
         context = page.head_context() | page_globals(page.path, page.lang, registry, ledger)
+        context["benchmark"] = benchmark
         markup = environment.get_template(page.template).render(context)
         scan_page(page.path, markup)
         pages[page.path] = markup
@@ -271,7 +277,9 @@ def build_site(inputs: SiteInputs) -> SiteBuildReport:
     lovspor_commit = require_clean_work_tree(inputs.checkout)
     _refuse_non_empty(inputs.out)
     document = load_capabilities(inputs.capabilities)
-    artifacts = _document_for_this_checkout(document, lovspor_commit, inputs)
+    artifacts = _document_for_this_checkout(document, lovspor_commit, inputs).model_copy(
+        update={"publication": load_publication(inputs.checkout)}
+    )
     toolchain = toolchain_fingerprint(inputs.checkout)
     key = release_key(artifacts.manifest.corpus_commit, lovspor_commit, document.state, toolchain)
     pages, llms, ledger = _render_pages(artifacts)

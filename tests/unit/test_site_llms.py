@@ -118,11 +118,15 @@ class TestWhatItNames:
         assert "https://lovspor.no/sitemap-site.xml" in text
         assert "https://lovspor.no/sitemap.xml — every page" not in text
 
-    def test_the_mcp_endpoint_and_that_it_needs_a_token(self) -> None:
+    def test_the_mcp_endpoint_and_that_it_needs_an_oauth_sign_in(self) -> None:
+        """Owner decision 2026-10-07: access is through a connector with OAuth
+        sign-in only, so the file names that and offers no token."""
         text = _text()
 
         assert "https://lovspor.no/mcp" in text
-        assert "token" in text
+        assert "OAuth sign-in" in text
+        assert "token" not in text.lower()
+        assert "https://lovspor.no/connect/" in text
         assert "https://lovspor.no/docs/" in text
 
     def test_the_limits_that_docs_already_states(self) -> None:

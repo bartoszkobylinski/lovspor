@@ -6,27 +6,40 @@
     per-client /connect/<client>/ pages stay a projection of the client
     registry (ADR:565-572), which does not exist yet, so every client this
     page knows about is on this one page. No number is typed here: the page
-    renders none, and every identifier that carries a digit is marked. -#}
+    renders none, and every identifier that carries a digit is marked.
+    Access to the hosted service is through a connector with OAuth sign-in
+    only (owner decision 2026-10-07): the page offers no other way in. -#}
 {% extends "_base.html" %}
 {% block main %}
 {{ badge(status) }}
 <h1>{{ title }}</h1>
 <p class="lede">{{ description }}</p>
 
-<p>lovverk er en <a href="https://modelcontextprotocol.io">MCP</a>-server. Klienten din snakker enten med den driftede tjenesten på <code>https://lovspor.no/mcp</code>, eller med en kopi du kjører på din egen maskin. Den første krever et token eller en innlogging med <span data-literal>OAuth 2.1</span>. Den andre krever ingenting.</p>
+<p>lovverk er en <a href="https://modelcontextprotocol.io">MCP</a>-server. Klienten din snakker enten med den driftede tjenesten på <code>https://lovspor.no/mcp</code>, gjennom en connector du logger inn i med <span data-literal>OAuth 2.1</span>, eller med en kopi du kjører på din egen maskin, som ikke krever noe.</p>
 
-<h2>Uten token</h2>
-<p>Du trenger ikke spørre noen om lov. Kjør serveren selv — den henter korpuset ned til maskinen din og snakker med klienten over stdio:</p>
+<h2>Claude Desktop og claude.ai — som connector</h2>
+<p>Den driftede tjenesten logger deg inn med <span data-literal>OAuth 2.1</span>, så du trenger ikke lime inn noe. Dette er framgangsmåten vi har kjørt fra claude.ai:</p>
+<ul>
+  <li>Legg til en egendefinert connector med adressen <code>https://lovspor.no/mcp</code>.</li>
+  <li>Velg <strong>Sign in now</strong>.</li>
+  <li>Velg <strong>Register automatically</strong> for klientregistrering. Standardvalget, som bruker Claudes publiserte identitet, virker ikke mot denne tjenesten.</li>
+  <li>Logg inn på siden som åpnes. Verktøyene svarer når du er tilbake i samtalen.</li>
+</ul>
+<p><span class="accent">Merkelappene inne i klienten endrer seg oftere enn denne siden gjør.</span> Har en av dem flyttet seg, er det adressen, <span data-literal>OAuth</span> som innloggingsmåte og automatisk registrering som teller.</p>
+
+<h2>ChatGPT — som connector</h2>
+<p>Også med <span data-literal>OAuth 2.1</span>. Framgangsmåten vi har kjørt:</p>
+<ul>
+  <li>Slå på <strong>utviklermodus</strong> (developer mode) i ChatGPT.</li>
+  <li>Opprett en connector med adressen <code>https://lovspor.no/mcp</code> og <strong>OAuth</strong> som autentisering.</li>
+  <li>Logg inn på siden som åpnes.</li>
+</ul>
+
+<h2>Kjør det selv</h2>
+<p>Du trenger ikke spørre noen om lov. Kjør serveren selv — den henter korpuset ned til maskinen din og snakker med klienten over stdio. I Claude Code:</p>
 <pre>uvx lovspor fetch-corpus
 claude mcp add lovverk -- uvx lovspor mcp</pre>
-<p>Dette virker i dag: ingen konto, intet token, ingen API-nøkkel. Alle verktøyene unntatt <code>semantic_search</code> leser bare filer og git på din egen maskin, og <code>semantic_search</code> trenger en embedding-nøkkel du selv setter inn.</p>
-
-<h2>Claude Code — den driftede tjenesten</h2>
-<p>Dette er framgangsmåten vi selv kjører, på én linje:</p>
-<pre>claude mcp add --transport http lovverk \
-  https://lovspor.no/mcp \
-  --header "Authorization: Bearer YOUR_TOKEN"</pre>
-<p>Bytt <code>YOUR_TOKEN</code> mot tokenet du har fått. <code>/mcp</code> i en ny økt viser at <code>lovverk</code> er registrert.</p>
+<p>Dette virker i dag: ingen konto, ingen API-nøkkel. Alle verktøyene unntatt <code>semantic_search</code> leser bare filer og git på din egen maskin, og <code>semantic_search</code> trenger en embedding-nøkkel du selv setter inn.</p>
 
 <h2>Claude Desktop — lokal kopi</h2>
 <p>Legg dette inn i oppsettsfila til Claude Desktop (<code>claude_desktop_config.json</code> — hvor den ligger avhenger av operativsystemet) og start klienten på nytt:</p>
@@ -39,30 +52,8 @@ claude mcp add lovverk -- uvx lovspor mcp</pre>
   }
 }</pre>
 
-<h2>Claude Desktop og claude.ai — som connector</h2>
-<p>Den driftede tjenesten logger deg inn med <span data-literal>OAuth 2.1</span>, så du trenger ikke lime inn noe token. Dette er framgangsmåten vi har kjørt fra claude.ai:</p>
-<ul>
-  <li>Legg til en egendefinert connector med adressen <code>https://lovspor.no/mcp</code>.</li>
-  <li>Velg <strong>Sign in now</strong>.</li>
-  <li>Velg <strong>Register automatically</strong> for klientregistrering. Standardvalget, som bruker Claudes publiserte identitet, virker ikke mot denne tjenesten.</li>
-  <li>Logg inn på siden som åpnes. Verktøyene svarer når du er tilbake i samtalen.</li>
-</ul>
-<p><span class="accent">Merkelappene inne i klienten endrer seg oftere enn denne siden gjør.</span> Har en av dem flyttet seg, er det adressen, <span data-literal>OAuth</span> som innloggingsmåte og automatisk registrering som teller.</p>
-
-<h2>ChatGPT — som connector</h2>
-<p>Også med <span data-literal>OAuth 2.1</span> og uten token. Framgangsmåten vi har kjørt:</p>
-<ul>
-  <li>Slå på <strong>utviklermodus</strong> (developer mode) i ChatGPT.</li>
-  <li>Opprett en connector med adressen <code>https://lovspor.no/mcp</code> og <strong>OAuth</strong> som autentisering.</li>
-  <li>Logg inn på siden som åpnes.</li>
-</ul>
-
 <h2>Cursor og Codex</h2>
-<p><strong>Ingen testet framgangsmåte.</strong> Begge tar imot et token i et felt, som er formen tjenesten tilbyr dem. Men vi har ikke kjørt oppsettet i disse klientene selv, og da dikter vi ikke opp stegene.</p>
-<p>Bruk klientens egen dokumentasjon, med adressen <code>https://lovspor.no/mcp</code> og tokenet ditt. Får du det til — eller får du det ikke til — så si fra, så kan det stå her som en testet oppskrift med navnet ditt på.</p>
-
-<h2>Få et token</h2>
-<p>Privat beta. Jeg drifter tjenesten alene, så token deles ut for hånd. Connectorene over logger inn i stedet og trenger ikke token.</p>
-<p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20tilgang">Be om et beta-token →</a></p>
-<p class="muted">Eller kjør det selv — motoren er åpen kildekode under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>. Hva verktøyene svarer på, står i <a href="/docs/">dokumentasjonen</a>; tilstanden ved siste utgivelse står på <a href="/status/">status</a>.</p>
+<p><strong>Ingen testet framgangsmåte.</strong> Vi har ikke kjørt oppsettet i disse klientene selv, og da dikter vi ikke opp stegene.</p>
+<p>Bruk en klient som støtter en connector med innlogging via <span data-literal>OAuth</span>, eller kjør serveren selv som over. Får du en av disse klientene til å virke mot den driftede tjenesten — eller får du det ikke til — så si fra på <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, så kan det stå her som en testet oppskrift med navnet ditt på.</p>
+<p class="muted">Motoren er åpen kildekode under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>. Hva verktøyene svarer på, står i <a href="/docs/">dokumentasjonen</a>; tilstanden ved siste utgivelse står på <a href="/status/">status</a>.</p>
 {% endblock %}

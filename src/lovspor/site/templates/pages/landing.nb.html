@@ -1,25 +1,83 @@
-{#- The Norwegian landing, migrated from deploy/digitalocean/site/index.html:71-122
-    (that tree was retired in the first-migration PR; see git history, and
-    tests/unit/fixtures/site/pre-envelope/index.html for the golden copy)
-    word for word (owner decision 2026-09-09) with exactly these substitutions:
-    the document count and the tool count are facts, example and identifier
-    digits are marked literals, and "Kommer snart" is the planned badge. -#}
+{#- The Norwegian landing: one page, six sections (owner decision 2026-10-07,
+    superseding the word-for-word migration of 2026-09-09). Every count is a
+    fact; every digit in an example, a quotation or an external citation is a
+    marked literal. The connector claim is gated on the release observation
+    (oauth_discovery_consistent), so the page stops saying "works today" the
+    release OAuth stops being attested, and points to running it locally.
+    Access is through the OAuth connector only (owner decision 2026-10-07):
+    the page offers no other way into the hosted service. LLHB values come from
+    benchmarks/llhb/PUBLICATION.json through `benchmark`, and the section is
+    absent when no manifest exists (ADR-0014, ADR:706). The quoted law text
+    is folketrygdloven § 8-18 first paragraph, verbatim from the corpus. -#}
 {% extends "_base.html" %}
 {% block main %}
-    <span class="tag">Privat beta</span>
+{% set oauth = reading("hosted.comparisons.oauth_discovery_consistent", kind="hosted") %}
     <h1>Norsk lovtekst KI-en ikke dikter opp.</h1>
-    <p class="lede">lovspor gir ChatGPT, Claude og de KI-verktøyene du allerede bruker <strong>den faktiske teksten</strong> i norske lover og forskrifter — med henvisninger du kan etterprøve, ikke paragrafnumre modellen har funnet på.</p>
+    <p class="lede">lovspor gir ChatGPT, Claude og de KI-verktøyene du allerede bruker <strong>den faktiske teksten</strong> i norske lover og forskrifter — med henvisninger du kan etterprøve, ikke paragrafnumre modellen har funnet på. Det er en åpen <a href="https://modelcontextprotocol.io">MCP</a>-server over {{ fact("corpus.documents", kind="corpus") }} lover og sentrale forskrifter, med {{ fact("code.tool_surface.tool_count", kind="code") }} verktøy som slår opp, søker og etterprøver.</p>
 
+    <h2>Et spørsmål du kan stille</h2>
     <div class="panel">
-      Spør en vanlig KI om <code><span data-literal>folketrygdloven § 8-18</span></code>, og den svarer med selvtillit — ofte med henvisning til paragrafer som ikke finnes. <span class="accent">I juss er et sannsynlig svar et farlig svar.</span> lovspor gjør at modellen siterer den virkelige bestemmelsen, eller sier at den ikke vet.
+      <p><strong>«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»</strong></p>
+      <p>Med lovspor slår modellen opp <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span> «Sykepenger fra arbeidsgiveren»</a> og siterer den:</p>
+      <blockquote><p>«For å få rett til sykepenger fra arbeidsgiveren må arbeidstakeren ha vært ansatt hos arbeidsgiveren i minst fire uker (opptjeningstid).»</p></blockquote>
+      <p>Verktøyet sjekker også henvisningen bestemmelsen gjør videre, til <span data-literal>§ 8-7</span>.</p>
+      <p>Spør du i stedet om <span data-literal>folketrygdloven § 8-99</span>, svarer verktøyet at bestemmelsen ikke finnes. <span class="accent">I juss er et sannsynlig svar et farlig svar.</span></p>
     </div>
 
-    <h2>Hva det er</h2>
-    <p>En <a href="https://modelcontextprotocol.io">MCP</a>-server over et løpende oppdatert, hash-verifisert korpus av norsk rett — <strong>{{ fact("corpus.documents", kind="corpus") }} lover og sentrale forskrifter</strong> som gjelder i dag. {{ fact("code.tool_surface.tool_count", kind="code") }} verktøy: semantisk søk, etterprøving av henvisninger og sitater, oppslag i enkeltbestemmelser, endringshistorikk og diff. Hvert svar kan spores tilbake til ordlyden i kilden.</p>
+    <h2>Koble til</h2>
+{% if oauth == "true" %}
+    <p>Som connector i Claude.ai og ChatGPT virker det i dag: du logger inn, og har ingenting å lime inn.</p>
+{% else %}
+    <p><span class="accent">Den driftede connectoren er ikke tilgjengelig akkurat nå</span>: ved denne utgivelsen er innloggingen ikke bekreftet (sammenligningen er {{ fact("hosted.comparisons.oauth_discovery_consistent", kind="hosted") }}; se <a href="/status/">status</a>). Kjør det selv i mellomtiden, som under.</p>
+{% endif %}
+    <ol>
+      <li>Legg til en egendefinert connector med adressen <code>https://lovspor.no/mcp</code> (i ChatGPT: slå på utviklermodus først, og velg <strong>OAuth</strong>).</li>
+      <li>I Claude: velg <strong>Register automatically</strong> for klientregistrering.</li>
+      <li>Logg inn på siden som åpnes.</li>
+    </ol>
+    <p>Eller kjør det selv, uten konto. I Claude Code er det to linjer:</p>
+    <pre>uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+    <p><a href="/connect/">Alle testede framgangsmåter, klient for klient →</a></p>
+{% if benchmark %}
 
-    <h2>Hvem det er for</h2>
-    <p><strong>Alle.</strong> Motoren er åpen kildekode under <span data-literal>AGPL-3.0</span>, og korpuset bygges fra Lovdatas åpne data. Trenger du norsk lovtekst i et KI-verktøy, kan du kjøre hele greia selv — uten å spørre noen, og uten å betale for det.</p>
-    <p>Den driftede tjenesten er i privat beta fordi jeg drifter den alene. <span class="accent">Koden er det ikke.</span></p>
+    <h2>Hvor godt virker det?</h2>
+    <p>Vi måler det med LLHB: de samme spørsmålene om norsk lov, stilt til {{ fact(benchmark.model.ids.model, kind="code") }} uten og med lovspors verktøy, {{ fact(benchmark.pair.ids.cases, kind="code") }} {{ benchmark.pair.wording }}. Hver henvisning i svaret kontrolleres maskinelt mot lovteksten; ingen språkmodell dømmer. <span class="tag">{{ benchmark.pair.label }}</span></p>
+    <table>
+      <thead><tr><th></th><th>Uten verktøy</th><th>Med lovspor</th></tr></thead>
+      <tbody>
+{% for key in ["citation_hallucination_rate", "citation_accuracy"] %}
+{% set row = benchmark[key] %}
+        <tr><td>{{ row.wording }}</td><td>{{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }} ({{ fact(row.ids.control_percent, kind="code") }} %)</td><td>{{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }} ({{ fact(row.ids.treatment_percent, kind="code") }} %)</td></tr>
+{% endfor %}
+{% for key in ["correct_provision_identification", "false_premise_rejection_rate"] %}
+{% set row = benchmark[key] %}
+        <tr><td>{{ row.wording }}</td><td>{{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }}</td><td>{{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }}</td></tr>
+{% endfor %}
+      </tbody>
+    </table>
+    <p><strong>Det som ikke ble bedre.</strong></p>
+    <ul>
+{% set row = benchmark.no_invention_rate %}
+      <li>{{ row.wording }}: {{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }} uten verktøy, {{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }} med ({{ row.label }}).</li>
+{% set row = benchmark.c2_hallucination %}
+      <li>{{ row.wording }}: {{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }} uten verktøy, {{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }} med.</li>
+      <li>Over {{ fact(benchmark.stability.ids.repeats, kind="code") }} {{ benchmark.stability.wording }} holder gevinsten i treffsikre henvisninger, men nedgangen i oppdiktede henvisninger gjør det ikke hver gang ({{ benchmark.stability.label }}).</li>
+    </ul>
+    <p class="muted">LLHB måler oppførsel på denne referansen. Den viser ikke at lovspor fjerner hallusinasjoner eller garanterer juridisk riktige svar.</p>
+
+    <h3>Hvordan det står seg mot andre målinger</h3>
+{% set row = benchmark.citation_hallucination_rate %}
+    <p>Juridiske hallusinasjoner er godt dokumentert, men nesten bare for amerikansk rett på engelsk. <a href="https://doi.org/10.1093/jla/laae003">Dahl mfl. (<span data-literal>2024</span>)</a> fant at generelle språkmodeller uten kilder hallusinerte i <span data-literal>58–88 %</span> av svarene om amerikanske rettsavgjørelser. <a href="https://doi.org/10.1111/jels.12413">Magesh mfl. (<span data-literal>2025</span>)</a> fant at kommersielle juridiske verktøy med kildesøk (RAG) fortsatt hallusinerte i <span data-literal>17–33 %</span> av svarene. Etablerte benchmarker som <a href="https://arxiv.org/abs/2308.11462">LegalBench</a> og <a href="https://arxiv.org/abs/2110.00976">LexGLUE</a> måler juridisk resonnering og klassifisering, ikke oppdiktede kildehenvisninger. LLHB er et supplement: norske lover og forskrifter på bokmål, samme modell med og uten lovspors verktøy, og hver henvisning kontrolleres maskinelt mot en fastlåst lovtekst. I en post hoc-diagnostisk kjøring falt andelen svar med en oppdiktet henvisning fra {{ fact(row.ids.control_percent, kind="code") }} % til {{ fact(row.ids.treatment_percent, kind="code") }} %, men forskjellen var ikke stabil over fem gjentakelser. Tallene er ikke direkte sammenlignbare: jurisdiksjon, språk, oppgavedefinisjon, modeller og tidspunkt er ulike.</p>
+    <p class="muted">Referanser: Dahl, Magesh, Suzgun og Ho, «Large Legal Fictions», <em>Journal of Legal Analysis</em> (<a href="https://arxiv.org/abs/2401.01301">arXiv</a>); Magesh, Surani, Dahl, Suzgun, Manning og Ho, «Hallucination-Free?», <em>Journal of Empirical Legal Studies</em> (<a href="https://arxiv.org/abs/2405.20362">arXiv</a>).</p>
+{% endif %}
+
+    <h2>Kilder</h2>
+    <ul>
+      <li><strong>Lover og sentrale forskrifter:</strong> Lovdatas åpne data (publicData), under <span data-literal>NLOD 2.0</span>.</li>
+      <li><strong>EU og EØS:</strong> lenkene til EU-rettsaktene en lov gjennomfører, som CELEX-koder.</li>
+      <li><strong>Lokale forskrifter:</strong> observert på kommunenes egne nettsider og publisert med hjemmel i <span data-literal>åndsverkloven § 14</span>, merket som observert, ikke hevdet å gjelde. I MCP får du dem bare når du ber om dem, og de publiseres ikke på dette nettstedet.</li>
+    </ul>
 
     <h2>Hva det dekker — ærlig</h2>
     <div class="cover">
@@ -40,20 +98,9 @@
         </ul>
       </div>
     </div>
-    <p class="muted">Kilde: Lovdatas åpne data (<span data-literal>NLOD 2.0</span>). lovspor er et oppslagsverktøy som viser lovteksten — det er ikke juridisk rådgivning.</p>
+    <p class="muted">lovspor er et oppslagsverktøy som viser lovteksten — det er ikke juridisk rådgivning.</p>
 
-    <h2>Slik bruker du det</h2>
-    <p>Inne i KI-verktøyet du allerede jobber i — ingen ny app å lære.</p>
-    <ul>
-      <li><strong>Som connector i ChatGPT og Claude</strong> — ett klikk, ingenting å konfigurere. <em>{{ badge("planned") }} — slik de fleste vil bruke det.</em></li>
-      <li><strong>I Claude Code, Codex eller Cursor</strong> — virker i dag; legg inn tokenet på én linje:</li>
-    </ul>
-    <pre>claude mcp add --transport http lovverk \
-  https://lovspor.no/mcp \
-  --header "Authorization: Bearer YOUR_TOKEN"</pre>
-
-    <h2>Få tilgang</h2>
-    <p>Privat beta. Send meg en e-post for et token.</p>
-    <p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20tilgang">Be om et beta-token →</a></p>
-    <p class="muted">Eller kjør det selv — motoren er åpen kildekode under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+    <h2>Åpen kildekode</h2>
+    <p>Motoren er åpen kildekode under <span data-literal>AGPL-3.0</span>, og korpuset bygges fra Lovdatas åpne data. Trenger du norsk lovtekst i et KI-verktøy, kan du kjøre hele greia selv — uten å spørre noen, og uten å betale for det: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+    <p class="muted">Jeg drifter tjenesten alene. Spørsmål og tilbakemeldinger: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
 {% endblock %}

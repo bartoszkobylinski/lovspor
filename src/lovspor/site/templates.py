@@ -11,7 +11,7 @@ settings are fixed here once:
 * ``keep_trailing_newline``, ``trim_blocks``, ``lstrip_blocks``: byte-stable
   output that does not depend on template whitespace accidents.
 * ``auto_reload=False``: templates are read once, at ``lovspor_commit``.
-* No clock global, no ``now`` (Decision 3). ``fact`` and ``badge`` are not
+* No clock global, no ``now`` (Decision 3). ``fact``, ``reading`` and ``badge`` are not
   environment globals either: they are bound per page by
   ``page_globals`` so the ledger knows which page rendered a value.
 * ``stylesheet`` *is* an environment global, and legitimately: it is one
@@ -35,7 +35,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from markupsafe import Markup
 
 from lovspor.site.errors import SiteBuildError
-from lovspor.site.facts import FactLedger, FactRegistry, Lang, fact_renderer
+from lovspor.site.facts import FactLedger, FactRegistry, Lang, fact_reader, fact_renderer
 from lovspor.site.style import stylesheet
 
 PageStatus = Literal["current", "planned", "research", "early_access"]
@@ -76,9 +76,10 @@ def site_environment() -> Environment:
 def page_globals(
     page: str, lang: Lang, registry: FactRegistry, ledger: FactLedger
 ) -> dict[str, object]:
-    """The render context of one page: its language, its ``fact`` and its ``badge``."""
+    """The render context of one page: its language, ``fact``, ``reading`` and ``badge``."""
     return {
         "lang": lang,
         "fact": fact_renderer(page, lang, registry, ledger),
+        "reading": fact_reader(page, registry, ledger),
         "badge": partial(badge, lang=lang),
     }

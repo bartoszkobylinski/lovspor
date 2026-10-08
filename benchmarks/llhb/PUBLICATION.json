@@ -1,0 +1,180 @@
+{
+  "schema_version": "1",
+  "benchmark": "LLHB v1",
+  "approved_by_role": "project owner",
+  "approved_on": "2026-10-07",
+  "entries": [
+    {
+      "id": "pair",
+      "source": "benchmarks/llhb/results/reports/llhb-v1-run-20260812-frozen2-vs-treatfrozen4-scorev2.json",
+      "values": {
+        "cases": {"field": "cases_scored", "format": "count"},
+        "scorer": {"field": "scorer_version", "format": "text"}
+      },
+      "label": {
+        "nb": "post hoc-diagnostisk resultat, ikke et bekreftende",
+        "en": "post-hoc diagnostic result, not a confirmatory one"
+      },
+      "ruling": "DECISIONS.md #30(a)",
+      "wording": {
+        "nb": "spørsmål per arm",
+        "en": "cases per arm"
+      }
+    },
+    {
+      "id": "model",
+      "source": "benchmarks/llhb/results/runs/llhb-v1-run-20260812-frozen2/run-metadata.json",
+      "values": {
+        "model": {"field": "model_id", "format": "text"}
+      },
+      "label": {
+        "nb": "post hoc-diagnostisk resultat, ikke et bekreftende",
+        "en": "post-hoc diagnostic result, not a confirmatory one"
+      },
+      "ruling": "DECISIONS.md #30(a)",
+      "wording": {
+        "nb": "modell",
+        "en": "model"
+      }
+    },
+    {
+      "id": "citation_hallucination_rate",
+      "source": "benchmarks/llhb/results/reports/llhb-v1-run-20260812-frozen2-vs-treatfrozen4-scorev2.json",
+      "values": {
+        "control_numerator": {"field": "metrics.citation_hallucination_rate.control.numerator", "format": "count"},
+        "control_denominator": {"field": "metrics.citation_hallucination_rate.control.denominator", "format": "count"},
+        "control_percent": {"field": "metrics.citation_hallucination_rate.control.rate", "format": "percent"},
+        "treatment_numerator": {"field": "metrics.citation_hallucination_rate.treatment.numerator", "format": "count"},
+        "treatment_denominator": {"field": "metrics.citation_hallucination_rate.treatment.denominator", "format": "count"},
+        "treatment_percent": {"field": "metrics.citation_hallucination_rate.treatment.rate", "format": "percent"}
+      },
+      "label": {
+        "nb": "post hoc-diagnostisk resultat, ikke et bekreftende",
+        "en": "post-hoc diagnostic result, not a confirmatory one"
+      },
+      "ruling": "DECISIONS.md #30(a)",
+      "wording": {
+        "nb": "Svar med minst én oppdiktet henvisning",
+        "en": "Answers containing an invented citation"
+      }
+    },
+    {
+      "id": "citation_accuracy",
+      "source": "benchmarks/llhb/results/reports/llhb-v1-run-20260812-frozen2-vs-treatfrozen4-scorev2.json",
+      "values": {
+        "control_numerator": {"field": "metrics.citation_accuracy.control.numerator", "format": "count"},
+        "control_denominator": {"field": "metrics.citation_accuracy.control.denominator", "format": "count"},
+        "control_percent": {"field": "metrics.citation_accuracy.control.rate", "format": "percent"},
+        "treatment_numerator": {"field": "metrics.citation_accuracy.treatment.numerator", "format": "count"},
+        "treatment_denominator": {"field": "metrics.citation_accuracy.treatment.denominator", "format": "count"},
+        "treatment_percent": {"field": "metrics.citation_accuracy.treatment.rate", "format": "percent"}
+      },
+      "label": {
+        "nb": "post hoc-diagnostisk resultat, ikke et bekreftende",
+        "en": "post-hoc diagnostic result, not a confirmatory one"
+      },
+      "ruling": "DECISIONS.md #30(a)",
+      "wording": {
+        "nb": "Henvisninger som peker på en bestemmelse som finnes",
+        "en": "Citation accuracy (citations that point at a provision that exists)"
+      }
+    },
+    {
+      "id": "correct_provision_identification",
+      "source": "benchmarks/llhb/results/reports/llhb-v1-run-20260812-frozen2-vs-treatfrozen4-scorev2.json",
+      "values": {
+        "control_numerator": {"field": "metrics.correct_provision_identification.control.numerator", "format": "count"},
+        "control_denominator": {"field": "metrics.correct_provision_identification.control.denominator", "format": "count"},
+        "treatment_numerator": {"field": "metrics.correct_provision_identification.treatment.numerator", "format": "count"},
+        "treatment_denominator": {"field": "metrics.correct_provision_identification.treatment.denominator", "format": "count"}
+      },
+      "label": {
+        "nb": "post hoc-diagnostisk resultat, ikke et bekreftende",
+        "en": "post-hoc diagnostic result, not a confirmatory one"
+      },
+      "ruling": "DECISIONS.md #30(a)",
+      "wording": {
+        "nb": "Riktig bestemmelse funnet",
+        "en": "Correct provision identified"
+      }
+    },
+    {
+      "id": "false_premise_rejection_rate",
+      "source": "benchmarks/llhb/results/reports/llhb-v1-run-20260812-frozen2-vs-treatfrozen4-scorev2.json",
+      "values": {
+        "control_numerator": {"field": "metrics.false_premise_rejection_rate.control.numerator", "format": "count"},
+        "control_denominator": {"field": "metrics.false_premise_rejection_rate.control.denominator", "format": "count"},
+        "treatment_numerator": {"field": "metrics.false_premise_rejection_rate.treatment.numerator", "format": "count"},
+        "treatment_denominator": {"field": "metrics.false_premise_rejection_rate.treatment.denominator", "format": "count"}
+      },
+      "label": {
+        "nb": "post hoc-diagnostisk resultat, ikke et bekreftende",
+        "en": "post-hoc diagnostic result, not a confirmatory one"
+      },
+      "ruling": "DECISIONS.md #30(a)",
+      "wording": {
+        "nb": "Feil premiss i spørsmålet avvist",
+        "en": "False premise rejected"
+      }
+    },
+    {
+      "id": "no_invention_rate",
+      "source": "benchmarks/llhb/results/reports/llhb-v1-run-20260812-frozen2-vs-treatfrozen4-scorev2.json",
+      "values": {
+        "control_numerator": {"field": "metrics.no_invention_rate.control.numerator", "format": "count"},
+        "control_denominator": {"field": "metrics.no_invention_rate.control.denominator", "format": "count"},
+        "treatment_numerator": {"field": "metrics.no_invention_rate.treatment.numerator", "format": "count"},
+        "treatment_denominator": {"field": "metrics.no_invention_rate.treatment.denominator", "format": "count"}
+      },
+      "label": {
+        "nb": "analyse av avgjorte tilfeller",
+        "en": "resolved-case analysis"
+      },
+      "ruling": "DECISIONS.md #30(c)",
+      "wording": {
+        "nb": "Spørsmål utenfor korpuset besvart uten å dikte opp",
+        "en": "Out-of-corpus questions answered without inventing"
+      }
+    },
+    {
+      "id": "c2_hallucination",
+      "source": "benchmarks/llhb/results/reports/llhb-v1-run-20260812-frozen2-vs-treatfrozen4-scorev2.json",
+      "values": {
+        "control_numerator": {"field": "per_category.C2.control.numerator", "format": "count"},
+        "control_denominator": {"field": "per_category.C2.control.denominator", "format": "count"},
+        "treatment_numerator": {"field": "per_category.C2.treatment.numerator", "format": "count"},
+        "treatment_denominator": {"field": "per_category.C2.treatment.denominator", "format": "count"}
+      },
+      "label": {
+        "nb": "post hoc-diagnostisk resultat, ikke et bekreftende",
+        "en": "post-hoc diagnostic result, not a confirmatory one"
+      },
+      "ruling": "DECISIONS.md #30(a)",
+      "wording": {
+        "nb": "«Finn bestemmelsen»-spørsmål med en oppdiktet henvisning",
+        "en": "Find-the-provision answers containing an invented citation"
+      }
+    },
+    {
+      "id": "stability",
+      "source": "benchmarks/llhb/results/reports/llhb-v1-stability30x5.json",
+      "values": {
+        "repeats": {"field": "repeats", "format": "count"}
+      },
+      "requires": [
+        {"field": "metrics.citation_accuracy.delta.maximum", "below": 0},
+        {"field": "metrics.citation_hallucination_rate.delta.minimum", "below": 0},
+        {"field": "metrics.citation_hallucination_rate.delta.maximum", "above": 0}
+      ],
+      "label": {
+        "nb": "variansmåling på et utvalg, ikke et nivå",
+        "en": "variance measurement on a subset, not a level"
+      },
+      "ruling": "DECISIONS.md #30(a)",
+      "wording": {
+        "nb": "gjentakelser",
+        "en": "repeats"
+      }
+    }
+  ]
+}

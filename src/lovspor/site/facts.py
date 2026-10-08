@@ -45,7 +45,7 @@ from lovspor.site.errors import SiteBuildError
 
 FactKind = Literal["code", "corpus", "hosted"]
 Lang = Literal["nb", "en"]
-FactValue = str | int | bool
+FactValue = str | int | bool | float
 
 CAPABILITIES_ARTIFACT = "deployment-capabilities.json"
 MANIFEST_ARTIFACT = "corpus/site-manifest.json"
@@ -56,6 +56,7 @@ _DEGRADED: dict[Lang, str] = {
     "en": "not attested at this release — unobserved ({reason}), observed {observed_at}",
 }
 _THOUSANDS: dict[Lang, str] = {"nb": "\u00a0", "en": ","}
+_DECIMAL: dict[Lang, str] = {"nb": ",", "en": "."}
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SPAN = Markup('<span data-fact="{id}" data-kind="{kind}">{text}</span>')
 
@@ -182,6 +183,8 @@ def _format_value(value: FactValue, lang: Lang) -> str:
         return "true" if value else "false"
     if isinstance(value, int):
         return f"{value:,}".replace(",", _THOUSANDS[lang])
+    if isinstance(value, float):
+        return f"{value:.1f}".replace(".", _DECIMAL[lang])
     return value
 
 
@@ -214,6 +217,24 @@ def fact_renderer(
         return _SPAN.format(id=source.id, kind=source.kind, text=_wording(source, lang))
 
     return fact
+
+
+def fact_reader(
+    page: str, registry: FactRegistry, ledger: FactLedger
+) -> Callable[..., FactValue | None]:
+    """The per-page ``reading(id, *, kind)``: a value a template branches on.
+
+    A status that decides which copy a page shows is still a reading of an
+    artifact, so it passes the same kind check and lands in the same ledger;
+    an unobserved hosted value reads as ``None``, never as a previous value.
+    """
+
+    def reading(fact_id: str, *, kind: FactKind) -> FactValue | None:
+        source = _checked(page, registry, fact_id, kind)
+        ledger.record(page, source)
+        return source.value
+
+    return reading
 
 
 def fact_text_renderer(
