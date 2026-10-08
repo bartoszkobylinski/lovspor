@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import locale
 import os
 import subprocess
 import sys
@@ -110,18 +111,37 @@ def test_diff_preserves_names_newlines_and_every_file(tmp_path: Path):
 @pytest.mark.parametrize("operation", ["published", "planned_diff"])
 def test_utf8_reading_under_ascii_locale(state, operation):
     inputs, _, _ = state
+    # Exercise the reader in this process as well, so mutation test selection
+    # records the function coverage; the child also controls startup UTF-8 mode.
+    previous = locale.setlocale(locale.LC_CTYPE)
+    try:
+        locale.setlocale(locale.LC_CTYPE, "C")
+        [(doc_id, record)] = inputs.corpus.local_manifest().documents.items()
+        if operation == "published":
+            assert published(inputs.corpus, doc_id, record).markdown == (
+                inputs.corpus.path / record.markdown_path
+            ).read_bytes().decode("utf-8")
+        else:
+            diff = planned_diff(inputs.corpus, {record.markdown_path: "replacement\n"})
+            assert "§" in diff
+            assert diff.endswith("+replacement\n")
+    finally:
+        locale.setlocale(locale.LC_CTYPE, previous)
     # Disable Python's UTF-8 mode and locale coercion in a fresh interpreter.
     code = """
 import locale, sys
+assert not sys.flags.utf8_mode
 from lovspor.promotion.corpus import CorpusCheckout
 from lovspor.promotion.migrate import published, planned_diff
 assert locale.getencoding().lower() in ('ascii', 'us-ascii', 'ansi_x3.4-1968')
 c = CorpusCheckout(__import__('pathlib').Path(sys.argv[1]), [])
 i, r = next(iter(c.local_manifest().documents.items()))
 if sys.argv[2] == 'published':
-    assert '\\u00a7' in published(c, i, r).markdown
+    assert published(c, i, r).markdown == (c.path / r.markdown_path).read_bytes().decode('utf-8')
 else:
-    assert planned_diff(c, {r.markdown_path: 'replacement\\n'}).startswith('--- a/')
+    diff = planned_diff(c, {r.markdown_path: 'replacement\\n'})
+    assert '\\u00a7' in diff
+    assert diff.endswith('+replacement\\n')
 """
     env = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
     result = subprocess.run(
@@ -144,11 +164,14 @@ def test_unreadable_observations_name_the_error(state):
     )
 
 
-def test_front_matter_ignores_body_keys_and_horizontal_rules(state):
+@pytest.mark.parametrize("rules", [1, 2, 4])
+def test_front_matter_ignores_body_keys_and_horizontal_rules(state, rules):
     _, document, _ = state
     changed = document.model_copy(
         update={
-            "markdown": document.markdown + '\nsource_url: "body"\n\n---\nsource_sha256: "body"\n'
+            "markdown": document.markdown
+            + '\nsource_url: "body"\n'
+            + '\n---\nsource_sha256: "body"\n' * rules
         }
     )
     assert _front_matter(changed) == _front_matter(document)
@@ -278,6 +301,9 @@ def test_cli_current_document_and_partial_selector_messages(state):
         f"{document.doc_id}: already at extractor v{EXTRACTOR_VERSION}\n"
         "Nothing to migrate; nothing written, nothing to commit.\n"
     )
+    selected = _migrate(inputs, "--authority", AUTHORITY, "--slug", document.record.slug)
+    assert selected.exit_code == 0, selected.output
+    assert selected.stdout == result.stdout
     for option, value in [("--authority", AUTHORITY), ("--slug", document.record.slug)]:
         result = _migrate(inputs, option, value)
         assert result.exit_code == 1
