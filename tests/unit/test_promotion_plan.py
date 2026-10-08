@@ -157,3 +157,59 @@ def test_an_approval_of_another_text_or_extractor_is_refused(
     assert str(refused.value) == (
         "the approval was given for another text or extractor; preview and approve again"
     )
+
+
+def test_an_old_approval_carried_to_the_running_extractor_stands() -> None:
+    """Decisions §19: consumers accept a carry exactly as a fresh approval."""
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION - 1)
+
+    assert require_approval(approval, prepared, {approval: EXTRACTOR_VERSION}) is approval
+
+
+@pytest.mark.parametrize("destination", [EXTRACTOR_VERSION - 1, EXTRACTOR_VERSION + 1])
+def test_a_carry_to_another_extractor_does_not_authorize_this_engine(destination: int) -> None:
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION - 2)
+
+    with pytest.raises(PromotionRefusedError, match="another text or extractor"):
+        require_approval(approval, prepared, {approval: destination})
+
+
+@pytest.mark.parametrize("changed", ["decided_at", "artifact"])
+def test_a_carry_of_another_decision_does_not_authorize_the_standing_one(changed: str) -> None:
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION - 1)
+    if changed == "decided_at":
+        other = approval.model_copy(update={"decided_at": datetime(2026, 8, 21, tzinfo=UTC)})
+    else:
+        other = approval.model_copy(
+            update={"artifact": approval.artifact.model_copy(update={"sha256": "b" * 64})}
+        )
+
+    with pytest.raises(PromotionRefusedError, match="another text or extractor"):
+        require_approval(approval, prepared, {other: EXTRACTOR_VERSION})
+
+
+def test_a_carried_approval_still_requires_exactly_the_approved_text() -> None:
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, "0" * 64, EXTRACTOR_VERSION - 1)
+
+    with pytest.raises(PromotionRefusedError, match="another text or extractor"):
+        require_approval(approval, prepared, {approval: EXTRACTOR_VERSION})
+
+
+@pytest.mark.parametrize("decision", [Decision.REJECT, Decision.HOLD])
+def test_a_carry_never_overrides_a_standing_refusal(decision: Decision) -> None:
+    prepared = _prepared()
+    refusal = _decision(decision, prepared.identity.content_hash, EXTRACTOR_VERSION - 1)
+
+    with pytest.raises(PromotionRefusedError, match=f"the standing decision is {decision.value}"):
+        require_approval(refusal, prepared, {refusal: EXTRACTOR_VERSION})
+
+
+def test_a_fresh_approval_stands_even_when_its_carry_mapping_names_another_extractor() -> None:
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION)
+
+    assert require_approval(approval, prepared, {approval: EXTRACTOR_VERSION - 1}) is approval
