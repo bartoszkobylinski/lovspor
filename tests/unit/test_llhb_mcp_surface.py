@@ -256,7 +256,7 @@ class TestToolConfig:
         assert names and all(re.match(pattern, name) for name in names)
 
     def test_the_frozen_surface_document_is_what_the_code_serves(self, tmp_path: Path) -> None:
-        """tool-surface-v8.json is the expectation check_fairness compares a
+        """tool-surface-v9.json is the expectation check_fairness compares a
         run's declaration against, so it must be the code's own account,
         re-derived here on every run. Two corpora with disjoint content are
         the witness that the surface comes from build_server, not from the
@@ -332,16 +332,25 @@ class TestToolConfig:
         name changes; with the new parameters omitted existing calls answer
         byte-identically. Taken with the S10b implementation.
 
-        v1 through v7 stay committed untouched so the runs that recorded
+        v8 -> v9 (2026-10-08): issue #570 — every input schema gains
+        ``additionalProperties: false``, and the server refuses at call time
+        any call its listed schema does not admit (unknown tool, undeclared
+        argument, wrong JSON type, null where none is allowed, missing
+        required argument; lovspor.mcp_contract). No tool name, description
+        or output schema changes; supported calls answer byte-identically.
+        The call-time refusal is behaviour the hash cannot see, so the bump
+        is taken between runs.
+
+        v1 through v8 stay committed untouched so the runs that recorded
         their hashes remain verifiable (check_fairness --surface-path);
-        this test guards the CURRENT apparatus, which v8 describes."""
+        this test guards the CURRENT apparatus, which v9 describes."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
                 / "benchmarks"
                 / "llhb"
                 / "runner"
-                / "tool-surface-v8.json"
+                / "tool-surface-v9.json"
             ).read_text(encoding="utf-8")
         )
         corpora = (

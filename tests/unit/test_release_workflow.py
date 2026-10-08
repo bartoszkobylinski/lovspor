@@ -276,10 +276,14 @@ def test_lockfile_carries_the_same_version_as_pyproject() -> None:
 
 
 def test_the_mcp_cap_is_load_bearing_because_the_server_imports_fastmcp() -> None:
-    """If this import goes away, the `<2` ceiling deserves re-review."""
-    mcp_source = (_ROOT / "src" / "lovspor" / "mcp.py").read_text(encoding="utf-8")
+    """If this import goes away, the `<2` ceiling deserves re-review.
 
-    assert "from mcp.server.fastmcp import FastMCP" in mcp_source
+    ``build_server`` constructs ``ContractServer``, the FastMCP subclass that
+    enforces the call contract (#570), so the import lives in its module."""
+    contract_source = (_ROOT / "src" / "lovspor" / "mcp_contract.py").read_text(encoding="utf-8")
+
+    assert "from mcp.server.fastmcp import FastMCP" in contract_source
+    assert "class ContractServer(FastMCP):" in contract_source
 
 
 def test_wheel_ships_only_the_lovspor_package() -> None:

@@ -790,6 +790,7 @@ dependencies = [
     { name = "anyio" },
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "lxml" },
     { name = "mcp" },
     { name = "numpy" },
@@ -812,7 +813,6 @@ embeddings = [
 dev = [
     { name = "bandit" },
     { name = "hypothesis" },
-    { name = "jsonschema" },
     { name = "lxml-stubs" },
     { name = "mutmut" },
     { name = "mypy" },
@@ -830,6 +830,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "jsonschema", specifier = ">=4.23" },
     { name = "lxml", specifier = ">=5.3.0" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
     { name = "numpy", specifier = ">=1.26.0" },
@@ -849,7 +850,6 @@ provides-extras = ["embeddings"]
 dev = [
     { name = "bandit", specifier = ">=1.9" },
     { name = "hypothesis", specifier = ">=6.115.0" },
-    { name = "jsonschema", specifier = ">=4.23" },
     { name = "lxml-stubs", specifier = ">=0.5.1" },
     { name = "mutmut", specifier = "==3.8.0" },
     { name = "mypy", specifier = ">=1.13.0" },
