@@ -103,7 +103,7 @@ def refusals(name: str, arguments: Mapping[str, Any], tools: Mapping[str, Tool])
     undeclared = sorted(set(arguments) - set(properties))
     return [
         *(_undeclared(name, argument, tools) for argument in undeclared),
-        *_invalid(tool.inputSchema, declared),
+        *_invalid(tool.inputSchema, properties, declared),
         *_reread(properties, declared),
     ]
 
@@ -134,8 +134,9 @@ def _served_axes(tools: Mapping[str, Tool]) -> str:
     return f"the time axes served are: {', '.join(served)}"
 
 
-def _invalid(schema: dict[str, Any], arguments: dict[str, Any]) -> list[str]:
-    properties: dict[str, Any] = schema.get("properties", {})
+def _invalid(
+    schema: dict[str, Any], properties: dict[str, Any], arguments: dict[str, Any]
+) -> list[str]:
     missing = [
         f"missing required argument {argument!r}"
         for argument in schema.get("required", [])

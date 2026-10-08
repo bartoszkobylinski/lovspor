@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/mcp_contract.py"
+symbol = "_shown"
+registered = "2026-10-08, PR #593, from run 37743229850"
+mutation = """
+-    text = json.dumps(value, ensure_ascii=False)
++    text = json.dumps(value, ensure_ascii=None)
+"""
+justification = """
+`json.dumps` tests ensure_ascii only for truth: None and False are both falsy and
+select the same non-escaping string encoder, so the quoted argument value in a
+refusal message is identical under both on every input, non-ASCII included (the
+ensure_ascii=True and dropped-argument mutants, which DO escape, are killed by
+test_a_norwegian_value_is_shown_unescaped). Python stdlib semantics, as for
+promotion.writer._json.
+"""

@@ -337,6 +337,13 @@ class TestRefusalsOnSchemasNotYetServed:
 
         assert text == f"argument 'n' must be integer, got string \"{'9' * 58}\""
 
+    def test_a_norwegian_value_is_shown_unescaped(self) -> None:
+        tools = {"t": _tool("t", {"properties": {"n": {"type": "integer"}}})}
+
+        (text,) = refusals("t", {"n": "særlov § 5"}, tools)
+
+        assert text == "argument 'n' must be integer, got string \"særlov § 5\""
+
     def test_an_optional_string_that_is_not_json_is_kept(self) -> None:
         nullable = {"anyOf": [{"type": "string"}, {"type": "null"}]}
         tools = {"t": _tool("t", {"properties": {"d": nullable}})}
