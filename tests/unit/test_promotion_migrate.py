@@ -15,19 +15,25 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 from typer.testing import Result
 
+from lovspor.errors import PromotionRefusedError
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
 from lovspor.promotion import extract
+from lovspor.promotion.corpus import CorpusCheckout
 from lovspor.promotion.decisions import DECISIONS_FILENAME
 from lovspor.promotion.extract import EXTRACTOR_VERSION
+from lovspor.promotion.fields import read_regulation
+from lovspor.promotion.migrate import Published, published, published_klass_version
 from tests.unit.promotion_cli_fixtures import (
     AUTHORITY,
     FIRST_SEEN,
+    REVIEWER,
+    REVIEWER_ROLE,
     Decision,
     approve,
     git,
@@ -379,6 +385,157 @@ class TestRefusals:
 
         assert result.exit_code == 1
         assert f"no local regulation {AUTHORITY}/finnes-ikke" in result.output
+
+
+def _promoted_once(
+    root: Path, corpus: Path, tmp_path: Path, mp: pytest.MonkeyPatch, reads: object = None
+) -> str:
+    """One capture, promoted with `promote local` by the earlier engine reading it as ``reads``."""
+    a = store(root, html_page())
+    with _earlier_engine(mp, reads):  # type: ignore[arg-type]
+        _approve(a, tmp_path)
+        result = promote("local", a, corpus)
+        assert result.exit_code == 0, result.output
+        _commit_printed(corpus, result.output)
+    return a
+
+
+def _refused_untouched(root: Path, corpus: Path) -> Result:
+    before, log_before = tree(corpus), _log(root)
+    result = _migrate_one(corpus)
+    assert result.exit_code == 1, result.output
+    assert tree(corpus) == before
+    assert _log(root) == log_before
+    return result
+
+
+class TestRefusalsOfWhatIsNotAMigration:
+    def test_a_rendering_that_would_change_is_refused(
+        self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def other_ikraft_text(lines: tuple[str, ...]) -> object:
+            regulation, fields = read_regulation(lines)  # type: ignore[misc]
+            return regulation, fields.model_copy(update={"ikraft_text": "straks"})
+
+        a = _promoted_once(root, corpus, tmp_path, monkeypatch, other_ikraft_text)
+        _approve(a, tmp_path)
+
+        result = _refused_untouched(root, corpus)
+
+        assert "its rendering changes though its text does not" in result.output
+
+    def test_a_text_named_by_another_id_is_refused(
+        self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def other_date(lines: tuple[str, ...]) -> object:
+            regulation, fields = read_regulation(lines)  # type: ignore[misc]
+            return regulation.model_copy(update={"vedtaksdato": date(2018, 1, 1)}), fields
+
+        a = _promoted_once(root, corpus, tmp_path, monkeypatch, other_date)
+        _approve(a, tmp_path)
+
+        result = _refused_untouched(root, corpus)
+
+        assert "names its text otherwise" in result.output
+
+    def test_a_source_the_running_extractor_holds_is_refused(
+        self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def always_the_regulation(lines: tuple[str, ...]) -> object:
+            return read_regulation(REGULATION_LINES)
+
+        # No section heading: the running extractor holds it (no body).
+        a = store(root, html_page(tuple(x for x in REGULATION_LINES if not x.startswith("§"))))
+        with _earlier_engine(monkeypatch, always_the_regulation):
+            _approve(a, tmp_path)
+            _commit_printed(corpus, promote("local", a, corpus).output)
+
+        result = _refused_untouched(root, corpus)
+
+        assert f"extractor v{EXTRACTOR_VERSION} holds its source" in result.output
+
+    def test_a_version_the_log_does_not_reproduce_is_refused(
+        self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store(root, html_page(CHANGED), observed_at=FIRST_SEEN)
+        b = store(root, html_page(), observed_at=FIRST_SEEN + DAY)
+        with _earlier_engine(monkeypatch):
+            _approve(b, tmp_path)
+            _commit_printed(corpus, promote("local", b, corpus).output)
+        _approve(b, tmp_path)
+
+        result = _refused_untouched(root, corpus)
+
+        assert "v1 at extractor" in result.output
+        assert "another text; that is not a migration" in result.output
+
+    def test_a_withdrawn_document_is_refused_and_skipped_in_a_full_run(
+        self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _promoted_once(root, corpus, tmp_path, monkeypatch)
+        slug = str(_record(corpus)["slug"])
+        withdrawal = tmp_path / "withdrawal.json"
+        withdrawal.write_text(
+            json.dumps(
+                {
+                    "decision": "withdraw",
+                    "removed_reason": "withdrawn_misclassified",
+                    "decided_by": REVIEWER,
+                    "reviewer_role": REVIEWER_ROLE,
+                    "reason": "Siden er en høring, ikke en vedtatt forskrift.",
+                }
+            ),
+            encoding="utf-8",
+        )
+        withdrawn = invoke(
+            "promote",
+            "withdraw",
+            "--authority",
+            AUTHORITY,
+            "--slug",
+            slug,
+            "--corpus",
+            str(corpus),
+            "--decision",
+            str(withdrawal),
+        )
+        assert withdrawn.exit_code == 0, withdrawn.output
+        _commit_printed(corpus, withdrawn.output)
+
+        one = _refused_untouched(root, corpus)
+        every = _migrate(corpus)
+
+        assert "is withdrawn; a withdrawn document is never migrated" in one.output
+        assert every.exit_code == 0, every.output
+        assert "Nothing to migrate" in every.output
+
+
+class TestPublishedDocument:
+    def _published(self, corpus: Path) -> Published:
+        [(doc_id, record)] = CorpusCheckout(corpus, []).local_manifest().documents.items()
+        return published(CorpusCheckout(corpus, []), doc_id, record)
+
+    def test_the_klass_version_is_read_from_the_front_matter(
+        self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _promoted_once(root, corpus, tmp_path, monkeypatch)
+
+        document = self._published(corpus)
+
+        assert published_klass_version(document) == "131-2024"
+        bare = document.model_copy(update={"markdown": '---\nid: "x"\n---\n'})
+        with pytest.raises(PromotionRefusedError, match="names no klass_version"):
+            published_klass_version(bare)
+
+    def test_observations_that_do_not_read_are_refused(
+        self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _promoted_once(root, corpus, tmp_path, monkeypatch)
+        [path] = (corpus / LOCAL / AUTHORITY / "observations").glob("*.json")
+        path.write_text("{}", encoding="utf-8")
+
+        with pytest.raises(PromotionRefusedError, match="do not read"):
+            self._published(corpus)
 
 
 class TestTheMigratedStateIsReachableThroughSupportedInterfacesOnly:
