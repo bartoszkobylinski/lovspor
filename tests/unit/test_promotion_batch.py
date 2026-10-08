@@ -511,6 +511,11 @@ def _expected_markdown(report: dict, corpus: Path) -> str:
             f"- {key['source_url']}",
             f"- sha256 {key['sha256']}",
             f"- {item['doc_id']} v{item['version']} -> {item['markdown_path']} ({item['outcome']})",
+            *(
+                [f"- canonical page of {len(pages)} that carry this text (#566), all in the JSON"]
+                if (pages := item["sources"])
+                else []
+            ),
             f"- review: {item['review']}",
             f"- classifier: {item['classifier']['class_name']} on "
             f"{', '.join(item['classifier']['evidence'])}",
@@ -570,9 +575,9 @@ def test_batch_report_bytes_and_assessment_fields(
         "candidates": len(items),
         "ready": sum(i["outcome"] == "ready" for i in items),
         "unchanged": 0,
-        "held": int(scenario in {"duplicates", "mixed"}),
+        "held": int(scenario == "mixed"),
         "refused": int(scenario == "mixed"),
-        "sampled": 1 if scenario in {"duplicates", "listed"} else 2,
+        "sampled": 1 if scenario == "listed" else 2,
         "would_write": 2 if scenario == "approved" else 0,
     }
     assert report["summary"] == expected_counts
@@ -817,27 +822,29 @@ def _items_by_hold(report: dict[str, object]) -> dict[str | None, list[dict]]:
 class TestCandidateGroups:
     """#566: one regulation embedded on N pages is one candidate with N source pages."""
 
-    def test_one_regulation_on_many_pages_is_one_held_group(
+    def test_one_regulation_on_many_pages_is_one_candidate_from_its_canonical_page(
         self, batch: Batch, corpus: Path
     ) -> None:
-        shas = {slug: batch.add(sidebar_page(TITLES[0], n), slug) for n, slug in enumerate("dbca")}
+        slugs = ("d", "b", "nyheter/forskrift-om-renovasjon-og-slam", "a")
+        shas = {slug: batch.add(sidebar_page(TITLES[0], n), slug) for n, slug in enumerate(slugs)}
         batch.add(page(TITLES[1]), "other")
 
         batch.run(corpus)
 
         report = batch.report()
         assert len(set(shas.values())) == 4
-        assert report["holds_by_reason"] == {"batch:needs_canonical_source": 1}
+        assert report["holds_by_reason"] == {}
         assert report["summary"]["candidates"] == 2
-        (group,) = _items_by_hold(report)["batch:needs_canonical_source"]
-        assert [k["source_url"] for k in group["sources"]] == [f"{BASE}/{s}" for s in "abcd"]
-        assert [k["sha256"] for k in group["sources"]] == [shas[s] for s in "abcd"]
-        assert group["key"] == group["sources"][0]
-        assert group["outcome"] == "held"
-        assert not group["sampled"]
+        assert report["summary"]["ready"] == 2
+        (group,) = [i for i in report["items"] if i["sources"]]
+        listed = sorted(slugs)
+        assert [k["source_url"] for k in group["sources"]] == [f"{BASE}/{s}" for s in listed]
+        assert [k["sha256"] for k in group["sources"]] == [shas[s] for s in listed]
+        assert group["key"]["source_url"] == f"{BASE}/{slugs[2]}"
+        assert group["key"]["sha256"] == shas[slugs[2]]
+        assert (group["outcome"], group["hold"], group["sampled"]) == ("ready", None, True)
         assert group["doc_id"].startswith(f"lk-{AUTHORITY}-")
         assert len(group["content_hash"]) == 64
-        assert "#566" in group["detail"]
 
     def test_the_group_does_not_depend_on_the_classifier_row_order(
         self, batch: Batch, corpus: Path
@@ -867,7 +874,7 @@ class TestCandidateGroups:
         assert len({i["content_hash"] for i in held}) == 2
         assert all(i["detail"].startswith("2 candidates of this batch mint") for i in held)
 
-    def test_the_markdown_shows_a_group_as_one_line_with_the_first_pages(
+    def test_the_markdown_reviews_a_group_on_its_canonical_page(
         self, batch: Batch, corpus: Path
     ) -> None:
         for n in range(5):
@@ -877,31 +884,26 @@ class TestCandidateGroups:
 
         text = (batch.report_dir / "batch-0301-test-1.md").read_text(encoding="utf-8")
         (group,) = batch.report()["items"]
-        assert text.count("`batch:needs_canonical_source`") == 1
-        assert f"1 regulation, 5 pages: {group['doc_id']}" in text
-        assert f"content_hash {group['content_hash']}" in text
-        assert all(f"{BASE}/p{n} " in text for n in range(3))
-        assert f"{BASE}/p3" not in text
-        assert "and 2 more page(s), listed in batch-0301-test-1.json" in text
-        assert "| batch:needs_canonical_source | 1 |" in text
+        sample = text.split("## Sample for review\n\n", 1)[1].split("## Held and refused", 1)[0]
+        assert f"- {BASE}/p0\n" in sample
+        assert "- canonical page of 5 that carry this text (#566), all in the JSON" in sample
+        assert f"{BASE}/p1" not in text
+        assert group["key"]["source_url"] == f"{BASE}/p0"
+        assert text.endswith("## Held and refused\n\n(none)\n")
 
-    def test_a_group_is_one_item_and_leaves_the_sample_alone(
-        self, batch: Batch, corpus: Path
-    ) -> None:
+    def test_a_group_is_one_item_of_the_sample_population(self, batch: Batch, corpus: Path) -> None:
         batch.add(page(TITLES[1]), "b")
         batch.add(page(TITLES[2]), "c")
-        batch.run(corpus, sample_rate="0.5")
-        before = batch.report()
         for n in range(30):
             batch.add(sidebar_page(TITLES[0], n), f"sidebar-{n}")
 
         code, _ = batch.run(corpus, sample_rate="0.5")
 
-        after = batch.report()
-        assert _sampled(after) == _sampled(before)
-        assert len(_sampled(after)) == 1
-        assert after["gate"] == before["gate"]
-        assert after["summary"]["candidates"] == 3
+        report = batch.report()
+        population = [ArtifactKey.model_validate(i["key"]) for i in report["items"]]
+        expected = draw_sample(population, "0301-test-1", parse_sample_rate("0.5"))
+        assert report["summary"]["candidates"] == 3
+        assert _sampled(report) == [k.sha256 for k in population if k in expected]
         assert code == BLOCKED_EXIT_CODE
 
 
@@ -924,10 +926,16 @@ def _group(*slugs: str) -> CandidateGroup:
 
 
 class TestCanonicalSeam:
-    """The owner's open decision (#566): today no canonical page is chosen."""
+    """Resolving a group from its canonical page (#566); the rule has its own test file."""
 
-    def test_no_canonical_source_is_chosen_today(self) -> None:
-        assert choose_canonical(_group("a", "b")) is None
+    def test_a_folded_group_is_resolved_from_the_chosen_page(self) -> None:
+        group = _group("a", "bb", "ccc")
+
+        (item,) = group_candidates(group.members[::-1])
+
+        assert item == resolve_group(group, choose_canonical(group))
+        assert (item.key, item.outcome, item.hold) == (group.sources[0], "ready", None)
+        assert item.sources == group.sources
 
     def test_an_unchosen_group_is_held_with_every_page(self) -> None:
         group = _group("a", "b")
@@ -986,18 +994,20 @@ class TestGroupingBoundaries:
         assert len(grouped) == 2
         assert grouped[0].sources == (first_hash.key, last_hash.key)
         assert grouped[0].key == first_hash.key
-        assert grouped[0].hold == NEEDS_CANONICAL_SOURCE
+        assert (grouped[0].outcome, grouped[0].hold) == ("ready", None)
         assert grouped[1] == other
 
-    def test_ready_and_unchanged_pages_of_one_text_form_one_held_candidate(self) -> None:
-        ready = _member(0, f"{BASE}/a")
+    def test_ready_and_unchanged_pages_of_one_text_keep_the_canonical_pages_outcome(
+        self,
+    ) -> None:
+        ready = _member(0, f"{BASE}/a/deeper")
         unchanged = _member(1, f"{BASE}/b").model_copy(update={"outcome": "unchanged"})
 
         (grouped,) = group_candidates((ready, unchanged))
 
         assert grouped.sources == (ready.key, unchanged.key)
-        assert (grouped.outcome, grouped.hold) == ("held", NEEDS_CANONICAL_SOURCE)
-        assert not grouped.promotable
+        assert grouped == unchanged.model_copy(update={"sources": grouped.sources})
+        assert grouped.promotable
 
     def test_canonical_page_with_member_url_but_wrong_hash_is_refused(self) -> None:
         group = _group("a", "b")
@@ -1032,12 +1042,13 @@ def test_incomplete_identity_pages_are_not_folded(missing: str) -> None:
     ("doc_id", "content_hash"),
     [(GROUP_ID, "c" * 64), ("lk-0301-111111111111", "d" * 64)],
 )
-def test_folded_candidate_preserves_identity_and_explains_canonical_hold(
+def test_folded_candidate_is_its_canonical_page_with_every_source(
     page_count: int, outcome: str, doc_id: str, content_hash: str
 ) -> None:
+    urls = [f"{BASE}/{n}" for n in range(page_count - 1)] + [f"{BASE}/nytt/renovasjon"]
     members = tuple(
         BatchItem.model_validate(
-            _member(n, f"{BASE}/{n}").model_dump()
+            _member(n, urls[n]).model_dump()
             | {
                 "doc_id": doc_id,
                 "content_hash": content_hash,
@@ -1049,18 +1060,28 @@ def test_folded_candidate_preserves_identity_and_explains_canonical_hold(
         )
         for n in range(page_count)
     )
-    first = members[0]
+    canonical = members[-1]
 
     (folded,) = group_candidates(tuple(reversed(members)))
 
-    assert folded == first.model_copy(
+    assert folded == canonical.model_copy(
+        update={"sources": tuple(member.key for member in members)}
+    )
+
+
+def test_the_defensive_hold_names_every_page_and_the_issue() -> None:
+    group = _group("a", "b", "c")
+
+    item = resolve_group(group, None)
+
+    assert item == group.members[0].model_copy(
         update={
-            "sources": tuple(member.key for member in members),
+            "sources": group.sources,
             "outcome": "held",
             "hold": NEEDS_CANONICAL_SOURCE,
             "detail": (
-                f"{page_count} pages carry this one text; which page is the canonical source "
-                "is the owner's open decision (#566) — every page stays in provenance"
+                "3 pages carry this one text and no canonical page was chosen "
+                "(#566) — every page stays in provenance"
             ),
         }
     )
@@ -1080,7 +1101,7 @@ def test_collision_detail_names_the_actual_regulation() -> None:
         )
 
 
-def test_report_keeps_holds_before_and_after_three_page_groups(batch: Batch, corpus: Path) -> None:
+def test_report_keeps_holds_around_two_three_page_groups(batch: Batch, corpus: Path) -> None:
     batch.add(page(TITLES[2], "Utskrift fra Lovdata"), "before")
     for title, prefix in zip(TITLES[:2], ("first", "second"), strict=True):
         for n in range(3):
@@ -1092,14 +1113,18 @@ def test_report_keeps_holds_before_and_after_three_page_groups(batch: Batch, cor
     report = batch.report()
     text = (batch.report_dir / "batch-0301-test-1.md").read_text(encoding="utf-8")
     holds = text.split("## Held and refused\n\n", 1)[1]
-    assert len(report["items"]) == 4
-    for item in report["items"]:
-        assert item["detail"] in holds
-        for key in item["sources"] or [item["key"]]:
-            assert key["source_url"] in holds
-            assert key["sha256"] in holds
-    assert holds.count("1 regulation, 3 pages:") == 2
-    assert "more page(s)" not in holds
+    items = report["items"]
+    held = [i for i in items if i["outcome"] == "held"]
+    groups = sorted((i for i in items if i["sources"]), key=lambda i: i["key"]["source_url"])
+    assert (len(held), len(groups), len(items)) == (2, 2, 4)
+    for item in held:
+        assert f"{item['key']['sha256']} {item['key']['source_url']}: {item['detail']}" in holds
+    for item, prefix in zip(groups, ("first", "second"), strict=True):
+        assert item["key"]["source_url"] == f"{BASE}/{prefix}-0"
+        assert len(item["sources"]) == 3
+        assert item["sampled"]
+        assert item["key"]["source_url"] not in holds
+    assert text.count("- canonical page of 3 that carry this text (#566), all in the JSON") == 2
     assert text == _expected_markdown(report, corpus)
 
 
@@ -1134,16 +1159,13 @@ def test_two_duplicated_texts_are_one_collision_hold_each() -> None:
     assert all(item.detail.startswith("2 candidates of this batch mint") for item in grouped)
 
 
-def test_approved_group_is_not_written_when_other_candidate_passes_gate(
+def test_an_approved_canonical_page_writes_the_group_once(
     batch: Batch, corpus: Path, tmp_path: Path, root: Path
 ) -> None:
-    """Approval does not settle the open canonical-source decision (#566)."""
-    for n in range(2):
-        _approve(batch.add(sidebar_page(TITLES[0], n), f"group-{n}"), tmp_path)
-    other = batch.add(page(TITLES[1]), "other")
-    _approve(other, tmp_path)
+    """The group is reviewed and written from its canonical page; the others stay sources."""
+    shas = [batch.add(sidebar_page(TITLES[0], n), f"group-{n}") for n in range(3)]
+    _approve(shas[0], tmp_path)
     archive_before = tree(root)
-    head = git(corpus, "rev-parse", "HEAD")
 
     code, output = batch.run(corpus, "--write")
 
@@ -1151,26 +1173,36 @@ def test_approved_group_is_not_written_when_other_candidate_passes_gate(
     report = batch.report()
     assert report["gate"]["verdict"] == "pass"
     assert report["summary"]["would_write"] == 1
-    assert _sampled(report) == [other]
-    (held,) = _items_by_hold(report)[NEEDS_CANONICAL_SOURCE]
-    assert held["review"] == "approved"
-    assert held["outcome"] == "held"
+    (item,) = report["items"]
+    assert [k["sha256"] for k in item["sources"]] == shas
     documents = _documents(corpus)
-    assert len(documents) == 1
-    assert held["doc_id"] not in documents
-    (ready,) = _items_by_hold(report)[None]
-    assert ready["doc_id"] in documents
-    assert TITLES[1] in (corpus / ready["markdown_path"]).read_text(encoding="utf-8")
-    assert git(corpus, "rev-parse", "HEAD") == head
-    archive_after = tree(root)
+    assert list(documents) == [item["doc_id"]]
+    assert TITLES[0] in (corpus / item["markdown_path"]).read_text(encoding="utf-8")
     log_before = archive_before.pop(DECISIONS_FILENAME)
-    log_after = archive_after.pop(DECISIONS_FILENAME)
-    assert archive_after == archive_before
-    assert log_after.startswith(log_before)
+    log_after = tree(root)[DECISIONS_FILENAME]
     (record,) = [json.loads(line) for line in log_after[len(log_before) :].splitlines()]
     assert record["kind"] == "promoted"
-    assert record["artifact"]["sha256"] == other
-    assert record["doc_id"] == ready["doc_id"]
+    assert record["artifact"]["sha256"] == shas[0]
+    assert record["artifact"]["source_url"] == f"{BASE}/group-0"
+    assert record["doc_id"] == item["doc_id"]
+
+
+def test_approving_another_page_of_the_group_does_not_approve_its_canonical_page(
+    batch: Batch, corpus: Path, tmp_path: Path
+) -> None:
+    shas = [batch.add(sidebar_page(TITLES[0], n), f"group-{n}") for n in range(2)]
+    _approve(shas[1], tmp_path)
+    head = git(corpus, "rev-parse", "HEAD")
+
+    code, _ = batch.run(corpus, "--write")
+
+    report = batch.report()
+    assert code == BLOCKED_EXIT_CODE
+    assert report["gate"]["awaiting_review"] == [report["items"][0]["key"]]
+    assert report["items"][0]["key"]["sha256"] == shas[0]
+    assert report["items"][0]["review"] == "unreviewed"
+    assert _documents(corpus) == {}
+    assert git(corpus, "rev-parse", "HEAD") == head
 
 
 def test_group_report_repeats_identical_bytes_and_round_trips_all_sources(

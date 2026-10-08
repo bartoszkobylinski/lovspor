@@ -136,12 +136,20 @@ def _sample(assessment: BatchAssessment, corpus: Path) -> list[str]:
             f"- {item.key.source_url}",
             f"- sha256 {item.key.sha256}",
             f"- {item.doc_id} v{item.version} -> {item.markdown_path} ({item.outcome})",
+            *_canonical(item),
             f"- review: {item.review.value}",
             f"- classifier: {item.classifier.class_name} on {', '.join(item.classifier.evidence)}",
             f"- read it: `{_preview(assessment, item, corpus)}`",
             "",
         ]
     return lines
+
+
+def _canonical(item: BatchItem) -> list[str]:
+    """A folded group is reviewed on its canonical page; the report says it has others (#566)."""
+    if not item.sources:
+        return []
+    return [f"- canonical page of {len(item.sources)} that carry this text (#566), all in the JSON"]
 
 
 def _preview(assessment: BatchAssessment, item: BatchItem, corpus: Path) -> str:
