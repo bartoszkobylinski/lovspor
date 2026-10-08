@@ -1,8 +1,9 @@
 {#- /terms/ (owner decision 2026-09-30): the terms the hosted OAuth sign-in
     links to. The licences are the repository's own (LICENSE is AGPL-3.0;
     the corpus carries NLOD 2.0 in every file's front matter); the quotas
-    are lovspor.access.Limits and ServiceLimits, and revocation is
-    `lovspor tokens revoke`. No liability cap, venue or other clause the
+    are lovspor.access.SELF_SERVICE_LIMITS and ServiceLimits. The site
+    offers no operator-issued tokens (owner decision 2026-10-08), so the
+    terms speak of the sign-in only. No liability cap, venue or other clause the
     owner has not decided is written here. The English twin must say the
     same things. -#}
 {% extends "_base.html" %}
@@ -10,7 +11,7 @@
 {{ badge(status) }}
 <h1>{{ title }}</h1>
 <p class="lede">{{ description }}</p>
-<p class="muted">Sist oppdatert <span data-literal>30. september 2026</span>.</p>
+<p class="muted">Sist oppdatert <span data-literal>8. oktober 2026</span>.</p>
 
 <h2>Hva tjenesten er</h2>
 <p>lovspor består av nettstedet lovspor.no og den driftede lovverk-tjenesten på <code>https://lovspor.no/mcp</code>, som gir KI-verktøy tilgang til teksten i norske lover og sentrale forskrifter. Tjenesten drives av Bartosz Kobyliński som privatperson og er gratis. Ved å bruke den godtar du disse vilkårene.</p>
@@ -24,8 +25,8 @@
 <h2>Lovdata og lisenser</h2>
 <p>Lovteksten kommer fra Lovdatas åpne data og er lisensiert under <span data-literal>NLOD 2.0</span>. Du kan bruke den videre på lisensens vilkår, med kildehenvisning. lovspor er ikke tilknyttet eller godkjent av Lovdata. Kildekoden til lovspor er åpen under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>.</p>
 
-<h2>Konto, token og rimelig bruk</h2>
-<p>Innloggingen og tokenet ditt er personlige; ikke del dem med andre. Hver bruker og hvert token har kvoter — grenser for samtidige kall, kall per minutt, kall per døgn og semantiske søk per døgn — og tjenesten som helhet har egne grenser; se <a href="/docs/">dokumentasjonen</a>. Du skal ikke forsøke å omgå kvotene, overbelaste tjenesten eller bruke den på en måte som hindrer andre i å bruke den. Kontoer og token som misbrukes eller truer driften, kan bli stengt eller trukket tilbake.</p>
+<h2>Konto og rimelig bruk</h2>
+<p>Innloggingen din er personlig; ikke del den med andre. Hver bruker har kvoter — grenser for samtidige kall, kall per minutt, kall per døgn og semantiske søk per døgn — og tjenesten som helhet har egne grenser; se <a href="/docs/">dokumentasjonen</a>. Du skal ikke forsøke å omgå kvotene, overbelaste tjenesten eller bruke den på en måte som hindrer andre i å bruke den. Kontoer som misbrukes eller truer driften, kan bli stengt.</p>
 
 <h2>Personvern</h2>
 <p>Hvilke opplysninger tjenesten behandler, og hvorfor, står på <a href="/privacy/">personvernsiden</a>.</p>

@@ -891,9 +891,21 @@ class TestConnectPage:
 class TestNoTokenAccess:
     """Owner decision 2026-10-07: the hosted service is reached through a
     connector with OAuth sign-in only. No page that tells a reader how to get
-    in offers a token, a bearer header or a request for one."""
+    in offers a token, a bearer header or a request for one. Owner decision
+    2026-10-08: the privacy and terms pages say nothing of tokens either."""
 
-    _ACCESS_PAGES = ("/", "/en/", "/connect/", "/en/connect/", "/docs/", "/en/docs/")
+    _ACCESS_PAGES = (
+        "/",
+        "/en/",
+        "/connect/",
+        "/en/connect/",
+        "/docs/",
+        "/en/docs/",
+        "/privacy/",
+        "/en/privacy/",
+        "/terms/",
+        "/en/terms/",
+    )
 
     @pytest.mark.parametrize("path", _ACCESS_PAGES)
     def test_no_access_page_mentions_a_token_or_a_bearer_header(
