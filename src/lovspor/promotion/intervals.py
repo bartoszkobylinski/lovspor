@@ -14,8 +14,9 @@ its first observation (the front matter carries it), and the promotion audit
 are what the corpus already committed; when the log does not reproduce them
 — promoted version *n* is not the log's version *n* of the same text at the
 same URL, first seen at the same instant — the file is refused, never
-patched. That is also what keeps an extractor bump out of a refresh: new text
-hashes are a migration (ADR-0016 4e), not new intervals.
+patched. That is also what keeps an extractor bump out of a refresh: a version
+promoted under another extractor is a migration (ADR-0016 4e,
+``lovspor promote migrate``), not new intervals.
 """
 
 from __future__ import annotations
@@ -62,6 +63,14 @@ def _divergence(entry: VersionObservations, version: DerivedVersion | None) -> s
             f"it was extracted with extractor {entry.promotion.extractor_version}, this engine "
             f"runs {EXTRACTOR_VERSION}; that is a migration, not a refresh"
         )
+    return reproduction(entry, version)
+
+
+def reproduction(entry: VersionObservations, version: DerivedVersion | None) -> str | None:
+    """Why ``version`` is not the text of ``entry``, its extractor aside; ``None`` when it is.
+
+    ``lovspor promote migrate`` asks exactly this before it moves the extractor.
+    """
     if version is None:
         return "the log has no such version at this URL"
     if version.primary_url != entry.primary_url:
