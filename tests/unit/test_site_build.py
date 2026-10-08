@@ -891,9 +891,21 @@ class TestConnectPage:
 class TestNoTokenAccess:
     """Owner decision 2026-10-07: the hosted service is reached through a
     connector with OAuth sign-in only. No page that tells a reader how to get
-    in offers a token, a bearer header or a request for one."""
+    in offers a token, a bearer header or a request for one. Owner decision
+    2026-10-08: the privacy and terms pages say nothing of tokens either."""
 
-    _ACCESS_PAGES = ("/", "/en/", "/connect/", "/en/connect/", "/docs/", "/en/docs/")
+    _ACCESS_PAGES = (
+        "/",
+        "/en/",
+        "/connect/",
+        "/en/connect/",
+        "/docs/",
+        "/en/docs/",
+        "/privacy/",
+        "/en/privacy/",
+        "/terms/",
+        "/en/terms/",
+    )
 
     @pytest.mark.parametrize("path", _ACCESS_PAGES)
     def test_no_access_page_mentions_a_token_or_a_bearer_header(
@@ -940,6 +952,93 @@ class TestLegalPages:
     processing party the code sends data to (owner decision 2026-09-30)."""
 
     _PATHS = ("/privacy/", "/en/privacy/", "/terms/", "/en/terms/")
+
+    @pytest.mark.parametrize("path", _PATHS)
+    def test_no_token_revision_updates_the_visible_date(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        """The 2026-10-08 owner decision updates both legal pages and twins."""
+        date = "8 October 2026" if path.startswith("/en/") else "8. oktober 2026"
+        markup = _page(built[0], path)
+
+        assert f"<span data-literal>{date}</span>" in markup
+        assert date in _text(markup)
+
+    @pytest.mark.parametrize(
+        ("path", "phrases"),
+        [
+            (
+                "/privacy/",
+                (
+                    "krever innlogging med konto",
+                    "logger du inn hos WorkOS",
+                    "et signert tilgangsbevis fra WorkOS",
+                    "bruker bare brukeridentifikatoren i det, ikke navn eller e-post",
+                    "Bruken telles per bruker for å håndheve kvotene",
+                    "Vil du slette kontoen din, skriv til kontakt@lovspor.no",
+                ),
+            ),
+            (
+                "/en/privacy/",
+                (
+                    "requires signing in with an account",
+                    "you sign in with WorkOS",
+                    "a signed access credential from WorkOS",
+                    "uses only the user identifier in it, not your name or email",
+                    "Usage is counted per user to enforce the quotas",
+                    "To delete your account, write to kontakt@lovspor.no",
+                ),
+            ),
+        ],
+    )
+    def test_privacy_describes_the_remaining_account_sign_in(
+        self, built: tuple[Path, SiteBuildReport], path: str, phrases: tuple[str, ...]
+    ) -> None:
+        """Removing issued credentials must preserve the WorkOS-only disclosure."""
+        text = _text(_page(built[0], path))
+
+        for phrase in phrases:
+            assert phrase in text, (path, phrase)
+
+    @pytest.mark.parametrize(
+        ("path", "phrases", "docs_path"),
+        [
+            (
+                "/terms/",
+                (
+                    "Konto og rimelig bruk",
+                    "Innloggingen din er personlig; ikke del den med andre",
+                    "Hver bruker har kvoter",
+                    "Kontoer som misbrukes eller truer driften, kan bli stengt",
+                ),
+                "/docs/",
+            ),
+            (
+                "/en/terms/",
+                (
+                    "Accounts and fair use",
+                    "Your sign-in is personal; do not share it",
+                    "Every user has quotas",
+                    "Accounts that are misused or threaten the operation of the service "
+                    "may be suspended",
+                ),
+                "/en/docs/",
+            ),
+        ],
+    )
+    def test_terms_preserve_account_fair_use_after_token_removal(
+        self,
+        built: tuple[Path, SiteBuildReport],
+        path: str,
+        phrases: tuple[str, ...],
+        docs_path: str,
+    ) -> None:
+        markup = _page(built[0], path)
+        text = _text(markup)
+
+        for phrase in phrases:
+            assert phrase in text, (path, phrase)
+        assert f'href="{docs_path}"' in markup
 
     @pytest.mark.parametrize("path", _PATHS)
     def test_is_a_current_page_with_the_contact_address(
