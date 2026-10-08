@@ -128,3 +128,18 @@ def test_length_limit_applies_to_the_accumulated_title(dangling: bool) -> None:
     assert len(joined) == MAX_TITLE_CHARS - 3
     result = read_title((head, second, "FOR EKSEMPEL KOMMUNE"))
     assert result == (None if dangling else joined)
+
+
+@pytest.mark.parametrize("line", ["FOR", "FOR EKSEMPEL", "FOR EKSEMPEL KOMMUNE"])
+def test_uppercase_continuation_uses_its_first_word(line: str) -> None:
+    block = ("FORSKRIFT OM GEBYR", line)
+    assert read_title(block) == (None if line == "FOR" else f"{block[0]} {line}")
+
+
+@pytest.mark.parametrize("head", ["For", "Gebyr for", "Forskrift om gebyr for"])
+def test_continuation_uses_the_last_word_even_in_a_single_word_heading(head: str) -> None:
+    assert read_title((head, "Eksempel kommune")) == f"{head} Eksempel kommune"
+
+
+def test_a_complete_single_word_heading_stops_before_another_line() -> None:
+    assert read_title(("Renovasjonsforskrift", "Eksempel kommune")) == "Renovasjonsforskrift"
