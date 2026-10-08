@@ -40,8 +40,8 @@ from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
 from lovspor.parsing.xml_normalizer import safe_parser
 from lovspor.promotion.backfill_commands import backfill, backfill_preview, observe
-from lovspor.promotion.fields import _ENACTED, _SELF_ENACTED
 from lovspor.promotion.relations import _CUE, _TARGET
+from lovspor.promotion.stated_dates import _ENACTED, _SELF_ENACTED
 from lovspor.release.envelope import CorpusSummary, Marker, ReleaseRecord
 from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
 from lovspor.site.fingerprint import ReleaseKey

@@ -134,7 +134,8 @@ class TestVedtatt:
 
         stated = stated_vedtatt(regulation)
 
-        assert fields.vedtatt == date(2019, 12, 12)
+        assert fields.vedtatt is None
+        assert regulation.vedtaksdato == date(2019, 12, 12)
         assert (stated.status, stated.value, stated.hold_reason) == (
             "held",
             None,
@@ -226,7 +227,7 @@ class TestIkraft:
         ],
     )
     def test_statements_that_disagree_are_held(self, clauses: tuple[str, str]) -> None:
-        regulation, _ = _read(
+        regulation, fields = _read(
             "Forskrift om slam, Eksempel kommune", "Vedtatt 1.1.2020.", "§ 1 Formål", *clauses
         )
 
@@ -234,6 +235,7 @@ class TestIkraft:
 
         assert (stated.status, stated.value, stated.text) == ("held", None, None)
         assert len(stated.statements) == 2
+        assert (fields.ikraft, fields.ikraft_text) == (None, None)
         assert _evidence_is_verbatim(regulation, stated)
 
     def test_a_header_and_a_clause_that_agree_are_one_date(self) -> None:

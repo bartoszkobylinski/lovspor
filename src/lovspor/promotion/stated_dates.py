@@ -1,8 +1,11 @@
 """``vedtatt`` and ``ikraft`` with their verbatim evidence (ADR-0016 Decision 2, slice S10).
 
-The front matter's fields (``fields.py``) take the *first* statement the
-text makes. This module reads *every* statement the same patterns find, keeps
-each one verbatim, and says whether they agree:
+This module reads *every* statement the text makes, keeps each one verbatim,
+and says whether they agree. It is the one reading of these dates: the
+evidence sidecar records it whole, and the front matter (``fields.py``) shows
+its ``value`` and ``text``, so a held date is ``null`` in both (#581). The
+patterns live here; ``fields.py`` reuses the enactment ones for the organ and
+for the identity's vedtaksdato.
 
 * ``stated`` — one date, however often stated; ``value`` is it;
 * ``text`` — no date, one non-date phrase ("straks"); ``text`` is it;
@@ -12,8 +15,7 @@ each one verbatim, and says whether they agree:
 * ``absent`` — the text states nothing.
 
 Nothing is derived from an observation time, and nothing is repaired: a
-statement whose date is not a real calendar date reads as a phrase, as the
-front matter reads it.
+statement whose date is not a real calendar date reads as a phrase.
 
 ``evidence`` is a substring of the extracted text with its line breaks read
 as spaces, exactly the text the patterns ran over.
@@ -27,17 +29,30 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.promotion.dates import has_placeholder_date, parse_stated_date
-from lovspor.promotion.fields import (
-    _DATE_FIRST,
-    _ENACTED,
-    _IKRAFT_HEADER,
-    _SELF_ENACTED,
-    _SENTENCE_END,
-    _STATUTE_BEFORE_DATE,
-)
+from lovspor.promotion.dates import DATE, has_placeholder_date, parse_stated_date
 from lovspor.promotion.models import ExtractedRegulation
 
+_LAW_NAME = r"\S*(?:lov|lova|loven|forskrift|forskrifta|forskriften)\b"
+# The organ never runs into a hjemmel phrase, and a date right after a law's
+# name ("lov av 14. juni 2002") is that statute's date, not the adoption's.
+_HJEMMEL_START = r"\bmed\s+(?:hjemmel|heimel)\b|\bmed(?:hold|hald)\s+av\b"
+_ENACTMENT = (
+    r"(?:fastsatt|fastsett|vedtatt|vedteke|vedteken)\s+(?:av|i)\s+"
+    rf"(?P<organ>(?:(?!{_HJEMMEL_START})[^\d.]){{1,90}}?)(?:\s+(?:i\s+møte|den))?[\s,]*" + DATE
+)
+_ENACTED = re.compile(r"\b" + _ENACTMENT, re.I)
+# In the body only the regulation's own adoption counts: "Forskriften er
+# vedtatt av …", never a repealed one's "som blei vedteke i …".
+_SELF_ENACTED = re.compile(
+    r"\b(?:denne\s+)?forskrift(?:en|a)?\s+(?:er|ble|blei|vart|vert)\s+" + _ENACTMENT, re.I
+)
+_STATUTE_BEFORE_DATE = re.compile(rf"{_LAW_NAME}(?:\s+av)?\s*$", re.I)
+_IKRAFT_HEADER = re.compile(r"(?:ikrafttredelse|ikraftsetjing|ikraftsetting)\s*:\s*(.+)", re.I)
+_DATE_FIRST = re.compile(
+    r"(?:(?:fra\s+og\s+med|fra|frå|f\.o\.m\.|den|med\s+(?:virkning|verknad)\s+fr[aå])\s+)*" + DATE,
+    re.I,
+)
+_SENTENCE_END = re.compile(r"\.(?=\s+[A-ZÆØÅ]|\s*$)")
 _IKRAFT_CUE = re.compile(r"\b(?:trer|trår)\s+i\s+kraft\s+(?=.)", re.IGNORECASE)
 _ENACTMENT_WORD = re.compile(r"\b(?:vedtatt|vedteke[n]?|vedtekne)\b", re.IGNORECASE)
 _SELF_ENACTMENT = re.compile(r"\bforskrift(?:en|a)?\b.*" + _ENACTMENT_WORD.pattern, re.IGNORECASE)
@@ -105,7 +120,7 @@ def stated_ikraft(regulation: ExtractedRegulation) -> StatedDate:
 
 
 def _statement(text: str, rest_at: int, starts_at: int = 0) -> DateStatement:
-    """The date or phrase from ``rest_at``, as ``fields._date_or_phrase`` reads it."""
+    """The date the clause from ``rest_at`` opens with, else its phrase to the sentence end."""
     rest = text[rest_at : rest_at + _CLAUSE_CHARS]
     stated = _DATE_FIRST.match(rest)
     parsed = parse_stated_date(stated.groups()[-1]) if stated else None

@@ -11,7 +11,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType
 
@@ -29,7 +29,9 @@ from lovspor.promotion import (
     ObservedSource,
     mint_identity,
 )
+from lovspor.promotion.evidence import EvidenceSubject, evidence_file
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
+from lovspor.promotion.relations import TargetIndex
 from lovspor.promotion.render import LOCAL_RENDERER_VERSION, render_local_regulation
 from tests.unit.promotion_fixtures import REGULATION_LINES, html_page
 
@@ -126,6 +128,42 @@ def test_front_matter_values() -> None:
     }
 
 
+def test_conflicting_ikraft_statements_leave_the_front_matter_date_null() -> None:
+    """#581: the front matter shows only a date the evidence sidecar stands behind."""
+    lines = (*REGULATION_LINES, "§ 4 Overgangsregel", "§ 2 trer i kraft 1. juli 2020.")
+    document = _document(lines)
+    keys, values = _front_matter(render_local_regulation(document))
+    subject = EvidenceSubject(
+        doc_id=document.identity.doc_id,
+        version=1,
+        content_hash=document.identity.content_hash,
+        regulation=document.extracted.regulation,
+    )
+    ikraft = evidence_file(subject, TargetIndex(by_lovdata={}, by_short_name={})).ikraft
+    assert tuple(keys) == FRONT_MATTER_KEYS
+    assert (values["ikraft"], values["ikraft_text"]) == (None, None)
+    assert (values["vedtatt"], values["vedtatt_av"]) == ("2019-12-12", "kommunestyret")
+    assert (ikraft.status, ikraft.value, ikraft.hold_reason) == (
+        "held",
+        None,
+        "conflicting_statements",
+    )
+    assert [(s.date, s.evidence) for s in ikraft.statements] == [
+        (date(2020, 1, 1), "trer i kraft 1. januar 2020"),
+        (date(2020, 7, 1), "trer i kraft 1. juli 2020"),
+    ]
+
+
+def test_conflicting_vedtatt_statements_leave_the_date_null_but_not_the_id() -> None:
+    """The id is seeded by the first enactment clause, so it does not move with #581."""
+    adopted_again = "Forskriften er vedtatt av bystyret den 3. mars 2020."
+    held = _document((*REGULATION_LINES, adopted_again))
+    _, values = _front_matter(render_local_regulation(held))
+    assert (values["vedtatt"], values["vedtatt_av"]) == (None, "kommunestyret")
+    assert values["ikraft"] == "2020-01-01"
+    assert held.extracted.regulation.vedtaksdato == date(2019, 12, 12)
+
+
 def test_lf_identity_renders_its_ref_id() -> None:
     lines = (REGULATION_LINES[0], "Dato: FOR-2019-12-12-2077", *REGULATION_LINES[1:])
     _, values = _front_matter(render_local_regulation(_document(lines)))
@@ -213,7 +251,7 @@ def test_slug_that_is_not_one_file_name_is_rejected(slug: str) -> None:
 
 
 def test_versions_are_recorded() -> None:
-    assert (LOCAL_RENDERER_VERSION, EXTRACTOR_VERSION) == (1, 5)
+    assert (LOCAL_RENDERER_VERSION, EXTRACTOR_VERSION) == (1, 6)
     _, values = _front_matter(render_local_regulation(_document(version=3)))
     assert values["version"] == 3
 
