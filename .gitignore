@@ -27,6 +27,9 @@ mutmut-stats.json
 # generated code into a commit.
 mutants/
 mutation-run.log
+# Agent run reports (issue #596): published as workflow artifacts, never
+# committed. The scope guard ignores what .gitignore ignores.
+.agent-reports/
 html/
 .tox/
 .uv-cache/
