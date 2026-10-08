@@ -1892,7 +1892,7 @@ def _root_names_read_by(module: Path) -> Iterator[tuple[str, int]]:
             isinstance(node.left, ast.Name) and node.left.id in aliases
         )
         if rooted and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str):
-            yield node.right.value, node.lineno
+            yield Path(node.right.value).parts[0], node.lineno
 
 
 def _repo_state_the_unit_suite_reads(unit_dir: Path) -> dict[str, str]:
@@ -1954,6 +1954,16 @@ class TestTheScanReadsRepoRootPaths:
         found = self._scan(tmp_path, source, (".tool.yaml",))
 
         assert found == {".tool.yaml": "tests/unit/test_module.py:1"}
+
+    def test_a_multi_segment_literal_counts_as_its_top_level_entry(self, tmp_path: Path) -> None:
+        """``ROOT / "scripts/ci/x.sh"`` reads inside ``scripts/``: also_copy carries
+        that directory, so the literal must not be reported as a missing entry (#598)."""
+        (tmp_path / "scripts" / "ci").mkdir(parents=True)
+        source = 'ROOT = Path(__file__).resolve().parents[2]\nX = ROOT / "scripts/ci/x.sh"\n'
+
+        found = self._scan(tmp_path, source, ("scripts/ci/x.sh",))
+
+        assert found == {"scripts": "tests/unit/test_module.py:2"}
 
     def test_it_ignores_a_path_that_is_not_rooted_at_the_repo(self, tmp_path: Path) -> None:
         """tests/fixtures/ travels with tests/, so only repo-root joins count."""
