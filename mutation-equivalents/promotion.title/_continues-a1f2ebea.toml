@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/promotion/title.py"
+symbol = "_continues"
+registered = "2026-10-08, PR #599, from run 37843931967"
+mutation = """
+-    return capitals or _dangles(title.rsplit(maxsplit=1)[-1])
++    return capitals or _dangles(title.rsplit(maxsplit=2)[-1])
+"""
+justification = """
+str.rsplit(maxsplit=k)[-1] is the last whitespace-separated word for every k >= 1: splitting more times from the right only adds earlier items, never changes the last, on every input (an empty line raises IndexError identically under both).
+The plain split()/rsplit() form that would leave no such mutant is refused by
+ruff PLC0207. Python stdlib semantics.
+"""
