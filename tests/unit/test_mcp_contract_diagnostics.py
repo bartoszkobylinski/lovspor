@@ -5,7 +5,8 @@ from typing import Any
 
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
-from mcp.types import Tool
+from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.types import TextContent, Tool
 
 from lovspor.errors import UnsupportedToolCallError
 from lovspor.mcp_contract import ContractServer, refusals
@@ -137,3 +138,56 @@ def test_wrong_type_shows_unicode_inside_containers(value: Any, shown: str) -> N
     assert refusals("echo", {"count": value}, tools) == [
         f"argument 'count' must be integer, got {shown}"
     ]
+
+
+@pytest.mark.parametrize("arguments", [{}, {"value": None}, {"value": "5"}, {"value": "true"}])
+def test_supported_nullable_strings_reach_the_body_unchanged(arguments: dict[str, Any]) -> None:
+    """docs/mcp.md keeps supported calls transparent, including actual JSON null."""
+    server = ContractServer("nullable")
+    received: list[str | None] = []
+
+    def echo(value: str | None = None) -> str:
+        received.append(value)
+        return "ok"
+
+    server.add_tool(echo)
+    asyncio.run(server.call_tool("echo", arguments))
+
+    assert received == [arguments.get("value")]
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments", "diagnostic"),
+    [
+        ("missing", {}, "unknown tool 'missing'"),
+        ("echo", {"count": 1, "extra": True}, "unsupported argument 'extra'"),
+        ("echo", {"count": "1"}, "argument 'count' must be integer"),
+        ("echo", {"count": None}, "got null"),
+        ("echo", {}, "missing required argument 'count'"),
+        ("echo", {"count": 1, "recorded_at": "null"}, "would be re-read as JSON"),
+    ],
+)
+def test_each_refusal_category_is_a_client_error_without_executing_the_body(
+    name: str, arguments: dict[str, Any], diagnostic: str
+) -> None:
+    """docs/mcp.md promises isError and no tool execution for every refusal."""
+    server = ContractServer("wire-errors")
+    received: list[tuple[int, str | None]] = []
+
+    def echo(count: int, recorded_at: str | None = None) -> str:
+        received.append((count, recorded_at))
+        return "ok"
+
+    server.add_tool(echo)
+
+    async def call() -> None:
+        async with create_connected_server_and_client_session(server) as client:
+            result = await client.call_tool(name, arguments)
+            assert result.isError is True
+            assert result.content
+            assert isinstance(result.content[0], TextContent)
+            assert result.content[0].text.startswith(f"Error executing tool {name}: ")
+            assert diagnostic in result.content[0].text
+
+    asyncio.run(call())
+    assert received == []
