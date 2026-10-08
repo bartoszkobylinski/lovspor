@@ -143,3 +143,20 @@ def test_continuation_uses_the_last_word_even_in_a_single_word_heading(head: str
 
 def test_a_complete_single_word_heading_stops_before_another_line() -> None:
     assert read_title(("Renovasjonsforskrift", "Eksempel kommune")) == "Renovasjonsforskrift"
+
+
+@pytest.mark.parametrize("separator", [" ", "  ", "\t", "\u00a0"])
+@pytest.mark.parametrize("word", ["OM", "FOR", "I", "VED", "AV", "TIL", "OG"])
+def test_uppercase_continuation_reads_first_word_across_whitespace(
+    separator: str, word: str
+) -> None:
+    head = "FORSKRIFT OM GEBYR"
+    line = separator + separator.join((word, "EKSEMPEL", "KOMMUNE")) + separator
+    assert read_title((head, line)) == f"{head} {line}"
+
+
+@pytest.mark.parametrize("separator", [" ", "  ", "\t", "\u00a0"])
+@pytest.mark.parametrize("word", ["om", "for", "i", "ved", "av", "til", "og"])
+def test_dangling_title_reads_last_word_across_whitespace(separator: str, word: str) -> None:
+    head = separator + separator.join(("Forskrift", "om", "gebyr", word)) + separator
+    assert read_title((head, "Eksempel kommune")) == f"{head} Eksempel kommune"
