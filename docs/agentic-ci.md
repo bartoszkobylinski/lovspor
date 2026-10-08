@@ -97,10 +97,22 @@ PR opened/synchronize
 
 `assert_codex_scope.sh` answers two questions, and it is worth knowing which.
 
-**It fails the job** when a path outside `tests/` changed, and when a test file that
+**It fails the job** when a path outside its lane's allowlist changed, and when a test file that
 existed at `BEFORE_SHA` was deleted or renamed away. Rename detection is deliberately
 off: moving a human test out from under the name its failures are reported by loses
 the same coverage as deleting it.
+
+The allowlist depends on the lane (issue #596). The PR test lanes (`codex-author`,
+`codex-tests`) may change `tests/**/*.py` and files under a `fixtures/` directory. The
+remediation lanes (`remediate`, `remediate-verify`, `assert_codex_scope.sh <sha>
+remediation`) may change `tests/unit/*.py` only: mutants are judged by `tests/unit/`, and
+`mutation-equivalents/` is owner-reviewed. The verifier runs the guard again right before
+its commit, after `git add -A`. The remediation report goes to the gitignored
+`.agent-reports/mutation-remediation-report.md` and is published as the
+`remediation-report-<head sha>` artifact, never committed. Two run reports reached
+`tests/` on main under the old `tests/*` allowlist; the fast-ci step
+`scripts/quality/check_tests_tree.sh` (also in `verify-fast.sh`) now fails on any tracked
+file under `tests/` that is neither Python nor a fixture.
 
 **It reports, without failing**, when lines were removed from a test file that already
 existed — the count and the path go to stdout and to the job summary. Rewriting an

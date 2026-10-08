@@ -22,6 +22,7 @@ cd "$here/../.."
 # tests/unit/test_quality_fast_gate.py (issue #558).
 check gitleaks gitleaks git --pre-commit --redact --staged --verbose
 check conflict-markers scripts/quality/check_conflict_markers.sh
+check tests-tree scripts/quality/check_tests_tree.sh
 check ruff-check uv run ruff check
 check ruff-format uv run ruff format --check
 check mypy uv run mypy src/

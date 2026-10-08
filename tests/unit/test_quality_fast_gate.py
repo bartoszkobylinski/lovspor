@@ -37,6 +37,7 @@ FAST_CHECKS = {
 }
 # Not a stubbed tool: the gate runs the real script, which asks the real git.
 CONFLICT_MARKERS = "scripts/quality/check_conflict_markers.sh"
+TESTS_TREE = "scripts/quality/check_tests_tree.sh"
 RELEASE_CONTRACTS = REPO_ROOT / "tests" / "unit" / "test_release_contracts.py"
 # `-m "not network"`: a test that needs a live third-party credential answers
 # for the operator's key, not for the change being pushed (issue #359).
@@ -179,6 +180,14 @@ class TestFastGate:
 
         assert f"==> conflict-markers: {CONFLICT_MARKERS}\n" in run.output
         assert not any(line.startswith("FAIL conflict-markers") for line in run.fail_lines())
+
+    def test_runs_the_tests_tree_script_fast_ci_runs(self, tmp_path: Path) -> None:
+        """Issue #596: an agent report tracked under tests/ is cheapest to drop
+        in the commit that staged it."""
+        run = _run_gate(FAST, tmp_path)
+
+        assert f"==> tests-tree: {TESTS_TREE}\n" in run.output
+        assert not any(line.startswith("FAIL tests-tree") for line in run.fail_lines())
 
     def test_never_runs_the_security_scan(self, tmp_path: Path) -> None:
         """It belongs to the push gate; the commit loop stays about a second."""
@@ -327,7 +336,8 @@ def test_real_conflict_markers_fail_local_gates_without_stopping_fast_checks(
     repo = tmp_path / "repo"
     quality = repo / "scripts" / "quality"
     quality.mkdir(parents=True)
-    for source in (FAST, DEEP, FAST.parent / "gate.sh", REPO_ROOT / CONFLICT_MARKERS):
+    shared = (REPO_ROOT / CONFLICT_MARKERS, REPO_ROOT / TESTS_TREE)
+    for source in (FAST, DEEP, FAST.parent / "gate.sh", *shared):
         shutil.copy2(source, quality / source.name)
     subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
     (repo / "tracked.txt").write_text(f"ordinary text\n{marker}\n", encoding="utf-8")

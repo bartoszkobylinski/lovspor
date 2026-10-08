@@ -93,11 +93,11 @@ def _scope_repo(tmp_path: Path) -> tuple[Path, str]:
     return repo, _git(repo, "rev-parse", "HEAD").stdout.strip()
 
 
-def _run_scope_guard(repo: Path, base: str) -> subprocess.CompletedProcess[str]:
+def _run_scope_guard(repo: Path, base: str, *lane: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.pop("GITHUB_STEP_SUMMARY", None)
     return subprocess.run(
-        [str(SCOPE_GUARD), base],
+        [str(SCOPE_GUARD), base, *lane],
         cwd=repo,
         check=False,
         text=True,
@@ -139,6 +139,108 @@ def test_scope_guard_rejects_non_test_changes(tmp_path: Path, state: str) -> Non
     assert result.returncode == 1
     assert "SCOPE VIOLATION" in result.stderr
     assert "src/lovspor/forbidden.py" in result.stderr
+
+
+def _write(repo: Path, relative: str) -> None:
+    path = repo / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("content\n")
+
+
+@pytest.mark.parametrize(
+    "allowed",
+    [
+        "tests/unit/test_new.py",
+        "tests/integration/test_new.py",
+        "tests/conftest.py",
+        "tests/fixtures/sample.xml",
+        "tests/unit/fixtures/case/README.md",
+    ],
+)
+def test_scope_guard_default_lane_allows_tests_and_fixtures(tmp_path: Path, allowed: str) -> None:
+    repo, base = _scope_repo(tmp_path)
+    _write(repo, allowed)
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "report",
+    ["tests/mutation-remediation-report.md", "tests/unit/notes.md", "tests/unit/run.log"],
+)
+def test_scope_guard_default_lane_rejects_a_report_under_tests(tmp_path: Path, report: str) -> None:
+    """Issue #596: `tests/*` let a 2,405-line agent report ride into a commit."""
+    repo, base = _scope_repo(tmp_path)
+    _write(repo, report)
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 1
+    assert f"  {report}\n" in result.stderr
+
+
+@pytest.mark.parametrize("state", ["staged", "untracked"])
+@pytest.mark.parametrize(
+    "outside",
+    [
+        "tests/mutation-remediation-report.md",
+        "tests/fixtures/new.json",
+        "tests/integration/test_new.py",
+        "mutation-equivalents/new.toml",
+    ],
+)
+def test_scope_guard_remediation_lane_refuses_all_but_unit_tests(
+    tmp_path: Path, outside: str, state: str
+) -> None:
+    repo, base = _scope_repo(tmp_path)
+    _write(repo, "tests/unit/test_kill.py")
+    _write(repo, outside)
+    if state == "staged":
+        _git(repo, "add", "-A")
+
+    result = _run_scope_guard(repo, base, "remediation")
+
+    assert result.returncode == 1
+    assert "remediation lane may commit tests/unit/*.py only" in result.stderr
+    assert f"  {outside}\n" in result.stderr
+    assert "tests/unit/test_kill.py" not in result.stderr
+
+
+def test_scope_guard_remediation_lane_allows_unit_tests(tmp_path: Path) -> None:
+    repo, base = _scope_repo(tmp_path)
+    _write(repo, "tests/unit/test_kill.py")
+    _write(repo, "tests/unit/nested/test_deeper.py")
+
+    result = _run_scope_guard(repo, base, "remediation")
+
+    assert result.returncode == 0, result.stderr
+    assert "scope guard OK (2 changed file(s), all allowed)" in result.stdout
+
+
+def test_scope_guard_ignores_a_report_in_a_gitignored_path(tmp_path: Path) -> None:
+    """The lane's report goes to a gitignored path: never staged, never refused."""
+    repo, base = _scope_repo(tmp_path)
+    (repo / ".gitignore").write_text(".agent-reports/\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "--quiet", "-m", "ignore")
+    base = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    _write(repo, ".agent-reports/mutation-remediation-report.md")
+    _write(repo, "tests/unit/test_kill.py")
+
+    result = _run_scope_guard(repo, base, "remediation")
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_scope_guard_refuses_an_unknown_lane(tmp_path: Path) -> None:
+    repo, base = _scope_repo(tmp_path)
+
+    result = _run_scope_guard(repo, base, "everything")
+
+    assert result.returncode == 2
+    assert "unknown lane 'everything'" in result.stderr
 
 
 def _scope_repo_with_test(tmp_path: Path) -> tuple[Path, str, Path]:

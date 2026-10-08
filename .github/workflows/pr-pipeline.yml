@@ -37,6 +37,11 @@ jobs:
         # the same script, so the two cannot drift apart (issue #558).
         run: scripts/quality/check_conflict_markers.sh
 
+      - name: Only tests and fixtures under tests/
+        # Two agent run reports were committed into tests/ and reached main
+        # (issue #596). Same script as the fast gate (issue #558).
+        run: scripts/quality/check_tests_tree.sh
+
       - name: Ruff lint
         run: uv run ruff check
 
