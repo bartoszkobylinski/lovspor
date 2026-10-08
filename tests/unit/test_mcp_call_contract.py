@@ -12,8 +12,10 @@ import asyncio
 import json
 import tempfile
 from collections.abc import Iterator
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import anyio
 import pytest
@@ -22,8 +24,11 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import TextContent, Tool
 
-from lovspor.mcp import build_server
+from lovspor.errors import UnsupportedToolCallError
+from lovspor.mcp import _hosted, build_server
 from lovspor.mcp_contract import TIME_AXES, ContractServer, refusals
+from lovspor.quota import QuotaEnforcer
+from lovspor.usage_metrics import UsageRecorder
 from tests.unit.local_dataset_fixtures import build_central, wire
 
 _DUMMY: dict[str, Any] = {"string": "x", "integer": 1, "number": 0.5, "boolean": False}
@@ -345,3 +350,83 @@ class TestRefusalsOnSchemasNotYetServed:
         tools = {"t": _tool("t", {"properties": {"n": {"type": "integer"}}, "required": ["n"]})}
 
         assert refusals("t", {"n": 3}, tools) == []
+
+
+def test_one_refusal_reports_all_independent_problems(server: FastMCP) -> None:
+    """docs/mcp.md promises every problem at once, including an omitted slug."""
+    text = _refusal(
+        server,
+        "get_section",
+        {
+            "section_id": 123,
+            "occurrence": None,
+            "recorded_at": "null",
+            "observed_at": "x",
+            "unexpected": True,
+        },
+    )
+
+    assert "missing required argument 'slug'" in text
+    assert "argument 'section_id' must be string, got integer 123" in text
+    assert "argument 'recorded_at' is the string \"null\"" in text
+    assert "unsupported argument 'observed_at'" in text
+    assert "get_observation_history" in text
+    assert "unsupported argument 'unexpected'" in text
+    assert "argument 'occurrence'" not in text  # JSON null is allowed here.
+
+
+@pytest.mark.parametrize("value", [True, False, 1.5])
+def test_boolean_and_fractional_numbers_are_not_integers(server: FastMCP, value: Any) -> None:
+    text = _refusal(server, "search_laws", {"query": "lov", "limit": value})
+
+    assert "argument 'limit' must be integer" in text
+
+
+@pytest.mark.parametrize("value", [" null ", "[]", "{}"])
+def test_optional_strings_cannot_be_reread_as_json_containers_or_null(
+    server: FastMCP, value: str
+) -> None:
+    text = _refusal(
+        server, "get_section", {"slug": "proveloven", "section_id": "2", "recorded_at": value}
+    )
+
+    assert "argument 'recorded_at' is the string" in text
+    assert "would be re-read as JSON" in text
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [{"slug": "x", "observed_at": "2026-08-20"}, {"slug": 1}, {"slug": None}, {}],
+)
+def test_refused_calls_never_enter_hosted_body_quota_or_usage(
+    monkeypatch: pytest.MonkeyPatch, arguments: dict[str, Any]
+) -> None:
+    """docs/mcp.md explicitly excludes refused calls from hosted accounting."""
+    body = Mock()
+    enforcer = Mock(spec=QuotaEnforcer)
+    enforcer.guard.return_value = nullcontext()
+    usage = Mock(spec=UsageRecorder)
+    token = Mock(client_id="contract-test")
+    monkeypatch.setattr("lovspor.mcp.get_access_token", lambda: token)
+    server = ContractServer("contract-test")
+
+    def get_law(slug: str) -> str:
+        body(slug)
+        return slug
+
+    server.add_tool(_hosted(get_law, enforcer, usage))
+
+    with pytest.raises(ToolError) as caught:
+        asyncio.run(server.call_tool("get_law", arguments))
+
+    assert isinstance(caught.value.__cause__, UnsupportedToolCallError)
+    body.assert_not_called()
+    enforcer.guard.assert_not_called()
+    usage.record.assert_not_called()
+
+    # Positive control: the same registered wrappers do run for an admitted call.
+    asyncio.run(server.call_tool("get_law", {"slug": "x"}))
+    body.assert_called_once_with("x")
+    enforcer.guard.assert_called_once_with("contract-test", paid=False)
+    usage.record.assert_called_once()
+    assert usage.record.call_args.args[0].outcome == "ok"
