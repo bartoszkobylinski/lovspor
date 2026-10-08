@@ -133,20 +133,32 @@ def write_set(
         f"{authority_dir}/observations/{prepared.slug}.json": _observations(
             corpus, prepared, artifact, audit
         ),
-        evidence_path(prepared.identity.authority.id, prepared.slug): _evidence(corpus, prepared),
+        evidence_path(prepared.identity.authority.id, prepared.slug): evidence_text(
+            corpus, prepared
+        ),
         f"{LOCAL_DIR}/{MANIFEST_NAME}": _manifest(corpus, prepared, artifact, decision),
     }
+    refuse_nlod(files)
+    return WriteSet(files=files, audit=audit)
+
+
+def refuse_nlod(files: dict[str, str]) -> None:
+    """Refuse a write set any file of which would mention NLOD."""
     mentioning = sorted(path for path, text in files.items() if _NLOD.search(text))
     if mentioning:
         msg = f"{mentioning} would mention NLOD; local regulations are not NLOD data"
         raise PromotionRefusedError(msg)
-    return WriteSet(files=files, audit=audit)
 
 
 def apply(corpus: CorpusCheckout, writes: WriteSet) -> tuple[str, ...]:
     """Write every file whose bytes differ from disk; the paths written, sorted."""
+    return apply_files(corpus, writes.files)
+
+
+def apply_files(corpus: CorpusCheckout, files: dict[str, str]) -> tuple[str, ...]:
+    """Write every file of ``files`` whose bytes differ from disk; the paths written, sorted."""
     written: list[str] = []
-    for relative, text in sorted(writes.files.items()):
+    for relative, text in sorted(files.items()):
         target = corpus.inside(relative.removeprefix(f"{LOCAL_DIR}/"))
         if target.is_file() and target.read_text(encoding="utf-8") == text:
             continue
@@ -181,7 +193,8 @@ def _audit(
     )
 
 
-def _evidence(corpus: CorpusCheckout, prepared: Prepared) -> str:
+def evidence_text(corpus: CorpusCheckout, prepared: Prepared) -> str:
+    """``evidence/<slug>.json`` of the prepared version, as every writer writes it."""
     subject = EvidenceSubject(
         doc_id=prepared.identity.doc_id,
         version=prepared.version,

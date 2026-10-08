@@ -1338,9 +1338,69 @@ files that changed. It adds no version and touches no document or manifest; a
 new text at the URL ends the current version's interval where the new text
 begins and waits for a backfill. A document the log does not reproduce (another
 text, another first observation, another extractor version — that is a
-migration) is skipped with the reason. Use the subject it prints: `observe: …`
+migration, `promote migrate` below) is skipped with the reason. Use the subject it prints: `observe: …`
 is no history event. Run it at most weekly (ADR-0016 Decision 3); scheduling
 it is not automated yet.
+
+### Migrating after an extractor bump (ADR-0016 4e)
+
+When `EXTRACTOR_VERSION` moves, a promoted document whose text the new
+extractor reads byte-identically is not a new version: it is a `migration:`
+commit. Until it is made, the document still records the old extractor, so
+`observe` skips it ("that is a migration, not a refresh"), `backfill` refuses
+to append to it, and `local` stops at `Unchanged`. `promote migrate` writes
+that commit's files:
+
+* `manifest.json` — the record's `extractor_version`;
+* `<authority_id>/observations/<slug>.json` — `promotion.extractor_version`
+  of every promoted version, nothing else;
+* `<authority_id>/evidence/<slug>.json` — only when the document has none
+  (promoted before the sidecar existed); an existing sidecar is not touched.
+
+The Markdown is **never** written. The command re-extracts the source the
+published front matter names (`source_sha256` at `source_url`) with the
+running extractor, and refuses, writing nothing:
+
+* when the text differs (another `content_hash`): that is a new version —
+  approve it and run `promote backfill` (or `promote local`);
+* when the text is the same but the rendering would change (a front-matter
+  field the new extractor reads otherwise): a migration never rewrites the
+  Markdown;
+* when any promoted version is not reproduced by the log (another text,
+  another first observation, another URL), or when the id the text is named
+  by moves;
+* without the owner's standing approval of **every** version's text at the
+  running extractor — the same approvals `backfill` asks for. The approval
+  made at the old extractor does not cover it; the re-approval is the owner's
+  act;
+* for a withdrawn document, or one whose standing decision is `reject` or
+  `hold`.
+
+The sequence, for one document (`<sha256>` is the `source_sha256` in its front
+matter; for a backfilled document, approve one blob of each version — a
+refusal names the version and its blobs):
+
+```bash
+export LOVSPOR_OBSERVATORY_ROOT=/Volumes/T7/lovspor-observatory
+uv run lovspor promote approve --authority 3118 --artifact <sha256> --decision decision-3118.json
+uv run lovspor promote migrate --authority 3118 --slug <slug> \
+  --corpus /absolute/path/to/lovverk --dry-run
+uv run lovspor promote migrate --authority 3118 --slug <slug> \
+  --corpus /absolute/path/to/lovverk
+git -C /absolute/path/to/lovverk add -- lokale-forskrifter
+git -C /absolute/path/to/lovverk commit -m 'migration(lokal-forskrift): 3118/<slug> extractor v<old>→v<new>'
+```
+
+`--dry-run` prints the unified diff the run would write and writes and
+records nothing. Without `--authority`/`--slug` it migrates every current
+document of the checkout in one run (subject `migration(lokal-forskrift): <n>
+documents to extractor v<new>`); a refused document is reported on its own
+line, the others are still written, and the exit status is 1. Use the subject
+it prints. Each migrated document is recorded in `promotions.jsonl` as a
+`migrated` record (artifact, version, content hash, from and to extractor,
+the approval time, the paths written). The commit touches no Markdown, so
+`promote history` derives no event from it. A rerun after the commit prints
+`already at extractor v<new>`, writes nothing and records nothing.
 
 ### 6. A batch of classifier candidates (S8)
 

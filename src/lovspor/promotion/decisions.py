@@ -21,6 +21,9 @@ written there could never be taken back (owner decision on PR #517,
 classifier evidence — is refused when it carries the reviewer's name.
 * ``held`` — a promotion run that stopped at a hold, with the stage and the
   reason (4h). Holds are recorded, never dropped.
+* ``migrated`` — a migration run (4e, ``lovspor promote migrate``) that moved
+  one promoted document's version metadata to the running extractor, the
+  text being byte-identical; it names the approval it rests on.
 * ``withdrawal`` — a human act on one promoted document (4f): its id, the
   closed-set ``removed_reason``, and every archived artifact it was promoted
   from, so no later run promotes the document again — under its id or from
@@ -289,6 +292,24 @@ class HeldRecord(BaseModel):
     personal_data: tuple[PersonalDataHit, ...] = ()
 
 
+class MigratedRecord(BaseModel):
+    """A migration run that moved one document to the running extractor (ADR-0016 4e)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["migrated"] = "migrated"
+    artifact: ArtifactKey
+    recorded_at: AwareDatetime
+    doc_id: str
+    version: int
+    content_hash: str
+    from_extractor_version: int
+    to_extractor_version: int
+    approved_at: AwareDatetime
+    written: tuple[str, ...]
+    commit_subject: str
+
+
 class WithdrawalDocument(BaseModel):
     """The reviewer's withdrawal of one promoted document, as the operator hands it over."""
 
@@ -344,9 +365,10 @@ class WithdrawalRecord(BaseModel):
 
 
 DecisionLogRecord = Annotated[
-    HumanDecision | PromotedRecord | HeldRecord | WithdrawalRecord, Field(discriminator="kind")
+    HumanDecision | PromotedRecord | HeldRecord | MigratedRecord | WithdrawalRecord,
+    Field(discriminator="kind"),
 ]
-OutcomeRecord = PromotedRecord | HeldRecord
+OutcomeRecord = PromotedRecord | HeldRecord | MigratedRecord
 _RECORD: TypeAdapter[DecisionLogRecord] = TypeAdapter(DecisionLogRecord)
 
 
@@ -402,7 +424,8 @@ class DecisionLog:
         previous = [
             r
             for r in self.records()
-            if isinstance(r, PromotedRecord | HeldRecord) and r.artifact == record.artifact
+            if isinstance(r, PromotedRecord | HeldRecord | MigratedRecord)
+            and r.artifact == record.artifact
         ]
         if previous and _same_outcome(previous[-1], record):
             return False
