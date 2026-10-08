@@ -323,3 +323,9 @@ def test_a_heading_broken_over_lines_is_one_title_and_the_block_keeps_its_lines(
 def test_a_title_cut_on_a_function_word_is_held_as_title_truncated() -> None:
     lines = ("Forskrift om gebyr for", "Vedtatt av kommunestyret 12.12.2019", "§ 1 Gebyr")
     assert read_regulation(lines) == ExtractionHoldReason.TITLE_TRUNCATED
+
+
+@pytest.mark.parametrize("section", ["§ 1 Formål", "Kapittel 1. Innledende bestemmelser"])
+def test_a_body_line_cannot_complete_a_truncated_title(section: str) -> None:
+    lines = ("Forskrift om", section, "gebyr for Eksempel kommune")
+    assert read_regulation(lines) == ExtractionHoldReason.TITLE_TRUNCATED

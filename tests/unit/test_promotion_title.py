@@ -99,3 +99,32 @@ def test_a_joined_title_stops_at_the_title_length() -> None:
     fits = "a" * (MAX_TITLE_CHARS - len(head) - 1)
     assert read_title((head, fits)) == f"{head} {fits}"
     assert read_title((head, fits + "a")) is None
+
+
+@pytest.mark.parametrize("word", ["om", "for", "i", "ved", "av", "til", "og"])
+def test_each_function_word_can_continue_a_title_in_mixed_case(word: str) -> None:
+    head = f"Forskrift om gebyr {word.capitalize()}"
+    assert read_title((head, "Eksempel kommune")) == f"{head} Eksempel kommune"
+
+
+def test_repeated_function_word_continuations_stop_at_the_first_complete_title() -> None:
+    block = ("Forskrift om", "gebyr for", "tilsyn i", "Eksempel kommune", "Annen overskrift")
+    assert read_title(block) == "Forskrift om gebyr for tilsyn i Eksempel kommune"
+
+
+@pytest.mark.parametrize("line", ["VEDTATT AV STYRET", "MED HEIMEL I LOV", "I MEDHOLD AV LOV"])
+def test_uppercase_metadata_never_joins_an_uppercase_title(line: str) -> None:
+    assert read_title(("FORSKRIFT OM GEBYR", line)) == "FORSKRIFT OM GEBYR"
+    assert read_title(("FORSKRIFT OM", line)) is None
+
+
+@pytest.mark.parametrize("dangling", [False, True])
+def test_length_limit_applies_to_the_accumulated_title(dangling: bool) -> None:
+    head = "FORSKRIFT OM"
+    second = "X" * (MAX_TITLE_CHARS - len(head) - 4)
+    if dangling:
+        second = second[:-2] + " I"
+    joined = f"{head} {second}"
+    assert len(joined) == MAX_TITLE_CHARS - 3
+    result = read_title((head, second, "FOR EKSEMPEL KOMMUNE"))
+    assert result == (None if dangling else joined)
