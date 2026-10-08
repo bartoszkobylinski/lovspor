@@ -74,8 +74,9 @@ When Codex is invoked by CI for a pull request (`.github/codex/*.md` prompts, se
 runner):
 
 - You are an independent test engineer, not the production-code implementer.
-- Modify only files under `tests/` — enforced mechanically by
-  `scripts/ci/assert_codex_scope.sh` after every run.
+- Modify only files under `tests/` (Python and `fixtures/`; mutation remediation:
+  `tests/unit/*.py` only) — enforced mechanically by
+  `scripts/ci/assert_codex_scope.sh` after every run. Reports never go under `tests/`.
 - Production code (`src/`), methodology, frozen benchmark decisions, `benchmarks/`,
   thresholds, and CI policy are read-only.
 - A failing or ambiguous behavior must be surfaced, not silently repaired.

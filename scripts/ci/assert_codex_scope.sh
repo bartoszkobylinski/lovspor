@@ -4,13 +4,30 @@
 # nothing is committed or pushed.
 set -euo pipefail
 
-BASE_SHA="${1:?usage: assert_codex_scope.sh <base-sha>}"
+BASE_SHA="${1:?usage: assert_codex_scope.sh <base-sha> [tests|remediation]}"
+LANE="${2:-tests}"
 
-# Codex may touch test files only. Patterns are shell `case` globs (fnmatch,
-# `*` crosses `/`), so tests/* covers the whole tests/ tree.
-ALLOWED_PATTERNS=(
-  "tests/*"
-)
+# Patterns are shell `case` globs (fnmatch, `*` crosses `/`), so tests/*.py
+# covers every Python file in the tests/ tree. Code and fixtures only, never
+# `tests/*`: that pattern let codex-mutation commit its 2,405-line run report
+# as tests/mutation-remediation-report.md (issue #596). A report belongs in
+# the lane's gitignored report directory and its workflow artifact.
+case "$LANE" in
+  tests)
+    ALLOWED_PATTERNS=("tests/*.py" "tests/fixtures/*" "tests/*/fixtures/*")
+    SCOPE="the test allowlist (tests/**/*.py and fixtures)"
+    ;;
+  remediation)
+    # Killing tests are unit tests: mutants are judged by tests/unit/ alone,
+    # and mutation-equivalents/ is owner-reviewed, outside the agent's scope.
+    ALLOWED_PATTERNS=("tests/unit/*.py")
+    SCOPE="the remediation allowlist: the remediation lane may commit tests/unit/*.py only"
+    ;;
+  *)
+    echo "assert_codex_scope.sh: unknown lane '$LANE' (expected tests or remediation)" >&2
+    exit 2
+    ;;
+esac
 
 # Committed range + staged + unstaged + untracked: the guard holds no matter
 # whether Codex committed its edits or left them in the working tree.
@@ -37,7 +54,7 @@ while IFS= read -r f; do
 done <<< "$changed"
 
 if [ "${#violations[@]}" -gt 0 ]; then
-  echo "SCOPE VIOLATION — Codex touched files outside the test allowlist:" >&2
+  echo "SCOPE VIOLATION — Codex touched files outside $SCOPE; refusing to commit:" >&2
   printf '  %s\n' "${violations[@]}" >&2
   exit 1
 fi
