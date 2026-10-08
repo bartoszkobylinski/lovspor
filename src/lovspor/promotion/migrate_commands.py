@@ -77,8 +77,8 @@ def migrate_impl(request: MigrateRequest, now: datetime) -> None:
         if not outcome.refusals:
             typer.echo("Nothing to migrate; nothing written, nothing to commit.")
     elif request.dry_run:
-        typer.echo(planned_diff(corpus, migration_files(corpus, outcome.migrations)), nl=False)
-        typer.echo("Dry run: nothing written, nothing recorded.")
+        diff = planned_diff(corpus, migration_files(corpus, outcome.migrations))
+        typer.echo(diff + "Dry run: nothing written, nothing recorded.")
     else:
         _write(inputs, outcome.migrations, now)
     if outcome.refusals:
@@ -87,12 +87,13 @@ def migrate_impl(request: MigrateRequest, now: datetime) -> None:
 
 def _selected(corpus: CorpusCheckout, request: MigrateRequest) -> list[tuple[str, LocalRecord]]:
     manifest = corpus.local_manifest()
-    if (request.authority_id is None) != (request.slug is None):
-        msg = "name one document with both --authority and --slug, or neither for every document"
-        raise PromotionRefusedError(msg)
-    if request.authority_id is not None and request.slug is not None:
-        return [locate_document(manifest, request.authority_id, request.slug)]
-    return [(i, r) for i, r in sorted(manifest.documents.items()) if r.status == "current"]
+    match (request.authority_id, request.slug):
+        case (None, None):
+            return [(i, r) for i, r in sorted(manifest.documents.items()) if r.status == "current"]
+        case (str() as authority_id, str() as slug):
+            return [locate_document(manifest, authority_id, slug)]
+    msg = "name one document with both --authority and --slug, or neither for every document"
+    raise PromotionRefusedError(msg)
 
 
 def _plan_all(inputs: MigrationInputs, selected: list[tuple[str, LocalRecord]]) -> Outcome:

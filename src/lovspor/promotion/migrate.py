@@ -147,7 +147,7 @@ def published(corpus: CorpusCheckout, doc_id: str, record: LocalRecord) -> Publi
     markdown_path = corpus.inside(record.markdown_path.removeprefix(f"{LOCAL_DIR}/"))
     observations = corpus.inside(f"{record.authority_id}/observations/{record.slug}.json")
     try:
-        markdown = markdown_path.read_text(encoding="utf-8")
+        markdown = markdown_path.read_bytes().decode()
         audit = ObservationsFile.model_validate_json(observations.read_bytes())
     except (OSError, UnicodeDecodeError, ValidationError) as exc:
         msg = f"{doc_id}: its rendering or observations do not read ({type(exc).__name__})"
@@ -189,7 +189,8 @@ def plan_migration(inputs: MigrationInputs, document: Published, authority: Auth
 
 def published_klass_version(document: Published) -> str:
     """The KLASS vintage the rendering was published under; a migration keeps it."""
-    found = _KLASS_VERSION.search(_front_matter(document).get("authority", ""))
+    authority = _front_matter(document).get("authority")
+    found = None if authority is None else _KLASS_VERSION.search(authority)
     if found is None:
         msg = f"{document.doc_id}: its front matter names no klass_version"
         raise PromotionRefusedError(msg)
@@ -224,7 +225,7 @@ def planned_diff(corpus: CorpusCheckout, files: dict[str, str]) -> str:
     chunks: list[str] = []
     for relative, text in sorted(files.items()):
         target = corpus.inside(relative.removeprefix(f"{LOCAL_DIR}/"))
-        old = target.read_text(encoding="utf-8") if target.is_file() else ""
+        old = target.read_bytes().decode() if target.is_file() else ""
         chunks += difflib.unified_diff(
             old.splitlines(keepends=True),
             text.splitlines(keepends=True),
@@ -236,7 +237,7 @@ def planned_diff(corpus: CorpusCheckout, files: dict[str, str]) -> str:
 
 def _front_matter(document: Published) -> dict[str, str]:
     """The raw value of every front-matter line, by key."""
-    block = document.markdown.removeprefix("---\n").split("\n---\n", 1)[0]
+    block = document.markdown.removeprefix("---\n").partition("\n---\n")[0]
     pairs = (line.partition(": ") for line in block.split("\n"))
     return {key: value for key, separator, value in pairs if separator}
 
