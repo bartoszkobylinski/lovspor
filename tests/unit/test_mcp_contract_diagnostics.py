@@ -114,3 +114,26 @@ def test_missing_properties_schema_still_reports_whole_call_constraints(
 ) -> None:
     tools = {"ping": tool("ping", **schema)}
     assert refusals("ping", {}, tools) == expected
+
+
+def test_missing_properties_filters_arguments_before_schema_validation() -> None:
+    tools = {"ping": tool("ping", minProperties=1, required=["count"])}
+    assert refusals("ping", {"count": 3}, tools) == [
+        "unsupported argument 'count'; ping accepts: no arguments",
+        "missing required argument 'count'",
+        "arguments: {} should be non-empty",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        (["blåbær", "雪"], 'array ["blåbær", "雪"]'),
+        ({"ø": "雪"}, 'object {"ø": "雪"}'),
+    ],
+)
+def test_wrong_type_shows_unicode_inside_containers(value: Any, shown: str) -> None:
+    tools = {"echo": tool("echo", properties={"count": {"type": "integer"}})}
+    assert refusals("echo", {"count": value}, tools) == [
+        f"argument 'count' must be integer, got {shown}"
+    ]
