@@ -206,3 +206,33 @@ def test_host_words_are_excluded_after_norwegian_folding() -> None:
     fallback = f"{site}/x"
 
     assert chosen(member(host_match, title=title), member(fallback, title=title)) == fallback
+
+
+def test_a_page_missing_title_metadata_does_not_discard_the_groups_title() -> None:
+    about = f"{SITE}/a/b/skoleregler"
+    fallback = f"{SITE}/x"
+
+    assert chosen(member(about), member(fallback, title=None)) == about
+
+
+@pytest.mark.parametrize("title", [None, ""])
+def test_a_missing_title_does_not_invent_a_slug_match(title: str | None) -> None:
+    fallback = f"{SITE}/x"
+    placeholder = f"{SITE}/a/b/xxxx"
+
+    assert chosen(member(fallback, title=title), member(placeholder, title=title)) == fallback
+
+
+@pytest.mark.parametrize("path", ["", "/", "///"])
+def test_a_site_root_has_no_slug_and_can_be_canonical(path: str) -> None:
+    root = f"{SITE}{path}"
+
+    assert chosen(member(f"{SITE}/unrelated"), member(root)) == root
+
+
+def test_a_url_without_a_hostname_does_not_exclude_title_words() -> None:
+    title = "Forskrift om xxxx"
+    about = "https:///a/b/xxxx"
+    fallback = f"{SITE}/x"
+
+    assert chosen(member(fallback, title=title), member(about, title=title)) == about
