@@ -117,7 +117,7 @@ def historical_markdown(
     wanted = (f"version: {version}", f"content_hash: {json.dumps(content_hash)}")
     for revision in revisions:
         text = _read_blob(corpus.path, revision.sha, revision.path)
-        lines = text.removeprefix("---\n").partition("\n---\n")[0].split("\n")
+        lines = text.partition("\n---\n")[0].split("\n")
         if all(line in lines for line in wanted):
             return text
     return None
