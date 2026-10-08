@@ -46,6 +46,7 @@ from __future__ import annotations
 import fcntl
 import os
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -407,6 +408,29 @@ class CarriedRecord(BaseModel):
         )
 
 
+class StandingApproval(BaseModel):
+    """The human approval a writer promotes on, and the carry it stands by, if any.
+
+    A writer stamps ``approval_carried`` from ``carry``, so an approval given at
+    an earlier extractor never reads as a review at the running one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decision: HumanDecision
+    carry: CarriedRecord | None = None
+
+    def approval_carried(self) -> ApprovalCarried | None:
+        """The published ``approval_carried`` block, or ``None`` for an approval given there."""
+        if self.carry is None:
+            return None
+        return ApprovalCarried(
+            approved_at_extractor=self.carry.approval.extractor_version,
+            carried_to_extractor=self.carry.to_extractor_version,
+            carried_at=utc_text(self.carry.carried_at),
+        )
+
+
 class WithdrawalDocument(BaseModel):
     """The reviewer's withdrawal of one promoted document, as the operator hands it over."""
 
@@ -466,6 +490,10 @@ DecisionLogRecord = Annotated[
     Field(discriminator="kind"),
 ]
 OutcomeRecord = PromotedRecord | HeldRecord | MigratedRecord
+#: Each carried approval and the last extractor it was carried to (:meth:`DecisionLog.carried`).
+Carried = Mapping[HumanDecision, int]
+#: Each carried approval and the carry that took it there (:meth:`DecisionLog.carries`).
+Carries = Mapping[HumanDecision, CarriedRecord]
 _RECORD: TypeAdapter[DecisionLogRecord] = TypeAdapter(DecisionLogRecord)
 
 
@@ -518,13 +546,20 @@ class DecisionLog:
 
     def carried(self) -> dict[HumanDecision, int]:
         """Each carried approval, with the last extractor a migration carried it to."""
+        return {decision: c.to_extractor_version for decision, c in self.carries().items()}
+
+    def carries(self) -> dict[HumanDecision, CarriedRecord]:
+        """Each carried approval, with the carry that took it to the latest extractor.
+
+        Of carries to the same extractor, the last recorded one stands.
+        """
         records = self.records()
         carries = [r for r in records if isinstance(r, CarriedRecord)]
-        found: dict[HumanDecision, int] = {}
+        found: dict[HumanDecision, CarriedRecord] = {}
         for decision in (r for r in records if isinstance(r, HumanDecision)):
-            reached = [c.to_extractor_version for c in carries if c.carries(decision)]
+            reached = [c for c in carries if c.carries(decision)]
             if reached:
-                found[decision] = max(reached)
+                found[decision] = max(reversed(reached), key=lambda c: c.to_extractor_version)
         return found
 
     def record_carry(self, record: CarriedRecord) -> bool:

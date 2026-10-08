@@ -36,7 +36,7 @@ versions it holds — a divergence is refused, never patched.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
@@ -48,7 +48,14 @@ from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation
 from lovspor.promotion.archive import ArchivedArtifact, Fetch, read_blob
 from lovspor.promotion.corpus import LOCAL_DIR, CorpusCheckout
-from lovspor.promotion.decisions import ArtifactKey, Decision, HumanDecision, utc_text
+from lovspor.promotion.decisions import (
+    ArtifactKey,
+    Carried,
+    Carries,
+    Decision,
+    HumanDecision,
+    utc_text,
+)
 from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.intervals import with_intervals
 from lovspor.promotion.models import Authority
@@ -57,6 +64,7 @@ from lovspor.promotion.plan import (
     Prepared,
     prepare,
     require_approval,
+    standing_on,
     stands_at_running_extractor,
 )
 from lovspor.promotion.versions import DerivedVersion, PrimaryHistory, read_primary
@@ -67,7 +75,7 @@ APPROVAL_STALE = "approval_stale"
 AFTER_EARLIER_HOLD = "after_earlier_hold"
 IDENTITY_CHANGED = "identity_changed"
 _REFUSALS = {Decision.REJECT: "rejected", Decision.HOLD: "held_by_reviewer"}
-_NONE_CARRIED: Mapping[HumanDecision, int] = MappingProxyType({})
+_NONE_CARRIED: Carried = MappingProxyType({})
 
 
 class VersionHold(BaseModel):
@@ -115,7 +123,8 @@ class Inputs:
     fetches: tuple[Fetch, ...]
     authority: Authority
     corpus: CorpusCheckout
-    carried: Mapping[HumanDecision, int] = field(default_factory=dict)
+    carried: Carried = field(default_factory=dict)
+    carries: Carries = field(default_factory=dict)
 
 
 class NextVersion(BaseModel):
@@ -132,7 +141,7 @@ class NextVersion(BaseModel):
 def plan_backfill(
     history: PrimaryHistory,
     decisions: Sequence[HumanDecision],
-    carried: Mapping[HumanDecision, int] = _NONE_CARRIED,
+    carried: Carried = _NONE_CARRIED,
 ) -> BackfillPlan:
     """Each version approved or held, in order; everything after the first hold is held.
 
@@ -159,7 +168,7 @@ def plan_backfill(
 def _approval(
     version: DerivedVersion,
     decisions: Sequence[HumanDecision],
-    carried: Mapping[HumanDecision, int],
+    carried: Carried,
 ) -> HumanDecision | VersionHold:
     held = version.held
     if held is not None:
@@ -179,9 +188,7 @@ def _approval(
     return VersionHold(version=version.version, reason=NOT_APPROVED, detail=detail)
 
 
-def _stale(
-    decision: HumanDecision, version: DerivedVersion, carried: Mapping[HumanDecision, int]
-) -> str:
+def _stale(decision: HumanDecision, version: DerivedVersion, carried: Carried) -> str:
     """Why a standing approval does not cover ``version``; approve it again to cover it."""
     if decision.content_hash != version.content_hash:
         return f"{decision.artifact.sha256} was approved for another text"
@@ -212,9 +219,7 @@ def _standing(
     return tuple(last[sha] for sha in sorted(last))
 
 
-def _fits(
-    decision: HumanDecision, version: DerivedVersion, carried: Mapping[HumanDecision, int]
-) -> bool:
+def _fits(decision: HumanDecision, version: DerivedVersion, carried: Carried) -> bool:
     return (
         decision.decision is Decision.APPROVE
         and decision.content_hash == version.content_hash
@@ -310,8 +315,9 @@ def _next(
         msg = f"the corpus places this text as v{prepared.version}, the log as v{number}"
         raise PromotionRefusedError(msg)
     decision = require_approval(approved.decision, prepared, inputs.carried)
+    approval = standing_on(decision, inputs.carries)
     artifact = _artifact(inputs, history, history.versions[number - 1])
-    writes = write_set(prepared, artifact, decision, inputs.corpus)
+    writes = write_set(prepared, artifact, approval, inputs.corpus)
     path = f"{LOCAL_DIR}/{prepared.identity.authority.id}/observations/{prepared.slug}.json"
     observed = ObservationsFile.model_validate_json(writes.files[path])
     files = {**writes.files, path: observations_text(with_intervals(observed, history))}

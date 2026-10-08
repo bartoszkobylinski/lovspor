@@ -48,6 +48,7 @@ from tests.unit.promotion_cli_fixtures import (
     approve,
     git,
     invoke,
+    make_corpus,
     promote,
     store,
     tree,
@@ -376,6 +377,63 @@ class TestTheCarriedStateIsReachableThroughSupportedInterfacesOnly:
         assert v4["promotion"]["extractor_version"] == EXTRACTOR_VERSION  # type: ignore[index]
 
 
+class TestEveryWriterStampsACarry:
+    """Decisions §19: an approval a writer uses via a carry is published as carried."""
+
+    def _carry_all(self, root: Path) -> None:
+        log = DecisionLog(ObservatoryRoot(root, []))
+        carried_at = datetime(2026, 10, 8, 12, tzinfo=UTC)
+        for decision in [r for r in log.records() if isinstance(r, HumanDecision)]:
+            assert decision.content_hash is not None
+            log.append(
+                CarriedRecord(
+                    artifact=decision.artifact,
+                    carried_at=carried_at,
+                    doc_id="lk-0301-000000000000",
+                    version=1,
+                    content_hash=decision.content_hash,
+                    from_extractor_version=OLD,
+                    to_extractor_version=EXTRACTOR_VERSION,
+                    approval=ApprovalReference.of(decision),
+                )
+            )
+
+    def test_local_publishes_a_carried_approval_as_carried(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        a, _ = _blobs(corpus)
+        self._carry_all(root)
+        fresh = make_corpus(tmp_path / "fresh")
+
+        result = promote("local", a, fresh)
+
+        assert result.exit_code == 0, result.output
+        [path] = (fresh / LOCAL / AUTHORITY / "observations").glob("*.json")
+        [version] = json.loads(path.read_text(encoding="utf-8"))["versions"]
+        assert version["promotion"]["extractor_version"] == EXTRACTOR_VERSION
+        assert version["promotion"]["approval_carried"] == {
+            "approved_at_extractor": OLD,
+            "basis": BASIS,
+            "carried_at": "2026-10-08T12:00:00Z",
+            "carried_to_extractor": EXTRACTOR_VERSION,
+        }
+
+    def test_a_fresh_approval_is_published_without_a_carry(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        a, _ = _blobs(corpus)
+        self._carry_all(root)
+        _approve(a, tmp_path)
+        fresh = make_corpus(tmp_path / "fresh")
+
+        result = promote("local", a, fresh)
+
+        assert result.exit_code == 0, result.output
+        [path] = (fresh / LOCAL / AUTHORITY / "observations").glob("*.json")
+        [version] = json.loads(path.read_text(encoding="utf-8"))["versions"]
+        assert "approval_carried" not in version["promotion"]
+
+
 class TestTheCarriedRecord:
     def _decision(self) -> HumanDecision:
         return HumanDecision(
@@ -420,6 +478,17 @@ class TestTheCarriedRecord:
             log.append(record)
 
         assert log.carried() == {decision: OLD + 2}
+        assert log.carries() == {decision: carries[0]}
+
+    def test_of_two_carries_to_one_extractor_the_last_recorded_stands(self, tmp_path: Path) -> None:
+        log = DecisionLog(ObservatoryRoot(tmp_path, []))
+        decision = self._decision()
+        first = self._carried(decision, EXTRACTOR_VERSION)
+        second = first.model_copy(update={"carried_at": datetime(2026, 10, 9, tzinfo=UTC)})
+        for record in (decision, first, second):
+            log.append(record)
+
+        assert log.carries() == {decision: second}
 
     def test_a_carry_of_another_text_or_extractor_carries_nothing(self, tmp_path: Path) -> None:
         log = DecisionLog(ObservatoryRoot(tmp_path, []))

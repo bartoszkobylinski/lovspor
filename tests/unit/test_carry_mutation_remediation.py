@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from lovspor.errors import PromotionRefusedError
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.promotion.archive import read_artifact
-from lovspor.promotion.carry import _carriable, historical_markdown
+from lovspor.promotion.batch import Review, _review
+from lovspor.promotion.carry import _carriable, historical_markdown, standing_approval
 from lovspor.promotion.commands import Request, _context
 from lovspor.promotion.corpus import CorpusCheckout
 from lovspor.promotion.decisions import (
@@ -18,6 +20,7 @@ from lovspor.promotion.decisions import (
     Decision,
     DecisionLog,
     HumanDecision,
+    utc_text,
 )
 from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.plan import Prepared, prepare
@@ -148,6 +151,76 @@ def test_backfill_reuses_carried_approvals_when_reconstructing_versions(
     assert record["version"] == 1
     assert record["content_hash"] == approvals[0].content_hash
     assert (corpus / record["markdown_path"]).is_file()
+    # Decisions §19: absent approval_carried means a human approved at extractor_version.
+    [observations] = (corpus / "lokale-forskrifter" / AUTHORITY / "observations").glob("*.json")
+    [version] = json.loads(observations.read_text(encoding="utf-8"))["versions"]
+    audit = version["promotion"]
+    assert audit["decided_at"] == utc_text(approvals[0].decided_at)
+    assert audit["reviewed_by_role"] == approvals[0].reviewer_role
+    assert audit["extractor_version"] == EXTRACTOR_VERSION
+    assert audit["approval_carried"] == {
+        "approved_at_extractor": EXTRACTOR_VERSION - 1,
+        "carried_to_extractor": EXTRACTOR_VERSION,
+        "carried_at": utc_text(FIRST_SEEN),
+        "basis": "byte-identical rendering",
+    }
+
+
+@pytest.mark.parametrize("extractor", [None, EXTRACTOR_VERSION + 1])
+def test_migration_never_carries_an_unknown_or_future_extractor_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extractor: int | None
+) -> None:
+    """Decisions §19 permits approvals given at an earlier extractor only."""
+    corpus = backfilled_corpus(tmp_path, monkeypatch)
+    log = DecisionLog(ObservatoryRoot(tmp_path / "observatory", []))
+    approval = next(r for r in log.records() if isinstance(r, HumanDecision))
+    context = _context(Request(AUTHORITY, approval.artifact.sha256, corpus, KLASS_VERSION))
+    prepared = prepare(
+        read_artifact(context.log, context.fetches, context.key, None),
+        context.authority,
+        context.corpus,
+    )
+    assert isinstance(prepared, Prepared)
+    approval = approval.model_copy(update={"extractor_version": extractor})
+
+    with pytest.raises(PromotionRefusedError, match="another text or extractor"):
+        standing_approval(approval, prepared)
+
+
+@pytest.mark.parametrize(
+    "destination,expected",
+    [(EXTRACTOR_VERSION, Review.APPROVED), (EXTRACTOR_VERSION - 1, Review.STALE)],
+)
+def test_batch_review_reads_the_carried_approval_from_the_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, destination: int, expected: Review
+) -> None:
+    """Decisions §19: batch accepts a carry exactly where it accepts a fresh approval."""
+    corpus = backfilled_corpus(tmp_path, monkeypatch)
+    root = tmp_path / "observatory"
+    approval = _old_approvals(root)[0]
+    log = DecisionLog(ObservatoryRoot(root, []))
+    context = _context(Request(AUTHORITY, approval.artifact.sha256, corpus, KLASS_VERSION))
+    prepared = prepare(
+        read_artifact(context.log, context.fetches, context.key, None),
+        context.authority,
+        context.corpus,
+    )
+    assert isinstance(prepared, Prepared)
+    assert approval.content_hash is not None
+    log.append(
+        CarriedRecord(
+            artifact=approval.artifact,
+            carried_at=FIRST_SEEN,
+            doc_id=prepared.identity.doc_id,
+            version=prepared.version,
+            content_hash=approval.content_hash,
+            from_extractor_version=EXTRACTOR_VERSION - 2,
+            to_extractor_version=destination,
+            approval=ApprovalReference.of(approval),
+        )
+    )
+
+    assert _review(log.latest_decision(approval.artifact), prepared, log.carried()) is expected
 
 
 def test_running_extractor_approval_is_not_carriable(

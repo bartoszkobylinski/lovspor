@@ -1414,7 +1414,9 @@ A carry never reads as a review:
 
   A block without `approval_carried` was approved at its `extractor_version`.
   `observe`, `backfill`, `local` and `batch` accept a carried approval exactly
-  where they accept one given at the running extractor.
+  where they accept one given at the running extractor, and a version `backfill`,
+  `local` or `batch` writes on a carried approval is published with
+  `approval_carried` taken from the carry (its `carried_at`, its extractors).
 
 `approval_carried` is a new key in the observations schema, and the readers
 refuse keys they do not know: deploy the engine that reads it (the hosted MCP,

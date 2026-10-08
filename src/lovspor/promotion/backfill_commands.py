@@ -76,8 +76,11 @@ OBSERVE_SUBJECT = "observe: refresh observation intervals ({count} documents)"
 def _plan(request: Request) -> tuple[Inputs, BackfillPlan, DecisionLog]:
     context = _context(request)
     decisions = DecisionLog(context.root)
+    carries = decisions.carries()
     carried = decisions.carried()
-    inputs = Inputs(context.log, context.fetches, context.authority, context.corpus, carried)
+    inputs = Inputs(
+        context.log, context.fetches, context.authority, context.corpus, carried, carries
+    )
     history = read_primary(context.log, context.fetches, context.key.source_url, None)
     human = [r for r in decisions.records() if isinstance(r, HumanDecision)]
     return inputs, plan_backfill(history, human, carried), decisions

@@ -47,7 +47,6 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
@@ -65,6 +64,7 @@ from lovspor.promotion.classifier import ClassifiedArtifact, ClassifierOutput
 from lovspor.promotion.corpus import CorpusCheckout
 from lovspor.promotion.decisions import (
     ArtifactKey,
+    Carried,
     ClassifierEvidence,
     Decision,
     DecisionLog,
@@ -297,9 +297,7 @@ def _placed(prepared: Prepared) -> dict[str, object]:
     }
 
 
-def _review(
-    decision: HumanDecision | None, prepared: Prepared, carried: Mapping[HumanDecision, int]
-) -> Review:
+def _review(decision: HumanDecision | None, prepared: Prepared, carried: Carried) -> Review:
     if decision is None:
         return Review.UNREVIEWED
     if decision.decision is Decision.REJECT:

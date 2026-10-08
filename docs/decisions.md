@@ -930,7 +930,9 @@ approval at the running extractor wins over an older one: nothing is carried.
   Absent, the approval was given at `extractor_version`. Keeping `extractor_version` at the
   running extractor is what lets `observe`, `backfill`, `local` and `batch` accept a carried
   approval exactly where they accept a fresh one; they read the carry from the log
-  (`DecisionLog.carried`), never from the corpus.
+  (`DecisionLog.carried`), never from the corpus, and every writer that promotes on a carried
+  approval stamps `approval_carried` from that carry (PR #601 fix: backfill first wrote such a
+  version as if reviewed at the running extractor).
 
 ## How to use this document
 

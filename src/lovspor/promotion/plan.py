@@ -23,7 +23,6 @@ Placement, for the one version this slice writes:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -31,7 +30,14 @@ from pydantic import BaseModel, ConfigDict
 from lovspor.errors import PromotionRefusedError
 from lovspor.promotion.archive import ArchivedArtifact
 from lovspor.promotion.corpus import LOCAL_DIR, CorpusCheckout, LocalManifest
-from lovspor.promotion.decisions import Decision, HumanDecision, utc_text
+from lovspor.promotion.decisions import (
+    Carried,
+    Carries,
+    Decision,
+    HumanDecision,
+    StandingApproval,
+    utc_text,
+)
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
 from lovspor.promotion.identity import mint_identity
 from lovspor.promotion.models import (
@@ -109,7 +115,7 @@ def prepare(
 
 
 def require_approval(
-    decision: HumanDecision | None, prepared: Prepared, carried: Mapping[HumanDecision, int]
+    decision: HumanDecision | None, prepared: Prepared, carried: Carried
 ) -> HumanDecision:
     """The standing human approval of exactly this text, or a refusal saying what is missing.
 
@@ -132,11 +138,21 @@ def require_approval(
     return decision
 
 
-def stands_at_running_extractor(
-    decision: HumanDecision, carried: Mapping[HumanDecision, int]
-) -> bool:
+def stands_at_running_extractor(decision: HumanDecision, carried: Carried) -> bool:
     """True when ``decision`` was given at the running extractor, or carried to it."""
     return EXTRACTOR_VERSION in (decision.extractor_version, carried.get(decision))
+
+
+def standing_on(decision: HumanDecision, carries: Carries) -> StandingApproval:
+    """``decision`` with the carry it stands by at the running extractor, if it is carried.
+
+    Writers publish the result, so an approval given at an earlier extractor is
+    stamped ``approval_carried`` and never reads as a review at this one.
+    """
+    carry = carries.get(decision)
+    if decision.extractor_version == EXTRACTOR_VERSION or carry is None:
+        return StandingApproval(decision=decision)
+    return StandingApproval(decision=decision, carry=carry)
 
 
 def _placement(
