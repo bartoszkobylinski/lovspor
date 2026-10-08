@@ -7,6 +7,7 @@ import locale
 import os
 import subprocess
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,7 @@ from lovspor.errors import PromotionRefusedError
 from lovspor.observatory.storage import ENV_OBSERVATORY_ROOT, ObservatoryRoot
 from lovspor.promotion.commands import _authority
 from lovspor.promotion.corpus import CorpusCheckout
-from lovspor.promotion.decisions import DecisionLog, WithdrawalRecord
+from lovspor.promotion.decisions import DecisionLog, MigratedRecord, WithdrawalRecord
 from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.migrate import (
     MigrationInputs,
@@ -48,6 +49,7 @@ from tests.unit.promotion_cli_fixtures import (
     promote,
     register,
     store,
+    tree,
 )
 from tests.unit.promotion_fixtures import REGULATION_LINES, html_page
 
@@ -381,3 +383,83 @@ def test_front_matter_preserves_raw_values_in_a_torn_header(state, markdown, exp
     _, document, _ = state
     torn = document.model_copy(update={"markdown": markdown})
     assert _front_matter(torn) == expected
+
+
+@pytest.mark.parametrize(
+    "field, value, reason",
+    [
+        (
+            "primary_url",
+            PAGE_URL + "/other",
+            PAGE_URL + "/other has no observation under this authority",
+        ),
+        (
+            "observed_at_first",
+            (FIRST_SEEN + timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+            "it was first observed at",
+        ),
+    ],
+)
+def test_migration_refuses_unreproduced_observation_facts_without_writes(
+    state, field, value, reason
+):
+    """operations.md requires every version's URL and first observation to reproduce."""
+    inputs, document, _ = state
+    _old(inputs, document)
+    path = inputs.corpus.path / document.observations_path
+    data = json.loads(path.read_bytes())
+    data["versions"][0][field] = value
+    path.write_text(json.dumps(data), encoding="utf-8")
+    git(inputs.corpus.path, "add", "-A")
+    git(inputs.corpus.path, "commit", "-q", "-m", "inconsistent observation fixture")
+    before = tree(inputs.corpus.path)
+    log_before = inputs.decisions.path.read_bytes()
+
+    result = _migrate(inputs)
+
+    assert result.exit_code == 1, result.output
+    assert reason in result.stderr
+    assert tree(inputs.corpus.path) == before
+    assert inputs.decisions.path.read_bytes() == log_before
+
+
+def test_missing_evidence_is_recovered_when_extractor_metadata_is_current(state):
+    """The migration's evidence recovery also covers documents with current metadata."""
+    inputs, document, _ = state
+    evidence = inputs.corpus.path / LOCAL / AUTHORITY / "evidence" / f"{document.record.slug}.json"
+    expected = evidence.read_bytes()
+    git(inputs.corpus.path, "rm", "-q", "--", str(evidence))
+    git(inputs.corpus.path, "commit", "-q", "-m", "missing evidence fixture")
+    before = tree(inputs.corpus.path)
+
+    result = _migrate(inputs)
+
+    assert result.exit_code == 0, result.output
+    assert "already at extractor" not in result.stdout
+    assert evidence.read_bytes() == expected
+    assert tree(inputs.corpus.path) == {
+        **before,
+        evidence.relative_to(inputs.corpus.path).as_posix(): expected,
+    }
+    [record] = [r for r in inputs.decisions.records() if isinstance(r, MigratedRecord)]
+    assert record.written == (evidence.relative_to(inputs.corpus.path).as_posix(),)
+
+
+def test_migrated_audit_round_trip_and_duplicate_suppression(state):
+    """The new outcome type survives JSONL and ignores only recorded_at for repeats."""
+    inputs, document, _ = state
+    _old(inputs, document)
+    result = _migrate(inputs)
+    assert result.exit_code == 0, result.output
+    [record] = [r for r in inputs.decisions.records() if isinstance(r, MigratedRecord)]
+    before = inputs.decisions.path.read_bytes()
+    approval = inputs.decisions.latest_decision(record.artifact)
+    assert approval is not None
+    repeated = record.model_copy(update={"recorded_at": record.recorded_at + timedelta(seconds=1)})
+
+    assert inputs.decisions.record_outcome(repeated) is False
+    assert inputs.decisions.path.read_bytes() == before
+    changed = repeated.model_copy(update={"to_extractor_version": EXTRACTOR_VERSION + 1})
+    assert inputs.decisions.record_outcome(changed) is True
+    assert DecisionLog(inputs.root).records()[-2:] == (record, changed)
+    assert inputs.decisions.latest_decision(record.artifact) == approval
