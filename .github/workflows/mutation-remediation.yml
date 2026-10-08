@@ -391,9 +391,22 @@ jobs:
             exit 1
           fi
 
+      # Issue #596: the report used to land in tests/ and ride into the commit.
+      # It now goes to a gitignored path, which no `git add -A` stages, and is
+      # published here even when the round fails, since that is when it is read.
+      - name: Upload the remediation report
+        if: always() && steps.cycle.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: remediation-report-${{ github.event.workflow_run.head_sha }}
+          path: .agent-reports/mutation-remediation-report.md
+          if-no-files-found: ignore
+
+      # `remediation`: tests/unit/*.py only. Any other path (a report under
+      # tests/, a fixture, mutation-equivalents/) fails the round (#596).
       - name: Scope guard
         if: steps.cycle.outputs.run == 'true'
-        run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
+        run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA" remediation
 
       - name: Hand the agent's work to the verifier
         id: patch
@@ -526,7 +539,7 @@ jobs:
 
       - name: Scope guard
         if: needs.remediate.outputs.run == 'true'
-        run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
+        run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA" remediation
 
       # Codex output is not always ruff-clean (issue #66): normalize before the
       # pipeline's own lint gate sees it. What ruff cannot fix safely gets an
@@ -562,6 +575,9 @@ jobs:
           git config user.name "codex-ci"
           git config user.email "codex-ci@users.noreply.github.com"
           git add -A
+          # Normalize and pytest ran since the guard step: guard the exact tree
+          # this commit takes, so `git add -A` sweeps in nothing else (#596).
+          scripts/ci/assert_codex_scope.sh "$BEFORE_SHA" remediation
           # The marker names the ACTUAL author — never stamp codex on a
           # Claude-written commit.
           git commit -m "test: kill mutation survivors for PR #${{ needs.remediate.outputs.pr }} [agent:${{ needs.remediate.outputs.author || 'codex' }}-mutation]"

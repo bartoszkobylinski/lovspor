@@ -1488,7 +1488,7 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
     def test_the_scope_guard_runs_on_both_lanes_against_the_recorded_base(self) -> None:
         for job_name in ("remediate", "remediate-verify"):
             guard = _named_step(_steps("mutation-remediation.yml", job_name), "Scope guard")
-            assert guard["run"] == 'scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"'
+            assert guard["run"] == 'scripts/ci/assert_codex_scope.sh "$BEFORE_SHA" remediation'
 
         verifier = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
         assert verifier["env"]["BEFORE_SHA"] == "${{ needs.remediate.outputs.before_sha }}"
@@ -3101,3 +3101,131 @@ class TestTheReporterReadsTheLaneLogGitHubsCliRefused:
         if gh == "old":
             expected.append(["api", endpoint])
         assert calls == expected
+
+
+_REPORT = ".agent-reports/mutation-remediation-report.md"
+
+
+class TestTheRemediationReportStaysOutOfTheCommit:
+    """Issue #596: codex-mutation wrote its 2,405-line run report to
+    tests/mutation-remediation-report.md, the scope guard's `tests/*` let it
+    through, and `git add -A` committed it into PR #565 and onto main."""
+
+    def _prompt(self) -> str:
+        path = _WORKFLOWS.parent / "codex" / "mutation-remediation.md"
+        return " ".join(path.read_text(encoding="utf-8").split())
+
+    def test_the_prompt_sends_the_report_to_the_gitignored_path(self) -> None:
+        prompt = self._prompt()
+
+        assert f"`{_REPORT}`" in prompt
+        assert "Never write a report, notes or logs under tests/" in prompt
+        assert "the scope guard refuses this lane any path but `tests/unit/*.py`" in prompt
+
+    def test_the_report_path_is_gitignored(self) -> None:
+        result = subprocess.run(
+            ["git", "check-ignore", "--no-index", "--quiet", _REPORT],
+            cwd=_REPO_ROOT,
+            check=False,
+        )
+
+        assert result.returncode == 0
+
+    def test_the_report_is_published_as_an_artifact_even_on_failure(self) -> None:
+        steps = _steps("mutation-remediation.yml", "remediate")
+        upload = _named_step(steps, "Upload the remediation report")
+        names = [step.get("name") for step in steps]
+
+        assert upload["if"] == "always() && steps.cycle.outputs.run == 'true'"
+        assert upload["with"] == {
+            "name": "remediation-report-${{ github.event.workflow_run.head_sha }}",
+            "path": _REPORT,
+            "if-no-files-found": "ignore",
+        }
+        assert str(upload["uses"]).startswith("actions/upload-artifact@")
+        assert names.index("Codex — mutation remediation (tests only)") < names.index(
+            upload["name"]
+        )
+
+    def test_the_verifier_guards_the_exact_tree_it_commits(self) -> None:
+        """Normalize and pytest run between the guard step and the commit; the
+        commit step re-runs the guard after staging, so nothing they leave
+        behind is swept in by `git add -A`."""
+        steps = _steps("mutation-remediation.yml", "remediate-verify")
+        run = _named_step(steps, "Commit and push, or report BLOCKED")["run"]
+        guard = 'scripts/ci/assert_codex_scope.sh "$BEFORE_SHA" remediation'
+
+        assert run.index("git add -A") < run.index(guard) < run.index("git commit")
+
+    def test_the_pr_test_lane_keeps_its_wider_allowlist(self) -> None:
+        for job_name in ("codex-author", "codex-tests"):
+            guard = _named_step(_steps("pr-pipeline.yml", job_name), "Scope guard")
+            assert guard["run"] == 'scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"'
+
+
+_TESTS_TREE_STEP = "Only tests and fixtures under tests/"
+
+
+def _tests_tree_gate(tmp_path: Path, *tracked: str) -> subprocess.CompletedProcess[str]:
+    gate = _named_step(_steps("pr-pipeline.yml", "fast-ci"), _TESTS_TREE_STEP)
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+    for relative in tracked:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("content\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    return subprocess.run(
+        [str(_REPO_ROOT / gate["run"].strip())],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        "tests/mutation-remediation-report.md",
+        "tests/unit/mutation-remediation-source-text-report.md",
+        "tests/integration/run.log",
+        "tests/unit/notes.txt",
+    ],
+)
+def test_fast_ci_rejects_a_tracked_report_under_tests(tmp_path: Path, artifact: str) -> None:
+    """Issue #596: two agent reports sat tracked under tests/ on main."""
+    result = _tests_tree_gate(tmp_path, "tests/unit/test_ok.py", artifact)
+
+    assert result.returncode == 1
+    assert f"  {artifact}\n" in result.stdout
+    assert "tests/unit/test_ok.py" not in result.stdout
+    assert "::error::tracked files under tests/ that are neither Python nor a fixture" in (
+        result.stdout
+    )
+
+
+def test_fast_ci_accepts_tests_and_fixtures(tmp_path: Path) -> None:
+    result = _tests_tree_gate(
+        tmp_path,
+        "tests/__init__.py",
+        "tests/unit/test_ok.py",
+        "tests/fixtures/sample.xml",
+        "tests/fixtures/.gitkeep",
+        "tests/unit/fixtures/case/README.md",
+        "docs/report.md",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_repository_tests_tree_passes_its_own_gate() -> None:
+    gate = _named_step(_steps("pr-pipeline.yml", "fast-ci"), _TESTS_TREE_STEP)
+    result = subprocess.run(
+        [str(_REPO_ROOT / gate["run"].strip())],
+        cwd=_REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout

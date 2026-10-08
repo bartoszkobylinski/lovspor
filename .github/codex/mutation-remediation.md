@@ -13,7 +13,8 @@ Your allowed action is to add or strengthen tests that correctly specify existin
 intended behavior.
 
 Hard constraints:
-- modify files under tests/ only;
+- modify files under tests/ only — and for a killing test that means tests/unit/
+  only: the scope guard refuses this lane any path but `tests/unit/*.py`;
 - do not change production code (src/), benchmarks/, scripts/, docs/, or CI configuration;
 - do not weaken or delete existing assertions;
 - do not skip/xfail tests to satisfy the gate;
@@ -63,6 +64,12 @@ the attempt, and name what you tried and why it cannot work:
 Report every such survivor as BLOCKED and explain why human review is required.
 For every survivor, report its class and the test that kills it, or the
 equivalence argument (or other stated reason) for why none can.
+
+Write that report to `.agent-reports/mutation-remediation-report.md` at the
+repository root (create the directory). The path is gitignored and the workflow
+publishes it as an artifact. Never write a report, notes or logs under tests/:
+on PR #565 a report written there was committed with the tests and reached
+main (issue #596), and the scope guard now refuses the whole round instead.
 
 After editing, run ONLY the test files you touched, by path — for example
 `uv run pytest tests/unit/test_foo.py`. Do NOT run `uv run pytest tests/unit/`:
