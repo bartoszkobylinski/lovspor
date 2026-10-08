@@ -263,6 +263,14 @@ claude mcp add lovverk -- uvx lovspor mcp
 
 All eighteen are read-only. None mutate the corpus or trigger a sync. Seventeen are pure local (manifest + filesystem + git on the local clone); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
 
+**Unsupported calls are refused, never answered (issue #570).** Every listed input schema carries `"additionalProperties": false`, and the server validates each call against exactly that schema before the tool runs, whatever the client checked. A refusal is an `isError: true` result, `Error executing tool <name>: …` (an `UnsupportedToolCallError`), listing every problem at once:
+
+- an unknown tool — names the tools served;
+- an undeclared argument — names it and the tool's accepted arguments; if another tool takes it, names that tool, and for a time-axis name (`observed_at`, `recorded_at`, `valid_at`, `as_of`, `at`, `date`, …) names the tools serving that axis, or lists the served axes when none does. So `get_section(…, observed_at=…)` is refused with a pointer to `get_observation_history` instead of answering with today's text;
+- a wrong type, a `null` where the schema does not allow one, or a missing required argument — names the argument, the expected type and what was sent.
+
+Types are strict JSON types: `"5"` is not an integer, `1` is not a boolean, and the string `"null"` sent for an optional argument is refused rather than read as JSON `null`. The one coercion kept is JSON Schema's own: `5.0` is an integer. A refused call never reaches the tool body, nor the hosted quota and usage accounting wrapped around it — the same as a call pydantic refused before.
+
 ### `get_law(slug)`
 
 Return the full Markdown of a Norwegian law or regulation.
@@ -1105,7 +1113,7 @@ Regulations enacted by a kommune or fylkeskommune and promoted from the local-la
   | `before_first_observation` | before the document's first observation | `observed_at_first`, `observation_floor` (`2026-08-19`, the observatory's first capture) |
   | `after_last_observation` | after the last observation (the last interval is closed, not open-ended) | `last`, `observed_at_last` — the version last seen, not asserted past it |
 
-  `observed_at` is the **observation axis** only (when the authority's website was read, ADR-0010) and never selects a corpus state; `recorded_at` is the **transaction axis** (git) and never reads an observation interval. No tool takes both. `include_text` needs `observed_at`; an older version's text is read from the checkout's git history, so a shallow clone may not reach it (`LocalCorpusError`).
+  `observed_at` is the **observation axis** only (when the authority's website was read, ADR-0010) and never selects a corpus state; `recorded_at` is the **transaction axis** (git) and never reads an observation interval. No tool takes both, and an axis sent to a tool that does not take it is refused, not ignored (see [Tools](#tools)). `include_text` needs `observed_at`; an older version's text is read from the checkout's git history, so a shallow clone may not reach it (`LocalCorpusError`).
 
 Every response carrying local content carries this label; `asserted` is always `false`:
 

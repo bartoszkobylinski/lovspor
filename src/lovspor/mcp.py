@@ -61,7 +61,6 @@ import numpy as np
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
-from mcp.server.fastmcp import FastMCP
 from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -103,6 +102,7 @@ from lovspor.headings import (
 )
 from lovspor.hosted_calls import offload_to_thread as _offload_to_thread
 from lovspor.hosted_calls import record_usage
+from lovspor.mcp_contract import ContractServer
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
 from lovspor.slug_index import SlugIndex, build_slug_index
@@ -4086,7 +4086,7 @@ def _with_section_notice(result: dict[str, Any], evaluation_date: date) -> dict[
 
 def build_server(
     corpus_path: Path, *, http: HttpConfig | None = None, usage: UsageRecorder | None = None
-) -> FastMCP:
+) -> ContractServer:
     """Build a FastMCP server bound to ``corpus_path``.
 
     The reader is constructed eagerly so configuration errors (missing
@@ -4110,7 +4110,7 @@ def build_server(
     bind = http or HttpConfig()
     store = CredentialStore(bind.credentials_path) if bind.credentials_path else None
     verifier, metering = _build_verifier(bind, store)
-    mcp = FastMCP("lovverk", host=bind.host, port=bind.port, **_auth_kwargs(bind, verifier))
+    mcp = ContractServer("lovverk", host=bind.host, port=bind.port, **_auth_kwargs(bind, verifier))
     # No store means --allow-insecure: no credential to meter, so no brakes.
     # serve_http already refuses that combination unless it was asked for.
     enforcer = _enforcer_with_spend_charger(bind, metering, reader)
@@ -4866,7 +4866,7 @@ def serve_http(corpus_path: Path, http: HttpConfig) -> None:
         server.run(transport="streamable-http")
 
 
-def _add_health_routes(server: FastMCP, corpus_path: Path, http: HttpConfig) -> None:
+def _add_health_routes(server: ContractServer, corpus_path: Path, http: HttpConfig) -> None:
     """Attach ``/healthz`` (process up) and ``/readyz`` (corpus present + attestation).
 
     Kept deliberately cheap so a probe hammering them cannot stall the event

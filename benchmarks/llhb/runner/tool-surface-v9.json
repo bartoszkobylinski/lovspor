@@ -1,0 +1,27 @@
+{
+  "description": "Apparatus surface after issue #570 (owner decision 2026-10-08: every tool call the server does not support is an error, without exception). Every input schema gains \"additionalProperties\": false, and the server refuses at call time, before the tool body runs, any call its listed schema does not admit: an unknown tool, an undeclared argument (named, with the tool's accepted arguments and, for a time-axis name such as observed_at, the tools that serve that axis), a wrong JSON type (strict: \"5\" is not an integer, 1 is not a boolean, the string \"null\" is not JSON null), a null where none is allowed, or a missing required argument (lovspor.mcp_contract.ContractServer). No tool name, description or output schema changes (eighteen tools), and every supported call answers byte-identically (pinned by tests/unit/test_mcp_existing_calls.py and, per tool, by tests/unit/test_mcp_call_contract.py). Supersedes tool-surface-v8.json for FUTURE runs; v1-v8 stay committed untouched because the runs that recorded their hashes must remain verifiable (pass --surface-path for a re-check against any of them). The call-time refusal is also a behaviour change the hash cannot see: a run that spans it would compare a lax server with a strict one, so take it between runs. The surface is corpus-independent (the schemas come from build_server, not the documents) but interpreter-dependent: tool descriptions come from docstrings, and CPython 3.13 dedents docstrings at compile time, so the hash is only defined together with the `python` field below. A unit test regenerates this document from the code on every run — names on every interpreter, hash on the apparatus interpreter; if the served surface changes, that test fails and changing this file is an explicit apparatus decision, not drift. check_fairness.py reads this document as the expectation the declared tool_config is compared against.",
+  "generated_by": "lovspor.llhb.mcp_surface.tool_surface()/allowed_tools() on branch fix/mcp-refuse-unsupported-calls-570 (issue #570)",
+  "python": "3.12",
+  "server": "lovverk",
+  "tool_schema_sha256": "a9aef8eabde0948d8069e8f7e968266aceb790d9ba37126258b6427b9a7ac341",
+  "tools": [
+    "mcp__lovverk__corpus_status",
+    "mcp__lovverk__diff_law_versions",
+    "mcp__lovverk__get_eu_basis",
+    "mcp__lovverk__get_law",
+    "mcp__lovverk__get_law_at",
+    "mcp__lovverk__get_law_history",
+    "mcp__lovverk__get_observation_history",
+    "mcp__lovverk__get_section",
+    "mcp__lovverk__get_temporal_events",
+    "mcp__lovverk__list_law_versions",
+    "mcp__lovverk__list_recent_changes",
+    "mcp__lovverk__list_sections",
+    "mcp__lovverk__search_body",
+    "mcp__lovverk__search_eu_implementations",
+    "mcp__lovverk__search_laws",
+    "mcp__lovverk__semantic_search",
+    "mcp__lovverk__validate_citation",
+    "mcp__lovverk__verify_quote"
+  ]
+}

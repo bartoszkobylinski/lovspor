@@ -12,8 +12,10 @@ checksum. Canonical form (frozen contract):
 * duplicate ``case_id`` values are an error — canonicalization fails
   closed rather than producing an ambiguous dataset.
 
-``jsonschema`` is a dev-group dependency (benchmark-only tooling); the
-import is lazy so the shipped package does not depend on it. JSON-Schema
+``jsonschema`` is imported lazily. It was a dev-group dependency when this
+module was written; since issue #570 it is a runtime dependency (the MCP
+server validates every tool call with it), so the lazy import is no longer
+load-bearing. JSON-Schema
 ``format`` checks are best-effort annotations — the structural checks
 and the typed models in the validator are authoritative.
 """

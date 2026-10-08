@@ -96,6 +96,17 @@ class ObservedAtError(LovsporError):
     """
 
 
+class UnsupportedToolCallError(LovsporError):
+    """A tool call the served surface does not support (issue #570).
+
+    An unknown tool, an undeclared argument, a wrong type, a null where none
+    is allowed or a missing required argument. Each is refused before the tool
+    body runs: answering with the argument ignored or coerced would be a
+    silent wrong answer — ``observed_at`` dropped from ``get_section`` returns
+    today's text as if it were the text observed then.
+    """
+
+
 class UnsupportedSidecarVersionError(LovsporError):
     """A sidecar is stored in a format version this engine does not read.
 

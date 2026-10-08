@@ -62,6 +62,11 @@ dependencies = [
     # regulation. A bump is a deliberate extractor_version change, and
     # tests/unit/test_promotion_extract.py fails until EXTRACTOR_VERSION says so.
     "pypdf==6.19.0",
+    # The MCP server validates every tool call against its listed input schema
+    # (lovspor.mcp_contract, issue #570). Already a transitive mcp dep (its
+    # low-level server imports it); declared because we import it directly.
+    # LLHB dataset validation (lovspor.llhb.schema) uses it too.
+    "jsonschema>=4.23",
 ]
 
 [project.optional-dependencies]
@@ -97,11 +102,8 @@ dev = [
     # a shipped console script; making it a runtime dependency would force it
     # on every `pip install lovspor` for code the wheel no longer contains.
     "pyyaml>=6.0",
-    # jsonschema backs LLHB dataset validation (lovspor.llhb.schema). Dev-only
-    # like pyyaml: the module lazy-imports it with a clear error, so the wheel
-    # gains no runtime dependency for benchmark-only tooling. Stubs follow the
+    # jsonschema itself is a runtime dependency (above); its stubs follow the
     # lxml-stubs precedent so `mypy src/` stays strict-green.
-    "jsonschema>=4.23",
     "types-jsonschema>=4.23",
     "bandit>=1.9",
 ]
