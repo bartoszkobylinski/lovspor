@@ -7,6 +7,7 @@ from datetime import date
 import pytest
 
 from lovspor.promotion import ExtractionHoldReason, RegulationFields
+from lovspor.promotion.anchors import MAX_TITLE_CHARS
 from lovspor.promotion.fields import read_regulation
 from tests.unit.promotion_fixtures import REGULATION_LINES
 
@@ -351,3 +352,20 @@ def test_joining_a_title_preserves_the_metadata_and_body() -> None:
 def test_a_body_line_cannot_complete_a_truncated_title(section: str) -> None:
     lines = ("Forskrift om", section, "gebyr for Eksempel kommune")
     assert read_regulation(lines) == ExtractionHoldReason.TITLE_TRUNCATED
+
+
+@pytest.mark.parametrize("length", [MAX_TITLE_CHARS, MAX_TITLE_CHARS + 1])
+def test_split_title_length_boundary_reaches_the_fields_or_a_typed_hold(length: int) -> None:
+    head = "FORSKRIFT OM"
+    continuation = "X" * (length - len(head) - 1)
+    lines = ("Kommunens forskrifter", head, continuation, "§ 1 Formål")
+    result = read_regulation(lines)
+    if length > MAX_TITLE_CHARS:
+        assert result == ExtractionHoldReason.TITLE_TRUNCATED
+    else:
+        assert not isinstance(result, ExtractionHoldReason), result
+        regulation, fields = result
+        assert regulation.title == fields.title == f"{head} {continuation}"
+        assert len(fields.title) == MAX_TITLE_CHARS
+        assert regulation.identification_block == "\n".join(lines[1:3])
+        assert regulation.body == lines[3]

@@ -160,3 +160,18 @@ def test_uppercase_continuation_reads_first_word_across_whitespace(
 def test_dangling_title_reads_last_word_across_whitespace(separator: str, word: str) -> None:
     head = separator + separator.join(("Forskrift", "om", "gebyr", word)) + separator
     assert read_title((head, "Eksempel kommune")) == f"{head} Eksempel kommune"
+
+
+@pytest.mark.parametrize("length", [MAX_TITLE_CHARS - 1, MAX_TITLE_CHARS])
+def test_a_complete_title_at_the_length_boundary_cannot_take_another_line(length: int) -> None:
+    head = "FORSKRIFT OM"
+    continuation = "X" * (length - len(head) - 1)
+    title = f"{head} {continuation}"
+    assert len(title) == length
+    assert read_title((head, continuation, "FOR EKSEMPEL KOMMUNE")) == title
+
+
+@pytest.mark.parametrize("head", ["FORSKRIFT OM", "FORSKRIFT OM GEBYR"])
+def test_metadata_ends_title_reading_without_skipping_to_a_later_continuation(head: str) -> None:
+    block = (head, "Hjemmel: LOV-1981-03-13-6-§30", "FOR EKSEMPEL KOMMUNE")
+    assert read_title(block) == (None if head == "FORSKRIFT OM" else head)
