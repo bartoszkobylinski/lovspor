@@ -167,3 +167,42 @@ def test_a_folded_group_is_one_promotable_item_from_the_chosen_page() -> None:
 
     assert item == pages[1].model_copy(update={"sources": (pages[1].key, pages[0].key)})
     assert item.promotable
+
+
+@pytest.mark.parametrize(
+    ("title", "slug"),
+    [
+        ("Forskrift om saerskilt gebyr", "særskilt"),
+        ("Forskrift om toemming", "tømming"),
+        ("Forskrift om aapningstider", "åpningstider"),
+        ("Forskrift om åpningstider", "a\u030apningstider"),
+        ("Forskrift om kafédrift", "kafe\u0301drift"),
+    ],
+)
+def test_title_and_slug_use_the_same_norwegian_folding(title: str, slug: str) -> None:
+    about = f"{SITE}/a/b/{slug}"
+
+    assert chosen(member(f"{SITE}/x", title=title), member(about, title=title)) == about
+
+
+def test_percent_decoding_happens_before_selecting_the_pages_own_slug() -> None:
+    parent_match = f"{SITE}/skoleregler%2Fsfo"
+    about = f"{SITE}/a/b/skoledemokrati"
+
+    assert chosen(member(parent_match), member(about)) == about
+
+
+def test_fragment_title_words_do_not_make_a_page_about_the_regulation() -> None:
+    fragment = f"{SITE}/a#skoleregler-skoledemokrati"
+    about = f"{SITE}/a/b/skoleregler"
+
+    assert chosen(member(fragment), member(about)) == about
+
+
+def test_host_words_are_excluded_after_norwegian_folding() -> None:
+    site = "https://www.aalesund.kommune.invalid"
+    title = "Forskrift om skoleregler i Ålesund kommune"
+    host_match = f"{site}/a/b/ålesund-kommune"
+    fallback = f"{site}/x"
+
+    assert chosen(member(host_match, title=title), member(fallback, title=title)) == fallback
