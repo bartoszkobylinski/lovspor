@@ -47,6 +47,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
@@ -258,7 +259,8 @@ def assess_item(candidate: ClassifiedArtifact, inputs: BatchInputs, version: str
         return item.model_copy(update={"detail": str(exc)})
     if isinstance(prepared, Held):
         return item.model_copy(update=_held(prepared))
-    review = _review(inputs.decisions.latest_decision(candidate.key), prepared)
+    decision = inputs.decisions.latest_decision(candidate.key)
+    review = _review(decision, prepared, inputs.decisions.carried())
     return item.model_copy(update=_placed(prepared) | {"review": review})
 
 
@@ -295,7 +297,9 @@ def _placed(prepared: Prepared) -> dict[str, object]:
     }
 
 
-def _review(decision: HumanDecision | None, prepared: Prepared) -> Review:
+def _review(
+    decision: HumanDecision | None, prepared: Prepared, carried: Mapping[HumanDecision, int]
+) -> Review:
     if decision is None:
         return Review.UNREVIEWED
     if decision.decision is Decision.REJECT:
@@ -303,7 +307,7 @@ def _review(decision: HumanDecision | None, prepared: Prepared) -> Review:
     if decision.decision is Decision.HOLD:
         return Review.HELD_BY_REVIEWER
     try:
-        require_approval(decision, prepared)
+        require_approval(decision, prepared, carried)
     except PromotionRefusedError:
         return Review.STALE
     return Review.APPROVED

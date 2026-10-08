@@ -23,6 +23,7 @@ Placement, for the one version this slice writes:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -107,8 +108,15 @@ def prepare(
     return prepared.model_copy(update={"markdown": _render(prepared, artifact)})
 
 
-def require_approval(decision: HumanDecision | None, prepared: Prepared) -> HumanDecision:
-    """The standing human approval of exactly this text, or a refusal saying what is missing."""
+def require_approval(
+    decision: HumanDecision | None, prepared: Prepared, carried: Mapping[HumanDecision, int]
+) -> HumanDecision:
+    """The standing human approval of exactly this text, or a refusal saying what is missing.
+
+    ``carried`` maps approvals a migration carried to the extractor it carried
+    them to (:meth:`~.decisions.DecisionLog.carried`): one carried to the
+    running extractor stands there exactly as one given there.
+    """
     if decision is None:
         msg = "no human decision is recorded for this artifact; run `lovspor promote approve`"
         raise PromotionRefusedError(msg)
@@ -116,13 +124,19 @@ def require_approval(decision: HumanDecision | None, prepared: Prepared) -> Huma
         when = utc_text(decision.decided_at)
         msg = f"the standing decision is {decision.decision.value} ({decision.decided_by}, {when})"
         raise PromotionRefusedError(msg)
-    if (decision.content_hash, decision.extractor_version) != (
-        prepared.identity.content_hash,
-        EXTRACTOR_VERSION,
+    if decision.content_hash != prepared.identity.content_hash or not stands_at_running_extractor(
+        decision, carried
     ):
         msg = "the approval was given for another text or extractor; preview and approve again"
         raise PromotionRefusedError(msg)
     return decision
+
+
+def stands_at_running_extractor(
+    decision: HumanDecision, carried: Mapping[HumanDecision, int]
+) -> bool:
+    """True when ``decision`` was given at the running extractor, or carried to it."""
+    return EXTRACTOR_VERSION in (decision.extractor_version, carried.get(decision))
 
 
 def _placement(

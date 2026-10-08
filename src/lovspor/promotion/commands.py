@@ -300,7 +300,7 @@ def promote_one(context: PromotionContext, now: datetime) -> None:
         raise typer.Exit(HELD_EXIT_CODE)
     # The artifact itself was refused by _standing; only the document is new here.
     refuse_withdrawn(decisions, None, prepared.identity.doc_id)
-    approval = require_approval(decision, prepared)
+    approval = require_approval(decision, prepared, decisions.carried())
     if prepared.unchanged:
         typer.echo(f"Unchanged: {prepared.identity.doc_id} v{prepared.version} is already at")
         typer.echo(f"{prepared.markdown_path}; nothing written, nothing to commit.")

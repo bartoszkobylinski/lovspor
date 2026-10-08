@@ -118,7 +118,7 @@ def test_an_approval_of_exactly_this_text_stands() -> None:
     prepared = _prepared()
     approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION)
 
-    assert require_approval(approval, prepared) is approval
+    assert require_approval(approval, prepared, {}) is approval
 
 
 @pytest.mark.parametrize(
@@ -138,7 +138,7 @@ def test_no_standing_approval_is_refused_saying_what_stands(
     decision: HumanDecision | None, expected: str
 ) -> None:
     with pytest.raises(PromotionRefusedError) as refused:
-        require_approval(decision, _prepared())
+        require_approval(decision, _prepared(), {})
 
     assert str(refused.value) == expected
 
@@ -152,7 +152,7 @@ def test_an_approval_of_another_text_or_extractor_is_refused(
     extractor = EXTRACTOR_VERSION + 1 if other_extractor else EXTRACTOR_VERSION
 
     with pytest.raises(PromotionRefusedError) as refused:
-        require_approval(_decision(Decision.APPROVE, content_hash, extractor), prepared)
+        require_approval(_decision(Decision.APPROVE, content_hash, extractor), prepared, {})
 
     assert str(refused.value) == (
         "the approval was given for another text or extractor; preview and approve again"

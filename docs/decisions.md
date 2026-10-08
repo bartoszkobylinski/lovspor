@@ -901,6 +901,37 @@ unexamined default, not a decision."*
 Per this file's convention the MIT sentences in §1 and §15 stay as history; this entry is
 what supersedes them.
 
+## 19. An extractor bump carries a standing approval on byte-identical rendering (decided 2026-10-08)
+
+Project-owner decision, given in chat on 2026-10-08 (*"jeśli jest identyczny to tak"*),
+amending the approval rule of `lovspor promote migrate` (ADR-0016 4e, PR #594). Until
+then a migration refused every promoted local regulation without an approval pinned to the
+running `EXTRACTOR_VERSION`, so each bump asked the owner to re-approve every published
+document even when nothing in it changed.
+
+**The rule.** When an extractor bump leaves a promoted version's published rendering
+byte-identical — same id, same `content_hash`, same Markdown bytes — the owner's standing
+`approve` of that text, given at any earlier extractor, carries to the running extractor
+with no new review. For the current version the bytes are the checkout's Markdown; for an
+earlier version they are the Markdown its own commit published (git history). Any byte
+difference still needs a fresh `promote approve` at the running extractor; a standing
+`reject` or `hold`, a withdrawal, or no prior `approve` is refused as before. A fresh
+approval at the running extractor wins over an older one: nothing is carried.
+
+**Provenance stays honest.** A carry is not a review and is never recorded as one:
+
+- `promotions.jsonl` gets a `carried` record per version (`approval`: the original
+  `decided_at`, `extractor_version`, `reviewer_role` — no `decided_by`; `carried_at`,
+  from/to extractor, `content_hash`, `basis: "byte-identical rendering"`).
+- The published `promotion` block keeps the human approval's fields. Its `extractor_version`
+  is the extractor the published bytes are current for — what it has meant since PR #594
+  moved it on migration — and the new `approval_carried` block (`approved_at_extractor`,
+  `carried_to_extractor`, `carried_at`, `basis`) says the review happened at another one.
+  Absent, the approval was given at `extractor_version`. Keeping `extractor_version` at the
+  running extractor is what lets `observe`, `backfill`, `local` and `batch` accept a carried
+  approval exactly where they accept a fresh one; they read the carry from the log
+  (`DecisionLog.carried`), never from the corpus.
+
 ## How to use this document
 
 - **Before starting a session**: read this + `CLAUDE.md`. Those two together are the full context.
