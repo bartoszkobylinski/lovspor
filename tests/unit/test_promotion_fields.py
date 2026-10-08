@@ -206,14 +206,44 @@ def test_ikraft_date_or_verbatim_phrase(
     assert (fields.ikraft, fields.ikraft_text) == (ikraft, ikraft_text)
 
 
-def test_ikraft_header_wins_over_the_body_clause() -> None:
+def test_an_ikraft_header_and_a_body_clause_that_disagree_leave_no_date() -> None:
     fields = _read(
         "Forskrift om gebyr",
         "Ikrafttredelse: 01.01.2020",
         "§ 1 Gebyr",
         "§ 9 Forskriften trer i kraft 1. juli 2020.",
     )
-    assert fields.ikraft == date(2020, 1, 1)
+    assert (fields.ikraft, fields.ikraft_text) == (None, None)
+
+
+def test_an_ikraft_header_and_a_body_clause_that_agree_give_the_date() -> None:
+    fields = _read(
+        "Forskrift om gebyr",
+        "Ikrafttredelse: 01.01.2020",
+        "§ 1 Gebyr",
+        "§ 9 Forskriften trer i kraft 1. januar 2020.",
+    )
+    assert (fields.ikraft, fields.ikraft_text) == (date(2020, 1, 1), None)
+
+
+def test_a_date_and_a_phrase_for_ikraft_leave_both_empty() -> None:
+    fields = _read(
+        "Forskrift om gebyr",
+        "§ 1 Gebyr",
+        "§ 8 Forskriften trer i kraft straks.",
+        "§ 9 Forskriften trer i kraft 1. juli 2020.",
+    )
+    assert (fields.ikraft, fields.ikraft_text) == (None, None)
+
+
+def test_two_enactment_dates_leave_vedtatt_empty_but_keep_the_first_organ() -> None:
+    fields = _read(
+        "Forskrift om gebyr",
+        "Vedtatt av kommunestyret 12.12.2019.",
+        "§ 1 Gebyr",
+        "Forskriften er vedtatt av bystyret den 3. mars 2020.",
+    )
+    assert (fields.vedtatt, fields.vedtatt_av) == (None, "kommunestyret")
 
 
 def test_no_ikraft_clause_leaves_both_empty() -> None:

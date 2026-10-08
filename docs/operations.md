@@ -1142,7 +1142,9 @@ It writes, under `lokale-forskrifter/` only:
 
 * `<authority_id>/<slug>.md` — the rendering, with ADR-0016's front matter
   (`observed_at_first` is the first observation of this content; there is no
-  `retrieved_at` and no `observed_at_last`);
+  `retrieved_at` and no `observed_at_last`; `vedtatt`, `ikraft` and
+  `ikraft_text` are the evidence sidecar's resolved value, `null` when its
+  statements disagree and the sidecar holds the date);
 * `<authority_id>/observations/<slug>.json` — per version: content hash,
   first and last observation, observation count, primary and corroborating
   URLs, source blob, and `promotion`, the audit record: decision, the

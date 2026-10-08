@@ -175,7 +175,9 @@ class RegulationFields(BaseModel):
 
     ``vedtatt`` and ``ikraft`` are source-explicit dates or ``None``; an
     in-force phrase that is not a date ("straks") is kept verbatim in
-    ``ikraft_text``. Nothing here is filled from an observation time.
+    ``ikraft_text``. Each is the value every statement of the text agrees on
+    (``stated_dates.py``); statements that disagree leave it ``None``. Nothing
+    here is filled from an observation time.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
