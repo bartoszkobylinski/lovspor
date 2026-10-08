@@ -164,6 +164,64 @@ def test_conflicting_vedtatt_statements_leave_the_date_null_but_not_the_id() -> 
     assert held.extracted.regulation.vedtaksdato == date(2019, 12, 12)
 
 
+@pytest.mark.parametrize(
+    ("body_phrase", "status", "resolved_phrase"),
+    [
+        ("straks", "text", "straks"),
+        ("når departementet bestemmer", "held", None),
+        ("1. januar 2020", "held", None),
+    ],
+)
+def test_front_matter_ikraft_phrase_matches_the_resolved_evidence(
+    body_phrase: str, status: str, resolved_phrase: str | None
+) -> None:
+    lines = (
+        *REGULATION_LINES[:2],
+        "Ikrafttredelse: straks",
+        *REGULATION_LINES[2:-1],
+        f"Forskriften trer i kraft {body_phrase}.",
+    )
+    document = _document(lines)
+    rendered = render_local_regulation(document)
+    _, values = _front_matter(rendered)
+    subject = EvidenceSubject(
+        doc_id=document.identity.doc_id,
+        version=1,
+        content_hash=document.identity.content_hash,
+        regulation=document.extracted.regulation,
+    )
+    ikraft = evidence_file(subject, TargetIndex(by_lovdata={}, by_short_name={})).ikraft
+
+    assert (ikraft.status, ikraft.value, ikraft.text) == (status, None, resolved_phrase)
+    assert (values["ikraft"], values["ikraft_text"]) == (None, resolved_phrase)
+    assert ikraft.hold_reason == ("conflicting_statements" if status == "held" else None)
+    assert [statement.evidence for statement in ikraft.statements] == [
+        "Ikrafttredelse: straks",
+        f"trer i kraft {body_phrase}",
+    ]
+    assert render_local_regulation(_document(lines)).encode("utf-8") == rendered.encode("utf-8")
+
+
+@pytest.mark.parametrize("in_block", [True, False])
+def test_later_conflicting_enactment_preserves_identity_but_changes_content_hash(
+    in_block: bool,
+) -> None:
+    original = _document()
+    clause = "Forskriften er vedtatt av bystyret den 3. mars 2020."
+    lines = (
+        (*REGULATION_LINES[:2], clause, *REGULATION_LINES[2:])
+        if in_block
+        else (*REGULATION_LINES, clause)
+    )
+    conflicting = _document(lines)
+    _, values = _front_matter(render_local_regulation(conflicting))
+
+    assert conflicting.identity.doc_id == original.identity.doc_id
+    assert conflicting.identity.content_hash != original.identity.content_hash
+    assert conflicting.extracted.regulation.vedtaksdato == original.extracted.regulation.vedtaksdato
+    assert (values["vedtatt"], values["vedtatt_av"]) == (None, "kommunestyret")
+
+
 def test_lf_identity_renders_its_ref_id() -> None:
     lines = (REGULATION_LINES[0], "Dato: FOR-2019-12-12-2077", *REGULATION_LINES[1:])
     _, values = _front_matter(render_local_regulation(_document(lines)))
