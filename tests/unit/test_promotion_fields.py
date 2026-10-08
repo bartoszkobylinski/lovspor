@@ -307,3 +307,19 @@ def test_hjemmel_phrase_without_i_before_a_law_or_regulation(phrase: str, expect
 def test_hjemmel_phrase_without_i_needs_a_law_or_regulation() -> None:
     fields = _read("Forskrift om gebyr", "Vedtatt med hjemmel som nevnt i saken.", "§ 1")
     assert fields.hjemmel == ()
+
+
+def test_a_heading_broken_over_lines_is_one_title_and_the_block_keeps_its_lines() -> None:
+    """Issue #592: Sykkylven 1528's capitals heading, structure only."""
+    lines = ("FORSKRIFT OM", "SKULEREGLAR", "FOR GRUNNSKULEN I EKSEMPEL KOMMUNE", "§ 1 Heimel")
+    result = read_regulation(lines)
+    assert not isinstance(result, ExtractionHoldReason), result
+    regulation, fields = result
+    title = "FORSKRIFT OM SKULEREGLAR FOR GRUNNSKULEN I EKSEMPEL KOMMUNE"
+    assert regulation.title == fields.title == title
+    assert regulation.identification_block == "\n".join(lines[:3])
+
+
+def test_a_title_cut_on_a_function_word_is_held_as_title_truncated() -> None:
+    lines = ("Forskrift om gebyr for", "Vedtatt av kommunestyret 12.12.2019", "§ 1 Gebyr")
+    assert read_regulation(lines) == ExtractionHoldReason.TITLE_TRUNCATED

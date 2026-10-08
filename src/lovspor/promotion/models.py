@@ -142,6 +142,7 @@ class ExtractionHoldReason(StrEnum):
     PLACEHOLDER_DATE = "placeholder_date"
     NO_BODY = "no_body"
     NO_TITLE = "no_title"
+    TITLE_TRUNCATED = "title_truncated"
     PERSONAL_DATA = "personal_data"
 
 

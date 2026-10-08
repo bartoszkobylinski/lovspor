@@ -309,7 +309,7 @@ def test_slug_that_is_not_one_file_name_is_rejected(slug: str) -> None:
 
 
 def test_versions_are_recorded() -> None:
-    assert (LOCAL_RENDERER_VERSION, EXTRACTOR_VERSION) == (1, 6)
+    assert (LOCAL_RENDERER_VERSION, EXTRACTOR_VERSION) == (1, 7)
     _, values = _front_matter(render_local_regulation(_document(version=3)))
     assert values["version"] == 3
 

@@ -21,6 +21,7 @@ A text that could mislead is held, never published, and the reason is typed
    § 14 does not cover (ADR-0016 Risks);
 6. ``placeholder_date`` — a draft's blank date such as ``X.X.2016`` (§6.4);
 7. ``no_body`` / ``no_title`` — the text cannot be split safely;
+   ``title_truncated`` — the title ends on a function word (``title.py``);
 8. ``personal_data`` — the gate of ``personal_data.py`` found something.
 """
 
@@ -49,7 +50,7 @@ from lovspor.promotion.source_text import docx_lines, html_lines, pdf_lines, sou
 #: Bump on any change that can change extracted text for the same bytes,
 #: including a pypdf bump (``source_text.PDF_LIBRARY_VERSION``). A bump is a
 #: ``migration:`` commit across the dataset, never new versions (ADR-0016 4e).
-EXTRACTOR_VERSION = 6
+EXTRACTOR_VERSION = 7
 MIN_TEXT_CHARS = 200
 
 # Measured 2026-10-03 over the archive's extracted texts longer than 200
@@ -116,6 +117,7 @@ _READERS: dict[SourceForm, Callable[[bytes, str], tuple[str, ...]]] = {
 _SPLIT_DETAIL = {
     ExtractionHoldReason.NO_BODY: "no first section (§ 1, Kapittel 1) bounds the block",
     ExtractionHoldReason.NO_TITLE: "no title line before the first section",
+    ExtractionHoldReason.TITLE_TRUNCATED: "the title ends on a function word: it is cut off",
 }
 
 
