@@ -17,16 +17,18 @@ the personal-data gate, identity, placement — and ends in one outcome:
 * ``held`` — a property of the source stops it (``<stage>:<reason>``, e.g.
   ``extraction:lovdata_copy``, ``identity:no_identity``), or two different
   texts of the batch mint one id (``batch:same_id_in_batch``: which URL is
-  primary is a recorded human decision, ADR-0016 1d, never picked here), or
-  one text minting one id was captured on several pages — a regulation in a
-  CMS sidebar — and the group waits for its canonical page
-  (``batch:needs_canonical_source``, #566; see :func:`choose_canonical`);
+  primary is a recorded human decision, ADR-0016 1d, never picked here);
+  ``batch:needs_canonical_source`` is a defensive hold for a group of pages
+  that reached :func:`resolve_group` without a chosen page, unreachable from
+  :func:`group_candidates`, which always chooses one (#566);
 * ``refused`` — the request cannot be carried out (not observed, tombstoned,
   withdrawn …), counted under ``request:refused`` with the reason kept.
 
 Candidates that mint one id from one extracted text (same ``content_hash``)
 are folded into **one** candidate listing every page in ``sources``, so a
-regulation on 90 pages is one hold and at most one sample item, not 90.
+regulation on 90 pages is one candidate and at most one sample item, not 90.
+It is assessed, reviewed and written from its canonical page, chosen by a
+deterministic rule from the URLs (:func:`choose_canonical`, #566).
 
 Holds and refusals are counted by reason, per candidate, never dropped (4h).
 
@@ -42,12 +44,15 @@ module reads only; it records and writes nothing.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import unquote, urlsplit
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
@@ -73,6 +78,7 @@ from lovspor.promotion.sample import draw_sample, parse_sample_rate
 SAME_ID_IN_BATCH = "batch:same_id_in_batch"
 NEEDS_CANONICAL_SOURCE = "batch:needs_canonical_source"
 REFUSED = "request:refused"
+MIN_TITLE_WORD = 4
 
 
 def _rate(value: object) -> Decimal:
@@ -323,25 +329,41 @@ def group_candidates(items: tuple[BatchItem, ...]) -> tuple[BatchItem, ...]:
     return tuple(folded)
 
 
-def choose_canonical(group: CandidateGroup) -> ArtifactKey | None:
-    """The page a group is promoted from: none today, the owner's open decision (#566).
+def choose_canonical(group: CandidateGroup) -> ArtifactKey:
+    """The page a group is promoted from (#566, owner decision 2026-10-08, option (a)).
 
-    Every page stays in provenance whichever rule is chosen. The options in #566:
+    Deterministic, and read only from what the members carry: each page's URL
+    and sha256 and the regulation title extracted from the text. A member does
+    not carry the page's own HTML title, so "the page is about the regulation"
+    is read from the URL alone. In order:
 
-    * (a) the page that is *about* the regulation — a title match, or the
-      shortest path — deterministic and documented;
-    * (b) the owner picks once per group, recorded in the decision log;
-    * (c) the page with the earliest ObservedAt.
+    1. **About the regulation**: the most title words in the page's own slug,
+       the last segment of its percent-decoded URL path. A title word is in
+       the slug when a slug word contains it, so a Norwegian compound or
+       inflection counts (``skolen`` in ``grunnskolen``, ``forskrift`` in
+       ``forskrifter``); the reverse, a slug word inside a longer title word,
+       does not. Title words have four
+       letters or more, so ``om``, ``og``, ``i`` and ``for`` do not count, and
+       words naming the site itself (its host labels, e.g. the kommune's name
+       in ``www.kongsvinger.kommune.no``) say nothing about the page and do not
+       count either. Both sides fold as slugs spell Norwegian: case, ``æ ø å``
+       as ``a o a``, ``ae oe aa`` as ``a o a``, accents dropped.
+    2. **Shortest path**: fewest path segments, then the shortest decoded path.
+    3. **Tie-break**: the URL, then the sha256.
 
-    Until the owner decides, ``None`` holds the group as
-    :data:`NEEDS_CANONICAL_SOURCE`.
+    Every page stays in provenance: :func:`resolve_group` keeps them all in
+    ``sources``, whichever page is chosen.
     """
-    del group
-    return None
+    title = {word for word in _words(group.members[0].title or "") if len(word) >= MIN_TITLE_WORD}
+    return min((m.key for m in group.members), key=lambda key: _canonical_rank(key, title))
 
 
 def resolve_group(group: CandidateGroup, canonical: ArtifactKey | None) -> BatchItem:
-    """The group as one candidate: held for the owner's choice, or the chosen page's item."""
+    """The group as one candidate from its chosen page, every page kept in ``sources``.
+
+    ``None`` holds the group as :data:`NEEDS_CANONICAL_SOURCE`: a defensive
+    path, since :func:`group_candidates` always passes :func:`choose_canonical`'s page.
+    """
     sources: dict[str, object] = {"sources": group.sources}
     if canonical is None:
         return group.members[0].model_copy(update=sources | _needs_canonical(group))
@@ -350,6 +372,28 @@ def resolve_group(group: CandidateGroup, canonical: ArtifactKey | None) -> Batch
         msg = f"{canonical.source_url} is not a page of the group that mints {group.doc_id}"
         raise PromotionRefusedError(msg)
     return chosen.model_copy(update=sources)
+
+
+_FOLDED_LETTERS = str.maketrans({"æ": "a", "ø": "o", "å": "a"})
+_FOLDED_DIGRAPHS = (("ae", "a"), ("oe", "o"), ("aa", "a"))
+
+
+def _canonical_rank(key: ArtifactKey, title: set[str]) -> tuple[int, int, int, str, str]:
+    url = urlsplit(key.source_url)
+    path = unquote(url.path)
+    segments = [segment for segment in path.split("/") if segment]
+    slug = _words(segments[-1]) if segments else frozenset()
+    named = title - _words(url.hostname or "")
+    about = sum(any(word in part for part in slug) for word in named)
+    return -about, len(segments), len(path), key.source_url, key.sha256
+
+
+def _words(text: str) -> frozenset[str]:
+    decomposed = unicodedata.normalize("NFKD", text.casefold().translate(_FOLDED_LETTERS))
+    folded = "".join(c for c in decomposed if not unicodedata.combining(c))
+    for digraph, letter in _FOLDED_DIGRAPHS:
+        folded = folded.replace(digraph, letter)
+    return frozenset(re.findall(r"[^\W_]+", folded))
 
 
 def _text(item: BatchItem) -> _Text | None:
@@ -384,8 +428,8 @@ def _fold(pages: tuple[BatchItem, ...], texts: int) -> BatchItem:
 
 def _needs_canonical(group: CandidateGroup) -> dict[str, object]:
     detail = (
-        f"{len(group.members)} pages carry this one text; which page is the canonical source "
-        "is the owner's open decision (#566) — every page stays in provenance"
+        f"{len(group.members)} pages carry this one text and no canonical page was chosen "
+        "(#566) — every page stays in provenance"
     )
     return {"outcome": "held", "hold": NEEDS_CANONICAL_SOURCE, "detail": detail}
 

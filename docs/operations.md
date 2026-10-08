@@ -1382,13 +1382,25 @@ an unreviewed one blocks it until it is reviewed.
 
 One regulation embedded on many pages (a CMS sidebar) is **one** candidate:
 candidates that mint the same id from the same extracted text (`content_hash`)
-are folded into one, with every page in its `sources`. The report shows it as
-one line, "1 regulation, N pages", with the id, the `content_hash` and the
-first pages; the JSON lists them all. It is held as
-`batch:needs_canonical_source` until the owner settles which page is the
-canonical source (#566), and it never enters the sample as more than one item.
+are folded into one, with every page in its `sources` (the JSON lists them
+all), and it never enters the sample as more than one item. It is assessed,
+reviewed, approved and written from its **canonical page**, chosen
+deterministically from the URLs (#566, owner decision 2026-10-08):
+
+1. the page whose own slug (the last segment of the decoded URL path) shares
+   the most words of the regulation's title — words of four letters or more,
+   not counting the words of the site's host name (the kommune's name);
+2. then the fewest path segments, then the shortest path;
+3. then the URL, then the sha256.
+
+The page's HTML title is not used: the batch does not carry it. The report's
+sample entry names the canonical page and says how many pages carry the text;
+approve that page's sha256 with `promote approve`, since an approval of another
+page of the group does not count for it. `batch:needs_canonical_source` remains
+only as a defensive hold and is not expected in a report.
 The same id minted from **different** texts stays a real collision,
-`batch:same_id_in_batch`, one hold per distinct text.
+`batch:same_id_in_batch`, one hold per distinct text, shown as "1 regulation,
+N pages" when one text sits on several pages.
 
 Once the gate passes, add `--write`: it writes the **next** approved item
 through the same code as `promote local` and prints its commit. Commit it,
