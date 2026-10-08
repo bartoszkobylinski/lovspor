@@ -232,6 +232,39 @@ def test_a_title_cut_on_a_function_word_is_held_with_its_detail() -> None:
     assert held.detail == "the title ends on a function word: it is cut off"
 
 
+def test_a_docx_split_heading_preserves_hashed_text_and_is_deterministic() -> None:
+    payload = minimal_docx(CAPS_HEADING_PDF_LINES)
+    document = _extracted(payload, DOCX)
+    assert document.source_form == SourceForm.DOCX
+    assert (
+        document.regulation.title
+        == document.fields.title
+        == ("FORSKRIFT OM SKULEREGLAR FOR GRUNNSKULEN I EKSEMPEL KOMMUNE")
+    )
+    expected_text = "\n".join(CAPS_HEADING_PDF_LINES)
+    assert document.regulation.full_text == expected_text
+    assert content_hash(document.regulation.full_text) == content_hash(expected_text)
+    assert _extracted(payload, DOCX) == document
+
+
+@pytest.mark.parametrize(
+    ("payload", "content_type", "form"),
+    [
+        (html_page(("Forskrift om", *REGULATION_LINES[1:])), HTML, SourceForm.HTML),
+        (minimal_docx(("Forskrift om", *REGULATION_LINES[1:])), DOCX, SourceForm.DOCX),
+    ],
+)
+def test_truncated_title_hold_round_trips_for_html_and_docx(
+    payload: bytes, content_type: str, form: SourceForm
+) -> None:
+    held = _held(payload, content_type)
+    assert held.reason == ExtractionHoldReason.TITLE_TRUNCATED
+    assert held.source_form == form
+    assert held.detail == "the title ends on a function word: it is cut off"
+    adapter: TypeAdapter[ExtractionResult] = TypeAdapter(ExtractionResult)
+    assert adapter.validate_json(adapter.dump_json(held)) == held
+
+
 def test_planted_fodselsnummer_is_held_for_review_not_redacted() -> None:
     lines = (*REGULATION_LINES, "Dispensasjon er gitt til eier med fødselsnummer 01019012480.")
     held = _held(html_page(lines))

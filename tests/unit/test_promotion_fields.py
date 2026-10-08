@@ -325,6 +325,28 @@ def test_a_title_cut_on_a_function_word_is_held_as_title_truncated() -> None:
     assert read_regulation(lines) == ExtractionHoldReason.TITLE_TRUNCATED
 
 
+def test_joining_a_title_preserves_the_metadata_and_body() -> None:
+    lines = (
+        "FORSKRIFT OM",
+        "GEBYR",
+        "FOR EKSEMPEL KOMMUNE",
+        "Vedtatt av kommunestyret 12.12.2019.",
+        "Hjemmel: LOV-1981-03-13-6-§30",
+        "§ 1 Gebyr",
+        "Forskriften trer i kraft 1. januar 2020.",
+    )
+    result = read_regulation(lines)
+    assert not isinstance(result, ExtractionHoldReason), result
+    regulation, fields = result
+    assert regulation.title == fields.title == "FORSKRIFT OM GEBYR FOR EKSEMPEL KOMMUNE"
+    assert regulation.identification_block == "\n".join(lines[:5])
+    assert regulation.body == "\n".join(lines[5:])
+    assert regulation.vedtaksdato == fields.vedtatt == date(2019, 12, 12)
+    assert fields.vedtatt_av == "kommunestyret"
+    assert fields.hjemmel == ("LOV-1981-03-13-6-§30",)
+    assert (fields.ikraft, fields.ikraft_text) == (date(2020, 1, 1), None)
+
+
 @pytest.mark.parametrize("section", ["§ 1 Formål", "Kapittel 1. Innledende bestemmelser"])
 def test_a_body_line_cannot_complete_a_truncated_title(section: str) -> None:
     lines = ("Forskrift om", section, "gebyr for Eksempel kommune")
