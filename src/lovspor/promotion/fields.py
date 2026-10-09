@@ -13,7 +13,9 @@ Fields are pre-filled for a human to confirm, never promoted on trust (the
 classification study measured 65-85 % accuracy per field, its §4). Each is
 what the text states, verbatim or as a parsed date, or empty:
 
-* ``title`` — the title line;
+* ``title`` — the title line, with the lines a broken heading continues on
+  (``title.py``); a title cut off on a function word is held as
+  ``title_truncated``;
 * ``hjemmel`` — ``Hjemmel: LOV-…`` header references and ``med hjemmel (i) …`` /
   ``i medhold av …`` phrases in the block, to the end of their sentence;
 * ``vedtatt_av`` — the organ of the first ``vedtatt av <organ> <dato>``
@@ -53,6 +55,7 @@ from lovspor.promotion.stated_dates import (
     stated_ikraft,
     stated_vedtatt,
 )
+from lovspor.promotion.title import read_title
 
 _HJEMMEL_HEADER = re.compile(r"(?:hjemmel|heimel)\s*:\s*((?:LOV|FOR)-.+)", re.I)
 _LOVDATA_REFERENCE_SPLIT = re.compile(r",\s*(?=(?:LOV|FOR)-)")
@@ -77,9 +80,12 @@ def read_regulation(lines: tuple[str, ...]) -> ReadRegulation | ExtractionHoldRe
     if title_index is None:
         return ExtractionHoldReason.NO_TITLE
     block, body = lines[title_index:body_start], lines[body_start:]
+    title = read_title(block)
+    if title is None:
+        return ExtractionHoldReason.TITLE_TRUNCATED
     vedtaksdato, vedtatt_av = _enactment(" ".join(block), " ".join(body))
     regulation = ExtractedRegulation(
-        title=block[0],
+        title=title,
         identification_block="\n".join(block),
         body="\n".join(body),
         vedtaksdato=vedtaksdato,
@@ -92,7 +98,7 @@ def _fields(
 ) -> RegulationFields:
     vedtatt, ikraft = stated_vedtatt(regulation), stated_ikraft(regulation)
     return RegulationFields(
-        title=block[0],
+        title=regulation.title,
         hjemmel=_hjemmel(block),
         vedtatt=vedtatt.value,
         vedtatt_av=vedtatt_av,

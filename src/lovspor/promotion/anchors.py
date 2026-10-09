@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-_MAX_TITLE_CHARS = 250
+MAX_TITLE_CHARS = 250
 _TITLE = re.compile(
     r"(?:[^\W\d_]+\s+){0,2}[^\W\d_]*forskrift(?:er)?\s+(?:om|for|til|ved|av|\d)", re.I
 )
@@ -32,7 +32,7 @@ def first_section(lines: tuple[str, ...]) -> int | None:
 def first_title(lines: tuple[str, ...]) -> int | None:
     """The index of the first title line, or ``None``."""
     return next(
-        (i for i, line in enumerate(lines) if len(line) <= _MAX_TITLE_CHARS and _TITLE.match(line)),
+        (i for i, line in enumerate(lines) if len(line) <= MAX_TITLE_CHARS and _TITLE.match(line)),
         None,
     )
 

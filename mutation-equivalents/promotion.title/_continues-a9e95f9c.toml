@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/promotion/title.py"
+symbol = "_continues"
+registered = "2026-10-08, PR #599, from run 37843931967"
+mutation = """
+-    capitals = title.isupper() and line.isupper() and _dangles(line.split(maxsplit=1)[0])
++    capitals = title.isupper() and line.isupper() and _dangles(line.split(maxsplit=2)[0])
+"""
+justification = """
+str.split(maxsplit=k)[0] is the first whitespace-separated word for every k >= 1: splitting more times only adds later items, never changes item 0, on every input (an empty line raises IndexError identically under both).
+The plain split()/rsplit() form that would leave no such mutant is refused by
+ruff PLC0207. Python stdlib semantics.
+"""

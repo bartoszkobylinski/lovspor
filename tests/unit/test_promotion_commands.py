@@ -422,7 +422,7 @@ class TestApprove:
             "source_url": PAGE_URL,
         }
         assert decision["content_hash"] is not None
-        assert decision["extractor_version"] == 6
+        assert decision["extractor_version"] == 7
 
     @pytest.mark.parametrize("machine", ["classifier", "lovspor", " Classifier "])
     def test_a_machine_cannot_be_the_reviewer(

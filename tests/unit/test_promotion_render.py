@@ -92,6 +92,24 @@ def test_rendering_is_byte_identical_across_runs() -> None:
     assert first.encode("utf-8") == render_local_regulation(_document()).encode("utf-8")
 
 
+def test_a_joined_title_renders_deterministically_in_front_matter_and_heading() -> None:
+    lines = (
+        "FORSKRIFT OM",
+        "RENOVASJON OG SLAM",
+        "FOR EKSEMPEL KOMMUNE",
+        *REGULATION_LINES[1:],
+    )
+    title = "FORSKRIFT OM RENOVASJON OG SLAM FOR EKSEMPEL KOMMUNE"
+    document = _document(lines)
+    rendered = render_local_regulation(document)
+    _, values = _front_matter(rendered)
+    assert values["title"] == title
+    assert rendered.split("---\n", 2)[2].startswith(f"\n# {title}\n\n")
+    assert document.extracted.regulation.identification_block == "\n".join(lines[:4])
+    assert render_local_regulation(_document(lines)).encode("utf-8") == rendered.encode("utf-8")
+    assert _document(lines).identity == document.identity
+
+
 def test_front_matter_keys_are_the_fixed_order() -> None:
     keys, _ = _front_matter(render_local_regulation(_document()))
     assert tuple(keys) == FRONT_MATTER_KEYS
@@ -309,7 +327,7 @@ def test_slug_that_is_not_one_file_name_is_rejected(slug: str) -> None:
 
 
 def test_versions_are_recorded() -> None:
-    assert (LOCAL_RENDERER_VERSION, EXTRACTOR_VERSION) == (1, 6)
+    assert (LOCAL_RENDERER_VERSION, EXTRACTOR_VERSION) == (1, 7)
     _, values = _front_matter(render_local_regulation(_document(version=3)))
     assert values["version"] == 3
 

@@ -58,8 +58,8 @@ def test_faq_page_content_hash_does_not_depend_on_the_page_tail() -> None:
     assert content_hash(with_tail) == content_hash(without)
 
 
-def test_extractor_version_is_six_since_front_matter_takes_the_resolved_dates() -> None:
-    assert EXTRACTOR_VERSION == 6
+def test_extractor_version_is_seven_since_a_broken_title_heading_is_joined() -> None:
+    assert EXTRACTOR_VERSION == 7
 
 
 def test_html_page_extracts_block_body_and_fields() -> None:
@@ -202,6 +202,67 @@ def test_no_first_section_is_held() -> None:
 
 def test_no_title_is_held() -> None:
     assert _held(html_page(REGULATION_LINES[1:])).reason == ExtractionHoldReason.NO_TITLE
+
+
+#: Issue #592, Sykkylven 1528's PDF: a capitals heading over three lines.
+CAPS_HEADING_PDF_LINES = (
+    "FORSKRIFT OM",
+    "SKULEREGLAR",
+    "FOR GRUNNSKULEN I EKSEMPEL KOMMUNE",
+    *REGULATION_LINES[1:],
+)
+
+
+def test_a_pdf_heading_broken_over_lines_is_one_title() -> None:
+    document = _extracted(minimal_pdf(CAPS_HEADING_PDF_LINES), PDF)
+    title = "FORSKRIFT OM SKULEREGLAR FOR GRUNNSKULEN I EKSEMPEL KOMMUNE"
+    assert document.regulation.title == document.fields.title == title
+
+
+def test_a_heading_split_by_br_is_one_title() -> None:
+    page = html_page(("FORSKRIFT OM SKULEREGLAR", *REGULATION_LINES[1:]))
+    page = page.replace(b"FORSKRIFT OM SKULEREGLAR", b"<h1>FORSKRIFT OM<br>SKULEREGLAR</h1>")
+    assert _extracted(page).regulation.identification_block.startswith("FORSKRIFT OM\nSKULEREGLAR")
+    assert _extracted(page).regulation.title == "FORSKRIFT OM SKULEREGLAR"
+
+
+def test_a_title_cut_on_a_function_word_is_held_with_its_detail() -> None:
+    held = _held(minimal_pdf(("FORSKRIFT OM", *REGULATION_LINES[1:])), PDF)
+    assert (held.reason, held.source_form) == (ExtractionHoldReason.TITLE_TRUNCATED, SourceForm.PDF)
+    assert held.detail == "the title ends on a function word: it is cut off"
+
+
+def test_a_docx_split_heading_preserves_hashed_text_and_is_deterministic() -> None:
+    payload = minimal_docx(CAPS_HEADING_PDF_LINES)
+    document = _extracted(payload, DOCX)
+    assert document.source_form == SourceForm.DOCX
+    assert (
+        document.regulation.title
+        == document.fields.title
+        == ("FORSKRIFT OM SKULEREGLAR FOR GRUNNSKULEN I EKSEMPEL KOMMUNE")
+    )
+    expected_text = "\n".join(CAPS_HEADING_PDF_LINES)
+    assert document.regulation.full_text == expected_text
+    assert content_hash(document.regulation.full_text) == content_hash(expected_text)
+    assert _extracted(payload, DOCX) == document
+
+
+@pytest.mark.parametrize(
+    ("payload", "content_type", "form"),
+    [
+        (html_page(("Forskrift om", *REGULATION_LINES[1:])), HTML, SourceForm.HTML),
+        (minimal_docx(("Forskrift om", *REGULATION_LINES[1:])), DOCX, SourceForm.DOCX),
+    ],
+)
+def test_truncated_title_hold_round_trips_for_html_and_docx(
+    payload: bytes, content_type: str, form: SourceForm
+) -> None:
+    held = _held(payload, content_type)
+    assert held.reason == ExtractionHoldReason.TITLE_TRUNCATED
+    assert held.source_form == form
+    assert held.detail == "the title ends on a function word: it is cut off"
+    adapter: TypeAdapter[ExtractionResult] = TypeAdapter(ExtractionResult)
+    assert adapter.validate_json(adapter.dump_json(held)) == held
 
 
 def test_planted_fodselsnummer_is_held_for_review_not_redacted() -> None:

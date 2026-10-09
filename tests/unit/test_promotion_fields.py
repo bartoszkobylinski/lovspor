@@ -7,6 +7,7 @@ from datetime import date
 import pytest
 
 from lovspor.promotion import ExtractionHoldReason, RegulationFields
+from lovspor.promotion.anchors import MAX_TITLE_CHARS
 from lovspor.promotion.fields import read_regulation
 from tests.unit.promotion_fixtures import REGULATION_LINES
 
@@ -307,3 +308,64 @@ def test_hjemmel_phrase_without_i_before_a_law_or_regulation(phrase: str, expect
 def test_hjemmel_phrase_without_i_needs_a_law_or_regulation() -> None:
     fields = _read("Forskrift om gebyr", "Vedtatt med hjemmel som nevnt i saken.", "§ 1")
     assert fields.hjemmel == ()
+
+
+def test_a_heading_broken_over_lines_is_one_title_and_the_block_keeps_its_lines() -> None:
+    """Issue #592: Sykkylven 1528's capitals heading, structure only."""
+    lines = ("FORSKRIFT OM", "SKULEREGLAR", "FOR GRUNNSKULEN I EKSEMPEL KOMMUNE", "§ 1 Heimel")
+    result = read_regulation(lines)
+    assert not isinstance(result, ExtractionHoldReason), result
+    regulation, fields = result
+    title = "FORSKRIFT OM SKULEREGLAR FOR GRUNNSKULEN I EKSEMPEL KOMMUNE"
+    assert regulation.title == fields.title == title
+    assert regulation.identification_block == "\n".join(lines[:3])
+
+
+def test_a_title_cut_on_a_function_word_is_held_as_title_truncated() -> None:
+    lines = ("Forskrift om gebyr for", "Vedtatt av kommunestyret 12.12.2019", "§ 1 Gebyr")
+    assert read_regulation(lines) == ExtractionHoldReason.TITLE_TRUNCATED
+
+
+def test_joining_a_title_preserves_the_metadata_and_body() -> None:
+    lines = (
+        "FORSKRIFT OM",
+        "GEBYR",
+        "FOR EKSEMPEL KOMMUNE",
+        "Vedtatt av kommunestyret 12.12.2019.",
+        "Hjemmel: LOV-1981-03-13-6-§30",
+        "§ 1 Gebyr",
+        "Forskriften trer i kraft 1. januar 2020.",
+    )
+    result = read_regulation(lines)
+    assert not isinstance(result, ExtractionHoldReason), result
+    regulation, fields = result
+    assert regulation.title == fields.title == "FORSKRIFT OM GEBYR FOR EKSEMPEL KOMMUNE"
+    assert regulation.identification_block == "\n".join(lines[:5])
+    assert regulation.body == "\n".join(lines[5:])
+    assert regulation.vedtaksdato == fields.vedtatt == date(2019, 12, 12)
+    assert fields.vedtatt_av == "kommunestyret"
+    assert fields.hjemmel == ("LOV-1981-03-13-6-§30",)
+    assert (fields.ikraft, fields.ikraft_text) == (date(2020, 1, 1), None)
+
+
+@pytest.mark.parametrize("section", ["§ 1 Formål", "Kapittel 1. Innledende bestemmelser"])
+def test_a_body_line_cannot_complete_a_truncated_title(section: str) -> None:
+    lines = ("Forskrift om", section, "gebyr for Eksempel kommune")
+    assert read_regulation(lines) == ExtractionHoldReason.TITLE_TRUNCATED
+
+
+@pytest.mark.parametrize("length", [MAX_TITLE_CHARS, MAX_TITLE_CHARS + 1])
+def test_split_title_length_boundary_reaches_the_fields_or_a_typed_hold(length: int) -> None:
+    head = "FORSKRIFT OM"
+    continuation = "X" * (length - len(head) - 1)
+    lines = ("Kommunens forskrifter", head, continuation, "§ 1 Formål")
+    result = read_regulation(lines)
+    if length > MAX_TITLE_CHARS:
+        assert result == ExtractionHoldReason.TITLE_TRUNCATED
+    else:
+        assert not isinstance(result, ExtractionHoldReason), result
+        regulation, fields = result
+        assert regulation.title == fields.title == f"{head} {continuation}"
+        assert len(fields.title) == MAX_TITLE_CHARS
+        assert regulation.identification_block == "\n".join(lines[1:3])
+        assert regulation.body == lines[3]
