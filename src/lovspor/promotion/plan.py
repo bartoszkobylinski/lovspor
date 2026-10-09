@@ -30,7 +30,14 @@ from pydantic import BaseModel, ConfigDict
 from lovspor.errors import PromotionRefusedError
 from lovspor.promotion.archive import ArchivedArtifact
 from lovspor.promotion.corpus import LOCAL_DIR, CorpusCheckout, LocalManifest
-from lovspor.promotion.decisions import Decision, HumanDecision, utc_text
+from lovspor.promotion.decisions import (
+    Carried,
+    Carries,
+    Decision,
+    HumanDecision,
+    StandingApproval,
+    utc_text,
+)
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
 from lovspor.promotion.identity import mint_identity
 from lovspor.promotion.models import (
@@ -107,8 +114,15 @@ def prepare(
     return prepared.model_copy(update={"markdown": _render(prepared, artifact)})
 
 
-def require_approval(decision: HumanDecision | None, prepared: Prepared) -> HumanDecision:
-    """The standing human approval of exactly this text, or a refusal saying what is missing."""
+def require_approval(
+    decision: HumanDecision | None, prepared: Prepared, carried: Carried
+) -> HumanDecision:
+    """The standing human approval of exactly this text, or a refusal saying what is missing.
+
+    ``carried`` maps approvals a migration carried to the extractor it carried
+    them to (:meth:`~.decisions.DecisionLog.carried`): one carried to the
+    running extractor stands there exactly as one given there.
+    """
     if decision is None:
         msg = "no human decision is recorded for this artifact; run `lovspor promote approve`"
         raise PromotionRefusedError(msg)
@@ -116,13 +130,29 @@ def require_approval(decision: HumanDecision | None, prepared: Prepared) -> Huma
         when = utc_text(decision.decided_at)
         msg = f"the standing decision is {decision.decision.value} ({decision.decided_by}, {when})"
         raise PromotionRefusedError(msg)
-    if (decision.content_hash, decision.extractor_version) != (
-        prepared.identity.content_hash,
-        EXTRACTOR_VERSION,
+    if decision.content_hash != prepared.identity.content_hash or not stands_at_running_extractor(
+        decision, carried
     ):
         msg = "the approval was given for another text or extractor; preview and approve again"
         raise PromotionRefusedError(msg)
     return decision
+
+
+def stands_at_running_extractor(decision: HumanDecision, carried: Carried) -> bool:
+    """True when ``decision`` was given at the running extractor, or carried to it."""
+    return EXTRACTOR_VERSION in (decision.extractor_version, carried.get(decision))
+
+
+def standing_on(decision: HumanDecision, carries: Carries) -> StandingApproval:
+    """``decision`` with the carry it stands by at the running extractor, if it is carried.
+
+    Writers publish the result, so an approval given at an earlier extractor is
+    stamped ``approval_carried`` and never reads as a review at this one.
+    """
+    carry = carries.get(decision)
+    if decision.extractor_version == EXTRACTOR_VERSION or carry is None:
+        return StandingApproval(decision=decision)
+    return StandingApproval(decision=decision, carry=carry)
 
 
 def _placement(

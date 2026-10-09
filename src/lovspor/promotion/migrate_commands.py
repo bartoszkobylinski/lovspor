@@ -29,7 +29,7 @@ from lovspor.observatory.registry_io import _root
 from lovspor.observatory.storage import engine_root
 from lovspor.promotion.commands import _authority, _Corpus, _echo_commit, _refusing, promote_app
 from lovspor.promotion.corpus import LOCAL_DIR, MANIFEST_NAME, CorpusCheckout, LocalRecord
-from lovspor.promotion.decisions import DecisionLog, MigratedRecord
+from lovspor.promotion.decisions import CARRY_BASIS, DecisionLog, MigratedRecord, utc_text
 from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.migrate import (
     Migration,
@@ -69,7 +69,7 @@ def migrate_impl(request: MigrateRequest, now: datetime) -> None:
     """Migrate the selected documents to the running extractor. Never commits."""
     root = _root()
     corpus = CorpusCheckout(request.corpus, [engine_root(), root.path])
-    inputs = MigrationInputs(root, DecisionLog(root), corpus)
+    inputs = MigrationInputs(root, DecisionLog(root), corpus, now)
     outcome = _plan_all(inputs, _selected(corpus, request))
     for doc_id, reason in outcome.refusals.items():
         typer.echo(f"Refused: {doc_id}: {reason}", err=True)
@@ -78,6 +78,8 @@ def migrate_impl(request: MigrateRequest, now: datetime) -> None:
             typer.echo("Nothing to migrate; nothing written, nothing to commit.")
     elif request.dry_run:
         diff = planned_diff(corpus, migration_files(corpus, outcome.migrations))
+        for migration in outcome.migrations:
+            _echo_carried(migration)
         typer.echo(diff + "Dry run: nothing written, nothing recorded.")
     else:
         _write(inputs, outcome.migrations, now)
@@ -117,14 +119,29 @@ def _write(inputs: MigrationInputs, migrations: list[Migration], now: datetime) 
     files = migration_files(inputs.corpus, migrations)
     written = apply_files(inputs.corpus, files)
     for migration in migrations:
+        for carried in migration.carried:
+            record = carried.carried_record(migration.doc_id, migration.from_version, now)
+            inputs.decisions.record_carry(record)
         inputs.decisions.record_outcome(_record(migration, written, commit_subject, now))
         typer.echo(
             f"{migration.doc_id}: migrated extractor v{migration.from_version} "
             f"-> v{EXTRACTOR_VERSION}; the Markdown is unchanged"
         )
+        _echo_carried(migration)
     for path in written:
         typer.echo(f"wrote {path}")
     _echo_commit(inputs.corpus, commit_subject)
+
+
+def _echo_carried(migration: Migration) -> None:
+    """Name each version whose approval is carried, and the extractor it was given at."""
+    for carried in migration.carried:
+        decision = carried.decision
+        typer.echo(
+            f"{migration.doc_id} v{carried.version}: approval of {utc_text(decision.decided_at)} "
+            f"at extractor v{decision.extractor_version} carried to v{EXTRACTOR_VERSION} "
+            f"({CARRY_BASIS}); no new review"
+        )
 
 
 def _record(

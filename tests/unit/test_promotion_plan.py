@@ -8,11 +8,17 @@ import pytest
 
 from lovspor.errors import PromotionRefusedError
 from lovspor.promotion.corpus import LocalManifest, LocalRecord
-from lovspor.promotion.decisions import ArtifactKey, Decision, HumanDecision
+from lovspor.promotion.decisions import (
+    ApprovalReference,
+    ArtifactKey,
+    CarriedRecord,
+    Decision,
+    HumanDecision,
+)
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
 from lovspor.promotion.identity import mint_identity
 from lovspor.promotion.models import Authority, ExtractedDocument, MintedIdentity
-from lovspor.promotion.plan import Prepared, _free_slug, require_approval
+from lovspor.promotion.plan import Prepared, _free_slug, require_approval, standing_on
 from tests.unit.promotion_fixtures import html_page
 
 BASE = "forskrift-om-renovasjon-og-slam-eksempel-kommune"
@@ -118,7 +124,7 @@ def test_an_approval_of_exactly_this_text_stands() -> None:
     prepared = _prepared()
     approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION)
 
-    assert require_approval(approval, prepared) is approval
+    assert require_approval(approval, prepared, {}) is approval
 
 
 @pytest.mark.parametrize(
@@ -138,7 +144,7 @@ def test_no_standing_approval_is_refused_saying_what_stands(
     decision: HumanDecision | None, expected: str
 ) -> None:
     with pytest.raises(PromotionRefusedError) as refused:
-        require_approval(decision, _prepared())
+        require_approval(decision, _prepared(), {})
 
     assert str(refused.value) == expected
 
@@ -152,8 +158,99 @@ def test_an_approval_of_another_text_or_extractor_is_refused(
     extractor = EXTRACTOR_VERSION + 1 if other_extractor else EXTRACTOR_VERSION
 
     with pytest.raises(PromotionRefusedError) as refused:
-        require_approval(_decision(Decision.APPROVE, content_hash, extractor), prepared)
+        require_approval(_decision(Decision.APPROVE, content_hash, extractor), prepared, {})
 
     assert str(refused.value) == (
         "the approval was given for another text or extractor; preview and approve again"
     )
+
+
+def test_an_old_approval_carried_to_the_running_extractor_stands() -> None:
+    """Decisions §19: consumers accept a carry exactly as a fresh approval."""
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION - 1)
+
+    assert require_approval(approval, prepared, {approval: EXTRACTOR_VERSION}) is approval
+
+
+@pytest.mark.parametrize("destination", [EXTRACTOR_VERSION - 1, EXTRACTOR_VERSION + 1])
+def test_a_carry_to_another_extractor_does_not_authorize_this_engine(destination: int) -> None:
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION - 2)
+
+    with pytest.raises(PromotionRefusedError, match="another text or extractor"):
+        require_approval(approval, prepared, {approval: destination})
+
+
+@pytest.mark.parametrize("changed", ["decided_at", "artifact"])
+def test_a_carry_of_another_decision_does_not_authorize_the_standing_one(changed: str) -> None:
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION - 1)
+    if changed == "decided_at":
+        other = approval.model_copy(update={"decided_at": datetime(2026, 8, 21, tzinfo=UTC)})
+    else:
+        other = approval.model_copy(
+            update={"artifact": approval.artifact.model_copy(update={"sha256": "b" * 64})}
+        )
+
+    with pytest.raises(PromotionRefusedError, match="another text or extractor"):
+        require_approval(approval, prepared, {other: EXTRACTOR_VERSION})
+
+
+def test_a_carried_approval_still_requires_exactly_the_approved_text() -> None:
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, "0" * 64, EXTRACTOR_VERSION - 1)
+
+    with pytest.raises(PromotionRefusedError, match="another text or extractor"):
+        require_approval(approval, prepared, {approval: EXTRACTOR_VERSION})
+
+
+@pytest.mark.parametrize("decision", [Decision.REJECT, Decision.HOLD])
+def test_a_carry_never_overrides_a_standing_refusal(decision: Decision) -> None:
+    prepared = _prepared()
+    refusal = _decision(decision, prepared.identity.content_hash, EXTRACTOR_VERSION - 1)
+
+    with pytest.raises(PromotionRefusedError, match=f"the standing decision is {decision.value}"):
+        require_approval(refusal, prepared, {refusal: EXTRACTOR_VERSION})
+
+
+def test_a_fresh_approval_stands_even_when_its_carry_mapping_names_another_extractor() -> None:
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION)
+
+    assert require_approval(approval, prepared, {approval: EXTRACTOR_VERSION - 1}) is approval
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+@pytest.mark.parametrize("has_carry", [False, True])
+def test_standing_approval_publishes_a_carry_only_for_an_earlier_extractor(
+    fresh: bool, has_carry: bool
+) -> None:
+    prepared = _prepared()
+    extractor = EXTRACTOR_VERSION if fresh else EXTRACTOR_VERSION - 1
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, extractor)
+    carry = CarriedRecord(
+        artifact=approval.artifact,
+        carried_at=datetime(2026, 8, 21, tzinfo=UTC),
+        doc_id=prepared.identity.doc_id,
+        version=prepared.version,
+        content_hash=prepared.identity.content_hash,
+        from_extractor_version=extractor,
+        to_extractor_version=extractor + 1,
+        approval=ApprovalReference.of(approval),
+    )
+
+    standing = standing_on(approval, {approval: carry} if has_carry else {})
+
+    assert standing.decision == approval
+    published = standing.approval_carried()
+    if has_carry and not fresh:
+        assert published is not None
+        assert published.model_dump() == {
+            "approved_at_extractor": extractor,
+            "carried_to_extractor": EXTRACTOR_VERSION,
+            "carried_at": "2026-08-21T00:00:00Z",
+            "basis": "byte-identical rendering",
+        }
+    else:
+        assert published is None

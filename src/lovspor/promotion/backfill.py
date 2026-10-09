@@ -37,8 +37,9 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from types import MappingProxyType
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -47,11 +48,25 @@ from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation
 from lovspor.promotion.archive import ArchivedArtifact, Fetch, read_blob
 from lovspor.promotion.corpus import LOCAL_DIR, CorpusCheckout
-from lovspor.promotion.decisions import ArtifactKey, Decision, HumanDecision, utc_text
+from lovspor.promotion.decisions import (
+    ArtifactKey,
+    Carried,
+    Carries,
+    Decision,
+    HumanDecision,
+    utc_text,
+)
 from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.intervals import with_intervals
 from lovspor.promotion.models import Authority
-from lovspor.promotion.plan import Held, Prepared, prepare, require_approval
+from lovspor.promotion.plan import (
+    Held,
+    Prepared,
+    prepare,
+    require_approval,
+    standing_on,
+    stands_at_running_extractor,
+)
 from lovspor.promotion.versions import DerivedVersion, PrimaryHistory, read_primary
 from lovspor.promotion.writer import ObservationsFile, WriteSet, observations_text, write_set
 
@@ -60,6 +75,7 @@ APPROVAL_STALE = "approval_stale"
 AFTER_EARLIER_HOLD = "after_earlier_hold"
 IDENTITY_CHANGED = "identity_changed"
 _REFUSALS = {Decision.REJECT: "rejected", Decision.HOLD: "held_by_reviewer"}
+_NONE_CARRIED: Carried = MappingProxyType({})
 
 
 class VersionHold(BaseModel):
@@ -107,6 +123,8 @@ class Inputs:
     fetches: tuple[Fetch, ...]
     authority: Authority
     corpus: CorpusCheckout
+    carried: Carried = field(default_factory=dict)
+    carries: Carries = field(default_factory=dict)
 
 
 class NextVersion(BaseModel):
@@ -120,8 +138,16 @@ class NextVersion(BaseModel):
     key: ArtifactKey
 
 
-def plan_backfill(history: PrimaryHistory, decisions: Sequence[HumanDecision]) -> BackfillPlan:
-    """Each version approved or held, in order; everything after the first hold is held."""
+def plan_backfill(
+    history: PrimaryHistory,
+    decisions: Sequence[HumanDecision],
+    carried: Carried = _NONE_CARRIED,
+) -> BackfillPlan:
+    """Each version approved or held, in order; everything after the first hold is held.
+
+    ``carried`` maps approvals a migration carried to the extractor it carried
+    them to; one carried to the running extractor fits exactly as one given there.
+    """
     approved: list[ApprovedVersion] = []
     holds: list[VersionHold] = []
     for version in history.versions:
@@ -131,7 +157,7 @@ def plan_backfill(history: PrimaryHistory, decisions: Sequence[HumanDecision]) -
                 VersionHold(version=version.version, reason=AFTER_EARLIER_HOLD, detail=detail)
             )
             continue
-        outcome = _approval(version, decisions)
+        outcome = _approval(version, decisions, carried)
         if isinstance(outcome, VersionHold):
             holds.append(outcome)
         else:
@@ -140,7 +166,9 @@ def plan_backfill(history: PrimaryHistory, decisions: Sequence[HumanDecision]) -
 
 
 def _approval(
-    version: DerivedVersion, decisions: Sequence[HumanDecision]
+    version: DerivedVersion,
+    decisions: Sequence[HumanDecision],
+    carried: Carried,
 ) -> HumanDecision | VersionHold:
     held = version.held
     if held is not None:
@@ -150,21 +178,21 @@ def _approval(
     refusals = [d for d in standing if d.decision in _REFUSALS]
     if refusals:
         return _refused(version, refusals[0])
-    fitting = [d for d in standing if _fits(d, version)]
+    fitting = [d for d in standing if _fits(d, version, carried)]
     if fitting:
         return max(fitting, key=lambda d: d.decided_at)
     if standing:
-        detail = _stale(max(standing, key=lambda d: d.decided_at), version)
+        detail = _stale(max(standing, key=lambda d: d.decided_at), version, carried)
         return VersionHold(version=version.version, reason=APPROVAL_STALE, detail=detail)
     detail = f"no decision on {version.source_sha256s[0]}; run `lovspor promote approve`"
     return VersionHold(version=version.version, reason=NOT_APPROVED, detail=detail)
 
 
-def _stale(decision: HumanDecision, version: DerivedVersion) -> str:
+def _stale(decision: HumanDecision, version: DerivedVersion, carried: Carried) -> str:
     """Why a standing approval does not cover ``version``; approve it again to cover it."""
     if decision.content_hash != version.content_hash:
         return f"{decision.artifact.sha256} was approved for another text"
-    if decision.extractor_version != EXTRACTOR_VERSION:
+    if not stands_at_running_extractor(decision, carried):
         return (
             f"approved under extractor {decision.extractor_version}; this engine extracts "
             f"with {EXTRACTOR_VERSION}"
@@ -191,11 +219,11 @@ def _standing(
     return tuple(last[sha] for sha in sorted(last))
 
 
-def _fits(decision: HumanDecision, version: DerivedVersion) -> bool:
+def _fits(decision: HumanDecision, version: DerivedVersion, carried: Carried) -> bool:
     return (
         decision.decision is Decision.APPROVE
         and decision.content_hash == version.content_hash
-        and decision.extractor_version == EXTRACTOR_VERSION
+        and stands_at_running_extractor(decision, carried)
         and decision.decided_at >= version.observed_at_first
     )
 
@@ -286,9 +314,10 @@ def _next(
     if prepared.unchanged or prepared.version != number:
         msg = f"the corpus places this text as v{prepared.version}, the log as v{number}"
         raise PromotionRefusedError(msg)
-    decision = require_approval(approved.decision, prepared)
+    decision = require_approval(approved.decision, prepared, inputs.carried)
+    approval = standing_on(decision, inputs.carries)
     artifact = _artifact(inputs, history, history.versions[number - 1])
-    writes = write_set(prepared, artifact, decision, inputs.corpus)
+    writes = write_set(prepared, artifact, approval, inputs.corpus)
     path = f"{LOCAL_DIR}/{prepared.identity.authority.id}/observations/{prepared.slug}.json"
     observed = ObservationsFile.model_validate_json(writes.files[path])
     files = {**writes.files, path: observations_text(with_intervals(observed, history))}

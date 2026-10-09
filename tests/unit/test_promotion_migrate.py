@@ -327,8 +327,10 @@ class TestRefusals:
             promoted = promote("local", other, corpus)
             assert promoted.exit_code == 0, promoted.output
             _commit_printed(corpus, promoted.output)
-        # Only the second document receives approval at the running extractor.
-        _approve(other, tmp_path)
+        # The first document's standing decision becomes a hold; the second's approval
+        # carries, its bytes being identical (owner decision, 2026-10-08).
+        held = approve(refused_blob, Decision(decision="hold").write(tmp_path))
+        assert held.exit_code == 0, held.output
         records_before = _manifest(corpus)
         before, log_before = tree(corpus), _log(root)
         head = git(corpus, "rev-parse", "HEAD")
@@ -337,7 +339,7 @@ class TestRefusals:
 
         assert result.exit_code == 1, result.output
         assert f"Refused: {refused_id}:" in result.output
-        assert "another text or extractor" in result.output
+        assert "standing decision is hold" in result.output
         assert git(corpus, "rev-parse", "HEAD") == head
         if dry_run:
             assert "Dry run: nothing written, nothing recorded" in result.output
@@ -360,7 +362,8 @@ class TestRefusals:
             }
             assert _markdown(after) == _markdown(before)
             assert _log(root).startswith(log_before)
-            [record] = _log(root)[len(log_before) :].decode().splitlines()
+            carry, record = _log(root)[len(log_before) :].decode().splitlines()
+            assert json.loads(carry)["kind"] == "carried"
             outcome = json.loads(record)
             assert outcome["kind"] == "migrated"
             assert outcome["doc_id"] == migrated_id
@@ -406,31 +409,34 @@ class TestRefusals:
         assert tree(corpus) == before
         assert _log(root) == log_before
 
-    def test_without_an_approval_at_the_running_extractor_nothing_moves(
+    def test_without_an_approval_at_the_running_extractor_identical_bytes_carry(
         self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Owner decision, 2026-10-08: identical bytes need no re-approval; the carry says so."""
         _promoted_earlier(root, corpus, tmp_path, monkeypatch)
         before, log_before = tree(corpus), _log(root)
 
         result = _migrate_one(corpus)
 
-        assert result.exit_code == 1
-        assert "another text or extractor" in result.output
-        assert tree(corpus) == before
-        assert _log(root) == log_before
+        assert result.exit_code == 0, result.output
+        assert _markdown(tree(corpus)) == _markdown(before)
+        kinds = [json.loads(line)["kind"] for line in _log(root)[len(log_before) :].splitlines()]
+        assert kinds == ["carried", "carried", "carried", "migrated"]
 
-    def test_an_earlier_version_not_approved_again_refuses(
+    def test_an_earlier_version_rejected_since_refuses(
         self, root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         a, b = _promoted_earlier(root, corpus, tmp_path, monkeypatch)
         _approve(a, tmp_path)
+        rejected = approve(b, Decision(decision="reject").write(tmp_path))
+        assert rejected.exit_code == 0, rejected.output
         before, log_before = tree(corpus), _log(root)
 
         result = _migrate_one(corpus)
 
         assert result.exit_code == 1
         assert f"v2 (approve one of {b})" in result.output
-        assert "another text or extractor" in result.output
+        assert "standing decision is reject" in result.output
         assert tree(corpus) == before
         assert _log(root) == log_before
 

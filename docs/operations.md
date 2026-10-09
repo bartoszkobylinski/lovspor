@@ -1150,7 +1150,9 @@ It writes, under `lokale-forskrifter/` only:
   URLs, source blob, and `promotion`, the audit record: decision, the
   reviewer's role (`reviewed_by_role` — never the name), decision time,
   reason, `reviewed_in_sample`, classifier evidence (or `null`), extractor/renderer versions, source form, identity (scheme, id,
-  ref-id, candidates), and the archive records it was read from;
+  ref-id, candidates), and the archive records it was read from; after a
+  migration that carried the approval, also `approval_carried` (see
+  "Migrating after an extractor bump");
 * `<authority_id>/evidence/<slug>.json` — what this version's text states,
   verbatim (ADR-0016 S10): `relations` (`hjemmel`, `amends`, `repeals`,
   `amended_by`, `repealed_by`), each with the sentence that states it and
@@ -1353,7 +1355,9 @@ that commit's files:
 
 * `manifest.json` — the record's `extractor_version`;
 * `<authority_id>/observations/<slug>.json` — `promotion.extractor_version`
-  of every promoted version, nothing else;
+  of every promoted version (the extractor the published bytes are current
+  for) and, where the approval is carried, `promotion.approval_carried`;
+  nothing else;
 * `<authority_id>/evidence/<slug>.json` — only when the document has none
   (promoted before the sidecar existed); an existing sidecar is not touched.
 
@@ -1369,38 +1373,89 @@ running extractor, and refuses, writing nothing:
 * when any promoted version is not reproduced by the log (another text,
   another first observation, another URL), or when the id the text is named
   by moves;
-* without the owner's standing approval of **every** version's text at the
-  running extractor — the same approvals `backfill` asks for. The approval
-  made at the old extractor does not cover it; the re-approval is the owner's
-  act;
+* without the owner's standing approval of **every** version's text (below);
 * for a withdrawn document, or one whose standing decision is `reject` or
   `hold`.
 
-The sequence, for one document (`<sha256>` is the `source_sha256` in its front
-matter; for a backfilled document, approve one blob of each version — a
-refusal names the version and its blobs):
+**Approvals carry on byte-identical bytes (owner decision, 2026-10-08).** The
+owner's standing `approve` of a version's text, given at an earlier
+extractor, carries to the running extractor when that version's published
+rendering is byte-identical under it: no new `promote approve` is needed. For
+the current version the bytes are the checkout's Markdown; for an earlier
+version of a backfilled document they are the Markdown its own commit
+published, read from the checkout's git history (a shallow clone that does
+not reach it carries nothing for that version). Any byte difference, a
+standing `reject` or `hold`, a withdrawal, or no prior `approve` is refused as
+before, and the re-approval at the running extractor is then the owner's act.
+An approval already given at the running extractor wins: nothing is carried
+for it.
+
+A carry never reads as a review:
+
+* `promotions.jsonl` gets one `carried` record per carried version: the
+  artifact, `doc_id`, `version`, `content_hash`, `from_extractor_version` /
+  `to_extractor_version`, `carried_at` (the run's time),
+  `basis: "byte-identical rendering"`, and `approval`, naming the approval it
+  rests on by `decided_at`, `extractor_version` and `reviewer_role` — never
+  `decided_by`. It is not a `decision` record;
+* in `observations/<slug>.json` the `promotion` block keeps the approval's own
+  `decision`, `reviewed_by_role`, `decided_at` and `reason`;
+  `extractor_version` is the running extractor (the one the published bytes
+  are current for), and `approval_carried` says where the review happened:
+
+  ```json
+  "approval_carried": {
+    "approved_at_extractor": 6,
+    "basis": "byte-identical rendering",
+    "carried_at": "2026-10-08T20:00:00Z",
+    "carried_to_extractor": 7
+  }
+  ```
+
+  A block without `approval_carried` was approved at its `extractor_version`.
+  `observe`, `backfill`, `local` and `batch` accept a carried approval exactly
+  where they accept one given at the running extractor, and a version `backfill`,
+  `local` or `batch` writes on a carried approval is published with
+  `approval_carried` taken from the carry (its `carried_at`, its extractors).
+
+`approval_carried` is a new key in the observations schema, and the readers
+refuse keys they do not know: deploy the engine that reads it (the hosted MCP,
+and `uvx --refresh` for local MCP clients) before pushing a carried migration
+to `lovverk`.
+
+The sequence, for every current document — no approval where the bytes are
+identical:
 
 ```bash
 export LOVSPOR_OBSERVATORY_ROOT=/Volumes/T7/lovspor-observatory
-uv run lovspor promote approve --authority 3118 --artifact <sha256> --decision decision-3118.json
-uv run lovspor promote migrate --authority 3118 --slug <slug> \
-  --corpus /absolute/path/to/lovverk --dry-run
-uv run lovspor promote migrate --authority 3118 --slug <slug> \
-  --corpus /absolute/path/to/lovverk
+uv run lovspor promote migrate --corpus /absolute/path/to/lovverk --dry-run
+uv run lovspor promote migrate --corpus /absolute/path/to/lovverk
 git -C /absolute/path/to/lovverk add -- lokale-forskrifter
-git -C /absolute/path/to/lovverk commit -m 'migration(lokal-forskrift): 3118/<slug> extractor v<old>→v<new>'
+git -C /absolute/path/to/lovverk commit -m 'migration(lokal-forskrift): <n> documents to extractor v<new>'
 ```
 
-`--dry-run` prints the unified diff the run would write and writes and
+Use the subject the run prints; for one document add `--authority <klass>
+--slug <slug>` (subject `migration(lokal-forskrift): <klass>/<slug> extractor
+v<old>→v<new>`). A document refused for a byte difference needs the owner's
+re-approval first (`<sha256>` is the `source_sha256` in its front matter; for
+a backfilled document, one blob of each refused version — a refusal names the
+version and its blobs), then the same two `migrate` runs:
+
+```bash
+uv run lovspor promote approve --authority 3118 --artifact <sha256> --decision decision-3118.json
+```
+
+`--dry-run` prints, per carried version, the approval it carries (time,
+extractor, basis), then the unified diff the run would write; it writes and
 records nothing. Without `--authority`/`--slug` it migrates every current
-document of the checkout in one run (subject `migration(lokal-forskrift): <n>
-documents to extractor v<new>`); a refused document is reported on its own
-line, the others are still written, and the exit status is 1. Use the subject
-it prints. Each migrated document is recorded in `promotions.jsonl` as a
-`migrated` record (artifact, version, content hash, from and to extractor,
-the approval time, the paths written). The commit touches no Markdown, so
-`promote history` derives no event from it. A rerun after the commit prints
-`already at extractor v<new>`, writes nothing and records nothing.
+document of the checkout in one run; a refused document is reported on its
+own line, the others are still written, and the exit status is 1. Each
+migrated document is recorded in `promotions.jsonl` as a `migrated` record
+(artifact, version, content hash, from and to extractor, the approval time,
+the paths written), after its `carried` records. The commit touches no
+Markdown, so `promote history` derives no event from it. A rerun after the
+commit prints `already at extractor v<new>`, writes nothing and records
+nothing.
 
 ### 6. A batch of classifier candidates (S8)
 

@@ -74,7 +74,7 @@ from lovspor.promotion.identity import content_hash
 from lovspor.promotion.local_history import HISTORY_SUBJECT, derive_local_history
 from lovspor.promotion.models import Authority, AuthorityType, HeldExtraction
 from lovspor.promotion.personal_data import screen_personal_data
-from lovspor.promotion.plan import Held, Prepared, prepare, require_approval
+from lovspor.promotion.plan import Held, Prepared, prepare, require_approval, standing_on
 from lovspor.promotion.withdraw import (
     Withdrawn,
     apply_withdrawal,
@@ -300,7 +300,8 @@ def promote_one(context: PromotionContext, now: datetime) -> None:
         raise typer.Exit(HELD_EXIT_CODE)
     # The artifact itself was refused by _standing; only the document is new here.
     refuse_withdrawn(decisions, None, prepared.identity.doc_id)
-    approval = require_approval(decision, prepared)
+    standing = require_approval(decision, prepared, decisions.carried())
+    approval = standing_on(standing, decisions.carries())
     if prepared.unchanged:
         typer.echo(f"Unchanged: {prepared.identity.doc_id} v{prepared.version} is already at")
         typer.echo(f"{prepared.markdown_path}; nothing written, nothing to commit.")

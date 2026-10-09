@@ -42,7 +42,13 @@ from lovspor.errors import PromotionRefusedError
 from lovspor.promotion.archive import ArchivedArtifact, SourceStatus
 from lovspor.promotion.corpus import LOCAL_DIR, MANIFEST_NAME, CorpusCheckout, LocalRecord
 from lovspor.promotion.corpus import manifest_text as render_manifest
-from lovspor.promotion.decisions import HumanDecision, IdentityAudit, PromotionAudit, utc_text
+from lovspor.promotion.decisions import (
+    HumanDecision,
+    IdentityAudit,
+    PromotionAudit,
+    StandingApproval,
+    utc_text,
+)
 from lovspor.promotion.evidence import EvidenceSubject, corpus_index, evidence_file, evidence_path
 from lovspor.promotion.models import RemovedReason
 from lovspor.promotion.plan import Prepared
@@ -123,10 +129,17 @@ class WriteSet(BaseModel):
 
 
 def write_set(
-    prepared: Prepared, artifact: ArchivedArtifact, decision: HumanDecision, corpus: CorpusCheckout
+    prepared: Prepared,
+    artifact: ArchivedArtifact,
+    approval: StandingApproval,
+    corpus: CorpusCheckout,
 ) -> WriteSet:
-    """The four files of one promoted version, refused if any would mention NLOD."""
-    audit = _audit(prepared, artifact, decision)
+    """The four files of one promoted version, refused if any would mention NLOD.
+
+    An approval that stands by a carry is published with ``approval_carried``.
+    """
+    audit = _audit(prepared, artifact, approval)
+    decision = approval.decision
     authority_dir = f"{LOCAL_DIR}/{prepared.identity.authority.id}"
     files = {
         prepared.markdown_path: prepared.markdown,
@@ -169,9 +182,9 @@ def apply_files(corpus: CorpusCheckout, files: dict[str, str]) -> tuple[str, ...
 
 
 def _audit(
-    prepared: Prepared, artifact: ArchivedArtifact, decision: HumanDecision
+    prepared: Prepared, artifact: ArchivedArtifact, approval: StandingApproval
 ) -> PromotionAudit:
-    identity = prepared.identity
+    decision = approval.decision
     return PromotionAudit(
         decision=decision.decision,
         reviewed_by_role=decision.reviewer_role,
@@ -182,14 +195,20 @@ def _audit(
         extractor_version=prepared.extracted.extractor_version,
         renderer_version=LOCAL_RENDERER_VERSION,
         source_form=prepared.extracted.source_form.value,
-        identity=IdentityAudit(
-            scheme=identity.scheme,
-            doc_id=identity.doc_id,
-            ref_id=identity.ref_id,
-            candidates=identity.candidates,
-        ),
+        identity=_identity_audit(prepared),
         observations_through=utc_text(decision.decided_at),
         observations=artifact.observations,
+        approval_carried=approval.approval_carried(),
+    )
+
+
+def _identity_audit(prepared: Prepared) -> IdentityAudit:
+    identity = prepared.identity
+    return IdentityAudit(
+        scheme=identity.scheme,
+        doc_id=identity.doc_id,
+        ref_id=identity.ref_id,
+        candidates=identity.candidates,
     )
 
 

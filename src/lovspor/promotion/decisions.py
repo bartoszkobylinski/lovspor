@@ -24,6 +24,13 @@ classifier evidence — is refused when it carries the reviewer's name.
 * ``migrated`` — a migration run (4e, ``lovspor promote migrate``) that moved
   one promoted document's version metadata to the running extractor, the
   text being byte-identical; it names the approval it rests on.
+* ``carried`` — a migration run that carried the owner's standing approval of
+  one version to the running extractor because the extractor bump left its
+  published rendering byte-identical (owner decision, 2026-10-08). It is not a
+  human act and does not read as one: it names the approval it rests on (when
+  it was given, at which extractor, in which role) and never a person, so
+  nothing in the log or the corpus says anyone reviewed the text at the new
+  extractor. Any byte difference still needs a fresh ``decision``.
 * ``withdrawal`` — a human act on one promoted document (4f): its id, the
   closed-set ``removed_reason``, and every archived artifact it was promoted
   from, so no later run promotes the document again — under its id or from
@@ -39,10 +46,11 @@ from __future__ import annotations
 import fcntl
 import os
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AfterValidator,
@@ -50,8 +58,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     TypeAdapter,
     ValidationError,
+    model_serializer,
     model_validator,
 )
 
@@ -69,6 +79,10 @@ MACHINE_NAMES = frozenset({"classifier", "lovspor", "promotion", "auto", "automa
 
 _SHA256 = r"^[0-9a-f]{64}$"
 _AUTHORITY_ID = r"^(?:\d{2}|\d{4})$"
+
+#: The one basis on which a migration carries an approval (owner decision, 2026-10-08).
+CarryBasis = Literal["byte-identical rendering"]
+CARRY_BASIS: CarryBasis = "byte-identical rendering"
 
 
 def _a_person(value: str) -> str:
@@ -239,11 +253,34 @@ class ObservationUsed(BaseModel):
     sha256: str
 
 
+class ApprovalCarried(BaseModel):
+    """In a published audit: the approval was given at one extractor and carried to another.
+
+    ``decided_at`` and ``reviewed_by_role`` of the audit stay the human
+    approval's; this says the review happened at ``approved_at_extractor`` and
+    a migration carried it to ``carried_to_extractor`` at ``carried_at``,
+    because the rendering stayed byte-identical (owner decision, 2026-10-08).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    approved_at_extractor: int
+    carried_to_extractor: int
+    carried_at: str
+    basis: CarryBasis = CARRY_BASIS
+
+
 class PromotionAudit(BaseModel):
     """Why a version was promoted (ADR-0016 4d): the versions, the evidence, the human's role.
 
     Published into ``lovverk``, so it names the reviewer by role only; the
-    name stays in the decision log's ``decision`` record.
+    name stays in the decision log's ``decision`` record. ``extractor_version``
+    is the extractor the published bytes are current for: the one that read
+    the text at promotion, or the one a migration moved it to. Whether a human
+    approved the text at that extractor is told by ``approval_carried``: absent,
+    the approval was given there; present, it was given at
+    ``approved_at_extractor`` and carried. It is written only when present, so
+    an audit without it keeps its bytes.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -260,6 +297,14 @@ class PromotionAudit(BaseModel):
     identity: IdentityAudit
     observations_through: str
     observations: tuple[ObservationUsed, ...]
+    approval_carried: ApprovalCarried | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        payload: dict[str, Any] = handler(self)
+        if self.approval_carried is None:
+            payload.pop("approval_carried", None)
+        return payload
 
 
 class PromotedRecord(BaseModel):
@@ -308,6 +353,82 @@ class MigratedRecord(BaseModel):
     approved_at: AwareDatetime
     written: tuple[str, ...]
     commit_subject: str
+
+
+class ApprovalReference(BaseModel):
+    """The human approval a carry rests on, named by role and time, never by the person."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decision: Literal["approve"] = "approve"
+    decided_at: AwareDatetime
+    extractor_version: int
+    reviewer_role: ReviewerRole
+
+    @classmethod
+    def of(cls, decision: HumanDecision) -> ApprovalReference:
+        """The reference to ``decision``, which must be an approval naming its extractor."""
+        if decision.decision is not Decision.APPROVE or decision.extractor_version is None:
+            msg = "only an approval naming its extractor can be carried"
+            raise ValueError(msg)
+        return cls(
+            decided_at=decision.decided_at,
+            extractor_version=decision.extractor_version,
+            reviewer_role=decision.reviewer_role,
+        )
+
+
+class CarriedRecord(BaseModel):
+    """A standing approval carried to the running extractor by a migration run.
+
+    Byte-identical rendering is the only basis (owner decision, 2026-10-08).
+    ``carried_at`` is when the run carried it, not when anyone decided.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["carried"] = "carried"
+    artifact: ArtifactKey
+    carried_at: AwareDatetime
+    doc_id: str
+    version: int
+    content_hash: str = Field(pattern=_SHA256)
+    from_extractor_version: int
+    to_extractor_version: int
+    basis: CarryBasis = CARRY_BASIS
+    approval: ApprovalReference
+
+    def carries(self, decision: HumanDecision) -> bool:
+        """True when this carry rests on ``decision``: its artifact, text, time and extractor."""
+        return (
+            self.artifact == decision.artifact
+            and self.content_hash == decision.content_hash
+            and self.approval.decided_at == decision.decided_at
+            and self.approval.extractor_version == decision.extractor_version
+        )
+
+
+class StandingApproval(BaseModel):
+    """The human approval a writer promotes on, and the carry it stands by, if any.
+
+    A writer stamps ``approval_carried`` from ``carry``, so an approval given at
+    an earlier extractor never reads as a review at the running one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decision: HumanDecision
+    carry: CarriedRecord | None = None
+
+    def approval_carried(self) -> ApprovalCarried | None:
+        """The published ``approval_carried`` block, or ``None`` for an approval given there."""
+        if self.carry is None:
+            return None
+        return ApprovalCarried(
+            approved_at_extractor=self.carry.approval.extractor_version,
+            carried_to_extractor=self.carry.to_extractor_version,
+            carried_at=utc_text(self.carry.carried_at),
+        )
 
 
 class WithdrawalDocument(BaseModel):
@@ -365,10 +486,14 @@ class WithdrawalRecord(BaseModel):
 
 
 DecisionLogRecord = Annotated[
-    HumanDecision | PromotedRecord | HeldRecord | MigratedRecord | WithdrawalRecord,
+    HumanDecision | PromotedRecord | HeldRecord | MigratedRecord | CarriedRecord | WithdrawalRecord,
     Field(discriminator="kind"),
 ]
 OutcomeRecord = PromotedRecord | HeldRecord | MigratedRecord
+#: Each carried approval and the last extractor it was carried to (:meth:`DecisionLog.carried`).
+Carried = Mapping[HumanDecision, int]
+#: Each carried approval and the carry that took it there (:meth:`DecisionLog.carries`).
+Carries = Mapping[HumanDecision, CarriedRecord]
 _RECORD: TypeAdapter[DecisionLogRecord] = TypeAdapter(DecisionLogRecord)
 
 
@@ -418,6 +543,34 @@ class DecisionLog:
             if isinstance(record, WithdrawalRecord) and record.withdraws(key, doc_id):
                 return record
         return None
+
+    def carried(self) -> dict[HumanDecision, int]:
+        """Each carried approval, with the last extractor a migration carried it to."""
+        return {decision: c.to_extractor_version for decision, c in self.carries().items()}
+
+    def carries(self) -> dict[HumanDecision, CarriedRecord]:
+        """Each carried approval, with the carry that took it to the latest extractor.
+
+        Of carries to the same extractor, the last recorded one stands.
+        """
+        records = self.records()
+        carries = [r for r in records if isinstance(r, CarriedRecord)]
+        found: dict[HumanDecision, CarriedRecord] = {}
+        for decision in (r for r in records if isinstance(r, HumanDecision)):
+            reached = [c for c in carries if c.carries(decision)]
+            if reached:
+                found[decision] = max(reversed(reached), key=lambda c: c.to_extractor_version)
+        return found
+
+    def record_carry(self, record: CarriedRecord) -> bool:
+        """Append ``record`` unless the same carry is already recorded; True if appended."""
+        ignore = {"carried_at"}
+        same = record.model_dump(exclude=ignore)
+        for earlier in self.records():
+            if isinstance(earlier, CarriedRecord) and earlier.model_dump(exclude=ignore) == same:
+                return False
+        self.append(record)
+        return True
 
     def record_outcome(self, record: OutcomeRecord) -> bool:
         """Append ``record`` unless it repeats the artifact's last outcome; True if appended."""

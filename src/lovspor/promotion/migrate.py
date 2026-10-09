@@ -22,9 +22,13 @@ and the backfill read every version against the running extractor
 (:mod:`.intervals`). Each must be reproduced by the log at the running
 extractor — the same text, first observed at the same instant, at the same
 URL — exactly as a refresh demands. Every version needs the owner's standing
-approval of its text at the running extractor (:func:`~.plan.require_approval`),
-as the backfill does: a re-approval is the owner's act, recorded with
-``lovspor promote approve``.
+approval of its text: given at the running extractor
+(:func:`~.plan.require_approval`), or — when that version's published
+rendering is byte-identical under the running extractor — given at an earlier
+one and carried (:mod:`.carry`, owner decision 2026-10-08). The current
+version's bytes are the checkout's Markdown; an earlier version's are those
+its commit published. Where the bytes cannot be shown identical, a
+re-approval is the owner's act, recorded with ``lovspor promote approve``.
 
 A document whose record, current version and sidecar already say the running
 extractor is current and is not read again, so a rerun after the commit
@@ -36,6 +40,7 @@ from __future__ import annotations
 import difflib
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -44,9 +49,15 @@ from lovspor.errors import PromotionRefusedError
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.promotion.archive import Fetch, authority_fetches, read_artifact
+from lovspor.promotion.carry import (
+    VersionApproval,
+    audit_at_running_extractor,
+    historical_markdown,
+    standing_approval,
+)
 from lovspor.promotion.corpus import LOCAL_DIR, MANIFEST_NAME, CorpusCheckout, LocalRecord
 from lovspor.promotion.corpus import manifest_text as render_manifest
-from lovspor.promotion.decisions import ArtifactKey, DecisionLog, HumanDecision, PromotionAudit
+from lovspor.promotion.decisions import ArtifactKey, DecisionLog, HumanDecision
 from lovspor.promotion.evidence import evidence_path
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
 from lovspor.promotion.identity import mint_identity
@@ -59,7 +70,7 @@ from lovspor.promotion.models import (
     LocalDocument,
     ObservedSource,
 )
-from lovspor.promotion.plan import Prepared, require_approval
+from lovspor.promotion.plan import Prepared
 from lovspor.promotion.render import render_local_regulation
 from lovspor.promotion.versions import DerivedVersion, read_primary
 from lovspor.promotion.withdraw import refuse_withdrawn
@@ -108,7 +119,13 @@ class Migration(BaseModel):
     record: LocalRecord
     from_version: int
     approval: HumanDecision
+    approvals: tuple[VersionApproval, ...]
     files: dict[str, str]
+
+    @property
+    def carried(self) -> tuple[VersionApproval, ...]:
+        """The versions whose approval this migration carries rather than finds given."""
+        return tuple(approval for approval in self.approvals if approval.carried)
 
     @property
     def commit_subject(self) -> str:
@@ -121,15 +138,16 @@ class Migration(BaseModel):
 
 
 class MigrationInputs:
-    """The archive, the decision log and the checkout one migration run reads."""
+    """The archive, the decision log and the checkout one migration run reads, and its instant."""
 
     def __init__(
-        self, root: ObservatoryRoot, decisions: DecisionLog, corpus: CorpusCheckout
+        self, root: ObservatoryRoot, decisions: DecisionLog, corpus: CorpusCheckout, now: datetime
     ) -> None:
         self.root = root
         self.log = ObservationLog(root)
         self.decisions = decisions
         self.corpus = corpus
+        self.now = now
         self._fetches: dict[str, tuple[Fetch, ...]] = {}
 
     def fetches(self, authority_id: str) -> tuple[Fetch, ...]:
@@ -171,10 +189,11 @@ def plan_migration(inputs: MigrationInputs, document: Published, authority: Auth
     key = _source_key(document)
     refuse_withdrawn(inputs.decisions, key, document.doc_id)
     prepared = _reread(inputs, document, key, authority)
-    approval = require_approval(inputs.decisions.latest_decision(key), prepared)
-    _require_earlier(inputs, document, prepared)
+    current = standing_approval(inputs.decisions.latest_decision(key), prepared)
+    earlier = _require_earlier(_Subject(inputs, document, authority), prepared)
+    approvals = (*earlier, current)
     files = {
-        document.observations_path: _observations(document),
+        document.observations_path: _observations(document, approvals, inputs.now),
         **_evidence(inputs.corpus, document, prepared),
     }
     return Migration(
@@ -182,7 +201,8 @@ def plan_migration(inputs: MigrationInputs, document: Published, authority: Auth
         key=key,
         record=document.record.model_copy(update={"extractor_version": EXTRACTOR_VERSION}),
         from_version=document.record.extractor_version,
-        approval=approval,
+        approval=current.decision,
+        approvals=approvals,
         files=files,
     )
 
@@ -330,20 +350,31 @@ def _refuse_new_rendering(document: Published, prepared: Prepared) -> None:
         raise PromotionRefusedError(msg)
 
 
-def _require_earlier(inputs: MigrationInputs, document: Published, prepared: Prepared) -> None:
-    """Every promoted version reproduced by the log; the earlier ones approved now too."""
-    versions = document.observations.versions
+@dataclass(frozen=True)
+class _Subject:
+    """One document being migrated: the run's inputs, the document and its authority."""
+
+    inputs: MigrationInputs
+    document: Published
+    authority: Authority
+
+
+def _require_earlier(subject: _Subject, prepared: Prepared) -> tuple[VersionApproval, ...]:
+    """Every promoted version reproduced by the log; the earlier ones' approvals."""
+    document, inputs = subject.document, subject.inputs
     fetches = inputs.fetches(document.record.authority_id)
     history = read_primary(inputs.log, fetches, _primary_url(document), None)
     derived = {version.version: version for version in history.versions}
-    for entry in versions:
+    approvals: list[VersionApproval] = []
+    for entry in document.observations.versions:
         version = derived.get(entry.version)
         problem = reproduction(entry, version)
         if problem is not None or version is None:
             msg = f"{document.doc_id} v{entry.version} at extractor v{EXTRACTOR_VERSION}: {problem}"
             raise PromotionRefusedError(msg + "; that is not a migration")
         if entry.version != document.record.version:
-            _require_version_approval(inputs.decisions, version, prepared)
+            approvals.append(_version_approval(subject, version, prepared))
+    return tuple(approvals)
 
 
 def _primary_url(document: Published) -> str:
@@ -357,38 +388,72 @@ def _primary_url(document: Published) -> str:
     return urls.pop()
 
 
-def _require_version_approval(
-    decisions: DecisionLog, version: DerivedVersion, prepared: Prepared
-) -> None:
-    """The latest standing decision on one of the version's blobs approves its text now."""
+def _version_approval(
+    subject: _Subject, version: DerivedVersion, prepared: Prepared
+) -> VersionApproval:
+    """The standing approval of an earlier version's text, carried only on identical bytes."""
     blobs = set(version.source_sha256s)
     standing = [
         record
-        for record in decisions.records()
+        for record in subject.inputs.decisions.records()
         if isinstance(record, HumanDecision)
         and record.artifact.source_url == version.primary_url
         and record.artifact.sha256 in blobs
     ]
     identity = prepared.identity.model_copy(update={"content_hash": version.content_hash})
-    earlier = prepared.model_copy(update={"identity": identity})
+    earlier = prepared.model_copy(update={"identity": identity, "version": version.version})
     try:
-        require_approval(standing[-1] if standing else None, earlier)
+        approval = standing_approval(standing[-1] if standing else None, earlier)
+        if approval.carried:
+            _require_identical_bytes(subject, version.version, approval.content_hash)
     except PromotionRefusedError as exc:
         msg = f"v{version.version} (approve one of {', '.join(sorted(blobs))}): {exc}"
         raise PromotionRefusedError(msg) from exc
+    return approval
 
 
-def _observations(document: Published) -> str:
+def _require_identical_bytes(subject: _Subject, version: int, content_hash: str) -> None:
+    """An earlier version's published Markdown re-rendered byte-identically, or a refusal."""
+    then = _published_then(subject, version, content_hash)
+    try:
+        _reread(subject.inputs, then, _source_key(then), subject.authority)
+    except PromotionRefusedError as exc:
+        msg = (
+            f"it is not byte-identical at extractor v{EXTRACTOR_VERSION} ({exc}); approve it again"
+        )
+        raise PromotionRefusedError(msg) from exc
+
+
+def _published_then(subject: _Subject, version: int, content_hash: str) -> Published:
+    """The document as an earlier version's commit published it."""
+    record = subject.document.record
+    text = historical_markdown(subject.inputs.corpus, record.markdown_path, version, content_hash)
+    if text is None:
+        msg = (
+            "its published bytes are not in this checkout's history, so they cannot be shown "
+            "byte-identical and its approval is not carried; approve it again"
+        )
+        raise PromotionRefusedError(msg)
+    then = record.model_copy(update={"version": version, "content_hash": content_hash})
+    return subject.document.model_copy(update={"record": then, "markdown": text})
+
+
+def _observations(
+    document: Published, approvals: tuple[VersionApproval, ...], now: datetime
+) -> str:
     """The observations file with every version's audit at the running extractor."""
+    by_version = {approval.version: approval for approval in approvals}
     versions = tuple(
-        entry.model_copy(update={"promotion": _at_running_extractor(entry.promotion)})
+        entry.model_copy(
+            update={
+                "promotion": audit_at_running_extractor(
+                    entry.promotion, by_version[entry.version], now
+                )
+            }
+        )
         for entry in document.observations.versions
     )
     return observations_text(document.observations.model_copy(update={"versions": versions}))
-
-
-def _at_running_extractor(audit: PromotionAudit) -> PromotionAudit:
-    return audit.model_copy(update={"extractor_version": EXTRACTOR_VERSION})
 
 
 def _evidence(corpus: CorpusCheckout, document: Published, prepared: Prepared) -> dict[str, str]:

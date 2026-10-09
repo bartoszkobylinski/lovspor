@@ -7,7 +7,7 @@ import locale
 import os
 import subprocess
 import sys
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -24,9 +24,10 @@ from lovspor.promotion.migrate import (
     _primary_url,
     _published_source,
     _refuse_new_text,
-    _require_version_approval,
     _reread,
     _source_key,
+    _Subject,
+    _version_approval,
     migration_files,
     plan_migration,
     planned_diff,
@@ -77,7 +78,7 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     [(doc_id, record)] = corpus.local_manifest().documents.items()
     document = published(corpus, doc_id, record)
     root = ObservatoryRoot(root_path, [])
-    inputs = MigrationInputs(root, DecisionLog(root), corpus)
+    inputs = MigrationInputs(root, DecisionLog(root), corpus, datetime.now(UTC))
     authority = _authority(root, AUTHORITY, KLASS_VERSION)
     return inputs, document, authority
 
@@ -258,7 +259,10 @@ def test_earlier_version_without_decision_lists_all_blobs(state, tmp_path):
     empty_path.mkdir()
     empty = DecisionLog(ObservatoryRoot(empty_path, []))
     with pytest.raises(PromotionRefusedError) as error:
-        _require_version_approval(empty, version, prepared)
+        subject = _Subject(
+            MigrationInputs(inputs.root, empty, inputs.corpus, inputs.now), document, authority
+        )
+        _version_approval(subject, version, prepared)
     assert str(error.value).startswith(
         f"v1 (approve one of {', '.join(sorted(version.source_sha256s))}): "
     )
