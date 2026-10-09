@@ -8,11 +8,17 @@ import pytest
 
 from lovspor.errors import PromotionRefusedError
 from lovspor.promotion.corpus import LocalManifest, LocalRecord
-from lovspor.promotion.decisions import ArtifactKey, Decision, HumanDecision
+from lovspor.promotion.decisions import (
+    ApprovalReference,
+    ArtifactKey,
+    CarriedRecord,
+    Decision,
+    HumanDecision,
+)
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
 from lovspor.promotion.identity import mint_identity
 from lovspor.promotion.models import Authority, ExtractedDocument, MintedIdentity
-from lovspor.promotion.plan import Prepared, _free_slug, require_approval
+from lovspor.promotion.plan import Prepared, _free_slug, require_approval, standing_on
 from tests.unit.promotion_fixtures import html_page
 
 BASE = "forskrift-om-renovasjon-og-slam-eksempel-kommune"
@@ -213,3 +219,38 @@ def test_a_fresh_approval_stands_even_when_its_carry_mapping_names_another_extra
     approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION)
 
     assert require_approval(approval, prepared, {approval: EXTRACTOR_VERSION - 1}) is approval
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+@pytest.mark.parametrize("has_carry", [False, True])
+def test_standing_approval_publishes_a_carry_only_for_an_earlier_extractor(
+    fresh: bool, has_carry: bool
+) -> None:
+    prepared = _prepared()
+    extractor = EXTRACTOR_VERSION if fresh else EXTRACTOR_VERSION - 1
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, extractor)
+    carry = CarriedRecord(
+        artifact=approval.artifact,
+        carried_at=datetime(2026, 8, 21, tzinfo=UTC),
+        doc_id=prepared.identity.doc_id,
+        version=prepared.version,
+        content_hash=prepared.identity.content_hash,
+        from_extractor_version=extractor,
+        to_extractor_version=extractor + 1,
+        approval=ApprovalReference.of(approval),
+    )
+
+    standing = standing_on(approval, {approval: carry} if has_carry else {})
+
+    assert standing.decision == approval
+    published = standing.approval_carried()
+    if has_carry and not fresh:
+        assert published is not None
+        assert published.model_dump() == {
+            "approved_at_extractor": extractor,
+            "carried_to_extractor": EXTRACTOR_VERSION,
+            "carried_at": "2026-08-21T00:00:00Z",
+            "basis": "byte-identical rendering",
+        }
+    else:
+        assert published is None
