@@ -1,0 +1,53 @@
+{#- /connect/chatgpt/ (owner decision 2026-10-10): the ChatGPT guide, one
+    entry of CLIENT_REGISTRY. Every step is sourced, and nothing past the
+    sources is written:
+      steps ............... docs/mcp.md "Connecting a chat app" and
+                            deploy/digitalocean/README.md (run in ChatGPT
+                            against the hosted service, 2026-09-30)
+      sign-in page ........ docs/mcp.md (the AuthKit page), privacy.nb.html
+                            (WorkOS, sign-in with another account)
+      Authorization failed  docs/mcp.md (a server-side resource setting)
+    Where in ChatGPT's settings developer mode and connectors live, and
+    which plan offers them, is not stated in any of them, so the page states
+    neither. The previous /connect/ page offered no local recipe for
+    ChatGPT, so this guide offers none and points to the Claude guide's
+    local copy instead. No hosted fact is rendered here. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<h2>Hva dette er</h2>
+<p>lovverk er en <a href="https://modelcontextprotocol.io">MCP</a>-server som gir ChatGPT oppslag i norske lover og forskrifter. Den driftede tjenesten ligger på <code>https://lovspor.no/mcp</code>. Du oppretter en connector til den og logger inn med <span data-literal>OAuth 2.1</span> — det er ingen nøkkel å lime inn, og det koster ingenting.</p>
+
+<h2>Koble til i ChatGPT</h2>
+<p>Dette er stegene vi har kjørt i ChatGPT:</p>
+<ol class="steps">
+  <li>Slå på <strong>utviklermodus</strong> (<span lang="en">developer mode</span>) i ChatGPT.</li>
+  <li>Opprett en connector med adressen <code>https://lovspor.no/mcp</code>.</li>
+  <li>Velg <strong>OAuth</strong> som autentisering.</li>
+  <li>Logg inn på siden som åpnes. Når du er tilbake i samtalen, svarer verktøyene.</li>
+</ol>
+
+<h2>Innloggingen</h2>
+<p>Når du har valgt <span data-literal>OAuth</span>, åpnes en innloggingsside fra WorkOS, tjenesten vi bruker til innlogging. Der logger du inn med en konto; du kan også logge inn med en annen konto, for eksempel Google. lovspor får bare en brukeridentifikator fra WorkOS, ikke navnet eller e-postadressen din — se <a href="/privacy/">personvern</a>. Etterpå sendes du tilbake til ChatGPT.</p>
+
+<h2>Prøv et første spørsmål</h2>
+<p>Still dette spørsmålet i en ny samtale:</p>
+<p class="panel"><strong>«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»</strong></p>
+<p>Svaret skal bygge på <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span></a> og sitere den: minst fire uker hos arbeidsgiveren (opptjeningstid). Spør deretter om <span data-literal>folketrygdloven § 8-99</span> — verktøyet skal svare at bestemmelsen ikke finnes.</p>
+
+<h2>Hvis det ikke virker</h2>
+<ul>
+  <li><strong>Du finner ikke hvor du oppretter en connector.</strong> Slå på utviklermodus først; det var det første steget da vi kjørte oppsettet.</li>
+  <li><strong>Innloggingen starter ikke.</strong> Sjekk at du valgte <strong>OAuth</strong> som autentisering.</li>
+  <li><strong><span lang="en">Authorization failed</span> etter at du har logget inn.</strong> Da ligger feilen i oppsettet på vår side, ikke hos deg. Skriv til <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</li>
+  <li><strong>En merkelapp har flyttet seg.</strong> Merkelappene inne i klienten endrer seg oftere enn denne siden. Det som teller, er adressen og <span data-literal>OAuth</span> som innloggingsmåte.</li>
+  <li><strong>Verktøyene svarer ikke.</strong> Tilstanden ved siste utgivelse står på <a href="/status/">status</a>. Tjenesten krever alltid innlogging, så et kall uten den blir avvist.</li>
+</ul>
+
+<h2>Uten konto</h2>
+<p>ChatGPT kobler seg til den driftede tjenesten. Vil du heller kjøre serveren på din egen maskin, uten konto, står framgangsmåten i <a href="/connect/claude/">veiledningen for Claude</a>; for ChatGPT har vi ingen testet lokal oppskrift.</p>
+<p class="muted">Andre klienter: <a href="/connect/">Koble til</a>. Hva verktøyene svarer på: <a href="/docs/">dokumentasjonen</a>. Spørsmål: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+{% endblock %}

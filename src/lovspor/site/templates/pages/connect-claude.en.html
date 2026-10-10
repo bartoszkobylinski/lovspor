@@ -1,0 +1,54 @@
+{#- /en/connect/claude/: the English twin of connect-claude.nb.html — a full
+    translation, not a summary. Same sources, same limits: see the
+    Norwegian template's header. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<h2>What this is</h2>
+<p>lovverk is an <a href="https://modelcontextprotocol.io">MCP</a> server that lets Claude look up Norwegian acts and regulations. The hosted service lives at <code>https://lovspor.no/mcp</code>. You add it as a custom connector and sign in with <span data-literal>OAuth 2.1</span> — there is no key to paste, and it costs nothing.</p>
+
+<h2>Connect in claude.ai</h2>
+<p>These are the steps we have run from claude.ai:</p>
+<ol class="steps">
+  <li>Add a custom connector.</li>
+  <li>Enter the address <code>https://lovspor.no/mcp</code>.</li>
+  <li>Choose <strong>Sign in now</strong>.</li>
+  <li>For client registration, choose <strong>Register automatically</strong>.</li>
+  <li>Sign in on the page that opens. Once you are back in the chat, the tools answer.</li>
+</ol>
+<p>In Claude Desktop the same choices are what matter — the address, <strong>Sign in now</strong> and <strong>Register automatically</strong> — but we have run the steps from claude.ai only.</p>
+
+<h2>Signing in</h2>
+<p>When you choose <strong>Sign in now</strong>, a sign-in page from WorkOS opens — the service we use for sign-in. You sign in there with an account; you can also sign in with another account, such as Google. lovspor receives only a user identifier from WorkOS, not your name or email address — see <a href="/en/privacy/">privacy</a>. Afterwards you are sent back to Claude.</p>
+
+<h2>Try a first question</h2>
+<p>Ask this in a new chat (it is Norwegian for “How long must I have worked to get sick pay from my employer?”):</p>
+<p class="panel"><strong lang="nb">«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»</strong></p>
+<p>The answer should rest on <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span></a> and quote it: at least four weeks with the employer (the qualifying period). Then ask about <span data-literal>folketrygdloven § 8-99</span> — the tool should answer that the section does not exist.</p>
+
+<h2>If it does not work</h2>
+<ul>
+  <li><strong>Registration fails.</strong> Check that you chose <strong>Register automatically</strong>. The default, Use Claude's published identity, does not work with this service.</li>
+  <li><strong>Authorization failed after you have signed in.</strong> Then the fault is in the setup on our side, not yours. Write to <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</li>
+  <li><strong>A label has moved.</strong> The labels inside the client change more often than this page does. What matters is the address, <span data-literal>OAuth</span> as the way to sign in, and automatic registration.</li>
+  <li><strong>The tools do not answer.</strong> The state at the last release is on <a href="/en/status/">status</a>. The service always requires sign-in, so a call without it is refused. If the hosted service is down, you can run the server yourself, as below.</li>
+</ul>
+
+<h2>Run it yourself</h2>
+<p>No account and no key: the server fetches the corpus down to your machine and talks to your client over stdio. In Claude Code:</p>
+<pre>uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+<p>In Claude Desktop, add this to the config file (<code>claude_desktop_config.json</code> — its location depends on your operating system) and restart the client:</p>
+<pre>{
+  "mcpServers": {
+    "lovverk": {
+      "command": "uvx",
+      "args": ["lovspor", "mcp"]
+    }
+  }
+}</pre>
+<p class="muted">Every tool except <code>semantic_search</code> then reads only files and git on your own machine; <code>semantic_search</code> needs an embedding key you supply yourself. Other clients: <a href="/en/connect/">Connect</a>. What the tools answer: the <a href="/en/docs/">documentation</a>. Questions: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+{% endblock %}

@@ -471,15 +471,16 @@ class TestTree:
         assert report.release_key.lovspor_commit == world.lovspor_commit
 
     def test_route_closure(self, built: tuple[Path, SiteBuildReport]) -> None:
-        """Every Decision-2 route in both languages where the mirror rule
-        applies, nothing outside the route set plus the three root files."""
+        """Every Decision-2 route in all three languages where the mirror rule
+        applies, one guide per registered client, nothing outside the route
+        set plus the root files."""
         out, _ = built
         expected = {f"{page.path.lstrip('/')}index.html" for page in emitted_pages()}
 
         assert _files(out) == expected | _ROOT_FILES
-        assert not [
+        assert {
             name for name in _files(out) if name.startswith("connect/") and name.count("/") > 1
-        ]
+        } == {"connect/claude/index.html", "connect/chatgpt/index.html"}
 
     def test_sitemap_lists_exactly_the_emitted_pages(
         self, built: tuple[Path, SiteBuildReport]
@@ -827,21 +828,39 @@ class TestLandingBenchmark:
         assert "unlisted" not in (out / "site-facts.json").read_text(encoding="utf-8")
 
 
-class TestConnectPage:
-    """The written /connect/ page: the procedures it shows, and the ones it
-    declines to invent. A client whose steps are not in this repository is
-    named as untested — the page never carries a plausible-looking recipe."""
+_CHOOSERS = ("/connect/", "/en/connect/", "/pl/connect/")
+_CLAUDE = ("/connect/claude/", "/en/connect/claude/", "/pl/connect/claude/")
+_CHATGPT = ("/connect/chatgpt/", "/en/connect/chatgpt/", "/pl/connect/chatgpt/")
+_GUIDES = (*_CLAUDE, *_CHATGPT)
+_QUESTION = "«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»"
 
-    @pytest.mark.parametrize("path", ["/connect/", "/en/connect/", "/pl/connect/"])
-    def test_shows_the_connector_address_and_the_local_path(
+
+class TestConnectPage:
+    """/connect/ is a short chooser since the owner's 2026-10-10 split: one
+    link per registered client, and the clients without a procedure in this
+    repository named as untested — never given a plausible-looking recipe."""
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_links_one_guide_per_registered_client_in_the_page_language(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
-        out, _ = built
-        markup = _page(out, path)
+        markup = _page(built[0], path)
+        prefix = path.removesuffix("connect/")
 
+        assert '<ul class="choices">' in markup
+        for slug in ("claude", "chatgpt"):
+            assert f'href="{prefix}connect/{slug}/"' in markup, (path, slug)
         assert "https://lovspor.no/mcp" in markup
-        assert "uvx lovspor fetch-corpus" in markup
-        assert "claude mcp add lovverk -- uvx lovspor mcp" in markup
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_is_short_and_leaves_the_steps_to_the_guides(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+
+        assert "Register automatically" not in markup
+        assert "<pre>" not in markup
+        assert markup.count("<h2>") <= 3
 
     def test_an_unverified_client_is_named_untested_rather_than_given_steps(
         self, built: tuple[Path, SiteBuildReport]
@@ -863,43 +882,144 @@ class TestConnectPage:
             for client in ("Cursor", "Codex"):
                 assert client in markup, (path, client)
 
-    @pytest.mark.parametrize("path", ["/connect/", "/en/connect/", "/pl/connect/"])
-    def test_the_oauth_connectors_carry_the_procedure_run_on_2026_09_30(
-        self, built: tuple[Path, SiteBuildReport], path: str
-    ) -> None:
-        """claude.ai and ChatGPT were connected over OAuth against the hosted
-        service on 2026-09-30 (owner decision superseding #343). The page
-        carries the choices that decided success: automatic registration
-        for claude.ai, developer mode and OAuth for ChatGPT."""
-        out, _ = built
-        markup = _page(out, path)
-
-        assert "Sign in now" in markup
-        assert "Register automatically" in markup
-        assert "developer mode" in markup
-        assert "<strong>OAuth</strong>" in markup
-
-    @pytest.mark.parametrize("path", ["/connect/", "/en/connect/", "/pl/connect/"])
+    @pytest.mark.parametrize("path", (*_CHOOSERS, *_GUIDES))
     def test_makes_no_hosted_claim_and_names_the_contact_address(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
         """A procedure page states no observation of the running service:
         the hosted reading lives on /status/ and nowhere else."""
-        out, _ = built
-        markup = _page(out, path)
+        markup = _page(built[0], path)
 
         assert 'data-kind="hosted"' not in markup
         assert '<a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>' in markup
         assert '<span class="tag" data-status="current">' in markup
 
-    def test_both_languages_carry_the_same_sections(
-        self, built: tuple[Path, SiteBuildReport]
+    @pytest.mark.parametrize("stem", ["/connect/", "/connect/claude/", "/connect/chatgpt/"])
+    def test_all_three_languages_carry_the_same_sections(
+        self, built: tuple[Path, SiteBuildReport], stem: str
     ) -> None:
-        """The English page is a full translation, not a summary."""
+        """The English and Polish pages are full translations, not summaries."""
         out, _ = built
+        counts = {_page(out, f"{prefix}{stem}").count("<h2>") for prefix in ("", "/en", "/pl")}
 
-        assert _page(out, "/connect/").count("<h2>") == _page(out, "/en/connect/").count("<h2>")
-        assert _page(out, "/connect/").count("<h2>") == _page(out, "/pl/connect/").count("<h2>")
+        assert len(counts) == 1, stem
+
+
+class TestConnectGuides:
+    """``/connect/claude/`` and ``/connect/chatgpt/``: what the connector is,
+    numbered steps with the exact address, the sign-in screen, a first
+    question, troubleshooting. Every step is one this repository records as
+    run on 2026-09-30 (docs/mcp.md); no menu path is written that the
+    sources do not state."""
+
+    @pytest.mark.parametrize("path", _GUIDES)
+    def test_numbered_steps_carry_the_exact_server_address(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+        steps = markup.split('<ol class="steps">', 1)[1].split("</ol>", 1)[0]
+
+        assert "<code>https://lovspor.no/mcp</code>" in steps
+        assert steps.count("<li>") >= 3
+
+    @pytest.mark.parametrize("path", _CLAUDE)
+    def test_the_claude_guide_carries_the_choices_that_decided_success(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        steps = _page(built[0], path).split('<ol class="steps">', 1)[1].split("</ol>", 1)[0]
+
+        assert "Sign in now" in steps
+        assert "Register automatically" in steps
+        assert "Use Claude's published identity" in _page(built[0], path)
+
+    @pytest.mark.parametrize("path", _CHATGPT)
+    def test_the_chatgpt_guide_turns_on_developer_mode_first_and_picks_oauth(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        steps = _page(built[0], path).split('<ol class="steps">', 1)[1].split("</ol>", 1)[0]
+
+        assert "developer mode" in steps
+        assert "<strong>OAuth</strong>" in steps
+        assert steps.index("developer mode") < steps.index("https://lovspor.no/mcp")
+        assert "Register automatically" not in steps
+
+    @pytest.mark.parametrize("path", _GUIDES)
+    def test_says_what_the_sign_in_screen_is_and_asks_for_no_secret(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+        prefix = path.split("/connect/", 1)[0]
+
+        assert "WorkOS" in markup
+        assert f'href="{prefix}/privacy/"' in markup
+        assert "token" not in _text(markup).lower()
+
+    @pytest.mark.parametrize("path", _GUIDES)
+    def test_the_first_question_is_the_section_8_18_example(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+
+        assert _QUESTION in markup
+        assert '<a href="/lov/folketrygdloven-ftrl/paragraf/8-18/">' in markup
+        assert "<span data-literal>folketrygdloven § 8-99</span>" in markup
+
+    @pytest.mark.parametrize("path", _GUIDES)
+    def test_troubleshooting_points_to_status_and_to_the_contact(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+        prefix = path.split("/connect/", 1)[0]
+
+        assert f'href="{prefix}/status/"' in markup
+        assert "Authorization failed" in markup
+
+    @pytest.mark.parametrize("path", _CLAUDE)
+    def test_the_local_copy_stays_on_the_claude_guide(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+
+        assert "uvx lovspor fetch-corpus" in markup
+        assert "claude mcp add lovverk -- uvx lovspor mcp" in markup
+        assert "claude_desktop_config.json" in markup
+
+    @pytest.mark.parametrize("path", _CHATGPT)
+    def test_the_chatgpt_guide_offers_no_local_recipe_of_its_own(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+        prefix = path.split("/connect/", 1)[0]
+
+        assert "<pre>" not in markup
+        assert f'href="{prefix}/connect/claude/"' in markup
+
+    @pytest.mark.parametrize("path", _GUIDES)
+    def test_states_no_plan_or_tier_the_sources_do_not_state(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        """No document in this repository says which Claude or ChatGPT plan a
+        custom connector needs, so a guide names none."""
+        text = _text(_page(built[0], path))
+
+        for plan in ("Pro", "Plus", "Team", "Enterprise", "Max"):
+            assert not re.search(rf"\b{plan}\b", text), (path, plan)
+
+    @pytest.mark.parametrize(
+        ("path", "guides"),
+        [
+            ("/", ('href="/connect/claude/"', 'href="/connect/chatgpt/"')),
+            ("/en/", ('href="/en/connect/claude/"', 'href="/en/connect/chatgpt/"')),
+            ("/pl/", ('href="/pl/connect/claude/"', 'href="/pl/connect/chatgpt/"')),
+        ],
+    )
+    def test_the_landing_links_both_guides(
+        self, built: tuple[Path, SiteBuildReport], path: str, guides: tuple[str, ...]
+    ) -> None:
+        markup = _page(built[0], path)
+
+        for href in guides:
+            assert href in markup, (path, href)
 
 
 class TestNoTokenAccess:
@@ -924,6 +1044,7 @@ class TestNoTokenAccess:
         "/pl/docs/",
         "/pl/privacy/",
         "/pl/terms/",
+        *_GUIDES,
     )
 
     @pytest.mark.parametrize("path", _ACCESS_PAGES)
@@ -1441,6 +1562,7 @@ class TestDegradation:
             "/en/docs/",
             "/pl/connect/",
             "/pl/docs/",
+            *_GUIDES,
         ):
             assert _page(one, path) == _page(two, path), path
         assert _page(one, "/status/") != _page(two, "/status/")

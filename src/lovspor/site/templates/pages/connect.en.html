@@ -1,54 +1,25 @@
-{#- /connect/ (ADR-0014 Decision 2), the English twin of connect.nb.html —
-    a full translation, not a summary. The same rule holds: a procedure we
-    have not run ourselves is named as untested rather than invented, and
-    every identifier carrying a digit is marked. Access to the hosted
-    service is through a connector with OAuth sign-in only (owner decision
-    2026-10-07): the page offers no other way in. -#}
+{#- /en/connect/ (ADR-0014 Decision 2), the English twin of connect.nb.html —
+    a full translation, not a summary. The same rule holds: a client
+    without a procedure in this repository is named as untested rather
+    than given invented steps, and every identifier carrying a digit is
+    marked. Access to the hosted service is through a connector with OAuth
+    sign-in only (owner decision 2026-10-07). -#}
 {% extends "_base.html" %}
 {% block main %}
 {{ badge(status) }}
 <h1>{{ title }}</h1>
 <p class="lede">{{ description }}</p>
 
-<p>lovverk is an <a href="https://modelcontextprotocol.io">MCP</a> server. Your client talks either to the hosted service at <code>https://lovspor.no/mcp</code>, through a connector you sign in to with <span data-literal>OAuth 2.1</span>, or to a copy you run on your own machine, which needs nothing.</p>
+<p>lovverk is an <a href="https://modelcontextprotocol.io">MCP</a> server. The hosted service lives at <code>https://lovspor.no/mcp</code>: you add it as a connector in your AI tool and sign in with <span data-literal>OAuth 2.1</span>. There is nothing to paste, and it costs nothing.</p>
 
-<h2>Claude Desktop and claude.ai — as a connector</h2>
-<p>The hosted service logs you in with <span data-literal>OAuth 2.1</span>, so there is nothing to paste. This is the procedure we have run from claude.ai:</p>
-<ul>
-  <li>Add a custom connector with the address <code>https://lovspor.no/mcp</code>.</li>
-  <li>Choose <strong>Sign in now</strong>.</li>
-  <li>For client registration, choose <strong>Register automatically</strong>. The default, which uses Claude's published identity, does not work with this service.</li>
-  <li>Log in on the page that opens. The tools answer once you are back in the chat.</li>
-</ul>
-<p><span class="accent">The labels inside the client change more often than this page does.</span> If one has moved, what matters is the address, <span data-literal>OAuth</span> as the way to log in, and automatic registration.</p>
-
-<h2>ChatGPT — as a connector</h2>
-<p>Also with <span data-literal>OAuth 2.1</span>. The procedure we have run:</p>
-<ul>
-  <li>Turn on <strong>developer mode</strong> in ChatGPT.</li>
-  <li>Create a connector with the address <code>https://lovspor.no/mcp</code> and <strong>OAuth</strong> as the authentication.</li>
-  <li>Log in on the page that opens.</li>
+<h2>Choose your client</h2>
+<ul class="choices">
+  <li><a href="/en/connect/claude/">Claude</a><p>claude.ai as a connector with sign-in, and a local copy in Claude Code and Claude Desktop.</p></li>
+  <li><a href="/en/connect/chatgpt/">ChatGPT</a><p>As a connector with sign-in, in developer mode.</p></li>
 </ul>
 
-<h2>Run it yourself</h2>
-<p>You do not have to ask anyone. Run the server yourself — it fetches the corpus down to your machine and talks to your client over stdio. In Claude Code:</p>
-<pre>uvx lovspor fetch-corpus
-claude mcp add lovverk -- uvx lovspor mcp</pre>
-<p>This works today: no account, no API key. Every tool except <code>semantic_search</code> reads only files and git on your own machine, and <code>semantic_search</code> needs an embedding key you supply yourself.</p>
-
-<h2>Claude Desktop — a local copy</h2>
-<p>Add this to the Claude Desktop config file (<code>claude_desktop_config.json</code> — its location depends on your operating system) and restart the client:</p>
-<pre>{
-  "mcpServers": {
-    "lovverk": {
-      "command": "uvx",
-      "args": ["lovspor", "mcp"]
-    }
-  }
-}</pre>
-
-<h2>Cursor and Codex</h2>
-<p><strong>No tested procedure.</strong> We have not run the setup in these clients ourselves, and we are not going to invent the steps.</p>
-<p>Use a client that supports a connector with <span data-literal>OAuth</span> sign-in, or run the server yourself as above. If you get one of these clients working against the hosted service — or if you cannot — tell us at <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, and it can stand here as a tested recipe with your name on it.</p>
-<p class="muted">The engine is open source under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>. What the tools answer is in the <a href="/en/docs/">documentation</a>; the state at the last release is on <a href="/en/status/">status</a>.</p>
+<h2>Other clients</h2>
+<p><strong>No tested procedure</strong> for Cursor and Codex. We have not run the setup in these clients ourselves, and we are not going to invent the steps.</p>
+<p>Use a client that supports a connector with <span data-literal>OAuth</span> sign-in, or run the server yourself, as in the <a href="/en/connect/claude/">Claude guide</a>. If you get one of these clients working against the hosted service — or if you cannot — tell us at <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, and it can stand here as a tested recipe with your name on it.</p>
+<p class="muted">What the tools answer is in the <a href="/en/docs/">documentation</a>; the state at the last release is on <a href="/en/status/">status</a>. The engine is open source under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
 {% endblock %}

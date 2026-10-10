@@ -9,7 +9,9 @@ from pydantic import ValidationError
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site import routes as routes_module
 from lovspor.site.routes import (
+    CLIENT_REGISTRY,
     SITE_ROUTES,
+    ConnectClient,
     Localised,
     SiteRoute,
     canonical_url,
@@ -101,9 +103,33 @@ class TestSiteRoutes:
         assert route.status == "current"
         assert route.twin
 
-    def test_client_routes_hook_is_empty_until_a_registry_exists(self) -> None:
-        assert client_routes() == ()
-        assert client_routes(None) == ()
+    def test_the_registry_names_the_two_clients_with_a_recorded_procedure(self) -> None:
+        """claude.ai and ChatGPT were connected to the hosted service on
+        2026-09-30 (docs/mcp.md); no other client has a recorded procedure."""
+        assert [client.slug for client in CLIENT_REGISTRY] == ["claude", "chatgpt"]
+
+    def test_client_routes_are_one_current_guide_per_registry_entry(self) -> None:
+        routes = client_routes()
+
+        assert [route.path for route in routes] == ["/connect/claude/", "/connect/chatgpt/"]
+        assert [route.template for route in routes] == ["connect-claude", "connect-chatgpt"]
+        assert {route.status for route in routes} == {"current"}
+        assert all(route.twin for route in routes)
+        assert client_routes(None) == routes
+        assert client_routes(()) == ()
+
+    def test_a_client_route_carries_its_copy_in_all_three_languages(self) -> None:
+        for client in CLIENT_REGISTRY:
+            route = client.route()
+            for lang in ("nb", "en", "pl"):
+                assert route.title.text(lang), (client.slug, lang)  # type: ignore[arg-type]
+                assert route.description.text(lang), (client.slug, lang)  # type: ignore[arg-type]
+
+    def test_a_client_slug_is_one_path_segment(self) -> None:
+        copy = Localised(nb="t", en="t", pl="t")
+        for slug in ("Claude", "a/b", "", "a b"):
+            with pytest.raises(ValidationError):
+                ConnectClient(slug=slug, title=copy, description=copy)
 
 
 class TestSiteRoute:
@@ -205,11 +231,13 @@ class TestEmittedPages:
         paths = [page.path for page in pages]
         twinned = [p for p in EXPECTED_STATUS if p != "/observatory/"]
 
-        expected = list(EXPECTED_STATUS) + [en_path(p) for p in twinned]
-        expected += [f"/pl{p}" for p in twinned]
+        twinned += ["/connect/claude/", "/connect/chatgpt/"]
+
+        expected = [*EXPECTED_STATUS, "/connect/claude/", "/connect/chatgpt/"]
+        expected += [en_path(p) for p in twinned] + [f"/pl{p}" for p in twinned]
         assert sorted(paths) == sorted(expected)
         assert len(paths) == len(set(paths))
-        assert len(pages) == 37
+        assert len(pages) == 43
 
     def test_emission_order_is_norwegian_then_english_then_polish(self) -> None:
         langs = [page.lang for page in emitted_pages()]
@@ -287,16 +315,33 @@ class TestEmittedPages:
             return ()
 
         monkeypatch.setattr(routes_module, "client_routes", hook)
-        registry = object()
+        registry = (CLIENT_REGISTRY[0],)
 
         assert emitted_pages(registry) == emitted_pages()
         assert handed == [registry, None]
 
     def test_client_pages_are_a_projection_of_the_registry(self) -> None:
-        """Zero registry entries, zero client pages — the set of pages is
-        never the source for the set of clients (ADR:565-572)."""
-        assert not [
-            page
+        """One registry entry, one guide in each language — the set of pages
+        is never the source for the set of clients (ADR:565-572)."""
+        guides = {
+            page.path
             for page in emitted_pages()
             if page.route_path.startswith("/connect/") and page.route_path != "/connect/"
+        }
+        only_claude = {
+            page.path
+            for page in emitted_pages((CLIENT_REGISTRY[0],))
+            if page.route_path.startswith("/connect/") and page.route_path != "/connect/"
+        }
+
+        assert guides == {
+            f"{prefix}/connect/{slug}/"
+            for prefix in ("", "/en", "/pl")
+            for slug in ("claude", "chatgpt")
+        }
+        assert only_claude == {"/connect/claude/", "/en/connect/claude/", "/pl/connect/claude/"}
+        assert not [
+            p
+            for p in emitted_pages(())
+            if p.route_path.startswith("/connect/") and p.route_path != "/connect/"
         ]

@@ -14,7 +14,12 @@ privacy policy and terms of use to link (owner decision 2026-09-30).
 
 ``/connect/<client>/`` pages are a projection of the client-capability
 registry, never the reverse (ADR:565-572): ``client_routes`` is that
-projection's hook and yields nothing until a registry exists.
+projection. ``CLIENT_REGISTRY`` is the registry: one ``ConnectClient`` per
+client whose procedure this repository records as run against the hosted
+service (docs/mcp.md, 2026-09-30) — claude.ai and ChatGPT. A client with
+no recorded procedure gets no page; ``/connect/`` names it as untested
+instead (owner decision 2026-10-10 split the one page into a chooser and
+one guide per registered client).
 
 Copy: the landing and the observatory keep the titles and descriptions
 of the hand-written pages they replace; ``/connect/`` and ``/docs/`` carry
@@ -179,16 +184,16 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
         title=Localised(nb="Koble til", en="Connect", pl="Połącz"),
         description=Localised(
             nb=(
-                "Slik kobler du KI-verktøyet ditt til lovverk — testede framgangsmåter der de "
-                "finnes, og et tydelig forbehold der de ikke gjør det."
+                "Velg klienten din: en veiledning for Claude og en for ChatGPT, og et tydelig "
+                "forbehold for klientene vi ikke har testet."
             ),
             en=(
-                "How to connect your AI tool to lovverk — tested procedures where they exist, "
-                "and a plain caveat where they do not."
+                "Choose your client: one guide for Claude and one for ChatGPT, and a plain "
+                "caveat for the clients we have not tested."
             ),
             pl=(
-                "Jak połączyć narzędzie AI z lovverk — sprawdzone instrukcje tam, gdzie je mamy, "
-                "i jasne zastrzeżenie tam, gdzie ich brak."
+                "Wybierz klienta: jedna instrukcja dla Claude, jedna dla ChatGPT i jasne "
+                "zastrzeżenie dla klientów, których nie sprawdziliśmy."
             ),
         ),
     ),
@@ -328,13 +333,73 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
 )
 
 
-def client_routes(registry: object | None = None) -> tuple[SiteRoute, ...]:
-    """``/connect/<client>/`` pages, derived from the client registry — none yet."""
-    del registry
-    return ()
+class ConnectClient(BaseModel):
+    """One registry entry: a client whose connect procedure has been run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    slug: Annotated[str, StringConstraints(pattern=r"^[a-z0-9-]+$")]
+    title: Localised
+    description: Localised
+
+    def route(self) -> SiteRoute:
+        """The client's guide: ``/connect/<slug>/``, template ``connect-<slug>``."""
+        return SiteRoute(
+            path=f"/connect/{self.slug}/",
+            template=f"connect-{self.slug}",
+            status="current",
+            title=self.title,
+            description=self.description,
+        )
 
 
-def emitted_pages(registry: object | None = None) -> tuple[EmittedPage, ...]:
+CLIENT_REGISTRY: tuple[ConnectClient, ...] = (
+    ConnectClient(
+        slug="claude",
+        title=Localised(nb="Koble til Claude", en="Connect Claude", pl="Połącz z Claude"),
+        description=Localised(
+            nb=(
+                "Steg for steg: lovverk som connector i Claude, med innlogging via OAuth og "
+                "ingenting å lime inn — og som lokal kopi i Claude Code."
+            ),
+            en=(
+                "Step by step: lovverk as a connector in Claude, with OAuth sign-in and "
+                "nothing to paste — and as a local copy in Claude Code."
+            ),
+            pl=(
+                "Krok po kroku: lovverk jako konektor w Claude, z logowaniem przez OAuth i "
+                "bez wklejania czegokolwiek — oraz jako lokalna kopia w Claude Code."
+            ),
+        ),
+    ),
+    ConnectClient(
+        slug="chatgpt",
+        title=Localised(nb="Koble til ChatGPT", en="Connect ChatGPT", pl="Połącz z ChatGPT"),
+        description=Localised(
+            nb=(
+                "Steg for steg: lovverk som connector i ChatGPT, med innlogging via OAuth og "
+                "ingenting å lime inn."
+            ),
+            en=(
+                "Step by step: lovverk as a connector in ChatGPT, with OAuth sign-in and "
+                "nothing to paste."
+            ),
+            pl=(
+                "Krok po kroku: lovverk jako konektor w ChatGPT, z logowaniem przez OAuth i "
+                "bez wklejania czegokolwiek."
+            ),
+        ),
+    ),
+)
+
+
+def client_routes(registry: tuple[ConnectClient, ...] | None = None) -> tuple[SiteRoute, ...]:
+    """``/connect/<client>/`` pages, one per registry entry, in registry order."""
+    entries = CLIENT_REGISTRY if registry is None else registry
+    return tuple(client.route() for client in entries)
+
+
+def emitted_pages(registry: tuple[ConnectClient, ...] | None = None) -> tuple[EmittedPage, ...]:
     """Every page of the tree: Norwegian first, then the ``/en/``, then the ``/pl/`` twins."""
     routes = (*SITE_ROUTES, *client_routes(registry))
     norwegian = tuple(EmittedPage(path=route.path, lang="nb", route=route) for route in routes)
