@@ -1,0 +1,66 @@
+{#- /connect/claude/ (owner decision 2026-10-10): the Claude guide, one
+    entry of CLIENT_REGISTRY. Every step is sourced, and nothing past the
+    sources is written:
+      steps ............... docs/mcp.md "Connecting a chat app" and
+                            deploy/digitalocean/README.md (run on claude.ai
+                            against the hosted service, 2026-09-30)
+      registration default  docs/mcp.md "CIMD only if you want it"
+      sign-in page ........ docs/mcp.md (the AuthKit page), privacy.nb.html
+                            (WorkOS, sign-in with another account)
+      Authorization failed  docs/mcp.md (a server-side resource setting)
+      local copy .......... the previous /connect/ page
+    Where in Claude's interface the custom-connector option lives, and which
+    plan offers it, is not stated in any of them, so the page states neither.
+    The procedure was run from claude.ai; for Claude Desktop the page says
+    the steps were not run there. No hosted fact is rendered here. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<h2>Hva dette er</h2>
+<p>lovverk er en <a href="https://modelcontextprotocol.io">MCP</a>-server som gir Claude oppslag i norske lover og forskrifter. Den driftede tjenesten ligger på <code>https://lovspor.no/mcp</code>. Du legger den til som en egendefinert connector og logger inn med <span data-literal>OAuth 2.1</span> — det er ingen nøkkel å lime inn, og det koster ingenting.</p>
+
+<h2>Koble til i claude.ai</h2>
+<p>Dette er stegene vi har kjørt fra claude.ai:</p>
+<ol class="steps">
+  <li>Legg til en egendefinert connector (<span lang="en">custom connector</span>).</li>
+  <li>Oppgi adressen <code>https://lovspor.no/mcp</code>.</li>
+  <li>Velg <strong lang="en">Sign in now</strong>.</li>
+  <li>Under klientregistrering velger du <strong lang="en">Register automatically</strong>.</li>
+  <li>Logg inn på siden som åpnes. Når du er tilbake i samtalen, svarer verktøyene.</li>
+</ol>
+<p>Bruker du Claude Desktop, er det de samme valgene som teller — adressen, <strong lang="en">Sign in now</strong> og <strong lang="en">Register automatically</strong> — men stegene har vi bare kjørt fra claude.ai.</p>
+
+<h2>Innloggingen</h2>
+<p>Når du velger <strong lang="en">Sign in now</strong>, åpnes en innloggingsside fra WorkOS, tjenesten vi bruker til innlogging. Der logger du inn med en konto; du kan også logge inn med en annen konto, for eksempel Google. lovspor får bare en brukeridentifikator fra WorkOS, ikke navnet eller e-postadressen din — se <a href="/privacy/">personvern</a>. Etterpå sendes du tilbake til Claude.</p>
+
+<h2>Prøv et første spørsmål</h2>
+<p>Still dette spørsmålet i en ny samtale:</p>
+<p class="panel"><strong>«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»</strong></p>
+<p>Svaret skal bygge på <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span></a> og sitere den: minst fire uker hos arbeidsgiveren (opptjeningstid). Spør deretter om <span data-literal>folketrygdloven § 8-99</span> — verktøyet skal svare at bestemmelsen ikke finnes.</p>
+
+<h2>Hvis det ikke virker</h2>
+<ul>
+  <li><strong>Registreringen feiler.</strong> Sjekk at du valgte <strong lang="en">Register automatically</strong>. Standardvalget, <span lang="en">Use Claude's published identity</span>, virker ikke mot denne tjenesten.</li>
+  <li><strong><span lang="en">Authorization failed</span> etter at du har logget inn.</strong> Da ligger feilen i oppsettet på vår side, ikke hos deg. Skriv til <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</li>
+  <li><strong>En merkelapp har flyttet seg.</strong> Merkelappene inne i klienten endrer seg oftere enn denne siden. Det som teller, er adressen, <span data-literal>OAuth</span> som innloggingsmåte og automatisk registrering.</li>
+  <li><strong>Verktøyene svarer ikke.</strong> Tilstanden ved siste utgivelse står på <a href="/status/">status</a>. Tjenesten krever alltid innlogging, så et kall uten den blir avvist. Er den driftede tjenesten nede, kan du kjøre serveren selv, som under.</li>
+</ul>
+
+<h2>Kjør det selv</h2>
+<p>Uten konto og uten nøkkel: serveren henter korpuset ned til maskinen din og snakker med klienten over stdio. I Claude Code:</p>
+<pre>uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+<p>I Claude Desktop legger du dette inn i oppsettsfila (<code>claude_desktop_config.json</code> — hvor den ligger avhenger av operativsystemet) og starter klienten på nytt:</p>
+<pre>{
+  "mcpServers": {
+    "lovverk": {
+      "command": "uvx",
+      "args": ["lovspor", "mcp"]
+    }
+  }
+}</pre>
+<p class="muted">Alle verktøyene unntatt <code>semantic_search</code> leser da bare filer og git på din egen maskin; <code>semantic_search</code> trenger en embedding-nøkkel du selv setter inn. Andre klienter: <a href="/connect/">Koble til</a>. Hva verktøyene svarer på: <a href="/docs/">dokumentasjonen</a>. Spørsmål: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+{% endblock %}

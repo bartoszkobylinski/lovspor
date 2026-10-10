@@ -1,0 +1,127 @@
+{#- The Polish landing (owner decision 2026-10-10), the twin of
+    landing.nb.html section for section, written as Polish rather than
+    translated word for word. The same rules hold: every count is a fact,
+    every digit in an example, a quotation or an external citation is a
+    marked literal, the connector claim is gated on the release observation
+    (oauth_discovery_consistent), and access is through the OAuth connector
+    only. Norwegian legal terms stay Norwegian, with a Polish gloss on first
+    use. The quoted law text stays Norwegian, verbatim from the corpus; the
+    Polish beside it is a translation, marked as one.
+    LLHB values reach a page only through benchmarks/llhb/PUBLICATION.json,
+    whose approved wording is Norwegian and English. Until the benchmark
+    owner adds Polish wording there, this page does not translate it: the
+    section says where the approved figures are instead (`benchmark` is
+    unset, `benchmark_published` is true). With Polish wording in the
+    manifest, the full section renders here like on the other two. -#}
+{% extends "_base.html" %}
+{% block main %}
+{% set oauth = reading("hosted.comparisons.oauth_discovery_consistent", kind="hosted") %}
+    <h1>Norweskie prawo, którego AI nie zmyśla.</h1>
+    <p class="lede">lovspor daje ChatGPT, Claude i innym asystentom AI, z których już korzystasz, <strong>prawdziwy tekst</strong> norweskich ustaw (<em lang="nb">lover</em>) i rozporządzeń (<em lang="nb">forskrifter</em>) — z odesłaniami, które możesz sprawdzić, a nie numerami paragrafów wymyślonymi przez model. To otwarty serwer <a href="https://modelcontextprotocol.io">MCP</a> obejmujący {{ fact("corpus.documents", kind="corpus") }} ustaw i centralnych rozporządzeń, z {{ fact("code.tool_surface.tool_count", kind="code") }} narzędziami do wyszukiwania, czytania i weryfikacji.</p>
+    <dl class="summary">
+      <dt>Co to jest</dt>
+      <dd>Otwarty serwer MCP: asystent AI sprawdza norweski tekst prawny, zamiast odtwarzać go z pamięci.</dd>
+      <dt>Cena</dt>
+      <dd>Bezpłatnie, bez żadnego klucza do wklejania.</dd>
+      <dt>Dostęp</dt>
+      <dd>Logujesz się przez <span data-literal>OAuth</span>, za pomocą konektora w Claude albo ChatGPT.</dd>
+      <dt>Zawartość</dt>
+      <dd>Ustawy i centralne rozporządzenia z otwartych danych Lovdata oraz lokalne rozporządzenia (<em lang="nb">lokale forskrifter</em>) w postaci zaobserwowanej na stronach gmin — oznaczone jako zaobserwowane, bez twierdzenia, że obowiązują.</dd>
+    </dl>
+    <p class="actions"><a class="cta" href="/pl/connect/">Połącz</a> <a href="/pl/docs/">Przeczytaj dokumentację</a></p>
+
+    <h2>Pytanie, które możesz zadać</h2>
+    <div class="panel">
+      <p><strong lang="nb">«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»</strong> <span class="muted">(Jak długo muszę pracować, żeby dostać zasiłek chorobowy od pracodawcy?)</span></p>
+      <p>Z lovspor model sprawdza <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span> «Sykepenger fra arbeidsgiveren»</a> (ustawa o ubezpieczeniu społecznym, przepis o zasiłku chorobowym od pracodawcy) i cytuje go:</p>
+      <blockquote><p>«For å få rett til sykepenger fra arbeidsgiveren må arbeidstakeren ha vært ansatt hos arbeidsgiveren i minst fire uker (opptjeningstid).»</p></blockquote>
+      <p class="muted">Tłumaczenie: aby mieć prawo do zasiłku chorobowego od pracodawcy, pracownik musi być zatrudniony u tego pracodawcy co najmniej cztery tygodnie (okres wyczekiwania).</p>
+      <p>Narzędzie sprawdza też odesłanie, które zawiera ten przepis, do <span data-literal>§ 8-7</span>.</p>
+      <p>Jeśli zapytasz o <span data-literal>folketrygdloven § 8-99</span>, narzędzie odpowie, że taki przepis nie istnieje. <span class="accent">W prawie odpowiedź prawdopodobna to odpowiedź niebezpieczna.</span></p>
+    </div>
+
+    <h2>Połącz</h2>
+{% if oauth == "true" %}
+    <p>Jako konektor w Claude.ai i ChatGPT działa już dziś: logujesz się i nie musisz niczego wklejać.</p>
+{% else %}
+    <p><span class="accent">Hostowany konektor jest teraz niedostępny</span>: w tym wydaniu logowanie nie zostało potwierdzone (porównanie ma wartość {{ fact("hosted.comparisons.oauth_discovery_consistent", kind="hosted") }}; zobacz <a href="/pl/status/">status</a>). Do tego czasu uruchom serwer u siebie, jak niżej.</p>
+{% endif %}
+    <ol>
+      <li>Dodaj własny konektor (custom connector) z adresem <code>https://lovspor.no/mcp</code> (w ChatGPT najpierw włącz tryb dewelopera i wybierz <strong>OAuth</strong>).</li>
+      <li>W Claude: przy rejestracji klienta wybierz <strong lang="en">Register automatically</strong>.</li>
+      <li>Zaloguj się na stronie, która się otworzy.</li>
+    </ol>
+    <p>Możesz też uruchomić go sam, bez konta. W Claude Code to dwie linijki:</p>
+    <pre>uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+    <p>Krok po kroku: <a href="/pl/connect/claude/">instrukcja dla Claude</a> · <a href="/pl/connect/chatgpt/">instrukcja dla ChatGPT</a> · <a href="/pl/connect/">inni klienci</a></p>
+{% if benchmark %}
+
+    <h2>Jak dobrze to działa?</h2>
+    <p>Mierzymy to benchmarkiem LLHB: te same pytania o norweskie prawo, zadane modelowi {{ fact(benchmark.model.ids.model, kind="code") }} bez narzędzi lovspor i z nimi, {{ fact(benchmark.pair.ids.cases, kind="code") }} {{ benchmark.pair.wording }}. Każde odesłanie w odpowiedzi jest sprawdzane maszynowo z tekstem prawa; żaden model językowy nie ocenia. <span class="tag">{{ benchmark.pair.label }}</span></p>
+    <table>
+      <thead><tr><th></th><th>Bez narzędzi</th><th>Z lovspor</th></tr></thead>
+      <tbody>
+{% for key in ["citation_hallucination_rate", "citation_accuracy"] %}
+{% set row = benchmark[key] %}
+        <tr><td>{{ row.wording }}</td><td>{{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }} ({{ fact(row.ids.control_percent, kind="code") }} %)</td><td>{{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }} ({{ fact(row.ids.treatment_percent, kind="code") }} %)</td></tr>
+{% endfor %}
+{% for key in ["correct_provision_identification", "false_premise_rejection_rate"] %}
+{% set row = benchmark[key] %}
+        <tr><td>{{ row.wording }}</td><td>{{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }}</td><td>{{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }}</td></tr>
+{% endfor %}
+      </tbody>
+    </table>
+    <p><strong>Co się nie poprawiło.</strong></p>
+    <ul>
+{% set row = benchmark.no_invention_rate %}
+      <li>{{ row.wording }}: {{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }} bez narzędzi, {{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }} z nimi ({{ row.label }}).</li>
+{% set row = benchmark.c2_hallucination %}
+      <li>{{ row.wording }}: {{ fact(row.ids.control_numerator, kind="code") }}/{{ fact(row.ids.control_denominator, kind="code") }} bez narzędzi, {{ fact(row.ids.treatment_numerator, kind="code") }}/{{ fact(row.ids.treatment_denominator, kind="code") }} z nimi.</li>
+      <li>W {{ fact(benchmark.stability.ids.repeats, kind="code") }} {{ benchmark.stability.wording }} poprawa trafności odesłań się utrzymuje, ale spadek liczby zmyślonych odesłań nie za każdym razem ({{ benchmark.stability.label }}).</li>
+    </ul>
+    <p class="muted">LLHB mierzy zachowanie na tym benchmarku. Nie dowodzi, że lovspor eliminuje halucynacje ani że gwarantuje prawnie poprawne odpowiedzi.</p>
+
+    <h3>Na tle innych pomiarów</h3>
+{% set row = benchmark.citation_hallucination_rate %}
+    <p>Halucynacje prawne są dobrze udokumentowane, ale niemal wyłącznie dla prawa amerykańskiego, po angielsku. <a href="https://doi.org/10.1093/jla/laae003">Dahl i in. (<span data-literal>2024</span>)</a> wykazali, że ogólne modele językowe bez źródeł halucynowały w <span data-literal>58–88 %</span> odpowiedzi o amerykańskich orzeczeniach. <a href="https://doi.org/10.1111/jels.12413">Magesh i in. (<span data-literal>2025</span>)</a> wykazali, że komercyjne narzędzia prawnicze z wyszukiwaniem źródeł (RAG) nadal halucynowały w <span data-literal>17–33 %</span> odpowiedzi. Uznane benchmarki, takie jak <a href="https://arxiv.org/abs/2308.11462">LegalBench</a> i <a href="https://arxiv.org/abs/2110.00976">LexGLUE</a>, mierzą rozumowanie prawnicze i klasyfikację, a nie zmyślone odesłania. LLHB je uzupełnia: norweskie ustawy i rozporządzenia w języku bokmål, ten sam model z narzędziami lovspor i bez nich, a każde odesłanie sprawdzane maszynowo z zamrożonym tekstem prawa. W diagnostycznym przebiegu post hoc odsetek odpowiedzi ze zmyślonym odesłaniem spadł z {{ fact(row.ids.control_percent, kind="code") }} % do {{ fact(row.ids.treatment_percent, kind="code") }} %, ale różnica nie była stabilna w pięciu powtórzeniach. Liczby nie są bezpośrednio porównywalne: różnią się jurysdykcja, język, definicja zadania, modele i czas.</p>
+    <p class="muted">Źródła: Dahl, Magesh, Suzgun i Ho, „Large Legal Fictions”, <em>Journal of Legal Analysis</em> (<a href="https://arxiv.org/abs/2401.01301">arXiv</a>); Magesh, Surani, Dahl, Suzgun, Manning i Ho, „Hallucination-Free?”, <em>Journal of Empirical Legal Studies</em> (<a href="https://arxiv.org/abs/2405.20362">arXiv</a>).</p>
+{% elif benchmark_published %}
+
+    <h2>Jak dobrze to działa?</h2>
+    <p>Mierzymy to benchmarkiem LLHB: te same pytania o norweskie prawo, zadane temu samemu modelowi bez narzędzi lovspor i z nimi, a każde odesłanie w odpowiedzi jest sprawdzane maszynowo z tekstem prawa. Wyniki publikujemy wyłącznie w brzmieniu zatwierdzonym przez właściciela benchmarku, a to brzmienie istnieje na razie po norwesku i po angielsku — dlatego nie tłumaczymy ich tutaj.</p>
+    <p><a href="/en/" hreflang="en" lang="en">Results in English</a> · <a href="/" hreflang="nb" lang="nb">Resultater på norsk</a></p>
+{% endif %}
+
+    <h2>Źródła</h2>
+    <ul>
+      <li><strong>Ustawy i centralne rozporządzenia:</strong> otwarte dane Lovdata (publicData), na licencji <span data-literal>NLOD 2.0</span>.</li>
+      <li><strong>UE i EOG:</strong> odnośniki do aktów prawa UE, które wdraża dana ustawa, w postaci kodów CELEX.</li>
+      <li><strong>Lokalne rozporządzenia:</strong> zaobserwowane na stronach internetowych samych gmin i publikowane na podstawie <span data-literal>åndsverkloven § 14</span> (norweska ustawa o prawie autorskim, przepis o dokumentach publicznych), oznaczone jako zaobserwowane, bez twierdzenia, że obowiązują. W MCP dostajesz je tylko wtedy, gdy o nie poprosisz, i nie są publikowane w tym serwisie.</li>
+    </ul>
+
+    <h2>Co obejmuje — uczciwie</h2>
+    <div class="cover">
+      <div>
+        <p><strong>Obejmuje</strong></p>
+        <ul>
+          <li class="yes">Ustawy (<em lang="nb">lover</em>)</li>
+          <li class="yes">Centralne rozporządzenia (<em lang="nb">forskrifter</em>)</li>
+          <li class="yes">Prawo obowiązujące, z historią zmian</li>
+        </ul>
+      </div>
+      <div>
+        <p><strong>Nie obejmuje</strong></p>
+        <ul>
+          <li class="no">Orzecznictwa</li>
+          <li class="no">Gminnych planów zagospodarowania</li>
+          <li class="no">Zamkniętych norm (kontrakty NS)</li>
+        </ul>
+      </div>
+    </div>
+    <p class="muted">lovspor to narzędzie, które pokazuje tekst prawa — nie jest poradą prawną.</p>
+
+    <h2>Otwarty kod</h2>
+    <p>Silnik jest otwartym oprogramowaniem na licencji <span data-literal>AGPL-3.0</span>, a korpus powstaje z otwartych danych Lovdata. Jeśli potrzebujesz norweskiego tekstu prawnego w narzędziu AI, możesz uruchomić całość sam — bez pytania kogokolwiek o zgodę i bez płacenia: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+    <p class="muted">Usługę prowadzi jedna osoba. Pytania i uwagi: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+{% endblock %}

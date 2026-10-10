@@ -49,11 +49,22 @@ class _Closed(BaseModel):
 
 
 class Wording(_Closed):
+    """The approved display text per language. ``pl`` is optional: a Polish
+    wording is benchmark copy like any other and reaches the site only when
+    the benchmark owner adds it to the manifest, never by translation here."""
+
     nb: Text
     en: Text
+    pl: Text | None = None
+
+    def speaks(self, lang: Lang) -> bool:
+        return lang != "pl" or self.pl is not None
 
     def text(self, lang: Lang) -> str:
-        return self.nb if lang == "nb" else self.en
+        value = {"nb": self.nb, "en": self.en, "pl": self.pl}[lang]
+        if value is None:
+            raise SiteBuildError(f"the publication manifest has no {lang} wording")
+        return value
 
 
 class ManifestValue(_Closed):
@@ -135,6 +146,13 @@ class Publication(_Closed):
 
     def artifact_hashes(self) -> tuple[tuple[str, str], ...]:
         return ((PUBLICATION_PATH, self.manifest_sha256), *self.source_hashes)
+
+    def speaks(self, lang: Lang) -> bool:
+        """Whether every entry carries approved wording and label in ``lang``."""
+        return all(
+            entry.wording.speaks(lang) and entry.label.speaks(lang)
+            for entry in self.manifest.entries
+        )
 
     def context(self, lang: Lang) -> dict[str, dict[str, object]]:
         """What a template needs per entry: wording, label, ruling and fact ids."""

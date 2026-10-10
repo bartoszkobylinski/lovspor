@@ -3,7 +3,8 @@
     marked literal, not a fact; the chrome adds no external link
     (ADR-0014 Decision 5). The privacy and terms links are site chrome
     only: the corpus frame is on every law page, and a link there would
-    re-render the whole corpus. -#}
+    re-render the whole corpus. The crawler page has no twin, so the
+    Polish footer says the page it links is in Norwegian. -#}
 <footer>
 {% if lang == "en" %}
   Contains data under <span data-literal>NLOD 2.0</span> from Lovdata. Not affiliated with or endorsed by Lovdata.
@@ -12,6 +13,11 @@
 {% if not corpus %}
   <br><a href="/en/privacy/">Privacy</a> · <a href="/en/terms/">Terms of use</a>
 {% endif %}
+{% elif lang == "pl" %}
+  Zawiera dane Lovdata udostępnione na licencji <span data-literal>NLOD 2.0</span>. Serwis nie jest powiązany z Lovdata ani przez nią zatwierdzony.
+  lovspor udostępnia tekst prawa do wglądu; nie jest to porada prawna. Autor: Bartosz Kobyliński.
+  <br><a href="/observatory/">O naszym robocie</a> (po norwesku) — dla administratorów stron, którzy znaleźli <code>lovspor-observatory</code> w swoich logach.
+  <br><a href="/pl/privacy/">Prywatność</a> · <a href="/pl/terms/">Warunki korzystania</a>
 {% else %}
   Inneholder data under <span data-literal>NLOD 2.0</span> fra Lovdata. Ikke tilknyttet eller godkjent av Lovdata.
   lovspor viser lovtekst til oppslag; det er ikke juridisk rådgivning. Bygget av Bartosz Kobyliński.

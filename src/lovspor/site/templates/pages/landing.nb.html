@@ -14,6 +14,17 @@
 {% set oauth = reading("hosted.comparisons.oauth_discovery_consistent", kind="hosted") %}
     <h1>Norsk lovtekst KI-en ikke dikter opp.</h1>
     <p class="lede">lovspor gir ChatGPT, Claude og de KI-verktøyene du allerede bruker <strong>den faktiske teksten</strong> i norske lover og forskrifter — med henvisninger du kan etterprøve, ikke paragrafnumre modellen har funnet på. Det er en åpen <a href="https://modelcontextprotocol.io">MCP</a>-server over {{ fact("corpus.documents", kind="corpus") }} lover og sentrale forskrifter, med {{ fact("code.tool_surface.tool_count", kind="code") }} verktøy som slår opp, søker og etterprøver.</p>
+    <dl class="summary">
+      <dt>Hva</dt>
+      <dd>En åpen MCP-server: KI-assistenten din slår opp i norsk lovtekst i stedet for å huske den.</dd>
+      <dt>Pris</dt>
+      <dd>Gratis, og uten nøkkel å lime inn.</dd>
+      <dt>Tilgang</dt>
+      <dd>Du logger inn med <span data-literal>OAuth</span> gjennom en connector i Claude eller ChatGPT.</dd>
+      <dt>Innhold</dt>
+      <dd>Lover og sentrale forskrifter fra Lovdatas åpne data, og lokale forskrifter slik de er observert på kommunenes egne nettsider — merket som observert, ikke hevdet å gjelde.</dd>
+    </dl>
+    <p class="actions"><a class="cta" href="/connect/">Koble til</a> <a href="/docs/">Les dokumentasjonen</a></p>
 
     <h2>Et spørsmål du kan stille</h2>
     <div class="panel">
@@ -38,7 +49,7 @@
     <p>Eller kjør det selv, uten konto. I Claude Code er det to linjer:</p>
     <pre>uvx lovspor fetch-corpus
 claude mcp add lovverk -- uvx lovspor mcp</pre>
-    <p><a href="/connect/">Alle testede framgangsmåter, klient for klient →</a></p>
+    <p>Steg for steg: <a href="/connect/claude/">veiledning for Claude</a> · <a href="/connect/chatgpt/">veiledning for ChatGPT</a> · <a href="/connect/">andre klienter</a></p>
 {% if benchmark %}
 
     <h2>Hvor godt virker det?</h2>
