@@ -170,6 +170,40 @@ class TestLoad:
         assert publication.context("nb")["rate"]["label"] == _LABEL["nb"]
         assert context["rate"]["ruling"] == "DECISIONS.md #30(a)"
 
+    def test_without_polish_wording_the_manifest_does_not_speak_polish(
+        self, tmp_path: Path
+    ) -> None:
+        """Polish benchmark copy is the benchmark owner's to approve: absent
+        from the manifest, the context refuses to fall back to English."""
+        publication = load_publication(_checkout(tmp_path, _manifest(), _report()))
+
+        assert publication is not None
+        assert publication.speaks("nb") and publication.speaks("en")
+        assert not publication.speaks("pl")
+        with pytest.raises(SiteBuildError, match="no pl wording"):
+            publication.context("pl")
+
+    def test_polish_wording_in_every_entry_is_published_in_polish(self, tmp_path: Path) -> None:
+        entry = _entry(
+            label={**_LABEL, "pl": "diagnostyka post hoc"},
+            wording={"nb": "Svar", "en": "Answers", "pl": "Odpowiedzi"},
+        )
+        publication = load_publication(_checkout(tmp_path, _manifest(entry), _report()))
+
+        assert publication is not None
+        assert publication.speaks("pl")
+        assert publication.context("pl")["rate"]["wording"] == "Odpowiedzi"
+        assert publication.context("pl")["rate"]["label"] == "diagnostyka post hoc"
+
+    def test_one_entry_without_polish_label_keeps_the_manifest_silent_in_polish(
+        self, tmp_path: Path
+    ) -> None:
+        entry = _entry(wording={"nb": "Svar", "en": "Answers", "pl": "Odpowiedzi"})
+        publication = load_publication(_checkout(tmp_path, _manifest(entry), _report()))
+
+        assert publication is not None
+        assert not publication.speaks("pl")
+
 
 class TestRefusals:
     @pytest.mark.parametrize(

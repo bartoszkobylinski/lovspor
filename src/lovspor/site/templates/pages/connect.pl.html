@@ -1,0 +1,55 @@
+{#- /pl/connect/ (ADR-0014 Decision 2), the Polish twin of connect.nb.html —
+    a full translation, not a summary. The same rule holds: a procedure we
+    have not run ourselves is named as untested rather than invented, and
+    every identifier carrying a digit is marked. Access to the hosted
+    service is through a connector with OAuth sign-in only (owner decision
+    2026-10-07): the page offers no other way in. Client labels stay in
+    English, as the clients show them. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<p>lovverk to serwer <a href="https://modelcontextprotocol.io">MCP</a>. Twój klient łączy się albo z usługą hostowaną pod adresem <code>https://lovspor.no/mcp</code>, przez konektor, do którego logujesz się za pomocą <span data-literal>OAuth 2.1</span>, albo z kopią uruchomioną na twoim własnym komputerze, która niczego nie wymaga.</p>
+
+<h2>Claude Desktop i claude.ai — jako konektor</h2>
+<p>Usługa hostowana loguje cię przez <span data-literal>OAuth 2.1</span>, więc nie musisz niczego wklejać. Tę procedurę przeszliśmy z claude.ai:</p>
+<ul>
+  <li>Dodaj własny konektor (custom connector) z adresem <code>https://lovspor.no/mcp</code>.</li>
+  <li>Wybierz <strong lang="en">Sign in now</strong>.</li>
+  <li>Przy rejestracji klienta wybierz <strong lang="en">Register automatically</strong>. Opcja domyślna, która używa opublikowanej tożsamości Claude, nie działa z tą usługą.</li>
+  <li>Zaloguj się na stronie, która się otworzy. Narzędzia odpowiadają, gdy wrócisz do rozmowy.</li>
+</ul>
+<p><span class="accent">Etykiety w kliencie zmieniają się częściej niż ta strona.</span> Jeśli któraś się przesunęła, liczą się adres, <span data-literal>OAuth</span> jako sposób logowania i automatyczna rejestracja.</p>
+
+<h2>ChatGPT — jako konektor</h2>
+<p>Również przez <span data-literal>OAuth 2.1</span>. Procedura, którą przeszliśmy:</p>
+<ul>
+  <li>Włącz w ChatGPT <strong>tryb dewelopera</strong> (<span lang="en">developer mode</span>).</li>
+  <li>Utwórz konektor z adresem <code>https://lovspor.no/mcp</code> i <strong>OAuth</strong> jako uwierzytelnianiem.</li>
+  <li>Zaloguj się na stronie, która się otworzy.</li>
+</ul>
+
+<h2>Uruchom go sam</h2>
+<p>Nie musisz nikogo pytać o zgodę. Uruchom serwer sam — pobierze korpus na twój komputer i będzie rozmawiał z klientem przez stdio. W Claude Code:</p>
+<pre>uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+<p>To działa już dziś: bez konta i bez klucza API. Wszystkie narzędzia poza <code>semantic_search</code> czytają tylko pliki i git na twoim komputerze, a <code>semantic_search</code> potrzebuje klucza do embeddingów, który podajesz sam.</p>
+
+<h2>Claude Desktop — kopia lokalna</h2>
+<p>Dodaj to do pliku konfiguracyjnego Claude Desktop (<code>claude_desktop_config.json</code> — jego położenie zależy od systemu operacyjnego) i uruchom klienta ponownie:</p>
+<pre>{
+  "mcpServers": {
+    "lovverk": {
+      "command": "uvx",
+      "args": ["lovspor", "mcp"]
+    }
+  }
+}</pre>
+
+<h2>Cursor i Codex</h2>
+<p><strong>Brak sprawdzonej procedury.</strong> Nie przeszliśmy konfiguracji w tych klientach sami, więc nie wymyślamy kroków.</p>
+<p>Użyj klienta, który obsługuje konektor z logowaniem przez <span data-literal>OAuth</span>, albo uruchom serwer sam, jak wyżej. Jeśli uda ci się podłączyć któregoś z tych klientów do usługi hostowanej — albo się nie uda — napisz na <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, a opis może się tu pojawić jako sprawdzona instrukcja, podpisana twoim nazwiskiem.</p>
+<p class="muted">Silnik jest otwartym oprogramowaniem na licencji <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>. Na co odpowiadają narzędzia, opisuje <a href="/pl/docs/">dokumentacja</a>; stan przy ostatnim wydaniu podaje strona <a href="/pl/status/">status</a>.</p>
+{% endblock %}

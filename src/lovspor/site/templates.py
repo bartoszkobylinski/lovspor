@@ -43,10 +43,10 @@ PageStatus = Literal["current", "planned", "research", "early_access"]
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 _STATUS_LABELS: dict[str, dict[Lang, str]] = {
-    "current": {"nb": "Gjeldende", "en": "Current"},
-    "planned": {"nb": "Planlagt", "en": "Planned"},
-    "research": {"nb": "Forskning", "en": "Research"},
-    "early_access": {"nb": "Tidlig tilgang", "en": "Early access"},
+    "current": {"nb": "Gjeldende", "en": "Current", "pl": "Aktualne"},
+    "planned": {"nb": "Planlagt", "en": "Planned", "pl": "Planowane"},
+    "research": {"nb": "Forskning", "en": "Research", "pl": "Badania"},
+    "early_access": {"nb": "Tidlig tilgang", "en": "Early access", "pl": "Wczesny dostęp"},
 }
 _BADGE = Markup('<span class="tag" data-status="{status}">{label}</span>')
 

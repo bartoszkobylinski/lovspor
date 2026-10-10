@@ -158,9 +158,11 @@ class TestFactRenderer:
     def test_formats_numbers_per_language(self, registry: FactRegistry) -> None:
         nb = fact_renderer("/", "nb", registry, FactLedger())
         en = fact_renderer("/en/", "en", registry, FactLedger())
+        pl = fact_renderer("/pl/", "pl", registry, FactLedger())
 
         assert ">5\u00a0900<" in nb("corpus.documents", kind="corpus")
         assert ">5,900<" in en("corpus.documents", kind="corpus")
+        assert ">5\u00a0900<" in pl("corpus.documents", kind="corpus")
 
     def test_renders_booleans_verbatim(self, registry: FactRegistry) -> None:
         fact = fact_renderer("/status/", "nb", registry, FactLedger())
@@ -221,6 +223,11 @@ class TestFactRenderer:
                 "not attested at this release — unobserved (timeout), "
                 "observed 2026-01-01T00:00:00Z",
             ),
+            (
+                "pl",
+                "niepotwierdzone w tym wydaniu — brak obserwacji (timeout), "
+                "obserwacja 2026-01-01T00:00:00Z",
+            ),
         ],
     )
     def test_a_hosted_fact_over_an_unobserved_record_degrades_in_the_page_language(
@@ -235,7 +242,7 @@ class TestFactRenderer:
             html
             == f'<span data-fact="hosted.process.tool_count" data-kind="hosted">{wording}</span>'
         )
-        assert not re.search(r"\d", re.sub(r"observert .*|observed .*", "", str(html)))
+        assert not re.search(r"\d", re.sub(r"observ(?:ert|ed) .*|obserwacja .*", "", str(html)))
 
     def test_writes_one_ledger_entry_per_rendered_value(self, registry: FactRegistry) -> None:
         ledger = FactLedger()
@@ -373,7 +380,7 @@ class TestFactReader:
 
 
 class TestPercentValues:
-    @pytest.mark.parametrize(("lang", "text"), [("nb", "19,5"), ("en", "19.5")])
+    @pytest.mark.parametrize(("lang", "text"), [("nb", "19,5"), ("en", "19.5"), ("pl", "19,5")])
     def test_a_float_renders_one_decimal_in_the_page_language(self, lang: str, text: str) -> None:
         source = FactSource(
             id="llhb.rate", kind="code", artifact="benchmarks/llhb/r.json", field="rate", value=19.5
@@ -405,6 +412,10 @@ class TestBadge:
             ("research", "en", "Research"),
             ("early_access", "nb", "Tidlig tilgang"),
             ("early_access", "en", "Early access"),
+            ("current", "pl", "Aktualne"),
+            ("planned", "pl", "Planowane"),
+            ("research", "pl", "Badania"),
+            ("early_access", "pl", "Wczesny dostęp"),
         ],
     )
     def test_renders_the_one_vocabulary(self, status: str, lang: str, label: str) -> None:

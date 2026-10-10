@@ -44,7 +44,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 from lovspor.site.errors import SiteBuildError
 
 FactKind = Literal["code", "corpus", "hosted"]
-Lang = Literal["nb", "en"]
+Lang = Literal["nb", "en", "pl"]
 FactValue = str | int | bool | float
 
 CAPABILITIES_ARTIFACT = "deployment-capabilities.json"
@@ -54,9 +54,10 @@ DESCRIPTOR_PREFIX = "tool-surface@"
 _DEGRADED: dict[Lang, str] = {
     "nb": "ikke attestert ved denne utgivelsen — uobservert ({reason}), observert {observed_at}",
     "en": "not attested at this release — unobserved ({reason}), observed {observed_at}",
+    "pl": ("niepotwierdzone w tym wydaniu — brak obserwacji ({reason}), obserwacja {observed_at}"),
 }
-_THOUSANDS: dict[Lang, str] = {"nb": "\u00a0", "en": ","}
-_DECIMAL: dict[Lang, str] = {"nb": ",", "en": "."}
+_THOUSANDS: dict[Lang, str] = {"nb": "\u00a0", "en": ",", "pl": "\u00a0"}
+_DECIMAL: dict[Lang, str] = {"nb": ",", "en": ".", "pl": ","}
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SPAN = Markup('<span data-fact="{id}" data-kind="{kind}">{text}</span>')
 

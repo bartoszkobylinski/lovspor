@@ -16,6 +16,7 @@ from lovspor.site.routes import (
     client_routes,
     emitted_pages,
     en_path,
+    lang_path,
 )
 from lovspor.site.templates import TEMPLATES_DIR
 
@@ -55,8 +56,8 @@ class TestSiteRoutes:
     def test_reserved_and_non_page_paths_are_absent(self) -> None:
         paths = {route.path for route in SITE_ROUTES}
 
-        assert not paths & {"/terms", "/mcp", "/mcp/", "/en/"}
-        assert not [path for path in paths if path.startswith("/en/")]
+        assert not paths & {"/terms", "/mcp", "/mcp/", "/en/", "/pl/"}
+        assert not [path for path in paths if path.startswith(("/en/", "/pl/"))]
 
     def test_only_the_observatory_lacks_a_twin(self) -> None:
         assert [route.path for route in SITE_ROUTES if not route.twin] == ["/observatory/"]
@@ -75,12 +76,14 @@ class TestSiteRoutes:
 
         assert (observatory.title.nb, observatory.description.nb) == (title, description)
         assert observatory.title.en is None
+        assert observatory.title.pl is None
 
     def test_every_route_has_copy_in_each_language_it_emits(self) -> None:
         for route in SITE_ROUTES:
             assert route.title.nb and route.description.nb, route.path
             if route.twin:
                 assert route.title.en and route.description.en, route.path
+                assert route.title.pl and route.description.pl, route.path
 
     def test_routes_are_unique_and_directory_shaped(self) -> None:
         paths = [route.path for route in SITE_ROUTES]
@@ -105,14 +108,31 @@ class TestSiteRoutes:
 
 class TestSiteRoute:
     def test_rejects_a_path_outside_the_directory_shape(self) -> None:
-        for path in ("/status", "status/", "/en/status/", "/Status/", "/a b/"):
+        for path in ("/status", "status/", "/en/status/", "/pl/status/", "/Status/", "/a b/"):
             with pytest.raises(ValidationError):
                 SiteRoute(
                     path=path,
                     template="placeholder",
                     status="planned",
-                    title=Localised(nb="t", en="t"),
-                    description=Localised(nb="d", en="d"),
+                    title=Localised(nb="t", en="t", pl="t"),
+                    description=Localised(nb="d", en="d", pl="d"),
+                )
+
+    def test_a_twin_needs_polish_copy(self) -> None:
+        """Owner decision 2026-10-10: every route with an English twin has a
+        Polish one, so a route that cannot say its title in Polish fails at
+        definition rather than rendering a blank head."""
+        for title, description in (
+            (Localised(nb="t", en="t"), Localised(nb="d", en="d", pl="d")),
+            (Localised(nb="t", en="t", pl="t"), Localised(nb="d", en="d")),
+        ):
+            with pytest.raises(ValidationError, match="pl title and description"):
+                SiteRoute(
+                    path="/x/",
+                    template="placeholder",
+                    status="planned",
+                    title=title,
+                    description=description,
                 )
 
     def test_a_twin_needs_english_copy(self) -> None:
@@ -121,23 +141,26 @@ class TestSiteRoute:
                 path="/x/",
                 template="placeholder",
                 status="planned",
-                title=Localised(nb="t"),
-                description=Localised(nb="d", en="d"),
+                title=Localised(nb="t", pl="t"),
+                description=Localised(nb="d", en="d", pl="d"),
             )
 
     def test_localised_text_by_language(self) -> None:
-        copy = Localised(nb="norsk", en="english")
+        copy = Localised(nb="norsk", en="english", pl="polski")
 
         assert copy.text("nb") == "norsk"
         assert copy.text("en") == "english"
+        assert copy.text("pl") == "polski"
 
     def test_missing_localised_text_names_the_language(self) -> None:
         with pytest.raises(ValueError, match="no en copy"):
             Localised(nb="norsk").text("en")
+        with pytest.raises(ValueError, match="no pl copy"):
+            Localised(nb="norsk", en="english").text("pl")
 
     def test_route_helper_preserves_every_argument(self) -> None:
-        title = Localised(nb="tittel", en="title")
-        description = Localised(nb="omtale", en="description")
+        title = Localised(nb="tittel", en="title", pl="tytuł")
+        description = Localised(nb="omtale", en="description", pl="opis")
 
         route = routes_module._route("/exact/", "research", title, description)
 
@@ -158,32 +181,58 @@ class TestHelpers:
     def test_en_path(self, path: str, expected: str) -> None:
         assert en_path(path) == expected
 
+    @pytest.mark.parametrize(
+        ("path", "lang", "expected"),
+        [
+            ("/", "nb", "/"),
+            ("/status/", "nb", "/status/"),
+            ("/", "pl", "/pl/"),
+            ("/terms/", "pl", "/pl/terms/"),
+            ("/docs/", "en", "/en/docs/"),
+        ],
+    )
+    def test_lang_path(self, path: str, lang: str, expected: str) -> None:
+        assert lang_path(path, lang) == expected  # type: ignore[arg-type]
+
     def test_canonical_url_is_absolute_on_the_site_origin(self) -> None:
         assert canonical_url("/en/status/") == f"{SITE_ORIGIN}/en/status/"
         assert canonical_url("/") == f"{SITE_ORIGIN}/"
 
 
 class TestEmittedPages:
-    def test_every_route_in_both_languages_where_the_mirror_rule_applies(self) -> None:
+    def test_every_route_in_all_three_languages_where_the_mirror_rule_applies(self) -> None:
         pages = emitted_pages()
         paths = [page.path for page in pages]
+        twinned = [p for p in EXPECTED_STATUS if p != "/observatory/"]
 
-        expected = list(EXPECTED_STATUS) + [
-            en_path(p) for p in EXPECTED_STATUS if p != "/observatory/"
-        ]
+        expected = list(EXPECTED_STATUS) + [en_path(p) for p in twinned]
+        expected += [f"/pl{p}" for p in twinned]
         assert sorted(paths) == sorted(expected)
         assert len(paths) == len(set(paths))
-        assert len(pages) == 25
+        assert len(pages) == 37
+
+    def test_emission_order_is_norwegian_then_english_then_polish(self) -> None:
+        langs = [page.lang for page in emitted_pages()]
+        first_en, first_pl = langs.index("en"), langs.index("pl")
+
+        assert set(langs[:first_en]) == {"nb"}
+        assert set(langs[first_en:first_pl]) == {"en"}
+        assert set(langs[first_pl:]) == {"pl"}
 
     def test_twins_name_each_other(self) -> None:
         by_path = {page.path: page for page in emitted_pages()}
 
-        assert by_path["/status/"].alternate == "/en/status/"
-        assert by_path["/en/status/"].alternate == "/status/"
-        assert by_path["/observatory/"].alternate is None
+        trio = (("nb", "/status/"), ("en", "/en/status/"), ("pl", "/pl/status/"))
+
+        assert by_path["/status/"].twins == trio
+        assert by_path["/en/status/"].twins == trio
+        assert by_path["/pl/status/"].twins == trio
+        assert by_path["/observatory/"].twins == ()
         assert by_path["/en/status/"].lang == "en"
+        assert by_path["/pl/status/"].lang == "pl"
         assert by_path["/status/"].lang == "nb"
         assert by_path["/en/status/"].route_path == "/status/"
+        assert by_path["/pl/status/"].route_path == "/status/"
 
     def test_every_page_names_an_existing_template_in_its_language(self) -> None:
         for page in emitted_pages():
@@ -199,8 +248,13 @@ class TestEmittedPages:
         assert context["alternates"] == (
             ("nb", f"{SITE_ORIGIN}/docs/"),
             ("en", f"{SITE_ORIGIN}/en/docs/"),
+            ("pl", f"{SITE_ORIGIN}/pl/docs/"),
         )
-        assert context["language_switch_href"] == "/docs/"
+        assert context["language_switch"] == (
+            ("nb", "/docs/"),
+            ("en", "/en/docs/"),
+            ("pl", "/pl/docs/"),
+        )
         assert context["corpus"] is False
         assert context["status"] == "current"
         assert context["title"] and context["description"]
@@ -210,7 +264,15 @@ class TestEmittedPages:
         context = page.head_context()
 
         assert context["alternates"] == ()
-        assert context["language_switch_href"] is None
+        assert context["language_switch"] == ()
+
+    def test_the_polish_head_is_polish(self) -> None:
+        page = next(page for page in emitted_pages() if page.path == "/pl/privacy/")
+        context = page.head_context()
+
+        assert context["lang"] == "pl"
+        assert context["title"] == "Prywatność"
+        assert context["canonical"] == f"{SITE_ORIGIN}/pl/privacy/"
 
     def test_order_is_deterministic(self) -> None:
         assert [p.path for p in emitted_pages()] == [p.path for p in emitted_pages()]

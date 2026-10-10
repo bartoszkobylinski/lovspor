@@ -1,0 +1,37 @@
+{#- /pl/terms/: the Polish twin of terms.nb.html (owner decision
+    2026-10-10). Same statements, same sources — see the Norwegian
+    template's header. It is a translation for convenience: the Norwegian
+    text governs, and the page says so. No clause the owner has not decided
+    is added here. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+<p class="muted">Ostatnia aktualizacja: <span data-literal>8 października 2026</span>.</p>
+<p class="panel note">To tłumaczenie pomocnicze. Wiążąca jest <a href="/terms/" hreflang="nb" lang="nb">wersja norweska</a>; w razie rozbieżności rozstrzyga tekst norweski.</p>
+
+<h2>Czym jest usługa</h2>
+<p>lovspor to strona lovspor.no i hostowana usługa lovverk pod adresem <code>https://lovspor.no/mcp</code>, która daje narzędziom AI dostęp do tekstu norweskich ustaw i centralnych rozporządzeń. Prowadzi ją Bartosz Kobyliński jako osoba prywatna, bezpłatnie. Korzystając z niej, akceptujesz te warunki.</p>
+
+<h2>To nie porada prawna</h2>
+<p>lovspor udostępnia tekst prawa do wglądu; nie jest to porada prawna. Tekst może zawierać błędy, nie obejmować niektórych przepisów albo być nieaktualny, a to, co model AI odpowie, korzystając z usługi jako źródła, jest odpowiedzią samego modelu. Zanim oprzesz się na tekście, sprawdź go w oryginalnym źródle, a gdy coś jest stawką, zasięgnij pomocy prawnej.</p>
+
+<h2>Bez gwarancji</h2>
+<p>Usługa jest udostępniana w obecnej postaci, bez żadnej gwarancji, że jest poprawna, kompletna lub dostępna. Może zostać zmieniona, ograniczona lub wyłączona bez uprzedzenia.</p>
+
+<h2>Lovdata i licencje</h2>
+<p>Tekst prawa pochodzi z otwartych danych Lovdata i jest udostępniony na licencji <span data-literal>NLOD 2.0</span>. Możesz go ponownie wykorzystywać na warunkach tej licencji, z podaniem źródła. lovspor nie jest powiązany z Lovdata ani przez nią zatwierdzony. Kod źródłowy lovspor jest otwarty na licencji <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>.</p>
+
+<h2>Konta i uczciwe korzystanie</h2>
+<p>Twoje logowanie jest osobiste; nie udostępniaj go innym. Każdy użytkownik ma limity — liczby równoczesnych wywołań, wywołań na minutę, wywołań na dzień i wyszukiwań semantycznych na dzień — a usługa jako całość ma własne limity; zobacz <a href="/pl/docs/">dokumentację</a>. Nie próbuj obchodzić limitów, przeciążać usługi ani korzystać z niej w sposób, który uniemożliwia korzystanie innym. Konta, które są nadużywane lub zagrażają działaniu usługi, mogą zostać zawieszone.</p>
+
+<h2>Prywatność</h2>
+<p>Jakie dane przetwarza usługa i w jakim celu, opisuje <a href="/pl/privacy/">strona o prywatności</a>.</p>
+
+<h2>Zmiany i prawo właściwe</h2>
+<p>Te warunki mogą się zmieniać; data na górze pokazuje, kiedy zmieniły się ostatnio. Warunki podlegają prawu norweskiemu.</p>
+
+<h2>Kontakt</h2>
+<p>Pytania dotyczące tych warunków: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+{% endblock %}
