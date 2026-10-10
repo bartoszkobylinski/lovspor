@@ -106,6 +106,38 @@ class TestNorwegianSiteChrome:
         assert 'class="tag"' not in chrome.header + chrome.footer
         assert "data-status" not in chrome.header + chrome.footer
 
+    @pytest.mark.parametrize(
+        ("lang", "home", "links"),
+        [
+            (
+                "nb",
+                "/",
+                (("/connect/", "Koble til"), ("/docs/", "Dokumentasjon"), ("/status/", "Status")),
+            ),
+            (
+                "en",
+                "/en/",
+                (
+                    ("/en/connect/", "Connect"),
+                    ("/en/docs/", "Documentation"),
+                    ("/en/status/", "Status"),
+                ),
+            ),
+        ],
+    )
+    def test_the_site_navigation_reaches_connect_in_one_click(
+        self, lang: str, home: str, links: tuple[tuple[str, str], ...]
+    ) -> None:
+        """The redesign's one promise in the frame: from any site page,
+        connecting is one click away, in the page's own language."""
+        header = chrome_html(lang).header  # type: ignore[arg-type]
+        site_nav = header.split('<nav class="site"', 1)[1].split("</nav>", 1)[0]
+
+        assert f'<a class="brand" href="{home}">' in header
+        for href, label in links:
+            assert f'<a href="{href}">{label}</a>' in site_nav, (lang, href)
+        assert site_nav.index("connect/") < site_nav.index("docs/")
+
     def test_footer_carries_the_licence_and_not_legal_advice_lines_verbatim(self) -> None:
         footer = chrome_html("nb").footer
 
@@ -143,13 +175,13 @@ class TestLanguageSwitch:
         header = chrome_html("nb", "/en/status/").header
 
         assert "<strong>NO</strong>" in header
-        assert '<a href="/en/status/">EN</a>' in header
+        assert '<a href="/en/status/" hreflang="en" lang="en">EN</a>' in header
 
     def test_english_page_links_back_and_reads_english(self) -> None:
         chrome = chrome_html("en", "/status/")
 
         assert "<strong>EN</strong>" in chrome.header
-        assert '<a href="/status/">NO</a>' in chrome.header
+        assert '<a href="/status/" hreflang="nb" lang="nb">NO</a>' in chrome.header
         assert "Acts" in chrome.header
         assert "Regulations" in chrome.header
         assert (
@@ -332,13 +364,14 @@ class TestBaseTemplate:
         assert f'<link rel="canonical" href="{SITE_ORIGIN}/en/about/">' in html
         assert f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/about/">' in html
         assert f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/about/">' in html
-        assert '<a href="/about/">NO</a>' in html
+        assert '<a href="/about/" hreflang="nb" lang="nb">NO</a>' in html
 
     def test_a_page_without_a_twin_has_no_hreflang_and_no_switch(self) -> None:
         html = _render("/observatory/")
 
         assert "hreflang" not in html
-        assert 'class="lang"' in html  # the corpus links stay
+        assert 'class="site"' in html  # the site navigation stays
+        assert 'href="/lov/"' in html
         assert ">EN</a>" not in html
 
     def test_the_stylesheet_is_the_one_shared_source_verbatim(self) -> None:

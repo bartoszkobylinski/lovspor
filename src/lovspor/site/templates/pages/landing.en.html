@@ -14,6 +14,17 @@
 {% set oauth = reading("hosted.comparisons.oauth_discovery_consistent", kind="hosted") %}
     <h1>Norwegian law your AI won't hallucinate.</h1>
     <p class="lede">lovspor gives ChatGPT, Claude and the AI tools you already use the <strong>actual text</strong> of Norwegian statutes and regulations — with exact citations you can verify, not invented paragraph numbers. It is an open <a href="https://modelcontextprotocol.io">MCP</a> server over {{ fact("corpus.documents", kind="corpus") }} acts and central regulations, with {{ fact("code.tool_surface.tool_count", kind="code") }} tools that look up, search and verify.</p>
+    <dl class="summary">
+      <dt>What</dt>
+      <dd>An open MCP server: your AI assistant looks up Norwegian legal text instead of recalling it.</dd>
+      <dt>Price</dt>
+      <dd>Free, with no key to paste.</dd>
+      <dt>Access</dt>
+      <dd>You sign in with <span data-literal>OAuth</span> through a connector in Claude or ChatGPT.</dd>
+      <dt>Contents</dt>
+      <dd>Acts and central regulations from Lovdata's open data, and local regulations as observed on the municipalities' own websites — labelled as observed, not asserted to be in force.</dd>
+    </dl>
+    <p class="actions"><a class="cta" href="/en/connect/">Connect</a> <a href="/en/docs/">Read the documentation</a></p>
 
     <h2>A question you can ask</h2>
     <div class="panel">
