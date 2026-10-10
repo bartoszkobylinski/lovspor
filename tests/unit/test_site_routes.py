@@ -226,6 +226,41 @@ class TestHelpers:
 
 
 class TestEmittedPages:
+    def test_supplied_registry_preserves_order_copy_and_all_language_twins(self) -> None:
+        """The registry projection contract applies to supplied entries too."""
+        registry = tuple(
+            ConnectClient(
+                slug=slug,
+                title=Localised(nb=f"nb {slug}", en=f"en {slug}", pl=f"pl {slug}"),
+                description=Localised(nb=f"nb d {slug}", en=f"en d {slug}", pl=f"pl d {slug}"),
+            )
+            for slug in ("second-client", "first-client")
+        )
+        guides = [
+            page
+            for page in emitted_pages(registry)
+            if page.route_path.startswith("/connect/") and page.route_path != "/connect/"
+        ]
+
+        assert [page.path for page in guides] == [
+            f"{prefix}/connect/{client.slug}/"
+            for prefix in ("", "/en", "/pl")
+            for client in registry
+        ]
+        for page in guides:
+            client = next(
+                client for client in registry if page.route_path == f"/connect/{client.slug}/"
+            )
+            assert page.template == f"pages/connect-{client.slug}.{page.lang}.html"
+            context = page.head_context()
+            assert context["title"] == client.title.text(page.lang)
+            assert context["description"] == client.description.text(page.lang)
+            assert context["language_switch"] == (
+                ("nb", f"/connect/{client.slug}/"),
+                ("en", f"/en/connect/{client.slug}/"),
+                ("pl", f"/pl/connect/{client.slug}/"),
+            )
+
     def test_every_route_in_all_three_languages_where_the_mirror_rule_applies(self) -> None:
         pages = emitted_pages()
         paths = [page.path for page in pages]

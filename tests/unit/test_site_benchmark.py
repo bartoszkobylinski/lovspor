@@ -205,6 +205,60 @@ class TestLoad:
         assert not publication.speaks("pl")
 
 
+@pytest.mark.parametrize("missing_key", ["label", "wording"])
+@pytest.mark.parametrize("incomplete_first", [False, True])
+def test_polish_publication_requires_both_texts_in_every_entry(
+    tmp_path: Path, missing_key: str, incomplete_first: bool
+) -> None:
+    """Publication.speaks promises approved wording AND label for every entry."""
+    complete = _entry(
+        label={**_LABEL, "pl": "diagnostyka post hoc"},
+        wording={"nb": "Svar", "en": "Answers", "pl": "Odpowiedzi"},
+    )
+    incomplete = {**complete, "id": "second"}
+    incomplete[missing_key] = {
+        key: value for key, value in complete[missing_key].items() if key != "pl"
+    }
+    entries = (incomplete, complete) if incomplete_first else (complete, incomplete)
+    publication = load_publication(_checkout(tmp_path, _manifest(*entries), _report()))
+
+    assert publication is not None
+    assert not publication.speaks("pl")
+    assert publication.speaks("nb")
+    assert publication.speaks("en")
+    with pytest.raises(SiteBuildError, match="no pl wording"):
+        publication.context("pl")
+    assert set(publication.context("en")) == {"rate", "second"}
+
+
+def test_approved_polish_copy_changes_manifest_hash_but_preserves_source_facts(
+    tmp_path: Path,
+) -> None:
+    """Optional locale copy is manifest data, not a new benchmark measurement."""
+    checkout = _checkout(tmp_path, _manifest(), _report())
+    before = load_publication(checkout)
+    assert before is not None
+    manifest_path = checkout / PUBLICATION_PATH
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["entries"][0]["label"]["pl"] = "diagnostyka post hoc"
+    manifest["entries"][0]["wording"]["pl"] = "Odpowiedzi"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    after = load_publication(checkout)
+
+    assert after is not None
+    assert after.speaks("pl")
+    assert after.manifest_sha256 != before.manifest_sha256
+    assert after.manifest_sha256 == hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    assert after.source_hashes == before.source_hashes
+    assert after.facts == before.facts
+    for entry_id, context in after.context("pl").items():
+        original = before.context("en")[entry_id]
+        assert context["ids"] == original["ids"]
+        assert context["ruling"] == original["ruling"]
+    assert load_publication(checkout) == after
+
+
 class TestRefusals:
     @pytest.mark.parametrize(
         "raw", [-0.001, 1.001, True, False, "0.5", None, float("nan"), float("inf")]
