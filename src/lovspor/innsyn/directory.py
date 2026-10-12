@@ -16,8 +16,9 @@ latest line for an authority stands; earlier ones stay as history.
   (Språkrådet's list of språkvedtak, or the authority's own pages). Unset, a
   letter is written in bokmål and the manifest says the form was not set:
   språklova's rules on the written standard bind public bodies, not a private
-  requester, so a bokmål letter is a valid request everywhere. The owner
-  decides whether unset authorities are sent before their form is recorded.
+  requester, so a bokmål letter is a valid request everywhere. Bokmål for
+  an unset form is the owner's decision (2026-10-12); the manifest keeps
+  saying the form was not recorded.
 """
 
 from datetime import datetime

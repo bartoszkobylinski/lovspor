@@ -1707,7 +1707,8 @@ $I due                                    # past the mark with no answer and no 
   choice.
 - **Målform.** No machine-readable source of the språkvedtak was found reliable enough
   to read automatically, so the operator records it with evidence (`set-maalform`).
-  Unset, the letter is in bokmål and the manifest says `maalform_recorded: false`.
+  Unset, the letter is in bokmål and the manifest says `maalform_recorded: false`. That
+  default is the owner's decision (2026-10-12).
 - **Letters.** A wave takes the next `--wave-size` resolved authorities and skips any
   authority with an open request (open until the outcome is `full` or `refused`).
   Authorities with known ids still to ask for come first, then the rest, each group in
