@@ -29,8 +29,8 @@ class Journal[RecordT: BaseModel]:
 
     def append(self, records: list[RecordT]) -> None:
         """Append ``records`` in one locked, fsynced write; the parent must exist."""
-        payload = "".join(record.model_dump_json() + "\n" for record in records)
-        with self._path.open("a", encoding="utf-8") as handle:
+        payload = "".join(record.model_dump_json() + "\n" for record in records).encode()
+        with self._path.open("ab") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             handle.write(payload)
             handle.flush()
@@ -46,7 +46,7 @@ class Journal[RecordT: BaseModel]:
         if not self._path.exists():
             return []
         try:
-            text = self._path.read_bytes().decode("utf-8")
+            text = self._path.read_bytes().decode()
         except UnicodeDecodeError as exc:
             raise InnsynRecordError(
                 f"{self._path}: not UTF-8 at byte {exc.start}; refused rather than read past",

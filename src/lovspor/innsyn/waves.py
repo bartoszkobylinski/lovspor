@@ -154,7 +154,7 @@ def _letter(inputs: WaveInputs, authority: Authority, ids: tuple[str, ...]) -> L
 
 
 def _write_letter(out: Path, request: LetterRequest, recorded: bool) -> ManifestEntry:
-    payload = render(request).text().encode("utf-8")
+    payload = render(request).text().encode()
     name = f"{request.authority.authority_id}.txt"
     atomic_replace_bytes(out / name, payload)
     return ManifestEntry(

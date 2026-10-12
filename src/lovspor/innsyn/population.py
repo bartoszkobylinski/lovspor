@@ -58,7 +58,7 @@ class Authority(BaseModel):
     @property
     def letter_name(self) -> str:
         """The name a letter addresses: the Norwegian form, before any Sami one."""
-        first = self.name.split(" - ", 1)[0].strip()
+        first = self.name.partition(" - ")[0].strip()
         return f"{first} kommune" if self.kind == "kommune" else first
 
 

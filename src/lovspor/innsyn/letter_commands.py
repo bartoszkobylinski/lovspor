@@ -24,12 +24,13 @@ def _held_ids(path: Path | None) -> frozenset[str]:
     if path is None:
         return frozenset()
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_bytes().decode().splitlines()
     except FileNotFoundError as exc:
         raise refuse(InnsynRefusedError(f"{path}: no such --held file")) from exc
     except UnicodeDecodeError as exc:
         raise refuse(InnsynRefusedError(f"{path}: not UTF-8 at byte {exc.start}")) from exc
-    return frozenset(line.split("#", 1)[0].strip() for line in lines) - {""}
+    ids = (line.partition("#")[0].strip() for line in lines)
+    return frozenset(lf_id for lf_id in ids if lf_id)
 
 
 def _lf_entries(path: Path | None) -> tuple[LedgerEntry, ...]:
@@ -97,7 +98,7 @@ def _letter_digest(manifest_path: Path, entry: ManifestEntry) -> str:
     """The SHA-256 of the letter as it stands, after its ``Til:`` is checked."""
     letter = manifest_path.parent / entry.letter_file
     payload = letter.read_bytes()
-    first = payload.decode("utf-8").split("\n", 1)[0]
+    first = payload.decode().partition("\n")[0]
     if first != f"Til: {entry.recipient}":
         raise InnsynRefusedError(f"{letter}: {first!r} is not the manifest's recipient")
     return hashlib.sha256(payload).hexdigest()

@@ -49,7 +49,7 @@ class Candidate(BaseModel):
 
 
 def _html(record: ArtifactObservation) -> bool:
-    media_type = record.content_type.split(";", 1)[0].lower()
+    media_type = record.content_type.partition(";")[0].lower()
     return record.http_status in _SUCCESS and "html" in media_type
 
 
@@ -76,7 +76,7 @@ class _Scan:
         self.counted.add(blob_key)
         domain = self.domains[record.authority_id]
         for address in self._addresses(record.sha256):
-            if host_within_domain(address.split("@", 1)[1], domain):
+            if host_within_domain(address.partition("@")[2], domain):
                 self._keep(record, address, new_page)
 
     def _addresses(self, sha256: str) -> frozenset[str]:
@@ -86,8 +86,9 @@ class _Scan:
         try:
             blob = self.log.read_blob(sha256)
         except FileNotFoundError:
-            blob = b""
-        found = frozenset(m.group(1).decode("ascii").lower() for m in MAILBOX.finditer(blob))
+            found: frozenset[str] = frozenset()
+        else:
+            found = frozenset(m.group(1).decode().lower() for m in MAILBOX.finditer(blob))
         self.addresses_by_blob[sha256] = found
         return found
 

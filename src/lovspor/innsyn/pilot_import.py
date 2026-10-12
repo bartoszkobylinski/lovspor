@@ -20,6 +20,7 @@ imports nothing twice; the rest go in one write or not at all.
 
 import csv
 import hashlib
+import io
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,7 +58,7 @@ def _letter(letters: Path, authority_id: str, n_ids: int) -> tuple[list[str], st
         payload = path.read_bytes()
     except FileNotFoundError as exc:
         raise InnsynRecordError(f"{path}: the letter as sent is missing") from exc
-    ids = sorted(set(_LETTER_ID.findall(payload.decode("utf-8"))))
+    ids = sorted(set(_LETTER_ID.findall(payload.decode())))
     if len(ids) != n_ids:
         raise InnsynRecordError(f"{path}: lists {len(ids)} ids, the register says {n_ids}")
     return ids, hashlib.sha256(payload).hexdigest()
@@ -80,7 +81,7 @@ def _transitions(row: dict[str, str], base: dict[str, object]) -> list[dict[str,
         found.append({"event": "acknowledged", "acknowledged_at": _instant(row["acknowledged_at"])})
     if row.get("kommune_saksnummer", "").strip():
         found.append({"event": "case_number", "saksnummer": row["kommune_saksnummer"]})
-    outcome = row.get("outcome", "").split(";", 1)[0].strip()
+    outcome = row.get("outcome", "").partition(";")[0].strip()
     if outcome:
         basis = row.get("refusal_basis", "").strip() or None
         at = _instant(row.get("answered_at", ""))
@@ -115,8 +116,7 @@ def read_register(register: Path, letters: Path, recorded_at: datetime) -> list[
             a letter that is missing or disagrees with its row.
     """
     try:
-        with register.open(encoding="utf-8", newline="") as handle:
-            rows = list(csv.DictReader(handle))
+        rows = list(csv.DictReader(io.StringIO(register.read_bytes().decode())))
     except FileNotFoundError as exc:
         raise InnsynRecordError(f"{register}: no such register") from exc
     except UnicodeDecodeError as exc:

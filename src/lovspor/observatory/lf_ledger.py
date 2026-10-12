@@ -27,6 +27,7 @@ is history too.
 
 import fcntl
 import hashlib
+import io
 import os
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -233,8 +234,7 @@ def read_ledger_file(path: Path) -> list[LedgerEntry]:
     """
     if not path.exists():
         return []
-    with path.open(encoding="utf-8") as handle:
-        return _parse_ledger(handle, path)
+    return _parse_ledger(io.StringIO(path.read_bytes().decode()), path)
 
 
 def _parse_ledger(handle: IO[str], path: Path) -> list[LedgerEntry]:
