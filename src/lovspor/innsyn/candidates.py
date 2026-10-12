@@ -6,6 +6,12 @@ live visit (``find_postmottak.py``, 2026-10-03): the general mailboxes
 distinct blob, cited by the shortest URL that carries them (usually the front
 page or the contact page). This is that scan over the corrected log.
 
+Only addresses on the authority's own registered domain (``canonical_domain``,
+a leading ``www.`` dropped, subdomains included) are proposed; a page that
+names a business, a state agency or a neighbouring kommune does not make
+its mailbox the authority's (owner decision 2026-10-12). An authority outside
+the observatory register has no domain, so nothing is proposed for it.
+
 A candidate is a proposal, never a recipient. Nothing here writes to the
 archive or to the directory: the operator opens the cited page, chooses, and
 records the choice with ``innsyn set-recipient``, whose evidence is that page.
@@ -20,6 +26,7 @@ from pydantic import BaseModel, ConfigDict
 from lovspor.errors import LogIntegrityError
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, ObservationRecord
+from lovspor.observatory.registry import SourceRegistry, host_within_domain
 
 MAILBOX = re.compile(rb"\b(post(?:mottak)?(?:\.[a-z0-9-]+)?@[a-z0-9.-]+\.no)\b", re.IGNORECASE)
 
@@ -49,6 +56,7 @@ def _html(record: ArtifactObservation) -> bool:
 @dataclass
 class _Scan:
     log: ObservationLog
+    domains: dict[str, str]
     wanted: frozenset[str] | None
     seen: set[str] = field(default_factory=set)
     found: dict[_Key, Candidate] = field(default_factory=dict)
@@ -56,13 +64,17 @@ class _Scan:
     def __call__(self, record: ObservationRecord) -> None:
         if not isinstance(record, ArtifactObservation) or not _html(record):
             return
+        if record.authority_id not in self.domains:
+            return
         if self.wanted is not None and record.authority_id not in self.wanted:
             return
         if record.sha256 in self.seen:
             return
         self.seen.add(record.sha256)
+        domain = self.domains[record.authority_id]
         for address in self._addresses(record.sha256):
-            self._keep(record, address)
+            if host_within_domain(address.split("@", 1)[1], domain):
+                self._keep(record, address)
 
     def _addresses(self, sha256: str) -> set[str]:
         try:
@@ -90,13 +102,23 @@ class _Scan:
         )
 
 
-def mailbox_candidates(log: ObservationLog, wanted: frozenset[str] | None) -> list[Candidate]:
-    """Every candidate for ``wanted`` (every authority when None), most pages first.
+def own_domains(registry: SourceRegistry) -> dict[str, str]:
+    """Each registered authority's domain, as its own mailboxes are named under it."""
+    return {
+        authority_id: record.canonical_domain.lower().removeprefix("www.")
+        for authority_id, record in registry.sources.items()
+    }
+
+
+def mailbox_candidates(
+    log: ObservationLog, domains: dict[str, str], wanted: frozenset[str] | None
+) -> list[Candidate]:
+    """Every own-domain candidate for ``wanted`` (every authority when None), most pages first.
 
     Raises:
         LogIntegrityError: the log does not read clean.
     """
-    scan = _Scan(log, wanted)
+    scan = _Scan(log, domains, wanted)
     result = log.scan_corrected_into(scan)
     if not result.complete:
         raise LogIntegrityError(

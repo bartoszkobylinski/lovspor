@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from pytest_httpx import HTTPXMock
 
+from lovspor.cli import app
 from lovspor.errors import InnsynRecordError
 from lovspor.innsyn.directory import contacts, directory_journal
 from lovspor.innsyn.sender import read_sender
@@ -18,7 +19,7 @@ from lovspor.innsyn.workspace import InnsynWorkspace
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
-from tests.unit.innsyn_support import fetched, innsyn
+from tests.unit.innsyn_support import fetched, innsyn, runner
 
 FJALER = "https://www.fjaler.kommune.no/"
 
@@ -201,6 +202,13 @@ def archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ObservationLog:
     root.mkdir()
     monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(root))
     monkeypatch.delenv(ENV_CORPUS_ROOT, raising=False)
+    for authority_id, name, domain in (
+        ("4646", "Fjaler kommune", "www.fjaler.kommune.no"),
+        ("1134", "Suldal kommune", "suldal.kommune.no"),
+    ):
+        args = ["--id", authority_id, "--name", name, "--domain", domain]
+        result = runner.invoke(app, ["observatory", "register-source", *args])
+        assert result.exit_code == 0, result.output
     return ObservationLog(ObservatoryRoot(root, []))
 
 
@@ -249,6 +257,32 @@ class TestCandidates:
         result = innsyn(tmp_path / "innsyn", "recipient-candidates")
         assert [line.split("\t")[0] for line in result.stdout.splitlines()] == ["1134", "4646"]
 
+    def test_only_addresses_on_the_authoritys_own_domain_are_proposed(
+        self, tmp_path: Path, archive: ObservationLog
+    ) -> None:
+        page = (
+            "<p>postmottak@fjaler.kommune.no post@fysio-fjaler.no "
+            "post@fjaler.kommune.no.evil.no post@notfjaler.kommune.no "
+            "postmottak@helse.fjaler.kommune.no</p>"
+        )
+        _capture(archive, FJALER, page)
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert result.exit_code == 0, result.output
+        assert sorted(line.split("\t")[1] for line in result.stdout.splitlines()) == [
+            "postmottak@fjaler.kommune.no",
+            "postmottak@helse.fjaler.kommune.no",
+        ]
+
+    def test_an_authority_outside_the_register_proposes_nothing(
+        self, tmp_path: Path, archive: ObservationLog
+    ) -> None:
+        _capture(
+            archive, "https://www.roros.kommune.no/", "<p>postmottak@roros.kommune.no</p>", "5025"
+        )
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert result.exit_code == 0, result.output
+        assert result.stdout == ""
+
     def test_a_damaged_log_is_refused(self, tmp_path: Path, archive: ObservationLog) -> None:
         _capture(archive, FJALER, "<p>postmottak@fjaler.kommune.no</p>")
         with archive.log_path.open("ab") as handle:
@@ -282,8 +316,8 @@ class TestCandidateScanEdges:
     def test_non_html_and_error_pages_are_not_read(
         self, tmp_path: Path, archive: ObservationLog
     ) -> None:
-        _variant(archive, "postmottak@pdf.no", content_type="application/pdf")
-        _variant(archive, "postmottak@error.no", http_status=404)
+        _variant(archive, "postmottak@fjaler.kommune.no", content_type="application/pdf")
+        _variant(archive, "post@fjaler.kommune.no", http_status=404)
         result = innsyn(tmp_path / "innsyn", "recipient-candidates")
         assert result.stdout == ""
 

@@ -1699,7 +1699,11 @@ $I due                                    # past the mark with no answer and no 
   letter. Each record carries the page the address was read on and when (a live visit,
   or a capture's `ObservedAt`). `recipient-candidates` scans the archive's captured HTML
   for `postmottak@`/`post@` addresses under `.no`, the way the pilot did, and prints
-  the shortest citing URL. It is read-only. The operator opens the page and records the
+  the shortest citing URL. It proposes only addresses on the authority's own registered
+  domain or its subdomains, so a business, a state agency or a neighbour named on the
+  page is never proposed (owner decision 2026-10-12). An authority whose mailbox lives
+  elsewhere, such as Oslo's `postmottak@oslobystyre.no`, is recorded by hand from the
+  page that names it. The scan is read-only. The operator opens the page and records the
   choice.
 - **Målform.** No machine-readable source of the språkvedtak was found reliable enough
   to read automatically, so the operator records it with evidence (`set-maalform`).

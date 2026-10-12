@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from lovspor.errors import LogIntegrityError
 from lovspor.innsyn.app import guarded, innsyn_app, instant, now, refuse, workspace
-from lovspor.innsyn.candidates import mailbox_candidates
+from lovspor.innsyn.candidates import mailbox_candidates, own_domains
 from lovspor.innsyn.directory import (
     Contact,
     contacts,
@@ -18,7 +18,7 @@ from lovspor.innsyn.directory import (
 from lovspor.innsyn.population import Authority, latest_snapshot
 from lovspor.innsyn.sender import Sender, write_sender
 from lovspor.observatory.log import ObservationLog
-from lovspor.observatory.registry_io import _root
+from lovspor.observatory.registry_io import _load, _registry_file, _root
 
 _Id = Annotated[str, typer.Option("--id", help="kommunenummer or fylkesnummer.")]
 _EvidenceUrl = Annotated[str, typer.Option("--evidence-url", help="The page the fact was read on.")]
@@ -126,14 +126,15 @@ def recipient_candidates(
         list[str] | None, typer.Option("--id", help="Only these authorities (repeatable).")
     ] = None,
 ) -> None:
-    """Propose mailboxes found in the archive's captured pages; records nothing.
+    """Propose own-domain mailboxes found in the archive's captured pages; records nothing.
 
     Columns: id, address, distinct pages, shortest citing URL, its ObservedAt,
     its blob. Reads the observatory archive (LOVSPOR_OBSERVATORY_ROOT) only.
     """
     wanted = frozenset(authority_ids) if authority_ids else None
+    domains = own_domains(_load(_registry_file()))
     try:
-        found = mailbox_candidates(ObservationLog(_root()), wanted)
+        found = mailbox_candidates(ObservationLog(_root()), domains, wanted)
     except LogIntegrityError as exc:
         raise refuse(exc) from exc
     for c in found:
