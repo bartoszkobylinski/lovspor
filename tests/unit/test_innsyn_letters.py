@@ -121,6 +121,25 @@ class TestWave:
         after = target.requests_log.read_bytes() if target.requests_log.exists() else None
         assert after == before
 
+    def test_repeated_waves_have_identical_letters_and_round_trip_manifests(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        first, second = tmp_path / "first", tmp_path / "second"
+        _wave(workspace, first, lf_ledger)
+        _wave(workspace, second, lf_ledger)
+        a = read_manifest(first / "manifest.json")
+        b = read_manifest(second / "manifest.json")
+        assert a.letters == b.letters
+        assert a.unresolved == b.unresolved
+        assert a.skipped_open == b.skipped_open
+        assert a.remaining == b.remaining
+        assert type(a).model_validate_json(a.model_dump_json()) == a
+        for entry in a.letters:
+            payload = (first / entry.letter_file).read_bytes()
+            assert payload == (second / entry.letter_file).read_bytes()
+            assert hashlib.sha256(payload).hexdigest() == entry.letter_sha256
+        assert not (workspace / "requests.jsonl").exists()
+
     def test_only_resolved_authorities_get_a_letter_in_id_order(
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
     ) -> None:

@@ -58,7 +58,8 @@ class _Scan:
     log: ObservationLog
     domains: dict[str, str]
     wanted: frozenset[str] | None
-    seen: set[str] = field(default_factory=set)
+    addresses_by_blob: dict[str, frozenset[str]] = field(default_factory=dict)
+    counted: set[tuple[str, str]] = field(default_factory=set)
     found: dict[_Key, Candidate] = field(default_factory=dict)
 
     def __call__(self, record: ObservationRecord) -> None:
@@ -68,25 +69,32 @@ class _Scan:
             return
         if self.wanted is not None and record.authority_id not in self.wanted:
             return
-        if record.sha256 in self.seen:
-            return
-        self.seen.add(record.sha256)
+        # A page counts once per authority and blob; every capture of it can
+        # still be the shortest citation.
+        blob_key = (record.authority_id, record.sha256)
+        new_page = blob_key not in self.counted
+        self.counted.add(blob_key)
         domain = self.domains[record.authority_id]
         for address in self._addresses(record.sha256):
             if host_within_domain(address.split("@", 1)[1], domain):
-                self._keep(record, address)
+                self._keep(record, address, new_page)
 
-    def _addresses(self, sha256: str) -> set[str]:
+    def _addresses(self, sha256: str) -> frozenset[str]:
+        cached = self.addresses_by_blob.get(sha256)
+        if cached is not None:
+            return cached
         try:
             blob = self.log.read_blob(sha256)
         except FileNotFoundError:
-            return set()
-        return {match.group(1).decode("ascii").lower() for match in MAILBOX.finditer(blob)}
+            blob = b""
+        found = frozenset(m.group(1).decode("ascii").lower() for m in MAILBOX.finditer(blob))
+        self.addresses_by_blob[sha256] = found
+        return found
 
-    def _keep(self, record: ArtifactObservation, address: str) -> None:
+    def _keep(self, record: ArtifactObservation, address: str, new_page: bool) -> None:
         key = (record.authority_id, address)
         held = self.found.get(key)
-        pages = 1 if held is None else held.pages + 1
+        pages = (0 if held is None else held.pages) + (1 if new_page else 0)
         if held is None or len(record.url) < len(held.url):
             cite = (record.url, record.observed_at, record.sha256)
         else:

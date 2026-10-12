@@ -313,6 +313,41 @@ def _variant(log: ObservationLog, body: str, **changes: object) -> None:
 
 
 class TestCandidateScanEdges:
+    def test_identical_bytes_still_use_the_shortest_citing_url(
+        self, tmp_path: Path, archive: ObservationLog
+    ) -> None:
+        # docs/operations.md promises the shortest citing URL, regardless of
+        # which capture of a distinct blob the archive encountered first.
+        body = "<p>postmottak@fjaler.kommune.no</p>"
+        _capture(archive, FJALER + "tenester/kontakt/", body)
+        _capture(archive, FJALER, body)
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert result.exit_code == 0, result.output
+        assert result.stdout.splitlines()[0].split("\t")[1:4] == [
+            "postmottak@fjaler.kommune.no",
+            "1",
+            FJALER,
+        ]
+
+    def test_shared_page_bytes_keep_candidates_for_each_authority(
+        self, tmp_path: Path, archive: ObservationLog
+    ) -> None:
+        # Candidates are keyed by authority; a shared contact page must not
+        # erase the second authority when scanning the whole population.
+        # Since the own-domain rule (owner decision 2026-10-12) a shared
+        # third-party mailbox is proposed for neither, so the shared bytes
+        # carry each authority's own mailbox instead.
+        body = "<p>postmottak@fjaler.kommune.no postmottak@suldal.kommune.no</p>"
+        _capture(archive, FJALER, body)
+        _capture(archive, "https://www.suldal.kommune.no/", body, "1134")
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert result.exit_code == 0, result.output
+        rows = [line.split("\t") for line in result.stdout.splitlines()]
+        assert [(row[0], row[1], row[2]) for row in rows] == [
+            ("1134", "postmottak@suldal.kommune.no", "1"),
+            ("4646", "postmottak@fjaler.kommune.no", "1"),
+        ]
+
     def test_non_html_and_error_pages_are_not_read(
         self, tmp_path: Path, archive: ObservationLog
     ) -> None:
