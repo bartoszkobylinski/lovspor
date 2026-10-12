@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/innsyn/workdays.py"
+symbol = "easter_sunday"
+registered = "2026-10-12, PR #605, from the mutation artifact of run 38214763489 (f0def4b) and a scoped local rerun"
+mutation = """
+-    month = (h + weekday_shift - 7 * m + 90) // 25
++    month = (h + weekday_shift - 8 * m + 90) // 25
+"""
+justification = """
+Pure integer arithmetic, no dependency. `m` is 0 or 1. With m = 0 the
+mutated term (8 * m) equals the original (7 * m), both 0. With m = 1:
+m = (a + 11h + 19w) // 433 with a <= 18, h <= 29 and w <= 6 needs
+11h + 19w >= 415. h <= 29 then forces 19w >= 96, so w = 6, and
+11h >= 301 forces h >= 28. So h + w is 34 or 35. The original month is
+(h + w + 83) // 25 = 117 // 25 or 118 // 25 = 4, and the mutated month is
+(h + w + 82) // 25 = 116 // 25 or 117 // 25 = 4. The value is the same,
+April, in every case. The `day` line keeps its own `- 7 * m`, so day is
+unchanged too. Also checked exhaustively over one full Gregorian Easter
+cycle (5,700,000 years from 1583): no year gives a different date.
+"""

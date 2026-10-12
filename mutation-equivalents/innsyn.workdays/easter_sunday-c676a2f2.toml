@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/innsyn/workdays.py"
+symbol = "easter_sunday"
+registered = "2026-10-12, PR #605, from the mutation artifact of run 38214763489 (f0def4b) and a scoped local rerun"
+mutation = """
+-    h = (19 * a + b - d - g + 15) % 30
++    h = (19 * a + b - d - g - 15) % 30
+"""
+justification = """
+Pure integer arithmetic, no dependency. `h` is the residue of an integer
+expression modulo 30, and the mutation changes the added constant from +15
+to -15. The two differ by exactly 30, and Python's `%` with a positive
+modulus is a function of the left operand's residue class: (x + 15) % 30 ==
+(x - 15) % 30 for every integer x, because x + 15 - (x - 15) = 30 is a
+multiple of 30. So `h` is the same value for every year, and everything
+computed from it is unchanged.
+"""

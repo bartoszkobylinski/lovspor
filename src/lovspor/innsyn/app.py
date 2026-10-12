@@ -1,0 +1,86 @@
+"""The ``observatory innsyn`` Typer app, and what every innsyn command shares.
+
+Separate from the command modules for the reason :mod:`lovspor.observatory.app`
+is: several modules register commands on one app without importing each other.
+The workspace is the group's option (``--dir`` / ``LOVSPOR_INNSYN_DIR``), read
+by every command through :func:`workspace`, so no command spends one of its
+four parameters on it.
+"""
+
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Annotated
+
+import click
+import typer
+
+from lovspor.errors import ConfigError, InnsynError, StorageUnavailableError
+from lovspor.innsyn.workspace import ENV_INNSYN_DIR, InnsynWorkspace, innsyn_workspace
+
+innsyn_app = typer.Typer(
+    name="innsyn",
+    help="Innsyn requests under offentleglova to every kommune and fylkeskommune (#509).",
+    no_args_is_help=True,
+)
+
+_DIR_KEY = "lovspor.innsyn.dir"
+
+
+@innsyn_app.callback()
+def _workspace_option(
+    ctx: typer.Context,
+    directory: Annotated[
+        Path | None,
+        typer.Option(
+            "--dir",
+            envvar=ENV_INNSYN_DIR,
+            help="The innsyn workspace: population, directory and request ledger.",
+        ),
+    ] = None,
+) -> None:
+    # Resolved by each command, not here: a command's own --help must work unset.
+    ctx.meta[_DIR_KEY] = directory
+
+
+def workspace() -> InnsynWorkspace:
+    """The validated workspace, or the operator's message and exit 1."""
+    raw = click.get_current_context().meta.get(_DIR_KEY)
+    try:
+        return innsyn_workspace(raw)
+    except ConfigError as exc:
+        typer.echo(f"Cannot use the innsyn directory: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
+def refuse(exc: Exception) -> typer.Exit:
+    """Say why on stderr; the caller raises the returned exit from ``exc``."""
+    typer.echo(f"Refused: {exc}", err=True)
+    return typer.Exit(1)
+
+
+def guarded[ResultT](action: Callable[[], ResultT]) -> ResultT:
+    """Run ``action``; an innsyn refusal or a missing volume is a message, not a traceback."""
+    try:
+        return action()
+    except (InnsynError, StorageUnavailableError) as exc:
+        raise refuse(exc) from exc
+
+
+def instant(raw: str, option: str) -> datetime:
+    """An ISO-8601 instant with an explicit offset, as UTC.
+
+    Raises:
+        typer.BadParameter: naive or not ISO-8601; a naive time invents a zone.
+    """
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise typer.BadParameter(f"{option}: not an ISO-8601 instant: {raw}") from exc
+    if parsed.tzinfo is None:
+        raise typer.BadParameter(f"{option}: give an offset or Z, e.g. 2026-10-05T07:43:43Z")
+    return parsed.astimezone(UTC)
+
+
+def now() -> datetime:
+    return datetime.now(UTC)

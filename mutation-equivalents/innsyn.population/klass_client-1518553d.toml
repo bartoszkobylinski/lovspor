@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/innsyn/population.py"
+symbol = "klass_client"
+registered = "2026-10-12, PR #605, from the mutation artifact of run 38214763489 (f0def4b) and a scoped local rerun"
+mutation = """
+-        headers={"User-Agent": DEFAULT_USER_AGENT, "Accept": "application/json"},
++        headers={"user-agent": DEFAULT_USER_AGENT, "Accept": "application/json"},
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 section 5.1), and httpx
+stores and merges headers case-insensitively. A client built with
+`{"user-agent": ...}` or `{"ACCEPT": ...}` replaces httpx's default field of
+that name instead of adding a second one, so exactly one User-Agent and one
+Accept go out with our values, and every lookup (pytest-httpx's matchers
+included) reads them under any spelling. This is argued from the dependency,
+so it is pinned by the assumption test.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_httpx_client_headers_merge_names_case_insensitively"

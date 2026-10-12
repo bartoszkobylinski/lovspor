@@ -1,0 +1,6 @@
+authority_id,sent_at,sent_from,recipient,n_ids,kommune_saksnummer,acknowledged_at,answered_at,outcome,n_documents,n_ids_unknown_or_not_theirs,refusal_basis,klage_sent_at,notes
+0301,2026-10-05T07:43:43Z,kontakt@lovspor.no,postmottak@oslobystyre.no,51,,2026-10-05T07:44:00Z,2026-10-06T12:28:20Z,referred_to_lovdata; presisering sent,,,,,notes removed from the fixture (personopplysningsloven: they name case officers)
+5025,2026-10-05T07:43:55Z,kontakt@lovspor.no,postmottak@roros.kommune.no,42,,2026-10-05T07:44:14Z,,,,,,,notes removed from the fixture (personopplysningsloven: they name case officers)
+1134,2026-10-05T07:44:06Z,kontakt@lovspor.no,postmottak@suldal.kommune.no,21,2026/2348,2026-10-05T07:44:22Z,,interim_reply_no_date,,,,,notes removed from the fixture (personopplysningsloven: they name case officers)
+4627,2026-10-05T07:44:16Z,kontakt@lovspor.no,postmottak@askoy.kommune.no,15,,2026-10-05T07:44:36Z,,,,,,,notes removed from the fixture (personopplysningsloven: they name case officers)
+4646,2026-10-05T07:44:25Z,kontakt@lovspor.no,postmottak@fjaler.kommune.no,3,,2026-10-05T07:44:44Z,2026-10-07T12:45:06Z,partial; 1 document pending from depot,4,,,,notes removed from the fixture (personopplysningsloven: they name case officers)
