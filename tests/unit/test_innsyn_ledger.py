@@ -123,6 +123,63 @@ class TestPilotImport:
 
 
 class TestTransitions:
+    @pytest.mark.parametrize(
+        ("outcome", "answered", "is_open"),
+        [
+            ("referred_to_lovdata", True, True),
+            ("interim_reply_no_date", False, True),
+            ("partial", True, True),
+            ("full", True, False),
+            ("refused", True, False),
+            ("no_answer", False, True),
+        ],
+    )
+    def test_each_outcome_controls_answer_open_and_due_state(
+        self, workspace: Path, outcome: str, answered: bool, is_open: bool
+    ) -> None:
+        # docs/operations.md: only the first four outcome classes are answers;
+        # requests remain open until full or refused.
+        result = innsyn(
+            workspace,
+            "record-outcome",
+            "--request",
+            ROROS,
+            "--outcome",
+            outcome,
+            "--at",
+            "2026-10-08T10:00:00Z",
+        )
+        assert result.exit_code == 0, result.output
+        state = _held(workspace)[ROROS]
+        assert state.outcome == outcome
+        assert state.answered is answered
+        assert state.is_open is is_open
+        expected_at = datetime(2026, 10, 8, 10, tzinfo=UTC) if answered else None
+        assert state.answered_at == expected_at
+        assert not state.is_due(date(2026, 10, 12))
+        assert state.is_due(date(2026, 10, 13)) is (not answered)
+
+    @pytest.mark.parametrize("command", ["record-ack", "record-outcome", "record-klage"])
+    def test_transition_times_refuse_before_send_but_accept_exact_send_time(
+        self, workspace: Path, command: str
+    ) -> None:
+        path = workspace / "requests.jsonl"
+        before = path.read_bytes()
+        args = ("--outcome", "no_answer") if command == "record-outcome" else ()
+        refused = innsyn(
+            workspace, command, "--request", ROROS, *args, "--at", "2026-10-05T07:43:54Z"
+        )
+        assert refused.exit_code == 1
+        assert "before it was sent" in refused.stderr
+        assert path.read_bytes() == before
+        accepted = innsyn(
+            workspace, command, "--request", ROROS, *args, "--at", "2026-10-05T09:43:55+02:00"
+        )
+        assert accepted.exit_code == 0, accepted.output
+        events = ledger_journal(InnsynWorkspace(workspace, [])).records()
+        assert len(events) == len(before.splitlines()) + 1
+        assert events[-1].request_id == ROROS
+
     def test_an_invalid_batch_appends_none_of_its_valid_prefix(self, workspace: Path) -> None:
         target = InnsynWorkspace(workspace, [])
         before = target.requests_log.read_bytes()
@@ -242,6 +299,24 @@ class TestTransitions:
 
 
 class TestListings:
+    def test_invalid_utf8_is_a_record_error_and_a_cli_refusal(self, workspace: Path) -> None:
+        # Journal.records promises InnsynRecordError when a line cannot parse;
+        # app.guarded turns that into the operator's refusal, without a traceback.
+        target = InnsynWorkspace(workspace, [])
+        original = target.requests_log.read_bytes()
+        payload = original + b"\xff\n"
+        target.requests_log.write_bytes(payload)
+        listing = innsyn(workspace, "requests")
+        append = innsyn(workspace, "record-case-number", "--request", ROROS, "--number", "2026/999")
+        assert target.requests_log.read_bytes() == payload
+        for result in (listing, append):
+            assert result.exit_code == 1
+            assert result.stdout == ""
+            assert "Refused:" in result.stderr
+            assert "requests.jsonl" in result.stderr
+        with pytest.raises(InnsynRecordError):
+            ledger_journal(target).records()
+
     @pytest.mark.parametrize("damage", ["torn", "malformed_middle", "blank_middle"])
     def test_corrupt_evidence_is_refused_and_cannot_be_appended_to(
         self, workspace: Path, damage: str

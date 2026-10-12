@@ -40,11 +40,18 @@ class Journal[RecordT: BaseModel]:
         """Every record in append order; an absent file is an empty journal.
 
         Raises:
-            InnsynRecordError: a torn last line, or a line that does not parse.
+            InnsynRecordError: bytes that are not UTF-8, a torn last line, or a
+                line that does not parse.
         """
         if not self._path.exists():
             return []
-        lines = self._path.read_text(encoding="utf-8").split("\n")
+        try:
+            text = self._path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise InnsynRecordError(
+                f"{self._path}: not UTF-8 at byte {exc.start}; refused rather than read past",
+            ) from exc
+        lines = text.split("\n")
         if lines[-1]:
             raise InnsynRecordError(f"{self._path}: the last record is incomplete (no newline)")
         return [self._parse(line, number) for number, line in enumerate(lines[:-1], start=1)]

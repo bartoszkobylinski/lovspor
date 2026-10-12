@@ -119,6 +119,8 @@ def read_register(register: Path, letters: Path, recorded_at: datetime) -> list[
             rows = list(csv.DictReader(handle))
     except FileNotFoundError as exc:
         raise InnsynRecordError(f"{register}: no such register") from exc
+    except UnicodeDecodeError as exc:
+        raise InnsynRecordError(f"{register}: not UTF-8 at byte {exc.start}") from exc
     missing = [c for c in _REQUIRED if rows and c not in rows[0]]
     if missing:
         raise InnsynRecordError(f"{register}: missing columns {', '.join(missing)}")

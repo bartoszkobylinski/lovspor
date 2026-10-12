@@ -27,6 +27,8 @@ def _held_ids(path: Path | None) -> frozenset[str]:
         lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError as exc:
         raise refuse(InnsynRefusedError(f"{path}: no such --held file")) from exc
+    except UnicodeDecodeError as exc:
+        raise refuse(InnsynRefusedError(f"{path}: not UTF-8 at byte {exc.start}")) from exc
     return frozenset(line.split("#", 1)[0].strip() for line in lines) - {""}
 
 
@@ -38,6 +40,8 @@ def _lf_entries(path: Path | None) -> tuple[LedgerEntry, ...]:
         return tuple(read_ledger_file(source))
     except LogIntegrityError as exc:
         raise refuse(exc) from exc
+    except UnicodeDecodeError as exc:
+        raise refuse(InnsynRefusedError(f"{source}: not UTF-8 at byte {exc.start}")) from exc
 
 
 def _inputs(
