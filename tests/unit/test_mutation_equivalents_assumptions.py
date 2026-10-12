@@ -704,3 +704,18 @@ def test_assumption_enactment_patterns_hold_exactly_two_groups() -> None:
     """
     assert _ENACTED.groups == _SELF_ENACTED.groups == 2
     assert _ENACTED.groupindex == _SELF_ENACTED.groupindex == {"organ": 1}
+
+
+def test_assumption_httpx_client_headers_merge_names_case_insensitively() -> None:
+    """Pins the argument that waives the header-name case mutants of
+    ``innsyn/population.py`` ``klass_client``: a client built with
+    ``headers={"user-agent": ...}`` or ``{"ACCEPT": ...}`` replaces httpx's own
+    default of that name rather than adding a second field, so exactly one
+    User-Agent and one Accept go out, with our values, whatever the spelling.
+    Field names are case-insensitive on the wire (RFC 9110 section 5.1)."""
+    spellings = (("User-Agent", "Accept"), ("user-agent", "accept"), ("USER-AGENT", "ACCEPT"))
+    for user_agent, accept in spellings:
+        with httpx.Client(headers={user_agent: "ua/1", accept: "application/json"}) as client:
+            request = client.build_request("GET", "https://example.invalid/")
+        assert request.headers.get_list("User-Agent") == ["ua/1"], user_agent
+        assert request.headers.get_list("Accept") == ["application/json"], accept
