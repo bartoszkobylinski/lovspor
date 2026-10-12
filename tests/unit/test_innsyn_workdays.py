@@ -1,5 +1,8 @@
 """The offentleglova § 32 andre ledd mark: five working days after receipt (#509)."""
 
+import os
+import time
+from collections.abc import Iterator
 from datetime import UTC, date, datetime
 
 import pytest
@@ -79,3 +82,20 @@ def test_a_request_sent_on_a_saturday_counts_from_the_monday() -> None:
 
 def test_zero_working_days_is_the_start_day() -> None:
     assert add_working_days(date(2026, 10, 10), 0) == date(2026, 10, 10)
+
+
+@pytest.fixture
+def los_angeles_clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """A process zone that is neither Oslo nor UTC, so the Oslo day must be asked for."""
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+@pytest.mark.usefixtures("los_angeles_clock")
+def test_the_receipt_day_is_oslo_whatever_zone_the_process_runs_in() -> None:
+    assert os.environ["TZ"] == "America/Los_Angeles"
+    # 15:30 on Thursday 8 October in Los Angeles; 00:30 on Friday 9 in Oslo.
+    assert klage_mark(datetime(2026, 10, 8, 22, 30, tzinfo=UTC)) == date(2026, 10, 16)
