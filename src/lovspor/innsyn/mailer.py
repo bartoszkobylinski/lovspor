@@ -11,6 +11,7 @@ Settings come from the environment (``.env`` is loaded by the CLI). The
 password is held as a secret and never printed, logged or put in an error.
 """
 
+import base64
 import smtplib
 import ssl
 from collections.abc import Mapping
@@ -123,19 +124,37 @@ class SmtpTransport:
         try:
             smtp = smtplib.SMTP(settings.host, settings.port, timeout=_TIMEOUT_SECONDS)
         except OSError as exc:
-            raise _failed(settings, exc) from exc
+            raise _failed(settings, exc) from None
         try:
             smtp.starttls(context=self._context)
             smtp.login(settings.user, settings.password.get_secret_value())
             smtp.send_message(message)
         except (smtplib.SMTPException, OSError) as exc:
-            raise _failed(settings, exc) from exc
+            raise _failed(settings, exc) from None
         finally:
             _close(smtp)
 
 
 def _failed(settings: SmtpSettings, exc: Exception) -> InnsynSendError:
-    return InnsynSendError(f"{settings.host}:{settings.port}: {type(exc).__name__}: {exc}")
+    """The error the operator sees; ``from None`` at the raise keeps the original out of it."""
+    reason = redact(f"{type(exc).__name__}: {exc}", settings)
+    return InnsynSendError(f"{settings.host}:{settings.port}: {reason}")
+
+
+def _spellings(settings: SmtpSettings) -> set[str]:
+    """Every form a server reply or an exception could show the password in."""
+    secret = settings.password.get_secret_value()
+    raw = secret.encode()
+    plain = b"\0" + settings.user.encode() + b"\0" + raw
+    encoded = {base64.b64encode(value).decode() for value in (raw, plain)}
+    return {secret, repr(secret)[1:-1], repr(raw)[2:-1], *encoded} - {""}
+
+
+def redact(text: str, settings: SmtpSettings) -> str:
+    """``text`` with the password, as typed, escaped or base64-encoded, replaced."""
+    for spelling in sorted(_spellings(settings), key=len, reverse=True):
+        text = text.replace(spelling, "[redacted]")
+    return text
 
 
 def _close(smtp: smtplib.SMTP) -> None:

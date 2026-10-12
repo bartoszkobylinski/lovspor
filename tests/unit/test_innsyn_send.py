@@ -7,9 +7,11 @@ No test connects to a real server or reads a real credential: ``.env``
 loading is switched off and every SMTP variable is set by the test.
 """
 
+import base64
 import email
 import hashlib
 import json
+import smtplib
 import socket
 import ssl
 import threading
@@ -18,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from email.policy import default
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from pytest_httpx import HTTPXMock
@@ -29,6 +32,7 @@ from lovspor.innsyn.ledger import Outcome, Sent, record_events, requests
 from lovspor.innsyn.mailer import (
     SmtpSettings,
     SmtpTransport,
+    redact,
     smtp_settings,
     tls_context,
 )
@@ -456,6 +460,41 @@ def _serve_once(listener: socket.socket, heard: list[bytes]) -> None:
 
 
 class TestSmtpTransport:
+    def test_quit_failure_does_not_undo_acceptance(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        server = Mock()
+        server.quit.side_effect = smtplib.SMTPServerDisconnected("connection closed")
+        factory = Mock(return_value=server)
+        monkeypatch.setattr("lovspor.innsyn.mailer.smtplib.SMTP", factory)
+        context = tls_context()
+        message = EmailMessage()
+        SmtpTransport(smtp_settings(SMTP_ENV), context).deliver(message)
+        factory.assert_called_once_with("smtp.invalid", 587, timeout=60.0)
+        assert server.method_calls == [
+            ("starttls", (), {"context": context}),
+            ("login", (SMTP_ENV["LOVSPOR_SMTP_USER"], PASSWORD), {}),
+            ("send_message", (message,), {}),
+            ("quit", (), {}),
+            ("close", (), {}),
+        ]
+
+    @pytest.mark.usefixtures("smtp_env")
+    def test_server_error_echoing_password_is_redacted_from_cli(
+        self, workspace: Path, manifest: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # operations.md: "The password is never printed."
+        server = Mock()
+        server.login.side_effect = smtplib.SMTPAuthenticationError(
+            535, f"rejected credential {PASSWORD}".encode()
+        )
+        monkeypatch.setattr("lovspor.innsyn.mailer.smtplib.SMTP", Mock(return_value=server))
+        code, out, err = _send(workspace, manifest, "--send")
+        assert code == 1
+        server.send_message.assert_not_called()
+        server.quit.assert_called_once()
+        assert not _sent(workspace)
+        assert PASSWORD not in out + err
+        assert str(PASSWORD.encode())[2:-1] not in out + err
+
     def test_a_server_without_starttls_never_sees_the_password(
         self, plain_server: tuple[int, list[bytes]]
     ) -> None:
@@ -485,3 +524,57 @@ class TestSmtpTransport:
         context = tls_context()
         assert context.verify_mode == ssl.CERT_REQUIRED
         assert context.check_hostname is True
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"Til: wrong@example.no\nEmne: subject\n\nbody\n",
+        b"Til: postmottak@oslobystyre.no\nSubject: subject\n\nbody\n",
+        b"Til: postmottak@oslobystyre.no\nEmne: \n\nbody\n",
+        b"Til: postmottak@oslobystyre.no\nEmne: subject\n\n \n",
+        b"Til: postmottak@oslobystyre.no\nEmne: subject\n\n\xff",
+    ],
+)
+def test_invalid_letter_with_matching_digest_is_refused(
+    workspace: Path, manifest: Path, payload: bytes
+) -> None:
+    (manifest.parent / "0301.txt").write_bytes(payload)
+    _rewrite_manifest(manifest, "0301", letter_sha256=hashlib.sha256(payload).hexdigest())
+    prepared = prepare(InnsynWorkspace(workspace, []), manifest)
+    assert [ready.entry.authority_id for ready in prepared.ready] == ["4646", "46"]
+    assert len(prepared.refused) == 1
+    assert prepared.refused[0].authority_id == "0301"
+    assert prepared.refused[0].reason
+    assert not _sent(workspace)
+
+
+class TestRedaction:
+    @pytest.mark.parametrize(
+        "echo",
+        [
+            PASSWORD,
+            repr(PASSWORD.encode())[2:-1],
+            base64.b64encode(PASSWORD.encode()).decode(),
+            base64.b64encode(
+                b"\0" + SMTP_ENV["LOVSPOR_SMTP_USER"].encode() + b"\0" + PASSWORD.encode()
+            ).decode(),
+        ],
+    )
+    def test_every_spelling_of_the_password_is_redacted(self, echo: str) -> None:
+        settings = smtp_settings(SMTP_ENV)
+        assert redact(f"535 bad {echo} here", settings) == "535 bad [redacted] here"
+
+    def test_a_send_error_keeps_no_trace_of_the_original(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        echoed = base64.b64encode(PASSWORD.encode())
+        server = Mock()
+        server.send_message.side_effect = smtplib.SMTPDataError(554, b"saw " + echoed)
+        monkeypatch.setattr("lovspor.innsyn.mailer.smtplib.SMTP", Mock(return_value=server))
+        with pytest.raises(InnsynSendError) as caught:
+            SmtpTransport(smtp_settings(SMTP_ENV)).deliver(EmailMessage())
+        assert echoed.decode() not in str(caught.value)
+        assert "[redacted]" in str(caught.value)
+        assert caught.value.__cause__ is None
+        assert caught.value.__suppress_context__
