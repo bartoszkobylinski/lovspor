@@ -1,6 +1,5 @@
 """``innsyn letters`` writes a wave; ``innsyn record-sent`` records one letter as sent."""
 
-import hashlib
 from pathlib import Path
 from typing import Annotated
 
@@ -9,10 +8,11 @@ import typer
 from lovspor.errors import InnsynRefusedError, LogIntegrityError
 from lovspor.innsyn.app import guarded, innsyn_app, instant, now, refuse, workspace
 from lovspor.innsyn.directory import contacts, directory_journal
-from lovspor.innsyn.ledger import parse_event, record_events, request_id, requests
+from lovspor.innsyn.ledger import record_events, requests
 from lovspor.innsyn.population import latest_snapshot
 from lovspor.innsyn.sender import read_sender
-from lovspor.innsyn.waves import ManifestEntry, WaveInputs, read_manifest, write_wave
+from lovspor.innsyn.sent import letter_digest, manifest_entry, sent_event
+from lovspor.innsyn.waves import WaveInputs, write_wave
 from lovspor.innsyn.workspace import InnsynWorkspace
 from lovspor.observatory.lf_ledger import LedgerEntry, ledger_path, read_ledger_file
 from lovspor.observatory.log import ObservationLog
@@ -86,40 +86,12 @@ def letters(
     )
 
 
-def _entry(manifest_path: Path, authority_id: str) -> ManifestEntry:
-    manifest = read_manifest(manifest_path)
-    for entry in manifest.letters:
-        if entry.authority_id == authority_id:
-            return entry
-    raise InnsynRefusedError(f"{manifest_path} has no letter for {authority_id}")
-
-
-def _letter_digest(manifest_path: Path, entry: ManifestEntry) -> str:
-    """The SHA-256 of the letter as it stands, after its ``Til:`` is checked."""
-    letter = manifest_path.parent / entry.letter_file
-    payload = letter.read_bytes()
-    first = payload.decode().partition("\n")[0]
-    if first != f"Til: {entry.recipient}":
-        raise InnsynRefusedError(f"{letter}: {first!r} is not the manifest's recipient")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _sent(manifest_path: Path, authority_id: str, sent_at: str) -> None:
-    entry = _entry(manifest_path, authority_id)
+def _sent(manifest_path: Path, authority_id: str, sent_at: str, message_id: str | None) -> None:
+    entry = manifest_entry(manifest_path, authority_id)
     moment = instant(sent_at, "--sent-at")
-    data = {
-        "event": "sent",
-        "request_id": request_id(authority_id, moment),
-        "recorded_at": now(),
-        "authority_id": authority_id,
-        "recipient": entry.recipient,
-        "sent_at": moment,
-        "lf_ids": entry.lf_ids,
-        "general_clause": entry.general_clause,
-        "letter_sha256": _letter_digest(manifest_path, entry),
-    }
-    record_events(workspace(), [parse_event(data)])
-    typer.echo(f"{data['request_id']}: sent to {entry.recipient} recorded")
+    event = sent_event(entry, letter_digest(manifest_path, entry), moment, message_id)
+    record_events(workspace(), [event])
+    typer.echo(f"{event.request_id}: sent to {entry.recipient} recorded")
 
 
 @innsyn_app.command("record-sent")
@@ -127,9 +99,13 @@ def record_sent(
     manifest: Annotated[Path, typer.Option("--manifest", help="The wave's manifest.json.")],
     authority_id: Annotated[str, typer.Option("--id", help="The authority the letter went to.")],
     sent_at: Annotated[str, typer.Option("--sent-at", help="When it was sent (UTC).")],
+    message_id: Annotated[
+        str | None,
+        typer.Option("--message-id", help="The Message-ID it went out with, e.g. <…@lovspor.no>."),
+    ] = None,
 ) -> None:
     """Record a letter of a wave as sent, with the SHA-256 of the letter as sent."""
     try:
-        guarded(lambda: _sent(manifest, authority_id, sent_at))
+        guarded(lambda: _sent(manifest, authority_id, sent_at, message_id))
     except (OSError, ValueError) as exc:
         raise refuse(exc) from exc

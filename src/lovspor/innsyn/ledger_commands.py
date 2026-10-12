@@ -109,6 +109,7 @@ def _row(state: RequestState) -> str:
         _text(state.outcome),
         _text(state.klage_mark),
         _text(state.klage_sent_at),
+        _text(sent.message_id),
     )
     return "\t".join(fields)
 
@@ -118,7 +119,8 @@ def list_requests() -> None:
     """List every request, tab-separated.
 
     Columns: request, authority, recipient, sent_at, LF ids, general clause,
-    saksnummer, acknowledged_at, answered_at, outcome, § 32 mark, klage_sent_at.
+    saksnummer, acknowledged_at, answered_at, outcome, § 32 mark, klage_sent_at,
+    Message-ID.
     """
     held = guarded(lambda: requests(workspace()))
     for state in held.values():
