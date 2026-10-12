@@ -256,3 +256,54 @@ class TestCandidates:
         result = innsyn(tmp_path / "innsyn", "recipient-candidates")
         assert result.exit_code == 1
         assert "unreadable record" in result.stderr
+
+
+def _variant(log: ObservationLog, body: str, **changes: object) -> None:
+    payload = body.encode()
+    record = ArtifactObservation(
+        authority_id="4646",
+        url=FJALER,
+        observed_at=datetime(2026, 9, 30, 9, tzinfo=UTC),
+        provenance=RetrievalProvenance(
+            adapter="http",
+            channel="http",
+            discovery_method="sitemap",
+            user_agent="test-agent",
+            rate_limit_seconds=1.0,
+        ),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        content_type="text/html",
+        http_status=200,
+    )
+    log.append_artifact(record.model_copy(update=changes), payload)
+
+
+class TestCandidateScanEdges:
+    def test_non_html_and_error_pages_are_not_read(
+        self, tmp_path: Path, archive: ObservationLog
+    ) -> None:
+        _variant(archive, "postmottak@pdf.no", content_type="application/pdf")
+        _variant(archive, "postmottak@error.no", http_status=404)
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert result.stdout == ""
+
+    def test_the_same_bytes_count_once_and_a_longer_page_keeps_the_short_citation(
+        self, tmp_path: Path, archive: ObservationLog
+    ) -> None:
+        _capture(archive, FJALER, "<p>postmottak@fjaler.kommune.no</p>")
+        _capture(archive, FJALER + "a/", "<p>postmottak@fjaler.kommune.no</p>")
+        _capture(archive, FJALER + "longer/page/", "<p>postmottak@fjaler.kommune.no </p>")
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert result.stdout.splitlines()[0].split("\t")[1:4] == [
+            "postmottak@fjaler.kommune.no",
+            "2",
+            FJALER,
+        ]
+
+    def test_a_missing_blob_is_skipped(self, tmp_path: Path, archive: ObservationLog) -> None:
+        body = "<p>postmottak@fjaler.kommune.no</p>"
+        _capture(archive, FJALER, body)
+        archive.blob_path(hashlib.sha256(body.encode()).hexdigest()).unlink()
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert result.exit_code == 0, result.output
+        assert result.stdout == ""
