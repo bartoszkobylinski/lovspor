@@ -28,11 +28,14 @@ from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, ObservationRecord
 from lovspor.observatory.registry import SourceRegistry, host_within_domain
 
-MAILBOX = re.compile(rb"\b(post(?:mottak)?(?:\.[a-z0-9-]+)?@[a-z0-9.-]+\.no)\b", re.IGNORECASE)
+#: Group 1 is the mailbox, group 2 its host.
+MAILBOX = re.compile(rb"\b(post(?:mottak)?(?:\.[a-z0-9-]+)?@([a-z0-9.-]+\.no))\b", re.IGNORECASE)
 
 _SUCCESS = range(200, 300)
 
 _Key = tuple[str, str]
+#: A mailbox (lower-cased) and its host (as written).
+_Mailbox = tuple[str, str]
 
 
 class Candidate(BaseModel):
@@ -48,6 +51,11 @@ class Candidate(BaseModel):
     sha256: str
 
 
+def _mailbox(match: re.Match[bytes]) -> _Mailbox:
+    # The host is compared by host_within_domain, which folds case itself.
+    return match.group(1).decode().lower(), match.group(2).decode()
+
+
 def _html(record: ArtifactObservation) -> bool:
     media_type = record.content_type.partition(";")[0].lower()
     return record.http_status in _SUCCESS and "html" in media_type
@@ -58,7 +66,7 @@ class _Scan:
     log: ObservationLog
     domains: dict[str, str]
     wanted: frozenset[str] | None
-    addresses_by_blob: dict[str, frozenset[str]] = field(default_factory=dict)
+    addresses_by_blob: dict[str, frozenset[_Mailbox]] = field(default_factory=dict)
     counted: set[tuple[str, str]] = field(default_factory=set)
     found: dict[_Key, Candidate] = field(default_factory=dict)
 
@@ -75,20 +83,20 @@ class _Scan:
         new_page = blob_key not in self.counted
         self.counted.add(blob_key)
         domain = self.domains[record.authority_id]
-        for address in self._addresses(record.sha256):
-            if host_within_domain(address.partition("@")[2], domain):
+        for address, host in self._addresses(record.sha256):
+            if host_within_domain(host, domain):
                 self._keep(record, address, new_page)
 
-    def _addresses(self, sha256: str) -> frozenset[str]:
+    def _addresses(self, sha256: str) -> frozenset[_Mailbox]:
         cached = self.addresses_by_blob.get(sha256)
         if cached is not None:
             return cached
         try:
             blob = self.log.read_blob(sha256)
         except FileNotFoundError:
-            found: frozenset[str] = frozenset()
+            found: frozenset[_Mailbox] = frozenset()
         else:
-            found = frozenset(m.group(1).decode().lower() for m in MAILBOX.finditer(blob))
+            found = frozenset(_mailbox(m) for m in MAILBOX.finditer(blob))
         self.addresses_by_blob[sha256] = found
         return found
 
