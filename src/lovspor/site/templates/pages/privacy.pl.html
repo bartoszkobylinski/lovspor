@@ -1,0 +1,63 @@
+{#- /pl/privacy/: the Polish twin of privacy.nb.html (owner decision
+    2026-10-10). Same statements, same sources — see the Norwegian
+    template's header for where each one is read from. It is a translation
+    for convenience: the Norwegian text governs, and the page says so.
+    Legal basis is stated under personopplysningsloven only, in plain
+    words, with no article numbers and no reference to any other act. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+<p class="muted">Ostatnia aktualizacja: <span data-literal>8 października 2026</span>.</p>
+<p class="panel note">To tłumaczenie pomocnicze. Wiążąca jest <a href="/privacy/" hreflang="nb" lang="nb">wersja norweska</a>; w razie rozbieżności rozstrzyga tekst norweski.</p>
+
+<h2>Kto odpowiada</h2>
+<p>Administratorem danych jest Bartosz Kobyliński, osoba prywatna w Norwegii. lovspor nie jest prowadzony przez firmę. Kontakt: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+
+<h2>Strona internetowa</h2>
+<p>Strony lovspor.no są statyczne. Nie ustawiają plików cookie, nie uruchamiają skryptów i nie używają narzędzi analitycznych ani śledzących.</p>
+<p>Serwer WWW prowadzi dziennik dostępu (access log) z otrzymywanych żądań, na potrzeby utrzymania, diagnozowania problemów i bezpieczeństwa. Jeden wpis opisuje jedno żądanie, w tym adres IP, z którego przyszło, czas, żądany adres i to, co przeglądarka podała o sobie. Dziennik jest rotowany według rozmiaru: przechowywana jest tylko ograniczona liczba starszych plików, a najstarsze są usuwane automatycznie — w praktyce po kilku dniach.</p>
+
+<h2>Usługa hostowana</h2>
+<p>Usługa lovverk pod adresem <code>https://lovspor.no/mcp</code> wymaga logowania na konto. Gdy łączysz się z aplikacji czatu, takiej jak Claude czy ChatGPT, logujesz się przez WorkOS, naszego dostawcę logowania. WorkOS przetwarza twój adres e-mail i imię oraz nazwisko, a jeśli logujesz się innym kontem, na przykład Google — twoją tożsamość u tego dostawcy. Nasz serwer otrzymuje od WorkOS podpisane poświadczenie dostępu i używa z niego tylko identyfikatora użytkownika, a nie imienia ani adresu e-mail, żeby cię rozpoznać i liczyć twoje użycie.</p>
+<p>Użycie jest liczone per użytkownik, żeby egzekwować limity. Liczniki są przechowywane tylko w pamięci serwera i znikają przy restarcie usługi. Nasz program nie zapisuje twoich pytań ani treści wywołań narzędzi w dzienniku. Proces usługi ma jednak na serwerze własny dziennik operacyjny, który zawiera szczegóły pojedynczych żądań, w tym adres IP i status odpowiedzi. Jest on usuwany najpóźniej po <span data-literal>30</span> dniach.</p>
+<p>Raz na godzinę usługa zapisuje do tego samego dziennika operacyjnego zbiorcze podsumowanie użycia: ile wywołań było na każde narzędzie, ile odrzucono i przez który limit, czasy odpowiedzi oraz ilu różnych użytkowników było aktywnych — wyłącznie jako liczba. Podsumowanie nie zawiera treści zapytań, identyfikatorów użytkowników ani adresów IP.</p>
+
+<h2>Wyszukiwanie semantyczne i OpenAI</h2>
+<p>Narzędzie <code>semantic_search</code> wysyła tekst twojego wyszukiwania, skrócony do stałej maksymalnej długości, do usługi embeddingów OpenAI, która zamienia go na wektor. To jedyne miejsce, w którym tekst, który piszesz, opuszcza nasz serwer; pozostałe narzędzia niczego dalej nie wysyłają. Tekst wyszukiwania i jego wektor są trzymane w pamięci podręcznej i znikają przy restarcie usługi. Przetwarzanie w OpenAI może odbywać się poza EOG. Nie wklejaj do wyszukiwania informacji poufnych ani danych osobowych.</p>
+
+<h2>E-mail</h2>
+<p>Jeśli do nas napiszesz, na przykład z pytaniem, przetwarzamy twój adres e-mail i treść wiadomości, żeby odpowiedzieć. Poczta na adres <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a> jest przekazywana przez Cloudflare.</p>
+
+<h2>Kto przetwarza dane w naszym imieniu</h2>
+<ul>
+  <li><strong>DigitalOcean</strong> — hosting serwera, w centrum danych we Frankfurcie (UE).</li>
+  <li><strong>WorkOS</strong> — logowanie na konto.</li>
+  <li><strong>OpenAI</strong> — tylko tekst wyszukiwania w <code>semantic_search</code>.</li>
+  <li><strong>Cloudflare</strong> — DNS dla lovspor.no i przekazywanie poczty na adres kontaktowy. Ruch do strony i do usługi nie przechodzi przez Cloudflare.</li>
+</ul>
+<p>Nie sprzedajemy danych, nie wyświetlamy reklam i nie używamy danych do profilowania.</p>
+
+<h2>Cele i podstawa prawna</h2>
+<ul>
+  <li><strong>Logowanie, limity i wyszukiwanie semantyczne</strong> — aby świadczyć usługę, na którą się zapisałeś.</li>
+  <li><strong>Dziennik dostępu i dziennik operacyjny</strong> — prawnie uzasadniony interes w utrzymaniu i ochronie usługi.</li>
+  <li><strong>E-mail</strong> — prawnie uzasadniony interes w odpowiedzi na twoją wiadomość.</li>
+</ul>
+
+<h2>Jak długo przechowujemy dane</h2>
+<ul>
+  <li><strong>Liczniki użycia i pamięć podręczna wyszukiwania</strong> — do restartu usługi.</li>
+  <li><strong>Dziennik dostępu</strong> — rotowany według rozmiaru; w praktyce kilka dni.</li>
+  <li><strong>Dziennik operacyjny</strong> — najwyżej <span data-literal>30</span> dni.</li>
+  <li><strong>Twoje konto w WorkOS</strong> — do czasu, aż poprosisz o jego usunięcie.</li>
+  <li><strong>E-mail</strong> — tak długo, jak potrzeba, żeby ci odpowiedzieć.</li>
+</ul>
+
+<h2>Twoje prawa</h2>
+<p>Zgodnie z <a href="/lov/personopplysningsloven/" lang="nb">personopplysningsloven</a> (norweską ustawą o ochronie danych osobowych) masz prawo dostępu do danych, które o tobie przechowujemy, oraz prawo do ich sprostowania lub usunięcia. Możesz też sprzeciwić się przetwarzaniu, zażądać jego ograniczenia i poprosić o przekazanie swoich danych. Aby usunąć konto, napisz na <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>. Jeśli uważasz, że przetwarzamy dane osobowe niezgodnie z przepisami, możesz złożyć skargę do <a href="https://www.datatilsynet.no/">Datatilsynet</a>, norweskiego organu ochrony danych.</p>
+
+<h2>Zmiany</h2>
+<p>Jeśli zmienimy tę stronę, zaktualizujemy datę na górze. Kod, który wykonuje opisane tu przetwarzanie, jest otwarty: <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>. Warunki korzystania są na <a href="/pl/terms/">osobnej stronie</a>.</p>
+{% endblock %}

@@ -1,0 +1,48 @@
+{#- /pl/docs/ (ADR-0014 Decision 2), the Polish twin of docs.nb.html — a
+    full translation, not a summary. The tool count is the checkout
+    descriptor's fact and the tool names are pinned to that descriptor by
+    the same test that pins the Norwegian page; no hosted fact is rendered
+    here. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<p>lovverk to serwer <a href="https://modelcontextprotocol.io">MCP</a> z {{ fact("code.tool_surface.tool_count", kind="code") }} narzędziami tylko do odczytu. Żadne z nich nie zmienia korpusu. Jak skierować do niego klienta: <a href="/pl/connect/">Połącz</a>.</p>
+
+<h2>Narzędzia</h2>
+<p><strong>Wyszukiwanie.</strong> <code>search_laws</code> przeszukuje skróconą nazwę (slug) i tytuł, <code>search_body</code> sam tekst prawa, a <code>semantic_search</code> szuka według znaczenia — gdy pytasz innymi słowami, niż używa ustawa. <code>list_recent_changes</code> pokazuje ostatnie zmiany, a <code>corpus_status</code>, jak świeży jest korpus, z którego czytasz.</p>
+<p><strong>Czytanie.</strong> <code>get_law</code> zwraca cały tekst, <code>get_section</code> pojedynczy przepis z już sprawdzonymi odesłaniami, a <code>list_sections</code> spis treści — model nie musi więc przeciągać całej ustawy przez okno kontekstu, żeby dotrzeć do jednego paragrafu.</p>
+<p><strong>Weryfikacja.</strong> <code>validate_citation</code> odpowiada, czy dane odesłanie w ogóle istnieje, a <code>verify_quote</code>, czy dosłowny cytat naprawdę występuje w przepisie, któremu go przypisujesz. Te dwa narzędzia istnieją z powodu najczęstszego błędu: modelu cytującego słowa, których tam nie ma.</p>
+<p><strong>Historia.</strong> <code>get_law_history</code>, <code>list_law_versions</code>, <code>get_law_at</code> i <code>diff_law_versions</code> czytają własną historię git korpusu: co korpus zawierał na koniec danego dnia i czym różniły się dwie daty. <code>get_temporal_events</code> zwraca to, co samo źródło mówi o zmianach i wejściu w życie. <code>get_observation_history</code> dotyczy tylko lokalnych rozporządzeń: które wersje zaobserwowano na stronie organu i kiedy — zaobserwowane, nigdy nie twierdzimy, że obowiązują.</p>
+<p><strong>UE i EOG.</strong> <code>get_eu_basis</code> podaje kody CELEX aktów, które dana ustawa wdraża; <code>search_eu_implementations</code> działa w drugą stronę, od dokumentu UE do norweskich ustaw.</p>
+
+<h2>Na co nie odpowiada</h2>
+<ul>
+  <li><strong>To nie porada prawna.</strong> Narzędzia pokazują tekst prawa. Interpretacja należy do ciebie.</li>
+  <li><strong>Nie prawo obowiązujące w danym dniu.</strong> Narzędzia historii odpowiadają, co <em>korpus zawierał</em> w danym dniu — a nie, które przepisy wtedy obowiązywały. To dwa różne pytania i tylko na pierwsze da się tu odpowiedzieć.</li>
+  <li><strong>Bez orzecznictwa, prac przygotowawczych, okólników i rozporządzeń gminnych.</strong> Przepis może być wiążący, a mimo to go tu nie być. Pusty wynik nie dowodzi, że takiego przepisu nie ma.</li>
+  <li><strong>Bez sprawdzania parafraz.</strong> <code>verify_quote</code> potwierdza, że dosłowny ciąg znaków występuje w przepisie. Czy przeredagowanie jest wierne prawnie, tego nie rozstrzygnie — w tym celu przeczytaj tekst sam.</li>
+</ul>
+
+<h2>Korpus</h2>
+<p>{{ fact("corpus.documents", kind="corpus") }} dokumentów w ostatnim wydaniu: obowiązujące norweskie ustawy i centralne rozporządzenia, pobrane z otwartych danych Lovdata i zapisane jako Markdown. Możesz je przeglądać tutaj — <a href="/lov/">ustawy</a> i <a href="/forskrift/">rozporządzenia</a> (po norwesku).</p>
+<p>Podział pochodzi od samego źródła: <em lang="nb">lover</em> (ustawy) uchwala Storting, a <em lang="nb">sentrale forskrifter</em> (centralne rozporządzenia) wydaje ministerstwo lub dyrektoriat na podstawie upoważnienia ustawowego. Lokalne i gminne rozporządzenia nie są tu ujęte.</p>
+<p class="muted">Źródło: Lovdata, na licencji <span data-literal>NLOD 2.0</span>; każdy plik zawiera licencję we własnym nagłówku (front matter). Korpus jest publiczny w <a href="https://github.com/bartoszkobylinski/lovverk">lovverk</a>; silnik, który go buduje, to <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>, na licencji <span data-literal>AGPL-3.0</span>.</p>
+
+<h2>Logowanie</h2>
+<p>Usługa hostowana zawsze wymaga zalogowania: wywołanie bez poświadczeń dostaje odpowiedź <span data-literal>401</span>. Logujesz się przez <span data-literal>OAuth 2.1</span>, za pomocą konektora w aplikacji czatu, takiej jak claude.ai czy ChatGPT; instrukcje są na stronie <a href="/pl/connect/">Połącz</a>. Logowanie jest włączone, gdy na serwerze skonfigurowano parę <span data-literal>OAuth 2.1</span> — usługa odpowiada wtedy na wykrywanie <span data-literal>RFC 9728</span>; gdy jest wyłączone, nie ma żadnego <code>.well-known</code>.</p>
+<p>W jakim stanie usługę rzeczywiście <em>zaobserwowano</em> przy ostatnim wydaniu, podaje strona <a href="/pl/status/">status</a> — nie ta.</p>
+
+<h2>Limity</h2>
+<p>Każde wywołanie jest liczone na dwóch poziomach: na poświadczenie i na instancję. Oba ograniczają liczbę równoczesnych wywołań, wywołań na minutę, wywołań na dzień i wyszukiwań semantycznych na dzień. Limity ustala się per poświadczenie i można je zmienić bez nowego wydania, więc są związane z twoim logowaniem — nie z tą stroną. Liczniki są trzymane w pamięci: restart usługi zeruje dzień.</p>
+
+<h2>Uczciwe zastrzeżenia</h2>
+<ul>
+  <li><strong><code>semantic_search</code> wymaga klucza na serwerze.</strong> Twoje zapytanie jest wysyłane do usługi embeddingów, która zamienia je na wektor. Wektory korpusu obliczono wcześniej, ale <em>twoje pytanie</em> opuszcza maszynę — nie wklejaj więc do niego poufnych treści. Bez klucza wyłączone jest tylko to jedno narzędzie; pozostałe działają bez zmian. Jeśli uruchamiasz serwer sam, klucz jest twój.</li>
+  <li><strong>Wynik to podobieństwo, nie trafność.</strong> Wysoka liczba z <code>semantic_search</code> oznacza, że przepis dotyczy czegoś podobnego — a nie, że odpowiada na pytanie. Przeczytaj tekst przez <code>get_section</code>, zanim go zacytujesz.</li>
+  <li><strong><code>search_body</code> dopasowuje podciągi znaków.</strong> Bez odmiany wyrazów: wyszukanie <em lang="nb">skattefradrag</em> nie znajdzie dokumentów, w których występuje tylko <em lang="nb">skattefradraget</em>.</li>
+  <li><strong>Brak obserwacji nie znaczy „nie działa”.</strong> Na stronie <a href="/pl/status/">status</a> wartość jest oznaczona jako nieobserwowana, gdy sam pomiar się nie powiódł — z powodu naszej sieci, naszego poświadczenia albo naszych narzędzi. Strona mówi wtedy dokładnie to, z powodem i czasem, zamiast pokazywać poprzednią wartość albo zero. Awaria obserwatora nie jest awarią usługi i nie mogą wyglądać tak samo.</li>
+</ul>
+{% endblock %}

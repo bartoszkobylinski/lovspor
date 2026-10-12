@@ -1,0 +1,42 @@
+{#- /en/connect/chatgpt/: the English twin of connect-chatgpt.nb.html — a
+    full translation, not a summary. Same sources, same limits: see the
+    Norwegian template's header. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<h2>What this is</h2>
+<p>lovverk is an <a href="https://modelcontextprotocol.io">MCP</a> server that lets ChatGPT look up Norwegian acts and regulations. The hosted service lives at <code>https://lovspor.no/mcp</code>. You create a connector to it and sign in with <span data-literal>OAuth 2.1</span> — there is no key to paste, and it costs nothing.</p>
+
+<h2>Connect in ChatGPT</h2>
+<p>These are the steps we have run in ChatGPT:</p>
+<ol class="steps">
+  <li>Turn on <strong>developer mode</strong> in ChatGPT.</li>
+  <li>Create a connector with the address <code>https://lovspor.no/mcp</code>.</li>
+  <li>Choose <strong>OAuth</strong> as the authentication.</li>
+  <li>Sign in on the page that opens. Once you are back in the chat, the tools answer.</li>
+</ol>
+
+<h2>Signing in</h2>
+<p>Once you have chosen <span data-literal>OAuth</span>, a sign-in page from WorkOS opens — the service we use for sign-in. You sign in there with an account; you can also sign in with another account, such as Google. lovspor receives only a user identifier from WorkOS, not your name or email address — see <a href="/en/privacy/">privacy</a>. Afterwards you are sent back to ChatGPT.</p>
+
+<h2>Try a first question</h2>
+<p>Ask this in a new chat (it is Norwegian for “How long must I have worked to get sick pay from my employer?”):</p>
+<p class="panel"><strong lang="nb">«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»</strong></p>
+<p>The answer should rest on <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span></a> and quote it: at least four weeks with the employer (the qualifying period). Then ask about <span data-literal>folketrygdloven § 8-99</span> — the tool should answer that the section does not exist.</p>
+
+<h2>If it does not work</h2>
+<ul>
+  <li><strong>You cannot find where to create a connector.</strong> Turn on developer mode first; it was the first step when we ran the setup.</li>
+  <li><strong>The sign-in does not start.</strong> Check that you chose <strong>OAuth</strong> as the authentication.</li>
+  <li><strong>Authorization failed after you have signed in.</strong> Then the fault is in the setup on our side, not yours. Write to <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</li>
+  <li><strong>A label has moved.</strong> The labels inside the client change more often than this page does. What matters is the address and <span data-literal>OAuth</span> as the way to sign in.</li>
+  <li><strong>The tools do not answer.</strong> The state at the last release is on <a href="/en/status/">status</a>. The service always requires sign-in, so a call without it is refused.</li>
+</ul>
+
+<h2>Without an account</h2>
+<p>ChatGPT connects to the hosted service. If you would rather run the server on your own machine, with no account, the procedure is in the <a href="/en/connect/claude/">Claude guide</a>; for ChatGPT we have no tested local recipe.</p>
+<p class="muted">Other clients: <a href="/en/connect/">Connect</a>. What the tools answer: the <a href="/en/docs/">documentation</a>. Questions: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+{% endblock %}

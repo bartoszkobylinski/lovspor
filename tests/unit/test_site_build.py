@@ -471,15 +471,16 @@ class TestTree:
         assert report.release_key.lovspor_commit == world.lovspor_commit
 
     def test_route_closure(self, built: tuple[Path, SiteBuildReport]) -> None:
-        """Every Decision-2 route in both languages where the mirror rule
-        applies, nothing outside the route set plus the three root files."""
+        """Every Decision-2 route in all three languages where the mirror rule
+        applies, one guide per registered client, nothing outside the route
+        set plus the root files."""
         out, _ = built
         expected = {f"{page.path.lstrip('/')}index.html" for page in emitted_pages()}
 
         assert _files(out) == expected | _ROOT_FILES
-        assert not [
+        assert {
             name for name in _files(out) if name.startswith("connect/") and name.count("/") > 1
-        ]
+        } == {"connect/claude/index.html", "connect/chatgpt/index.html"}
 
     def test_sitemap_lists_exactly_the_emitted_pages(
         self, built: tuple[Path, SiteBuildReport]
@@ -522,14 +523,15 @@ class TestTree:
                 assert alternates == {}, page.path
                 continue
             assert alternates[page.lang] == f"{SITE_ORIGIN}{page.path}"
-            other = "en" if page.lang == "nb" else "nb"
-            twin = alternates[other].removeprefix(SITE_ORIGIN)
-            twin_alternates = dict(
-                re.findall(
-                    r'<link rel="alternate" hreflang="(\w+)" href="([^"]+)">', _page(out, twin)
+            assert set(alternates) == {"nb", "en", "pl"}, page.path
+            for other in {"nb", "en", "pl"} - {page.lang}:
+                twin = alternates[other].removeprefix(SITE_ORIGIN)
+                twin_alternates = dict(
+                    re.findall(
+                        r'<link rel="alternate" hreflang="(\w+)" href="([^"]+)">', _page(out, twin)
+                    )
                 )
-            )
-            assert twin_alternates[page.lang] == f"{SITE_ORIGIN}{page.path}", page.path
+                assert twin_alternates == alternates, (page.path, twin)
 
     def test_no_script_no_handler_no_external_asset_on_any_page(
         self, built: tuple[Path, SiteBuildReport]
@@ -602,6 +604,14 @@ _SECTIONS = {
         "What it covers — honestly",
         "Open source",
     ],
+    "/pl/": [
+        "Pytanie, które możesz zadać",
+        "Połącz",
+        "Jak dobrze to działa?",
+        "Źródła",
+        "Co obejmuje — uczciwie",
+        "Otwarty kod",
+    ],
 }
 
 
@@ -625,7 +635,7 @@ def _rebased(world: World, root: Path, publication: bool, extra: dict[str, str])
 class TestLanding:
     """One page, six sections (owner decision 2026-10-07)."""
 
-    @pytest.mark.parametrize("path", ["/", "/en/"])
+    @pytest.mark.parametrize("path", ["/", "/en/", "/pl/"])
     def test_the_sections_are_the_six_in_order(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
@@ -634,7 +644,7 @@ class TestLanding:
         assert _h2s(markup) == _SECTIONS[path]
         assert markup.count("<h1>") == 1
 
-    @pytest.mark.parametrize("path", ["/", "/en/"])
+    @pytest.mark.parametrize("path", ["/", "/en/", "/pl/"])
     def test_reads_the_two_counts_as_facts(
         self, built: tuple[Path, SiteBuildReport], world: World, path: str
     ) -> None:
@@ -647,7 +657,7 @@ class TestLanding:
         assert "<span data-literal>AGPL-3.0</span>" in markup
         assert "<span data-literal>NLOD 2.0</span>" in markup
 
-    @pytest.mark.parametrize("path", ["/", "/en/"])
+    @pytest.mark.parametrize("path", ["/", "/en/", "/pl/"])
     def test_the_example_quotes_section_8_18_and_links_its_page(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
@@ -663,6 +673,7 @@ class TestLanding:
         [
             ("/", "Som connector i Claude.ai og ChatGPT virker det i dag"),
             ("/en/", "As a connector in Claude.ai and ChatGPT it works today"),
+            ("/pl/", "Jako konektor w Claude.ai i ChatGPT działa już dziś"),
         ],
     )
     def test_the_connector_works_today_when_the_release_attests_oauth(
@@ -683,6 +694,7 @@ class TestLanding:
         [
             ("/", "virker det i dag", "ved denne utgivelsen er innloggingen ikke bekreftet"),
             ("/en/", "it works today", "at this release the sign-in is not attested"),
+            ("/pl/", "działa już dziś", "w tym wydaniu logowanie nie zostało potwierdzone"),
         ],
     )
     def test_the_connector_claim_follows_the_oauth_comparison(
@@ -799,6 +811,7 @@ class TestLandingBenchmark:
 
         assert "Hvor godt virker det?" not in _page(out, "/")
         assert "How well does it work?" not in _page(out, "/en/")
+        assert "Jak dobrze to działa?" not in _page(out, "/pl/")
         assert not [e for e in _facts(out)["artifacts"] if e["id"].startswith("benchmarks/")]
 
     def test_an_unlisted_report_changes_no_page(
@@ -815,21 +828,39 @@ class TestLandingBenchmark:
         assert "unlisted" not in (out / "site-facts.json").read_text(encoding="utf-8")
 
 
-class TestConnectPage:
-    """The written /connect/ page: the procedures it shows, and the ones it
-    declines to invent. A client whose steps are not in this repository is
-    named as untested — the page never carries a plausible-looking recipe."""
+_CHOOSERS = ("/connect/", "/en/connect/", "/pl/connect/")
+_CLAUDE = ("/connect/claude/", "/en/connect/claude/", "/pl/connect/claude/")
+_CHATGPT = ("/connect/chatgpt/", "/en/connect/chatgpt/", "/pl/connect/chatgpt/")
+_GUIDES = (*_CLAUDE, *_CHATGPT)
+_QUESTION = "«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»"
 
-    @pytest.mark.parametrize("path", ["/connect/", "/en/connect/"])
-    def test_shows_the_connector_address_and_the_local_path(
+
+class TestConnectPage:
+    """/connect/ is a short chooser since the owner's 2026-10-10 split: one
+    link per registered client, and the clients without a procedure in this
+    repository named as untested — never given a plausible-looking recipe."""
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_links_one_guide_per_registered_client_in_the_page_language(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
-        out, _ = built
-        markup = _page(out, path)
+        markup = _page(built[0], path)
+        prefix = path.removesuffix("connect/")
 
+        assert '<ul class="choices">' in markup
+        for slug in ("claude", "chatgpt"):
+            assert f'href="{prefix}connect/{slug}/"' in markup, (path, slug)
         assert "https://lovspor.no/mcp" in markup
-        assert "uvx lovspor fetch-corpus" in markup
-        assert "claude mcp add lovverk -- uvx lovspor mcp" in markup
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_is_short_and_leaves_the_steps_to_the_guides(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+
+        assert "Register automatically" not in markup
+        assert "<pre>" not in markup
+        assert markup.count("<h2>") <= 3
 
     def test_an_unverified_client_is_named_untested_rather_than_given_steps(
         self, built: tuple[Path, SiteBuildReport]
@@ -841,6 +872,7 @@ class TestConnectPage:
         for path, wording in (
             ("/connect/", "Ingen testet framgangsmåte"),
             ("/en/connect/", "No tested procedure"),
+            ("/pl/connect/", "Brak sprawdzonej procedury"),
         ):
             markup = _page(out, path)
 
@@ -850,42 +882,144 @@ class TestConnectPage:
             for client in ("Cursor", "Codex"):
                 assert client in markup, (path, client)
 
-    @pytest.mark.parametrize("path", ["/connect/", "/en/connect/"])
-    def test_the_oauth_connectors_carry_the_procedure_run_on_2026_09_30(
-        self, built: tuple[Path, SiteBuildReport], path: str
-    ) -> None:
-        """claude.ai and ChatGPT were connected over OAuth against the hosted
-        service on 2026-09-30 (owner decision superseding #343). The page
-        carries the choices that decided success: automatic registration
-        for claude.ai, developer mode and OAuth for ChatGPT."""
-        out, _ = built
-        markup = _page(out, path)
-
-        assert "Sign in now" in markup
-        assert "Register automatically" in markup
-        assert "developer mode" in markup
-        assert "<strong>OAuth</strong>" in markup
-
-    @pytest.mark.parametrize("path", ["/connect/", "/en/connect/"])
+    @pytest.mark.parametrize("path", (*_CHOOSERS, *_GUIDES))
     def test_makes_no_hosted_claim_and_names_the_contact_address(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
         """A procedure page states no observation of the running service:
         the hosted reading lives on /status/ and nowhere else."""
-        out, _ = built
-        markup = _page(out, path)
+        markup = _page(built[0], path)
 
         assert 'data-kind="hosted"' not in markup
         assert '<a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>' in markup
         assert '<span class="tag" data-status="current">' in markup
 
-    def test_both_languages_carry_the_same_sections(
-        self, built: tuple[Path, SiteBuildReport]
+    @pytest.mark.parametrize("stem", ["/connect/", "/connect/claude/", "/connect/chatgpt/"])
+    def test_all_three_languages_carry_the_same_sections(
+        self, built: tuple[Path, SiteBuildReport], stem: str
     ) -> None:
-        """The English page is a full translation, not a summary."""
+        """The English and Polish pages are full translations, not summaries."""
         out, _ = built
+        counts = {_page(out, f"{prefix}{stem}").count("<h2>") for prefix in ("", "/en", "/pl")}
 
-        assert _page(out, "/connect/").count("<h2>") == _page(out, "/en/connect/").count("<h2>")
+        assert len(counts) == 1, stem
+
+
+class TestConnectGuides:
+    """``/connect/claude/`` and ``/connect/chatgpt/``: what the connector is,
+    numbered steps with the exact address, the sign-in screen, a first
+    question, troubleshooting. Every step is one this repository records as
+    run on 2026-09-30 (docs/mcp.md); no menu path is written that the
+    sources do not state."""
+
+    @pytest.mark.parametrize("path", _GUIDES)
+    def test_numbered_steps_carry_the_exact_server_address(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+        steps = markup.split('<ol class="steps">', 1)[1].split("</ol>", 1)[0]
+
+        assert "<code>https://lovspor.no/mcp</code>" in steps
+        assert steps.count("<li>") >= 3
+
+    @pytest.mark.parametrize("path", _CLAUDE)
+    def test_the_claude_guide_carries_the_choices_that_decided_success(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        steps = _page(built[0], path).split('<ol class="steps">', 1)[1].split("</ol>", 1)[0]
+
+        assert "Sign in now" in steps
+        assert "Register automatically" in steps
+        assert "Use Claude's published identity" in _page(built[0], path)
+
+    @pytest.mark.parametrize("path", _CHATGPT)
+    def test_the_chatgpt_guide_turns_on_developer_mode_first_and_picks_oauth(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        steps = _page(built[0], path).split('<ol class="steps">', 1)[1].split("</ol>", 1)[0]
+
+        assert "developer mode" in steps
+        assert "<strong>OAuth</strong>" in steps
+        assert steps.index("developer mode") < steps.index("https://lovspor.no/mcp")
+        assert "Register automatically" not in steps
+
+    @pytest.mark.parametrize("path", _GUIDES)
+    def test_says_what_the_sign_in_screen_is_and_asks_for_no_secret(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+        prefix = path.split("/connect/", 1)[0]
+
+        assert "WorkOS" in markup
+        assert f'href="{prefix}/privacy/"' in markup
+        assert "token" not in _text(markup).lower()
+
+    @pytest.mark.parametrize("path", _GUIDES)
+    def test_the_first_question_is_the_section_8_18_example(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+
+        assert _QUESTION in markup
+        assert '<a href="/lov/folketrygdloven-ftrl/paragraf/8-18/">' in markup
+        assert "<span data-literal>folketrygdloven § 8-99</span>" in markup
+
+    @pytest.mark.parametrize("path", _GUIDES)
+    def test_troubleshooting_points_to_status_and_to_the_contact(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+        prefix = path.split("/connect/", 1)[0]
+
+        assert f'href="{prefix}/status/"' in markup
+        assert "Authorization failed" in markup
+
+    @pytest.mark.parametrize("path", _CLAUDE)
+    def test_the_local_copy_stays_on_the_claude_guide(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+
+        assert "uvx lovspor fetch-corpus" in markup
+        assert "claude mcp add lovverk -- uvx lovspor mcp" in markup
+        assert "claude_desktop_config.json" in markup
+
+    @pytest.mark.parametrize("path", _CHATGPT)
+    def test_the_chatgpt_guide_offers_no_local_recipe_of_its_own(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+        prefix = path.split("/connect/", 1)[0]
+
+        assert "<pre>" not in markup
+        assert f'href="{prefix}/connect/claude/"' in markup
+
+    @pytest.mark.parametrize("path", _GUIDES)
+    def test_states_no_plan_or_tier_the_sources_do_not_state(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        """No document in this repository says which Claude or ChatGPT plan a
+        custom connector needs, so a guide names none."""
+        text = _text(_page(built[0], path))
+
+        for plan in ("Pro", "Plus", "Team", "Enterprise", "Max"):
+            assert not re.search(rf"\b{plan}\b", text), (path, plan)
+
+    @pytest.mark.parametrize(
+        ("path", "guides"),
+        [
+            ("/", ('href="/connect/claude/"', 'href="/connect/chatgpt/"')),
+            ("/en/", ('href="/en/connect/claude/"', 'href="/en/connect/chatgpt/"')),
+            ("/pl/", ('href="/pl/connect/claude/"', 'href="/pl/connect/chatgpt/"')),
+        ],
+    )
+    def test_the_landing_links_both_guides(
+        self, built: tuple[Path, SiteBuildReport], path: str, guides: tuple[str, ...]
+    ) -> None:
+        markup = _page(built[0], path)
+
+        for href in guides:
+            assert href in markup, (path, href)
 
 
 class TestNoTokenAccess:
@@ -905,6 +1039,12 @@ class TestNoTokenAccess:
         "/en/privacy/",
         "/terms/",
         "/en/terms/",
+        "/pl/",
+        "/pl/connect/",
+        "/pl/docs/",
+        "/pl/privacy/",
+        "/pl/terms/",
+        *_GUIDES,
     )
 
     @pytest.mark.parametrize("path", _ACCESS_PAGES)
@@ -932,6 +1072,7 @@ class TestNoTokenAccess:
         [
             ("/", "Den driftede connectoren er ikke tilgjengelig akkurat nå"),
             ("/en/", "The hosted connector is unavailable right now"),
+            ("/pl/", "Hostowany konektor jest teraz niedostępny"),
         ],
     )
     def test_an_unattested_release_points_to_running_it_locally(
@@ -951,14 +1092,23 @@ class TestLegalPages:
     pages in both languages, name the operator's contact address, and each
     processing party the code sends data to (owner decision 2026-09-30)."""
 
-    _PATHS = ("/privacy/", "/en/privacy/", "/terms/", "/en/terms/")
+    _PATHS = (
+        "/privacy/",
+        "/en/privacy/",
+        "/pl/privacy/",
+        "/terms/",
+        "/en/terms/",
+        "/pl/terms/",
+    )
 
     @pytest.mark.parametrize("path", _PATHS)
     def test_no_token_revision_updates_the_visible_date(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
         """The 2026-10-08 owner decision updates both legal pages and twins."""
-        date = "8 October 2026" if path.startswith("/en/") else "8. oktober 2026"
+        date = {"/en/": "8 October 2026", "/pl/": "8 października 2026"}.get(
+            path[:4], "8. oktober 2026"
+        )
         markup = _page(built[0], path)
 
         assert f"<span data-literal>{date}</span>" in markup
@@ -987,6 +1137,17 @@ class TestLegalPages:
                     "uses only the user identifier in it, not your name or email",
                     "Usage is counted per user to enforce the quotas",
                     "To delete your account, write to kontakt@lovspor.no",
+                ),
+            ),
+            (
+                "/pl/privacy/",
+                (
+                    "wymaga logowania na konto",
+                    "logujesz się przez WorkOS",
+                    "podpisane poświadczenie dostępu",
+                    "używa z niego tylko identyfikatora użytkownika, a nie imienia",
+                    "Użycie jest liczone per użytkownik, żeby egzekwować limity",
+                    "Aby usunąć konto, napisz na kontakt@lovspor.no",
                 ),
             ),
         ],
@@ -1024,6 +1185,17 @@ class TestLegalPages:
                 ),
                 "/en/docs/",
             ),
+            (
+                "/pl/terms/",
+                (
+                    "Konta i uczciwe korzystanie",
+                    "Twoje logowanie jest osobiste; nie udostępniaj go innym",
+                    "Każdy użytkownik ma limity",
+                    "Konta, które są nadużywane lub zagrażają działaniu usługi, mogą zostać "
+                    "zawieszone",
+                ),
+                "/pl/docs/",
+            ),
         ],
     )
     def test_terms_preserve_account_fair_use_after_token_removal(
@@ -1052,7 +1224,7 @@ class TestLegalPages:
         assert "ikke publisert ennå" not in markup
         assert '<a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>' in markup
 
-    @pytest.mark.parametrize("path", ["/privacy/", "/en/privacy/"])
+    @pytest.mark.parametrize("path", ["/privacy/", "/en/privacy/", "/pl/privacy/"])
     def test_privacy_names_every_party_the_code_sends_data_to(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
@@ -1068,6 +1240,10 @@ class TestLegalPages:
         [
             ("/privacy/", "ingen søketekst, ingen brukeridentifikatorer og ingen IP-adresser"),
             ("/en/privacy/", "no query text, no user identifiers and no IP addresses"),
+            (
+                "/pl/privacy/",
+                "nie zawiera treści zapytań, identyfikatorów użytkowników ani adresów IP",
+            ),
         ],
     )
     def test_privacy_says_the_hourly_usage_summary_is_aggregate_only(
@@ -1077,7 +1253,7 @@ class TestLegalPages:
         the page must say so, and say what it cannot contain."""
         assert phrase in _text(_page(built[0], path))
 
-    @pytest.mark.parametrize("path", ["/terms/", "/en/terms/"])
+    @pytest.mark.parametrize("path", ["/terms/", "/en/terms/", "/pl/terms/"])
     def test_terms_carry_the_licences_and_the_not_legal_advice_line(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
@@ -1092,6 +1268,7 @@ class TestLegalPages:
         out, _ = built
         for path in ("/privacy/", "/terms/"):
             assert _page(out, path).count("<h2>") == _page(out, f"/en{path}").count("<h2>")
+            assert _page(out, path).count("<h2>") == _page(out, f"/pl{path}").count("<h2>")
 
     def test_the_sitemap_lists_both_pages_in_both_languages(
         self, built: tuple[Path, SiteBuildReport]
@@ -1102,7 +1279,7 @@ class TestLegalPages:
         for path in self._PATHS:
             assert f"<loc>{SITE_ORIGIN}{path}</loc>" in sitemap, path
 
-    @pytest.mark.parametrize("prefix", ["", "/en"])
+    @pytest.mark.parametrize("prefix", ["", "/en", "/pl"])
     def test_the_site_footer_links_both_pages_in_the_page_language(
         self, built: tuple[Path, SiteBuildReport], prefix: str
     ) -> None:
@@ -1265,7 +1442,7 @@ class TestDocsPage:
     """The written /docs/ page: counts through the ledger, tool names pinned
     to the checkout's own descriptor, and no hosted claim."""
 
-    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/"])
+    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/", "/pl/docs/"])
     def test_the_counts_are_facts_never_typed_numbers(
         self, built: tuple[Path, SiteBuildReport], world: World, path: str
     ) -> None:
@@ -1277,7 +1454,7 @@ class TestDocsPage:
         ]
         assert _fact_values(markup, "corpus.documents") == ["1"]
 
-    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/"])
+    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/", "/pl/docs/"])
     def test_every_tool_it_names_is_a_tool_the_checkout_serves(
         self, built: tuple[Path, SiteBuildReport], world: World, path: str
     ) -> None:
@@ -1290,7 +1467,7 @@ class TestDocsPage:
 
         assert named == set(world.descriptor.names)
 
-    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/"])
+    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/", "/pl/docs/"])
     def test_makes_no_hosted_claim_and_sends_the_reader_to_status(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
@@ -1309,11 +1486,12 @@ class TestDocsPage:
     ) -> None:
         """The English page is a full translation, not a summary."""
         out, _ = built
-        nb, en = _page(out, "/docs/"), _page(out, "/en/docs/")
+        nb, en, pl = _page(out, "/docs/"), _page(out, "/en/docs/"), _page(out, "/pl/docs/")
 
         assert "Ikke juridisk rådgivning" in nb
         assert "Not legal advice" in en
-        assert nb.count("<h2>") == en.count("<h2>")
+        assert "To nie porada prawna" in pl
+        assert nb.count("<h2>") == en.count("<h2>") == pl.count("<h2>")
 
 
 _DEGRADED = {
@@ -1342,6 +1520,7 @@ class TestDegradation:
         for path, wording in (
             ("/status/", "ikke attestert ved denne utgivelsen — uobservert"),
             ("/en/status/", "not attested at this release — unobserved"),
+            ("/pl/status/", "niepotwierdzone w tym wydaniu — brak obserwacji"),
         ):
             markup = _page(out, path)
             assert _fact_values(markup, "hosted.state") == [hosted_state]
@@ -1381,6 +1560,9 @@ class TestDegradation:
             "/en/connect/",
             "/docs/",
             "/en/docs/",
+            "/pl/connect/",
+            "/pl/docs/",
+            *_GUIDES,
         ):
             assert _page(one, path) == _page(two, path), path
         assert _page(one, "/status/") != _page(two, "/status/")
@@ -1623,6 +1805,9 @@ class TestSiteFacts:
             "/en/docs/",
             "/status/",
             "/en/status/",
+            "/pl/",
+            "/pl/docs/",
+            "/pl/status/",
             LLMS_PAGE,
         }
 
@@ -2092,3 +2277,114 @@ def test_fresh_build_publishes_benchmark_in_page_language(
     assert f'<span class="tag">{label}</span>' in markup
     assert wording in markup
     assert _fact_values(markup, "llhb.pair.cases") == ["250"]
+
+
+_EU_LAW_REFERENCE = re.compile(
+    r"GDPR|RODO|personvernforordningen|2016/679|\bart(?:ykuł|ikkel|icle)?\.?\s*\d", re.I
+)
+
+
+def _with_polish_wording(world: World, root: Path) -> World:
+    """The same world, with a manifest whose every entry also carries Polish wording.
+
+    Stands in for the benchmark owner adding approved Polish copy to
+    ``PUBLICATION.json``: the build must then render the full section on
+    ``/pl/``, from the same facts as the other two languages.
+    """
+    rebased = _rebased(world, root, publication=True, extra={})
+    manifest_path = rebased.checkout / "benchmarks" / "llhb" / "PUBLICATION.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for entry in manifest["entries"]:
+        for key in ("label", "wording"):
+            entry[key]["pl"] = f"PL {entry[key]['en']}"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return rebased._replace(lovspor_commit=commit_all(rebased.checkout, "polish wording"))
+
+
+class TestPolishLocale:
+    """``/pl/`` beside nb and en (owner decision 2026-10-10): every page with an
+    English twin has a Polish one, said in Polish, with the same sections and
+    the same guarantees."""
+
+    def test_every_english_page_has_a_polish_twin_with_the_same_sections(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        out, _ = built
+        english = [page for page in emitted_pages() if page.lang == "en"]
+
+        assert english
+        for page in english:
+            polish = f"/pl{page.route.path}"
+            markup = _page(out, polish)
+            assert '<html lang="pl">' in markup, polish
+            assert markup.count("<h2>") == _page(out, page.path).count("<h2>"), polish
+
+    @pytest.mark.parametrize("path", ["/pl/privacy/", "/pl/terms/"])
+    def test_the_polish_legal_pages_say_the_norwegian_text_governs(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+
+        assert "w razie rozbieżności rozstrzyga tekst norweski" in _text(markup)
+        assert f'href="{path.removeprefix("/pl")}" hreflang="nb"' in markup
+
+    def test_no_page_cites_an_eu_regulation_instead_of_personopplysningsloven(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        for page in emitted_pages():
+            text = _text(_page(built[0], page.path))
+            assert not _EU_LAW_REFERENCE.search(text), (page.path, _EU_LAW_REFERENCE.search(text))
+        assert "personopplysningsloven (norweską ustawą o ochronie danych osobowych)" in _text(
+            _page(built[0], "/pl/privacy/")
+        )
+
+    def test_norwegian_legal_terms_stay_norwegian_with_a_polish_gloss(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        text = _text(_page(built[0], "/pl/"))
+
+        assert "åndsverkloven § 14 (norweska ustawa o prawie autorskim" in text
+        assert "ustaw (lover)" in text
+        assert "rozporządzeń (forskrifter)" in text
+        assert "oznaczone jako zaobserwowane, bez twierdzenia, że obowiązują" in text
+
+    def test_the_polish_number_format_is_the_norwegian_one(
+        self, world: World, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "site"
+        _with_polish_wording(world, tmp_path).build(out)
+        markup = _page(out, "/pl/")
+        rate = "llhb.citation_hallucination_rate"
+
+        assert _fact_values(markup, f"{rate}.control_percent") == ["19,5", "19,5"]
+
+    def test_without_polish_wording_the_benchmark_is_pointed_to_not_translated(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        """The manifest's approved wording is nb and en only: the Polish page
+        names the section and links the approved figures, renders none of
+        them, and does not fall back to the English wording."""
+        markup = _page(built[0], "/pl/")
+
+        assert "Jak dobrze to działa?" in _h2s(markup)
+        assert '<a href="/en/" hreflang="en" lang="en">Results in English</a>' in markup
+        assert 'data-fact="llhb.' not in markup
+        assert "post-hoc diagnostic" not in markup
+        assert "llhb" not in json.dumps(
+            [e for e in _facts(built[0])["facts"] if e["page"] == "/pl/"]
+        )
+
+    def test_with_polish_wording_the_full_section_renders_from_the_same_facts(
+        self, world: World, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "site"
+        _with_polish_wording(world, tmp_path).build(out)
+        markup = _page(out, "/pl/")
+
+        assert '<span class="tag">PL post-hoc diagnostic result, not a confirmatory one</span>' in (
+            markup
+        )
+        assert _fact_values(markup, "llhb.pair.cases") == ["250"]
+        assert _fact_values(markup, "llhb.model.model") == ["claude-opus-5"]
+        assert "Results in English" not in markup
+        assert _h2s(markup) == _SECTIONS["/pl/"]

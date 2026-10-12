@@ -1,0 +1,25 @@
+{#- /pl/connect/ (ADR-0014 Decision 2), the Polish twin of connect.nb.html —
+    a full translation, not a summary. The same rule holds: a client
+    without a procedure in this repository is named as untested rather
+    than given invented steps, and every identifier carrying a digit is
+    marked. Access to the hosted service is through a connector with OAuth
+    sign-in only (owner decision 2026-10-07). -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<p>lovverk to serwer <a href="https://modelcontextprotocol.io">MCP</a>. Usługa hostowana działa pod adresem <code>https://lovspor.no/mcp</code>: dodajesz ją jako konektor w swoim narzędziu AI i logujesz się przez <span data-literal>OAuth 2.1</span>. Nie musisz niczego wklejać i nic nie płacisz.</p>
+
+<h2>Wybierz klienta</h2>
+<ul class="choices">
+  <li><a href="/pl/connect/claude/">Claude</a><p>claude.ai jako konektor z logowaniem oraz lokalna kopia w Claude Code i Claude Desktop.</p></li>
+  <li><a href="/pl/connect/chatgpt/">ChatGPT</a><p>Jako konektor z logowaniem, w trybie dewelopera.</p></li>
+</ul>
+
+<h2>Inni klienci</h2>
+<p><strong>Brak sprawdzonej procedury</strong> dla Cursor i Codex. Nie przeszliśmy konfiguracji w tych klientach sami, więc nie wymyślamy kroków.</p>
+<p>Użyj klienta, który obsługuje konektor z logowaniem przez <span data-literal>OAuth</span>, albo uruchom serwer sam, jak w <a href="/pl/connect/claude/">instrukcji dla Claude</a>. Jeśli uda ci się podłączyć któregoś z tych klientów do usługi hostowanej — albo się nie uda — napisz na <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, a opis może się tu pojawić jako sprawdzona instrukcja, podpisana twoim nazwiskiem.</p>
+<p class="muted">Na co odpowiadają narzędzia, opisuje <a href="/pl/docs/">dokumentacja</a>; stan przy ostatnim wydaniu podaje strona <a href="/pl/status/">status</a>. Silnik jest otwartym oprogramowaniem na licencji <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+{% endblock %}

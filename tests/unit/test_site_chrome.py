@@ -11,13 +11,18 @@ import lovspor.site.chrome as chrome_module
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site.capabilities import Checkout, Observation, derive_state
 from lovspor.site.chrome import Chrome, chrome_html, corpus_chrome_html
-from lovspor.site.facts import FactLedger, FactRegistry, FactSource
+from lovspor.site.facts import FactLedger, FactRegistry, FactSource, Lang
 from lovspor.site.routes import emitted_pages
 from lovspor.site.style import stylesheet
 from lovspor.site.templates import TEMPLATES_DIR, page_globals, site_environment
 from tests.unit.site_fixtures import available_observation, checkout_expectations, readyz_503
 
 _EXTERNAL = re.compile(r"https?://|<script|<link|<img|@import|url\(|\bon\w+=", re.IGNORECASE)
+
+
+def _switch(path: str) -> tuple[tuple[Lang, str], ...]:
+    """The three twins of one route, as ``EmittedPage.twins`` hands them over."""
+    return (("nb", path), ("en", f"/en{path}"), ("pl", f"/pl{path}"))
 
 
 def _fact_set(documents: int, hosted_ready: bool) -> tuple[FactRegistry, str]:
@@ -53,8 +58,8 @@ class TestChromeSignature:
         could arrive (ADR:1170-1176) — enforced structurally."""
         parameters = inspect.signature(chrome_html).parameters
 
-        assert list(parameters) == ["lang", "language_switch_href"]
-        assert parameters["language_switch_href"].default is None
+        assert list(parameters) == ["lang", "language_switch"]
+        assert parameters["language_switch"].default == ()
         assert inspect.signature(chrome_html).return_annotation is Chrome
 
 
@@ -70,7 +75,7 @@ class TestChromeInvariance:
 
         assert chrome_html("nb") == chrome_html("nb")
         assert chrome_html("nb").header.encode("utf-8") == chrome_html("nb").header.encode("utf-8")
-        assert chrome_html("en", "/status/") == chrome_html("en", "/status/")
+        assert chrome_html("en", _switch("/status/")) == chrome_html("en", _switch("/status/"))
         assert ledger_a.entries != ledger_b.entries
 
     def test_renders_with_no_fact_in_scope(self) -> None:
@@ -106,6 +111,38 @@ class TestNorwegianSiteChrome:
         assert 'class="tag"' not in chrome.header + chrome.footer
         assert "data-status" not in chrome.header + chrome.footer
 
+    @pytest.mark.parametrize(
+        ("lang", "home", "links"),
+        [
+            (
+                "nb",
+                "/",
+                (("/connect/", "Koble til"), ("/docs/", "Dokumentasjon"), ("/status/", "Status")),
+            ),
+            (
+                "en",
+                "/en/",
+                (
+                    ("/en/connect/", "Connect"),
+                    ("/en/docs/", "Documentation"),
+                    ("/en/status/", "Status"),
+                ),
+            ),
+        ],
+    )
+    def test_the_site_navigation_reaches_connect_in_one_click(
+        self, lang: str, home: str, links: tuple[tuple[str, str], ...]
+    ) -> None:
+        """The redesign's one promise in the frame: from any site page,
+        connecting is one click away, in the page's own language."""
+        header = chrome_html(lang).header  # type: ignore[arg-type]
+        site_nav = header.split('<nav class="site"', 1)[1].split("</nav>", 1)[0]
+
+        assert f'<a class="brand" href="{home}">' in header
+        for href, label in links:
+            assert f'<a href="{href}">{label}</a>' in site_nav, (lang, href)
+        assert site_nav.index("connect/") < site_nav.index("docs/")
+
     def test_footer_carries_the_licence_and_not_legal_advice_lines_verbatim(self) -> None:
         footer = chrome_html("nb").footer
 
@@ -116,7 +153,7 @@ class TestNorwegianSiteChrome:
         assert '<a href="/observatory/">Om roboten vår</a>' in footer
 
     def test_footer_links_the_privacy_and_terms_pages_in_the_page_language(self) -> None:
-        nb, en = chrome_html("nb").footer, chrome_html("en", "/").footer
+        nb, en = chrome_html("nb").footer, chrome_html("en", _switch("/")).footer
 
         assert '<a href="/privacy/">Personvern</a>' in nb
         assert '<a href="/terms/">Vilkår for bruk</a>' in nb
@@ -125,13 +162,13 @@ class TestNorwegianSiteChrome:
 
     def test_adds_no_external_link_asset_or_script(self) -> None:
         """The chrome adds no external link and no new scheme (ADR:1180-1181)."""
-        for lang, href in (("nb", None), ("en", "/"), ("nb", "/en/status/")):
+        for lang, href in (("nb", ()), ("en", _switch("/")), ("pl", _switch("/status/"))):
             chrome = chrome_html(lang, href)  # type: ignore[arg-type]
 
             assert not _EXTERNAL.search(chrome.header + chrome.footer)
 
     def test_the_only_numerals_are_marked_literals(self) -> None:
-        for lang in ("nb", "en"):
+        for lang in ("nb", "en", "pl"):
             text = chrome_html(lang).header + chrome_html(lang).footer  # type: ignore[arg-type]
             outside = re.sub(r"<span data-literal>[^<]*</span>", "", text)
 
@@ -140,16 +177,16 @@ class TestNorwegianSiteChrome:
 
 class TestLanguageSwitch:
     def test_norwegian_page_links_to_its_english_twin(self) -> None:
-        header = chrome_html("nb", "/en/status/").header
+        header = chrome_html("nb", _switch("/status/")).header
 
         assert "<strong>NO</strong>" in header
-        assert '<a href="/en/status/">EN</a>' in header
+        assert '<a href="/en/status/" hreflang="en" lang="en">EN</a>' in header
 
     def test_english_page_links_back_and_reads_english(self) -> None:
-        chrome = chrome_html("en", "/status/")
+        chrome = chrome_html("en", _switch("/status/"))
 
         assert "<strong>EN</strong>" in chrome.header
-        assert '<a href="/status/">NO</a>' in chrome.header
+        assert '<a href="/status/" hreflang="nb" lang="nb">NO</a>' in chrome.header
         assert "Acts" in chrome.header
         assert "Regulations" in chrome.header
         assert (
@@ -159,10 +196,61 @@ class TestLanguageSwitch:
         assert '<a href="/observatory/">About our crawler</a>' in chrome.footer
 
     def test_the_switch_target_is_escaped(self) -> None:
-        header = chrome_html("nb", '/en/"><script>').header
+        header = chrome_html("nb", (("nb", "/"), ("en", '/en/"><script>'))).header
 
         assert "<script>" not in header
         assert "&lt;script&gt;" in header
+
+
+class TestPolishSiteChrome:
+    """The ``/pl/`` frame (owner decision 2026-10-10): Polish navigation and
+    footer, the three-way switch, and the corpus links still pointing at the
+    Norwegian law, which has no translation."""
+
+    def test_the_switch_names_all_three_languages_with_polish_current(self) -> None:
+        header = chrome_html("pl", _switch("/status/")).header
+        switch = header.split('<nav class="switch"', 1)[1].split("</nav>", 1)[0]
+
+        assert 'aria-label="Język"' in switch
+        assert '<a href="/status/" hreflang="nb" lang="nb">NO</a>' in switch
+        assert '<a href="/en/status/" hreflang="en" lang="en">EN</a>' in switch
+        assert "<strong>PL</strong>" in switch
+        assert switch.index(">NO<") < switch.index(">EN<") < switch.index(">PL<")
+
+    @pytest.mark.parametrize("lang", ["nb", "en"])
+    def test_the_other_languages_link_to_the_polish_twin(self, lang: str) -> None:
+        header = chrome_html(lang, _switch("/terms/")).header  # type: ignore[arg-type]
+
+        assert '<a href="/pl/terms/" hreflang="pl" lang="pl">PL</a>' in header
+
+    def test_the_navigation_is_polish_and_stays_on_the_polish_tree(self) -> None:
+        header = chrome_html("pl").header
+
+        assert '<a class="brand" href="/pl/">' in header
+        assert '<a href="/pl/connect/">Połącz</a>' in header
+        assert '<a href="/pl/docs/">Dokumentacja</a>' in header
+        assert '<a href="/pl/status/">Status</a>' in header
+        assert '<a href="/lov/">Ustawy</a>' in header
+        assert '<a href="/forskrift/">Rozporządzenia</a>' in header
+
+    def test_the_footer_is_polish_with_the_licence_and_legal_links(self) -> None:
+        footer = chrome_html("pl").footer
+
+        assert (
+            "Zawiera dane Lovdata udostępnione na licencji <span data-literal>NLOD 2.0</span>."
+            in (footer)
+        )
+        assert "nie jest to porada prawna" in footer
+        assert '<a href="/pl/privacy/">Prywatność</a>' in footer
+        assert '<a href="/pl/terms/">Warunki korzystania</a>' in footer
+        assert '<a href="/observatory/">O naszym robocie</a> (po norwesku)' in footer
+
+    def test_adds_no_external_link_and_no_unmarked_numeral(self) -> None:
+        chrome = chrome_html("pl", _switch("/"))
+        text = chrome.header + chrome.footer
+
+        assert not _EXTERNAL.search(text)
+        assert not re.search(r"\d", re.sub(r"<span data-literal>[^<]*</span>", "", text))
 
 
 class TestCorpusChrome:
@@ -201,7 +289,7 @@ class TestCorpusChrome:
         monkeypatch.setattr(chrome_module, "_render", record_context)
 
         assert corpus_chrome_html() is expected
-        assert contexts == [{"lang": "nb", "language_switch_href": None, "corpus": True}]
+        assert contexts == [{"lang": "nb", "language_switch": (), "corpus": True}]
 
     def test_both_navigation_labels_carry_their_english_gloss(self) -> None:
         header = corpus_chrome_html().header
@@ -231,13 +319,13 @@ class TestCorpusChrome:
     def test_it_carries_no_per_page_language_switch(self) -> None:
         """The switch markup is what promises a twin at the other language's
         URL. A later refactor must not reintroduce it by passing ``/en/`` as
-        ``language_switch_href``, which renders exactly that promise."""
+        ``language_switch``, which renders exactly that promise."""
         header = corpus_chrome_html().header
 
         assert "<strong>NO</strong>" not in header
         assert "<strong>EN</strong>" not in header
         assert ">NO</a>" not in header
-        assert header != chrome_html("nb", "/en/").header
+        assert header != chrome_html("nb", _switch("/")).header
 
     def test_the_frame_is_norwegian_and_carries_no_status_badge(self) -> None:
         chrome = corpus_chrome_html()
@@ -282,7 +370,7 @@ class TestCorpusChrome:
         """Site pages keep today's chrome exactly: their switch is real,
         because both twins exist, and their labels need no gloss because the
         English twin is a page of its own."""
-        for lang, href in (("nb", None), ("en", "/status/"), ("nb", "/en/status/")):
+        for lang, href in (("nb", ()), ("en", _switch("/status/")), ("pl", _switch("/status/"))):
             chrome = chrome_html(lang, href)  # type: ignore[arg-type]
 
             assert "gloss" not in chrome.header + chrome.footer
@@ -332,13 +420,14 @@ class TestBaseTemplate:
         assert f'<link rel="canonical" href="{SITE_ORIGIN}/en/about/">' in html
         assert f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/about/">' in html
         assert f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/about/">' in html
-        assert '<a href="/about/">NO</a>' in html
+        assert '<a href="/about/" hreflang="nb" lang="nb">NO</a>' in html
 
     def test_a_page_without_a_twin_has_no_hreflang_and_no_switch(self) -> None:
         html = _render("/observatory/")
 
         assert "hreflang" not in html
-        assert 'class="lang"' in html  # the corpus links stay
+        assert 'class="site"' in html  # the site navigation stays
+        assert 'href="/lov/"' in html
         assert ">EN</a>" not in html
 
     def test_the_stylesheet_is_the_one_shared_source_verbatim(self) -> None:
@@ -386,20 +475,33 @@ class TestBaseTemplate:
             "_base.html",
             "_chrome_footer.html",
             "_chrome_header.html",
+            "pages/connect-chatgpt.en.html",
+            "pages/connect-chatgpt.nb.html",
+            "pages/connect-chatgpt.pl.html",
+            "pages/connect-claude.en.html",
+            "pages/connect-claude.nb.html",
+            "pages/connect-claude.pl.html",
             "pages/connect.en.html",
             "pages/connect.nb.html",
+            "pages/connect.pl.html",
             "pages/docs.en.html",
             "pages/docs.nb.html",
+            "pages/docs.pl.html",
             "pages/landing.en.html",
             "pages/landing.nb.html",
+            "pages/landing.pl.html",
             "pages/observatory.nb.html",
             "pages/placeholder.en.html",
             "pages/placeholder.nb.html",
+            "pages/placeholder.pl.html",
             "pages/privacy.en.html",
             "pages/privacy.nb.html",
+            "pages/privacy.pl.html",
             "pages/status.en.html",
             "pages/status.nb.html",
+            "pages/status.pl.html",
             "pages/terms.en.html",
             "pages/terms.nb.html",
+            "pages/terms.pl.html",
         ]
         assert TEMPLATES_DIR.name != "html"

@@ -1,0 +1,55 @@
+{#- /pl/connect/claude/: the Polish twin of connect-claude.nb.html — a full
+    translation, not a summary. Same sources, same limits: see the
+    Norwegian template's header. Client labels stay in English, as the
+    client shows them. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<h2>Co to jest</h2>
+<p>lovverk to serwer <a href="https://modelcontextprotocol.io">MCP</a>, dzięki któremu Claude może sprawdzać norweskie ustawy (<em lang="nb">lover</em>) i rozporządzenia (<em lang="nb">forskrifter</em>). Usługa hostowana działa pod adresem <code>https://lovspor.no/mcp</code>. Dodajesz ją jako własny konektor i logujesz się przez <span data-literal>OAuth 2.1</span> — nie ma żadnego klucza do wklejania i nic nie płacisz.</p>
+
+<h2>Połączenie w claude.ai</h2>
+<p>Te kroki przeszliśmy w claude.ai:</p>
+<ol class="steps">
+  <li>Dodaj własny konektor (<span lang="en">custom connector</span>).</li>
+  <li>Podaj adres <code>https://lovspor.no/mcp</code>.</li>
+  <li>Wybierz <strong lang="en">Sign in now</strong>.</li>
+  <li>Przy rejestracji klienta wybierz <strong lang="en">Register automatically</strong>.</li>
+  <li>Zaloguj się na stronie, która się otworzy. Gdy wrócisz do rozmowy, narzędzia zaczną odpowiadać.</li>
+</ol>
+<p>W Claude Desktop liczą się te same wybory — adres, <strong lang="en">Sign in now</strong> i <strong lang="en">Register automatically</strong> — ale kroki przeszliśmy tylko w claude.ai.</p>
+
+<h2>Logowanie</h2>
+<p>Gdy wybierzesz <strong lang="en">Sign in now</strong>, otworzy się strona logowania WorkOS — usługi, której używamy do logowania. Logujesz się tam na konto; możesz też zalogować się innym kontem, na przykład Google. lovspor dostaje od WorkOS tylko identyfikator użytkownika, a nie twoje imię ani adres e-mail — zobacz <a href="/pl/privacy/">prywatność</a>. Potem wracasz do Claude.</p>
+
+<h2>Pierwsze pytanie na próbę</h2>
+<p>Zadaj to pytanie w nowej rozmowie (po norwesku: „Jak długo muszę pracować, żeby dostać zasiłek chorobowy od pracodawcy?”):</p>
+<p class="panel"><strong lang="nb">«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»</strong></p>
+<p>Odpowiedź powinna opierać się na <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span></a> (ustawa o ubezpieczeniu społecznym) i cytować ten przepis: co najmniej cztery tygodnie u danego pracodawcy (okres wyczekiwania). Potem zapytaj o <span data-literal>folketrygdloven § 8-99</span> — narzędzie powinno odpowiedzieć, że taki przepis nie istnieje.</p>
+
+<h2>Jeśli to nie działa</h2>
+<ul>
+  <li><strong>Rejestracja się nie udaje.</strong> Sprawdź, czy wybrałeś <strong lang="en">Register automatically</strong>. Opcja domyślna, <span lang="en">Use Claude's published identity</span>, nie działa z tą usługą.</li>
+  <li><strong><span lang="en">Authorization failed</span> po zalogowaniu.</strong> Wtedy błąd leży w konfiguracji po naszej stronie, nie po twojej. Napisz na <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</li>
+  <li><strong>Etykieta się przesunęła.</strong> Etykiety w kliencie zmieniają się częściej niż ta strona. Liczą się adres, <span data-literal>OAuth</span> jako sposób logowania i automatyczna rejestracja.</li>
+  <li><strong>Narzędzia nie odpowiadają.</strong> Stan przy ostatnim wydaniu podaje strona <a href="/pl/status/">status</a>. Usługa zawsze wymaga logowania, więc wywołanie bez niego jest odrzucane. Jeśli usługa hostowana nie działa, możesz uruchomić serwer sam, jak niżej.</li>
+</ul>
+
+<h2>Uruchom go sam</h2>
+<p>Bez konta i bez klucza: serwer pobiera korpus na twój komputer i rozmawia z klientem przez stdio. W Claude Code:</p>
+<pre>uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+<p>W Claude Desktop dodaj to do pliku konfiguracyjnego (<code>claude_desktop_config.json</code> — jego położenie zależy od systemu operacyjnego) i uruchom klienta ponownie:</p>
+<pre>{
+  "mcpServers": {
+    "lovverk": {
+      "command": "uvx",
+      "args": ["lovspor", "mcp"]
+    }
+  }
+}</pre>
+<p class="muted">Wszystkie narzędzia poza <code>semantic_search</code> czytają wtedy tylko pliki i git na twoim komputerze; <code>semantic_search</code> potrzebuje klucza do embeddingów, który podajesz sam. Inni klienci: <a href="/pl/connect/">Połącz</a>. Na co odpowiadają narzędzia: <a href="/pl/docs/">dokumentacja</a>. Pytania: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+{% endblock %}

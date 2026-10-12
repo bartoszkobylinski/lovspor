@@ -103,7 +103,7 @@ curl -fsS https://lovspor.yourdomain.com/healthz && echo ' OK'
 ## The site is part of the release
 
 Everything Caddy serves outside `/mcp` — the landing page, `/observatory/`,
-`/status/`, the EN twins — is built by `lovspor build-site` from the source
+`/status/`, the connect guides, the EN and PL twins — is built by `lovspor build-site` from the source
 checkout and released **together with the corpus** as one envelope (ADR-0014
 Decision 6, below). There is no separate site deploy and nothing to rsync: a
 site-source change is a release, made live by the same configuration swap as
@@ -186,8 +186,8 @@ reached the box.)
 
 Restart and release are independent, and neither waits for the other. A release
 run before the restart is not refused: it publishes `runtime_tree_match: false`
-or `environment_match: false`, every `/connect/<client>/` page withholds its
-hosted procedures naming that comparison, and the log says **restart
+or `environment_match: false`, which `/status/` shows (the connect guides state
+no observation of the service, so they do not change), and the log says **restart
 `lovspor-mcp`, then release again**. A restart after a pull without `uv sync` is
 `environment_match: false`, and the log says **run `uv sync --frozen --no-dev`,
 restart, then release again**. A site-only change needs no restart at all and

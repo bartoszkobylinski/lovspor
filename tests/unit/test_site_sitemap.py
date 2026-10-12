@@ -25,7 +25,7 @@ class TestSitemapSiteXml:
         locs = _locs(sitemap_site_xml(pages))
 
         assert locs == [f"{SITE_ORIGIN}{page.path}" for page in pages]
-        assert len(set(locs)) == len(pages) == 25
+        assert len(set(locs)) == len(pages) == 43
 
     def test_one_urlset_with_the_xml_header_and_no_lastmod(self) -> None:
         """No builder-generated time in the output tree (ADR:645-648): a
@@ -50,8 +50,8 @@ class TestSitemapSiteXml:
             path="/a-b/",
             template="placeholder",
             status="planned",
-            title=Localised(nb="t", en="t"),
-            description=Localised(nb="d", en="d"),
+            title=Localised(nb="t", en="t", pl="t"),
+            description=Localised(nb="d", en="d", pl="d"),
         )
         page = EmittedPage(path="/a-b/?x=1&y=2", lang="nb", route=route)
 
@@ -65,8 +65,8 @@ class TestSitemapSiteXml:
             path="/a/",
             template="placeholder",
             status="planned",
-            title=Localised(nb="t", en="t"),
-            description=Localised(nb="d", en="d"),
+            title=Localised(nb="t", en="t", pl="t"),
+            description=Localised(nb="d", en="d", pl="d"),
         )
         pages = (
             EmittedPage(path="/a/", lang="nb", route=route),

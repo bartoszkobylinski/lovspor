@@ -49,7 +49,7 @@ from lovspor.publish.companion import companion_json_bytes
 from lovspor.site.benchmark import load_publication
 from lovspor.site.capabilities import CapabilityDocument, HostedState, load_capabilities
 from lovspor.site.errors import SiteBuildError
-from lovspor.site.facts import FactLedger
+from lovspor.site.facts import FactLedger, Lang
 from lovspor.site.fingerprint import ReleaseKey, Toolchain, release_key, toolchain_fingerprint
 from lovspor.site.llms import LLMS_NAME, llms_txt
 from lovspor.site.routes import emitted_pages
@@ -174,6 +174,21 @@ def _document_for_this_checkout(
     )
 
 
+def _benchmark_context(artifacts: BuildArtifacts, lang: Lang) -> dict[str, object]:
+    """The benchmark section's values in ``lang``, or ``None`` where it has no approved wording.
+
+    ``benchmark_published`` tells a page whose language the manifest does
+    not speak that the section exists in another, so it can point there
+    instead of translating approved benchmark copy itself.
+    """
+    publication = artifacts.publication
+    speaks = publication is not None and publication.speaks(lang)
+    return {
+        "benchmark": publication.context(lang) if publication is not None and speaks else None,
+        "benchmark_published": publication is not None,
+    }
+
+
 def _render_pages(artifacts: BuildArtifacts) -> tuple[dict[str, str], bytes, FactLedger]:
     """Every page, then ``llms.txt``, through the one fact mechanism.
 
@@ -184,12 +199,10 @@ def _render_pages(artifacts: BuildArtifacts) -> tuple[dict[str, str], bytes, Fac
     environment = site_environment()
     registry = fact_registry(artifacts)
     ledger = FactLedger()
-    publication = artifacts.publication
     pages: dict[str, str] = {}
     for page in emitted_pages():
-        benchmark = None if publication is None else publication.context(page.lang)
         context = page.head_context() | page_globals(page.path, page.lang, registry, ledger)
-        context["benchmark"] = benchmark
+        context |= _benchmark_context(artifacts, page.lang)
         markup = environment.get_template(page.template).render(context)
         scan_page(page.path, markup)
         pages[page.path] = markup

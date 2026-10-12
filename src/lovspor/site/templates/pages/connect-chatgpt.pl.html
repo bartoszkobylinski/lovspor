@@ -1,0 +1,43 @@
+{#- /pl/connect/chatgpt/: the Polish twin of connect-chatgpt.nb.html — a full
+    translation, not a summary. Same sources, same limits: see the
+    Norwegian template's header. Client labels stay in English, as the
+    client shows them. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<h2>Co to jest</h2>
+<p>lovverk to serwer <a href="https://modelcontextprotocol.io">MCP</a>, dzięki któremu ChatGPT może sprawdzać norweskie ustawy (<em lang="nb">lover</em>) i rozporządzenia (<em lang="nb">forskrifter</em>). Usługa hostowana działa pod adresem <code>https://lovspor.no/mcp</code>. Tworzysz do niej konektor i logujesz się przez <span data-literal>OAuth 2.1</span> — nie ma żadnego klucza do wklejania i nic nie płacisz.</p>
+
+<h2>Połączenie w ChatGPT</h2>
+<p>Te kroki przeszliśmy w ChatGPT:</p>
+<ol class="steps">
+  <li>Włącz w ChatGPT <strong>tryb dewelopera</strong> (<span lang="en">developer mode</span>).</li>
+  <li>Utwórz konektor z adresem <code>https://lovspor.no/mcp</code>.</li>
+  <li>Jako uwierzytelnianie wybierz <strong>OAuth</strong>.</li>
+  <li>Zaloguj się na stronie, która się otworzy. Gdy wrócisz do rozmowy, narzędzia zaczną odpowiadać.</li>
+</ol>
+
+<h2>Logowanie</h2>
+<p>Gdy wybierzesz <span data-literal>OAuth</span>, otworzy się strona logowania WorkOS — usługi, której używamy do logowania. Logujesz się tam na konto; możesz też zalogować się innym kontem, na przykład Google. lovspor dostaje od WorkOS tylko identyfikator użytkownika, a nie twoje imię ani adres e-mail — zobacz <a href="/pl/privacy/">prywatność</a>. Potem wracasz do ChatGPT.</p>
+
+<h2>Pierwsze pytanie na próbę</h2>
+<p>Zadaj to pytanie w nowej rozmowie (po norwesku: „Jak długo muszę pracować, żeby dostać zasiłek chorobowy od pracodawcy?”):</p>
+<p class="panel"><strong lang="nb">«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»</strong></p>
+<p>Odpowiedź powinna opierać się na <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span></a> (ustawa o ubezpieczeniu społecznym) i cytować ten przepis: co najmniej cztery tygodnie u danego pracodawcy (okres wyczekiwania). Potem zapytaj o <span data-literal>folketrygdloven § 8-99</span> — narzędzie powinno odpowiedzieć, że taki przepis nie istnieje.</p>
+
+<h2>Jeśli to nie działa</h2>
+<ul>
+  <li><strong>Nie widzisz, gdzie utworzyć konektor.</strong> Najpierw włącz tryb dewelopera; to był pierwszy krok, gdy przechodziliśmy konfigurację.</li>
+  <li><strong>Logowanie się nie zaczyna.</strong> Sprawdź, czy jako uwierzytelnianie wybrałeś <strong>OAuth</strong>.</li>
+  <li><strong><span lang="en">Authorization failed</span> po zalogowaniu.</strong> Wtedy błąd leży w konfiguracji po naszej stronie, nie po twojej. Napisz na <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</li>
+  <li><strong>Etykieta się przesunęła.</strong> Etykiety w kliencie zmieniają się częściej niż ta strona. Liczą się adres i <span data-literal>OAuth</span> jako sposób logowania.</li>
+  <li><strong>Narzędzia nie odpowiadają.</strong> Stan przy ostatnim wydaniu podaje strona <a href="/pl/status/">status</a>. Usługa zawsze wymaga logowania, więc wywołanie bez niego jest odrzucane.</li>
+</ul>
+
+<h2>Bez konta</h2>
+<p>ChatGPT łączy się z usługą hostowaną. Jeśli wolisz uruchomić serwer na własnym komputerze, bez konta, opis znajdziesz w <a href="/pl/connect/claude/">instrukcji dla Claude</a>; dla ChatGPT nie mamy sprawdzonego przepisu lokalnego.</p>
+<p class="muted">Inni klienci: <a href="/pl/connect/">Połącz</a>. Na co odpowiadają narzędzia: <a href="/pl/docs/">dokumentacja</a>. Pytania: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
+{% endblock %}
