@@ -5,6 +5,7 @@ ledger, does a wave reach every authority it should, leave out the ones it
 must, and can each letter be recorded as sent with what it asked for?
 """
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from lovspor.innsyn.ledger import requests
+from lovspor.innsyn.waves import Manifest, read_manifest
 from lovspor.innsyn.workspace import InnsynWorkspace
 from lovspor.observatory.lf_ledger import LedgerEntry
 from tests.unit.innsyn_support import fetched, innsyn
@@ -101,6 +103,24 @@ def _letters(manifest: dict[str, object]) -> dict[str, dict[str, object]]:
 
 
 class TestWave:
+    def test_manifest_round_trip_hashes_and_generation_leave_ledger_untouched(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        target = InnsynWorkspace(workspace, [])
+        before = target.requests_log.read_bytes() if target.requests_log.exists() else None
+        out = tmp_path / "wave"
+        generated = _wave(workspace, out, lf_ledger)
+        manifest = read_manifest(out / "manifest.json")
+        assert manifest == Manifest.model_validate(generated)
+        assert Manifest.model_validate_json(manifest.model_dump_json()) == manifest
+        for letter in manifest.letters:
+            assert (
+                letter.letter_sha256
+                == hashlib.sha256((out / letter.letter_file).read_bytes()).hexdigest()
+            )
+        after = target.requests_log.read_bytes() if target.requests_log.exists() else None
+        assert after == before
+
     def test_only_resolved_authorities_get_a_letter_in_id_order(
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
     ) -> None:
@@ -288,6 +308,53 @@ class TestRefusals:
 
 
 class TestRecordSent:
+    def test_it_hashes_the_letter_as_sent_after_a_body_edit(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        out = tmp_path / "wave"
+        generated = _wave(workspace, out, lf_ledger)
+        letter = out / "4646.txt"
+        payload = letter.read_bytes() + "\nVedlegg følger.\n".encode()
+        letter.write_bytes(payload)
+        _set(
+            workspace,
+            "record-sent",
+            "--manifest",
+            str(out / "manifest.json"),
+            "--id",
+            "4646",
+            "--sent-at",
+            "2026-10-13T08:00:00Z",
+        )
+        state = requests(InnsynWorkspace(workspace, []))["4646-20261013T080000Z"]
+        assert state.sent.letter_sha256 == hashlib.sha256(payload).hexdigest()
+        assert state.sent.letter_sha256 != _letters(generated)["4646"]["letter_sha256"]
+
+    @pytest.mark.parametrize("damage", ["missing", "invalid_utf8"])
+    def test_an_unreadable_letter_is_refused_without_recording_a_send(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path, damage: str
+    ) -> None:
+        out = tmp_path / "wave"
+        _wave(workspace, out, lf_ledger)
+        letter = out / "4646.txt"
+        if damage == "missing":
+            letter.unlink()
+        else:
+            letter.write_bytes(b"Til: postmottak@fjaler.kommune.no\n\xff")
+        result = innsyn(
+            workspace,
+            "record-sent",
+            "--manifest",
+            str(out / "manifest.json"),
+            "--id",
+            "4646",
+            "--sent-at",
+            "2026-10-13T08:00:00Z",
+        )
+        assert result.exit_code == 1
+        assert result.stderr
+        assert requests(InnsynWorkspace(workspace, [])) == {}
+
     def test_it_records_what_the_letter_asked_for(
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
     ) -> None:

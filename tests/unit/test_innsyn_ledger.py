@@ -12,8 +12,16 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.errors import InnsynRecordError
-from lovspor.innsyn.ledger import RequestState, Sent, fold, ledger_journal, requests
+from lovspor.errors import InnsynRecordError, InnsynRefusedError
+from lovspor.innsyn.ledger import (
+    CaseNumber,
+    RequestState,
+    Sent,
+    fold,
+    ledger_journal,
+    record_events,
+    requests,
+)
 from lovspor.innsyn.workspace import InnsynWorkspace
 from tests.unit.innsyn_support import FIXTURES, innsyn
 
@@ -115,6 +123,22 @@ class TestPilotImport:
 
 
 class TestTransitions:
+    def test_an_invalid_batch_appends_none_of_its_valid_prefix(self, workspace: Path) -> None:
+        target = InnsynWorkspace(workspace, [])
+        before = target.requests_log.read_bytes()
+        events = [
+            CaseNumber(
+                request_id=request,
+                recorded_at=datetime(2026, 10, 13, tzinfo=UTC),
+                saksnummer="2026/999",
+            )
+            for request in (ROROS, "5025-20991005T074355Z")
+        ]
+        with pytest.raises(InnsynRefusedError, match="no request"):
+            record_events(target, events)
+        assert target.requests_log.read_bytes() == before
+        assert _held(workspace)[ROROS].saksnummer is None
+
     def test_each_transition_has_its_command(self, workspace: Path) -> None:
         steps = [
             ("record-ack", "--at", "2026-10-05T08:00:00Z"),
@@ -218,6 +242,30 @@ class TestTransitions:
 
 
 class TestListings:
+    @pytest.mark.parametrize("damage", ["torn", "malformed_middle", "blank_middle"])
+    def test_corrupt_evidence_is_refused_and_cannot_be_appended_to(
+        self, workspace: Path, damage: str
+    ) -> None:
+        path = workspace / "requests.jsonl"
+        original = path.read_bytes()
+        if damage == "torn":
+            payload = original.rstrip(b"\n")
+            message = "incomplete (no newline)"
+        else:
+            lines = original.splitlines(keepends=True)
+            payload = lines[0] + (b"{bad}\n" if damage == "malformed_middle" else b"\n")
+            payload += b"".join(lines[1:])
+            message = "requests.jsonl:2: does not parse"
+        path.write_bytes(payload)
+        listing = innsyn(workspace, "requests")
+        assert listing.exit_code == 1
+        assert message in listing.stderr
+        assert listing.stdout == ""
+        result = innsyn(workspace, "record-case-number", "--request", ROROS, "--number", "123")
+        assert result.exit_code == 1
+        assert message in result.stderr
+        assert path.read_bytes() == payload
+
     def test_requests_lists_every_field_and_the_mark(self, workspace: Path) -> None:
         result = innsyn(workspace, "requests")
         assert result.exit_code == 0, result.output
