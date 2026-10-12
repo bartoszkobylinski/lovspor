@@ -222,7 +222,15 @@ def read_ledger(log: ObservationLog) -> list[LedgerEntry]:
     Raises:
         LogIntegrityError: a line does not parse.
     """
-    path = ledger_path(log)
+    return read_ledger_file(ledger_path(log))
+
+
+def read_ledger_file(path: Path) -> list[LedgerEntry]:
+    """:func:`read_ledger` for a ledger file named directly, such as a copy off the volume.
+
+    Raises:
+        LogIntegrityError: a line does not parse.
+    """
     if not path.exists():
         return []
     with path.open(encoding="utf-8") as handle:
