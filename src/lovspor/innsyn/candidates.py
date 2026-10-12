@@ -2,7 +2,7 @@
 
 The pilot found every recipient in the authority's captured pages, not by a
 live visit (``find_postmottak.py``, 2026-10-03): the general mailboxes
-(``postmottak@``, ``post@``, ``postmottak.<unit>@``) under ``.no``, counted per
+(``postmottak@``, ``post@``, ``postmottak.<unit>@``), counted per
 distinct blob, cited by the shortest URL that carries them (usually the front
 page or the contact page). This is that scan over the corrected log.
 
@@ -28,8 +28,18 @@ from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, ObservationRecord
 from lovspor.observatory.registry import SourceRegistry, host_within_domain
 
-#: Group 1 is the mailbox, group 2 its host.
-MAILBOX = re.compile(rb"\b(post(?:mottak)?(?:\.[a-z0-9-]+)?@([a-z0-9.-]+\.no))\b", re.IGNORECASE)
+#: Group 1 is the mailbox, group 2 its whole host. The host is every
+#: dot-separated label there is, so a longer host (``….no.com``) is read whole
+#: and then fails the own-domain check, instead of yielding a prefix that is not
+#: on the page; a sentence-ending dot is no label and is left out. The edges
+#: refuse a match cut out of a longer address: no address character before
+#: ``post``, and no host character or ``@`` after the host.
+MAILBOX = re.compile(
+    rb"(?<![a-z0-9._%+-])"
+    rb"(post(?:mottak)?(?:\.[a-z0-9-]+)?@([a-z0-9-]+(?:\.[a-z0-9-]+)+))"
+    rb"(?![a-z0-9_@-])",
+    re.IGNORECASE,
+)
 
 _SUCCESS = range(200, 300)
 

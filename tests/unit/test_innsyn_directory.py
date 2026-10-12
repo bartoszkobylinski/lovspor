@@ -313,6 +313,59 @@ def _variant(log: ObservationLog, body: str, **changes: object) -> None:
 
 
 class TestCandidateScanEdges:
+    @pytest.mark.parametrize("suffix", [".com", ".org", ".example.com"])
+    def test_an_external_mailbox_is_not_truncated_to_the_authoritys_domain(
+        self, tmp_path: Path, archive: ObservationLog, suffix: str
+    ) -> None:
+        # docs/operations.md: candidates must belong to the authority's own
+        # domain or a subdomain. A matching prefix of an external host is
+        # neither, and must not create an address absent from the page.
+        _capture(archive, FJALER, f"<p>post@fjaler.kommune.no{suffix}</p>")
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert result.exit_code == 0, result.output
+        assert result.stdout == ""
+        assert not (tmp_path / "innsyn").exists()
+
+    @pytest.mark.parametrize("after", [".", ",", ")", "</p>", ".</p>", "; ", "\n"])
+    def test_a_mailbox_ending_a_sentence_is_still_found_whole(
+        self, tmp_path: Path, archive: ObservationLog, after: str
+    ) -> None:
+        _capture(archive, FJALER, f"<p>Skriv til post@fjaler.kommune.no{after} Takk.</p>")
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert [line.split("\t")[1] for line in result.stdout.splitlines()] == [
+            "post@fjaler.kommune.no"
+        ]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "kontakt.postmottak@fjaler.kommune.no",
+            "x-post@fjaler.kommune.no",
+            "post@fjaler.kommune.no_arkiv",
+            "post@fjaler.kommune.no-arkiv.example",
+            "post@fjaler.kommune.no@relay.example",
+        ],
+    )
+    def test_a_mailbox_inside_a_longer_address_is_not_cut_out_of_it(
+        self, tmp_path: Path, archive: ObservationLog, text: str
+    ) -> None:
+        _capture(archive, FJALER, f"<p>{text}</p>")
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert result.exit_code == 0, result.output
+        assert result.stdout == ""
+
+    @pytest.mark.parametrize(
+        ("status", "eligible"), [(199, False), (200, True), (299, True), (300, False)]
+    )
+    def test_only_success_statuses_contribute_mailbox_candidates(
+        self, tmp_path: Path, archive: ObservationLog, status: int, eligible: bool
+    ) -> None:
+        _variant(archive, "<p>post@fjaler.kommune.no</p>", http_status=status)
+        result = innsyn(tmp_path / "innsyn", "recipient-candidates")
+        assert result.exit_code == 0, result.output
+        addresses = [line.split("\t")[1] for line in result.stdout.splitlines()]
+        assert addresses == (["post@fjaler.kommune.no"] if eligible else [])
+
     def test_identical_bytes_still_use_the_shortest_citing_url(
         self, tmp_path: Path, archive: ObservationLog
     ) -> None:
