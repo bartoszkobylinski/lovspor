@@ -105,7 +105,7 @@ class TestWave:
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
     ) -> None:
         manifest = _wave(workspace, tmp_path / "wave", lf_ledger)
-        assert list(_letters(manifest)) == ["0301", "46", "4646"]
+        assert list(_letters(manifest)) == ["0301", "4646", "46"]
         unresolved = manifest["unresolved"]
         assert isinstance(unresolved, list)
         assert "1134" in unresolved and "4646" not in unresolved
@@ -133,8 +133,21 @@ class TestWave:
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
     ) -> None:
         manifest = _wave(workspace, tmp_path / "wave", lf_ledger, "--wave-size", "2")
-        assert list(_letters(manifest)) == ["0301", "46"]
+        assert list(_letters(manifest)) == ["0301", "4646"]
         assert manifest["remaining"] == 1
+
+    def test_authorities_with_unheld_known_ids_come_first(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        held = tmp_path / "held.txt"
+        held.write_text("2019-03-20-400\n")
+        manifest = _wave(workspace, tmp_path / "wave", lf_ledger, "--held", str(held))
+        assert list(_letters(manifest)) == ["4646", "0301", "46"]
+        assert [_letters(manifest)[a]["lf_ids"] == [] for a in ("4646", "0301", "46")] == [
+            False,
+            True,
+            True,
+        ]
 
     def test_a_wave_is_reproducible(self, workspace: Path, tmp_path: Path, lf_ledger: Path) -> None:
         _wave(workspace, tmp_path / "one", lf_ledger)
@@ -146,7 +159,7 @@ class TestWave:
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
     ) -> None:
         first = _wave(workspace, tmp_path / "one", lf_ledger, "--wave-size", "2")
-        for authority_id in ("0301", "46"):
+        for authority_id in ("0301", "4646"):
             _set(
                 workspace,
                 "record-sent",
@@ -158,9 +171,9 @@ class TestWave:
                 "2026-10-13T08:00:00Z",
             )
         second = _wave(workspace, tmp_path / "two", lf_ledger, "--wave-size", "2")
-        assert list(_letters(first)) == ["0301", "46"]
-        assert list(_letters(second)) == ["4646"]
-        assert second["skipped_open"] == ["0301", "46"]
+        assert list(_letters(first)) == ["0301", "4646"]
+        assert list(_letters(second)) == ["46"]
+        assert second["skipped_open"] == ["0301", "4646"]
 
     def test_ids_already_asked_are_not_asked_again(
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
@@ -294,7 +307,7 @@ class TestRecordSent:
         assert state.sent.recipient == "postmottak@fjaler.kommune.no"
         assert state.sent.lf_ids == ("2009-02-16-306", "2022-12-15-2677", "2024-09-19-2196")
         assert state.sent.general_clause is True
-        letter = json.loads((tmp_path / "wave" / "manifest.json").read_text())["letters"][2]
+        letter = json.loads((tmp_path / "wave" / "manifest.json").read_text())["letters"][1]
         assert state.sent.letter_sha256 == letter["letter_sha256"]
 
     def test_a_letter_whose_recipient_was_changed_is_refused(

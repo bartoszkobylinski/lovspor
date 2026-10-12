@@ -1708,9 +1708,10 @@ $I due                                    # past the mark with no answer and no 
 - **Målform.** No machine-readable source of the språkvedtak was found reliable enough
   to read automatically, so the operator records it with evidence (`set-maalform`).
   Unset, the letter is in bokmål and the manifest says `maalform_recorded: false`.
-- **Letters.** A wave takes the next `--wave-size` resolved authorities in id order and
-  skips any authority with an open request (open until the outcome is `full` or
-  `refused`). Point 1 lists the `LF`/`LTII` ids the LF ledger saw on the authority's
+- **Letters.** A wave takes the next `--wave-size` resolved authorities and skips any
+  authority with an open request (open until the outcome is `full` or `refused`).
+  Authorities with known ids still to ask for come first, then the rest, each group in
+  id order (owner decision 2026-10-12). Point 1 lists the `LF`/`LTII` ids the LF ledger saw on the authority's
   pages, less the ids in `--held` (one per line, `#` comments) and the ids an earlier
   request already asked for. The short `forskrift` link form is left out. The next
   point asks for all other local regulations in force, with their amendments and an

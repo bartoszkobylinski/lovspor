@@ -1,11 +1,15 @@
 """Letters for the whole population, a wave at a time (issue #509, point 4).
 
-A wave is the next ``wave_size`` authorities, in authority-id order, that
+A wave is the next ``wave_size`` authorities that
 
 * have a recorded recipient — the rest are listed as ``unresolved`` and get
   no letter; and
 * have no open request in the ledger — those are listed as ``skipped_open``.
   A request stays open until its outcome is ``full`` or ``refused``.
+
+Authorities with at least one known id still to ask for (part a, after held
+and already-asked ids are taken out) come first, then the rest; each group
+is in authority-id order (owner decision 2026-10-12).
 
 Part (a) of each letter is the LF and LTII ids the LF ledger saw linked from
 the authority's own pages, less the ids whose text is held (``--held``) and
@@ -124,6 +128,8 @@ def plan(inputs: WaveInputs, wave_size: int) -> _Plan:
             unresolved.append(authority.authority_id)
         else:
             eligible.append(authority)
+    ids = known_ids(inputs)
+    eligible.sort(key=lambda a: (not ids.get(a.authority_id), a.authority_id))
     chosen = eligible[:wave_size]
     return _Plan(
         chosen=chosen,
