@@ -1650,6 +1650,91 @@ uv run lovspor observatory lf-first-seen --since 2026-10-01
   authority, kind, id, page) to stdout and the count to stderr. Days are Oslo calendar
   days.
 
+### Innsyn requests to every local authority (issue #509)
+
+The LF ledger says which regulations a kommune links; the innsyn commands turn that, and
+the general request for everything else, into one innsynskrav per kommune and
+fylkeskommune. They live in a workspace of their own: `--dir` or `LOVSPOR_INNSYN_DIR`,
+with no default. The workspace is refused inside the engine repo or the corpus. Keep it
+off the archive volume too (for example `~/lovspor-ops/innsyn`); its parent must exist.
+
+```bash
+export LOVSPOR_INNSYN_DIR=~/lovspor-ops/innsyn
+I="uv run lovspor observatory innsyn"
+
+# 1. The population: every kommune (KLASS 131) and fylkeskommune (KLASS 127) at a date.
+$I fetch-population --date 2026-10-12     # writes population/population-<date>-read-<ts>.json
+$I population                             # id, kind, KLASS code, name; sources + exclusions on stderr
+
+# 2. Who signs, and where each request goes.
+$I set-sender --name "…" --email kontakt@lovspor.no
+$I recipient-candidates --id 4646         # proposals from the archive's captures; records nothing
+$I set-recipient --id 4646 --address postmottak@fjaler.kommune.no \
+   --evidence-url https://www.fjaler.kommune.no/ --read-at 2026-10-03T10:00:00Z
+$I set-maalform --id 4646 --form nn --evidence-url <page read> --read-at <when>
+$I authorities                            # recipient or UNRESOLVED, målform; counts on stderr
+
+# 3. The pilot register, once.
+$I import-pilot --register ~/lovspor-ops/innsyn-pilot-2026-10-03/sent.csv
+
+# 4. A wave of letters. Writes files only; sends nothing.
+$I letters --out ~/lovspor-ops/innsyn/wave-01 --wave-size 25 [--held held-ids.txt]
+
+# 5. After the owner sends a letter, and as answers arrive.
+$I record-sent --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --id 4646 --sent-at <UTC>
+$I record-ack --request 4646-20261005T074425Z --at <UTC>
+$I record-case-number --request 4646-20261005T074425Z --number 2026/2348
+$I record-outcome --request 4646-20261005T074425Z --outcome partial --at <UTC> [--refusal-basis "…"]
+$I record-klage --request 4646-20261005T074425Z --at <UTC>
+$I requests                               # every request, with its § 32 mark
+$I due                                    # past the mark with no answer and no klage
+```
+
+- **Population.** The snapshot is the count. Nothing pins a number of kommuner, because
+  the division changes. Codes that are not authorities are kept as `excluded` with the
+  reason: SSB's "Uoppgitt" (`9999`, `9900`), and fylkeskommune `0300`, which is Oslo.
+  Oslo is asked once, as kommune `0301`. A fylkeskommune is keyed by its fylkesnummer
+  (`4600` becomes `46`), the same id the register and the LF ledger use.
+- **Recipients.** An authority without a recorded recipient is **unresolved** and gets no
+  letter. Each record carries the page the address was read on and when (a live visit,
+  or a capture's `ObservedAt`). `recipient-candidates` scans the archive's captured HTML
+  for `postmottak@`/`post@` addresses under `.no`, the way the pilot did, and prints
+  the shortest citing URL. It is read-only. The operator opens the page and records the
+  choice.
+- **Målform.** No machine-readable source of the språkvedtak was found reliable enough
+  to read automatically, so the operator records it with evidence (`set-maalform`).
+  Unset, the letter is in bokmål and the manifest says `maalform_recorded: false`.
+- **Letters.** A wave takes the next `--wave-size` resolved authorities in id order and
+  skips any authority with an open request (open until the outcome is `full` or
+  `refused`). Point 1 lists the `LF`/`LTII` ids the LF ledger saw on the authority's
+  pages, less the ids in `--held` (one per line, `#` comments) and the ids an earlier
+  request already asked for. The short `forskrift` link form is left out. The next
+  point asks for all other local regulations in force, with their amendments and an
+  overview, as cases of one kind (offentleglova § 28 andre ledd). An authority with no
+  known ids gets that point alone. Every letter asks for the authority's archive
+  documents, not Lovdata texts, in electronic form (§ 30 første ledd). The output
+  directory must be new or empty, and holds `<id>.txt` files (`Til:`, `Emne:`, body)
+  and `manifest.json`. `--lf-ledger` names a copy of `lf-ledger.jsonl`; by default the
+  observatory's own is read, so the volume must be mounted.
+- **Ledger.** `requests.jsonl` is append-only, locked and fsynced. A torn or malformed
+  line is refused, never read past. Each field has its own command. `record-sent`
+  takes the ids, the general clause and the recipient from the manifest. It refuses a
+  letter whose `Til:` line no longer matches, and records the SHA-256 of the letter as
+  it stands. A transition on an unknown request, a second send of one request, and a
+  time before the send are all refused. Outcome classes: `referred_to_lovdata`,
+  `interim_reply_no_date`, `partial`, `full`, `refused`, `no_answer`. Only the first
+  four are answers, so an interim reply leaves the request due.
+- **The § 32 mark.** offentleglova § 32 andre ledd: no answer within five working days
+  after receipt counts as a refusal that can be appealed. The mark is computed, never
+  stored. It is the fifth working day after the Oslo day of `sent_at`, skipping
+  weekends and Norwegian public holidays. `due` lists requests whose mark has passed:
+  these are the klage candidates.
+- **Pilot import.** `import-pilot` reads `sent.csv` with the letters as sent
+  (`innsyn-<id>.txt` beside it, or `--letters`). The ids come from the letter, and a row
+  whose letter lists a different number of ids is refused. The outcome class is the
+  cell's text before the first `;`. `notes` and `sent_from` are not imported, because the
+  notes name case officers. A rerun imports nothing twice.
+
 ### The dead-man switch (issue #167, part 3)
 
 Two failures look identical from inside this machine: *the sweep ran and found nothing

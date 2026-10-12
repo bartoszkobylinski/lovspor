@@ -84,6 +84,30 @@ the canonical pipeline's:
   time — not an assertion of law, and not even of legal publication. It reaches the
   canonical corpus only through an explicit per-artifact promotion step.
 
+## Local law: innsyn requests under offentleglova (issue #509)
+
+Lovdata publicData does not carry Norsk Lovtidend avd. II, and most kommuner link to
+Lovdata instead of hosting a regulation's text. The other lawful source of that text is
+the authority's own archive: a local regulation and every amending regulation are
+documents of a public body, so they can be requested under offentleglova § 3, and their
+text is free of copyright under åndsverkloven § 14.
+
+- Requests go to **every** kommune and fylkeskommune in SSB's KLASS division at the date
+  read, not only to authorities whose pages the observatory saw linking an LF id.
+- A letter asks for the authority's own archive documents (the vedtak with the adopted
+  text, and the text sent to Norsk Lovtidend), never for Lovdata's consolidations.
+- Known ids and the general request for all other regulations in force are separate
+  numbered points. Under offentleglova § 28 andre ledd a request must concern a specific
+  case or, to a reasonable extent, cases of a specific kind; keeping them apart means a
+  refusal of the general point does not take the specific one with it.
+- The engine writes letters; it never sends them. The owner sends each one in his own
+  name. A recipient address is used only when it was recorded with the page it was read
+  on; nothing is guessed from a domain pattern.
+- The request ledger keeps only what the process needs (personopplysningsloven): no
+  free-text notes, which would name case officers. It lives outside every repository.
+
+The commands and the flow are in [`operations.md`](operations.md#innsyn-requests-to-every-local-authority-issue-509).
+
 ## Verification
 
 Anyone can verify our output by:
