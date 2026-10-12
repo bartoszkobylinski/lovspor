@@ -322,3 +322,25 @@ class ClassifierOutputError(PromotionError):
     A row skipped because it does not parse could be the one candidate a
     batch should have counted, so the file is refused whole, never read past.
     """
+
+
+class InnsynError(LovsporError):
+    """Base for the offentleglova request workstream (issue #509)."""
+
+
+class InnsynRecordError(InnsynError):
+    """A file of the innsyn workspace does not read to its end, or is not its shape.
+
+    The request ledger and the recipient directory are append-only evidence
+    of letters sent and answers received; a line skipped because it does not
+    parse could be the answer that closes a request or the address it went to.
+    """
+
+
+class InnsynRefusedError(InnsynError):
+    """A recording the ledger refuses, with the reason; nothing is written.
+
+    A transition on a request the ledger does not hold, a second send of one
+    request, or an address without evidence would each put a fact in the
+    ledger that no letter or answer supports.
+    """

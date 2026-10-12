@@ -17,9 +17,12 @@ MCP server and by library code that wants none of typer, and a package init that
 drags in a CLI makes every such import pay for it.
 """
 
+from lovspor.innsyn.entrypoint import innsyn_app
 from lovspor.observatory import document_report_commands as _document_report_commands  # noqa: F401
 from lovspor.observatory import lf_commands as _lf_commands  # noqa: F401
 from lovspor.observatory import survey_commands as _survey_commands  # noqa: F401
 from lovspor.observatory.commands import observatory_app
+
+observatory_app.add_typer(innsyn_app)
 
 __all__ = ["observatory_app"]
