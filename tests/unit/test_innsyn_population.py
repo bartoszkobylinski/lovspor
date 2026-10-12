@@ -172,8 +172,10 @@ def test_the_workspace_has_no_default_and_refuses_the_engine_repo(
     with pytest.raises(ConfigError, match="absolute"):
         InnsynWorkspace(Path("relative"), [])
     repo = Path(__file__).resolve().parents[2]
+    # A name no checkout has: a real root entry (such as data/) read here would
+    # have to be carried into mutmut's shadow tree (issue #338 guard).
     with pytest.raises(ConfigError, match="inside"):
-        InnsynWorkspace(repo / "data", [repo])
+        InnsynWorkspace(repo / "innsyn-workspace-inside-the-repo", [repo])
 
 
 def test_the_command_without_a_workspace_says_how_to_set_one(
