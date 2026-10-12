@@ -344,3 +344,11 @@ class InnsynRefusedError(InnsynError):
     request, or an address without evidence would each put a fact in the
     ledger that no letter or answer supports.
     """
+
+
+class InnsynSendError(InnsynError):
+    """The SMTP server did not take a letter, or could not be reached securely.
+
+    The run stops at the first such letter and records nothing for it: a
+    request is in the ledger only once the server accepted the message.
+    """
