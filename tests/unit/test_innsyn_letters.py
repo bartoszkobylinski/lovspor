@@ -103,6 +103,87 @@ def _letters(manifest: dict[str, object]) -> dict[str, dict[str, object]]:
 
 
 class TestWave:
+    @pytest.mark.parametrize(
+        ("outcome", "closed"),
+        [
+            ("referred_to_lovdata", False),
+            ("interim_reply_no_date", False),
+            ("partial", False),
+            ("no_answer", False),
+            ("full", True),
+            ("refused", True),
+        ],
+    )
+    def test_outcomes_control_wave_eligibility_and_previously_asked_priority(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path, outcome: str, closed: bool
+    ) -> None:
+        # docs/operations.md: open until full/refused; prioritize ids still to ask for.
+        first = tmp_path / "first"
+        _wave(workspace, first, lf_ledger)
+        _set(
+            workspace,
+            "record-sent",
+            "--manifest",
+            str(first / "manifest.json"),
+            "--id",
+            "0301",
+            "--sent-at",
+            "2026-10-13T08:00:00Z",
+        )
+        _set(
+            workspace,
+            "record-outcome",
+            "--request",
+            "0301-20261013T080000Z",
+            "--outcome",
+            outcome,
+            "--at",
+            "2026-10-14T08:00:00Z",
+        )
+        before = (workspace / "requests.jsonl").read_bytes()
+        manifest = _wave(workspace, tmp_path / "next", lf_ledger)
+        letters = _letters(manifest)
+        assert list(letters) == (["4646", "0301", "46"] if closed else ["4646", "46"])
+        assert manifest["skipped_open"] == ([] if closed else ["0301"])
+        assert manifest["remaining"] == 0
+        if closed:
+            assert letters["0301"]["lf_ids"] == []
+            assert letters["0301"]["general_clause"] is True
+        assert (workspace / "requests.jsonl").read_bytes() == before
+
+    def test_known_ids_are_distinct_and_belong_to_each_authority(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        # The same id can be linked repeatedly and by two authorities.
+        with lf_ledger.open("a", encoding="utf-8") as handle:
+            handle.write(_entry("4646", "2024-09-19-2196", "LTII") + "\n")
+            handle.write(_entry("46", "2024-09-19-2196") + "\n")
+        manifest = _wave(workspace, tmp_path / "wave", lf_ledger)
+        letters = _letters(manifest)
+        assert letters["4646"]["lf_ids"] == [
+            "2009-02-16-306",
+            "2022-12-15-2677",
+            "2024-09-19-2196",
+        ]
+        assert letters["46"]["lf_ids"] == ["2024-09-19-2196"]
+        assert letters["0301"]["lf_ids"] == ["2019-03-20-400"]
+        text = (tmp_path / "wave" / "4646.txt").read_text(encoding="utf-8")
+        assert text.count("- FOR-2024-09-19-2196") == 1
+
+    def test_an_existing_empty_output_directory_is_accepted(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        out = tmp_path / "empty"
+        out.mkdir()
+        manifest = _wave(workspace, out, lf_ledger)
+        assert len(_letters(manifest)) == 3
+        assert sorted(path.name for path in out.iterdir()) == [
+            "0301.txt",
+            "46.txt",
+            "4646.txt",
+            "manifest.json",
+        ]
+
     def test_manifest_round_trip_hashes_and_generation_leave_ledger_untouched(
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
     ) -> None:
@@ -274,6 +355,35 @@ class TestLetterText:
 
 
 class TestRefusals:
+    @pytest.mark.parametrize("size", ["0", "-1"])
+    def test_a_nonpositive_wave_size_is_rejected_before_writing(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path, size: str
+    ) -> None:
+        out = tmp_path / "wave"
+        result = innsyn(
+            workspace,
+            "letters",
+            "--out",
+            str(out),
+            "--lf-ledger",
+            str(lf_ledger),
+            "--wave-size",
+            size,
+        )
+        assert result.exit_code == 2
+        assert not out.exists()
+        assert not (workspace / "requests.jsonl").exists()
+
+    def test_a_missing_output_parent_is_refused_without_creating_it(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        out = tmp_path / "missing" / "wave"
+        result = innsyn(workspace, "letters", "--out", str(out), "--lf-ledger", str(lf_ledger))
+        assert result.exit_code == 1
+        assert "is missing" in result.stderr
+        assert not out.parent.exists()
+        assert not (workspace / "requests.jsonl").exists()
+
     def test_a_non_empty_output_directory_is_refused(
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
     ) -> None:
