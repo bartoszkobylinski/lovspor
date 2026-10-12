@@ -1738,10 +1738,12 @@ $I due                                    # past the mark with no answer and no 
   STARTTLS and certificate verification (port 587), in manifest order. A server that does
   not offer STARTTLS is refused before the password is sent. Without `--send` it is a dry
   run: one line per letter that would go (id, To, From, Subject, size in bytes), whether
-  the SMTP settings are complete, and nothing sent or written. Before each letter it checks
-  that the letter file still has the manifest's SHA-256, that the directory's recipient
-  is still the manifest's, and that the authority has no open request from elsewhere; a
-  letter that fails a check is refused with the reason and the others go. A letter whose
+  the SMTP settings are complete, and nothing sent or written. Right before each letter,
+  after the pause, it reads the ledger, the directory and the file again and checks that
+  the letter file still has the manifest's SHA-256, that the directory's recipient is
+  still the manifest's, and that the authority has no open request from elsewhere; a
+  letter that fails a check is refused with the reason and the others go. `--limit`
+  counts letters sent, not letters refused. A letter whose
   authority already has a `sent` with this letter's SHA-256 is skipped, so a rerun never
   sends twice. Each accepted letter is recorded at once, through the same event as
   `record-sent`, with the acceptance time (UTC) as `sent_at` and its Message-ID (on the
@@ -1755,7 +1757,8 @@ $I due                                    # past the mark with no answer and no 
   App passwords), never the account password. The From header is the recorded sender
   (`set-sender`), so `kontakt@lovspor.no` must be a verified send-as address of that Gmail
   account (Settings, Accounts, "Send mail as"). A missing setting is refused by name. The
-  password is never printed.
+  password is never printed: a server reply or error that echoes it, plain, escaped or
+  base64-encoded, is shown with `[redacted]` in its place.
 - **Run procedure.** 1. Dry run, and read the lines: `send --manifest … --limit 25`.
   2. `send --manifest … --limit 25 --send`. 3. Check Gmail's Sent folder: 25 messages,
   From `kontakt@lovspor.no`, and `requests` lists them with their Message-IDs. 4. Repeat

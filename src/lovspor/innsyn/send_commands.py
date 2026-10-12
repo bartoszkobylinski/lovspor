@@ -74,12 +74,15 @@ def _report(report: SendReport, manifest: Path) -> None:
         _failure(report.failure, manifest)
 
 
-def _summary(prepared: Prepared, sent: int, remaining: int) -> None:
-    for refusal in prepared.refused:
+def _summary(prepared: Prepared, report: SendReport) -> None:
+    """Counts over the whole manifest: judged so up front, or right before sending."""
+    refused = (*prepared.refused, *report.refused)
+    for refusal in refused:
         typer.echo(f"refused {refusal.authority_id}: {refusal.reason}", err=True)
+    skipped = len(prepared.skipped) + len(report.skipped)
     typer.echo(
-        f"send: sent {sent}, skipped (already sent) {len(prepared.skipped)}, "
-        f"refused {len(prepared.refused)}, remaining {remaining}",
+        f"send: sent {len(report.sent)}, skipped (already sent) {skipped}, "
+        f"refused {len(refused)}, remaining {report.remaining}",
         err=True,
     )
 
@@ -119,9 +122,9 @@ def send(
     plan = _plan(guarded(lambda: read_sender(target)), limit, pause_seconds)
     if not really:
         _dry_run(prepared, plan)
-        _summary(prepared, 0, len(prepared.ready))
+        _summary(prepared, SendReport(sent=(), failure=None, remaining=len(prepared.ready)))
         return
     report = _deliver(prepared, plan, manifest)
-    _summary(prepared, len(report.sent), report.remaining)
+    _summary(prepared, report)
     if report.failure is not None:
         raise typer.Exit(1)

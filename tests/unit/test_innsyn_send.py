@@ -526,6 +526,34 @@ class TestSmtpTransport:
         assert context.check_hostname is True
 
 
+@pytest.mark.usefixtures("smtp_env")
+@pytest.mark.parametrize("change", ["letter", "recipient", "open_request"])
+def test_rechecks_each_letter_after_the_pause(
+    workspace: Path,
+    manifest: Path,
+    fake: FakeTransport,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    # operations.md: "Before each letter it checks" all three conditions.
+    def changed_during_pause(seconds: float) -> None:
+        if change == "letter":
+            letter = manifest.parent / "4646.txt"
+            letter.write_bytes(letter.read_bytes() + b"P.S.\n")
+        elif change == "recipient":
+            _fact(workspace, "set-recipient", "4646", "--address", "new@example.no")
+        elif not _sent(workspace).get("4646"):
+            record_events(
+                InnsynWorkspace(workspace, []),
+                [_foreign_sent("4646", datetime(2026, 10, 5, tzinfo=UTC))],
+            )
+
+    monkeypatch.setattr(send_commands, "pause", changed_during_pause)
+    _, _, err = _send(workspace, manifest, "--send")
+    assert fake.recipients() == ["postmottak@oslobystyre.no", "post@vlfk.no"], err
+    assert "refused 4646:" in err
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -578,3 +606,48 @@ class TestRedaction:
         assert "[redacted]" in str(caught.value)
         assert caught.value.__cause__ is None
         assert caught.value.__suppress_context__
+
+
+@pytest.mark.usefixtures("smtp_env")
+class TestJudgedAgainBeforeEachLetter:
+    def test_a_letter_recorded_by_hand_during_the_run_is_skipped(
+        self, workspace: Path, manifest: Path, fake: FakeTransport, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def recorded_meanwhile(seconds: float) -> None:
+            if "4646" not in _sent(workspace):
+                args = ("--manifest", str(manifest), "--id", "4646")
+                _ok(workspace, "record-sent", *args, "--sent-at", "2026-10-13T08:00:00Z")
+
+        monkeypatch.setattr(send_commands, "pause", recorded_meanwhile)
+        code, _, err = _send(workspace, manifest, "--send")
+        assert code == 0, err
+        assert fake.recipients() == ["postmottak@oslobystyre.no", "post@vlfk.no"]
+        assert "send: sent 2, skipped (already sent) 1, refused 0, remaining 0" in err
+
+    def test_the_limit_counts_letters_sent_not_letters_refused(
+        self, workspace: Path, manifest: Path, fake: FakeTransport, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def changed_meanwhile(seconds: float) -> None:
+            letter = manifest.parent / "4646.txt"
+            letter.write_bytes(letter.read_bytes() + b"P.S.\n")
+
+        monkeypatch.setattr(send_commands, "pause", changed_meanwhile)
+        code, _, err = _send(workspace, manifest, "--send", "--limit", "2")
+        assert code == 0, err
+        assert fake.recipients() == ["postmottak@oslobystyre.no", "post@vlfk.no"]
+        assert "send: sent 2, skipped (already sent) 0, refused 1, remaining 0" in err
+
+    def test_a_ledger_that_stops_reading_stops_the_run(
+        self, workspace: Path, manifest: Path, fake: FakeTransport, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def torn_meanwhile(seconds: float) -> None:
+            with (workspace / "requests.jsonl").open("ab") as handle:
+                handle.write(b"{torn")
+
+        monkeypatch.setattr(send_commands, "pause", torn_meanwhile)
+        code, _, err = _send(workspace, manifest, "--send")
+        assert code == 1
+        assert fake.recipients() == ["postmottak@oslobystyre.no"]
+        assert "FAILED 4646: could not be judged again before sending" in err
+        assert "Traceback" not in err
+        assert "send: sent 1, skipped (already sent) 0, refused 0, remaining 2" in err

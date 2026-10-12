@@ -10,11 +10,15 @@ order:
   since the manifest (SHA-256), or not a letter; each with its reason;
 * **ready** — everything else.
 
-The first ``limit`` ready letters are sent, a pause between each. Each one
-is recorded the moment the server accepts it, through the event ``record-sent``
-writes, with the acceptance time and the Message-ID. The first letter the
-server does not accept stops the run: nothing is recorded for it, and the
-letters after it are not tried.
+Up to ``limit`` ready letters are sent, a pause after each one sent. Each is
+judged again right before it goes, after the pause, from the ledger, the
+directory and the file as they are then: a letter recorded, edited or
+re-addressed during the run is skipped or refused there, not sent on the
+strength of the judgement made at the start. Each one is recorded the moment
+the server accepts it, through the event ``record-sent`` writes, with the
+acceptance time and the Message-ID. The first letter the server does not
+accept stops the run: nothing is recorded for it, and the letters after it
+are not tried.
 """
 
 import hashlib
@@ -57,6 +61,7 @@ class Prepared(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    manifest_path: Path
     ready: tuple[Ready, ...]
     skipped: tuple[str, ...]
     refused: tuple[Refusal, ...]
@@ -142,11 +147,7 @@ def prepare(workspace: InnsynWorkspace, manifest_path: Path) -> Prepared:
             directory does not read.
     """
     manifest = read_manifest(manifest_path)
-    context = _Context(
-        folder=manifest_path.parent,
-        held=requests(workspace),
-        contacts=contacts(directory_journal(workspace).records()),
-    )
+    context = _context(workspace, manifest_path)
     ready, skipped, refused = [], [], []
     for entry in manifest.letters:
         judged = _judge(context, entry)
@@ -156,7 +157,20 @@ def prepare(workspace: InnsynWorkspace, manifest_path: Path) -> Prepared:
             refused.append(judged)
         else:
             ready.append(judged)
-    return Prepared(ready=tuple(ready), skipped=tuple(skipped), refused=tuple(refused))
+    return Prepared(
+        manifest_path=manifest_path,
+        ready=tuple(ready),
+        skipped=tuple(skipped),
+        refused=tuple(refused),
+    )
+
+
+def _context(workspace: InnsynWorkspace, manifest_path: Path) -> _Context:
+    return _Context(
+        folder=manifest_path.parent,
+        held=requests(workspace),
+        contacts=contacts(directory_journal(workspace).records()),
+    )
 
 
 def compose(ready: Ready, sender: Sender, at: datetime) -> MailMessage:
@@ -202,9 +216,13 @@ class Failure(BaseModel):
 
 
 class SendReport(BaseModel):
+    """What the run did; ``skipped`` and ``refused`` are the letters judged so only at send time."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     sent: tuple[Sent, ...]
+    skipped: tuple[str, ...] = ()
+    refused: tuple[Refusal, ...] = ()
     failure: Failure | None
     remaining: int = Field(ge=0)
 
@@ -235,20 +253,76 @@ def _send_one(
     return event
 
 
+Judged = Ready | Refusal | Failure | None
+
+
+def _rejudge(workspace: InnsynWorkspace, prepared: Prepared, ready: Ready) -> Judged:
+    """``ready`` judged again from the ledger, directory and file as they are now."""
+    try:
+        context = _context(workspace, prepared.manifest_path)
+    except (InnsynError, StorageUnavailableError, OSError) as exc:
+        reason = f"could not be judged again before sending: {exc}"
+        return Failure(authority_id=ready.entry.authority_id, reason=reason)
+    return _judge(context, ready.entry)
+
+
+class _Run(BaseModel):
+    """What a run has done so far."""
+
+    sent: list[Sent] = []
+    skipped: list[str] = []
+    refused: list[Refusal] = []
+    failure: Failure | None = None
+    owes_pause: bool = False
+
+    def report(self, prepared: Prepared) -> SendReport:
+        accepted = len(self.sent) + (1 if self.failure is not None and self.failure.accepted else 0)
+        judged_late = len(self.skipped) + len(self.refused)
+        return SendReport(
+            sent=tuple(self.sent),
+            skipped=tuple(self.skipped),
+            refused=tuple(self.refused),
+            failure=self.failure,
+            remaining=len(prepared.ready) - accepted - judged_late,
+        )
+
+
+class _Job(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prepared: Prepared
+    plan: SendPlan
+    wire: Wire
+
+
+def _step(workspace: InnsynWorkspace, run: _Run, ready: Ready, job: _Job) -> None:
+    prepared, plan, wire = job.prepared, job.plan, job.wire
+    if run.owes_pause:
+        wire.pause(plan.pause_seconds)
+        run.owes_pause = False
+    judged = _rejudge(workspace, prepared, ready)
+    if judged is None:
+        run.skipped.append(ready.entry.authority_id)
+    elif isinstance(judged, Refusal):
+        run.refused.append(judged)
+    elif isinstance(judged, Failure):
+        run.failure = judged
+    else:
+        outcome = _send_one(workspace, judged, plan, wire)
+        if isinstance(outcome, Failure):
+            run.failure = outcome
+        else:
+            run.sent.append(outcome)
+            run.owes_pause = True
+
+
 def send_letters(
     workspace: InnsynWorkspace, prepared: Prepared, plan: SendPlan, wire: Wire
 ) -> SendReport:
-    """Send the first ``plan.limit`` ready letters, recording each as it is accepted."""
-    sent: list[Sent] = []
-    failure = None
-    for index, ready in enumerate(prepared.ready[: plan.limit]):
-        if index:
-            wire.pause(plan.pause_seconds)
-        outcome = _send_one(workspace, ready, plan, wire)
-        if isinstance(outcome, Failure):
-            failure = outcome
+    """Send up to ``plan.limit`` ready letters, each judged again and recorded as accepted."""
+    run, job = _Run(), _Job(prepared=prepared, plan=plan, wire=wire)
+    for ready in prepared.ready:
+        if run.failure is not None or len(run.sent) >= plan.limit:
             break
-        sent.append(outcome)
-    accepted = len(sent) + (1 if failure is not None and failure.accepted else 0)
-    remaining = len(prepared.ready) - accepted
-    return SendReport(sent=tuple(sent), failure=failure, remaining=remaining)
+        _step(workspace, run, ready, job)
+    return run.report(prepared)
