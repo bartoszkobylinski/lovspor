@@ -30,7 +30,9 @@ from pydantic import BaseModel, ConfigDict
 from lovspor.errors import InnsynRecordError
 from lovspor.innsyn.ledger import LedgerEvent, parse_event, request_id
 
-_LETTER_ID = re.compile(r"^- FOR-(\d{4}-\d{2}-\d{2}-\d+)\b", re.MULTILINE)
+#: An id line ends at a blank or the line's end, so ``306-7`` or ``306.7`` is
+#: never read as ``306``.
+_LETTER_ID = re.compile(r"^- FOR-(\d{4}-\d{2}-\d{2}-\d+)(?=[ \t]|$)", re.MULTILINE)
 
 _REQUIRED = ("authority_id", "sent_at", "recipient", "n_ids")
 

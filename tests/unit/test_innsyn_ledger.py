@@ -87,6 +87,18 @@ class TestPilotImport:
         assert "lists 2 ids, the register says 3" in result.stderr
         assert not (tmp_path / "innsyn" / "requests.jsonl").exists()
 
+    @pytest.mark.parametrize("longer", ["2009-02-16-306-7", "2009-02-16-306.7", "2009-02-16-306x"])
+    def test_an_id_line_naming_a_longer_number_is_not_read_as_its_prefix(
+        self, tmp_path: Path, longer: str
+    ) -> None:
+        copy = tmp_path / "pilot"
+        shutil.copytree(PILOT, copy)
+        letter = copy / "innsyn-4646.txt"
+        letter.write_text(letter.read_text().replace("- FOR-2009-02-16-306 ", f"- FOR-{longer} "))
+        result = innsyn(tmp_path / "innsyn", "import-pilot", "--register", str(copy / "sent.csv"))
+        assert result.exit_code == 1
+        assert "lists 2 ids, the register says 3" in result.stderr
+
     def test_a_missing_letter_or_register_is_refused(self, tmp_path: Path) -> None:
         copy = tmp_path / "pilot"
         shutil.copytree(PILOT, copy)
