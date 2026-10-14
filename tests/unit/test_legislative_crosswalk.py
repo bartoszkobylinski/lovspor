@@ -1,6 +1,6 @@
 """Fixture-based #610 case-page probe; no external requests or invented vote joins."""
 
-from lovspor.legislative_crosswalk import resolve_case_page
+from lovspor.legislative_crosswalk import CrosswalkRequest, resolve_case_page
 
 OFFICIAL_URL = "https://www.stortinget.no/no/Saker-og-publikasjoner/Saker/Sak/?p=89016"
 # Checked against the official case page on 2026-10-14; deliberately an
@@ -15,15 +15,19 @@ Lovvedtak 85 (2021-2022)</p>
 
 
 def probe(source_body: str = STORTING_EXCERPT, **overrides: object):
-    args: dict[str, object] = {
+    identifiers: dict[str, object] = {
         "law_id": "LOV-2022-06-17-63",
         "session_id": "2021-2022",
         "lovvedtak_number": 85,
+    }
+    origin: dict[str, object] = {
         "source_url": OFFICIAL_URL,
         "source_body": source_body,
     }
-    args.update(overrides)
-    return resolve_case_page(**args)  # type: ignore[arg-type]
+    for key, value in overrides.items():
+        (identifiers if key in identifiers else origin)[key] = value
+    request = CrosswalkRequest(**identifiers)  # type: ignore[arg-type]
+    return resolve_case_page(request, **origin)  # type: ignore[arg-type]
 
 
 def test_official_case_attests_lov_to_lovvedtak_to_sak() -> None:
