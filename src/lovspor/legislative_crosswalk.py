@@ -145,7 +145,10 @@ def resolve_case_page(
         elif not sanctions or not decisions:
             verdict, reason = "unresolved", "Missing explicit sanction or Lovvedtak reference"
         elif law_id not in sanctions or expected_decision not in decisions:
-            verdict, reason = "contradicted", "Explicit source identifiers contradict the requested link"
+            verdict, reason = (
+                "contradicted",
+                "Explicit source identifiers contradict the requested link",
+            )
         else:
             verdict, reason = "attested", "The official case page names both exact identifiers"
     return CrosswalkProbe(
