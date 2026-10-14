@@ -44,6 +44,20 @@ Build a versioned Markdown corpus of current Norwegian law, auto-updated from Lo
 - Full parliamentary enrichment from Stortinget
 - Interpretation or legal advice
 
+> **Scope clarification adopted 2026-10-14 (ADR-0017):** The above is the
+> original corpus-only boundary, not a prohibition on every independently
+> sourced legislative reference. [ADR-0017](https://github.com/bartoszkobylinski/lovspor-notebook/blob/main/docs/adr/ADR-0017-source-backed-legislative-crosswalk.md)
+> accepts **a narrow, source-backed, derived legislative crosswalk**
+> `LOV ↔ (Storting session, Lovvedtak) ↔ sak_id`, produced by Lovspor and
+> consumed by Politik. Official Lovdata, Stortinget and regjeringen.no
+> documents remain authoritative for their respective facts; Lovspor does
+> not become a parliamentary speech/vote corpus. General parliamentary
+> enrichment remains out of scope for the core `lovverk` legal corpus.
+> Placement, licensing, schema and migration are subject to separate
+> evidence and implementation gates ([Lovspor #610](https://github.com/bartoszkobylinski/lovspor/issues/610)).
+> This note preserves the original decision and records its limited later
+> exception; it does not rewrite the historical policy.
+
 ## 3. Data sources
 
 Single ingestion channel: **Lovdata public-data API** (`https://api.lovdata.no/v1/publicData/`), announced 2025-11-03 under NLOD 2.0.
