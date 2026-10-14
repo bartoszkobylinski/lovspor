@@ -128,7 +128,7 @@ def resolve_case_page(
     """
     sak_id = _case_id(source_url)
     verdict: Status = "unresolved"
-    reason = "The source does not establish the complete law–decision–case chain"
+    reason = "The source does not establish the complete law-decision-case chain"
     if sak_id is None or _LOV_ID.fullmatch(law_id) is None:
         verdict, reason = "unsupported", "Invalid official case URL or Lovdata law identity"
     elif lovvedtak_number <= 0 or not re.fullmatch(r"\d{4}-\d{4}", session_id):
