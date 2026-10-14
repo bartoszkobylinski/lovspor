@@ -141,3 +141,12 @@ def test_archive_refuses_existing_corrupted_object(tmp_path) -> None:
     path.write_bytes(b"tampered")
     with pytest.raises(ValueError, match="mismatch"):
         archive_sak(capture, tmp_path)
+
+
+def test_archive_rejects_snapshot_with_forged_digest(tmp_path) -> None:
+    from dataclasses import replace
+
+    capture = _snapshot()
+    altered = replace(capture, source_sha256="0" * 64)
+    with pytest.raises(ValueError, match="digest mismatch"):
+        archive_sak(altered, tmp_path)
