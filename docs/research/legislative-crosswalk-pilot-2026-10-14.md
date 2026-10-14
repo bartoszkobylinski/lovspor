@@ -43,12 +43,10 @@ forvaltningsloven (LOV-1967-02-10) §§ 10, 46
 ### Executable example
 
 \`\`\`python
-from lovspor.legislative_crosswalk import resolve_case_page
+from lovspor.legislative_crosswalk import CrosswalkRequest, resolve_case_page
 
 result = resolve_case_page(
-    law_id="LOV-2022-06-17-63",
-    session_id="2021-2022",
-    lovvedtak_number=85,
+    CrosswalkRequest("LOV-2022-06-17-63", "2021-2022", 85),
     source_url="https://www.stortinget.no/no/Saker-og-publikasjoner/Saker/Sak/?p=89016",
     source_body=verified_official_case_page_html_or_excerpt,
 )
