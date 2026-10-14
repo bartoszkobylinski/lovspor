@@ -81,7 +81,9 @@ def fetch_sak(
     observed = observed_at or datetime.now(UTC)
     if observed.tzinfo is None or observed.utcoffset() is None:
         raise ValueError("observed_at must be timezone aware")
-    with client.stream("GET", _ENDPOINT, params={"sakid": str(sak_id)}, follow_redirects=False) as r:
+    with client.stream(
+        "GET", _ENDPOINT, params={"sakid": str(sak_id)}, follow_redirects=False
+    ) as r:
         content_type = _validate_response(r)
         body = _read_limited(r)
         return CaseSnapshot(
@@ -108,7 +110,7 @@ def _law_decision(ref: etree._Element, case_session: str) -> LawDecision | None:
 def _decisions(root: etree._Element, session: str) -> tuple[LawDecision, ...]:
     path = f"{{{_NS}}}publikasjon_referanse_liste/{{{_NS}}}publikasjon_referanse"
     found = (_law_decision(ref, session) for ref in root.findall(path))
-    return tuple(sorted(set(dec for dec in found if dec is not None), key=lambda d: d.number))
+    return tuple(sorted({dec for dec in found if dec is not None}, key=lambda d: d.number))
 
 
 def parse_sak(snapshot: CaseSnapshot) -> CaseMetadata:
@@ -154,12 +156,17 @@ def archive_sak(snapshot: CaseSnapshot, directory: Path) -> Path:
     name = f"sak-{snapshot.sak_id}-{snapshot.source_sha256}"
     blob = directory / f"{name}.xml"
     _store_once(blob, snapshot.body)
-    identity = {"sak_id": snapshot.sak_id, "source_url": snapshot.source_url,
-                "sha256": snapshot.source_sha256, "content_type": snapshot.content_type}
+    identity = {
+        "sak_id": snapshot.sak_id,
+        "source_url": snapshot.source_url,
+        "sha256": snapshot.source_sha256,
+        "content_type": snapshot.content_type,
+    }
     _store_once(blob.with_suffix(".json"), json.dumps(identity, sort_keys=True).encode())
     observation_dir = directory / "observations"
     observation_dir.mkdir(exist_ok=True)
     timestamp = snapshot.observed_at.astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     record = {"object": blob.name, "observed_at": snapshot.observed_at.isoformat()}
-    _store_once(observation_dir / f"{name}-{timestamp}.json", json.dumps(record, sort_keys=True).encode())
+    observation = observation_dir / f"{name}-{timestamp}.json"
+    _store_once(observation, json.dumps(record, sort_keys=True).encode())
     return blob
