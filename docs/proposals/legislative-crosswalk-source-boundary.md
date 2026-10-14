@@ -1,6 +1,6 @@
-# Proposed: source-backed Lovspor ↔ Politik legislative crosswalk
+# Accepted architecture: source-backed Lovspor ↔ Politik legislative crosswalk
 
-**Status:** design proposal, not deployed / not an accepted architectural decision  
+**Status:** source-of-truth architecture accepted 2026-10-14 by the project owner as ADR-0017; no crosswalk implementation deployed and its publication schema/location still require separate decisions  
 **Tracking:** [Lovspor #610](https://github.com/bartoszkobylinski/lovspor/issues/610), [Politik #62](https://github.com/bartoszkobylinski/norwegian_parilamentary/issues/62), [Politik #88](https://github.com/bartoszkobylinski/norwegian_parilamentary/issues/88), [Politik #98](https://github.com/bartoszkobylinski/norwegian_parilamentary/issues/98)  
 **Related planned sources:** `docs/roadmap.md` D-DIRECT-3 (forarbeider), D-DIRECT-4 (Stortinget).  
 **Date:** 2026-10-14
@@ -118,4 +118,4 @@ The placeholders **must not** be published as real hashes or events. Actual reco
 
 No full historical valid-time law reconstruction; no secondary voting database in Lovspor; no Politik runtime requirement to use Lovspor; no speculation that votes prove legislative authorship; no inference that a law is effective simply because adopted; no adoption of sejmDiff's implementation (it is product inspiration only).
 
-**Governance:** this is a public *proposal*. It is not an accepted ADR, deployed code, a functioning crosswalk, nor permission for a corpus migration. The project's private ADR notebook cannot be a hidden dependency of reproducibility or user-facing documentation.
+**Governance:** the authority and ownership assignment is accepted in ADR-0017; this public document is the implementation-facing design and evidence-spike plan. It is NOT deployed code, a functioning crosswalk, permission for a corpus migration, or approval of an immutable output schema. The project's private ADR notebook cannot be a hidden dependency of reproducibility or user-facing documentation.
