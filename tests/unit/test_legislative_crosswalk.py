@@ -40,7 +40,7 @@ def test_official_case_attests_lov_to_lovvedtak_to_sak() -> None:
 
 
 def test_repeated_identical_lovvedtak_does_not_create_ambiguity() -> None:
-    assert probe(STORTING_EXCERPT + "<p>Lovvedtak 85 (2021–2022)</p>").status == "attested"
+    assert probe(STORTING_EXCERPT + "<p>Lovvedtak 85 (2021\u20132022)</p>").status == "attested"
 
 
 def test_missing_sanction_stays_unresolved_not_guess_from_date() -> None:
