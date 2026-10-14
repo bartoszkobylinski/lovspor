@@ -66,7 +66,8 @@ def _validate_response(response: httpx.Response) -> str:
     url = str(response.request.url)
     if not url.startswith(f"{_ENDPOINT}?"):
         raise ValueError("Unexpected source endpoint")
-    content_type = response.headers.get("content-type", "").split(";", 1)[0].lower().strip()
+    header_value = str(response.headers.get("content-type", ""))
+    content_type = header_value.split(";", 1)[0].lower().strip()
     if content_type not in {"application/xml", "text/xml"}:
         raise ValueError("Expected an XML response from Stortinget")
     return content_type
@@ -115,13 +116,15 @@ def _decisions(root: etree._Element, session: str) -> tuple[LawDecision, ...]:
 
 def parse_sak(snapshot: CaseSnapshot) -> CaseMetadata:
     """Read only direct, typed references, not prose in a title or henvisning."""
+    if b"<!DOCTYPE" in snapshot.body.upper():
+        raise ValueError("Forbidden XML DTD")
     parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
     try:
         root = etree.fromstring(snapshot.body, parser=parser)
     except etree.XMLSyntaxError as exc:
         raise ValueError("Invalid Stortinget case XML") from exc
-    if root.tag != f"{{{_NS}}}detaljert_sak" or root.getroottree().docinfo.doctype:
-        raise ValueError("Unexpected XML root or forbidden DTD")
+    if root.tag != f"{{{_NS}}}detaljert_sak":
+        raise ValueError("Unexpected XML root")
     if _field(root, "id") != str(snapshot.sak_id):
         raise ValueError("Stortinget case id mismatch")
     session = _field(root, "sak_sesjon")
