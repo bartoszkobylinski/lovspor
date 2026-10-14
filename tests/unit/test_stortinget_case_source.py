@@ -1,5 +1,6 @@
 """Offline API-contract tests; XML is a synthetic derivative of the official schema."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import httpx
@@ -144,8 +145,6 @@ def test_archive_refuses_existing_corrupted_object(tmp_path) -> None:
 
 
 def test_archive_rejects_snapshot_with_forged_digest(tmp_path) -> None:
-    from dataclasses import replace
-
     capture = _snapshot()
     altered = replace(capture, source_sha256="0" * 64)
     with pytest.raises(ValueError, match="digest mismatch"):
