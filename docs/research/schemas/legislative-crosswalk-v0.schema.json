@@ -273,6 +273,48 @@
               ]
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "law_identity"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_url": {
+                "pattern": "^https://api\\.lovdata\\.no/v1/publicData/"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "decision_case"
+              },
+              "capture_level": {
+                "const": "raw_body_captured"
+              }
+            },
+            "required": [
+              "role",
+              "capture_level"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_url": {
+                "pattern": "^https://data\\.stortinget\\.no/eksport/sak\\?"
+              }
+            }
+          }
         }
       ]
     }

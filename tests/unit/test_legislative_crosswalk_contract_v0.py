@@ -100,9 +100,12 @@ def _record() -> dict[str, object]:
 
 
 def _raw(role: str) -> dict[str, str]:
+    source = "https://api.lovdata.no/v1/publicData/"
+    if role != "law_identity":
+        source = "https://data.stortinget.no/eksport/sak?sakid=43206"
     return {
         "role": role,
-        "source_url": "https://data.stortinget.no/eksport/sak?sakid=43206",
+        "source_url": source,
         "capture_level": "raw_body_captured",
         "observed_on": "2026-10-14",
         "upstream_id": "synthetic-fixture-only",
@@ -191,6 +194,19 @@ def test_attested_shape_needs_three_distinct_raw_evidence_roles() -> None:
         }
         with pytest.raises(ValidationError):
             VALIDATOR.validate(reduced)
+
+
+def test_attested_roles_require_independent_official_source_origins() -> None:
+    record = _attested_shape()
+    legal_source = record["evidence"][-3]
+    legal_source["source_url"] = "https://data.stortinget.no/eksport/sak?sakid=43206"
+    with pytest.raises(ValidationError):
+        VALIDATOR.validate(record)
+    legal_source["source_url"] = "https://api.lovdata.no/v1/publicData/"
+    parliamentary_source = record["evidence"][-1]
+    parliamentary_source["source_url"] = "https://api.lovdata.no/v1/publicData/"
+    with pytest.raises(ValidationError):
+        VALIDATOR.validate(record)
 
 
 def test_raw_capture_must_include_retrieval_and_digest() -> None:
