@@ -21,8 +21,12 @@ XML = b"""<?xml version="1.0" encoding="utf-8"?>
   <id>89016</id><sak_sesjon>2021-2022</sak_sesjon>
   <henvisning>Prop. 81 L (2021-2022), Lovvedtak 85 (2021-2022)</henvisning>
   <publikasjon_referanse_liste>
-    <publikasjon_referanse><type>innstilling</type><lenke_tekst>Innst. 386 L (2021-2022)</lenke_tekst></publikasjon_referanse>
-    <publikasjon_referanse><type>lovvedtak</type><lenke_tekst>Lovvedtak 85 (2021-2022)</lenke_tekst></publikasjon_referanse>
+    <publikasjon_referanse>
+      <type>innstilling</type><lenke_tekst>Innst. 386 L (2021-2022)</lenke_tekst>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <type>lovvedtak</type><lenke_tekst>Lovvedtak 85 (2021-2022)</lenke_tekst>
+    </publikasjon_referanse>
   </publikasjon_referanse_liste>
 </detaljert_sak>"""
 DECISION = LawDecision("2021-2022", 85)
@@ -71,7 +75,10 @@ def test_unexpected_lovvedtak_is_not_silently_paired() -> None:
 
 
 def test_multiple_distinct_typed_decisions_are_ambiguous() -> None:
-    extra = b"<publikasjon_referanse><type>lovvedtak</type><lenke_tekst>Lovvedtak 86 (2021-2022)</lenke_tekst></publikasjon_referanse>"
+    extra = (
+        b"<publikasjon_referanse><type>lovvedtak</type>"
+        b"<lenke_tekst>Lovvedtak 86 (2021-2022)</lenke_tekst></publikasjon_referanse>"
+    )
     body = XML.replace(b"</publikasjon_referanse_liste>", extra + b"</publikasjon_referanse_liste>")
     assert resolve_publication(parse_sak(_snapshot(body)), DECISION) == "ambiguous"
 
