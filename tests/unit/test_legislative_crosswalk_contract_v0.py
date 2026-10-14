@@ -23,7 +23,7 @@ VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 def _ledger() -> list[dict[str, str]]:
     payload = LEDGER_PATH.read_bytes()
     header = b"blob " + str(len(payload)).encode("ascii") + b"\0"
-    assert sha1(header + payload).hexdigest() == SOURCE_BLOB_SHA
+    assert sha1(header + payload, usedforsecurity=False).hexdigest() == SOURCE_BLOB_SHA
     return list(csv.DictReader(io.StringIO(payload.decode("utf-8"))))
 
 
