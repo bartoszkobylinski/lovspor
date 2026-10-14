@@ -30,7 +30,10 @@ def test_official_case_attests_lov_to_lovvedtak_to_sak() -> None:
     result = probe()
     assert result.status == "attested"
     assert (result.law_id, result.session_id, result.lovvedtak_number, result.sak_id) == (
-        "LOV-2022-06-17-63", "2021-2022", 85, 89016,
+        "LOV-2022-06-17-63",
+        "2021-2022",
+        85,
+        89016,
     )
     assert result.representation == "excerpt"
     assert len(result.input_sha256) == 64
@@ -41,7 +44,8 @@ def test_repeated_identical_lovvedtak_does_not_create_ambiguity() -> None:
 
 
 def test_missing_sanction_stays_unresolved_not_guess_from_date() -> None:
-    assert probe("Lovvedtak 85 (2021-2022). Ikrafttredelse 01.07.2022 (lov63)").status == "unresolved"
+    result = probe("Lovvedtak 85 (2021-2022). Ikrafttredelse 01.07.2022 (lov63)")
+    assert result.status == "unresolved"
 
 
 def test_missing_lovvedtak_stays_unresolved() -> None:
