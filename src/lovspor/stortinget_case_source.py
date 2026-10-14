@@ -153,19 +153,31 @@ def _store_once(path: Path, content: bytes) -> None:
             raise ValueError("Archived Stortinget object hash/content mismatch") from None
 
 
-def archive_sak(snapshot: CaseSnapshot, directory: Path) -> Path:
-    """Keep immutable content and per-observation metadata outside Lovverk."""
-    directory.mkdir(parents=True, exist_ok=True)
-    name = f"sak-{snapshot.sak_id}-{snapshot.source_sha256}"
-    blob = directory / f"{name}.xml"
-    _store_once(blob, snapshot.body)
+def _archive_identity(snapshot: CaseSnapshot) -> bytes:
     identity = {
         "sak_id": snapshot.sak_id,
         "source_url": snapshot.source_url,
         "sha256": snapshot.source_sha256,
         "content_type": snapshot.content_type,
     }
-    _store_once(blob.with_suffix(".json"), json.dumps(identity, sort_keys=True).encode())
+    return json.dumps(identity, sort_keys=True).encode()
+
+
+def _verify_snapshot(snapshot: CaseSnapshot) -> None:
+    if sha256(snapshot.body).hexdigest() != snapshot.source_sha256:
+        raise ValueError("Stortinget evidence digest mismatch")
+    if snapshot.observed_at.tzinfo is None or snapshot.observed_at.utcoffset() is None:
+        raise ValueError("Stortinget observation time must be timezone aware")
+
+
+def archive_sak(snapshot: CaseSnapshot, directory: Path) -> Path:
+    """Keep immutable content and per-observation metadata outside Lovverk."""
+    _verify_snapshot(snapshot)
+    directory.mkdir(parents=True, exist_ok=True)
+    name = f"sak-{snapshot.sak_id}-{snapshot.source_sha256}"
+    blob = directory / f"{name}.xml"
+    _store_once(blob, snapshot.body)
+    _store_once(blob.with_suffix(".json"), _archive_identity(snapshot))
     observation_dir = directory / "observations"
     observation_dir.mkdir(exist_ok=True)
     timestamp = snapshot.observed_at.astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
