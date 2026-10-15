@@ -377,6 +377,8 @@ def test_receipt_with_storage_blocked_by_a_file_preserves_the_ledger(
     )
     assert result.exit_code != 0
     assert isinstance(result.exception, OSError)
+    # Report the actual obstruction, rather than a nonexistent hash directory below it.
+    assert result.exception.filename == str(blocked)
     assert journal.read_bytes() == original
     assert blocked.read_bytes() == b"existing unrelated file"
     assert _held(workspace)[FJALER].documents == ()
