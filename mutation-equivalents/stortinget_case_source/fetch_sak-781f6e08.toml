@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/stortinget_case_source.py"
+symbol = "fetch_sak"
+registered = "2026-10-15, PR #614, from the mutation artifact of run 38780023516 (e6ac4a7), each re-checked by hand on the rewritten line"
+mutation = """
+-        "GET", _ENDPOINT, params={"sakid": str(sak_id)}, follow_redirects=False
++        "get", _ENDPOINT, params={"sakid": str(sak_id)}, follow_redirects=False
+"""
+justification = """
+httpx normalises the method before the request exists: Request.__init__
+does `self.method = method.upper()`, so "get" and "GET" build the same
+request and put the same bytes on the wire. Argued from the dependency,
+hence pinned.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_httpx_still_normalises_the_request_method"

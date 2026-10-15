@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/stortinget_case_source.py"
+symbol = "_field"
+registered = "2026-10-15, PR #614, from the mutation artifact of run 38780023516 (e6ac4a7), each re-checked by hand on the rewritten line"
+mutation = """
+-    return (element.findtext(f"{{{_NS}}}{name}") or "").strip()
++    return (element.findtext(f"{{{_NS}}}{name}") or "XXXX").strip()
+"""
+justification = """
+Pure Python, no dependency. The fallback is returned when the child is
+missing or empty. Every caller in the module rejects "" and "XXXX" alike:
+_law_decision compares the type with "lovvedtak" and fullmatches the link
+text against ^Lovvedtak..., parse_sak compares the id with str() of a
+positive int and fullmatches the session against _SESSION (four digits,
+a hyphen, four digits). Neither string passes any of the four, so each
+caller takes the same branch (None, or the same ValueError) whichever
+fallback it got.
+"""
