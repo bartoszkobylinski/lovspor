@@ -101,6 +101,24 @@ def test_dtd_is_rejected_without_external_resolution() -> None:
         parse_sak(_snapshot(body))
 
 
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16", "utf-16-le", "utf-32"])
+@pytest.mark.parametrize(
+    "doctype",
+    [
+        '<!DOCTYPE detaljert_sak [<!ENTITY marker "expanded">]>',
+        '<!DOCTYPE detaljert_sak SYSTEM "http://example.invalid/sak.dtd">',
+    ],
+)
+def test_a_dtd_is_refused_in_any_encoding(encoding: str, doctype: str) -> None:
+    declared = "utf-16" if encoding.startswith("utf-16") else encoding
+    prolog = f'<?xml version="1.0" encoding="{declared}"?>'
+    body = (prolog + doctype + XML.decode().split("?>", 1)[1]).encode(encoding)
+    if encoding == "utf-16-le":
+        body = b"\xff\xfe" + body
+    with pytest.raises(ValueError, match="Forbidden XML DTD"):
+        parse_sak(_snapshot(body))
+
+
 @pytest.mark.parametrize("sak_id", [-1, 0, True, 1.3])
 def test_bad_requested_case_id_fails_before_network(sak_id: object) -> None:
     with _client() as client, pytest.raises(ValueError, match="sak_id"):

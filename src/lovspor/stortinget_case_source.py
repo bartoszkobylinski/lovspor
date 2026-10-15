@@ -118,11 +118,17 @@ def parse_sak(snapshot: CaseSnapshot) -> CaseMetadata:
     """Read only direct, typed references, not prose in a title or henvisning."""
     if b"<!DOCTYPE" in snapshot.body.upper():
         raise ValueError("Forbidden XML DTD")
-    parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
+    parser = etree.XMLParser(
+        resolve_entities=False, no_network=True, load_dtd=False, huge_tree=False
+    )
     try:
         root = etree.fromstring(snapshot.body, parser=parser)
     except etree.XMLSyntaxError as exc:
         raise ValueError("Invalid Stortinget case XML") from exc
+    # The byte check above sees only ASCII-compatible encodings; a UTF-16 or
+    # UTF-32 document carries its DOCTYPE past it, so ask the parsed tree too.
+    if root.getroottree().docinfo.internalDTD is not None:
+        raise ValueError("Forbidden XML DTD")
     if root.tag != f"{{{_NS}}}detaljert_sak":
         raise ValueError("Unexpected XML root")
     if _field(root, "id") != str(snapshot.sak_id):
