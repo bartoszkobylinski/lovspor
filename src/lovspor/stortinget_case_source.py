@@ -17,6 +17,8 @@ from typing import Literal
 import httpx
 from lxml import etree
 
+from lovspor.parsing.xml_normalizer import safe_parser
+
 _NS = "http://data.stortinget.no"
 _ENDPOINT = "https://data.stortinget.no/eksport/sak"
 _LIMIT = 2_000_000
@@ -66,8 +68,9 @@ def _validate_response(response: httpx.Response) -> str:
     url = str(response.request.url)
     if not url.startswith(f"{_ENDPOINT}?"):
         raise ValueError("Unexpected source endpoint")
-    header_value = str(response.headers.get("content-type", ""))
-    content_type = header_value.split(";", 1)[0].lower().strip()
+    header: str = response.headers.get("content-type", "")
+    media_type, _, _ = header.partition(";")
+    content_type = media_type.lower().strip()
     if content_type not in {"application/xml", "text/xml"}:
         raise ValueError("Expected an XML response from Stortinget")
     return content_type
@@ -118,11 +121,8 @@ def parse_sak(snapshot: CaseSnapshot) -> CaseMetadata:
     """Read only direct, typed references, not prose in a title or henvisning."""
     if b"<!DOCTYPE" in snapshot.body.upper():
         raise ValueError("Forbidden XML DTD")
-    parser = etree.XMLParser(
-        resolve_entities=False, no_network=True, load_dtd=False, huge_tree=False
-    )
     try:
-        root = etree.fromstring(snapshot.body, parser=parser)
+        root = etree.fromstring(snapshot.body, parser=safe_parser())
     except etree.XMLSyntaxError as exc:
         raise ValueError("Invalid Stortinget case XML") from exc
     # The byte check above sees only ASCII-compatible encodings; a UTF-16 or
@@ -187,7 +187,7 @@ def archive_sak(snapshot: CaseSnapshot, directory: Path) -> Path:
     observation_dir = directory / "observations"
     observation_dir.mkdir(exist_ok=True)
     timestamp = snapshot.observed_at.astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-    record = {"object": blob.name, "observed_at": snapshot.observed_at.isoformat()}
+    record = {"observed_at": snapshot.observed_at.isoformat(), "object": blob.name}
     observation = observation_dir / f"{name}-{timestamp}.json"
     _store_once(observation, json.dumps(record, sort_keys=True).encode())
     return blob
