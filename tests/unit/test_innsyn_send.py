@@ -460,6 +460,38 @@ def _serve_once(listener: socket.socket, heard: list[bytes]) -> None:
 
 
 class TestSmtpTransport:
+    @pytest.mark.usefixtures("smtp_env")
+    @pytest.mark.parametrize("stage", ["starttls", "login", "send_message"])
+    def test_submission_failure_stops_without_recording(
+        self, workspace: Path, manifest: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+    ) -> None:
+        # operations.md: the first unaccepted letter stops the run, with nothing recorded.
+        server = Mock()
+        errors = {
+            "starttls": ssl.SSLCertVerificationError("untrusted certificate"),
+            "login": smtplib.SMTPAuthenticationError(535, b"authentication failed"),
+            "send_message": smtplib.SMTPDataError(554, b"message refused"),
+        }
+        getattr(server, stage).side_effect = errors[stage]
+        factory = Mock(return_value=server)
+        monkeypatch.setattr("lovspor.innsyn.mailer.smtplib.SMTP", factory)
+
+        code, _, err = _send(workspace, manifest, "--send")
+
+        assert code == 1
+        factory.assert_called_once()
+        server.quit.assert_called_once()
+        if stage == "starttls":
+            server.login.assert_not_called()
+        if stage != "send_message":
+            server.send_message.assert_not_called()
+        assert not _sent(workspace)
+        assert "FAILED 0301:" in err
+        assert type(errors[stage]).__name__ in err
+        assert "nothing recorded for it" in err
+        assert "sent 0, skipped (already sent) 0, refused 0, remaining 3" in err
+        assert "Traceback" not in err
+
     def test_quit_failure_does_not_undo_acceptance(self, monkeypatch: pytest.MonkeyPatch) -> None:
         server = Mock()
         server.quit.side_effect = smtplib.SMTPServerDisconnected("connection closed")
@@ -610,6 +642,65 @@ class TestRedaction:
 
 @pytest.mark.usefixtures("smtp_env")
 class TestJudgedAgainBeforeEachLetter:
+    @pytest.mark.parametrize("during_run", [False, True])
+    def test_a_missing_letter_is_refused_and_later_letters_still_go(
+        self,
+        workspace: Path,
+        manifest: Path,
+        fake: FakeTransport,
+        monkeypatch: pytest.MonkeyPatch,
+        during_run: bool,
+    ) -> None:
+        letter = manifest.parent / "4646.txt"
+        if during_run:
+
+            def remove_letter(seconds: float) -> None:
+                letter.unlink(missing_ok=True)
+
+            monkeypatch.setattr(send_commands, "pause", remove_letter)
+        else:
+            letter.unlink()
+            monkeypatch.setattr(send_commands, "pause", lambda _: None)
+
+        code, _, err = _send(workspace, manifest, "--send")
+
+        assert code == 0, err
+        assert fake.recipients() == ["postmottak@oslobystyre.no", "post@vlfk.no"]
+        assert set(_sent(workspace)) == {"0301", "46"}
+        assert "refused 4646:" in err
+        assert "cannot be read (FileNotFoundError)" in err
+        assert "sent 2, skipped (already sent) 0, refused 1, remaining 0" in err
+
+    def test_acceptance_is_recorded_before_the_next_delivery(
+        self,
+        workspace: Path,
+        manifest: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        pauses: list[float],
+    ) -> None:
+        # operations.md: "Each accepted letter is recorded at once" with acceptance time.
+        start = datetime(2026, 10, 13, 8, tzinfo=UTC)
+        monkeypatch.setattr(send_commands, "now", _Clock(start))
+
+        class InspectingTransport(FakeTransport):
+            def deliver(self, message: EmailMessage) -> None:
+                held = _sent(workspace)
+                assert set(held) == set(ORDER[: self.calls])
+                for index, previous in enumerate(self.delivered):
+                    event = held[ORDER[index]]
+                    assert event.message_id == previous["Message-ID"]
+                    assert event.sent_at == start + timedelta(seconds=2 * (index + 1))
+                super().deliver(message)
+
+        transport = InspectingTransport()
+        monkeypatch.setattr(send_commands, "transport_for", lambda _: transport)
+
+        code, _, err = _send(workspace, manifest, "--send")
+
+        assert code == 0, err
+        assert transport.calls == 3
+        assert _sent(workspace)["46"].sent_at == start + timedelta(seconds=6)
+
     def test_a_letter_recorded_by_hand_during_the_run_is_skipped(
         self, workspace: Path, manifest: Path, fake: FakeTransport, monkeypatch: pytest.MonkeyPatch
     ) -> None:
