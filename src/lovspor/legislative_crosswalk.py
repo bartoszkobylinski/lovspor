@@ -65,7 +65,10 @@ _CASE_HOSTS = frozenset({"stortinget.no", "www.stortinget.no"})
 
 def _case_id(url: str) -> int | None:
     """Trust a typed id only in the official Stortinget case-page URL."""
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError:  # an unbalanced "[" reads as a broken IPv6 literal
+        return None
     # The whole authority, not .hostname/.port: .port raises on a malformed
     # port and is falsy for ":0" and ":", so userinfo or any port is refused.
     if parts.scheme != "https" or parts.netloc.casefold() not in _CASE_HOSTS:

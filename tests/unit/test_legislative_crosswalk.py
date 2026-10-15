@@ -93,6 +93,12 @@ def test_any_port_or_userinfo_is_unsupported_never_an_exception(authority: str) 
     assert probe(source_url=url).status == "unsupported"
 
 
+@pytest.mark.parametrize("authority", ["[", "[not-an-ip]", "www.stortinget.no]", "[::1"])
+def test_a_broken_bracket_authority_is_unsupported_never_an_exception(authority: str) -> None:
+    url = OFFICIAL_URL.replace("www.stortinget.no", authority)
+    assert probe(source_url=url).status == "unsupported"
+
+
 def test_script_content_is_not_used_as_attestation() -> None:
     body = "<script>Lovvedtak 85 (2021-2022) Sanksjonert 17.06.2022 (lov63)</script>"
     assert probe(body).status == "unresolved"
