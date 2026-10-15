@@ -7,7 +7,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from lovspor.errors import ConfigError, InnsynSendError
 from lovspor.innsyn import send_commands
@@ -28,6 +28,32 @@ from tests.unit.test_innsyn_send import (
 # autouse fixture or transport patches.
 __all__ = ["manifest", "workspace"]
 AT = datetime(2026, 10, 13, 8, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("body", ["ASCII only", "Blåbær og innsyn", "你好 👋\nNeste linje"])
+def test_message_body_round_trips_as_utf8(body: str) -> None:
+    message = MailMessage(
+        sender=Sender(name="Åse", email="ase@example.no", recorded_at=AT),
+        to="post@example.no",
+        subject="Innsyn",
+        body=body,
+        date=AT,
+        message_id="<test@example.no>",
+    ).email()
+    assert message.get_content_charset() == "utf-8"
+    assert message.get_payload(decode=True) == (body + "\n").encode("utf-8")
+
+
+@pytest.mark.parametrize("address", ["a@b@example.no", '"a@b"@example.no', "a.example.no"])
+def test_sender_rejects_addresses_without_one_unambiguous_domain(address: str) -> None:
+    with pytest.raises(ValidationError):
+        Sender(name="Åse", email=address, recorded_at=AT)
+
+
+@pytest.mark.parametrize("address", ["a+b@sub.example.no", " A.B@EXAMPLE.NO "])
+def test_message_id_uses_validated_sender_domain(address: str) -> None:
+    sender = Sender(name="Åse", email=address, recorded_at=AT)
+    assert message_id(sender).endswith(".innsyn@" + sender.email.split("@")[1] + ">")
 
 
 @pytest.fixture(autouse=True)
@@ -200,6 +226,33 @@ def test_pause_is_consumed_even_when_next_letter_is_refused(
     )
     assert len(report.sent) == 2
     assert len(report.refused) == 1
+    assert pauses == [2]
+
+
+def test_one_pause_before_multiple_late_refusals(workspace: Path, manifest: Path) -> None:
+    target = InnsynWorkspace(workspace, [])
+    prepared = prepare(target, manifest)
+    pauses = []
+
+    def pause(seconds):
+        pauses.append(seconds)
+        for ready in prepared.ready[1:]:
+            path = manifest.parent / ready.entry.letter_file
+            path.write_bytes(path.read_bytes() + b"edited during pause")
+
+    transport = FakeTransport()
+    report = send_letters(
+        target,
+        prepared,
+        SendPlan(sender=read_sender(target), limit=3, pause_seconds=2),
+        Wire(transport=transport, clock=lambda: AT, pause=pause),
+    )
+    assert len(report.sent) == 1
+    assert tuple(item.authority_id for item in report.refused) == tuple(
+        ready.entry.authority_id for ready in prepared.ready[1:]
+    )
+    assert report.failure is None
+    assert report.remaining == 0
     assert pauses == [2]
 
 
