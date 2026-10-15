@@ -5,7 +5,7 @@ import json
 import os
 import time
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta, tzinfo
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from hashlib import sha256
 
 import httpx
@@ -507,3 +507,66 @@ def test_utf16_external_entity_is_not_loaded(tmp_path) -> None:
 )
 def test_missing_reference_fields_do_not_attest(field) -> None:
     assert parse_sak(_snapshot(XML.replace(field, b""))).lovvedtak == ()
+
+
+def test_repeated_reference_to_one_decision_is_not_ambiguous() -> None:
+    reference = (
+        b"<publikasjon_referanse><type>lovvedtak</type>"
+        b"<lenke_tekst>Lovvedtak 85 (2021-2022)</lenke_tekst></publikasjon_referanse>"
+    )
+    body = XML.replace(
+        b"</publikasjon_referanse_liste>", reference + b"</publikasjon_referanse_liste>"
+    )
+    case = parse_sak(_snapshot(body))
+    assert case.lovvedtak == (DECISION,)
+    assert resolve_publication(case, DECISION) == "attested"
+
+
+def test_same_decision_number_in_different_session_is_contradicted() -> None:
+    case = parse_sak(_snapshot())
+    assert resolve_publication(case, LawDecision("2020-2021", 85)) == "contradicted"
+
+
+@pytest.mark.parametrize("element", ["publikasjon_referanse", "type", "lenke_tekst"])
+def test_foreign_namespace_reference_cannot_attest(element: str) -> None:
+    opening = f"<{element}>".encode()
+    foreign = f'<{element} xmlns="https://example.invalid">'.encode()
+    body = XML.replace(opening, foreign)
+    case = parse_sak(_snapshot(body))
+    assert case.lovvedtak == ()
+    assert resolve_publication(case, DECISION) == "unresolved"
+
+
+def test_changed_payload_keeps_both_content_addressed_objects(tmp_path) -> None:
+    original = _snapshot()
+    changed = replace(
+        _snapshot(XML.replace(b"Lovvedtak 85", b"Lovvedtak 86")),
+        observed_at=OBSERVED + timedelta(seconds=1),
+    )
+    first = archive_sak(original, tmp_path)
+    second = archive_sak(changed, tmp_path)
+    assert first != second
+    assert set(tmp_path.glob("*.xml")) == {first, second}
+    for snapshot, path in [(original, first), (changed, second)]:
+        assert path.read_bytes() == snapshot.body
+        assert path.name == f"sak-89016-{sha256(snapshot.body).hexdigest()}.xml"
+        assert (
+            json.loads(path.with_suffix(".json").read_bytes())["sha256"]
+            == sha256(snapshot.body).hexdigest()
+        )
+    records = [json.loads(path.read_bytes()) for path in (tmp_path / "observations").glob("*.json")]
+    assert sorted(records, key=lambda record: record["observed_at"]) == [
+        {"object": first.name, "observed_at": original.observed_at.isoformat()},
+        {"object": second.name, "observed_at": changed.observed_at.isoformat()},
+    ]
+
+
+def test_non_utc_observation_uses_utc_filename_and_preserves_offset(tmp_path) -> None:
+    offset = OBSERVED.astimezone(timezone(timedelta(hours=5, minutes=30)))
+    snapshot = replace(_snapshot(), observed_at=offset)
+    path = archive_sak(snapshot, tmp_path)
+    observation = tmp_path / "observations" / f"{path.stem}-20261014T080000000000Z.json"
+    assert json.loads(observation.read_bytes()) == {
+        "object": path.name,
+        "observed_at": offset.isoformat(),
+    }
