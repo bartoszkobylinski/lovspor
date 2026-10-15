@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/innsyn/mailer.py"
+symbol = "message_id"
+registered = "2026-10-15, PR #609, from the mutation artifact of run 38786825561 (619ae0c), re-checked by hand"
+mutation = """
+-    return make_msgid(idstring="innsyn", domain=sender.email.rpartition("@")[2])
++    return make_msgid(idstring="innsyn", domain=sender.email.partition("@")[2])
+"""
+justification = """
+`Sender.email` is a pydantic field constrained by MAILBOX_PATTERN, whose
+local-part and domain character classes both exclude "@", so every Sender
+that can exist holds exactly one "@". On a string with one separator,
+partition and rpartition return the same triple, and [2] is the same
+domain. Argued from the dependency enforcing the pattern, hence pinned.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_sender_mailbox_holds_exactly_one_at"
