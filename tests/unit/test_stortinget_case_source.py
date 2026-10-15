@@ -1,7 +1,10 @@
 """Offline API-contract tests; XML is a synthetic derivative of the official schema."""
 
+import gzip
+import json
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 
 import httpx
 import pytest
@@ -167,3 +170,127 @@ def test_archive_rejects_snapshot_with_forged_digest(tmp_path) -> None:
     altered = replace(capture, source_sha256="0" * 64)
     with pytest.raises(ValueError, match="digest mismatch"):
         archive_sak(altered, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        (b"", "Invalid Stortinget case XML"),
+        (XML[:-20], "Invalid Stortinget case XML"),
+        (XML.replace(b"<id>89016", b"<id>\xff"), "Invalid Stortinget case XML"),
+        (
+            XML.replace(b"http://data.stortinget.no", b"http://example.invalid"),
+            "Unexpected XML root",
+        ),
+        (XML.replace(b"<id>89016</id>", b""), "case id mismatch"),
+        (XML.replace(b"<sak_sesjon>2021-2022</sak_sesjon>", b""), "session identity"),
+    ],
+)
+def test_invalid_case_xml_fails_with_useful_error(body: bytes, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        parse_sak(_snapshot(body))
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [b"Lovvedtak 85 (2020-2022)", b"Lovvedtak 85", b"Prop. 85 (2021-2022)"],
+)
+def test_inexact_typed_reference_does_not_attest(reference: bytes) -> None:
+    body = XML.replace(b"Lovvedtak 85 (2021-2022)", reference)
+    case = parse_sak(_snapshot(body))
+    assert case.lovvedtak == ()
+    assert resolve_publication(case, DECISION) == "unresolved"
+
+
+def test_nested_reference_does_not_establish_a_direct_link() -> None:
+    body = XML.replace(b"<publikasjon_referanse_liste>", b"<wrapper><publikasjon_referanse_liste>")
+    body = body.replace(
+        b"</publikasjon_referanse_liste>", b"</publikasjon_referanse_liste></wrapper>"
+    )
+    assert parse_sak(_snapshot(body)).lovvedtak == ()
+
+
+def test_capture_bounds_decoded_gzip_bytes() -> None:
+    decoded = XML + b" " * (2_000_000 - len(XML))
+    for body, exceeds in [(decoded, False), (decoded + b" ", True)]:
+
+        def handler(request: httpx.Request, body: bytes = body) -> httpx.Response:
+            assert str(request.url) == URL
+            return httpx.Response(
+                200,
+                content=gzip.compress(body),
+                headers={"Content-Type": "text/xml; charset=utf-8", "Content-Encoding": "gzip"},
+            )
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            if exceeds:
+                with pytest.raises(ValueError, match="byte limit"):
+                    fetch_sak(client, 89016, observed_at=OBSERVED)
+            else:
+                capture = fetch_sak(client, 89016, observed_at=OBSERVED)
+                assert capture.body == decoded
+                assert capture.source_sha256 == sha256(decoded).hexdigest()
+                assert capture.content_type == "text/xml"
+
+
+@pytest.mark.parametrize("failure", [httpx.ReadTimeout, httpx.ReadError])
+def test_partial_download_propagates_transport_failure(failure: type[httpx.TransportError]) -> None:
+    requests = []
+
+    class InterruptedBody(httpx.SyncByteStream):
+        def __iter__(self):
+            yield XML[:100]
+            raise failure("interrupted response")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200, stream=InterruptedBody(), headers={"Content-Type": "application/xml"}
+        )
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(failure, match="interrupted response"),
+    ):
+        fetch_sak(client, 89016, observed_at=OBSERVED)
+    assert len(requests) == 1
+
+
+def test_archive_metadata_and_separate_observations_round_trip(tmp_path) -> None:
+    capture = _snapshot()
+    path = archive_sak(capture, tmp_path)
+    later = replace(capture, observed_at=OBSERVED + timedelta(seconds=1))
+    assert archive_sak(later, tmp_path) == path
+    assert json.loads(path.with_suffix(".json").read_bytes()) == {
+        "sak_id": 89016,
+        "source_url": URL,
+        "sha256": capture.source_sha256,
+        "content_type": "application/xml",
+    }
+    observations = sorted((tmp_path / "observations").glob("*.json"))
+    assert [json.loads(p.read_bytes()) for p in observations] == [
+        {"object": path.name, "observed_at": time.isoformat()}
+        for time in (OBSERVED, later.observed_at)
+    ]
+    assert list(tmp_path.glob("*.xml")) == [path]
+
+
+def test_archive_refuses_corrupted_metadata_without_overwriting(tmp_path) -> None:
+    capture = _snapshot()
+    path = archive_sak(capture, tmp_path)
+    metadata = path.with_suffix(".json")
+    metadata.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="hash/content mismatch"):
+        archive_sak(capture, tmp_path)
+    assert metadata.read_bytes() == b"tampered"
+    assert path.read_bytes() == XML
+
+
+def test_naive_observation_is_rejected_before_fetch_or_archive(tmp_path) -> None:
+    naive = OBSERVED.replace(tzinfo=None)
+    with _client() as client, pytest.raises(ValueError, match="timezone aware"):
+        fetch_sak(client, 89016, observed_at=naive)
+    directory = tmp_path / "archive"
+    with pytest.raises(ValueError, match="timezone aware"):
+        archive_sak(replace(_snapshot(), observed_at=naive), directory)
+    assert not directory.exists()
