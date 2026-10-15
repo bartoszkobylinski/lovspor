@@ -4,7 +4,7 @@ from hashlib import sha256
 
 import pytest
 
-from lovspor.legislative_crosswalk import CrosswalkRequest, resolve_case_page
+from lovspor.legislative_crosswalk import CrosswalkRequest, _text, resolve_case_page
 
 OFFICIAL_URL = "https://www.stortinget.no/no/Saker-og-publikasjoner/Saker/Sak/?p=89016"
 # Checked against the official case page on 2026-10-14; deliberately an
@@ -198,3 +198,101 @@ def test_probe_is_deterministic_and_preserves_exact_evidence_digest() -> None:
     assert (
         probe().input_sha256 == "d452e746b719a1b08e46771ec1c3e005f7ee6b9cbd30b60d1a078395c5ed290f"
     )
+
+
+@pytest.mark.parametrize(
+    ("body", "overrides", "status", "reason"),
+    [
+        (STORTING_EXCERPT, {}, "attested", "The official case page names both exact identifiers"),
+        ("", {}, "unresolved", "Missing explicit sanction or Lovvedtak reference"),
+        (
+            STORTING_EXCERPT + " Lovvedtak 86 (2021-2022)",
+            {},
+            "ambiguous",
+            "Several law/decision identities occur in the source",
+        ),
+        (
+            STORTING_EXCERPT,
+            {"lovvedtak_number": 86},
+            "contradicted",
+            "Explicit source identifiers contradict the requested link",
+        ),
+        (
+            STORTING_EXCERPT,
+            {"law_id": "invalid"},
+            "unsupported",
+            "Invalid official case URL or Lovdata law identity",
+        ),
+        (
+            STORTING_EXCERPT,
+            {"lovvedtak_number": 0},
+            "unsupported",
+            "Invalid parliamentary decision identity",
+        ),
+        (
+            STORTING_EXCERPT,
+            {"representation": "html"},
+            "unsupported",
+            "Unrecognised evidence representation",
+        ),
+    ],
+)
+def test_probe_preserves_verdict_explanation(
+    body: str, overrides: dict[str, object], status: str, reason: str
+) -> None:
+    result = probe(body, **overrides)
+    assert (result.status, result.reason) == (status, reason)
+
+
+@pytest.mark.parametrize("suffix", ["X", "/X", "xX/"])
+def test_case_path_cannot_have_trailing_non_slash_characters(suffix: str) -> None:
+    url = OFFICIAL_URL.replace("/Sak/", "/Sak" + suffix)
+    result = probe(source_url=url)
+    assert result.status == "unsupported"
+    assert result.sak_id is None
+
+
+@pytest.mark.parametrize("query", ["p=89016&p=", "p=89016&x=", "p=&p=89016"])
+def test_blank_query_fields_cannot_be_discarded(query: str) -> None:
+    result = probe(source_url=OFFICIAL_URL.split("?", maxsplit=1)[0] + "?" + query)
+    assert result.status == "unsupported"
+    assert result.sak_id is None
+
+
+def test_smallest_positive_case_and_decision_are_valid() -> None:
+    result = probe(
+        "Lovvedtak 1 (2021-2022) Sanksjonert 17.06.2022 (lov63)",
+        source_url=OFFICIAL_URL.replace("89016", "1"),
+        lovvedtak_number=1,
+    )
+    assert result.status == "attested"
+    assert result.sak_id == 1
+
+
+def test_invalid_sanction_does_not_hide_later_valid_sanction() -> None:
+    body = "Sanksjonert 31.02.2022 (lov64) " + STORTING_EXCERPT
+    assert probe(body).status == "attested"
+
+
+def test_plain_text_normalizes_whitespace_to_single_spaces() -> None:
+    assert _text("  Lovvedtak\t85\r\n(2021-2022)  ") == "Lovvedtak 85 (2021-2022)"
+
+
+@pytest.mark.parametrize("tag", ["script", "style"])
+def test_unmatched_hidden_end_tag_does_not_hide_visible_evidence(tag: str) -> None:
+    assert probe(f"</{tag}>" + STORTING_EXCERPT).status == "attested"
+
+
+def test_nested_hidden_markup_does_not_leak_evidence() -> None:
+    body = (
+        "<script><style></style>"
+        "Lovvedtak 86 (2021-2022) Sanksjonert 17.06.2022 (lov64)"
+        "</script>" + STORTING_EXCERPT
+    )
+    assert probe(body).status == "attested"
+
+
+@pytest.mark.parametrize("tag", ["script", "style"])
+def test_hidden_section_ends_before_plain_visible_evidence(tag: str) -> None:
+    body = f"<{tag}>untrusted text</{tag}>Lovvedtak 85 (2021-2022) Sanksjonert 17.06.2022 (lov63)"
+    assert probe(body).status == "attested"
