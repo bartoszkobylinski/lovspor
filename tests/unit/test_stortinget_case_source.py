@@ -2,16 +2,20 @@
 
 import gzip
 import json
+import os
+import time
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from hashlib import sha256
 
 import httpx
 import pytest
+from pytest_httpx import IteratorStream
 
 from lovspor.stortinget_case_source import (
     CaseSnapshot,
     LawDecision,
+    _validate_response,
     archive_sak,
     fetch_sak,
     parse_sak,
@@ -294,3 +298,212 @@ def test_naive_observation_is_rejected_before_fetch_or_archive(tmp_path) -> None
     with pytest.raises(ValueError, match="timezone aware"):
         archive_sak(replace(_snapshot(), observed_at=naive), directory)
     assert not directory.exists()
+
+
+class _NoOffset(tzinfo):
+    def utcoffset(self, dt):
+        return None
+
+
+def test_observation_with_timezone_but_no_offset_is_rejected(tmp_path) -> None:
+    observed = OBSERVED.replace(tzinfo=_NoOffset())
+    with (
+        _client() as client,
+        pytest.raises(ValueError, match="^observed_at must be timezone aware$"),
+    ):
+        fetch_sak(client, 89016, observed_at=observed)
+    with pytest.raises(ValueError, match="^Stortinget observation time must be timezone aware$"):
+        archive_sak(replace(_snapshot(), observed_at=observed), tmp_path / "absent")
+    assert not (tmp_path / "absent").exists()
+
+
+def test_streamed_chunks_are_concatenated_and_cumulatively_bounded(httpx_mock) -> None:
+    for chunks, exceeds in [([b"abc", b"def"], False), ([b"x" * 1_000_001] * 2, True)]:
+        httpx_mock.add_response(
+            url=URL, stream=IteratorStream(chunks), headers={"Content-Type": "application/xml"}
+        )
+        with httpx.Client() as client:
+            if exceeds:
+                with pytest.raises(
+                    ValueError, match="^Stortinget sak response exceeds byte limit$"
+                ):
+                    fetch_sak(client, 89016, observed_at=OBSERVED)
+            else:
+                assert fetch_sak(client, 89016, observed_at=OBSERVED).body == b"abcdef"
+
+
+@pytest.mark.parametrize(
+    "content_type", [None, "text/html", " Application/XML ; charset=utf-8; x=y"]
+)
+def test_response_media_type_parameters_and_missing_header(httpx_mock, content_type) -> None:
+    headers = {} if content_type is None else {"Content-Type": content_type}
+    httpx_mock.add_response(url=URL, content=XML, headers=headers)
+    with httpx.Client() as client:
+        if content_type is None or content_type == "text/html":
+            with pytest.raises(ValueError, match="^Expected an XML response from Stortinget$"):
+                fetch_sak(client, 89016, observed_at=OBSERVED)
+        else:
+            assert fetch_sak(client, 89016, observed_at=OBSERVED).content_type == "application/xml"
+
+
+def test_response_endpoint_is_validated() -> None:
+    response = httpx.Response(
+        200,
+        request=httpx.Request("GET", "https://example.invalid/?sakid=1"),
+        headers={"Content-Type": "application/xml"},
+    )
+    with pytest.raises(ValueError, match="^Unexpected source endpoint$"):
+        _validate_response(response)
+
+
+def test_first_case_and_default_observation_and_http_method(httpx_mock) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url="https://data.stortinget.no/eksport/sak?sakid=1",
+        content=XML,
+        headers={"Content-Type": "application/xml"},
+    )
+    before = datetime.now(UTC)
+    with httpx.Client() as client:
+        capture = fetch_sak(client, 1)
+    assert capture.sak_id == 1
+    assert capture.observed_at.tzinfo is not None
+    assert before <= capture.observed_at <= datetime.now(UTC)
+
+
+def test_redirect_override_on_redirect_following_client(httpx_mock) -> None:
+    httpx_mock.add_response(url=URL, status_code=302, headers={"Location": URL + "&redirect=1"})
+    with httpx.Client(follow_redirects=True) as client, pytest.raises(httpx.HTTPStatusError):
+        fetch_sak(client, 89016, observed_at=OBSERVED)
+
+
+@pytest.mark.parametrize(
+    "body,message",
+    [
+        (b"<!DOCTYPE broken", "Forbidden XML DTD"),
+        (b"<broken", "Invalid Stortinget case XML"),
+        (b"<wrong/>", "Unexpected XML root"),
+        (XML.replace(b"<id>89016</id>", b""), "Stortinget case id mismatch"),
+        (
+            XML.replace(b"<sak_sesjon>2021-2022</sak_sesjon>", b""),
+            "Invalid Stortinget session identity",
+        ),
+        (
+            (
+                "<?xml version='1.0' encoding='utf-16'?><!DOCTYPE detaljert_sak>"
+                + XML.decode().split("?>", 1)[1]
+            ).encode("utf-16"),
+            "Forbidden XML DTD",
+        ),
+        (
+            b'<detaljert_sak xmlns="http://data.stortinget.no">'
+            + b"<x>" * 300
+            + b"</x>" * 300
+            + b"</detaljert_sak>",
+            "Invalid Stortinget case XML",
+        ),
+        (
+            (
+                "<?xml version='1.0' encoding='utf-16'?>"
+                "<!DOCTYPE detaljert_sak [<!ENTITY x SYSTEM "
+                "'file:///definitely-absent-lovspor'>]>"
+                "<detaljert_sak xmlns='http://data.stortinget.no'>&x;</detaljert_sak>"
+            ).encode("utf-16"),
+            "Forbidden XML DTD",
+        ),
+    ],
+)
+def test_parse_rejection_diagnostics_are_exact(body, message) -> None:
+    with pytest.raises(ValueError) as error:
+        parse_sak(_snapshot(body))
+    assert str(error.value) == message
+
+
+def test_metadata_keeps_evidence_digest() -> None:
+    snapshot = _snapshot()
+    assert parse_sak(snapshot).source_sha256 == sha256(XML).hexdigest()
+
+
+def test_invalid_case_id_diagnostic() -> None:
+    with (
+        _client() as client,
+        pytest.raises(ValueError, match="^sak_id must be a positive integer$"),
+    ):
+        fetch_sak(client, 0)
+
+
+def test_archive_exact_identity_and_utc_observation_name(tmp_path, monkeypatch) -> None:
+    previous = os.environ.get("TZ")
+    monkeypatch.setenv("TZ", "EST5")
+    time.tzset()
+    try:
+        capture = _snapshot()
+        directory = tmp_path / "missing" / "archive"
+        path = archive_sak(capture, directory)
+        name = f"sak-89016-{sha256(XML).hexdigest()}"
+        assert path == directory / f"{name}.xml"
+        assert (
+            path.with_suffix(".json").read_bytes()
+            == json.dumps(
+                {
+                    "sak_id": 89016,
+                    "source_url": URL,
+                    "sha256": sha256(XML).hexdigest(),
+                    "content_type": "application/xml",
+                },
+                sort_keys=True,
+            ).encode()
+        )
+        observation = directory / "observations" / f"{name}-20261014T080000000000Z.json"
+        assert (
+            observation.read_bytes()
+            == json.dumps(
+                {
+                    "object": path.name,
+                    "observed_at": OBSERVED.isoformat(),
+                },
+                sort_keys=True,
+            ).encode()
+        )
+        observation.write_bytes(b"torn")
+        with pytest.raises(ValueError, match="^Archived Stortinget object hash/content mismatch$"):
+            archive_sak(capture, directory)
+        assert observation.read_bytes() == b"torn"
+    finally:
+        if previous is None:
+            monkeypatch.delenv("TZ")
+        else:
+            monkeypatch.setenv("TZ", previous)
+        time.tzset()
+
+
+@pytest.mark.parametrize("observed", [OBSERVED.replace(tzinfo=None), OBSERVED])
+def test_snapshot_verification_exact_diagnostics(tmp_path, observed) -> None:
+    capture = replace(_snapshot(), observed_at=observed)
+    if observed.tzinfo is not None:
+        capture = replace(capture, source_sha256="0" * 64)
+        message = "Stortinget evidence digest mismatch"
+    else:
+        message = "Stortinget observation time must be timezone aware"
+    with pytest.raises(ValueError) as error:
+        archive_sak(capture, tmp_path)
+    assert str(error.value) == message
+
+
+def test_utf16_external_entity_is_not_loaded(tmp_path) -> None:
+    entity = tmp_path / "entity.xml"
+    entity.write_bytes(b"\xff")
+    body = (
+        "<?xml version='1.0' encoding='utf-16'?>"
+        f"<!DOCTYPE detaljert_sak [<!ENTITY x SYSTEM '{entity.as_uri()}'>]>"
+        "<detaljert_sak xmlns='http://data.stortinget.no'>&x;</detaljert_sak>"
+    ).encode("utf-16")
+    with pytest.raises(ValueError, match="^Forbidden XML DTD$"):
+        parse_sak(_snapshot(body))
+
+
+@pytest.mark.parametrize(
+    "field", [b"<type>lovvedtak</type>", b"<lenke_tekst>Lovvedtak 85 (2021-2022)</lenke_tekst>"]
+)
+def test_missing_reference_fields_do_not_attest(field) -> None:
+    assert parse_sak(_snapshot(XML.replace(field, b""))).lovvedtak == ()
