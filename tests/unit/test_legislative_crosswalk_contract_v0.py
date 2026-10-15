@@ -258,3 +258,64 @@ def test_draft_must_not_be_marked_as_production_export() -> None:
     record["release_state"] = "production"
     with pytest.raises(ValidationError):
         VALIDATOR.validate(record)
+
+
+@pytest.mark.parametrize("role", ["law_identity", "law_decision_pair", "decision_case"])
+@pytest.mark.parametrize("field", ["upstream_id", "body_sha256", "retrieved_at", "parser_version"])
+def test_each_raw_evidence_role_requires_capture_metadata(role: str, field: str) -> None:
+    record = _attested_shape()
+    VALIDATOR.validate(record)
+    evidence = next(
+        item
+        for item in record["evidence"]
+        if item["role"] == role and item["capture_level"] == "raw_body_captured"
+    )
+    del evidence[field]
+    with pytest.raises(ValidationError):
+        VALIDATOR.validate(record)
+
+
+@pytest.mark.parametrize("role", ["law_decision_pair", "decision_case"])
+def test_duplicate_web_evidence_cannot_replace_the_other_edge(role: str) -> None:
+    record = _record()
+    evidence = next(item for item in record["evidence"] if item["role"] == role)
+    record["evidence"] = [evidence.copy(), evidence.copy()]
+    with pytest.raises(ValidationError):
+        VALIDATOR.validate(record)
+
+
+@pytest.mark.parametrize("status", ["reviewed_web_only", "attested"])
+@pytest.mark.parametrize("field", ["kind", "session_id", "number"])
+def test_complete_status_requires_the_full_decision_key(status: str, field: str) -> None:
+    record = _attested_shape() if status == "attested" else _record()
+    VALIDATOR.validate(record)
+    del record["decision"][field]
+    with pytest.raises(ValidationError):
+        VALIDATOR.validate(record)
+
+
+@pytest.mark.parametrize("status", ["unresolved", "ambiguous", "contradicted", "unsupported"])
+def test_partial_status_accepts_unknown_edges_but_requires_nonempty_reason(status: str) -> None:
+    record = _record()
+    record.update(
+        status=status,
+        reason="Official evidence does not establish this association",
+        decision=None,
+        sak_id=None,
+        evidence=[],
+        sanction_events=[],
+    )
+    VALIDATOR.validate(record)
+    for reason_fields in ({}, {"reason": ""}):
+        incomplete = {key: value for key, value in record.items() if key != "reason"}
+        incomplete.update(reason_fields)
+        with pytest.raises(ValidationError):
+            VALIDATOR.validate(incomplete)
+
+
+@pytest.mark.parametrize("field", ["retrieved_at", "parser_version"])
+def test_web_review_cannot_claim_raw_capture_metadata(field: str) -> None:
+    record = _record()
+    record["evidence"][0][field] = _raw("law_decision_pair")[field]
+    with pytest.raises(ValidationError):
+        VALIDATOR.validate(record)
