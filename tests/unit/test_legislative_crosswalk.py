@@ -1,5 +1,7 @@
 """Fixture-based #610 case-page probe; no external requests or invented vote joins."""
 
+from hashlib import sha256
+
 import pytest
 
 from lovspor.legislative_crosswalk import CrosswalkRequest, resolve_case_page
@@ -106,3 +108,93 @@ def test_script_content_is_not_used_as_attestation() -> None:
 
 def test_only_hashes_supplied_evidence_bytes() -> None:
     assert probe("Lovvedtak 85 (2021-2022)").input_sha256 != probe().input_sha256
+
+
+@pytest.mark.parametrize(
+    "query", ["", "p=", "p=0", "p=-1", "p=1.5", "p=\uff18\uff19\uff10\uff11\uff16", "p=89016&x=1"]
+)
+def test_invalid_case_query_has_no_typed_id(query: str) -> None:
+    result = probe(source_url=OFFICIAL_URL.split("?", maxsplit=1)[0] + "?" + query)
+    assert result.status == "unsupported"
+    assert result.sak_id is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        OFFICIAL_URL + "#evidence",
+        OFFICIAL_URL.replace("/Sak/", "/Voteringsoversikt/"),
+    ],
+)
+def test_non_case_page_url_is_unsupported(url: str) -> None:
+    assert probe(source_url=url).status == "unsupported"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"law_id": "LOV-2022-06-17"},
+        {"law_id": "LOV-2022-06-17-63suffix"},
+        {"session_id": "2021/2022"},
+        {"lovvedtak_number": 0},
+        {"lovvedtak_number": -1},
+        {"representation": "html"},
+    ],
+)
+def test_invalid_request_is_unsupported_even_with_matching_evidence(
+    overrides: dict[str, object],
+) -> None:
+    assert probe(**overrides).status == "unsupported"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "",
+        "Sanksjonert 31.02.2022 (lov63) Lovvedtak 85 (2021-2022)",
+        "Sanksjonert 17.06.2022 (lov63) Lovvedtak 85 (2021-2023)",
+    ],
+)
+def test_missing_or_invalid_identity_evidence_is_unresolved(body: str) -> None:
+    assert probe(body).status == "unresolved"
+
+
+@pytest.mark.parametrize("tag", ["script", "style"])
+def test_hidden_conflicting_identities_do_not_change_visible_attestation(tag: str) -> None:
+    hidden = f"<{tag}>Lovvedtak 86 (2021-2022) Sanksjonert 17.06.2022 (lov64)</{tag}>"
+    assert probe(hidden + STORTING_EXCERPT).status == "attested"
+
+
+def test_comments_and_attributes_are_not_evidence() -> None:
+    evidence = "Lovvedtak 85 (2021-2022) Sanksjonert 17.06.2022 (lov63)"
+    assert (
+        probe(f'<!-- {evidence} --><p title="{evidence}">No identities</p>').status == "unresolved"
+    )
+
+
+def test_visible_entities_and_whitespace_preserve_attestation() -> None:
+    body = "<p>Lovvedtak&nbsp;85 (2021&ndash;2022)</p><p>Sanksjonert\n17.6.2022 (lov 63)</p>"
+    assert probe(body).status == "attested"
+
+
+def test_duplicate_sanction_is_not_ambiguous() -> None:
+    assert probe(STORTING_EXCERPT + " Sanksjonert 17.6.2022 (lov 063)").status == "attested"
+
+
+def test_conflicting_decision_number_is_contradicted() -> None:
+    assert probe(lovvedtak_number=86).status == "contradicted"
+
+
+def test_probe_is_deterministic_and_preserves_exact_evidence_digest() -> None:
+    # The pilot promises a checksum of supplied UTF-8 bytes, not normalized HTML.
+    body = STORTING_EXCERPT + "<!-- æøå -->\r\n"
+    result = probe(body, representation="full_page")
+    assert result == probe(body, representation="full_page")
+    assert result.status == "attested"
+    assert result.source_url == OFFICIAL_URL
+    assert result.representation == "full_page"
+    assert result.input_sha256 == sha256(body.encode("utf-8")).hexdigest()
+    assert result.input_sha256 != probe(body.replace("\r\n", "\n")).input_sha256
+    assert (
+        probe().input_sha256 == "d452e746b719a1b08e46771ec1c3e005f7ee6b9cbd30b60d1a078395c5ed290f"
+    )
