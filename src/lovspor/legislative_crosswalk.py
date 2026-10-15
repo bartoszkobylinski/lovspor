@@ -60,12 +60,17 @@ def _text(source: str) -> str:
     return " ".join(" ".join(parser.parts).split())
 
 
+_CASE_HOSTS = frozenset({"stortinget.no", "www.stortinget.no"})
+
+
 def _case_id(url: str) -> int | None:
     """Trust a typed id only in the official Stortinget case-page URL."""
     parts = urlsplit(url)
-    if parts.scheme != "https" or parts.hostname not in {"stortinget.no", "www.stortinget.no"}:
+    # The whole authority, not .hostname/.port: .port raises on a malformed
+    # port and is falsy for ":0" and ":", so userinfo or any port is refused.
+    if parts.scheme != "https" or parts.netloc.casefold() not in _CASE_HOSTS:
         return None
-    if parts.username or parts.password or parts.port or parts.fragment:
+    if parts.fragment:
         return None
     if parts.path.rstrip("/").casefold() != "/no/saker-og-publikasjoner/saker/sak":
         return None

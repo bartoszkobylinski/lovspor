@@ -1,5 +1,7 @@
 """Fixture-based #610 case-page probe; no external requests or invented vote joins."""
 
+import pytest
+
 from lovspor.legislative_crosswalk import CrosswalkRequest, resolve_case_page
 
 OFFICIAL_URL = "https://www.stortinget.no/no/Saker-og-publikasjoner/Saker/Sak/?p=89016"
@@ -80,6 +82,15 @@ def test_reject_host_path_and_duplicate_case_id() -> None:
         "http://www.stortinget.no/no/Saker-og-publikasjoner/Saker/Sak/?p=89016",
     ):
         assert probe(source_url=url).status == "unsupported"
+
+
+@pytest.mark.parametrize("authority", ["invalid", "65536", "0", "443", "", "user@"])
+def test_any_port_or_userinfo_is_unsupported_never_an_exception(authority: str) -> None:
+    if authority.endswith("@"):
+        url = OFFICIAL_URL.replace("www.", f"{authority}www.")
+    else:
+        url = OFFICIAL_URL.replace(".no/", f".no:{authority}/")
+    assert probe(source_url=url).status == "unsupported"
 
 
 def test_script_content_is_not_used_as_attestation() -> None:
