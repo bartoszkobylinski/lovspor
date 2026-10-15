@@ -430,6 +430,94 @@ def _foreign_sent(authority_id: str, at: datetime) -> Sent:
     )
 
 
+def test_malformed_utf8_letter_is_refused_without_stopping_later_letters(
+    workspace: Path, manifest: Path
+) -> None:
+    # operations.md: a file that is not a letter is refused; the others go.
+    letter = manifest.parent / "0301.txt"
+    payload = letter.read_bytes() + b"\xff"
+    letter.write_bytes(payload)
+    _rewrite_manifest(manifest, "0301", letter_sha256=hashlib.sha256(payload).hexdigest())
+    target = InnsynWorkspace(workspace, [])
+    prepared = prepare(target, manifest)
+    assert [item.authority_id for item in prepared.refused] == ["0301"]
+    assert "decode" in prepared.refused[0].reason
+    transport = FakeTransport()
+    report = send_letters(
+        target,
+        prepared,
+        SendPlan(sender=read_sender(target), limit=3, pause_seconds=0),
+        Wire(
+            transport=transport,
+            clock=lambda: datetime(2026, 10, 13, tzinfo=UTC),
+            pause=lambda _: None,
+        ),
+    )
+    assert transport.recipients() == ["postmottak@fjaler.kommune.no", "post@vlfk.no"]
+    assert set(_sent(workspace)) == {"4646", "46"}
+    assert report.failure is None
+    assert report.remaining == 0
+
+
+def test_first_letter_is_rechecked_after_preparation(workspace: Path, manifest: Path) -> None:
+    # dispatch promises a fresh check right before *each* letter, including the first.
+    target = InnsynWorkspace(workspace, [])
+    prepared = prepare(target, manifest)
+    letter = manifest.parent / "0301.txt"
+    letter.write_bytes(letter.read_bytes() + b"changed after preparation")
+    transport = FakeTransport()
+    report = send_letters(
+        target,
+        prepared,
+        SendPlan(sender=read_sender(target), limit=1, pause_seconds=0),
+        Wire(
+            transport=transport,
+            clock=lambda: datetime(2026, 10, 13, tzinfo=UTC),
+            pause=lambda _: None,
+        ),
+    )
+    assert transport.recipients() == ["postmottak@fjaler.kommune.no"]
+    assert set(_sent(workspace)) == {"4646"}
+    assert [item.authority_id for item in report.refused] == ["0301"]
+    assert "SHA-256" in report.refused[0].reason
+    assert report.failure is None
+    assert report.remaining == 1
+
+
+@pytest.mark.usefixtures("smtp_env")
+def test_closed_request_does_not_allow_resending_the_same_letter(
+    workspace: Path, manifest: Path, fake: FakeTransport, pauses: list[float]
+) -> None:
+    # operations.md: a sent with this letter's SHA-256 is skipped, so a rerun never sends twice.
+    code, _, err = _send(workspace, manifest, "--send", "--limit", "1")
+    assert code == 0, err
+    event = _sent(workspace)["0301"]
+    target = InnsynWorkspace(workspace, [])
+    record_events(
+        target,
+        [
+            Outcome(
+                request_id=event.request_id,
+                recorded_at=event.sent_at,
+                outcome="full",
+                at=event.sent_at,
+            )
+        ],
+    )
+    assert not requests(target)[event.request_id].is_open
+
+    code, _, err = _send(workspace, manifest, "--send")
+
+    assert code == 0, err
+    assert fake.recipients() == [
+        "postmottak@oslobystyre.no",
+        "postmottak@fjaler.kommune.no",
+        "post@vlfk.no",
+    ]
+    assert _sent(workspace)["0301"] == event
+    assert "sent 2, skipped (already sent) 1, refused 0, remaining 0" in err
+
+
 @pytest.fixture
 def plain_server() -> Iterator[tuple[int, list[bytes]]]:
     """A local SMTP server that offers no STARTTLS; it keeps every command it is sent."""
