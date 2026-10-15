@@ -269,6 +269,8 @@ def _rejudge(workspace: InnsynWorkspace, prepared: Prepared, ready: Ready) -> Ju
 class _Run(BaseModel):
     """What a run has done so far."""
 
+    model_config = ConfigDict(validate_assignment=True)
+
     sent: list[Sent] = []
     skipped: list[str] = []
     refused: list[Refusal] = []
