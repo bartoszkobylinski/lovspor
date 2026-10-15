@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from lovspor.innsyn import received
 from lovspor.innsyn.ledger import RequestState, requests
 from lovspor.innsyn.workspace import InnsynWorkspace
 from tests.unit.innsyn_support import FIXTURES, innsyn
@@ -218,3 +219,96 @@ class TestListing:
         result = innsyn(workspace, "received")
         assert "0 unclassified" in result.stderr
         assert f"{FJALER}: 2 of 3 requested ids without a received text" in result.stderr
+
+
+@pytest.mark.parametrize("kind", ["regulation_text", "vedtak", "minutes", "cover_letter", "other"])
+def test_reclassification_without_answers_clears_the_previous_answer(
+    workspace: Path, document: Path, kind: str
+) -> None:
+    """operations.md: later classification replaces earlier; no --answers is unrequested."""
+    sha = _sha(document)
+    _receive(workspace, document)
+    assert _classify(workspace, sha, "--kind", "regulation_text", "--answers", REQUESTED)[0] == 0
+    before = _held(workspace)[FJALER]
+    assert REQUESTED not in before.unanswered_ids
+    code, out = _classify(workspace, sha, "--kind", kind)
+    assert code == 0, out
+    after = _held(workspace)[FJALER]
+    assert after.documents[0].kind == kind
+    assert after.documents[0].answers is None
+    assert after.unanswered_ids == after.sent.lf_ids
+    assert after.documents[0].received_at == before.documents[0].received_at
+    assert after.documents[0].sha256 == sha
+    assert after.documents[0].content_type == "application/pdf"
+
+
+def test_classification_is_specific_to_the_document_and_request(
+    workspace: Path, document: Path, tmp_path: Path
+) -> None:
+    sha = _sha(document)
+    second = tmp_path / "second.pdf"
+    second.write_bytes(b"%PDF-1.4 another attachment")
+    _receive(workspace, document)
+    _receive(workspace, second)
+    _receive(workspace, document, request=SULDAL)
+    code, out = _classify(workspace, sha, "--kind", "vedtak", "--answers", REQUESTED)
+    assert code == 0, out
+    held = _held(workspace)
+    assert [(d.sha256, d.kind, d.answers) for d in held[FJALER].documents] == [
+        (sha, "vedtak", REQUESTED),
+        (_sha(second), None, None),
+    ]
+    assert held[SULDAL].documents[0].kind is None
+    assert held[SULDAL].documents[0].answers is None
+    # A vedtak answers an id, but is not the regulation text counted by this view.
+    assert held[FJALER].unanswered_ids == held[FJALER].sent.lf_ids
+
+
+@pytest.mark.parametrize("failure_point", ["atomic_write_bytes", "record_events"])
+def test_failed_receipt_can_be_retried_without_a_ledger_line_missing_its_blob(
+    workspace: Path, document: Path, monkeypatch: pytest.MonkeyPatch, failure_point: str
+) -> None:
+    """record_received promises store-before-record and reuse after an interrupted append."""
+    journal = workspace / "requests.jsonl"
+    original = journal.read_bytes()
+    sha = _sha(document)
+    blob = workspace / "received" / sha[:2] / sha
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise OSError("synthetic write failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(received, failure_point, fail)
+        result = innsyn(
+            workspace,
+            "record-received",
+            "--request",
+            FJALER,
+            "--file",
+            str(document),
+            "--at",
+            RECEIVED_AT,
+        )
+    assert result.exit_code != 0
+    assert journal.read_bytes() == original
+    assert blob.exists() == (failure_point == "record_events")
+
+    def must_reuse(*args: object, **kwargs: object) -> None:
+        pytest.fail("a retry must reuse the blob left before a failed append")
+
+    with monkeypatch.context() as patch:
+        if blob.exists():
+            patch.setattr(received, "atomic_write_bytes", must_reuse)
+        result = innsyn(
+            workspace,
+            "record-received",
+            "--request",
+            FJALER,
+            "--file",
+            str(document),
+            "--at",
+            RECEIVED_AT,
+        )
+    assert result.exit_code == 0, result.output
+    assert blob.read_bytes() == document.read_bytes()
+    assert [d.sha256 for d in _held(workspace)[FJALER].documents] == [sha]
