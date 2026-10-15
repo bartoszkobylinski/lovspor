@@ -312,3 +312,71 @@ def test_failed_receipt_can_be_retried_without_a_ledger_line_missing_its_blob(
     assert result.exit_code == 0, result.output
     assert blob.read_bytes() == document.read_bytes()
     assert [d.sha256 for d in _held(workspace)[FJALER].documents] == [sha]
+
+
+def test_unreadable_document_reports_the_path_and_os_reason(
+    workspace: Path, tmp_path: Path
+) -> None:
+    directory = tmp_path / "directory.pdf"
+    directory.mkdir()
+    result = innsyn(
+        workspace,
+        "record-received",
+        "--request",
+        FJALER,
+        "--file",
+        str(directory),
+        "--at",
+        RECEIVED_AT,
+    )
+    assert result.exit_code == 1
+    assert f"cannot read {directory}:" in result.stderr
+    assert "Is a directory" in result.stderr
+    assert result.stdout == ""
+    assert _held(workspace)[FJALER].documents == ()
+
+
+def test_invalid_receipt_reports_the_validation_reason(workspace: Path, document: Path) -> None:
+    journal = workspace / "requests.jsonl"
+    original = journal.read_bytes()
+    result = innsyn(
+        workspace,
+        "record-received",
+        "--request",
+        "invalid-request",
+        "--file",
+        str(document),
+        "--at",
+        RECEIVED_AT,
+    )
+    assert result.exit_code == 1
+    assert "Refused:" in result.stderr
+    assert "request_id" in result.stderr
+    assert "String should match pattern" in result.stderr
+    assert result.stdout == ""
+    assert journal.read_bytes() == original
+    assert not (workspace / "received").exists()
+
+
+def test_receipt_with_storage_blocked_by_a_file_preserves_the_ledger(
+    workspace: Path, document: Path
+) -> None:
+    journal = workspace / "requests.jsonl"
+    original = journal.read_bytes()
+    blocked = workspace / "received"
+    blocked.write_bytes(b"existing unrelated file")
+    result = innsyn(
+        workspace,
+        "record-received",
+        "--request",
+        FJALER,
+        "--file",
+        str(document),
+        "--at",
+        RECEIVED_AT,
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, OSError)
+    assert journal.read_bytes() == original
+    assert blocked.read_bytes() == b"existing unrelated file"
+    assert _held(workspace)[FJALER].documents == ()
