@@ -151,6 +151,13 @@ class TestBudget:
         assert "--signal=TERM" in body
         assert "--kill-after=30" in body
 
+    def test_setup_has_its_own_allowance_on_top_of_the_files(self) -> None:
+        """Issue #622: mutmut's setup over the whole suite outlasted a one-file budget."""
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        assert 'setup_budget="${MUTMUT_PR_SETUP_BUDGET_SECONDS:-2400}"' in body
+        assert "total_budget=$((setup_budget + file_budget * count))" in body
+
     def test_budget_kill_is_reported_not_hidden(self) -> None:
         body = SCRIPT.read_text(encoding="utf-8")
 
@@ -160,6 +167,7 @@ class TestBudget:
 
 
 SILENT_MUTMUT = "#!/bin/sh\nexec sleep 30\n"
+NO_SETUP_ALLOWANCE = {"MUTMUT_PR_SETUP_BUDGET_SECONDS": "0"}
 # GNU timeout handles SIGALRM as its own timer firing: it marks the run timed
 # out, TERMs the child and exits 124. Raising it from the fake, after the
 # spinner is written, ends the budget at a known point instead of racing a
@@ -206,7 +214,7 @@ class TestBudgetKillBeforeFirstTally:
             cwd=repo,
             capture_output=True,
             text=True,
-            env={**os.environ, "MUTMUT_PR_FILE_BUDGET_SECONDS": "1"},
+            env={**os.environ, **NO_SETUP_ALLOWANCE, "MUTMUT_PR_FILE_BUDGET_SECONDS": "1"},
             timeout=60,
             check=False,
         )
@@ -216,6 +224,24 @@ class TestBudgetKillBeforeFirstTally:
 
         assert "mutation budget exceeded: after 1s" in result.stdout
         assert "no progress line" not in result.stderr
+        assert result.returncode == 16
+
+    def test_the_setup_allowance_adds_to_the_files_budget(self, tmp_path: Path) -> None:
+        repo = _repo_with_one_changed_function(tmp_path, SILENT_MUTMUT)
+        budgets = {"MUTMUT_PR_SETUP_BUDGET_SECONDS": "1", "MUTMUT_PR_FILE_BUDGET_SECONDS": "1"}
+
+        result = subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "base"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env={**os.environ, **budgets},
+            timeout=60,
+            check=False,
+        )
+
+        assert "budget: 1s for mutmut's setup + 1s x 1 changed file(s) = 2s" in result.stdout
+        assert "mutation budget exceeded: after 2s" in result.stdout
         assert result.returncode == 16
 
     def test_names_every_mutant_unmeasured(self, tmp_path: Path) -> None:
@@ -230,7 +256,11 @@ class TestBudgetKillBeforeFirstTally:
             ["bash", "scripts/mutmut-pr.sh", "base"],
             cwd=repo,
             capture_output=True,
-            env={**os.environ, "MUTMUT_PR_FILE_BUDGET_SECONDS": str(SPINNER_BUDGET_SECONDS)},
+            env={
+                **os.environ,
+                **NO_SETUP_ALLOWANCE,
+                "MUTMUT_PR_FILE_BUDGET_SECONDS": str(SPINNER_BUDGET_SECONDS),
+            },
             timeout=60,
             check=False,
         )

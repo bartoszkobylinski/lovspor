@@ -62,13 +62,18 @@ One mutmut 3.8.0 run, scoped to **functions**, not files:
 ## The budget
 
 - One total wall-clock budget for the whole `mutmut run`:
+  `MUTMUT_PR_SETUP_BUDGET_SECONDS` (default 2400) for mutmut's setup, plus
   `MUTMUT_PR_FILE_BUDGET_SECONDS` (default 1200) × the number of changed `.py` files
-  under `src/lovspor/` (`total_budget=$((file_budget * count))` in `mutmut-pr.sh`). It is
-  not a per-file budget: one slow file can spend the whole allowance. The variable keeps
-  its old name.
+  under `src/lovspor/` (`total_budget=$((setup_budget + file_budget * count))` in
+  `mutmut-pr.sh`, printed as a `budget:` line). It is not a per-file budget: one slow file
+  can spend the whole allowance. The variable keeps its old name.
+- The setup allowance (issue #622): before its first mutant mutmut generates mutants and
+  runs the stats pass and the clean-test pass over the whole unit suite. That cost grows
+  with the suite, not the diff — ~1650 s on 2026-10-16 — and charged to the file allowance
+  it left a one-file PR `budget_exceeded` with `total: 0`.
 - Enforced with `timeout(1)` around `mutmut run`; without `timeout` on `PATH` the script
   warns that the budget is unenforced. The legacy `generate`/`select` steps run before it,
-  outside the budget. The CI job's `timeout-minutes: 60` is the backstop.
+  outside the budget. The CI job's `timeout-minutes: 100` is the backstop.
 - Origin: issue #102, a PR touching `mcp.py` that ground 3 h+ toward a 6 h job kill with
   no verdict.
 - On budget: `mutation budget exceeded: after <N>s — unmeasured mutants are untested`,

@@ -133,8 +133,10 @@ reach — module-level and class-body statements, decorated functions, decorated
 are not run but named in an `unmeasured changed lines: ...` notice, carried into
 `mutation-result.json` as `unmeasured_changed_lines` (#289, #292, #419, #420); only a file that
 does not parse falls back to its whole-module pattern. The whole run has one wall-clock budget,
-`MUTMUT_PR_FILE_BUDGET_SECONDS` (default 1200 s) × the number of changed files (issue #102),
-enforced with `timeout(1)`; it is not a per-file budget.
+`MUTMUT_PR_SETUP_BUDGET_SECONDS` (default 2400 s, issue #622) for mutmut's setup — generating
+mutants, the stats pass and the clean-test pass over the whole unit suite, a cost of the suite
+and not of the diff — plus `MUTMUT_PR_FILE_BUDGET_SECONDS` (default 1200 s) × the number of
+changed files (issue #102), enforced with `timeout(1)`; it is not a per-file budget.
 
 A changed function with a `function-lines` entry in `scripts/quality/ratchet-baseline.toml`
 is a large legacy function (issue #228, owner decision 2026-09-30): only the mutants on its
