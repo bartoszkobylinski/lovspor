@@ -1,0 +1,488 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lovspor legislative crosswalk candidate — research-only v0",
+  "description": "A proposed, non-production, one-law record. Structure is not verification of primary-source bytes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_state",
+    "origin_lovverk_commit",
+    "origin_research_commit",
+    "observed_on",
+    "status",
+    "amending_lov_id",
+    "decision",
+    "sak_id",
+    "sanction_events",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0-research"
+    },
+    "release_state": {
+      "const": "research_only"
+    },
+    "origin_lovverk_commit": {
+      "$ref": "#/$defs/git_sha"
+    },
+    "origin_research_commit": {
+      "$ref": "#/$defs/git_sha"
+    },
+    "observed_on": {
+      "type": "string",
+      "format": "date"
+    },
+    "status": {
+      "enum": [
+        "reviewed_web_only",
+        "attested",
+        "unresolved",
+        "ambiguous",
+        "contradicted",
+        "unsupported"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "amending_lov_id": {
+      "$ref": "#/$defs/law_id"
+    },
+    "decision": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/decision"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sak_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "sanction_events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sanction_event"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    }
+  },
+  "$defs": {
+    "git_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "law_id": {
+      "type": "string",
+      "pattern": "^LOV-[0-9]{4}-[0-9]{2}-[0-9]{2}-[1-9][0-9]*$"
+    },
+    "official_url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://(?:www\\.)?(?:stortinget\\.no|data\\.stortinget\\.no|regjeringen\\.no|lovdata\\.no|api\\.lovdata\\.no)/"
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "session_id",
+        "number"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "lovvedtak",
+            "besl_o"
+          ]
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{4}$"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "sanction_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "law_id",
+        "kind",
+        "source_url"
+      ],
+      "properties": {
+        "law_id": {
+          "$ref": "#/$defs/law_id"
+        },
+        "kind": {
+          "enum": [
+            "initial_sanction",
+            "corrective_resanction"
+          ]
+        },
+        "source_url": {
+          "$ref": "#/$defs/official_url"
+        },
+        "corrects_law_id": {
+          "$ref": "#/$defs/law_id"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "corrective_resanction"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "corrects_law_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "initial_sanction"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "corrects_law_id"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "source_url",
+        "capture_level",
+        "observed_on"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "law_identity",
+            "law_decision_pair",
+            "decision_case",
+            "correction"
+          ]
+        },
+        "source_url": {
+          "$ref": "#/$defs/official_url"
+        },
+        "capture_level": {
+          "enum": [
+            "web_page_review",
+            "raw_body_captured"
+          ]
+        },
+        "observed_on": {
+          "type": "string",
+          "format": "date"
+        },
+        "upstream_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "body_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "retrieved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "parser_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "capture_level": {
+                "const": "raw_body_captured"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "upstream_id",
+              "body_sha256",
+              "retrieved_at",
+              "parser_version"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "capture_level": {
+                "const": "web_page_review"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "body_sha256"
+                  ]
+                },
+                {
+                  "required": [
+                    "retrieved_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "parser_version"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "law_identity"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_url": {
+                "pattern": "^https://api\\.lovdata\\.no/v1/publicData/"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "decision_case"
+              },
+              "capture_level": {
+                "const": "raw_body_captured"
+              }
+            },
+            "required": [
+              "role",
+              "capture_level"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_url": {
+                "pattern": "^https://data\\.stortinget\\.no/eksport/sak\\?"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "reviewed_web_only"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "decision": {
+            "$ref": "#/$defs/decision"
+          },
+          "sak_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sanction_events": {
+            "minItems": 1
+          },
+          "evidence": {
+            "minItems": 2,
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/evidence"
+                },
+                {
+                  "properties": {
+                    "capture_level": {
+                      "const": "web_page_review"
+                    }
+                  }
+                }
+              ]
+            },
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "role": {
+                      "const": "law_decision_pair"
+                    }
+                  },
+                  "required": [
+                    "role"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "role": {
+                      "const": "decision_case"
+                    }
+                  },
+                  "required": [
+                    "role"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "attested"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "decision": {
+            "$ref": "#/$defs/decision"
+          },
+          "sak_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sanction_events": {
+            "minItems": 1
+          },
+          "evidence": {
+            "minItems": 3,
+            "allOf": [
+              {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "role",
+                    "capture_level"
+                  ],
+                  "properties": {
+                    "role": {
+                      "const": "law_identity"
+                    },
+                    "capture_level": {
+                      "const": "raw_body_captured"
+                    }
+                  }
+                }
+              },
+              {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "role",
+                    "capture_level"
+                  ],
+                  "properties": {
+                    "role": {
+                      "const": "law_decision_pair"
+                    },
+                    "capture_level": {
+                      "const": "raw_body_captured"
+                    }
+                  }
+                }
+              },
+              {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "role",
+                    "capture_level"
+                  ],
+                  "properties": {
+                    "role": {
+                      "const": "decision_case"
+                    },
+                    "capture_level": {
+                      "const": "raw_body_captured"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "unresolved",
+              "ambiguous",
+              "contradicted",
+              "unsupported"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason"
+        ]
+      }
+    }
+  ]
+}
