@@ -12,45 +12,57 @@ import typer
 from pydantic import ValidationError
 
 from lovspor.innsyn.app import guarded, innsyn_app, instant, now, refuse, workspace
-from lovspor.innsyn.ledger import OUTCOMES, RequestState, parse_event, record_events, requests
+from lovspor.innsyn.ledger import (
+    OUTCOMES,
+    LedgerEvent,
+    RequestState,
+    parse_event,
+    record_events,
+    requests,
+)
 from lovspor.innsyn.pilot_import import read_register
 from lovspor.innsyn.workdays import OSLO
 
-_Request = Annotated[
+Request = Annotated[
     str, typer.Option("--request", help="The request id, e.g. 4646-20261005T074425Z.")
 ]
 _At = Annotated[str, typer.Option("--at", help="When it happened (UTC, e.g. 2026-10-06T12:28Z).")]
 
 
-def _record(request: str, event: str, fields: dict[str, object]) -> None:
+def event_from(request: str, event: str, fields: dict[str, object]) -> LedgerEvent:
+    """The event recorded now, or the operator's message and exit 1."""
     data = {"request_id": request, "recorded_at": now(), "event": event, **fields}
     try:
-        parsed = parse_event(data)
+        return parse_event(data)
     except ValidationError as exc:
         raise refuse(exc) from exc
+
+
+def record_event(request: str, event: str, fields: dict[str, object]) -> None:
+    parsed = event_from(request, event, fields)
     target = workspace()
     guarded(lambda: record_events(target, [parsed]))
     typer.echo(f"{request}: {event} recorded")
 
 
 @innsyn_app.command("record-ack")
-def record_ack(request: _Request, at: _At) -> None:
+def record_ack(request: Request, at: _At) -> None:
     """Record the authority's acknowledgement of receipt."""
-    _record(request, "acknowledged", {"acknowledged_at": instant(at, "--at")})
+    record_event(request, "acknowledged", {"acknowledged_at": instant(at, "--at")})
 
 
 @innsyn_app.command("record-case-number")
 def record_case_number(
-    request: _Request,
+    request: Request,
     number: Annotated[str, typer.Option("--number", help="The authority's saksnummer.")],
 ) -> None:
     """Record the authority's saksnummer for the request."""
-    _record(request, "case_number", {"saksnummer": number})
+    record_event(request, "case_number", {"saksnummer": number})
 
 
 @innsyn_app.command("record-outcome")
 def record_outcome(
-    request: _Request,
+    request: Request,
     outcome: Annotated[str, typer.Option("--outcome", help=" | ".join(OUTCOMES))],
     at: _At,
     refusal_basis: Annotated[
@@ -60,13 +72,13 @@ def record_outcome(
 ) -> None:
     """Record what the authority answered (or that it has not), and when."""
     fields = {"outcome": outcome, "at": instant(at, "--at"), "refusal_basis": refusal_basis}
-    _record(request, "outcome", fields)
+    record_event(request, "outcome", fields)
 
 
 @innsyn_app.command("record-klage")
-def record_klage(request: _Request, at: _At) -> None:
+def record_klage(request: Request, at: _At) -> None:
     """Record that a klage was sent on the request."""
-    _record(request, "klage", {"klage_sent_at": instant(at, "--at")})
+    record_event(request, "klage", {"klage_sent_at": instant(at, "--at")})
 
 
 @innsyn_app.command("import-pilot")
