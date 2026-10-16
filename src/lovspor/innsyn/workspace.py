@@ -1,10 +1,11 @@
 """The innsyn workspace: one operator-chosen directory, never a repository.
 
-It holds the population snapshots, the recipient directory, the sender and
-the request ledger. The path comes from ``--dir`` or ``LOVSPOR_INNSYN_DIR``
-with no default: the ledger names mailboxes and holds correspondence
-metadata, and a default inside a checkout or on the archive volume would put
-that one forgotten setting away from a place it must not be. The engine
+It holds the population snapshots, the recipient directory, the sender, the
+request ledger and the documents received in answer. The path comes from
+``--dir`` or ``LOVSPOR_INNSYN_DIR`` with no default: the ledger names
+mailboxes and holds correspondence metadata, and a default inside a checkout
+or on the archive volume would put that one forgotten setting away from a
+place it must not be. The engine
 repository and the ``lovverk`` corpus are refused outright, as for the
 observatory root (ADR-0010 §5).
 
@@ -25,6 +26,7 @@ POPULATION_DIRNAME = "population"
 DIRECTORY_FILENAME = "directory.jsonl"
 REQUESTS_FILENAME = "requests.jsonl"
 SENDER_FILENAME = "sender.json"
+RECEIVED_DIRNAME = "received"
 
 
 class InnsynWorkspace:
@@ -69,6 +71,10 @@ class InnsynWorkspace:
     @property
     def sender_path(self) -> Path:
         return self._path / SENDER_FILENAME
+
+    @property
+    def received_dir(self) -> Path:
+        return self._path / RECEIVED_DIRNAME
 
     def ensure(self, directory: Path | None = None) -> Path:
         """Make ``directory`` (default: the workspace) without ever making its parent.

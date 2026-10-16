@@ -294,7 +294,7 @@ jobs:
 
       - name: Upload the memory sample
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent-rss-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/agent-rss.log
@@ -326,7 +326,7 @@ jobs:
 
       - name: Upload the agent's tests
         if: steps.patch.outputs.patch == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent-tests-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/agent-tests.patch
@@ -354,7 +354,7 @@ jobs:
 
       - name: Upload preserved agent work
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent-work-author-${{ github.event.pull_request.head.sha }}
           path: |
@@ -416,7 +416,7 @@ jobs:
 
       - name: Download the agent's tests
         if: needs.codex-author.outputs.patch == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: agent-tests-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}
@@ -514,7 +514,7 @@ jobs:
 
       - name: Upload Codex tests and log
         if: failure() && steps.verdict.outcome == 'failure'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: codex-tests-${{ github.event.pull_request.head.sha }}
           path: |
@@ -588,7 +588,7 @@ jobs:
 
       - name: Upload preserved agent work
         if: failure() && steps.verdict.outcome != 'failure'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent-work-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/agent-work.patch
@@ -600,7 +600,7 @@ jobs:
       - name: Download the partial round's findings
         if: failure() && needs.codex-author.result == 'failure'
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: agent-work-author-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/author-partial
@@ -904,7 +904,7 @@ jobs:
 
       - name: Upload mutation artifact (PASS and FAIL)
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mutation-result-${{ github.event.pull_request.head.sha }}
           path: |

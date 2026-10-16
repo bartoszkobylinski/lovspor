@@ -14,6 +14,12 @@ request, recorded by its own command:
   refusal or partial answer, the stated basis. An interim reply without a
   date, or a recorded ``no_answer``, is not an answer.
 * ``klage`` — a complaint was sent.
+* ``document_received`` — a document the authority sent, by SHA-256 and media
+  type, with when it arrived; the file itself is held by
+  :mod:`lovspor.innsyn.received`, and its name is not kept.
+* ``document_classified`` — what the operator read the document to be, and
+  which requested LF id it answers, if any. A later classification replaces
+  an earlier one; a document never classified is not yet evidence of anything.
 
 The § 32 andre ledd mark is computed, never stored: five working days after
 the Oslo day of ``sent_at``. Free-text notes are not kept: they name case
@@ -57,8 +63,27 @@ ANSWERS = frozenset({"referred_to_lovdata", "partial", "full", "refused"})
 CLOSING = frozenset({"full", "refused"})
 _WITH_BASIS = frozenset({"partial", "refused"})
 
+DocumentKind = Literal["regulation_text", "vedtak", "minutes", "cover_letter", "other"]
+DOCUMENT_KINDS: tuple[DocumentKind, ...] = (
+    "regulation_text",
+    "vedtak",
+    "minutes",
+    "cover_letter",
+    "other",
+)
+#: A kind that can be the requested regulation, or the vedtak adopting it.
+_ANSWERING = frozenset({"regulation_text", "vedtak"})
+#: The formats the promotion extractor reads (:mod:`lovspor.promotion.source_text`).
+ReceivedMediaType = Literal[
+    "application/pdf",
+    "text/html",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]
+
 REQUEST_ID_PATTERN = r"^(?:\d{2}|\d{4})-\d{8}T\d{6}Z$"
 MESSAGE_ID_PATTERN = r"^<[^<>@\s]+@[^<>@\s]+>$"
+_SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_LfId = Annotated[str, Field(pattern=LF_ID_PATTERN)]
 Source = Literal["cli", "pilot-import"]
 
 
@@ -88,9 +113,9 @@ class Sent(_Event):
     authority_id: str = Field(pattern=AUTHORITY_ID_PATTERN)
     recipient: str = Field(pattern=MAILBOX_PATTERN)
     sent_at: datetime
-    lf_ids: tuple[Annotated[str, Field(pattern=LF_ID_PATTERN)], ...]
+    lf_ids: tuple[_LfId, ...]
     general_clause: bool
-    letter_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    letter_sha256: str = Field(pattern=_SHA256_PATTERN)
     message_id: str | None = Field(default=None, pattern=MESSAGE_ID_PATTERN)
 
     @field_validator("sent_at")
@@ -156,9 +181,47 @@ class KlageSent(_Event):
         return require_utc(value)
 
 
-LedgerEvent = Annotated[
-    Sent | Acknowledged | CaseNumber | Outcome | KlageSent, Field(discriminator="event")
-]
+class DocumentReceived(_Event):
+    event: Literal["document_received"] = "document_received"
+    received_at: datetime
+    sha256: str = Field(pattern=_SHA256_PATTERN)
+    content_type: ReceivedMediaType
+
+    @field_validator("received_at")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        return require_utc(value)
+
+
+class DocumentClassified(_Event):
+    event: Literal["document_classified"] = "document_classified"
+    sha256: str = Field(pattern=_SHA256_PATTERN)
+    kind: DocumentKind
+    answers: _LfId | None = None
+
+    @model_validator(mode="after")
+    def _answering_kind(self) -> "DocumentClassified":
+        if self.answers is not None and self.kind not in _ANSWERING:
+            raise ValueError("only a regulation text or vedtak answers a requested id")
+        return self
+
+
+class ReceivedDocument(BaseModel):
+    """One received document as its receipt and latest classification leave it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    sha256: str
+    content_type: ReceivedMediaType
+    received_at: datetime
+    kind: DocumentKind | None = None
+    answers: str | None = None
+
+
+_Transition = (
+    Acknowledged | CaseNumber | Outcome | KlageSent | DocumentReceived | DocumentClassified
+)
+LedgerEvent = Annotated[Sent | _Transition, Field(discriminator="event")]
 _ADAPTER: TypeAdapter[LedgerEvent] = TypeAdapter(LedgerEvent)
 
 
@@ -174,6 +237,13 @@ class RequestState(BaseModel):
     outcome: OutcomeClass | None = None
     refusal_basis: str | None = None
     klage_sent_at: datetime | None = None
+    documents: tuple[ReceivedDocument, ...] = ()
+
+    @property
+    def unanswered_ids(self) -> tuple[str, ...]:
+        """Requested ids no received regulation text answers: silence is not "none exist"."""
+        texts = {d.answers for d in self.documents if d.kind == "regulation_text"}
+        return tuple(lf_id for lf_id in self.sent.lf_ids if lf_id not in texts)
 
     @property
     def klage_mark(self) -> date:
@@ -209,11 +279,29 @@ def _answer(state: RequestState, event: Outcome) -> RequestState:
     return state.model_copy(update={**update, "refusal_basis": event.refusal_basis})
 
 
-def _apply(
-    state: RequestState, event: Acknowledged | CaseNumber | Outcome | KlageSent
-) -> RequestState:
+def _receive(state: RequestState, event: DocumentReceived) -> RequestState:
+    document = ReceivedDocument(
+        sha256=event.sha256, content_type=event.content_type, received_at=event.received_at
+    )
+    return state.model_copy(update={"documents": (*state.documents, document)})
+
+
+def _classify(state: RequestState, event: DocumentClassified) -> RequestState:
+    reading = {"kind": event.kind, "answers": event.answers}
+    documents = tuple(
+        document.model_copy(update=reading) if document.sha256 == event.sha256 else document
+        for document in state.documents
+    )
+    return state.model_copy(update={"documents": documents})
+
+
+def _apply(state: RequestState, event: _Transition) -> RequestState:
     if isinstance(event, Outcome):
         return _answer(state, event)
+    if isinstance(event, DocumentReceived):
+        return _receive(state, event)
+    if isinstance(event, DocumentClassified):
+        return _classify(state, event)
     if isinstance(event, Acknowledged):
         return state.model_copy(update={"acknowledged_at": event.acknowledged_at})
     if isinstance(event, CaseNumber):
@@ -241,7 +329,21 @@ def _moment(event: LedgerEvent) -> datetime | None:
         return event.acknowledged_at
     if isinstance(event, KlageSent):
         return event.klage_sent_at
+    if isinstance(event, DocumentReceived):
+        return event.received_at
     return event.at if isinstance(event, Outcome) else None
+
+
+def _check_document(state: RequestState, event: LedgerEvent) -> None:
+    held = {document.sha256 for document in state.documents}
+    if isinstance(event, DocumentReceived) and event.sha256 in held:
+        raise InnsynRefusedError(f"{event.request_id}: document {event.sha256} already received")
+    if not isinstance(event, DocumentClassified):
+        return
+    if event.sha256 not in held:
+        raise InnsynRefusedError(f"{event.request_id}: document {event.sha256} not received")
+    if event.answers is not None and event.answers not in state.sent.lf_ids:
+        raise InnsynRefusedError(f"{event.request_id} did not ask for {event.answers}")
 
 
 def check(held: dict[str, RequestState], event: LedgerEvent) -> None:
@@ -249,7 +351,10 @@ def check(held: dict[str, RequestState], event: LedgerEvent) -> None:
 
     Raises:
         InnsynRefusedError: a second ``sent`` for one request, a transition of
-            a request never sent, or one dated before the request was sent.
+            a request never sent, or one dated before the request was sent; a
+            document received twice on one request, or classified without
+            having been received, or said to answer an id the request did not
+            ask for.
     """
     state = held.get(event.request_id)
     if isinstance(event, Sent):
@@ -261,15 +366,24 @@ def check(held: dict[str, RequestState], event: LedgerEvent) -> None:
     moment = _moment(event)
     if moment is not None and moment < state.sent.sent_at:
         raise InnsynRefusedError(f"{event.request_id}: {moment} is before it was sent")
+    _check_document(state, event)
+
+
+def _check_all(held: dict[str, RequestState], events: list[LedgerEvent]) -> None:
+    for event in events:
+        check(held, event)
+        _step(held, event)
+
+
+def precheck(workspace: InnsynWorkspace, events: list[LedgerEvent]) -> None:
+    """Refuse what :func:`record_events` would refuse, writing nothing."""
+    _check_all(requests(workspace), events)
 
 
 def record_events(workspace: InnsynWorkspace, events: list[LedgerEvent]) -> None:
     """Check every event against the ledger and what precedes it, then append all or none."""
     journal = ledger_journal(workspace)
-    held = fold(journal.records())
-    for event in events:
-        check(held, event)
-        _step(held, event)
+    _check_all(fold(journal.records()), events)
     workspace.ensure()
     journal.append(events)
 
