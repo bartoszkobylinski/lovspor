@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/stortinget_case_source.py"
+symbol = "_validate_response"
+registered = "2026-10-15, PR #614, from the mutation artifact of run 38780023516 (e6ac4a7), each re-checked by hand on the rewritten line"
+mutation = """
+-    header: str = response.headers.get("content-type", "")
++    header: str = response.headers.get("content-type", "XXXX")
+"""
+justification = """
+Pure Python, no dependency. The default is read only when the response
+carries no Content-Type. Partitioned on ";", "" gives media type "" and
+"XXXX" gives "XXXX"; lower-cased, neither is in {"application/xml",
+"text/xml"}, so both raise the same ValueError("Expected an XML response from
+Stortinget"), and nothing else reads the value. The default's other mutants
+(None, and no default) do differ, because None has no .partition, and are
+killed by the missing-header case of
+test_response_media_type_parameters_and_missing_header.
+"""

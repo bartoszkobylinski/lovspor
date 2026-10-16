@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/stortinget_case_source.py"
+symbol = "fetch_sak"
+registered = "2026-10-15, PR #614, from the mutation artifact of run 38780023516 (e6ac4a7), each re-checked by hand on the rewritten line"
+mutation = """
+-        "GET", _ENDPOINT, params={"sakid": str(sak_id)}, follow_redirects=False
++        "GET", _ENDPOINT, params={"sakid": str(sak_id)}, follow_redirects=None
+"""
+justification = """
+httpx `Client.send` substitutes the client's own setting only for the
+`USE_CLIENT_DEFAULT` sentinel; `None` is not that sentinel, so it is passed
+through and `_send_handling_redirects` tests it with a bare
+`if follow_redirects:`. None and False are both falsy, so a redirect is
+returned unfollowed in both cases, even on a client built with
+follow_redirects=True, and _validate_response then refuses its status.
+Argued from the dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_observatory_robots_live.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_reads_follow_redirects_none_as_do_not_follow"
