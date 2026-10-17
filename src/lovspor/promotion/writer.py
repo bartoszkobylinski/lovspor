@@ -51,6 +51,7 @@ from lovspor.promotion.corpus import manifest_text as render_manifest
 from lovspor.promotion.decisions import (
     HumanDecision,
     IdentityAudit,
+    ObservationUsed,
     PromotionAudit,
     StandingApproval,
     utc_text,
@@ -198,7 +199,7 @@ def write_set(
 
     An approval that stands by a carry is published with ``approval_carried``.
     """
-    audit = _audit(prepared, artifact, approval)
+    audit = audit_record(prepared, approval, artifact.observations)
     decision = approval.decision
     authority_dir = f"{LOCAL_DIR}/{prepared.identity.authority.id}"
     files = {
@@ -209,7 +210,9 @@ def write_set(
         evidence_path(prepared.identity.authority.id, prepared.slug): evidence_text(
             corpus, prepared
         ),
-        f"{LOCAL_DIR}/{MANIFEST_NAME}": _manifest(corpus, prepared, artifact, decision),
+        f"{LOCAL_DIR}/{MANIFEST_NAME}": local_manifest_text(
+            corpus, prepared, utc_text(artifact.observed_at_last), decision
+        ),
     }
     refuse_nlod(files)
     return WriteSet(files=files, audit=audit)
@@ -241,9 +244,10 @@ def apply_files(corpus: CorpusCheckout, files: dict[str, str]) -> tuple[str, ...
     return tuple(written)
 
 
-def _audit(
-    prepared: Prepared, artifact: ArchivedArtifact, approval: StandingApproval
+def audit_record(
+    prepared: Prepared, approval: StandingApproval, observations: tuple[ObservationUsed, ...]
 ) -> PromotionAudit:
+    """The published audit of one version, read from ``observations`` (none when received)."""
     decision = approval.decision
     return PromotionAudit(
         decision=decision.decision,
@@ -257,7 +261,7 @@ def _audit(
         source_form=prepared.extracted.source_form.value,
         identity=_identity_audit(prepared),
         observations_through=utc_text(decision.decided_at),
-        observations=artifact.observations,
+        observations=observations,
         approval_carried=approval.approval_carried(),
     )
 
@@ -356,9 +360,10 @@ def _observed_earlier(path: Path, version: int) -> tuple[VersionObservations, ..
     return observed
 
 
-def _manifest(
-    corpus: CorpusCheckout, prepared: Prepared, artifact: ArchivedArtifact, decision: HumanDecision
+def local_manifest_text(
+    corpus: CorpusCheckout, prepared: Prepared, last_seen: str, decision: HumanDecision
 ) -> str:
+    """``manifest.json`` with the prepared version current, ``last_seen`` dated by its channel."""
     manifest = corpus.local_manifest()
     authority = prepared.identity.authority
     record = LocalRecord(
@@ -367,7 +372,7 @@ def _manifest(
         title=prepared.extracted.fields.title,
         markdown_path=prepared.markdown_path,
         renderer_version=LOCAL_RENDERER_VERSION,
-        last_seen=utc_text(artifact.observed_at_last),
+        last_seen=last_seen,
         authority_id=authority.id,
         authority_type=authority.type.value,
         content_hash=prepared.identity.content_hash,
