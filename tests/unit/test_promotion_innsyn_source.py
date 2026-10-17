@@ -186,6 +186,9 @@ class TestReceivedSource:
         with pytest.raises(PromotionRefusedError) as caught:
             received_source(_read(regulation))
         message = str(caught.value)
-        assert "does not have the digits-only shape" in message
+        assert message == (
+            f"{FJALER}: the recorded saksnummer does not have the "
+            "digits-only shape (such as 2026/1234); held rather than rewritten (ADR-0016 A5)"
+        )
         assert "ABC" not in message
         assert "2026/1234-7" not in message

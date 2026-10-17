@@ -315,7 +315,10 @@ class TestIntervals:
         result = invoke("promote", "observe", "--corpus", str(corpus))
 
         assert result.exit_code == 0, result.output
-        assert "skipped: a received-only document has no observation axis" in result.output
+        assert result.stdout.splitlines()[0] == (
+            f"{json.loads(before)['doc_id']}: "
+            "skipped: a received-only document has no observation axis"
+        )
         assert path.read_bytes() == before
 
 

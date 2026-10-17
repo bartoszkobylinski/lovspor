@@ -349,7 +349,9 @@ class TestAnObservedDocument:
     def test_a_received_new_version_of_it_is_refused(self, workspace: Path, observed: Path) -> None:
         received = _received(workspace, lines=CHANGED, request=OSLO)
         message = _refusal(workspace, received, observed)
-        assert "switching the primary channel is a recorded decision (ADR-0016 A4)" in message
+        assert message.endswith(
+            ": switching the primary channel is a recorded decision (ADR-0016 A4)"
+        )
 
     def test_a_received_copy_of_its_text_is_refused_not_corroborated(
         self, workspace: Path, observed: Path
@@ -379,3 +381,29 @@ class TestAuthority:
         empty.mkdir()
         with pytest.raises(PromotionRefusedError, match="population cannot be read"):
             received_authority(InnsynWorkspace(empty, []), "4646", KLASS_VERSION)
+
+
+def test_torn_received_history_names_document_and_missing_version_range(
+    workspace: Path, corpus: Path
+) -> None:
+    first = _received(workspace)
+    writes = _written(workspace, first, corpus)
+    [relative] = [p for p in writes.files if "/observations/" in p]
+    path = corpus / relative
+    document = json.loads(path.read_text())
+    document["versions"][0]["version"] = 2
+    path.write_text(json.dumps(document))
+    later = _received(workspace, lines=CHANGED, at=LATER)
+    before = {p: p.read_bytes() for p in corpus.rglob("*") if p.is_file()}
+    assert _refusal(workspace, later, corpus) == (
+        f"the observations file of {document['doc_id']} does not list versions 1..1"
+    )
+    assert {p: p.read_bytes() for p in corpus.rglob("*") if p.is_file()} == before
+
+
+def test_invalid_authority_block_reports_first_validation_error(workspace: Path) -> None:
+    with pytest.raises(PromotionRefusedError) as refused:
+        received_authority(InnsynWorkspace(workspace, []), "4646", "")
+    assert str(refused.value) == (
+        "the authority block does not validate: String should have at least 1 character"
+    )

@@ -272,7 +272,11 @@ class TestRefusals:
         for command in ("preview", "local"):
             result = _received(command, sha256, corpus)
             assert result.exit_code == 1
-            assert "classified minutes; only a regulation_text is promoted" in result.output
+            assert result.stderr == (
+                f"Refused: {FJALER}: document {sha256} is classified minutes; "
+                "only a regulation_text is promoted, every other kind is innsyn material "
+                "and never published (ADR-0016 A1)\n"
+            )
         assert tree(corpus) == before
         assert _log(root) == []
 
@@ -299,6 +303,20 @@ class TestRefusals:
         assert result.exit_code == 1
         assert "a withdrawn document is never promoted again" in result.output
         assert tree(corpus) == before
+        # A stale corpus copy can lack the tombstone while the decision log
+        # still records the permanent withdrawal.
+        manifest["documents"] = {}
+        (corpus / LOCAL / "manifest.json").write_text(json.dumps(manifest))
+        before = tree(corpus)
+        # A different artifact of the same document evades the artifact-key guard;
+        # both commands must still enforce withdrawal by document identity.
+        sha256 = _receive(workspace, html_page() + b"\n")
+        assert _approve(sha256, tmp_path).exit_code == 0
+        for command in ("preview", "local"):
+            result = _received(command, sha256, corpus)
+            assert result.exit_code == 1
+            assert "a withdrawn document is never promoted again" in result.stderr
+            assert tree(corpus) == before
 
     def test_a_rejected_document_is_refused(
         self, workspace: Path, corpus: Path, tmp_path: Path
@@ -319,3 +337,45 @@ class TestRefusals:
             assert result.exit_code == 1
             assert f"Refused: set {ENV_INNSYN_DIR} to the innsyn workspace" in result.output
             assert "Traceback" not in result.output
+
+
+def test_preview_enforces_rejection(workspace: Path, corpus: Path, tmp_path: Path) -> None:
+    sha256 = _receive(workspace, html_page())
+    assert _approve(sha256, tmp_path, decision="reject").exit_code == 0
+    before = tree(corpus)
+    result = _received("preview", sha256, corpus)
+    assert result.exit_code == 1
+    assert "the standing decision is reject" in result.stderr
+    assert tree(corpus) == before
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_decision_receipt_and_review_fields(
+    workspace: Path, root: Path, tmp_path: Path, decision: str
+) -> None:
+    sha256 = _receive(workspace, html_page())
+    result = _approve(sha256, tmp_path, decision=decision)
+    assert result.exit_code == 0, result.output
+    [record] = _log(root)
+    assert result.stdout == (
+        f"Recorded {decision} of {sha256} on request {FJALER}\n"
+        f"by {REVIEWER} ({REVIEWER_ROLE}) at {record['decided_at']} "
+        f"in {root / 'promotions.jsonl'}\n"
+    )
+    assert result.stderr == ""
+    if decision == "reject":
+        assert record.get("content_hash") is None
+        assert record.get("extractor_version") is None
+
+
+def test_invalid_innsyn_directory_reports_configuration_reason(
+    workspace: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sha256 = _receive(workspace, html_page())
+    blocked = Path("relative-innsyn")
+    monkeypatch.setenv(ENV_INNSYN_DIR, str(blocked))
+    result = _received("preview", sha256, corpus)
+    assert result.exit_code == 1
+    assert result.stderr.startswith("Refused: cannot use the innsyn directory: ")
+    assert str(blocked) in result.stderr
+    assert result.stdout == ""

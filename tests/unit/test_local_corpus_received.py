@@ -21,6 +21,7 @@ from lovspor.local_corpus import (
     LocalDataset,
     ObservationLabel,
     ReceivedObservation,
+    _given,
 )
 from tests.unit.local_dataset_fixtures import add_local_dataset, build_central
 from tests.unit.test_local_corpus import ADDRESS, OBSERVATION
@@ -159,8 +160,14 @@ class TestFrontMatterChannel:
         received_keys = f'received_at: "{RECEIVED_AT}"\ninnsyn_request: "{FJALER}"'
         _edit_front_matter(path, f"{first}\n{url}", f"{received_keys}\ninnsyn_saksnummer: null")
         _edit_front_matter(path, 'basis: "observed"', 'basis: "received"')
-        with pytest.raises(LocalCorpusError, match="was observed"):
+        [observations] = (tmp_path / LOCAL / "9999" / "observations").glob("*.json")
+        manifest = json.loads((tmp_path / LOCAL / "manifest.json").read_text())
+        [doc_id] = manifest["documents"]
+        with pytest.raises(LocalCorpusError) as refused:
             LocalDataset(tmp_path).document(ADDRESS)
+        assert str(refused.value) == (
+            f"{observations}: version 1 of {doc_id} was observed; its front matter says received"
+        )
 
 
 class TestObservedUnchanged:
@@ -170,3 +177,10 @@ class TestObservedUnchanged:
         served = LocalDataset(tmp_path).document(ADDRESS)
         assert served.observation.label() == OBSERVATION
         assert list(served.observation.label()) == list(OBSERVATION)
+
+
+def test_missing_validated_front_matter_key_reports_internal_invariant() -> None:
+    """The defensive helper diagnoses a lost key even for a direct caller."""
+    with pytest.raises(LocalCorpusError) as refused:
+        _given(None)
+    assert str(refused.value) == "front matter lost a key its basis requires"
