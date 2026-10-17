@@ -340,3 +340,25 @@ def test_official_host_variants_preserve_case_identity(host: str) -> None:
     assert result.status == "attested"
     assert result.sak_id == 89016
     assert result.source_url == url
+
+
+@pytest.mark.parametrize("outer, inner", [("script", "style"), ("style", "script")])
+@pytest.mark.parametrize("inner_end", [">", "/>"])
+def test_nested_hidden_tags_cannot_expose_conflicting_evidence(
+    outer: str, inner: str, inner_end: str
+) -> None:
+    body = (
+        f"<{outer}><{inner}{inner_end}</{inner}>"
+        "Lovvedtak 86 (2021-2022) Sanksjonert 17.06.2022 (lov64)"
+        f"</{outer}>" + STORTING_EXCERPT
+    )
+    assert probe(body).status == "attested"
+
+
+@pytest.mark.parametrize("body", ["", "æøå Ω 法 😀\r\n", "\ud800"])
+def test_evidence_digest_uses_utf8_including_strict_error_behavior(body: str) -> None:
+    if body == "\ud800":
+        with pytest.raises(UnicodeEncodeError):
+            probe(body)
+    else:
+        assert probe(body).input_sha256 == sha256(body.encode("utf-8")).hexdigest()
