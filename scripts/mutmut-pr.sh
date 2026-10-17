@@ -174,7 +174,13 @@ mkdir -p mutants/data
 ln -sfn "../.venv" "mutants/.venv"
 
 file_budget="${MUTMUT_PR_FILE_BUDGET_SECONDS:-1200}"
-total_budget=$((file_budget * count))
+# Before its first mutant, mutmut generates mutants and runs the stats pass
+# and the clean-test pass over the whole unit suite: a cost of the suite, not
+# of the diff, about 1650 s on 2026-10-16 (issue #622). Charged to the
+# per-file allowance, it left a one-file PR no time for any mutant.
+setup_budget="${MUTMUT_PR_SETUP_BUDGET_SECONDS:-2400}"
+total_budget=$((setup_budget + file_budget * count))
+echo "budget: ${setup_budget}s for mutmut's setup + ${file_budget}s x $count changed file(s) = ${total_budget}s"
 max_children="${MUTMUT_PR_MAX_CHILDREN:-4}"
 
 if [ "$legacy_count" -gt 0 ]; then

@@ -267,7 +267,7 @@ def test_mutation_job_has_a_wallclock_backstop() -> None:
     grind to GitHub's default kill with no verdict artifact."""
     job = _workflow("pr-pipeline.yml")["jobs"]["mutation"]
 
-    assert job["timeout-minutes"] == 60
+    assert job["timeout-minutes"] == 100
 
 
 def test_mutation_report_treats_a_missing_tool_exit_code_as_failure() -> None:
