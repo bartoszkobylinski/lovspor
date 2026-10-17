@@ -1688,6 +1688,12 @@ $I record-outcome --request 4646-20261005T074425Z --outcome partial --at <UTC> [
 $I record-klage --request 4646-20261005T074425Z --at <UTC>
 $I requests                               # every request, with its § 32 mark
 $I due                                    # past the mark with no answer and no klage
+
+# 6. The documents an answer carried (#509 point 5).
+$I record-received --request 4646-20261005T074425Z --file <attachment.pdf> --at <UTC>
+$I classify-received --request 4646-20261005T074425Z --document <sha256> \
+   --kind regulation_text --answers 2009-02-16-306
+$I received                               # every document; requested ids still without a text
 ```
 
 - **Population.** The snapshot is the count. Nothing pins a number of kommuner, because
@@ -1735,6 +1741,19 @@ $I due                                    # past the mark with no answer and no 
   stored. It is the fifth working day after the Oslo day of `sent_at`, skipping
   weekends and Norwegian public holidays. `due` lists requests whose mark has passed:
   these are the klage candidates.
+- **Received documents.** `record-received` holds the attachment in the workspace under
+  `received/<sha256[:2]>/<sha256>` and records its SHA-256, media type and arrival time on
+  the request. Only PDF, HTML and DOCX are taken: the formats the promotion extractor
+  reads. The file name is not kept, because it can name a case officer or a party.
+  Documents never go into a repository: a received PDF also carries cover letters,
+  minutes pages and names, so only text extracted from it, after review, is published.
+  `classify-received` records what the operator read the document to be:
+  `regulation_text`, `vedtak`, `minutes`, `cover_letter` or `other`, and with
+  `--answers` the requested LF id it is the text or vedtak of. Without `--answers` it is
+  unrequested, such as a predecessor regulation the kommune sent along. A later
+  classification replaces an earlier one. `received` lists every document and, per
+  request, how many requested ids no received regulation text answers yet. A kommune
+  that sent some texts and said nothing of the rest is not saying the rest do not exist.
 - **Pilot import.** `import-pilot` reads `sent.csv` with the letters as sent
   (`innsyn-<id>.txt` beside it, or `--letters`). The ids come from the letter, and a row
   whose letter lists a different number of ids is refused. The outcome class is the
