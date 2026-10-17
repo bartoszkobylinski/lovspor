@@ -19,18 +19,24 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from lovspor.errors import LocalCorpusError
+from lovspor.errors import LocalCorpusError, PromotionRefusedError
 from lovspor.local_corpus import LocalDataset
 from lovspor.observation_history import observation_history
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
 from lovspor.promotion.archive import authority_fetches
 from lovspor.promotion.corpus import CorpusCheckout
-from lovspor.promotion.decisions import WithdrawalDocument
+from lovspor.promotion.decisions import (
+    ArtifactKey,
+    DecisionLog,
+    ReceivedKey,
+    WithdrawalDocument,
+    WithdrawalRecord,
+)
 from lovspor.promotion.intervals import reproduction, with_intervals
 from lovspor.promotion.models import RemovedReason
 from lovspor.promotion.versions import read_primary
-from lovspor.promotion.withdraw import locate_document, withdrawal_record
+from lovspor.promotion.withdraw import locate_document, refuse_withdrawn, withdrawal_record
 from lovspor.promotion.writer import (
     ObservationsFile,
     ReceivedVersion,
@@ -347,25 +353,60 @@ class TestMigrate:
 
 
 class TestWithdraw:
-    def test_withdrawing_a_received_version_names_only_observed_artifacts(
+    def test_withdrawing_a_received_version_names_its_received_key(
         self, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
         _receive_on_disk(_promoted(root, corpus, tmp_path))
-        checkout = CorpusCheckout(corpus, [])
-        manifest = checkout.local_manifest()
-        [record] = manifest.documents.values()
-        located = locate_document(manifest, AUTHORITY, record.slug)
-        document = WithdrawalDocument(
-            decision="withdraw",
-            removed_reason=RemovedReason.WITHDRAWN_MISCLASSIFIED,
-            decided_by=REVIEWER,
-            reviewer_role=REVIEWER_ROLE,
-            reason="Klassifisert feil.",
+        received = ReceivedKey(
+            authority_id=AUTHORITY,
+            innsyn_request=RECEIVED["innsyn_request"],
+            sha256=RECEIVED["source_sha256"],
         )
 
-        withdrawal = withdrawal_record(checkout, located, document, datetime.now(UTC))
+        withdrawal = _withdraw(CorpusCheckout(corpus, []))
 
-        assert withdrawal.artifacts == ()
+        assert withdrawal.artifacts == (received,)
+        decisions = DecisionLog(ObservatoryRoot(root, []))
+        decisions.append(withdrawal)
+        with pytest.raises(PromotionRefusedError, match="never promoted again"):
+            refuse_withdrawn(decisions, received, None)
+
+    def test_a_mixed_document_names_each_version_by_its_own_channel(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        checkout = backfilled_corpus(tmp_path, monkeypatch)
+        path = _observations_path(checkout)
+        document = json.loads(path.read_text(encoding="utf-8"))
+        observed = document["versions"][0]
+        document["versions"][-1] = _received(document["versions"][-1])
+        _rewrite(path, {**document, "schema_version": 2})
+
+        withdrawal = _withdraw(CorpusCheckout(checkout, []))
+
+        assert withdrawal.artifacts[0] == ArtifactKey(
+            authority_id=withdrawal.authority_id,
+            sha256=observed["source_sha256s"][0],
+            source_url=observed["primary_url"],
+        )
+        assert withdrawal.artifacts[-1] == ReceivedKey(
+            authority_id=withdrawal.authority_id,
+            innsyn_request=RECEIVED["innsyn_request"],
+            sha256=RECEIVED["source_sha256"],
+        )
+
+
+def _withdraw(checkout: CorpusCheckout) -> WithdrawalRecord:
+    manifest = checkout.local_manifest()
+    [record] = manifest.documents.values()
+    located = locate_document(manifest, record.authority_id, record.slug)
+    document = WithdrawalDocument(
+        decision="withdraw",
+        removed_reason=RemovedReason.WITHDRAWN_MISCLASSIFIED,
+        decided_by=REVIEWER,
+        reviewer_role=REVIEWER_ROLE,
+        reason="Klassifisert feil.",
+    )
+    return withdrawal_record(checkout, located, document, datetime.now(UTC))
 
 
 class TestLocalReaders:

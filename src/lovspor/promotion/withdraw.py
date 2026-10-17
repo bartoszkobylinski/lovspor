@@ -12,7 +12,8 @@ undone by a later commit that:
   role, never the name.
 
 The withdrawal is first a record in the decision log, naming the document's
-id and every archived artifact it was promoted from. Promotion reads that
+id and every source it was promoted from — each archived artifact, and each
+document received under offentleglova by its request. Promotion reads that
 record on every run (:func:`refuse_withdrawn`), so neither a later approval
 nor a fresh checkout brings the document back. Nothing here commits.
 """
@@ -36,6 +37,8 @@ from lovspor.promotion.corpus import (
 from lovspor.promotion.decisions import (
     ArtifactKey,
     DecisionLog,
+    ReceivedKey,
+    SourceKey,
     WithdrawalDocument,
     WithdrawalRecord,
     utc_text,
@@ -43,6 +46,7 @@ from lovspor.promotion.decisions import (
 from lovspor.promotion.evidence import evidence_path
 from lovspor.promotion.writer import (
     ObservationsFile,
+    ReceivedVersion,
     VersionObservations,
     WithdrawalNotice,
     observations_text,
@@ -76,14 +80,11 @@ def locate_document(manifest: LocalManifest, authority_id: str, slug: str) -> Lo
 def withdrawal_record(
     corpus: CorpusCheckout, located: LocatedDocument, document: WithdrawalDocument, now: datetime
 ) -> WithdrawalRecord:
-    """The decision-log record of withdrawing ``located``, naming every artifact it came from."""
+    """The decision-log record of withdrawing ``located``, naming every source it came from."""
     doc_id, record = located
     observations = _observations(corpus, record)
     artifacts = tuple(
-        ArtifactKey(authority_id=record.authority_id, sha256=sha256, source_url=v.primary_url)
-        for v in observations.versions
-        if isinstance(v, VersionObservations)
-        for sha256 in v.source_sha256s
+        key for v in observations.versions for key in _sources(record.authority_id, v)
     )
     return WithdrawalRecord(
         doc_id=doc_id,
@@ -95,6 +96,24 @@ def withdrawal_record(
         reviewer_role=document.reviewer_role,
         decided_at=now,
         reason=document.reason,
+    )
+
+
+def _sources(
+    authority_id: str, version: VersionObservations | ReceivedVersion
+) -> tuple[SourceKey, ...]:
+    if isinstance(version, ReceivedVersion):
+        return tuple(
+            ReceivedKey(
+                authority_id=authority_id,
+                innsyn_request=provenance.innsyn_request,
+                sha256=provenance.source_sha256,
+            )
+            for provenance in version.received
+        )
+    return tuple(
+        ArtifactKey(authority_id=authority_id, sha256=sha256, source_url=version.primary_url)
+        for sha256 in version.source_sha256s
     )
 
 
@@ -120,8 +139,8 @@ def apply_withdrawal(corpus: CorpusCheckout, withdrawal: WithdrawalRecord) -> Wi
     )
 
 
-def refuse_withdrawn(decisions: DecisionLog, key: ArtifactKey | None, doc_id: str | None) -> None:
-    """Refuse to go on with an artifact, or a document, the decision log withdrew."""
+def refuse_withdrawn(decisions: DecisionLog, key: SourceKey | None, doc_id: str | None) -> None:
+    """Refuse to go on with a source, or a document, the decision log withdrew."""
     withdrawal = decisions.withdrawal_of(key, doc_id)
     if withdrawal is None:
         return

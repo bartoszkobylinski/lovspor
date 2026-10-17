@@ -402,6 +402,7 @@ def _version_approval(
         record
         for record in subject.inputs.decisions.records()
         if isinstance(record, HumanDecision)
+        and isinstance(record.artifact, ArtifactKey)
         and record.artifact.source_url == version.primary_url
         and record.artifact.sha256 in blobs
     ]

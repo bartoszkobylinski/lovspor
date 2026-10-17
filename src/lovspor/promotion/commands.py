@@ -66,6 +66,7 @@ from lovspor.promotion.decisions import (
     HumanDecision,
     PromotedRecord,
     PromotionAudit,
+    SourceKey,
     WithdrawalDocument,
     utc_text,
 )
@@ -218,7 +219,7 @@ def _withdrawal_document(path: Path) -> WithdrawalDocument:
     return document
 
 
-def _standing(decisions: DecisionLog, key: ArtifactKey) -> HumanDecision | None:
+def _standing(decisions: DecisionLog, key: SourceKey) -> HumanDecision | None:
     """The standing decision on ``key``, refusing a withdrawn or rejected artifact."""
     refuse_withdrawn(decisions, key, None)
     decision = decisions.latest_decision(key)
@@ -313,7 +314,7 @@ def promote_one(context: PromotionContext, now: datetime) -> None:
 
 
 def _promoted(
-    key: ArtifactKey, prepared: Prepared, audit: PromotionAudit, now: datetime
+    key: SourceKey, prepared: Prepared, audit: PromotionAudit, now: datetime
 ) -> PromotedRecord:
     return PromotedRecord(
         artifact=key,
@@ -383,7 +384,7 @@ def _echo_withdrawn(corpus: CorpusCheckout, withdrawn: Withdrawn, how: str) -> N
     _echo_commit(corpus, withdrawn.commit_subject)
 
 
-def _record_held(decisions: DecisionLog, key: ArtifactKey, held: Held, now: datetime) -> None:
+def _record_held(decisions: DecisionLog, key: SourceKey, held: Held, now: datetime) -> None:
     record = HeldRecord(
         artifact=key,
         recorded_at=now,
