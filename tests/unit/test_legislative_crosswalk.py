@@ -362,3 +362,25 @@ def test_evidence_digest_uses_utf8_including_strict_error_behavior(body: str) ->
             probe(body)
     else:
         assert probe(body).input_sha256 == sha256(body.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.parametrize("tag", ["script", "style"])
+@pytest.mark.parametrize("nested", ["script", "style"])
+def test_hidden_raw_text_closes_only_at_matching_end_tag(tag: str, nested: str) -> None:
+    body = (
+        f"<{tag}><{nested}></{nested}>"
+        "Lovvedtak 86 (2021-2022) Sanksjonert 17.06.2022 (lov64)"
+        f"</{tag}>" + STORTING_EXCERPT
+    )
+    # A matching end tag closes raw text, even after a nested-looking opener.
+    assert probe(body).status == ("ambiguous" if tag == nested else "attested")
+
+
+@pytest.mark.parametrize("body", ["\x00", "\ufeffæøå\U0001f600", "\udfff"])
+def test_evidence_digest_preserves_null_bom_and_strict_surrogate_handling(body: str) -> None:
+    if body == "\udfff":
+        with pytest.raises(UnicodeEncodeError):
+            probe(body)
+    else:
+        expected = sha256(bytes(body, encoding="utf-8")).hexdigest()
+        assert probe(body).input_sha256 == expected
