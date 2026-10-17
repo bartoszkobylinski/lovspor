@@ -14,6 +14,8 @@ from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from lovspor.innsyn.ledger import REQUEST_ID_PATTERN
+
 _KLASS_CODE_LENGTH = {"kommune": 4, "fylkeskommune": 2}
 _DIGITS = re.compile(r"[0-9]+")
 
@@ -238,6 +240,28 @@ class ObservedSource(BaseModel):
         return self.observed_at_first.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
+class ReceivedSource(BaseModel):
+    """The received document a version was rendered from (ADR-0016 A3, A5).
+
+    ``received_at`` is when the mail carrying the document arrived, written in
+    UTC. ``innsyn_saksnummer`` is the authority's case number as digits only:
+    archive systems can append a case officer's initials, which are never
+    published (A5). There is deliberately no field for a file name, a sender or
+    a recipient.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    received_at: AwareDatetime
+    innsyn_request: str = Field(pattern=REQUEST_ID_PATTERN)
+    innsyn_saksnummer: str | None = Field(pattern=r"^\d{2,4}/\d+(?:-\d+)?$")
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @property
+    def received_at_utc(self) -> str:
+        return self.received_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
 class LocalDocument(BaseModel):
     """Everything one rendered version of a local regulation is made from."""
 
@@ -247,4 +271,4 @@ class LocalDocument(BaseModel):
     extracted: ExtractedDocument
     slug: str = Field(pattern=r"^[^\s/\\.][^\s/\\]*$")
     version: int = Field(ge=1)
-    source: ObservedSource
+    source: ObservedSource | ReceivedSource
