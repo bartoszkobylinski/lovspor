@@ -36,6 +36,13 @@ classifier evidence — is refused when it carries the reviewer's name.
   from, so no later run promotes the document again — under its id or from
   any of those artifacts, in any checkout. Signed like a ``decision``.
 
+A record names its source by an ``ArtifactKey`` — bytes served at a URL and
+archived by the observatory — or by a ``ReceivedKey`` — bytes an authority
+sent in answer to an innsyn request, which have no URL (ADR-0016 A1, A2). The
+two never match each other, even on the same bytes: a review reads the
+provenance with the text, so an approval of one channel is not an approval of
+the other.
+
 A run that would append an outcome identical to the artifact's last one
 (apart from ``recorded_at``) appends nothing, so a rerun leaves the log as it
 found it.
@@ -57,8 +64,10 @@ from pydantic import (
     AwareDatetime,
     BaseModel,
     ConfigDict,
+    Discriminator,
     Field,
     SerializerFunctionWrapHandler,
+    Tag,
     TypeAdapter,
     ValidationError,
     model_serializer,
@@ -66,7 +75,9 @@ from pydantic import (
 )
 
 from lovspor.errors import DecisionLogError, StorageBoundaryError
+from lovspor.innsyn.ledger import REQUEST_ID_PATTERN
 from lovspor.observatory.fields import TrimmedNonBlankStr
+from lovspor.observatory.lf_refs import LF_ID_PATTERN
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.promotion.models import IdScheme, PersonalDataHit, RemovedReason
 from lovspor.promotion.personal_data import screen_personal_data
@@ -143,6 +154,33 @@ class ArtifactKey(BaseModel):
     source_url: str = Field(pattern=r"^https?://\S+$")
 
 
+class ReceivedKey(BaseModel):
+    """One received document: the bytes, and the request the authority sent them in answer to.
+
+    No URL: a received file was never served from one (ADR-0016 A2).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    authority_id: str = Field(pattern=_AUTHORITY_ID)
+    innsyn_request: str = Field(pattern=REQUEST_ID_PATTERN)
+    sha256: str = Field(pattern=_SHA256)
+
+
+def _channel(key: object) -> str:
+    # Keyed on a field rather than a tag, so every line logged before the
+    # received channel existed keeps its bytes.
+    if isinstance(key, dict):
+        return "received" if "innsyn_request" in key else "observed"
+    return "received" if isinstance(key, ReceivedKey) else "observed"
+
+
+SourceKey = Annotated[
+    Annotated[ArtifactKey, Tag("observed")] | Annotated[ReceivedKey, Tag("received")],
+    Discriminator(_channel),
+]
+
+
 class ClassifierEvidence(BaseModel):
     """What a classifier said about the artifact, as the reviewer supplied it.
 
@@ -208,7 +246,7 @@ class HumanDecision(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["decision"] = "decision"
-    artifact: ArtifactKey
+    artifact: SourceKey
     decision: Decision
     decided_by: PersonName
     reviewer_role: ReviewerRole
@@ -270,6 +308,22 @@ class ApprovalCarried(BaseModel):
     basis: CarryBasis = CARRY_BASIS
 
 
+class InnsynAudit(BaseModel):
+    """In a published audit: the innsyn request a received text was sent in answer to.
+
+    ``answers`` is the LF id the operator read the document to answer. It is
+    review evidence, never identity: the document id is minted from the text
+    alone (ADR-0016 A3, owner decision A1-1).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    innsyn_request: str = Field(pattern=REQUEST_ID_PATTERN)
+    received_at: str
+    kind: Literal["regulation_text"]
+    answers: str | None = Field(pattern=LF_ID_PATTERN)
+
+
 class PromotionAudit(BaseModel):
     """Why a version was promoted (ADR-0016 4d): the versions, the evidence, the human's role.
 
@@ -279,8 +333,9 @@ class PromotionAudit(BaseModel):
     the text at promotion, or the one a migration moved it to. Whether a human
     approved the text at that extractor is told by ``approval_carried``: absent,
     the approval was given there; present, it was given at
-    ``approved_at_extractor`` and carried. It is written only when present, so
-    an audit without it keeps its bytes.
+    ``approved_at_extractor`` and carried. ``innsyn`` names the request of a
+    received text. Each is written only when present, so an audit without it
+    keeps its bytes.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -298,12 +353,15 @@ class PromotionAudit(BaseModel):
     observations_through: str
     observations: tuple[ObservationUsed, ...]
     approval_carried: ApprovalCarried | None = None
+    innsyn: InnsynAudit | None = None
 
     @model_serializer(mode="wrap")
     def _omit_absent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
         payload: dict[str, Any] = handler(self)
         if self.approval_carried is None:
             payload.pop("approval_carried", None)
+        if self.innsyn is None:
+            payload.pop("innsyn", None)
         return payload
 
 
@@ -313,7 +371,7 @@ class PromotedRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["promoted"] = "promoted"
-    artifact: ArtifactKey
+    artifact: SourceKey
     recorded_at: AwareDatetime
     doc_id: str
     version: int
@@ -329,7 +387,7 @@ class HeldRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["held"] = "held"
-    artifact: ArtifactKey
+    artifact: SourceKey
     recorded_at: AwareDatetime
     stage: Literal["extraction", "identity"]
     reason: str
@@ -388,7 +446,7 @@ class CarriedRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["carried"] = "carried"
-    artifact: ArtifactKey
+    artifact: SourceKey
     carried_at: AwareDatetime
     doc_id: str
     version: int
@@ -469,7 +527,7 @@ class WithdrawalRecord(BaseModel):
     authority_id: str = Field(pattern=_AUTHORITY_ID)
     slug: TrimmedNonBlankStr
     removed_reason: RemovedReason
-    artifacts: tuple[ArtifactKey, ...]
+    artifacts: tuple[SourceKey, ...]
     decided_by: PersonName
     reviewer_role: ReviewerRole
     decided_at: AwareDatetime
@@ -480,7 +538,7 @@ class WithdrawalRecord(BaseModel):
         _refuse_the_name(self.decided_by, _published(self.reviewer_role, self.reason, None))
         return self
 
-    def withdraws(self, key: ArtifactKey | None, doc_id: str | None) -> bool:
+    def withdraws(self, key: SourceKey | None, doc_id: str | None) -> bool:
         """True when this withdrawal covers ``key`` or the document ``doc_id``."""
         return key in self.artifacts or self.doc_id == doc_id
 
@@ -530,14 +588,14 @@ class DecisionLog:
             raise DecisionLogError(msg)
         return tuple(_parse(line, number) for number, line in enumerate(lines[:-1], start=1))
 
-    def latest_decision(self, artifact: ArtifactKey) -> HumanDecision | None:
+    def latest_decision(self, artifact: SourceKey) -> HumanDecision | None:
         """The last human decision on ``artifact`` — the one that stands."""
         found = [
             r for r in self.records() if isinstance(r, HumanDecision) and r.artifact == artifact
         ]
         return found[-1] if found else None
 
-    def withdrawal_of(self, key: ArtifactKey | None, doc_id: str | None) -> WithdrawalRecord | None:
+    def withdrawal_of(self, key: SourceKey | None, doc_id: str | None) -> WithdrawalRecord | None:
         """The first withdrawal covering ``key`` or ``doc_id``; a withdrawal is never undone."""
         for record in self.records():
             if isinstance(record, WithdrawalRecord) and record.withdraws(key, doc_id):

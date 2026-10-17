@@ -32,11 +32,11 @@ from lovspor.promotion.corpus import CorpusCheckout
 from lovspor.promotion.decisions import (
     ApprovalCarried,
     ApprovalReference,
-    ArtifactKey,
     CarriedRecord,
     Decision,
     HumanDecision,
     PromotionAudit,
+    SourceKey,
     utc_text,
 )
 from lovspor.promotion.extract import EXTRACTOR_VERSION
@@ -55,7 +55,7 @@ class VersionApproval(BaseModel):
     carried: bool
 
     @property
-    def key(self) -> ArtifactKey:
+    def key(self) -> SourceKey:
         return self.decision.artifact
 
     def carried_record(self, doc_id: str, from_version: int, now: datetime) -> CarriedRecord:

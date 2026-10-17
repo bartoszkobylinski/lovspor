@@ -209,12 +209,16 @@ def _refused(version: DerivedVersion, decision: HumanDecision) -> VersionHold:
 def _standing(
     version: DerivedVersion, decisions: Sequence[HumanDecision]
 ) -> tuple[HumanDecision, ...]:
-    """The last decision on each of the version's blobs at its URL."""
+    """The last decision on each of the version's blobs at its URL; a received one has none."""
     blobs = set(version.source_sha256s)
     last: dict[str, HumanDecision] = {}
     for decision in decisions:
         artifact = decision.artifact
-        if artifact.source_url == version.primary_url and artifact.sha256 in blobs:
+        if (
+            isinstance(artifact, ArtifactKey)
+            and artifact.source_url == version.primary_url
+            and artifact.sha256 in blobs
+        ):
             last[artifact.sha256] = decision
     return tuple(last[sha] for sha in sorted(last))
 

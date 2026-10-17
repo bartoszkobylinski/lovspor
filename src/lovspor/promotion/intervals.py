@@ -25,7 +25,9 @@ from lovspor.errors import PromotionRefusedError
 from lovspor.promotion.decisions import utc_text
 from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.versions import DerivedVersion, PrimaryHistory
-from lovspor.promotion.writer import ObservationsFile, VersionObservations
+from lovspor.promotion.writer import ObservationsFile, ReceivedVersion, VersionObservations
+
+PromotedEntry = VersionObservations | ReceivedVersion
 
 
 def with_intervals(existing: ObservationsFile, history: PrimaryHistory) -> ObservationsFile:
@@ -41,7 +43,9 @@ def with_intervals(existing: ObservationsFile, history: PrimaryHistory) -> Obser
     )
 
 
-def _refreshed(entry: VersionObservations, version: DerivedVersion | None) -> VersionObservations:
+def _refreshed(entry: PromotedEntry, version: DerivedVersion | None) -> PromotedEntry:
+    if isinstance(entry, ReceivedVersion):
+        return entry
     problem = _divergence(entry, version)
     if problem is not None or version is None:
         msg = f"promoted version {entry.version} does not match the log: {problem}"
@@ -66,11 +70,13 @@ def _divergence(entry: VersionObservations, version: DerivedVersion | None) -> s
     return reproduction(entry, version)
 
 
-def reproduction(entry: VersionObservations, version: DerivedVersion | None) -> str | None:
+def reproduction(entry: PromotedEntry, version: DerivedVersion | None) -> str | None:
     """Why ``version`` is not the text of ``entry``, its extractor aside; ``None`` when it is.
 
     ``lovspor promote migrate`` asks exactly this before it moves the extractor.
     """
+    if isinstance(entry, ReceivedVersion):
+        return "a received-only version has no observation axis"
     if version is None:
         return "the log has no such version at this URL"
     if version.primary_url != entry.primary_url:
