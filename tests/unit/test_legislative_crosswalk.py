@@ -296,3 +296,47 @@ def test_nested_hidden_markup_does_not_leak_evidence() -> None:
 def test_hidden_section_ends_before_plain_visible_evidence(tag: str) -> None:
     body = f"<{tag}>untrusted text</{tag}>Lovvedtak 85 (2021-2022) Sanksjonert 17.06.2022 (lov63)"
     assert probe(body).status == "attested"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Lovvedtak 85 (2021-2022) Lovvedtak 85 (2022-2023)",
+        "Sanksjonert 17.06.2022 (lov63) Sanksjonert 18.06.2022 (lov63)",
+    ],
+)
+def test_distinct_identities_are_ambiguous_even_without_other_edge(body: str) -> None:
+    # The pilot explicitly fails closed on multiple distinct identities.
+    assert probe(body).status == "ambiguous"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"source_url": OFFICIAL_URL.replace("stortinget.no", "example.org")},
+        {"law_id": "invalid"},
+        {"lovvedtak_number": 0},
+        {"representation": "html"},
+    ],
+)
+def test_invalid_origin_or_request_cannot_be_overridden_by_ambiguous_evidence(
+    overrides: dict[str, object],
+) -> None:
+    body = STORTING_EXCERPT + " Lovvedtak 86 (2021-2022)"
+    assert probe(body, **overrides).status == "unsupported"
+
+
+@pytest.mark.parametrize("year, status", [(2000, "attested"), (1900, "unresolved")])
+def test_sanction_date_obeys_century_leap_year_boundary(year: int, status: str) -> None:
+    body = f"Lovvedtak 85 ({year - 1}-{year}) Sanksjonert 29.02.{year} (lov63)"
+    result = probe(body, law_id=f"LOV-{year}-02-29-63", session_id=f"{year - 1}-{year}")
+    assert result.status == status
+
+
+@pytest.mark.parametrize("host", ["stortinget.no", "WWW.STORTINGET.NO"])
+def test_official_host_variants_preserve_case_identity(host: str) -> None:
+    url = OFFICIAL_URL.replace("www.stortinget.no", host)
+    result = probe(source_url=url)
+    assert result.status == "attested"
+    assert result.sak_id == 89016
+    assert result.source_url == url
