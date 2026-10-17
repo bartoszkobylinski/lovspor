@@ -261,6 +261,37 @@ class TestIdentityIsFromTheTextAlone:
 
 
 class TestVersions:
+    def test_changed_text_with_the_same_receipt_time_is_refused(
+        self, workspace: Path, corpus: Path
+    ) -> None:
+        _written(workspace, _received(workspace), corpus)
+        changed = _received(workspace, lines=CHANGED, at=RECEIVED_AT)
+        before = {p.relative_to(corpus): p.read_bytes() for p in corpus.rglob("*") if p.is_file()}
+        assert "received before the current version's" in _refusal(workspace, changed, corpus)
+        assert {
+            p.relative_to(corpus): p.read_bytes() for p in corpus.rglob("*") if p.is_file()
+        } == before
+
+    @pytest.mark.parametrize("damage", ["missing", "malformed"])
+    def test_unreadable_version_history_refuses_a_new_received_version(
+        self, workspace: Path, corpus: Path, damage: str
+    ) -> None:
+        first = _written(workspace, _received(workspace), corpus)
+        [relative] = [p for p in first.files if "/observations/" in p]
+        path = corpus / relative
+        if damage == "missing":
+            path.unlink()
+        else:
+            path.write_text('{"versions":', encoding="utf-8")
+        changed = _received(workspace, lines=CHANGED, at=LATER)
+        before = {p.relative_to(corpus): p.read_bytes() for p in corpus.rglob("*") if p.is_file()}
+        assert "does not read; no received version is written beside it" in _refusal(
+            workspace, changed, corpus
+        )
+        assert {
+            p.relative_to(corpus): p.read_bytes() for p in corpus.rglob("*") if p.is_file()
+        } == before
+
     def test_a_later_received_text_is_version_2(self, workspace: Path, corpus: Path) -> None:
         first = _received(workspace)
         _written(workspace, first, corpus)

@@ -115,6 +115,22 @@ class TestReadReceived:
 
 
 class TestRefusals:
+    @pytest.mark.parametrize("kind", [None, "vedtak", "minutes", "cover_letter", "other"])
+    def test_innsyn_material_is_refused_before_reading_its_payload(
+        self, workspace: Path, monkeypatch: pytest.MonkeyPatch, kind: str | None
+    ) -> None:
+        if kind is not None:
+            _classify(workspace, kind)
+        before = _tree(workspace)
+
+        def unexpected_payload_read(*args: object) -> bytes:
+            pytest.fail("non-regulation material must be refused before its payload is read")
+
+        monkeypatch.setattr("lovspor.promotion.innsyn_source._payload", unexpected_payload_read)
+        message = _refusal(workspace)
+        assert ("is not classified yet" if kind is None else f"is classified {kind}") in message
+        assert _tree(workspace) == before
+
     def test_an_unknown_request(self, regulation: Path) -> None:
         assert "no request 4646-20261005T074426Z in the innsyn ledger" in _refusal(
             regulation, request="4646-20261005T074426Z"
