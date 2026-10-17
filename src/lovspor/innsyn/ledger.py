@@ -5,8 +5,9 @@ request, recorded by its own command:
 
 * ``sent`` — the letter went out: authority, recipient, ``sent_at``, the LF
   ids of part (a), whether the general clause of part (b) was included, and
-  the SHA-256 of the letter as sent. A request is identified by authority and
-  ``sent_at`` (``4646-20261005T074425Z``).
+  the SHA-256 of the letter as sent, and, for a letter ``send`` delivered (or
+  one recorded with ``--message-id``), the Message-ID it went out with. A
+  request is identified by authority and ``sent_at`` (``4646-20261005T074425Z``).
 * ``acknowledged`` — the authority's receipt, automatic or not.
 * ``case_number`` — the authority's saksnummer, quoted in every later mail.
 * ``outcome`` — one of :data:`OUTCOMES`, with the time it arrived and, for a
@@ -80,6 +81,7 @@ ReceivedMediaType = Literal[
 ]
 
 REQUEST_ID_PATTERN = r"^(?:\d{2}|\d{4})-\d{8}T\d{6}Z$"
+MESSAGE_ID_PATTERN = r"^<[^<>@\s]+@[^<>@\s]+>$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _LfId = Annotated[str, Field(pattern=LF_ID_PATTERN)]
 Source = Literal["cli", "pilot-import"]
@@ -114,6 +116,7 @@ class Sent(_Event):
     lf_ids: tuple[_LfId, ...]
     general_clause: bool
     letter_sha256: str = Field(pattern=_SHA256_PATTERN)
+    message_id: str | None = Field(default=None, pattern=MESSAGE_ID_PATTERN)
 
     @field_validator("sent_at")
     @classmethod

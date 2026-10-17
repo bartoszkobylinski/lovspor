@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/innsyn/mailer.py"
+symbol = "email"
+registered = "2026-10-15, PR #609, from the mutation artifact of run 38786825561 (619ae0c), re-checked by hand"
+mutation = """
+-    message.set_content(self.body, charset="utf-8", cte="quoted-printable")
++    message.set_content(self.body, cte="quoted-printable")
+"""
+justification = """
+The standard library's raw-data content manager (`set_text_content`)
+defaults `charset` to "utf-8" for a str body, so naming it and leaving it
+out build byte-identical messages. Kept explicit because the letter is
+Norwegian text and the charset is part of what is sent. Argued from the
+standard library's default rather than from Python's semantics, hence
+pinned.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_set_content_writes_text_as_utf_8_by_default"

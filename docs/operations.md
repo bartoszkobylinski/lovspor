@@ -1680,8 +1680,12 @@ $I import-pilot --register ~/lovspor-ops/innsyn-pilot-2026-10-03/sent.csv
 # 4. A wave of letters. Writes files only; sends nothing.
 $I letters --out ~/lovspor-ops/innsyn/wave-01 --wave-size 25 [--held held-ids.txt]
 
-# 5. After the owner sends a letter, and as answers arrive.
-$I record-sent --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --id 4646 --sent-at <UTC>
+# 5. Send it: a dry run first, then --send, a batch at a time (see "Sending a wave").
+$I send --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --limit 25
+$I send --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --limit 25 --send
+
+# 6. A letter sent by hand, and the answers as they arrive.
+$I record-sent --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --id 4646 --sent-at <UTC> [--message-id '<…@lovspor.no>']
 $I record-ack --request 4646-20261005T074425Z --at <UTC>
 $I record-case-number --request 4646-20261005T074425Z --number 2026/2348
 $I record-outcome --request 4646-20261005T074425Z --outcome partial --at <UTC> [--refusal-basis "…"]
@@ -1736,6 +1740,38 @@ $I received                               # every document; requested ids still 
   time before the send are all refused. Outcome classes: `referred_to_lovdata`,
   `interim_reply_no_date`, `partial`, `full`, `refused`, `no_answer`. Only the first
   four are answers, so an interim reply leaves the request due.
+- **Sending a wave.** `send` delivers the manifest's letters by SMTP submission with
+  STARTTLS and certificate verification (port 587), in manifest order. A server that does
+  not offer STARTTLS is refused before the password is sent. Without `--send` it is a dry
+  run: one line per letter that would go (id, To, From, Subject, size in bytes), whether
+  the SMTP settings are complete, and nothing sent or written. Right before each letter,
+  after the pause, it reads the ledger, the directory and the file again and checks that
+  the letter file still has the manifest's SHA-256, that the directory's recipient is
+  still the manifest's, and that the authority has no open request from elsewhere; a
+  letter that fails a check is refused with the reason and the others go. `--limit`
+  counts letters sent, not letters refused. A letter whose
+  authority already has a `sent` with this letter's SHA-256 is skipped, so a rerun never
+  sends twice. Each accepted letter is recorded at once, through the same event as
+  `record-sent`, with the acceptance time (UTC) as `sent_at` and its Message-ID (on the
+  sender's domain), which `requests` shows as its last column. The first letter the
+  server does not accept stops the run: nothing is recorded for it, and the summary says
+  `sent N, skipped (already sent) M, refused K, remaining R`. `--pause-seconds` (default
+  20) is the gap between two letters, to stay inside Gmail's sending limits.
+- **SMTP setup (Gmail).** In `.env` (see `.env.example`): `LOVSPOR_SMTP_HOST=smtp.gmail.com`,
+  `LOVSPOR_SMTP_PORT=587` (the default), `LOVSPOR_SMTP_USER` = the Gmail address, and
+  `LOVSPOR_SMTP_PASSWORD` = an app password (Google Account, Security, 2-Step Verification,
+  App passwords), never the account password. The From header is the recorded sender
+  (`set-sender`), so `kontakt@lovspor.no` must be a verified send-as address of that Gmail
+  account (Settings, Accounts, "Send mail as"). A missing setting is refused by name. The
+  password is never printed: a server reply or error that echoes it, plain, escaped or
+  base64-encoded, is shown with `[redacted]` in its place.
+- **Run procedure.** 1. Dry run, and read the lines: `send --manifest … --limit 25`.
+  2. `send --manifest … --limit 25 --send`. 3. Check Gmail's Sent folder: 25 messages,
+  From `kontakt@lovspor.no`, and `requests` lists them with their Message-IDs. 4. Repeat
+  step 2 until `remaining 0`. If a run stops on an SMTP error, look for that letter in Sent
+  before running again: when the server took it but the answer was lost, record it with
+  `record-sent --message-id …` from the Sent copy so the rerun skips it. If the server took
+  a letter and the ledger refused it, `send` prints the exact `record-sent` command.
 - **The § 32 mark.** offentleglova § 32 andre ledd: no answer within five working days
   after receipt counts as a refusal that can be appealed. The mark is computed, never
   stored. It is the fifth working day after the Oslo day of `sent_at`, skipping

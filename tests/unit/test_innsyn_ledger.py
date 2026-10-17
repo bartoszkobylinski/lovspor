@@ -370,6 +370,7 @@ class TestListings:
             "interim_reply_no_date",
             "2026-10-12",
             "",
+            "",
         ]
         assert "5 requests" in result.stderr
 

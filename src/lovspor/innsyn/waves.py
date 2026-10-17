@@ -20,7 +20,8 @@ regulation is local. Part (b), the general request, is in every letter.
 The output is one ``<authority>.txt`` per letter (``Til:``, ``Emne:``, body)
 and ``manifest.json``. The output directory must be new or empty, so a wave
 on disk is exactly one run. Nothing is sent and the ledger is not touched:
-``record-sent`` records each letter when the owner has sent it.
+``send`` delivers the wave and records each letter as the server accepts it,
+and ``record-sent`` records a letter the owner sent by hand.
 """
 
 import hashlib

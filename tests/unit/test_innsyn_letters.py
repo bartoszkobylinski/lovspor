@@ -542,3 +542,39 @@ class TestRecordSent:
         result = innsyn(workspace, "record-sent", *args)
         assert result.exit_code == 1
         assert "not a wave manifest" in result.stderr
+
+
+class TestRecordSentMessageId:
+    def test_record_sent_carries_a_message_id_to_the_listing(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        _wave(workspace, tmp_path / "wave", lf_ledger)
+        manifest = str(tmp_path / "wave" / "manifest.json")
+        args = ("--manifest", manifest, "--id", "46", "--sent-at", "2026-10-13T08:00:00Z")
+        _set(workspace, "record-sent", *args, "--message-id", "<abc.123@example.no>")
+        held = requests(InnsynWorkspace(workspace, []))
+        assert [s.sent.message_id for s in held.values()] == ["<abc.123@example.no>"]
+        listing = innsyn(workspace, "requests").stdout.splitlines()
+        assert listing[0].split("\t")[-1] == "<abc.123@example.no>"
+
+    def test_without_a_message_id_the_column_is_empty(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        _wave(workspace, tmp_path / "wave", lf_ledger)
+        manifest = str(tmp_path / "wave" / "manifest.json")
+        args = ("--manifest", manifest, "--id", "46", "--sent-at", "2026-10-13T08:00:00Z")
+        _set(workspace, "record-sent", *args)
+        listing = innsyn(workspace, "requests").stdout.splitlines()
+        assert listing[0].split("\t")[-1] == ""
+
+    @pytest.mark.parametrize("bad", ["not-an-id", "<no-at-sign>", "<a@b> <c@d>"])
+    def test_a_malformed_message_id_is_refused(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path, bad: str
+    ) -> None:
+        _wave(workspace, tmp_path / "wave", lf_ledger)
+        manifest = str(tmp_path / "wave" / "manifest.json")
+        args = ("--manifest", manifest, "--id", "46", "--sent-at", "2026-10-13T08:00:00Z")
+        result = innsyn(workspace, "record-sent", *args, "--message-id", bad)
+        assert result.exit_code == 1
+        assert "Refused:" in result.stderr
+        assert not (workspace / "requests.jsonl").exists()
