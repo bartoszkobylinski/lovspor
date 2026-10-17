@@ -34,7 +34,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from lovspor.errors import LocalCorpusError, LocalScopeError, ObservedAtError
-from lovspor.local_corpus import LocalDataset, Observation, is_local_address
+from lovspor.local_corpus import LocalDataset, LocalObservation, is_local_address
 from lovspor.promotion.archive import SourceStatus
 from lovspor.promotion.decisions import utc_text
 from lovspor.promotion.versions import ExcludedObservation
@@ -127,7 +127,7 @@ class ObservationHistory(BaseModel):
     versions: tuple[ObservedVersion, ...]
     source_status: SourceStatus
     excluded: tuple[ExcludedObservation, ...]
-    observation: Observation
+    observation: LocalObservation
     at: ObservationOutcome | None
 
 

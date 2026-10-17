@@ -13,7 +13,10 @@ call can start answering with observed material.
 
 Every served local document carries an :class:`Observation`: what was
 observed, where and when, and ``asserted: false`` as a constant — the model
-cannot hold ``true``. Its fields come from the document's front matter and
+cannot hold ``true``. A document the authority sent under offentleglova and
+nobody observed carries a :class:`ReceivedObservation` instead (ADR-0016 A6):
+when it was received and on which request, and no URL or interval, because
+there was none. Its fields come from the document's front matter and
 its ``observations/<slug>.json``; files that disagree with the manifest, or
 with each other about which document they describe, are a
 :class:`~lovspor.errors.LocalCorpusError`, never served unlabelled.
@@ -32,9 +35,9 @@ import re
 import subprocess
 from collections import Counter
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from lovspor.errors import AmbiguousSlugError, CorpusNotFoundError, LocalCorpusError
 from lovspor.promotion.corpus import (
@@ -51,11 +54,14 @@ from lovspor.timetravel import _iter_follow_log, _read_blob
 __all__ = [
     "LOCAL_DATASET",
     "OBSERVATION_NOTICE",
+    "RECEIVED_NOTICE",
     "STATUS_NOTICE",
     "LocalDataset",
+    "LocalObservation",
     "LocalRecord",
     "Observation",
     "ObservationLabel",
+    "ReceivedObservation",
     "ServedLocal",
     "is_local_address",
 ]
@@ -64,6 +70,13 @@ OBSERVATION_NOTICE = (
     "Observert på myndighetens nettsted; ikke kontrollert mot Norsk Lovtidend eller Lovdata. "
     "Lovspor hevder ikke at forskriften gjelder. / Observed on the authority's website; "
     "not verified against Norsk Lovtidend or Lovdata. "
+    "Lovspor does not assert that this regulation is in force."
+)
+
+RECEIVED_NOTICE = (
+    "Mottatt fra myndigheten etter innsynskrav (offentleglova); ikke kontrollert mot Norsk "
+    "Lovtidend eller Lovdata. Lovspor hevder ikke at forskriften gjelder. / Received from the "
+    "authority under an offentleglova request; not verified against Norsk Lovtidend or Lovdata. "
     "Lovspor does not assert that this regulation is in force."
 )
 
@@ -77,6 +90,9 @@ _LOCAL_ID = re.compile(r"lf-\d{8}-\d{4,}|lk-\d{2}(?:\d{2})?-[0-9a-f]{12}")
 _FLOW_PAIR = re.compile(r'(\w+): ("(?:[^"\\]|\\.)*"|null)')
 _FRONT_MATTER_OPEN = "---\n"
 _FRONT_MATTER_CLOSE = "\n---\n"
+_OBSERVED_KEYS = frozenset({"observed_at_first", "source_url"})
+_RECEIVED_KEYS = frozenset({"received_at", "innsyn_request", "innsyn_saksnummer"})
+_CHANNEL_KEYS = {"observed": _OBSERVED_KEYS, "received": _RECEIVED_KEYS}
 
 LocalEntry = tuple[str, LocalRecord]
 
@@ -112,12 +128,32 @@ class Observation(BaseModel):
         return self.model_dump()
 
 
+class ReceivedObservation(BaseModel):
+    """The label of a version received under offentleglova (ADR-0016 A6), in its key order."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    basis: Literal["received"] = "received"
+    asserted: Literal[False] = False
+    authority: ObservedAuthority
+    received_at: str
+    innsyn_request: str
+    notice: str = RECEIVED_NOTICE
+
+    def label(self) -> dict[str, Any]:
+        """The block as a response carries it; every field is already JSON-native."""
+        return self.model_dump()
+
+
+LocalObservation = Annotated[Observation | ReceivedObservation, Field(discriminator="basis")]
+
+
 class ObservationLabel(BaseModel):
     """``{"observation": ...}``, the JSON block ``get_law`` appends to a local text."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    observation: Observation
+    observation: LocalObservation
 
 
 class ServedLocal(BaseModel):
@@ -129,7 +165,7 @@ class ServedLocal(BaseModel):
     address: str
     record: LocalRecord
     markdown: str
-    observation: Observation
+    observation: LocalObservation
 
 
 class _FrontMatter(BaseModel):
@@ -139,8 +175,31 @@ class _FrontMatter(BaseModel):
     authority: ObservedAuthority
     version: int
     content_hash: str
-    observed_at_first: str
-    source_url: str
+    basis: Literal["observed", "received"]
+    observed_at_first: str | None = None
+    source_url: str | None = None
+    received_at: str | None = None
+    innsyn_request: str | None = None
+    innsyn_saksnummer: str | None = None
+
+    @model_validator(mode="after")
+    def _one_channel(self) -> Self:
+        """Exactly the keys of the stated basis; only the saksnummer may be null."""
+        expected = _CHANNEL_KEYS[self.basis]
+        present = self.model_fields_set & (_OBSERVED_KEYS | _RECEIVED_KEYS)
+        if present != expected:
+            msg = f"basis {self.basis!r} needs {sorted(expected)}, found {sorted(present)}"
+            raise ValueError(msg)
+        missing = sorted(k for k in expected - {"innsyn_saksnummer"} if getattr(self, k) is None)
+        if missing:
+            raise ValueError(f"basis {self.basis!r} needs a value for {missing}")
+        return self
+
+
+class _Received(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    received_at: str
 
 
 class _ObservedVersion(BaseModel):
@@ -148,6 +207,7 @@ class _ObservedVersion(BaseModel):
 
     version: int
     observed_at_last: str | None = None
+    received: tuple[_Received, ...] | None = None
 
 
 class _Observations(BaseModel):
@@ -297,17 +357,21 @@ class LocalDataset:
 
     def _observation(
         self, doc_id: str, record: LocalRecord, markdown: tuple[Path, str]
-    ) -> Observation:
+    ) -> LocalObservation:
         markdown_path, text = markdown
         front = _front_matter(markdown_path, text)
         _agree_with_record(markdown_path, front, doc_id, record)
         path, observations = self._read(_observations_path(record.markdown_path))
-        observed_last = _observed_at_last(path, observations, doc_id, front.version)
+        entry = _version_entry(path, observations, doc_id, front.version)
+        if front.basis == "received":
+            return _received_label(path, front, entry, doc_id)
+        if entry.observed_at_last is None:
+            raise LocalCorpusError(f"{path}: version {front.version} of {doc_id} is received-only")
         return Observation(
             authority=front.authority,
-            source_url=front.source_url,
-            observed_at_first=front.observed_at_first,
-            observed_at_last=observed_last,
+            source_url=_given(front.source_url),
+            observed_at_first=_given(front.observed_at_first),
+            observed_at_last=entry.observed_at_last,
         )
 
     def _read(self, relative: str) -> tuple[Path, str]:
@@ -440,7 +504,7 @@ def _flow_mapping(value: str) -> dict[str, Any]:
     return {key: json.loads(literal) for key, literal in _FLOW_PAIR.findall(value)}
 
 
-def _observed_at_last(path: Path, text: str, doc_id: str, version: int) -> str:
+def _version_entry(path: Path, text: str, doc_id: str, version: int) -> _ObservedVersion:
     try:
         observed = _Observations.model_validate_json(text)
     except ValidationError as exc:
@@ -448,8 +512,35 @@ def _observed_at_last(path: Path, text: str, doc_id: str, version: int) -> str:
     if observed.doc_id != doc_id:
         raise LocalCorpusError(f"{path} holds the observations of {observed.doc_id}")
     for entry in observed.versions:
-        if entry.version == version and entry.observed_at_last is None:
-            raise LocalCorpusError(f"{path}: version {version} of {doc_id} is received-only")
-        if entry.version == version and entry.observed_at_last is not None:
-            return entry.observed_at_last
+        if entry.version == version:
+            return entry
     raise LocalCorpusError(f"{path} has no observations of version {version} of {doc_id}")
+
+
+def _received_label(
+    path: Path, front: _FrontMatter, entry: _ObservedVersion, doc_id: str
+) -> ReceivedObservation:
+    """The label from the front matter, once the observations file agrees it was received."""
+    if entry.received is None:
+        raise LocalCorpusError(
+            f"{path}: version {front.version} of {doc_id} was observed; "
+            "its front matter says received"
+        )
+    received_at = _given(front.received_at)
+    if received_at not in {copy.received_at for copy in entry.received}:
+        raise LocalCorpusError(
+            f"{path} records no copy of version {front.version} of {doc_id} "
+            f"with received_at {received_at}"
+        )
+    return ReceivedObservation(
+        authority=front.authority,
+        received_at=received_at,
+        innsyn_request=_given(front.innsyn_request),
+    )
+
+
+def _given(value: str | None) -> str:
+    """A key the front-matter validator already required; ``None`` here is a bug, not data."""
+    if value is None:
+        raise LocalCorpusError("front matter lost a key its basis requires")
+    return value
