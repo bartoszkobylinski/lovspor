@@ -1278,6 +1278,46 @@ python3 scripts/check_corpus_integrity.py
 python3 scripts/check_dataset_separation.py origin/main HEAD
 ```
 
+### Promoting a received document (ADR-0016 A1)
+
+A text an authority sent in answer to an innsyn request (see "Innsyn requests
+to every local authority") is promoted with `lovspor promote received`: the
+same preview, approve and local steps, read from the innsyn workspace instead
+of the archive. The decision log is still `promotions.jsonl` in the
+observatory root; the authority block comes from the latest innsyn population
+snapshot, so `--authority` is not asked for: the request names it.
+
+```bash
+export LOVSPOR_INNSYN_DIR=/absolute/path/to/innsyn-workspace
+export LOVSPOR_OBSERVATORY_ROOT=/Volumes/T7/lovspor-observatory
+uv run lovspor promote received preview --request 4646-20261005T074425Z --document <sha256> \
+  --corpus /absolute/path/to/lovverk --klass-version <klass-vintage>
+uv run lovspor promote received approve --request 4646-20261005T074425Z --document <sha256> \
+  --decision decision-4646.json
+uv run lovspor promote received local --request 4646-20261005T074425Z --document <sha256> \
+  --corpus /absolute/path/to/lovverk --klass-version <klass-vintage>
+```
+
+`--document` is the SHA-256 `record-received` printed; the decision document
+is the one step 2 describes. `local` writes the same four files as an
+observed promotion, with `basis: "received"`, `received_at` and the request
+in place of `observed_at_first` and `source_url`, and prints the commit to
+make; a rerun prints `Unchanged`. The rules:
+
+* Only a document classified `regulation_text` is read. A `vedtak`,
+  `minutes`, `cover_letter` or `other` is innsyn material and is refused
+  before anything is read or written.
+* `--answers` is review evidence, kept in the innsyn block of the audit. It
+  never names the document: the id is minted from the text alone.
+* A scan without a text layer is held as `empty_text` (exit 3, recorded in the
+  decision log) and cannot be approved. It is never OCR'd.
+* No file name, recipient mailbox or person's name is published. The
+  reviewer is named by role, as for an observed promotion.
+* A document whose versions were observed is refused: switching the primary
+  channel is a recorded decision no command makes yet (A4). A withdrawn or
+  rejected received document is refused, and `promote withdraw` withdraws
+  one the same way as an observed one.
+
 ### Backfill — every observed version, one commit each (ADR-0016 S6)
 
 `promote local` writes the one version you approved. `promote backfill`
