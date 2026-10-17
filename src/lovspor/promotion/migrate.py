@@ -76,6 +76,8 @@ from lovspor.promotion.versions import DerivedVersion, read_primary
 from lovspor.promotion.withdraw import refuse_withdrawn
 from lovspor.promotion.writer import (
     ObservationsFile,
+    ReceivedVersion,
+    VersionObservations,
     evidence_text,
     observations_text,
     refuse_nlod,
@@ -380,7 +382,10 @@ def _require_earlier(subject: _Subject, prepared: Prepared) -> tuple[VersionAppr
 def _primary_url(document: Published) -> str:
     """The one URL every promoted version was read at, numbered 1..current."""
     versions = document.observations.versions
-    urls = {entry.primary_url for entry in versions}
+    if any(isinstance(entry, ReceivedVersion) for entry in versions):
+        msg = f"{document.observations_path} holds a received version, which is not migrated"
+        raise PromotionRefusedError(msg)
+    urls = {entry.primary_url for entry in versions if isinstance(entry, VersionObservations)}
     current = document.record.version
     if len(urls) != 1 or [entry.version for entry in versions] != list(range(1, current + 1)):
         msg = f"{document.observations_path} does not list one URL's versions 1..{current}"

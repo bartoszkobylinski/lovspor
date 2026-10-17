@@ -41,7 +41,12 @@ from lovspor.promotion.decisions import (
     utc_text,
 )
 from lovspor.promotion.evidence import evidence_path
-from lovspor.promotion.writer import ObservationsFile, WithdrawalNotice, observations_text
+from lovspor.promotion.writer import (
+    ObservationsFile,
+    VersionObservations,
+    WithdrawalNotice,
+    observations_text,
+)
 
 WITHDRAW_SUBJECT = "withdraw(lokal-forskrift): {authority_id}/{slug}"
 
@@ -77,6 +82,7 @@ def withdrawal_record(
     artifacts = tuple(
         ArtifactKey(authority_id=record.authority_id, sha256=sha256, source_url=v.primary_url)
         for v in observations.versions
+        if isinstance(v, VersionObservations)
         for sha256 in v.source_sha256s
     )
     return WithdrawalRecord(

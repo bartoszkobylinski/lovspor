@@ -68,7 +68,12 @@ from lovspor.promotion.decisions import (
 )
 from lovspor.promotion.intervals import with_intervals
 from lovspor.promotion.versions import read_primary
-from lovspor.promotion.writer import ObservationsFile, apply, observations_text
+from lovspor.promotion.writer import (
+    ObservationsFile,
+    VersionObservations,
+    apply,
+    observations_text,
+)
 
 OBSERVE_SUBJECT = "observe: refresh observation intervals ({count} documents)"
 
@@ -233,7 +238,9 @@ def _refresh(
     try:
         on_disk = path.read_bytes()
         existing = ObservationsFile.model_validate_json(on_disk)
-        urls = {entry.primary_url for entry in existing.versions}
+        urls = {e.primary_url for e in existing.versions if isinstance(e, VersionObservations)}
+        if not urls:
+            return "skipped: a received-only document has no observation axis"
         if len(urls) != 1:
             return "skipped: its versions name more than one primary URL"
         history = read_primary(log, fetches, urls.pop(), None)

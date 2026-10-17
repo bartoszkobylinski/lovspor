@@ -147,7 +147,7 @@ class _ObservedVersion(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     version: int
-    observed_at_last: str
+    observed_at_last: str | None = None
 
 
 class _Observations(BaseModel):
@@ -448,6 +448,8 @@ def _observed_at_last(path: Path, text: str, doc_id: str, version: int) -> str:
     if observed.doc_id != doc_id:
         raise LocalCorpusError(f"{path} holds the observations of {observed.doc_id}")
     for entry in observed.versions:
-        if entry.version == version:
+        if entry.version == version and entry.observed_at_last is None:
+            raise LocalCorpusError(f"{path}: version {version} of {doc_id} is received-only")
+        if entry.version == version and entry.observed_at_last is not None:
             return entry.observed_at_last
     raise LocalCorpusError(f"{path} has no observations of version {version} of {doc_id}")

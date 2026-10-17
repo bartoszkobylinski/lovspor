@@ -33,12 +33,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.errors import LocalScopeError, ObservedAtError
+from lovspor.errors import LocalCorpusError, LocalScopeError, ObservedAtError
 from lovspor.local_corpus import LocalDataset, Observation, is_local_address
 from lovspor.promotion.archive import SourceStatus
 from lovspor.promotion.decisions import utc_text
 from lovspor.promotion.versions import ExcludedObservation
-from lovspor.promotion.writer import VersionObservations
+from lovspor.promotion.writer import ObservationsFile, VersionObservations
 
 OBSERVATION_FLOOR = "2026-08-19"
 """The observatory's first capture: no local document was observed before it."""
@@ -178,7 +178,7 @@ def observation_history(
     instant = None if observed_at is None else parse_observed_at(observed_at)
     served = local.document(document)
     observed = local.observations(served)
-    versions = tuple(ObservedVersion.of(entry) for entry in observed.versions)
+    versions, source_status = _observed(served.address, observed)
     at = None if instant is None else locate(versions, instant)
     if include_text and isinstance(at, Contained):
         text = local.version_text(served, at.version.version, at.version.content_hash)
@@ -187,11 +187,22 @@ def observation_history(
         document=served.address,
         doc_id=served.doc_id,
         versions=versions,
-        source_status=observed.source_status,
+        source_status=source_status,
         excluded=observed.excluded,
         observation=served.observation,
         at=at,
     ).model_dump(mode="json")
+
+
+def _observed(
+    address: str, observed: ObservationsFile
+) -> tuple[tuple[ObservedVersion, ...], SourceStatus]:
+    """The observed versions and last outcome, refused when a version was only received."""
+    entries = [entry for entry in observed.versions if isinstance(entry, VersionObservations)]
+    if len(entries) != len(observed.versions) or observed.source_status is None:
+        msg = f"{address} holds a received-only version, which has no observation interval"
+        raise LocalCorpusError(msg)
+    return tuple(ObservedVersion.of(entry) for entry in entries), observed.source_status
 
 
 def _check_request(document: str, observed_at: str | None, include_text: bool) -> None:
