@@ -18,6 +18,8 @@ from lovspor.innsyn.ledger import REQUEST_ID_PATTERN
 
 _KLASS_CODE_LENGTH = {"kommune": 4, "fylkeskommune": 2}
 _DIGITS = re.compile(r"[0-9]+")
+#: A saksnummer as digits only: an archive suffix can carry initials (ADR-0016 A5).
+SAKSNUMMER_PATTERN = r"^\d{2,4}/\d+(?:-\d+)?$"
 
 
 class AuthorityType(StrEnum):
@@ -254,7 +256,7 @@ class ReceivedSource(BaseModel):
 
     received_at: AwareDatetime
     innsyn_request: str = Field(pattern=REQUEST_ID_PATTERN)
-    innsyn_saksnummer: str | None = Field(pattern=r"^\d{2,4}/\d+(?:-\d+)?$")
+    innsyn_saksnummer: str | None = Field(pattern=SAKSNUMMER_PATTERN)
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @property
