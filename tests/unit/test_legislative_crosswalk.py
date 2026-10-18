@@ -384,3 +384,47 @@ def test_evidence_digest_preserves_null_bom_and_strict_surrogate_handling(body: 
     else:
         expected = sha256(bytes(body, encoding="utf-8")).hexdigest()
         assert probe(body).input_sha256 == expected
+
+
+@pytest.mark.parametrize(
+    "hidden, visible",
+    [
+        ("Lovvedtak 85 (2021-2022)", "Sanksjonert 17.06.2022 (lov63)"),
+        ("Sanksjonert 17.06.2022 (lov63)", "Lovvedtak 85 (2021-2022)"),
+    ],
+)
+@pytest.mark.parametrize(
+    "wrapper",
+    ["<script>{}</script>", "<style>{}</style>", "<!-- {} -->", '<p title="{}"></p>'],
+)
+def test_each_identity_must_be_visible_evidence(hidden: str, visible: str, wrapper: str) -> None:
+    # The pilot requires both explicit references, not one visible reference
+    # supplemented by an identity in non-evidence HTML content.
+    assert probe(wrapper.format(hidden) + f"<p>{visible}</p>").status == "unresolved"
+
+
+@pytest.mark.parametrize("sanction_date", ["18.06.2022", "17.07.2022", "17.06.2023"])
+def test_same_law_number_with_different_sanction_date_is_contradicted(
+    sanction_date: str,
+) -> None:
+    body = f"Lovvedtak 85 (2021-2022) Sanksjonert {sanction_date} (lov63)"
+    assert probe(body).status == "contradicted"
+
+
+@pytest.mark.parametrize(
+    "body, overrides, status",
+    [
+        (STORTING_EXCERPT, {}, "attested"),
+        ("Ingen vedtak – æøå", {}, "unresolved"),  # noqa: RUF001
+        (STORTING_EXCERPT + " Lovvedtak 86 (2021-2022)", {}, "ambiguous"),
+        (STORTING_EXCERPT, {"lovvedtak_number": 86}, "contradicted"),
+        (STORTING_EXCERPT, {"source_url": "https://example.org/"}, "unsupported"),
+    ],
+)
+def test_every_verdict_retains_exact_supplied_evidence_digest(
+    body: str, overrides: dict[str, object], status: str
+) -> None:
+    body += "<!-- æøå -->\r\n"
+    result = probe(body, **overrides)
+    assert result.status == status
+    assert result.input_sha256 == sha256(body.encode("utf-8")).hexdigest()
