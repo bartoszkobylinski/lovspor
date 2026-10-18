@@ -66,6 +66,7 @@ from lovspor.promotion.decisions import (
     HumanDecision,
     PromotedRecord,
     PromotionAudit,
+    SourceKey,
     WithdrawalDocument,
     utc_text,
 )
@@ -218,7 +219,7 @@ def _withdrawal_document(path: Path) -> WithdrawalDocument:
     return document
 
 
-def _standing(decisions: DecisionLog, key: ArtifactKey) -> HumanDecision | None:
+def _standing(decisions: DecisionLog, key: SourceKey) -> HumanDecision | None:
     """The standing decision on ``key``, refusing a withdrawn or rejected artifact."""
     refuse_withdrawn(decisions, key, None)
     decision = decisions.latest_decision(key)
@@ -232,7 +233,12 @@ def _standing(decisions: DecisionLog, key: ArtifactKey) -> HumanDecision | None:
 def _reviewed_text(log: ObservationLog, fetches: tuple[Fetch, ...], key: ArtifactKey) -> str:
     """The content hash of the text an approval is given for; a held text cannot be approved."""
     artifact = read_artifact(log, fetches, key, None)
-    extracted = extract_regulation(artifact.payload, artifact.content_type)
+    return reviewed_hash(artifact.payload, artifact.content_type)
+
+
+def reviewed_hash(payload: bytes, content_type: str) -> str:
+    """The content hash an approval of ``payload`` names; a held text cannot be approved."""
+    extracted = extract_regulation(payload, content_type)
     if isinstance(extracted, HeldExtraction):
         msg = f"nothing to approve: the text is held ({extracted.reason.value}: {extracted.detail})"
         raise PromotionRefusedError(msg)
@@ -273,6 +279,11 @@ def preview_impl(request: Request) -> None:
         raise typer.Exit(HELD_EXIT_CODE)
     # The artifact itself was refused by _standing; only the document is new here.
     refuse_withdrawn(decisions, None, prepared.identity.doc_id)
+    echo_preview(prepared)
+
+
+def echo_preview(prepared: Prepared) -> None:
+    """What a reviewer reads: the placement, and the Markdown unless the corpus holds it."""
     typer.echo(f"id: {prepared.identity.doc_id}  version: {prepared.version}")
     typer.echo(f"path: {prepared.markdown_path}")
     typer.echo(f"content_hash: {prepared.identity.content_hash}")
@@ -303,8 +314,7 @@ def promote_one(context: PromotionContext, now: datetime) -> None:
     standing = require_approval(decision, prepared, decisions.carried())
     approval = standing_on(standing, decisions.carries())
     if prepared.unchanged:
-        typer.echo(f"Unchanged: {prepared.identity.doc_id} v{prepared.version} is already at")
-        typer.echo(f"{prepared.markdown_path}; nothing written, nothing to commit.")
+        echo_unchanged(prepared)
         return
     writes = write_set(prepared, artifact, approval, context.corpus)
     written = apply(context.corpus, writes)
@@ -312,8 +322,13 @@ def promote_one(context: PromotionContext, now: datetime) -> None:
     _echo_promoted(context.corpus, prepared, written)
 
 
+def echo_unchanged(prepared: Prepared) -> None:
+    typer.echo(f"Unchanged: {prepared.identity.doc_id} v{prepared.version} is already at")
+    typer.echo(f"{prepared.markdown_path}; nothing written, nothing to commit.")
+
+
 def _promoted(
-    key: ArtifactKey, prepared: Prepared, audit: PromotionAudit, now: datetime
+    key: SourceKey, prepared: Prepared, audit: PromotionAudit, now: datetime
 ) -> PromotedRecord:
     return PromotedRecord(
         artifact=key,
@@ -383,7 +398,7 @@ def _echo_withdrawn(corpus: CorpusCheckout, withdrawn: Withdrawn, how: str) -> N
     _echo_commit(corpus, withdrawn.commit_subject)
 
 
-def _record_held(decisions: DecisionLog, key: ArtifactKey, held: Held, now: datetime) -> None:
+def _record_held(decisions: DecisionLog, key: SourceKey, held: Held, now: datetime) -> None:
     record = HeldRecord(
         artifact=key,
         recorded_at=now,
