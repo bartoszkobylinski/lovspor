@@ -8,7 +8,10 @@ clock; every time in the output is an input.
 as a JSON literal — a valid YAML scalar that the ``lovverk`` integrity check
 reads with ``json.loads`` — ``authority`` as a flow mapping and ``hjemmel``
 as a flow list. The provenance is fixed: ``source_license: "åndsverkloven §
-14"``, ``basis: "observed"``, ``asserted: false``. There is no
+14"``, ``asserted: false``, and ``basis`` names the channel: ``"observed"``
+with ``observed_at_first`` and ``source_url``, or ``"received"`` (ADR-0016 A5)
+with ``received_at``, ``innsyn_request`` and ``innsyn_saksnummer`` in their
+place — a received version names no URL. There is no
 ``retrieved_at`` (Lovdata download time) and no ``observed_at_last`` (it would
 churn the file daily).
 
@@ -31,7 +34,7 @@ import re
 
 from lovspor.errors import PromotionRenderError
 from lovspor.promotion.identity import content_hash
-from lovspor.promotion.models import Authority, LocalDocument
+from lovspor.promotion.models import Authority, LocalDocument, ObservedSource, ReceivedSource
 
 LOCAL_RENDERER_VERSION = 1
 DOC_TYPE = "lokal-forskrift"
@@ -42,6 +45,8 @@ _CHAPTER = re.compile(r"kap(?:ittel|\.)\s*(?:\d+|[IVXLC]+)\b", re.IGNORECASE)
 _SECTION = re.compile(r"§\s*\d")
 _MARKDOWN_LEAD = frozenset("#>*+-=|`~")
 _NLOD = re.compile(r"nlod", re.IGNORECASE)
+
+_Fields = tuple[tuple[str, str], ...]
 
 
 def render_local_regulation(document: LocalDocument) -> str:
@@ -81,18 +86,39 @@ def _fields(document: LocalDocument) -> tuple[tuple[str, str], ...]:
 
 
 def _provenance(document: LocalDocument) -> tuple[tuple[str, str], ...]:
-    source = document.source
+    source, authority = document.source, document.identity.authority
+    axis, channel, basis = _channel(source)
     return (
         ("version", _scalar(document.version)),
         ("content_hash", _scalar(document.identity.content_hash)),
-        ("observed_at_first", _scalar(source.observed_at_first_utc)),
-        ("source_url", _scalar(source.source_url)),
+        *axis,
         ("source_sha256", _scalar(source.source_sha256)),
-        ("source_provider", _scalar(_provider(document.identity.authority))),
+        ("source_provider", _scalar(f"{authority.name} {authority.type.value} ({channel})")),
         ("source_license", _scalar(SOURCE_LICENSE)),
-        ("basis", _scalar("observed")),
+        ("basis", _scalar(basis)),
         ("asserted", _scalar(False)),
         ("language", _scalar("no")),
+    )
+
+
+def _channel(source: ObservedSource | ReceivedSource) -> tuple[_Fields, str, str]:
+    if isinstance(source, ReceivedSource):
+        return _received_axis(source), "received under offentleglova", "received"
+    return _observed_axis(source), "observed", "observed"
+
+
+def _observed_axis(source: ObservedSource) -> tuple[tuple[str, str], ...]:
+    return (
+        ("observed_at_first", _scalar(source.observed_at_first_utc)),
+        ("source_url", _scalar(source.source_url)),
+    )
+
+
+def _received_axis(source: ReceivedSource) -> tuple[tuple[str, str], ...]:
+    return (
+        ("received_at", _scalar(source.received_at_utc)),
+        ("innsyn_request", _scalar(source.innsyn_request)),
+        ("innsyn_saksnummer", _scalar(source.innsyn_saksnummer)),
     )
 
 
@@ -108,10 +134,6 @@ def _authority(authority: Authority) -> str:
         f"klass_version: {_scalar(authority.klass_version)}",
     )
     return "{" + ", ".join(parts) + "}"
-
-
-def _provider(authority: Authority) -> str:
-    return f"{authority.name} {authority.type.value} (observed)"
 
 
 def _body(document: LocalDocument) -> str:

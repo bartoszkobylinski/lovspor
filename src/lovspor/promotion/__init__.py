@@ -43,6 +43,7 @@ from lovspor.promotion.models import (
     ObservedSource,
     PersonalDataHit,
     PersonalDataKind,
+    ReceivedSource,
     RegulationFields,
     SourceForm,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "ObservedSource",
     "PersonalDataHit",
     "PersonalDataKind",
+    "ReceivedSource",
     "RegulationFields",
     "SourceForm",
     "content_hash",

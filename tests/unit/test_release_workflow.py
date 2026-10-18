@@ -204,7 +204,7 @@ def test_project_version_and_mcp_cap_are_pinned() -> None:
     runtime_mcp = [dep for dep in deps if dep.startswith("mcp")]
 
     assert project["version"] == _EXPECTED_VERSION
-    assert runtime_mcp == ["mcp>=1.28.1,<2"]
+    assert runtime_mcp == ["mcp>=1.30.0,<2"]
 
 
 def test_package_license_metadata_and_readme_agree_on_agpl_v3() -> None:
@@ -264,8 +264,8 @@ def test_engine_license_docs_do_not_regress_to_stale_mit_claims() -> None:
 def test_lockfile_matches_the_declared_mcp_cap_and_resolves_to_a_1x_release() -> None:
     lock = (_ROOT / "uv.lock").read_text(encoding="utf-8")
 
-    assert '{ name = "mcp", specifier = ">=1.28.1,<2" }' in lock
-    assert 'name = "mcp"\nversion = "1.28.1"' in lock
+    assert '{ name = "mcp", specifier = ">=1.30.0,<2" }' in lock
+    assert 'name = "mcp"\nversion = "1.30.0"' in lock
 
 
 def test_lockfile_carries_the_same_version_as_pyproject() -> None:

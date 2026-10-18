@@ -40,6 +40,7 @@ from lovspor.promotion.decisions import (
 )
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
 from lovspor.promotion.identity import mint_identity
+from lovspor.promotion.innsyn_source import ReceivedArtifact, received_source
 from lovspor.promotion.models import (
     Authority,
     ExtractedDocument,
@@ -49,6 +50,7 @@ from lovspor.promotion.models import (
     MintedIdentity,
     ObservedSource,
     PersonalDataHit,
+    ReceivedSource,
 )
 from lovspor.promotion.render import render_local_regulation
 from lovspor.rendering.slug import derive_slug
@@ -91,9 +93,15 @@ class Prepared(BaseModel):
 
 
 def prepare(
-    artifact: ArchivedArtifact, authority: Authority, corpus: CorpusCheckout
+    artifact: ArchivedArtifact | ReceivedArtifact, authority: Authority, corpus: CorpusCheckout
 ) -> Held | Prepared:
-    """Extract, identify, place and render one artifact; a hold stops it at its stage."""
+    """Extract, identify, place and render one artifact; a hold stops it at its stage.
+
+    An observed and a received artifact pass the same gates (ADR-0016 A1): only
+    the provenance the rendering carries differs. A received artifact's
+    ``answers`` never reaches identity, which is minted from the text alone
+    (owner decision A1-1).
+    """
     extracted = extract_regulation(artifact.payload, artifact.content_type)
     if isinstance(extracted, HeldExtraction):
         return Held(
@@ -192,17 +200,22 @@ def _free_slug(
     raise PromotionRefusedError(msg)
 
 
-def _render(prepared: Prepared, artifact: ArchivedArtifact) -> str:
-    source = ObservedSource(
-        observed_at_first=artifact.observed_at_first,
-        source_url=artifact.key.source_url,
-        source_sha256=artifact.key.sha256,
-    )
+def _render(prepared: Prepared, artifact: ArchivedArtifact | ReceivedArtifact) -> str:
     document = LocalDocument(
         identity=prepared.identity,
         extracted=prepared.extracted,
         slug=prepared.slug,
         version=prepared.version,
-        source=source,
+        source=_source(artifact),
     )
     return render_local_regulation(document)
+
+
+def _source(artifact: ArchivedArtifact | ReceivedArtifact) -> ObservedSource | ReceivedSource:
+    if isinstance(artifact, ReceivedArtifact):
+        return received_source(artifact)
+    return ObservedSource(
+        observed_at_first=artifact.observed_at_first,
+        source_url=artifact.key.source_url,
+        source_sha256=artifact.key.sha256,
+    )

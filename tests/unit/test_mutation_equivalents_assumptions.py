@@ -22,7 +22,8 @@ import json
 import re
 import subprocess
 import tomllib
-from datetime import datetime
+from datetime import UTC, datetime
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ from pydantic import ValidationError
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
+from lovspor.innsyn.sender import Sender
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
 from lovspor.parsing.xml_normalizer import safe_parser
@@ -719,3 +721,25 @@ def test_assumption_httpx_client_headers_merge_names_case_insensitively() -> Non
             request = client.build_request("GET", "https://example.invalid/")
         assert request.headers.get_list("User-Agent") == ["ua/1"], user_agent
         assert request.headers.get_list("Accept") == ["application/json"], accept
+
+
+def test_assumption_set_content_writes_text_as_utf_8_by_default() -> None:
+    """Pins the ``innsyn/mailer.py`` ``email`` entry: the standard library's
+    raw-data content manager gives a ``str`` body charset utf-8 when none is
+    named, so dropping ``charset="utf-8"`` sends the same part."""
+    named, default = EmailMessage(), EmailMessage()
+    named.set_content("Søknad om innsyn", charset="utf-8", cte="quoted-printable")
+    default.set_content("Søknad om innsyn", cte="quoted-printable")
+    assert default.get_content_charset() == named.get_content_charset() == "utf-8"
+    assert default.as_bytes() == named.as_bytes()
+
+
+@pytest.mark.parametrize("email", ["a@b@lovspor.no", '"a@b"@lovspor.no', "lovspor.no"])
+def test_assumption_a_sender_mailbox_holds_exactly_one_at(email: str) -> None:
+    """Pins the ``innsyn/mailer.py`` ``message_id`` entry: pydantic enforces
+    the ``Sender.email`` pattern at construction, and that pattern admits
+    exactly one "@", so ``partition`` and ``rpartition`` cut the same domain."""
+    recorded = datetime(2026, 10, 15, tzinfo=UTC)
+    assert Sender(name="A", email="a@lovspor.no", recorded_at=recorded).email.count("@") == 1
+    with pytest.raises(ValidationError):
+        Sender(name="A", email=email, recorded_at=recorded)

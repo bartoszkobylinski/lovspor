@@ -1278,6 +1278,46 @@ python3 scripts/check_corpus_integrity.py
 python3 scripts/check_dataset_separation.py origin/main HEAD
 ```
 
+### Promoting a received document (ADR-0016 A1)
+
+A text an authority sent in answer to an innsyn request (see "Innsyn requests
+to every local authority") is promoted with `lovspor promote received`: the
+same preview, approve and local steps, read from the innsyn workspace instead
+of the archive. The decision log is still `promotions.jsonl` in the
+observatory root; the authority block comes from the latest innsyn population
+snapshot, so `--authority` is not asked for: the request names it.
+
+```bash
+export LOVSPOR_INNSYN_DIR=/absolute/path/to/innsyn-workspace
+export LOVSPOR_OBSERVATORY_ROOT=/Volumes/T7/lovspor-observatory
+uv run lovspor promote received preview --request 4646-20261005T074425Z --document <sha256> \
+  --corpus /absolute/path/to/lovverk --klass-version <klass-vintage>
+uv run lovspor promote received approve --request 4646-20261005T074425Z --document <sha256> \
+  --decision decision-4646.json
+uv run lovspor promote received local --request 4646-20261005T074425Z --document <sha256> \
+  --corpus /absolute/path/to/lovverk --klass-version <klass-vintage>
+```
+
+`--document` is the SHA-256 `record-received` printed; the decision document
+is the one step 2 describes. `local` writes the same four files as an
+observed promotion, with `basis: "received"`, `received_at` and the request
+in place of `observed_at_first` and `source_url`, and prints the commit to
+make; a rerun prints `Unchanged`. The rules:
+
+* Only a document classified `regulation_text` is read. A `vedtak`,
+  `minutes`, `cover_letter` or `other` is innsyn material and is refused
+  before anything is read or written.
+* `--answers` is review evidence, kept in the innsyn block of the audit. It
+  never names the document: the id is minted from the text alone.
+* A scan without a text layer is held as `empty_text` (exit 3, recorded in the
+  decision log) and cannot be approved. It is never OCR'd.
+* No file name, recipient mailbox or person's name is published. The
+  reviewer is named by role, as for an observed promotion.
+* A document whose versions were observed is refused: switching the primary
+  channel is a recorded decision no command makes yet (A4). A withdrawn or
+  rejected received document is refused, and `promote withdraw` withdraws
+  one the same way as an observed one.
+
 ### Backfill — every observed version, one commit each (ADR-0016 S6)
 
 `promote local` writes the one version you approved. `promote backfill`
@@ -1680,8 +1720,12 @@ $I import-pilot --register ~/lovspor-ops/innsyn-pilot-2026-10-03/sent.csv
 # 4. A wave of letters. Writes files only; sends nothing.
 $I letters --out ~/lovspor-ops/innsyn/wave-01 --wave-size 25 [--held held-ids.txt]
 
-# 5. After the owner sends a letter, and as answers arrive.
-$I record-sent --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --id 4646 --sent-at <UTC>
+# 5. Send it: a dry run first, then --send, a batch at a time (see "Sending a wave").
+$I send --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --limit 25
+$I send --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --limit 25 --send
+
+# 6. A letter sent by hand, and the answers as they arrive.
+$I record-sent --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --id 4646 --sent-at <UTC> [--message-id '<…@lovspor.no>']
 $I record-ack --request 4646-20261005T074425Z --at <UTC>
 $I record-case-number --request 4646-20261005T074425Z --number 2026/2348
 $I record-outcome --request 4646-20261005T074425Z --outcome partial --at <UTC> [--refusal-basis "…"]
@@ -1736,6 +1780,38 @@ $I received                               # every document; requested ids still 
   time before the send are all refused. Outcome classes: `referred_to_lovdata`,
   `interim_reply_no_date`, `partial`, `full`, `refused`, `no_answer`. Only the first
   four are answers, so an interim reply leaves the request due.
+- **Sending a wave.** `send` delivers the manifest's letters by SMTP submission with
+  STARTTLS and certificate verification (port 587), in manifest order. A server that does
+  not offer STARTTLS is refused before the password is sent. Without `--send` it is a dry
+  run: one line per letter that would go (id, To, From, Subject, size in bytes), whether
+  the SMTP settings are complete, and nothing sent or written. Right before each letter,
+  after the pause, it reads the ledger, the directory and the file again and checks that
+  the letter file still has the manifest's SHA-256, that the directory's recipient is
+  still the manifest's, and that the authority has no open request from elsewhere; a
+  letter that fails a check is refused with the reason and the others go. `--limit`
+  counts letters sent, not letters refused. A letter whose
+  authority already has a `sent` with this letter's SHA-256 is skipped, so a rerun never
+  sends twice. Each accepted letter is recorded at once, through the same event as
+  `record-sent`, with the acceptance time (UTC) as `sent_at` and its Message-ID (on the
+  sender's domain), which `requests` shows as its last column. The first letter the
+  server does not accept stops the run: nothing is recorded for it, and the summary says
+  `sent N, skipped (already sent) M, refused K, remaining R`. `--pause-seconds` (default
+  20) is the gap between two letters, to stay inside Gmail's sending limits.
+- **SMTP setup (Gmail).** In `.env` (see `.env.example`): `LOVSPOR_SMTP_HOST=smtp.gmail.com`,
+  `LOVSPOR_SMTP_PORT=587` (the default), `LOVSPOR_SMTP_USER` = the Gmail address, and
+  `LOVSPOR_SMTP_PASSWORD` = an app password (Google Account, Security, 2-Step Verification,
+  App passwords), never the account password. The From header is the recorded sender
+  (`set-sender`), so `kontakt@lovspor.no` must be a verified send-as address of that Gmail
+  account (Settings, Accounts, "Send mail as"). A missing setting is refused by name. The
+  password is never printed: a server reply or error that echoes it, plain, escaped or
+  base64-encoded, is shown with `[redacted]` in its place.
+- **Run procedure.** 1. Dry run, and read the lines: `send --manifest … --limit 25`.
+  2. `send --manifest … --limit 25 --send`. 3. Check Gmail's Sent folder: 25 messages,
+  From `kontakt@lovspor.no`, and `requests` lists them with their Message-IDs. 4. Repeat
+  step 2 until `remaining 0`. If a run stops on an SMTP error, look for that letter in Sent
+  before running again: when the server took it but the answer was lost, record it with
+  `record-sent --message-id …` from the Sent copy so the rerun skips it. If the server took
+  a letter and the ledger refused it, `send` prints the exact `record-sent` command.
 - **The § 32 mark.** offentleglova § 32 andre ledd: no answer within five working days
   after receipt counts as a refusal that can be appealed. The mark is computed, never
   stored. It is the fifth working day after the Oslo day of `sent_at`, skipping

@@ -27,24 +27,31 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Any, Literal
+from pathlib import Path
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Discriminator,
+    Field,
     SerializerFunctionWrapHandler,
+    Tag,
     ValidationError,
     model_serializer,
+    model_validator,
 )
 
 from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import PromotionRefusedError
+from lovspor.innsyn.ledger import REQUEST_ID_PATTERN
 from lovspor.promotion.archive import ArchivedArtifact, SourceStatus
 from lovspor.promotion.corpus import LOCAL_DIR, MANIFEST_NAME, CorpusCheckout, LocalRecord
 from lovspor.promotion.corpus import manifest_text as render_manifest
 from lovspor.promotion.decisions import (
     HumanDecision,
     IdentityAudit,
+    ObservationUsed,
     PromotionAudit,
     StandingApproval,
     utc_text,
@@ -56,6 +63,7 @@ from lovspor.promotion.render import LOCAL_RENDERER_VERSION
 from lovspor.promotion.versions import ExcludedObservation
 
 _NLOD = re.compile(r"nlod", re.IGNORECASE)
+_RECEIVED_SCHEMA = 2
 
 
 class VersionObservations(BaseModel):
@@ -72,6 +80,42 @@ class VersionObservations(BaseModel):
     corroborating_urls: tuple[str, ...]
     source_sha256s: tuple[str, ...]
     promotion: PromotionAudit
+
+
+class ReceivedProvenance(BaseModel):
+    """One received copy of a version's text (ADR-0016 A3, A5): no file, sender or recipient."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    received_at: str
+    innsyn_request: str = Field(pattern=REQUEST_ID_PATTERN)
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ReceivedVersion(BaseModel):
+    """One promoted version whose text was received, never observed (ADR-0016 A4).
+
+    It has no observation axis, so none of its keys: no interval, no URL.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: int
+    content_hash: str
+    received: tuple[ReceivedProvenance, ...] = Field(min_length=1)
+    promotion: PromotionAudit
+
+
+def _channel(entry: object) -> str:
+    if isinstance(entry, dict):
+        return "received" if "received" in entry else "observed"
+    return "received" if isinstance(entry, ReceivedVersion) else "observed"
+
+
+PromotedVersion = Annotated[
+    Annotated[VersionObservations, Tag("observed")] | Annotated[ReceivedVersion, Tag("received")],
+    Discriminator(_channel),
+]
 
 
 class WithdrawalNotice(BaseModel):
@@ -93,19 +137,34 @@ class ObservationsFile(BaseModel):
     """``observations/<slug>.json``: every promoted version of one document.
 
     ``withdrawal`` is written only once there is one, so the file of a
-    document that was never withdrawn keeps exactly the bytes it had.
+    document that was never withdrawn keeps exactly the bytes it had. Schema
+    version 2 marks a file holding a received version, and only such a file,
+    so a file of observed versions keeps version 1 (ADR-0016 A5).
+    ``source_status`` is the last outcome at the primary URL: a file of
+    received versions only has no URL to have one for.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
     doc_id: str
     slug: str
     authority_id: str
-    versions: tuple[VersionObservations, ...]
-    source_status: SourceStatus
+    versions: tuple[PromotedVersion, ...]
+    source_status: SourceStatus | None = None
     excluded: tuple[ExcludedObservation, ...] = ()
     withdrawal: WithdrawalNotice | None = None
+
+    @model_validator(mode="after")
+    def _channels_agree(self) -> Self:
+        received = [isinstance(v, ReceivedVersion) for v in self.versions]
+        if (self.schema_version == _RECEIVED_SCHEMA) != any(received):
+            msg = "schema_version 2 is written if and only if a version was received"
+            raise ValueError(msg)
+        if self.source_status is None and not (received and all(received)):
+            msg = "source_status is required while a version was observed"
+            raise ValueError(msg)
+        return self
 
     @model_serializer(mode="wrap")
     def _omit_absent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
@@ -116,6 +175,8 @@ class ObservationsFile(BaseModel):
             payload.pop("excluded", None)
         if self.withdrawal is None:
             payload.pop("withdrawal", None)
+        if self.source_status is None:
+            payload.pop("source_status", None)
         return payload
 
 
@@ -138,7 +199,7 @@ def write_set(
 
     An approval that stands by a carry is published with ``approval_carried``.
     """
-    audit = _audit(prepared, artifact, approval)
+    audit = audit_record(prepared, approval, artifact.observations)
     decision = approval.decision
     authority_dir = f"{LOCAL_DIR}/{prepared.identity.authority.id}"
     files = {
@@ -149,7 +210,9 @@ def write_set(
         evidence_path(prepared.identity.authority.id, prepared.slug): evidence_text(
             corpus, prepared
         ),
-        f"{LOCAL_DIR}/{MANIFEST_NAME}": _manifest(corpus, prepared, artifact, decision),
+        f"{LOCAL_DIR}/{MANIFEST_NAME}": local_manifest_text(
+            corpus, prepared, utc_text(artifact.observed_at_last), decision
+        ),
     }
     refuse_nlod(files)
     return WriteSet(files=files, audit=audit)
@@ -181,9 +244,10 @@ def apply_files(corpus: CorpusCheckout, files: dict[str, str]) -> tuple[str, ...
     return tuple(written)
 
 
-def _audit(
-    prepared: Prepared, artifact: ArchivedArtifact, approval: StandingApproval
+def audit_record(
+    prepared: Prepared, approval: StandingApproval, observations: tuple[ObservationUsed, ...]
 ) -> PromotionAudit:
+    """The published audit of one version, read from ``observations`` (none when received)."""
     decision = approval.decision
     return PromotionAudit(
         decision=decision.decision,
@@ -197,7 +261,7 @@ def _audit(
         source_form=prepared.extracted.source_form.value,
         identity=_identity_audit(prepared),
         observations_through=utc_text(decision.decided_at),
-        observations=artifact.observations,
+        observations=observations,
         approval_carried=approval.approval_carried(),
     )
 
@@ -269,23 +333,37 @@ def _earlier_versions(
     if prepared.version == 1:
         return ()
     path = corpus.inside(f"{prepared.identity.authority.id}/observations/{prepared.slug}.json")
+    earlier = _observed_earlier(path, prepared.version)
+    if _instant(earlier[-1].observed_at_first) >= artifact.observed_at_first:
+        msg = "this content was first observed before the current version; backfill orders that"
+        raise PromotionRefusedError(msg)
+    return earlier
+
+
+def _observed_earlier(path: Path, version: int) -> tuple[VersionObservations, ...]:
+    """Versions 1..``version - 1`` as ``path`` holds them, every one observed."""
     try:
         existing = ObservationsFile.model_validate_json(path.read_bytes())
     except (OSError, ValidationError) as exc:
-        msg = f"{path} does not read; version {prepared.version} cannot be appended to it"
+        msg = f"{path} does not read; version {version} cannot be appended to it"
         raise PromotionRefusedError(msg) from exc
-    if [v.version for v in existing.versions] != list(range(1, prepared.version)):
-        msg = f"{path} does not list versions 1..{prepared.version - 1}"
+    if [v.version for v in existing.versions] != list(range(1, version)):
+        msg = f"{path} does not list versions 1..{version - 1}"
         raise PromotionRefusedError(msg)
-    if _instant(existing.versions[-1].observed_at_first) >= artifact.observed_at_first:
-        msg = "this content was first observed before the current version; backfill orders that"
+    observed = tuple(v for v in existing.versions if isinstance(v, VersionObservations))
+    if len(observed) != len(existing.versions):
+        msg = (
+            f"{path} holds a received version; switching the primary channel "
+            "is a recorded decision (ADR-0016 A4)"
+        )
         raise PromotionRefusedError(msg)
-    return existing.versions
+    return observed
 
 
-def _manifest(
-    corpus: CorpusCheckout, prepared: Prepared, artifact: ArchivedArtifact, decision: HumanDecision
+def local_manifest_text(
+    corpus: CorpusCheckout, prepared: Prepared, last_seen: str, decision: HumanDecision
 ) -> str:
+    """``manifest.json`` with the prepared version current, ``last_seen`` dated by its channel."""
     manifest = corpus.local_manifest()
     authority = prepared.identity.authority
     record = LocalRecord(
@@ -294,7 +372,7 @@ def _manifest(
         title=prepared.extracted.fields.title,
         markdown_path=prepared.markdown_path,
         renderer_version=LOCAL_RENDERER_VERSION,
-        last_seen=utc_text(artifact.observed_at_last),
+        last_seen=last_seen,
         authority_id=authority.id,
         authority_type=authority.type.value,
         content_hash=prepared.identity.content_hash,
