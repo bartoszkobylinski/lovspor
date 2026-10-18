@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/legislative_crosswalk.py"
+symbol = "resolve_case_page"
+registered = "2026-10-18, PR #613, from run 39010410346"
+mutation = """
+-        input_sha256=sha256(source_body.encode("utf-8")).hexdigest(),
++        input_sha256=sha256(source_body.encode("UTF-8")).hexdigest(),
+"""
+justification = """
+Python's codec registry normalises encoding names before lookup — case is folded
+(`encodings.normalize_encoding`, `codecs.lookup("UTF-8").name == "utf-8"`), so
+`str.encode` reaches the same strict UTF-8 encoder under either spelling and
+returns identical bytes, hence an identical SHA-256, or raises the identical
+UnicodeEncodeError on a lone surrogate. Python's own semantics; the same
+argument as the registered snapshot._read_wanted entry.
+"""
