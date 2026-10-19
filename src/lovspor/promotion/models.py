@@ -268,7 +268,9 @@ class ReceivedSource(BaseModel):
     UTC. ``innsyn_saksnummer`` is the authority's case number as digits only:
     archive systems can append a case officer's initials, which are never
     published (A5). There is deliberately no field for a file name, a sender or
-    a recipient.
+    a recipient. ``received_form`` is the form the text arrived in (A1-3): a
+    Lovdata print, a Lovtidend PDF or the authority's original, so every
+    Lovdata-derived text stays findable as a set.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -277,6 +279,7 @@ class ReceivedSource(BaseModel):
     innsyn_request: str = Field(pattern=REQUEST_ID_PATTERN)
     innsyn_saksnummer: str | None = Field(pattern=SAKSNUMMER_PATTERN)
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    received_form: ReceivedForm
 
     @property
     def received_at_utc(self) -> str:

@@ -1311,6 +1311,17 @@ make; a rerun prints `Unchanged`. The rules:
   never names the document: the id is minted from the text alone.
 * A scan without a text layer is held as `empty_text` (exit 3, recorded in the
   decision log) and cannot be approved. It is never OCR'd.
+* A Lovdata print or a Norsk Lovtidend avd. II PDF is promoted with Lovdata's
+  markup removed (owner decision A1-3): the metadata block, the contents list,
+  amendment annotations, footnotes and print chrome; the id is minted from
+  the `Dato` (or Lovtidend `Kunngjort`) line before removal. `preview` prints
+  the form first (`received_form: lovdata_print | lovtidend |
+  authority_original`) and the front matter records it. A print whose
+  metadata block cannot be bounded, or with Lovdata's markup left after
+  removal, is held as `lovdata_copy`. `vedtatt_av` is the issuer the text
+  names (`Fastsatt ved kgl.res.`, `Fastsatt av Miljødirektoratet`), never
+  assumed to be the kommunestyre (A1-4). The observed channel still holds
+  every Lovdata copy.
 * No file name, recipient mailbox or person's name is published. The
   reviewer is named by role, as for an observed promotion.
 * A document whose versions were observed is refused: switching the primary

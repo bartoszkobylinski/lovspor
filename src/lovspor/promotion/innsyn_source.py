@@ -24,7 +24,7 @@ from lovspor.innsyn.ledger import ReceivedDocument, ReceivedMediaType, RequestSt
 from lovspor.innsyn.received import blob_path
 from lovspor.innsyn.workspace import InnsynWorkspace
 from lovspor.promotion.decisions import ReceivedKey
-from lovspor.promotion.models import SAKSNUMMER_PATTERN, ReceivedSource
+from lovspor.promotion.models import SAKSNUMMER_PATTERN, ReceivedForm, ReceivedSource
 
 _SAKSNUMMER = re.compile(SAKSNUMMER_PATTERN)
 
@@ -118,8 +118,10 @@ def read_received(workspace: InnsynWorkspace, request_id: str, sha256: str) -> R
     )
 
 
-def received_source(artifact: ReceivedArtifact) -> ReceivedSource:
+def received_source(artifact: ReceivedArtifact, form: ReceivedForm) -> ReceivedSource:
     """The provenance a version rendered from ``artifact`` carries (ADR-0016 A3, A5).
+
+    ``form`` is the form its text arrived in, as the extractor read it (A1-3).
 
     Raises:
         PromotionRefusedError: the saksnummer is not digits only. It is held,
@@ -137,4 +139,5 @@ def received_source(artifact: ReceivedArtifact) -> ReceivedSource:
         innsyn_request=artifact.key.innsyn_request,
         innsyn_saksnummer=saksnummer,
         source_sha256=artifact.key.sha256,
+        received_form=form,
     )

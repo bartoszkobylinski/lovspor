@@ -79,6 +79,7 @@ RECEIVED = {
     "received_at": "2026-10-07T12:45:06Z",
     "innsyn_request": "4646-20261005T074425Z",
     "source_sha256": "a" * 64,
+    "received_form": "lovdata_print",
 }
 GOLDEN = """\
 {

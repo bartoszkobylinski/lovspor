@@ -38,18 +38,20 @@ from lovspor.promotion.decisions import (
     StandingApproval,
     utc_text,
 )
-from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
+from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_received, extract_regulation
 from lovspor.promotion.identity import mint_identity
 from lovspor.promotion.innsyn_source import ReceivedArtifact, received_source
 from lovspor.promotion.models import (
     Authority,
     ExtractedDocument,
+    ExtractionResult,
     HeldExtraction,
     HeldIdentity,
     LocalDocument,
     MintedIdentity,
     ObservedSource,
     PersonalDataHit,
+    ReceivedForm,
     ReceivedSource,
 )
 from lovspor.promotion.render import render_local_regulation
@@ -98,11 +100,12 @@ def prepare(
     """Extract, identify, place and render one artifact; a hold stops it at its stage.
 
     An observed and a received artifact pass the same gates (ADR-0016 A1): only
-    the provenance the rendering carries differs. A received artifact's
-    ``answers`` never reaches identity, which is minted from the text alone
-    (owner decision A1-1).
+    the provenance the rendering carries differs, and a received text has
+    Lovdata's markup removed first (``extract_received``, A1-3). A received
+    artifact's ``answers`` never reaches identity, which is minted from the
+    text alone (owner decision A1-1).
     """
-    extracted = extract_regulation(artifact.payload, artifact.content_type)
+    extracted = _extract(artifact)
     if isinstance(extracted, HeldExtraction):
         return Held(
             stage="extraction",
@@ -120,6 +123,25 @@ def prepare(
     if unchanged:
         return prepared
     return prepared.model_copy(update={"markdown": _render(prepared, artifact)})
+
+
+def received_form(prepared: Prepared) -> ReceivedForm:
+    """The form a received version's text arrived in.
+
+    Raises:
+        PromotionRefusedError: the version was extracted on the observed channel.
+    """
+    form = prepared.extracted.received_form
+    if form is None:
+        msg = f"{prepared.identity.doc_id} was not extracted as a received text"
+        raise PromotionRefusedError(msg)
+    return form
+
+
+def _extract(artifact: ArchivedArtifact | ReceivedArtifact) -> ExtractionResult:
+    if isinstance(artifact, ReceivedArtifact):
+        return extract_received(artifact.payload, artifact.content_type)
+    return extract_regulation(artifact.payload, artifact.content_type)
 
 
 def require_approval(
@@ -206,14 +228,16 @@ def _render(prepared: Prepared, artifact: ArchivedArtifact | ReceivedArtifact) -
         extracted=prepared.extracted,
         slug=prepared.slug,
         version=prepared.version,
-        source=_source(artifact),
+        source=_source(artifact, prepared),
     )
     return render_local_regulation(document)
 
 
-def _source(artifact: ArchivedArtifact | ReceivedArtifact) -> ObservedSource | ReceivedSource:
+def _source(
+    artifact: ArchivedArtifact | ReceivedArtifact, prepared: Prepared
+) -> ObservedSource | ReceivedSource:
     if isinstance(artifact, ReceivedArtifact):
-        return received_source(artifact)
+        return received_source(artifact, received_form(prepared))
     return ObservedSource(
         observed_at_first=artifact.observed_at_first,
         source_url=artifact.key.source_url,

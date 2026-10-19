@@ -57,7 +57,7 @@ from lovspor.promotion.decisions import (
     utc_text,
 )
 from lovspor.promotion.evidence import EvidenceSubject, corpus_index, evidence_file, evidence_path
-from lovspor.promotion.models import RemovedReason
+from lovspor.promotion.models import ReceivedForm, RemovedReason
 from lovspor.promotion.plan import Prepared
 from lovspor.promotion.render import LOCAL_RENDERER_VERSION
 from lovspor.promotion.versions import ExcludedObservation
@@ -90,6 +90,7 @@ class ReceivedProvenance(BaseModel):
     received_at: str
     innsyn_request: str = Field(pattern=REQUEST_ID_PATTERN)
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    received_form: ReceivedForm
 
 
 class ReceivedVersion(BaseModel):

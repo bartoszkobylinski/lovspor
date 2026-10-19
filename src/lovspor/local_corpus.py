@@ -91,7 +91,7 @@ _FLOW_PAIR = re.compile(r'(\w+): ("(?:[^"\\]|\\.)*"|null)')
 _FRONT_MATTER_OPEN = "---\n"
 _FRONT_MATTER_CLOSE = "\n---\n"
 _OBSERVED_KEYS = frozenset({"observed_at_first", "source_url"})
-_RECEIVED_KEYS = frozenset({"received_at", "innsyn_request", "innsyn_saksnummer"})
+_RECEIVED_KEYS = frozenset({"received_at", "innsyn_request", "innsyn_saksnummer", "received_form"})
 _CHANNEL_KEYS = {"observed": _OBSERVED_KEYS, "received": _RECEIVED_KEYS}
 
 LocalEntry = tuple[str, LocalRecord]
@@ -181,6 +181,7 @@ class _FrontMatter(BaseModel):
     received_at: str | None = None
     innsyn_request: str | None = None
     innsyn_saksnummer: str | None = None
+    received_form: Literal["lovdata_print", "lovtidend", "authority_original"] | None = None
 
     @model_validator(mode="after")
     def _one_channel(self) -> Self:

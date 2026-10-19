@@ -16,7 +16,7 @@ from lovspor.errors import PromotionRefusedError
 from lovspor.innsyn.workspace import InnsynWorkspace
 from lovspor.promotion.decisions import ReceivedKey
 from lovspor.promotion.innsyn_source import ReceivedArtifact, read_received, received_source
-from lovspor.promotion.models import ReceivedSource
+from lovspor.promotion.models import ReceivedForm, ReceivedSource
 from tests.unit.innsyn_support import FIXTURES, innsyn
 
 FJALER = "4646-20261005T074425Z"
@@ -170,21 +170,22 @@ class TestRefusals:
 class TestReceivedSource:
     def test_the_provenance_of_a_read_artifact(self, regulation: Path) -> None:
         _run(regulation, "record-case-number", "--request", FJALER, "--number", "2026/1234-7")
-        source = received_source(_read(regulation))
+        source = received_source(_read(regulation), ReceivedForm.LOVTIDEND)
         assert source == ReceivedSource(
             received_at=datetime(2026, 10, 7, 12, 45, 6, tzinfo=UTC),
             innsyn_request=FJALER,
             innsyn_saksnummer="2026/1234-7",
             source_sha256=SHA,
+            received_form=ReceivedForm.LOVTIDEND,
         )
 
     def test_without_a_saksnummer(self, regulation: Path) -> None:
-        assert received_source(_read(regulation)).innsyn_saksnummer is None
+        assert received_source(_read(regulation), ReceivedForm.LOVTIDEND).innsyn_saksnummer is None
 
     def test_a_saksnummer_with_letters_is_held_and_never_echoed(self, regulation: Path) -> None:
         _run(regulation, "record-case-number", "--request", FJALER, "--number", "2026/1234-7 ABC")
         with pytest.raises(PromotionRefusedError) as caught:
-            received_source(_read(regulation))
+            received_source(_read(regulation), ReceivedForm.LOVTIDEND)
         message = str(caught.value)
         assert message == (
             f"{FJALER}: the recorded saksnummer does not have the "

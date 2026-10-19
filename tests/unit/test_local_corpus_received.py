@@ -130,6 +130,27 @@ class TestFrontMatterChannel:
         with pytest.raises(LocalCorpusError, match="received_at"):
             LocalDataset(received).document(_address(received))
 
+    def test_a_received_basis_without_its_form_is_refused(self, received: Path) -> None:
+        path = _markdown_file(received)
+        _edit_front_matter(path, 'received_form: "authority_original"\n', "")
+        with pytest.raises(LocalCorpusError, match="basis 'received'"):
+            LocalDataset(received).document(_address(received))
+
+    @pytest.mark.parametrize("value", ["null", '"lovdata"'])
+    def test_a_null_or_unknown_form_is_refused(self, received: Path, value: str) -> None:
+        path = _markdown_file(received)
+        _edit_front_matter(path, '"authority_original"', value)
+        with pytest.raises(LocalCorpusError, match="received_form"):
+            LocalDataset(received).document(_address(received))
+
+    def test_an_observed_basis_with_a_received_form_is_refused(self, tmp_path: Path) -> None:
+        build_central(tmp_path)
+        add_local_dataset(tmp_path)
+        [path] = (tmp_path / LOCAL / "9999").glob("*.md")
+        _edit_front_matter(path, "source_sha256:", 'received_form: "lovtidend"\nsource_sha256:')
+        with pytest.raises(LocalCorpusError, match="basis 'observed'"):
+            LocalDataset(tmp_path).document(ADDRESS)
+
     def test_an_observed_basis_with_received_keys_is_refused(self, tmp_path: Path) -> None:
         build_central(tmp_path)
         add_local_dataset(tmp_path)
@@ -158,7 +179,8 @@ class TestFrontMatterChannel:
         [first] = [x for x in text.splitlines() if x.startswith("observed_at_first: ")]
         [url] = [x for x in text.splitlines() if x.startswith("source_url: ")]
         received_keys = f'received_at: "{RECEIVED_AT}"\ninnsyn_request: "{FJALER}"'
-        _edit_front_matter(path, f"{first}\n{url}", f"{received_keys}\ninnsyn_saksnummer: null")
+        received_keys += '\ninnsyn_saksnummer: null\nreceived_form: "authority_original"'
+        _edit_front_matter(path, f"{first}\n{url}", received_keys)
         _edit_front_matter(path, 'basis: "observed"', 'basis: "received"')
         [observations] = (tmp_path / LOCAL / "9999" / "observations").glob("*.json")
         manifest = json.loads((tmp_path / LOCAL / "manifest.json").read_text())

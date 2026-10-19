@@ -32,7 +32,7 @@ from lovspor.promotion.corpus import LOCAL_DIR, MANIFEST_NAME, CorpusCheckout
 from lovspor.promotion.decisions import InnsynAudit, PromotionAudit, StandingApproval, utc_text
 from lovspor.promotion.evidence import evidence_path
 from lovspor.promotion.innsyn_source import ReceivedArtifact
-from lovspor.promotion.plan import Prepared
+from lovspor.promotion.plan import Prepared, received_form
 from lovspor.promotion.writer import (
     ObservationsFile,
     ReceivedProvenance,
@@ -148,6 +148,7 @@ def _observations(
         received_at=utc_text(received.received_at),
         innsyn_request=received.key.innsyn_request,
         source_sha256=received.key.sha256,
+        received_form=received_form(prepared),
     )
     entry = ReceivedVersion(
         version=prepared.version,
