@@ -62,6 +62,15 @@ def test_extractor_version_is_eight_since_pypdf_6_20_1() -> None:
     assert EXTRACTOR_VERSION == 8
 
 
+@pytest.mark.parametrize(
+    ("payload", "content_type"),
+    [(minimal_pdf(), PDF), (minimal_docx(), DOCX)],
+)
+def test_binary_sources_record_extractor_version_eight(payload: bytes, content_type: str) -> None:
+    """The library upgrade changes the engine version recorded on every source form."""
+    assert _extracted(payload, content_type).extractor_version == 8
+
+
 def test_html_page_extracts_block_body_and_fields() -> None:
     document = _extracted(html_page())
     assert document.source_form == SourceForm.HTML
