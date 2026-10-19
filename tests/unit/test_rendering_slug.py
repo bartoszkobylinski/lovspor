@@ -18,6 +18,18 @@ def test_derive_slug_preserves_norwegian_unicode_characters() -> None:
     assert derive_slug("Fjordlova", "x", "nl-x") == "fjordlova"
 
 
+@pytest.mark.parametrize(
+    ("title", "slug"),
+    [
+        ("Rossen tjïelte", "rossen-tjïelte"),
+        ("Sámediggi", "sámediggi"),
+        ("Čáhcesuolu Đ Ŋ Š Ŧ Ž", "čáhcesuolu-đ-ŋ-š-ŧ-ž"),
+    ],
+)
+def test_derive_slug_preserves_sami_letters(title: str, slug: str) -> None:
+    assert derive_slug(None, title, "x") == slug
+
+
 def test_derive_slug_replaces_spaces_with_hyphens() -> None:
     assert derive_slug("Forbud paa Vimpel-føring", "x", "nl-x") == "forbud-paa-vimpel-føring"
 
