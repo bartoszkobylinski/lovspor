@@ -372,6 +372,18 @@ def test_pdf_that_does_not_parse_is_unreadable() -> None:
         pdf_lines(b"%PDF-1.4 this is not a pdf")
 
 
+def test_password_protected_pdf_is_unreadable() -> None:
+    """A reader refusal stays a source error after the pinned library upgrade."""
+    writer = pypdf.PdfWriter()
+    writer.append(io.BytesIO(minimal_pdf()))
+    writer.encrypt("not-an-empty-password", algorithm="RC4-128")
+    encrypted = io.BytesIO()
+    writer.write(encrypted)
+
+    with pytest.raises(UnreadableSourceError, match="PDF did not parse: "):
+        pdf_lines(encrypted.getvalue())
+
+
 def test_unreadable_source_is_a_lovspor_error() -> None:
     assert issubclass(UnreadableSourceError, LovsporError)
 
