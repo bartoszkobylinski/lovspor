@@ -12,6 +12,20 @@ Lovdata assigns on publication, and at least ``_MIN_FIELDS`` distinct field
 names start lines within ``_BLOCK_SPAN`` lines of it. A municipal draft laid
 out on Lovdata's submission template leaves ``Dato`` blank (Orkland 5059) and
 is not held here. The names are matched case-sensitively, as Lovdata sets them.
+
+A DOCX exported from Lovdata sets each field name and its value as paragraphs
+of their own (``Dato`` / ``FOR-…``). ``has_lovdata_header`` reads the observed
+channel's hold as it always has; ``lovdata_dato``, which the received channel
+reads (ADR-0016 A1-3), also takes the id from the line after a bare ``Dato``.
+
+The print markers live here too, so the extractor's hold and the received
+channel's removal (``lovdata_markup.py``) read one definition:
+``LOVDATA_PRINT`` is the "Utskrift fra Lovdata" stamp, and
+``LOVDATA_PRINT_CHROME`` a browser print's page chrome: a print date or a page
+counter beside the page URL or the ``Lovdata - <title>`` page title (#519).
+Requiring the chrome keeps a regulation that merely links Lovdata in its body
+from being held: a bare URL, or ``<title> - Lovdata`` as a link's text, is not
+one.
 """
 
 from __future__ import annotations
@@ -27,12 +41,23 @@ _FIELD = re.compile(
     r"[ \t]*:?(.*)$"
 )
 _LOVDATA_ID = re.compile(r"[ \t]*(?:LOV|FOR)-\d{4}-\d{2}-\d{2}-\d+")
+_BARE_ID = re.compile(r"[ \t]*(?:LOV|FOR)-\d{4}-\d{2}-\d{2}-\d+[ \t]*")
+
+LOVDATA_PRINT = re.compile(r"utskrift\s+fra\s+lovdata", re.IGNORECASE)
+_PRINT_CHROME = r"(?:\d{1,2}[./]\d{1,2}[./]\d{2,4}(?:,?\s*\d{1,2}:\d{2})?|side\s+\d+\s+av\s+\d+)"
+_LOVDATA_PAGE = r"(?:https?://)?(?:www\.)?lovdata\.no/\S+"
+LOVDATA_PRINT_CHROME = re.compile(
+    rf"^[ \t]*{_PRINT_CHROME}[ \t]*(?:{_LOVDATA_PAGE}|lovdata\s+-\s)"
+    rf"|(?:^|\s){_LOVDATA_PAGE}[ \t]+\d+/\d+[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 class _Field(NamedTuple):
     line: int
     name: tuple[str, ...]
     dated: bool
+    bare: bool
 
 
 def has_lovdata_header(text: str) -> bool:
@@ -50,10 +75,34 @@ def _field_lines(text: str) -> tuple[_Field, ...]:
             # are one field, and no separator literal is left to mean anything.
             name = tuple(match.group(1).split())
             dated = name == ("Dato",) and _LOVDATA_ID.match(match.group(2)) is not None
-            found.append(_Field(number, name, dated))
+            bare = name == ("Dato",) and not match.group(2).strip()
+            found.append(_Field(number, name, dated, bare))
     return tuple(found)
 
 
 def _is_block(fields: tuple[_Field, ...], anchor: _Field) -> bool:
     near = {field.name for field in fields if abs(field.line - anchor.line) <= _BLOCK_SPAN}
     return len(near) >= _MIN_FIELDS
+
+
+def lovdata_dato(lines: tuple[str, ...]) -> tuple[int, int] | None:
+    """Where Lovdata's block in ``lines`` states the regulation's id, or ``None``.
+
+    The index of the ``Dato`` line, and of the line carrying the id: the same
+    line, or the next one after a bare ``Dato`` (a DOCX export).
+    """
+    fields = _field_lines("\n".join(lines))
+    for anchor in fields:
+        holder = _id_holder(lines, anchor)
+        if holder is not None and _is_block(fields, anchor):
+            return anchor.line, holder
+    return None
+
+
+def _id_holder(lines: tuple[str, ...], anchor: _Field) -> int | None:
+    if anchor.dated:
+        return anchor.line
+    following = anchor.line + 1
+    if anchor.bare and following < len(lines) and _BARE_ID.fullmatch(lines[following]):
+        return following
+    return None

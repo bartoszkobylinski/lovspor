@@ -27,7 +27,7 @@ from lovspor.promotion.decisions import HumanDecision, StandingApproval
 from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.innsyn_authority import received_authority
 from lovspor.promotion.innsyn_source import ReceivedArtifact, read_received
-from lovspor.promotion.models import Authority, AuthorityType
+from lovspor.promotion.models import Authority, AuthorityType, ReceivedForm
 from lovspor.promotion.plan import Held, Prepared, prepare
 from lovspor.promotion.received_writer import received_write_set
 from lovspor.promotion.writer import ObservationsFile, ReceivedVersion, WriteSet, apply
@@ -189,6 +189,7 @@ class TestTheWriteSet:
         assert isinstance(version, ReceivedVersion)
         assert version.received[0].received_at == RECEIVED_AT
         assert version.received[0].source_sha256 == received.key.sha256
+        assert version.received[0].received_form is ReceivedForm.AUTHORITY_ORIGINAL
         assert "source_status" not in _observations(writes)
 
     def test_the_audit_names_the_request_and_no_observation(

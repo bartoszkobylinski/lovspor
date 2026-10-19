@@ -56,11 +56,17 @@ from lovspor.promotion.commands import (
 )
 from lovspor.promotion.corpus import CorpusCheckout
 from lovspor.promotion.decisions import Decision, DecisionLog, HumanDecision, utc_text
-from lovspor.promotion.extract import EXTRACTOR_VERSION
+from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_received
 from lovspor.promotion.innsyn_authority import received_authority
 from lovspor.promotion.innsyn_source import ReceivedArtifact, read_received
 from lovspor.promotion.models import Authority
-from lovspor.promotion.plan import Held, prepare, require_approval, standing_on
+from lovspor.promotion.plan import (
+    Held,
+    prepare,
+    received_form,
+    require_approval,
+    standing_on,
+)
 from lovspor.promotion.received_writer import received_history, received_write_set
 from lovspor.promotion.withdraw import refuse_withdrawn
 from lovspor.promotion.writer import apply
@@ -130,6 +136,7 @@ def received_preview_impl(request: ReceivedRequest) -> None:
         raise typer.Exit(HELD_EXIT_CODE)
     refuse_withdrawn(decisions, None, prepared.identity.doc_id)
     received_history(context.corpus, prepared)
+    typer.echo(f"received_form: {received_form(prepared).value}")
     echo_preview(prepared)
 
 
@@ -142,7 +149,7 @@ def received_approve_impl(request_id: str, document: str, decision: Path, now: d
     recorded = HumanDecision(
         artifact=artifact.key,
         decided_at=now,
-        content_hash=reviewed_hash(artifact.payload, artifact.content_type) if approving else None,
+        content_hash=_reviewed(artifact) if approving else None,
         extractor_version=EXTRACTOR_VERSION if approving else None,
         **given.model_dump(),
     )
@@ -151,6 +158,10 @@ def received_approve_impl(request_id: str, document: str, decision: Path, now: d
     typer.echo(f"Recorded {recorded.decision.value} of {document} on request {request_id}")
     who = f"{recorded.decided_by} ({recorded.reviewer_role})"
     typer.echo(f"by {who} at {utc_text(now)} in {decisions.path}")
+
+
+def _reviewed(artifact: ReceivedArtifact) -> str:
+    return reviewed_hash(artifact.payload, artifact.content_type, extract_received)
 
 
 def received_local_impl(request: ReceivedRequest, now: datetime) -> None:

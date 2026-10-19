@@ -73,7 +73,7 @@ from lovspor.promotion.decisions import (
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
 from lovspor.promotion.identity import content_hash
 from lovspor.promotion.local_history import HISTORY_SUBJECT, derive_local_history
-from lovspor.promotion.models import Authority, AuthorityType, HeldExtraction
+from lovspor.promotion.models import Authority, AuthorityType, ExtractionResult, HeldExtraction
 from lovspor.promotion.personal_data import screen_personal_data
 from lovspor.promotion.plan import Held, Prepared, prepare, require_approval, standing_on
 from lovspor.promotion.withdraw import (
@@ -88,6 +88,7 @@ from lovspor.promotion.writer import apply, write_set
 #: Exit status of a run that stopped at a hold: not a failure of the command,
 #: and not a promotion either, so a script can tell the three apart.
 HELD_EXIT_CODE = 3
+Extractor = Callable[[bytes, str], ExtractionResult]
 
 promote_app = typer.Typer(
     name="promote",
@@ -236,9 +237,15 @@ def _reviewed_text(log: ObservationLog, fetches: tuple[Fetch, ...], key: Artifac
     return reviewed_hash(artifact.payload, artifact.content_type)
 
 
-def reviewed_hash(payload: bytes, content_type: str) -> str:
-    """The content hash an approval of ``payload`` names; a held text cannot be approved."""
-    extracted = extract_regulation(payload, content_type)
+def reviewed_hash(
+    payload: bytes, content_type: str, extract: Extractor = extract_regulation
+) -> str:
+    """The content hash an approval of ``payload`` names; a held text cannot be approved.
+
+    ``extract`` is the channel's extractor: a received text is approved as it
+    is published, with Lovdata's markup removed (``extract_received``).
+    """
+    extracted = extract(payload, content_type)
     if isinstance(extracted, HeldExtraction):
         msg = f"nothing to approve: the text is held ({extracted.reason.value}: {extracted.detail})"
         raise PromotionRefusedError(msg)

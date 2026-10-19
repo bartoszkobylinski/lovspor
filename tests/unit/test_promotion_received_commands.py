@@ -32,6 +32,7 @@ from tests.unit.promotion_cli_fixtures import (
     tree,
 )
 from tests.unit.promotion_fixtures import html_page, minimal_pdf
+from tests.unit.test_promotion_lovdata_markup import LOVDATA_PRINT, LOVTIDEND
 from tests.unit.test_promotion_render_received import RECEIVED_FRONT_MATTER_KEYS
 
 FJALER = "4646-20261005T074425Z"
@@ -233,6 +234,50 @@ class TestLocal:
         assert "no human decision is recorded" in result.output
         assert "Traceback" not in result.output
         assert tree(corpus) == before
+
+
+class TestAReceivedLovdataPrint:
+    """A1-3: a Lovdata print or Lovtidend PDF is promoted with Lovdata's markup removed."""
+
+    def test_preview_shows_the_form_and_no_markup(self, workspace: Path, corpus: Path) -> None:
+        sha256 = _receive(workspace, minimal_pdf(LOVDATA_PRINT), name="utskrift.pdf")
+        result = _received("preview", sha256, corpus)
+        assert result.exit_code == 0, result.output
+        assert result.stdout.startswith("received_form: lovdata_print\nid: lf-20010203-9001 ")
+        assert '\nreceived_form: "lovdata_print"\n' in result.stdout
+        for markup in ("Utskrift fra Lovdata", "Korttittel", "Innholdsfortegnelse", "Endret ved"):
+            assert markup not in result.stdout
+
+    @pytest.mark.parametrize(
+        ("payload", "name", "form"),
+        [
+            (minimal_pdf(LOVTIDEND), "lovtidend.pdf", "lovtidend"),
+            (html_page(), FILE_NAME, "authority_original"),
+        ],
+    )
+    def test_preview_names_every_form(
+        self, workspace: Path, corpus: Path, payload: bytes, name: str, form: str
+    ) -> None:
+        sha256 = _receive(workspace, payload, name=name)
+        result = _received("preview", sha256, corpus)
+        assert result.exit_code == 0, result.output
+        assert result.stdout.startswith(f"received_form: {form}\n")
+
+    def test_approve_then_local_publishes_the_regulation_alone(
+        self, workspace: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        sha256 = _receive(workspace, minimal_pdf(LOVDATA_PRINT), name="utskrift.pdf")
+        approved = _approve(sha256, tmp_path)
+        assert approved.exit_code == 0, approved.output
+        result = _received("local", sha256, corpus)
+        assert result.exit_code == 0, result.output
+        markdown = _markdown(corpus)
+        assert '\nid: "lf-20010203-9001"\n' in markdown
+        for markup in ("Utskrift fra Lovdata", "Dato FOR-", "lovdata.no", "Lovdatas anm"):
+            assert markup not in markdown
+        [observations] = (corpus / LOCAL / "4646" / "observations").glob("*.json")
+        [version] = json.loads(observations.read_text(encoding="utf-8"))["versions"]
+        assert version["received"][0]["received_form"] == "lovdata_print"
 
 
 class TestAScan:

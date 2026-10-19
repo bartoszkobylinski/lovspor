@@ -10,8 +10,9 @@ reads with ``json.loads`` — ``authority`` as a flow mapping and ``hjemmel``
 as a flow list. The provenance is fixed: ``source_license: "åndsverkloven §
 14"``, ``asserted: false``, and ``basis`` names the channel: ``"observed"``
 with ``observed_at_first`` and ``source_url``, or ``"received"`` (ADR-0016 A5)
-with ``received_at``, ``innsyn_request`` and ``innsyn_saksnummer`` in their
-place — a received version names no URL. There is no
+with ``received_at``, ``innsyn_request``, ``innsyn_saksnummer`` and
+``received_form`` (``lovdata_print``, ``lovtidend`` or ``authority_original``,
+A1-3) in their place — a received version names no URL. There is no
 ``retrieved_at`` (Lovdata download time) and no ``observed_at_last`` (it would
 churn the file daily).
 
@@ -119,6 +120,7 @@ def _received_axis(source: ReceivedSource) -> tuple[tuple[str, str], ...]:
         ("received_at", _scalar(source.received_at_utc)),
         ("innsyn_request", _scalar(source.innsyn_request)),
         ("innsyn_saksnummer", _scalar(source.innsyn_saksnummer)),
+        ("received_form", _scalar(source.received_form.value)),
     )
 
 

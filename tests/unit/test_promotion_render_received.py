@@ -23,6 +23,7 @@ from lovspor.promotion import (
     mint_identity,
 )
 from lovspor.promotion.extract import extract_regulation
+from lovspor.promotion.models import ReceivedForm
 from lovspor.promotion.render import render_local_regulation
 from tests.unit.promotion_fixtures import REGULATION_LINES, html_page
 
@@ -45,6 +46,7 @@ RECEIVED_FRONT_MATTER_KEYS = (
     "received_at",
     "innsyn_request",
     "innsyn_saksnummer",
+    "received_form",
     "source_sha256",
     "source_provider",
     "source_license",
@@ -60,6 +62,7 @@ def _source(saksnummer: str | None = None) -> ReceivedSource:
         innsyn_request=REQUEST,
         innsyn_saksnummer=saksnummer,
         source_sha256="cd" * 32,
+        received_form=ReceivedForm.LOVDATA_PRINT,
     )
 
 
@@ -96,6 +99,7 @@ def test_received_provenance_values() -> None:
         "received_at": "2026-10-07T12:45:06Z",
         "innsyn_request": REQUEST,
         "innsyn_saksnummer": "2026/2348",
+        "received_form": "lovdata_print",
         "source_sha256": "cd" * 32,
         "source_provider": "Fjaler kommune (received under offentleglova)",
         "source_license": "åndsverkloven § 14",
@@ -132,6 +136,8 @@ def test_received_at_is_written_in_utc() -> None:
         ("innsyn_saksnummer", "Ola Nordmann"),
         ("source_sha256", "CD" * 32),
         ("received_at", datetime(2026, 10, 7, 12, 45, 6)),
+        ("received_form", "lovdata"),
+        ("received_form", None),
     ],
 )
 def test_a_received_source_refuses_a_malformed_field(field: str, value: object) -> None:
@@ -144,3 +150,16 @@ def test_a_received_source_refuses_observed_fields() -> None:
     fields = _source().model_dump() | {"source_url": "https://www.fjaler.kommune.no/"}
     with pytest.raises(ValidationError):
         ReceivedSource.model_validate(fields)
+
+
+def test_a_received_source_needs_its_form() -> None:
+    fields = _source().model_dump(exclude={"received_form"})
+    with pytest.raises(ValidationError):
+        ReceivedSource.model_validate(fields)
+
+
+@pytest.mark.parametrize("form", list(ReceivedForm))
+def test_the_received_form_follows_the_saksnummer(form: ReceivedForm) -> None:
+    source = _source().model_copy(update={"received_form": form})
+    markdown = render_local_regulation(_document(source))
+    assert f'\ninnsyn_saksnummer: null\nreceived_form: "{form.value}"\nsource_sha256: ' in markdown

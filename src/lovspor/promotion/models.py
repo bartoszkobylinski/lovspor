@@ -73,6 +73,11 @@ class ExtractedRegulation(BaseModel):
     ``body`` is everything else; a date-number in it is a citation, never the
     document's id. ``vedtaksdato`` is the decision date as the text states it,
     or ``None``; it is never filled from an observation time.
+
+    ``removed_identification`` is set on the received channel only (ADR-0016
+    A1-3): the lines of Lovdata's markup that state the regulation's id (its
+    ``Dato`` line, Lovtidend's ``Kunngjort`` line), removed from the text but
+    read by identity, so the id is minted from the text before removal.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -81,6 +86,7 @@ class ExtractedRegulation(BaseModel):
     identification_block: str
     body: str
     vedtaksdato: date | None = None
+    removed_identification: str | None = None
 
     @property
     def full_text(self) -> str:
@@ -133,6 +139,14 @@ class SourceForm(StrEnum):
     HTML = "html"
     PDF = "pdf"
     DOCX = "docx"
+
+
+class ReceivedForm(StrEnum):
+    """The form a received text arrived in (ADR-0016 A1-3), as the text itself shows it."""
+
+    LOVDATA_PRINT = "lovdata_print"
+    LOVTIDEND = "lovtidend"
+    AUTHORITY_ORIGINAL = "authority_original"
 
 
 class ExtractionHoldReason(StrEnum):
@@ -196,7 +210,11 @@ class RegulationFields(BaseModel):
 
 
 class ExtractedDocument(BaseModel):
-    """A source the extractor read in full: the regulation's text and its fields."""
+    """A source the extractor read in full: the regulation's text and its fields.
+
+    ``received_form`` is the form a received text arrived in (ADR-0016 A1-3);
+    ``None`` on the observed channel.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -205,6 +223,7 @@ class ExtractedDocument(BaseModel):
     source_form: SourceForm
     regulation: ExtractedRegulation
     fields: RegulationFields
+    received_form: ReceivedForm | None = None
 
 
 class HeldExtraction(BaseModel):
@@ -249,7 +268,9 @@ class ReceivedSource(BaseModel):
     UTC. ``innsyn_saksnummer`` is the authority's case number as digits only:
     archive systems can append a case officer's initials, which are never
     published (A5). There is deliberately no field for a file name, a sender or
-    a recipient.
+    a recipient. ``received_form`` is the form the text arrived in (A1-3): a
+    Lovdata print, a Lovtidend PDF or the authority's original, so every
+    Lovdata-derived text stays findable as a set.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -258,6 +279,7 @@ class ReceivedSource(BaseModel):
     innsyn_request: str = Field(pattern=REQUEST_ID_PATTERN)
     innsyn_saksnummer: str | None = Field(pattern=SAKSNUMMER_PATTERN)
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    received_form: ReceivedForm
 
     @property
     def received_at_utc(self) -> str:

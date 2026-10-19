@@ -17,8 +17,14 @@ from lovspor.promotion.decisions import (
 )
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
 from lovspor.promotion.identity import mint_identity
-from lovspor.promotion.models import Authority, ExtractedDocument, MintedIdentity
-from lovspor.promotion.plan import Prepared, _free_slug, require_approval, standing_on
+from lovspor.promotion.models import Authority, ExtractedDocument, MintedIdentity, ReceivedForm
+from lovspor.promotion.plan import (
+    Prepared,
+    _free_slug,
+    received_form,
+    require_approval,
+    standing_on,
+)
 from tests.unit.promotion_fixtures import html_page
 
 BASE = "forskrift-om-renovasjon-og-slam-eksempel-kommune"
@@ -105,6 +111,19 @@ DECIDED_AT = datetime(2026, 8, 20, 10, 0, tzinfo=UTC)
 def _prepared() -> Prepared:
     identity, extracted = _minted()
     return Prepared(identity=identity, extracted=extracted, slug=BASE, version=1, unchanged=False)
+
+
+def test_an_observed_extraction_has_no_received_form() -> None:
+    prepared = _prepared()
+    with pytest.raises(PromotionRefusedError, match="was not extracted as a received text"):
+        received_form(prepared)
+
+
+def test_a_received_extraction_names_its_form() -> None:
+    prepared = _prepared()
+    extracted = prepared.extracted.model_copy(update={"received_form": ReceivedForm.LOVTIDEND})
+    received = prepared.model_copy(update={"extracted": extracted})
+    assert received_form(received) is ReceivedForm.LOVTIDEND
 
 
 def _decision(decision: Decision, content_hash: str | None, extractor: int | None) -> HumanDecision:
