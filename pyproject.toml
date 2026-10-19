@@ -63,7 +63,7 @@ dependencies = [
     # reads one glyph differently would mint a new version of every PDF-sourced
     # regulation. A bump is a deliberate extractor_version change, and
     # tests/unit/test_promotion_extract.py fails until EXTRACTOR_VERSION says so.
-    "pypdf==6.19.0",
+    "pypdf==6.20.1",
     # The MCP server validates every tool call against its listed input schema
     # (lovspor.mcp_contract, issue #570). Already a transitive mcp dep (its
     # low-level server imports it); declared because we import it directly.

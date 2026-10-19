@@ -58,8 +58,8 @@ def test_faq_page_content_hash_does_not_depend_on_the_page_tail() -> None:
     assert content_hash(with_tail) == content_hash(without)
 
 
-def test_extractor_version_is_seven_since_a_broken_title_heading_is_joined() -> None:
-    assert EXTRACTOR_VERSION == 7
+def test_extractor_version_is_eight_since_pypdf_6_20_1() -> None:
+    assert EXTRACTOR_VERSION == 8
 
 
 def test_html_page_extracts_block_body_and_fields() -> None:

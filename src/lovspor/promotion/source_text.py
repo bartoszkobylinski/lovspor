@@ -57,7 +57,7 @@ from lovspor.parsing.xml_normalizer import safe_parser
 from lovspor.promotion.anchors import anchor_lines
 from lovspor.promotion.models import SourceForm
 
-PDF_LIBRARY_VERSION = "6.19.0"
+PDF_LIBRARY_VERSION = "6.20.1"
 MAX_DOCX_PART_BYTES = 20 * 1024 * 1024
 
 _DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
