@@ -30,6 +30,29 @@ def test_derive_slug_preserves_sami_letters(title: str, slug: str) -> None:
     assert derive_slug(None, title, "x") == slug
 
 
+@pytest.mark.parametrize("letter", list("ïáčđŋšŧž"))
+def test_derive_slug_preserves_sami_short_title_in_both_cases(letter: str) -> None:
+    assert derive_slug(letter, "Fallback", "nl-x") == letter
+    assert derive_slug(letter.upper(), "Fallback", "nl-x") == letter
+
+
+@pytest.mark.parametrize("letter", list("ïáčđŋšŧž"))
+@pytest.mark.parametrize("prefix_length", [198, 199])
+def test_derive_slug_sami_letter_at_utf8_byte_cap(letter: str, prefix_length: int) -> None:
+    prefix = "a" * prefix_length
+    expected = prefix + letter if prefix_length == 198 else prefix
+
+    assert derive_slug(prefix + letter, "", "nl-x") == expected
+    assert derive_slug(prefix + letter + "suffix", "", "nl-x") == expected
+
+
+@pytest.mark.parametrize("separator", ["/", "\\", "…", "é", "ć"])
+def test_derive_slug_still_replaces_non_allowlisted_chars_between_sami_letters(
+    separator: str,
+) -> None:
+    assert derive_slug(None, f"Ï{separator}Á", "nl-x") == "ï-á"
+
+
 def test_derive_slug_replaces_spaces_with_hyphens() -> None:
     assert derive_slug("Forbud paa Vimpel-føring", "x", "nl-x") == "forbud-paa-vimpel-føring"
 
