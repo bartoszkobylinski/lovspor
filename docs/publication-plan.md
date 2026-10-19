@@ -1,5 +1,7 @@
 # Publication plan — from fixed corpus to a 2027 paper
 
+> **2026-10-17:** the plans dated 2027 below have moved to 2028.
+
 **Written 2026-07-24. Phase 0 closed 2026-07-28.** Sequenced plan
 with gates. Complements
 [`roadmap.md`](roadmap.md) (menu of strategic options) and
@@ -280,7 +282,7 @@ things the source discussion never addressed. It is still unaddressed.
 
 ## Phase 4 — Write-up and submission
 
-**Target: 2027.** NLLP 2026 closes **2026-08-11** — 18 days from writing, which
+**Target: 2028** (moved from 2027 on 2026-10-17). NLLP 2026 closes **2026-08-11** — 18 days from writing, which
 is not achievable alongside Phases 0–3. These deadlines recur annually.
 
 Candidate venues:
