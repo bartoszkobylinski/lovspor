@@ -135,6 +135,14 @@ class SourceForm(StrEnum):
     DOCX = "docx"
 
 
+class ReceivedForm(StrEnum):
+    """The form a received text arrived in (ADR-0016 A1-3), as the text itself shows it."""
+
+    LOVDATA_PRINT = "lovdata_print"
+    LOVTIDEND = "lovtidend"
+    AUTHORITY_ORIGINAL = "authority_original"
+
+
 class ExtractionHoldReason(StrEnum):
     """Why extracted text may not be published (ADR-0016 4h): held, counted, never dropped."""
 
