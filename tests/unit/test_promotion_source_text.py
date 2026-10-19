@@ -787,6 +787,60 @@ def test_docx_drops_a_page_reference_field_result() -> None:
 # --- HTML <br> hard line wraps (#523) -----------------------------------------
 
 
+def test_html_hyphen_wraps_join_only_within_a_block_and_are_deterministic() -> None:
+    page = _main(
+        "<p>Forskrift om el-<br><strong>sparkesykkel</strong></p>"
+        "<p>Gjelder Sør-</p><p>Trøndelag.</p>"
+        "<p>Gebyr for vann-<br>og/eller avløp.</p>"
+        "<p>Vedlegg A-<br>§ 2 Gebyr</p>"
+    )
+    expected = (
+        "Forskrift om el-sparkesykkel",
+        "Gjelder Sør-",
+        "Trøndelag.",
+        "Gebyr for vann- og/eller avløp.",
+        "Vedlegg A-",
+        "§ 2 Gebyr",
+    )
+    assert html_lines(page, "text/html") == expected
+    assert html_lines(page, "text/html") == expected
+
+
+def test_pdf_hyphen_wrap_rejoins_across_page_furniture() -> None:
+    payload = pdf_pages(("Forskrift for Sør-", "Side 1 av 2"), ("Trøndelag",))
+    assert pdf_lines(payload) == ("Forskrift for Sør-Trøndelag",)
+
+
+def test_docx_pageref_instruction_split_across_runs_and_multiple_results() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Forskrift om gebyr</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> PAGE</w:instrText></w:r>"
+        "<w:r><w:instrText>REF _Toc123 </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>1</w:t></w:r><w:r><w:t>2</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t> gjelder fortsatt.</w:t></w:r></w:p>"
+    )
+    payload = _docx_body(paragraph)
+    assert docx_lines(payload) == ("Forskrift om gebyr gjelder fortsatt.",)
+    assert docx_lines(payload) == ("Forskrift om gebyr gjelder fortsatt.",)
+
+
+@pytest.mark.parametrize("instruction", ["PAGE", "REF PAGEREF", "PAGEREF_EXTRA"])
+def test_docx_only_pageref_field_results_are_removed(instruction: str) -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Gebyret er </w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        f"<w:r><w:instrText> {instruction} </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>200</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t> kroner.</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Gebyret er 200 kroner.",)
+
+
 def _main(body: str) -> bytes:
     return f"<html><body><main>{body}</main></body></html>".encode()
 
