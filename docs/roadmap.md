@@ -1,5 +1,7 @@
 # Roadmap — strategic options after Sprint 8
 
+> **Historical.** The current roadmap is [`ROADMAP.md`](../ROADMAP.md) at the repository root; this file is kept as the 2026-04 option catalogue and its later annotations.
+
 > **Strategic options under evaluation.** This document is not a commitment. It is a structured menu of directions to argue against during sprint planning, written 2026-04-29 immediately after Sprint 8 closeout (PR #35 merged). It complements [`decisions.md`](decisions.md), which logs decisions actually made.
 
 > **Direction superseded 2026-07-30 (open infrastructure).** The 2026-07-14 commercial-pivot note below, and every "paid remote service as the primary product" statement in this file, are **historical record**. The accepted current direction (logged in [`decisions.md`](decisions.md) §1) is open infrastructure: engine public under **AGPL-3.0** (relicensed from MIT on 2026-08-12, `decisions.md` §18), [`lovverk`](https://github.com/bartoszkobylinski/lovverk) public under its NLOD 2.0 / CC0 boundary, the core independently runnable. The hosted MCP endpoint is an optional operated access layer; optional paid hosting/support/integration may exist but must not restrict the open core. Engine publication is in progress (`docs/publication-plan.md`). The catalogue and shipped-work notes below are preserved unchanged as history.
