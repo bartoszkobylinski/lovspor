@@ -107,6 +107,12 @@ _LIST_ITEM = re.compile(
 _NUMBERED_HEADING = re.compile(r"\d+(?:\.\d+)+\s+[A-ZÆØÅ]")
 _ENACTMENT_START = re.compile(r"(?:vedtatt|vedteke|vedteken|fastsatt|fastsett)\b", re.IGNORECASE)
 _MAX_HEADING_CHARS = 100
+# "Sør-" / "Trøndelag" is one word the line end split at its own hyphen, and
+# rejoins with no space (#638). A suspended hyphen ("vann- og avløp") is
+# followed by its conjunction and keeps the space.
+_HYPHEN_WRAP = re.compile(r"\w-$")
+_FIRST_WORD = re.compile(r"[^\s/,.]+")
+_SUSPENDED_BEFORE = frozenset({"og", "eller", "samt"})
 
 
 def source_form(content_type: str) -> SourceForm | None:
@@ -148,11 +154,33 @@ def docx_lines(payload: bytes) -> tuple[str, ...]:
         root = etree.fromstring(_docx_part(payload), parser=safe_parser(remove_blank_text=False))
     except etree.XMLSyntaxError as error:
         raise UnreadableSourceError(f"DOCX {_DOCX_PART} did not parse: {error}") from error
-    paragraphs = (
-        "".join(node.text or "" for node in paragraph.iter(f"{_W}t"))
-        for paragraph in root.iter(f"{_W}p")
-    )
-    return _clean_lines(paragraphs)
+    return _clean_lines(_paragraph_text(paragraph) for paragraph in root.iter(f"{_W}p"))
+
+
+def _paragraph_text(paragraph: etree._Element) -> str:
+    """The paragraph's text runs, minus a ``PAGEREF`` field's result (#638).
+
+    A contents entry ends on its page number, a field Word computes; joined to
+    the title it reads ``Sør-Trøndelag1``. Fields nest (the whole contents is a
+    ``TOC`` field), so the innermost open field decides.
+    """
+    fields: list[str] = []
+    text: list[str] = []
+    for node in paragraph.iter(f"{_W}fldChar", f"{_W}instrText", f"{_W}t"):
+        if node.tag == f"{_W}fldChar":
+            _step_field(fields, node.get(f"{_W}fldCharType"))
+        elif node.tag == f"{_W}instrText":
+            fields[-1:] = [f"{field}{node.text or ''}" for field in fields[-1:]]
+        elif not (fields and fields[-1].split()[:1] == ["PAGEREF"]):
+            text.append(node.text or "")
+    return "".join(text)
+
+
+def _step_field(fields: list[str], kind: str | None) -> None:
+    if kind == "begin":
+        fields.append("")
+    elif kind == "end" and fields:
+        fields.pop()
 
 
 def _docx_part(payload: bytes) -> bytes:
@@ -241,11 +269,20 @@ def _clean_lines(lines: Iterable[str]) -> tuple[str, ...]:
 def _rejoined(lines: tuple[str, ...]) -> tuple[str, ...]:
     joined: list[str] = []
     for line in lines:
-        if joined and _continues(joined[-1], line):
+        if joined and _wrapped_at_hyphen(joined[-1], line):
+            joined[-1] = f"{joined[-1]}{line}"
+        elif joined and _continues(joined[-1], line):
             joined[-1] = f"{joined[-1]} {line}"
         else:
             joined.append(line)
     return tuple(joined)
+
+
+def _wrapped_at_hyphen(previous: str, line: str) -> bool:
+    if not _HYPHEN_WRAP.search(previous) or _SECTION_START.match(line):
+        return False
+    first = _FIRST_WORD.match(line)
+    return first is not None and first.group().casefold() not in _SUSPENDED_BEFORE
 
 
 def _continues(previous: str, line: str) -> bool:

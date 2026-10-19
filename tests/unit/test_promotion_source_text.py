@@ -725,7 +725,120 @@ def test_pdf_a_section_line_over_the_heading_limit_takes_its_wrap() -> None:
     assert pdf_lines(pdf) == (f"{line} gjelder alle.",)
 
 
+# --- A word wrapped at its own hyphen (#638) -----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("wrapped", "joined"),
+    [
+        (("Røros kommune, Sør-", "Trøndelag"), "Røros kommune, Sør-Trøndelag"),
+        (("til kryss Ol-", "Klemmetsaveien."), "til kryss Ol-Klemmetsaveien."),
+        (
+            ("ikke lov å bruke el-", "sparkesykkel i skolegården."),
+            "ikke lov å bruke el-sparkesykkel i skolegården.",
+        ),
+        (
+            ("beskrevet i opplæringslovens § 24-", "3. § 16. Forvaltning"),
+            "beskrevet i opplæringslovens § 24-3. § 16. Forvaltning",
+        ),
+    ],
+)
+def test_pdf_rejoins_a_word_wrapped_at_its_hyphen_without_a_space(
+    wrapped: tuple[str, str], joined: str
+) -> None:
+    assert pdf_lines(minimal_pdf(wrapped)) == (joined,)
+
+
+@pytest.mark.parametrize("conjunction", ["og", "eller", "og/eller", "samt"])
+def test_pdf_a_suspended_hyphen_before_a_conjunction_keeps_its_space(conjunction: str) -> None:
+    pdf = minimal_pdf(("som er tilknytt vann-", f"{conjunction} avløpsanlegg."))
+    assert pdf_lines(pdf) == (f"som er tilknytt vann- {conjunction} avløpsanlegg.",)
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        ("Gebyr for vann-", "§ 2 Avløp"),
+        ("Satsene gjelder fra -", "Neste ledd"),
+        ("Vedlegg A-", "Kapittel 2 Gebyr"),
+    ],
+)
+def test_pdf_a_hyphen_line_end_does_not_swallow_a_section_or_a_lone_dash(
+    lines: tuple[str, str],
+) -> None:
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_docx_drops_a_page_reference_field_result() -> None:
+    paragraph = (
+        '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText>TOC \\o</w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>Forskrift om gebyr, Sør-Trøndelag</w:t></w:r><w:r><w:tab/></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> PAGEREF _Toc256000000 \\h </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        '<w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t> gjelder</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Forskrift om gebyr, Sør-Trøndelag gjelder",)
+
+
 # --- HTML <br> hard line wraps (#523) -----------------------------------------
+
+
+def test_html_hyphen_wraps_join_only_within_a_block_and_are_deterministic() -> None:
+    page = _main(
+        "<p>Forskrift om el-<br><strong>sparkesykkel</strong></p>"
+        "<p>Gjelder Sør-</p><p>Trøndelag.</p>"
+        "<p>Gebyr for vann-<br>og/eller avløp.</p>"
+        "<p>Vedlegg A-<br>§ 2 Gebyr</p>"
+    )
+    expected = (
+        "Forskrift om el-sparkesykkel",
+        "Gjelder Sør-",
+        "Trøndelag.",
+        "Gebyr for vann- og/eller avløp.",
+        "Vedlegg A-",
+        "§ 2 Gebyr",
+    )
+    assert html_lines(page, "text/html") == expected
+    assert html_lines(page, "text/html") == expected
+
+
+def test_pdf_hyphen_wrap_rejoins_across_page_furniture() -> None:
+    payload = pdf_pages(("Forskrift for Sør-", "Side 1 av 2"), ("Trøndelag",))
+    assert pdf_lines(payload) == ("Forskrift for Sør-Trøndelag",)
+
+
+def test_docx_pageref_instruction_split_across_runs_and_multiple_results() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Forskrift om gebyr</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> PAGE</w:instrText></w:r>"
+        "<w:r><w:instrText>REF _Toc123 </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>1</w:t></w:r><w:r><w:t>2</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t> gjelder fortsatt.</w:t></w:r></w:p>"
+    )
+    payload = _docx_body(paragraph)
+    assert docx_lines(payload) == ("Forskrift om gebyr gjelder fortsatt.",)
+    assert docx_lines(payload) == ("Forskrift om gebyr gjelder fortsatt.",)
+
+
+@pytest.mark.parametrize("instruction", ["PAGE", "REF PAGEREF", "PAGEREF_EXTRA"])
+def test_docx_only_pageref_field_results_are_removed(instruction: str) -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Gebyret er </w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        f"<w:r><w:instrText> {instruction} </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>200</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t> kroner.</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Gebyret er 200 kroner.",)
 
 
 def _main(body: str) -> bytes:
@@ -847,3 +960,39 @@ def test_reading_lines_preserves_live_descendant_text_tails_and_parents() -> Non
             == before
         )
         assert _lines_of(candidate) == lines
+
+
+def test_docx_nested_field_restores_outer_pageref_then_keeps_following_text() -> None:
+    """Only the innermost field controls whether its displayed result is kept."""
+    paragraph = (
+        '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> PAGEREF outer </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>outer page before</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> REF title </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>Forskrift om gebyr</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t>outer page after</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t> gjelder fortsatt.</w:t></w:r></w:p>"
+    )
+    payload = _docx_body(paragraph)
+    assert docx_lines(payload) == ("Forskrift om gebyr gjelder fortsatt.",)
+    assert docx_lines(payload) == ("Forskrift om gebyr gjelder fortsatt.",)
+
+
+def test_docx_empty_instruction_run_does_not_interrupt_pageref_keyword() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Forskrift om gebyr</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> PAGE</w:instrText></w:r>"
+        "<w:r><w:instrText/></w:r>"
+        "<w:r><w:instrText>REF bookmark </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>42</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t> gjelder.</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Forskrift om gebyr gjelder.",)
