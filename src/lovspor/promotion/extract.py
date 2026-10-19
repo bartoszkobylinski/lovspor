@@ -23,6 +23,16 @@ A text that could mislead is held, never published, and the reason is typed
 7. ``no_body`` / ``no_title`` — the text cannot be split safely;
    ``title_truncated`` — the title ends on a function word (``title.py``);
 8. ``personal_data`` — the gate of ``personal_data.py`` found something.
+
+``extract_received`` is the received channel's extractor (ADR-0016 A1-3,
+#632). It reads the same bytes the same way, names the form the text arrived
+in (``lovdata_markup.received_form``) and removes Lovdata's markup before the
+holds above run, so a Lovdata print or a Lovtidend PDF an authority sent is
+not held as ``lovdata_copy``. It is held as ``lovdata_copy`` instead when the
+metadata block cannot be bounded, or when anything of Lovdata's is left after
+removal. The lines that stated the id are kept for identity (§1a), and a text
+whose block names no enacting organ is read for a state instrument
+(``Fastsatt ved kgl.res.``, A1-4). The observed channel never calls it.
 """
 
 from __future__ import annotations
@@ -33,12 +43,18 @@ from collections.abc import Callable
 
 from lovspor.errors import UnreadableSourceError
 from lovspor.promotion.dates import has_placeholder_date
-from lovspor.promotion.fields import read_regulation
+from lovspor.promotion.fields import instrument_issuer, read_regulation
 from lovspor.promotion.identity import normalise_text
 from lovspor.promotion.lovdata_header import (
     LOVDATA_PRINT,
     LOVDATA_PRINT_CHROME,
     has_lovdata_header,
+)
+from lovspor.promotion.lovdata_markup import (
+    Stripped,
+    received_form,
+    residual_markup,
+    strip_markup,
 )
 from lovspor.promotion.models import (
     ExtractedDocument,
@@ -46,6 +62,7 @@ from lovspor.promotion.models import (
     ExtractionResult,
     HeldExtraction,
     PersonalDataHit,
+    ReceivedForm,
     SourceForm,
 )
 from lovspor.promotion.personal_data import screen_personal_data
@@ -112,20 +129,64 @@ _SPLIT_DETAIL = {
 }
 
 
+_UNBOUNDED = "Lovdata's metadata block cannot be bounded, so its markup cannot be removed"
+_RESIDUAL = "Lovdata's markup remains after removal"
+
+_Read = tuple[SourceForm, tuple[str, ...]]
+
+
 def extract_regulation(payload: bytes, content_type: str) -> ExtractionResult:
     """The regulation in ``payload``, or a typed hold saying why it may not be published."""
+    read = _read(payload, content_type)
+    if isinstance(read, HeldExtraction):
+        return read
+    form, lines = read
+    refused = _text_hold("\n".join(lines))
+    if refused is not None:
+        return _held(form, *refused)
+    return _document(form, lines)
+
+
+def extract_received(payload: bytes, content_type: str) -> ExtractionResult:
+    """A received text's regulation with Lovdata's markup removed, or a typed hold."""
+    read = _read(payload, content_type)
+    if isinstance(read, HeldExtraction):
+        return read
+    form, lines = read
+    received = received_form(lines)
+    stripped = strip_markup(lines, received)
+    if stripped is None:
+        return _held(form, ExtractionHoldReason.LOVDATA_COPY, _UNBOUNDED)
+    if received is not ReceivedForm.AUTHORITY_ORIGINAL and residual_markup(stripped.lines):
+        return _held(form, ExtractionHoldReason.LOVDATA_COPY, _RESIDUAL)
+    refused = _text_hold("\n".join(stripped.lines))
+    if refused is not None:
+        return _held(form, *refused)
+    return _as_received(_document(form, stripped.lines), received, stripped)
+
+
+def _read(payload: bytes, content_type: str) -> _Read | HeldExtraction:
     form = source_form(content_type)
     if form is None:
         detail = f"media type {content_type!r} is not HTML, PDF or DOCX"
         return _held(None, ExtractionHoldReason.UNSUPPORTED_FORMAT, detail)
     try:
-        lines = _READERS[form](payload, content_type)
+        return form, _READERS[form](payload, content_type)
     except UnreadableSourceError as error:
         return _held(form, ExtractionHoldReason.UNREADABLE, str(error))
-    refused = _text_hold("\n".join(lines))
-    if refused is not None:
-        return _held(form, *refused)
-    return _document(form, lines)
+
+
+def _as_received(
+    result: ExtractionResult, received: ReceivedForm, stripped: Stripped
+) -> ExtractionResult:
+    if isinstance(result, HeldExtraction):
+        return result
+    removed = "\n".join(stripped.identification) if stripped.identification else None
+    regulation = result.regulation.model_copy(update={"removed_identification": removed})
+    issuer = result.fields.vedtatt_av or instrument_issuer(regulation.identification_block)
+    fields = result.fields.model_copy(update={"vedtatt_av": issuer})
+    update = {"regulation": regulation, "fields": fields, "received_form": received}
+    return result.model_copy(update=update)
 
 
 def _text_hold(text: str) -> tuple[ExtractionHoldReason, str] | None:

@@ -73,6 +73,11 @@ class ExtractedRegulation(BaseModel):
     ``body`` is everything else; a date-number in it is a citation, never the
     document's id. ``vedtaksdato`` is the decision date as the text states it,
     or ``None``; it is never filled from an observation time.
+
+    ``removed_identification`` is set on the received channel only (ADR-0016
+    A1-3): the lines of Lovdata's markup that state the regulation's id (its
+    ``Dato`` line, Lovtidend's ``Kunngjort`` line), removed from the text but
+    read by identity, so the id is minted from the text before removal.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -81,6 +86,7 @@ class ExtractedRegulation(BaseModel):
     identification_block: str
     body: str
     vedtaksdato: date | None = None
+    removed_identification: str | None = None
 
     @property
     def full_text(self) -> str:
@@ -204,7 +210,11 @@ class RegulationFields(BaseModel):
 
 
 class ExtractedDocument(BaseModel):
-    """A source the extractor read in full: the regulation's text and its fields."""
+    """A source the extractor read in full: the regulation's text and its fields.
+
+    ``received_form`` is the form a received text arrived in (ADR-0016 A1-3);
+    ``None`` on the observed channel.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -213,6 +223,7 @@ class ExtractedDocument(BaseModel):
     source_form: SourceForm
     regulation: ExtractedRegulation
     fields: RegulationFields
+    received_form: ReceivedForm | None = None
 
 
 class HeldExtraction(BaseModel):

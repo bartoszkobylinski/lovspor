@@ -9,6 +9,9 @@ An id is chosen by the first rule that applies:
 1. ``lf-yyyymmdd-nnnn`` when the regulation's *own identification block*
    names exactly one date and number. A date-number in the body is a citation
    and is never read; neither are ``Hjemmel``/``Endrer`` lines in a header.
+   On the received channel the block includes the lines of Lovdata's markup
+   that state the id (``removed_identification``, ADR-0016 A1-3): the id is
+   minted from the text before the markup is removed.
 2. ``lk-<authority_id>-<h12>`` from authority, normalised title and the
    vedtaksdato the text states.
 3. Otherwise the regulation is held. No id is minted from an observation time,
@@ -93,7 +96,7 @@ def mint_identity(
     central_ref_ids: frozenset[str] = frozenset(),
 ) -> IdentityResult:
     """Apply ADR-0016 1a's rules in order; a held result carries no id."""
-    candidates = _candidates(regulation.identification_block)
+    candidates = _candidates(_identification_text(regulation))
     facts = _Facts(regulation, authority, tuple(_lf_id(c) for c in candidates))
     if len(candidates) == 1:
         return _lovdata_identity(facts, candidates[0], _central_ids(central_ref_ids))
@@ -154,6 +157,13 @@ def _fallback_identity(facts: _Facts) -> IdentityResult:
     seed = _UNIT_SEPARATOR.join((facts.authority.id, facts.title, vedtaksdato.isoformat()))
     h12 = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12]
     return facts.minted(f"lk-{facts.authority.id}-{h12}", IdScheme.LK, None)
+
+
+def _identification_text(regulation: ExtractedRegulation) -> str:
+    """The block ids are read from: Lovdata's removed id lines first, then the text's own."""
+    if regulation.removed_identification is None:
+        return regulation.identification_block
+    return f"{regulation.removed_identification}\n{regulation.identification_block}"
 
 
 def _candidates(identification_block: str) -> tuple[_LovdataId, ...]:

@@ -22,7 +22,10 @@ what the text states, verbatim or as a parsed date, or empty:
   (or ``fastsatt``, ``vedteke``) in the block, else of the body's
   ``Forskriften er vedtatt av <organ> den <dato>``. The organ stops at
   ``med hjemmel`` / ``i medhold av``, and a date right after a law's name is
-  that statute's date, never the vedtaksdato;
+  that statute's date, never the vedtaksdato. On the received channel a
+  text whose block names no such organ is read for a state instrument
+  (``instrument_issuer``: ``Fastsatt ved kgl.res.``), as the text writes it
+  (ADR-0016 A1-4); nothing ever defaults to the kommunestyre;
 * ``vedtatt`` / ``ikraft`` / ``ikraft_text`` — the date (or, for ``ikraft``,
   the non-date phrase such as "straks") that **every** statement of the text
   agrees on, as ``stated_dates.py`` resolves it for the evidence sidecar
@@ -68,7 +71,19 @@ _HJEMMEL_PHRASE = re.compile(
     re.I,
 )
 
+_INSTRUMENT = re.compile(
+    r"\bfastsatt\s+ved\s+(?P<instrument>(?:kgl|kronprinsreg)\.\s*res\b\.?"
+    r"|kongelig\s+resolusjon|statsrådsbeslutning)",
+    re.IGNORECASE,
+)
+
 ReadRegulation = tuple[ExtractedRegulation, RegulationFields]
+
+
+def instrument_issuer(identification_block: str) -> str | None:
+    """The state instrument the block's ``Fastsatt ved`` names, verbatim, or ``None``."""
+    match = _INSTRUMENT.search(identification_block.replace("\n", " "))
+    return None if match is None else match.group("instrument")
 
 
 def read_regulation(lines: tuple[str, ...]) -> ReadRegulation | ExtractionHoldReason:
