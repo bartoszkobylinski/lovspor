@@ -16,6 +16,8 @@ from lovspor.promotion import (
     ExtractedDocument,
     ExtractionHoldReason,
     HeldExtraction,
+    HeldIdentity,
+    HoldReason,
     MintedIdentity,
     mint_identity,
 )
@@ -171,3 +173,57 @@ def test_an_own_number_in_the_block_beside_the_dato_is_ambiguous() -> None:
     extracted = _received(minimal_pdf(lines))
     identity = mint_identity(extracted.regulation, EKSEMPEL)
     assert len(identity.candidates) == 2
+
+
+@pytest.mark.parametrize(
+    ("lines", "ref_id"),
+    [
+        (LOVDATA_PRINT, "forskrift/2001-02-03-9001"),
+        (LOVTIDEND, "forskrift/2025-12-11-9006"),
+    ],
+)
+def test_removed_identification_still_enforces_central_collision(
+    lines: tuple[str, ...], ref_id: str
+) -> None:
+    """Removing editorial markup must not evade ADR-0016's collision gate."""
+    extracted = _received(html_page(lines), HTML)
+    identity = mint_identity(extracted.regulation, EKSEMPEL, frozenset({ref_id}))
+    assert isinstance(identity, HeldIdentity)
+    assert identity.reason is HoldReason.CENTRAL_COLLISION
+    assert identity.colliding_ref_id == ref_id
+
+
+def test_editorial_changes_do_not_version_the_regulation_but_body_changes_do() -> None:
+    """The version hash names the published regulation, not removed print furniture."""
+    editorial = tuple(
+        line.replace("01.02.2026 09:30", "02.03.2026 10:45")
+        .replace("Publisert II 2001 99", "Publisert II 2001 100")
+        .replace("7 juni 2005 nr. 9002", "8 juli 2006 nr. 9003")
+        for line in LOVDATA_PRINT
+    )
+    changed_body = tuple(
+        line.replace("Ingen må forstyrre", "Ingen skal forstyrre") for line in LOVDATA_PRINT
+    )
+    identities = []
+    for lines in (LOVDATA_PRINT, editorial, changed_body):
+        result = mint_identity(_received(html_page(lines), HTML).regulation, EKSEMPEL)
+        assert isinstance(result, MintedIdentity)
+        identities.append(result)
+    original, reprinted, amended = identities
+    assert original == reprinted
+    assert amended.doc_id == original.doc_id
+    assert amended.content_hash != original.content_hash
+
+
+@pytest.mark.parametrize(
+    ("extra", "reason"),
+    [
+        ("Kontaktperson: Kari Testperson", ExtractionHoldReason.PERSONAL_DATA),
+        ("Forskriften trer i kraft X.X.2026.", ExtractionHoldReason.PLACEHOLDER_DATE),
+    ],
+)
+def test_stripping_markup_does_not_bypass_safety_holds(
+    extra: str, reason: ExtractionHoldReason
+) -> None:
+    held = _held(html_page((*LOVDATA_PRINT, extra)), HTML)
+    assert held.reason is reason
