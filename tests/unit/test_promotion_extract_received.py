@@ -227,3 +227,53 @@ def test_stripping_markup_does_not_bypass_safety_holds(
 ) -> None:
     held = _held(html_page((*LOVDATA_PRINT, extra)), HTML)
     assert held.reason is reason
+
+
+@pytest.mark.parametrize("content_type", [PDF, DOCX])
+def test_received_unreadable_documents_preserve_the_observed_error(content_type: str) -> None:
+    payload = b"not a PDF or a DOCX archive"
+    observed = extract_regulation(payload, content_type)
+    assert isinstance(observed, HeldExtraction)
+    assert observed.reason is ExtractionHoldReason.UNREADABLE
+    assert observed.detail
+    assert extract_received(payload, content_type) == observed
+
+
+def test_print_metadata_cannot_supply_a_missing_regulation_body() -> None:
+    # Keep the retained preamble above the length gate to exercise the split gate.
+    preamble = (
+        PREAMBLE,
+        "Forskriften gjelder for hele kommunen og fastsetter bestemmelser om orden, "
+        "ferdsel og bruk av kommunens offentlige områder til beste for innbyggerne.",
+    )
+    held = _held(html_page((*PRINT_HEAD, *preamble)), HTML)
+    assert held.reason is ExtractionHoldReason.NO_BODY
+
+
+def test_removed_and_retained_identification_of_the_same_id_is_not_ambiguous() -> None:
+    lines = (*PRINT_HEAD, "Forskrift 3. februar 2001 nr. 9001 om eksempel.", PREAMBLE, *BODY)
+    extracted = _received(html_page(lines), HTML)
+    identity = mint_identity(extracted.regulation, EKSEMPEL)
+    assert isinstance(identity, MintedIdentity), identity
+    assert identity.doc_id == "lf-20010203-9001"
+    assert identity.candidates == ("lf-20010203-9001",)
+
+
+def test_cited_body_id_does_not_collide_after_print_identification_is_removed() -> None:
+    lines = (*LOVDATA_PRINT, "Forskrift 3. mars 2001 nr. 9099 om eksempel oppheves.")
+    extracted = _received(html_page(lines), HTML)
+    identity = mint_identity(
+        extracted.regulation, EKSEMPEL, frozenset({"forskrift/2001-03-03-9099"})
+    )
+    assert isinstance(identity, MintedIdentity), identity
+    assert identity.doc_id == "lf-20010203-9001"
+    assert identity.candidates == ("lf-20010203-9001",)
+
+
+def test_an_explicit_issuer_takes_precedence_over_a_cited_state_instrument() -> None:
+    enactment = (
+        "Fastsatt av Eksempel kommunestyre 3. februar 2001 med hjemmel i lov. "
+        "Tidligere forskrift er fastsatt ved kgl.res. av 5. oktober 1962."
+    )
+    extracted = _received(html_page((*PRINT_HEAD, enactment, *BODY)), HTML)
+    assert extracted.fields.vedtatt_av == "Eksempel kommunestyre"
