@@ -725,6 +725,65 @@ def test_pdf_a_section_line_over_the_heading_limit_takes_its_wrap() -> None:
     assert pdf_lines(pdf) == (f"{line} gjelder alle.",)
 
 
+# --- A word wrapped at its own hyphen (#638) -----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("wrapped", "joined"),
+    [
+        (("Røros kommune, Sør-", "Trøndelag"), "Røros kommune, Sør-Trøndelag"),
+        (("til kryss Ol-", "Klemmetsaveien."), "til kryss Ol-Klemmetsaveien."),
+        (
+            ("ikke lov å bruke el-", "sparkesykkel i skolegården."),
+            "ikke lov å bruke el-sparkesykkel i skolegården.",
+        ),
+        (
+            ("beskrevet i opplæringslovens § 24-", "3. § 16. Forvaltning"),
+            "beskrevet i opplæringslovens § 24-3. § 16. Forvaltning",
+        ),
+    ],
+)
+def test_pdf_rejoins_a_word_wrapped_at_its_hyphen_without_a_space(
+    wrapped: tuple[str, str], joined: str
+) -> None:
+    assert pdf_lines(minimal_pdf(wrapped)) == (joined,)
+
+
+@pytest.mark.parametrize("conjunction", ["og", "eller", "og/eller", "samt"])
+def test_pdf_a_suspended_hyphen_before_a_conjunction_keeps_its_space(conjunction: str) -> None:
+    pdf = minimal_pdf(("som er tilknytt vann-", f"{conjunction} avløpsanlegg."))
+    assert pdf_lines(pdf) == (f"som er tilknytt vann- {conjunction} avløpsanlegg.",)
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        ("Gebyr for vann-", "§ 2 Avløp"),
+        ("Satsene gjelder fra -", "Neste ledd"),
+        ("Vedlegg A-", "Kapittel 2 Gebyr"),
+    ],
+)
+def test_pdf_a_hyphen_line_end_does_not_swallow_a_section_or_a_lone_dash(
+    lines: tuple[str, str],
+) -> None:
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_docx_drops_a_page_reference_field_result() -> None:
+    paragraph = (
+        '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText>TOC \\o</w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>Forskrift om gebyr, Sør-Trøndelag</w:t></w:r><w:r><w:tab/></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> PAGEREF _Toc256000000 \\h </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        '<w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t> gjelder</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Forskrift om gebyr, Sør-Trøndelag gjelder",)
+
+
 # --- HTML <br> hard line wraps (#523) -----------------------------------------
 
 
