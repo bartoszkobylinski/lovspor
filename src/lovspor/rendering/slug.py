@@ -14,9 +14,11 @@ Preference chain for the source string:
 
 After choosing the source, ``_slugify`` lowercases, replaces non-slug
 characters with hyphens, and collapses runs of hyphens. Norwegian
-``æøå`` and the German ``äöü`` are preserved — modern URL handling
-and GitHub UI both render them correctly, and Norwegian readers
-expect them.
+``æøå``, the German ``äöü`` and the Sami letters ``ïáčđŋšŧž`` are
+preserved — modern URL handling and GitHub UI both render them
+correctly, and Norwegian readers expect them. Without the Sami set a
+bilingual municipal title such as ``Rossen tjïelte`` split into
+``rossen-tj-elte`` (#640).
 
 The result is then capped at ``_MAX_SLUG_BYTES`` UTF-8 bytes so the
 final filename (slug + ``.md`` + collision suffix) stays under POSIX
@@ -57,7 +59,7 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict
 
 _BRACKET_CONTENT = re.compile(r"[\[(].*?[\])]")
-_NON_SLUG_CHAR = re.compile(r"[^a-z0-9æøåäöü]+")
+_NON_SLUG_CHAR = re.compile(r"[^a-z0-9æøåäöüïáčđŋšŧž]+")
 _HYPHEN_RUN = re.compile(r"-+")
 
 _MAX_SLUG_BYTES = 200
