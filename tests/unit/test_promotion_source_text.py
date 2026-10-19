@@ -960,3 +960,39 @@ def test_reading_lines_preserves_live_descendant_text_tails_and_parents() -> Non
             == before
         )
         assert _lines_of(candidate) == lines
+
+
+def test_docx_nested_field_restores_outer_pageref_then_keeps_following_text() -> None:
+    """Only the innermost field controls whether its displayed result is kept."""
+    paragraph = (
+        '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> PAGEREF outer </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>outer page before</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> REF title </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>Forskrift om gebyr</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t>outer page after</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t> gjelder fortsatt.</w:t></w:r></w:p>"
+    )
+    payload = _docx_body(paragraph)
+    assert docx_lines(payload) == ("Forskrift om gebyr gjelder fortsatt.",)
+    assert docx_lines(payload) == ("Forskrift om gebyr gjelder fortsatt.",)
+
+
+def test_docx_empty_instruction_run_does_not_interrupt_pageref_keyword() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Forskrift om gebyr</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> PAGE</w:instrText></w:r>"
+        "<w:r><w:instrText/></w:r>"
+        "<w:r><w:instrText>REF bookmark </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:t>42</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        "<w:r><w:t> gjelder.</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Forskrift om gebyr gjelder.",)
