@@ -1,0 +1,23 @@
+[[equivalent]]
+file = "src/lovspor/legislative_crosswalk.py"
+symbol = "handle_starttag"
+registered = "2026-10-18, PR #613, from run 39010410346"
+mutation = """
+-            self.hidden_depth += 1
++            self.hidden_depth = 1
+"""
+justification = """
+`+= 1` and `= 1` differ only when `handle_starttag` sees a script or style
+tag while `hidden_depth` is already 1, i.e. a script/style start tag inside
+an open script/style element. The stdlib `html.parser.HTMLParser` never
+reports one: on a script or style start tag it enters CDATA (raw text) mode
+and hands everything up to the matching end tag to `handle_data`, so no
+start tag is emitted inside it (`<script><script>`, `<style><script>`,
+comment-wrapped and SVG-wrapped variants all checked on 3.12, 3.13, 3.14).
+A self-closing `<script/>` calls start then end, back to 0. So `hidden_depth`
+is never above 1 before the increment, and both spellings store 1.
+
+The argument relies on HTMLParser's raw-text handling, which the assumption
+test pins.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_html_parser_reports_no_start_tag_inside_script_or_style"

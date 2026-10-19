@@ -24,6 +24,7 @@ import subprocess
 import tomllib
 from datetime import UTC, datetime
 from email.message import EmailMessage
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -285,6 +286,35 @@ def test_assumption_codec_names_ignore_surrounding_quotes() -> None:
     for nameless in ('"', '""', ""):
         with pytest.raises(LookupError):
             b"x".decode(nameless)
+
+
+class _StartTags(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tags: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.tags.append(tag)
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        "<script><script>x</script></script>",
+        "<style><script>x</script>y</style>",
+        "<script>a<!--<script>b</script>-->c</script>",
+        "<svg><script><style>x</style></script></svg>",
+    ],
+)
+def test_assumption_html_parser_reports_no_start_tag_inside_script_or_style(page: str) -> None:
+    """Pins the argument that waives ``hidden_depth += 1`` -> ``hidden_depth = 1``
+    in ``legislative_crosswalk.py::_VisibleText.handle_starttag``: the stdlib
+    parser reads script and style content as raw text, so no start tag is
+    reported inside one and the depth never passes 1."""
+    parser = _StartTags()
+    parser.feed(page)
+    parser.close()
+    assert [tag for tag in parser.tags if tag in {"script", "style"}] in (["script"], ["style"])
 
 
 def _main_text(page: str, parser: html.HTMLParser | None) -> str | None:
