@@ -1,0 +1,23 @@
+name: Security audit
+
+# Shared audit from bartoszkobylinski/security-audit (milamber_assistant #205).
+# A secret in the checked-out tree fails this job; secrets in history, bandit
+# (high severity) and pip-audit findings are reported in the run summary only.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    uses: bartoszkobylinski/security-audit/.github/workflows/audit.yml@5972eca0d4e504e417a978cdee36cc5b3da43636 # feat/audit-workflow
+    with:
+      # Public repo: hosted minutes are free.
+      runner: '"ubuntu-latest"'
