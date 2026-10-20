@@ -24,7 +24,9 @@ Event types correspond to the orchestrator's per-document commit policy
 Local regulations (ADR-0016 Decision 3) carry their own subjects:
 ``promote(lokal-forskrift): <authority_id>/<slug> v<N>`` is ``added`` for
 v1 and ``updated`` for a later version, ``withdraw(lokal-forskrift): …`` is
-``removed``, and ``observe: …`` (an observation-interval refresh) is no event.
+``removed``, and ``observe: …`` (an observation-interval refresh) and
+``migration(lokal-forskrift): re-render …`` (an unchanged version's
+front matter re-rendered, #645) are no event.
 
 Pre-Sprint-4 commits used bulk-mode subjects (``sync: N new, M changed,
 …``) that don't tell us per-doc intent. For commits matching that
@@ -61,7 +63,9 @@ _PER_DOC_SUBJECT = re.compile(
 _MIGRATION_RENAME_SUBJECT = re.compile(r"^migration: rename ")
 # Not legal-history events: a re-render rewrites Markdown from unchanged input,
 # and an `observe:` commit refreshes local observation intervals (ADR-0016 3).
-_HISTORY_EXEMPT_SUBJECT = re.compile(r"^(?:migration: re-render |observe: )")
+_HISTORY_EXEMPT_SUBJECT = re.compile(
+    r"^(?:migration: re-render |migration\(lokal-forskrift\): re-render |observe: )"
+)
 # ADR-0016 Decision 3: a local regulation's per-version and withdrawal subjects.
 _LOCAL_SUBJECT = re.compile(
     r"^(?:promote\(lokal-forskrift\): \S+ v(?P<version>[1-9]\d*)"

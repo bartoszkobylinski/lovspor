@@ -122,7 +122,7 @@ def prepare(
     )
     if unchanged:
         return prepared
-    return prepared.model_copy(update={"markdown": _render(prepared, artifact)})
+    return prepared.model_copy(update={"markdown": render_prepared(prepared, artifact)})
 
 
 def received_form(prepared: Prepared) -> ReceivedForm:
@@ -222,7 +222,8 @@ def _free_slug(
     raise PromotionRefusedError(msg)
 
 
-def _render(prepared: Prepared, artifact: ArchivedArtifact | ReceivedArtifact) -> str:
+def render_prepared(prepared: Prepared, artifact: ArchivedArtifact | ReceivedArtifact) -> str:
+    """The rendering of ``prepared`` with the provenance ``artifact`` gives it."""
     document = LocalDocument(
         identity=prepared.identity,
         extracted=prepared.extracted,

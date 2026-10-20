@@ -1337,6 +1337,40 @@ make; a rerun prints `Unchanged`. The rules:
   rejected received document is refused, and `promote withdraw` withdraws
   one the same way as an observed one.
 
+#### Re-rendering an unchanged received version (#645)
+
+A received version promoted before the renderer learned a front-matter field
+(`status: "repealed"`, #639) keeps its old rendering: its `content_hash` has
+not moved, so `local` prints `Unchanged`, and `promote migrate` does not read
+received documents (#643). `promote received refresh` re-renders every current
+`basis: "received"` document of the checkout from the source its front matter
+names (`innsyn_request`, `source_sha256`), under the `klass_version` it was
+published with, and rewrites the Markdown where the bytes differ:
+
+```bash
+export LOVSPOR_INNSYN_DIR=/absolute/path/to/innsyn-workspace
+export LOVSPOR_OBSERVATORY_ROOT=/Volumes/T7/lovspor-observatory
+uv run lovspor promote received refresh --corpus /absolute/path/to/lovverk --dry-run
+uv run lovspor promote received refresh --corpus /absolute/path/to/lovverk
+```
+
+* It is a re-render, never a new version: `version`, `content_hash`,
+  `received_at`, the request, the source and its form stay as they are. A
+  re-rendering whose body or any of those fields would change is refused
+  (`Refused: <id>: …`, exit 1, the others still refreshed); a new text is
+  promoted with `local`.
+* It needs the same standing approval as `local`: the approval of exactly
+  this text at the running extractor. A held, rejected or withdrawn document
+  is refused. Read the `--dry-run` diff before approving again.
+* A document that re-renders byte-identically is reported as `unchanged` and
+  not written. Only the Markdown is written: the manifest, the observations
+  file and the evidence sidecar describe the same version and are left alone,
+  and nothing is recorded in the decision log.
+* It never commits. It prints the commit to make,
+  `migration(lokal-forskrift): re-render <authority>/<slug> front matter` (or
+  `… re-render front matter of N received documents`), which the history
+  derivation reads as no event: the law did not change, its rendering did.
+
 ### Backfill — every observed version, one commit each (ADR-0016 S6)
 
 `promote local` writes the one version you approved. `promote backfill`
