@@ -189,6 +189,21 @@ class TestExtractReceived:
         in_force = _received(minimal_pdf(LOVDATA_PRINT)).fields
         assert _received(minimal_pdf(REPEALED_PRINT)).fields.ikraft == in_force.ikraft
 
+    @pytest.mark.parametrize("stated", ["1. februar 2001", "straks"])
+    def test_the_texts_explicit_ikraft_survives_a_different_header_range(self, stated: str) -> None:
+        # operations.md #639: ikraft stays the text's statement, never the range start.
+        body = (*BODY, "§ 3. Ikrafttredelse", f"Forskriften trer i kraft {stated}.")
+        fields = _received(minimal_docx((*REPEALED_HEAD, PREAMBLE, *body)), DOCX).fields
+        assert fields.ikraft == (date(2001, 2, 1) if stated != "straks" else None)
+        assert fields.ikraft_text == ("straks" if stated == "straks" else None)
+        assert (fields.status, fields.ikraft_end) == (REPEALED.status, REPEALED.ikraft_end)
+
+    def test_an_invalid_range_does_not_discard_the_repeal_stamp(self) -> None:
+        lines = (*_docx_head("03.02.2001 - 31.02.2001", stamp=True), PREAMBLE, *BODY)
+        fields = _received(minimal_docx(lines), DOCX).fields
+        assert fields.status is RegulationStatus.REPEALED
+        assert fields.ikraft_end is None
+
     def test_the_extracted_text_does_not_move(self) -> None:
         repealed = _received(minimal_pdf(REPEALED_PRINT)).regulation
         assert repealed == _received(minimal_pdf(LOVDATA_PRINT)).regulation
