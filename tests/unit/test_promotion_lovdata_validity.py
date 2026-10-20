@@ -210,3 +210,46 @@ class TestExtractReceived:
 
     def test_the_observed_channel_still_holds_it(self) -> None:
         assert isinstance(extract_regulation(minimal_pdf(REPEALED_PRINT), PDF), HeldExtraction)
+
+
+@pytest.mark.parametrize(
+    ("last_line", "expected"),
+    [
+        ("OPPHEVET", HeaderValidity(status=RegulationStatus.REPEALED)),
+        (f"Ikrafttredelse {RANGE}", HeaderValidity(ikraft_end=date(2001, 3, 31))),
+    ],
+)
+def test_validity_on_the_last_metadata_line_is_read(
+    last_line: str, expected: HeaderValidity
+) -> None:
+    # The entire removed block supplies validity (operations.md #639), including
+    # its final line immediately before the contents boundary.
+    boundary = PRINT_HEAD.index("Innholdsfortegnelse")
+    head = tuple(line for line in PRINT_HEAD[:boundary] if not line.startswith("Ikrafttredelse"))
+    lines = (*head, last_line, *PRINT_HEAD[boundary:], PREAMBLE, *BODY)
+    assert _validity(lines) == expected
+
+
+def test_a_bare_metadata_label_cannot_borrow_a_range_from_the_published_text() -> None:
+    boundary = PRINT_HEAD.index("Innholdsfortegnelse")
+    head = tuple(line for line in PRINT_HEAD[:boundary] if not line.startswith("Ikrafttredelse"))
+    lines = (*head, "Ikrafttredelse", "Innholdsfortegnelse", RANGE, TITLE, PREAMBLE, *BODY)
+    stripped = strip_markup(lines, ReceivedForm.LOVDATA_PRINT)
+    assert stripped is not None
+    assert stripped.validity == HeaderValidity()
+    assert stripped.lines[0] == RANGE
+
+
+@pytest.mark.parametrize(
+    ("lines", "form"),
+    [(LOVTIDEND, ReceivedForm.LOVTIDEND), (ORIGINAL, ReceivedForm.AUTHORITY_ORIGINAL)],
+)
+def test_received_non_prints_do_not_promote_body_lines_to_validity(
+    lines: tuple[str, ...], form: ReceivedForm
+) -> None:
+    # models.RegulationFields and lovdata_markup specify the removed Lovdata
+    # block as the sole source of these fields, never another form's body.
+    payload = minimal_docx((*lines, "OPPHEVET", f"Ikrafttredelse {RANGE}"))
+    result = _received(payload, DOCX)
+    assert result.received_form is form
+    assert (result.fields.status, result.fields.ikraft_end) == (None, None)
