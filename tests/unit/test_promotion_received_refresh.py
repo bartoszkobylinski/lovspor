@@ -205,3 +205,69 @@ class TestRefusals:
         text = path.read_text(encoding="utf-8")
         path.write_text(re.sub(r"\ninnsyn_request: [^\n]*", "", text), encoding="utf-8")
         assert "does not name its received source (KeyError)" in self._refused(corpus)
+
+
+@pytest.mark.parametrize("mode", ["write", "dry-run", "refusal"])
+def test_batch_refresh_preserves_other_files_and_continues_after_a_refusal(
+    mode: str,
+    promoted: tuple[str, Path],
+    workspace: Path,
+    corpus: Path,
+    root: Path,
+    tmp_path: Path,
+) -> None:
+    """Operations #645 promises per-document refusal and Markdown-only batch writes."""
+    _, first = promoted
+    lines = tuple(line.replace("2001-02-03-9001", "2001-02-03-9006") for line in REPEALED_PRINT)
+    sha256 = _receive(workspace, minimal_pdf(lines), name="second.pdf")
+    assert _approve(sha256, tmp_path).exit_code == 0
+    result = _received("local", sha256, corpus)
+    assert result.exit_code == 0, result.output
+    [second] = [path for path in first.parent.glob("*.md") if path != first]
+    first_current, second_current = _stale(first), _stale(second)
+    if mode == "refusal":
+        # The lower id is visited first: its refusal must not stop the later refresh.
+        first.write_text(first.read_text(encoding="utf-8") + "\nEt tillegg.\n", encoding="utf-8")
+    before, log, held = tree(corpus), _log(root), tree(workspace)
+    result = _refresh(corpus, *(("--dry-run",) if mode == "dry-run" else ()))
+    assert result.exit_code == (1 if mode == "refusal" else 0), result.output
+    expected = before.copy()
+    if mode != "dry-run":
+        expected[second.relative_to(corpus).as_posix()] = second_current.encode("utf-8")
+        if mode == "write":
+            expected[first.relative_to(corpus).as_posix()] = first_current.encode("utf-8")
+    assert tree(corpus) == expected
+    assert _log(root) == log
+    assert tree(workspace) == held
+    if mode == "refusal":
+        assert "Refused: lf-20010203-9001: its body would change" in result.stderr
+        assert f"re-render 4646/{second.stem} front matter" in result.stdout
+    elif mode == "dry-run":
+        assert result.stdout.count('+status: "repealed"') == 2
+        assert result.stdout.endswith("Dry run: nothing written.\n")
+    else:
+        assert "re-render front matter of 2 received documents" in result.stdout
+        again = _refresh(corpus)
+        assert again.exit_code == 0, again.output
+        assert again.stdout.count("unchanged; its rendering is current") == 2
+        assert "nothing to commit" in again.stdout
+        assert tree(corpus) == expected
+
+
+@pytest.mark.parametrize("damage", ["missing", "corrupt"])
+def test_refresh_refuses_a_missing_or_corrupt_named_source(
+    damage: str, promoted: tuple[str, Path], workspace: Path, corpus: Path
+) -> None:
+    """A refresh must use the same hash-verified held source as received local."""
+    sha256, path = promoted
+    _stale(path)
+    blob = workspace / "received" / sha256[:2] / sha256
+    assert blob.is_file()
+    if damage == "missing":
+        blob.unlink()
+    else:
+        blob.write_bytes(b"not the received document")
+    reason = TestRefusals()._refused(corpus)
+    assert (
+        "missing or unreadable" if damage == "missing" else "does not hash to its name"
+    ) in reason
