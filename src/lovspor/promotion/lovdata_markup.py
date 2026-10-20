@@ -33,7 +33,11 @@ this module: a Lovdata copy found on a website is still held.
 The id is a fact about the regulation, not markup, and is minted from the text
 before removal (ADR-0016 §1a): the lines that state it — Lovdata's ``Dato``
 line (with its value line in a DOCX export), or Lovtidend's ``Kunngjort``
-line — are returned beside the published lines for identity to read.
+line — are returned beside the published lines for identity to read. What a
+print's block states about a repealed regulation — the ``OPPHEVET`` stamp and
+the end of the ``Ikrafttredelse`` range — is read from the removed block the
+same way and returned as its ``validity`` (#639); the published lines do not
+change. Every other form states none.
 
 A Lovdata print whose metadata block cannot be bounded is ``None``: it is held,
 never published with part of the block left in. ``residual_markup`` is the
@@ -46,8 +50,13 @@ import re
 from collections.abc import Iterator
 from typing import NamedTuple
 
-from lovspor.promotion.lovdata_header import LOVDATA_PRINT, LOVDATA_PRINT_CHROME, lovdata_dato
-from lovspor.promotion.models import ReceivedForm
+from lovspor.promotion.lovdata_header import (
+    LOVDATA_PRINT,
+    LOVDATA_PRINT_CHROME,
+    header_validity,
+    lovdata_dato,
+)
+from lovspor.promotion.models import HeaderValidity, ReceivedForm
 
 _UTSKRIFT = re.compile(
     r"Utskrift\s+fra\s+Lovdata\s+-\s+\d{1,2}\.\d{1,2}\.\d{4}(?:\s+\d{1,2}:\d{2})?"
@@ -86,10 +95,11 @@ Lines = tuple[str, ...]
 
 
 class Stripped(NamedTuple):
-    """The lines to publish, and the removed lines that state the regulation's id."""
+    """The lines to publish, the removed lines that state the id, and the block's validity."""
 
     lines: Lines
     identification: Lines
+    validity: HeaderValidity = HeaderValidity()
 
 
 def received_form(lines: Lines) -> ReceivedForm:
@@ -130,7 +140,7 @@ def _lovdata_print(lines: Lines) -> Stripped | None:
     if bound is None:
         return None
     published = tuple(_annotation_free(_without_contents(kept[bound + 1 :])))
-    return Stripped(published, kept[dato[0] : dato[1] + 1])
+    return Stripped(published, kept[dato[0] : dato[1] + 1], header_validity(kept[:bound]))
 
 
 def _is_chrome_line(line: str) -> bool:

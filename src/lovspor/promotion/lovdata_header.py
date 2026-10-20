@@ -26,12 +26,23 @@ counter beside the page URL or the ``Lovdata - <title>`` page title (#519).
 Requiring the chrome keeps a regulation that merely links Lovdata in its body
 from being held: a bare URL, or ``<title> - Lovdata`` as a link's text, is not
 one.
+
+``header_validity`` reads what the block states about a repealed regulation
+(#639): Lovdata's ``OPPHEVET`` stamp, a line of its own, and the end of the
+``Ikrafttredelse`` range, ``15.02.2020 - 31.03.2020`` as Lovdata sets it with
+an en dash (its value on the next line in a DOCX export). Only two real
+``dd.mm.yyyy`` dates joined by a hyphen, an en dash or an em dash are a range;
+anything else states no end.
 """
 
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import NamedTuple
+
+from lovspor.promotion.dates import parse_stated_date
+from lovspor.promotion.models import HeaderValidity, RegulationStatus
 
 _MIN_FIELDS = 3
 _BLOCK_SPAN = 10
@@ -42,6 +53,11 @@ _FIELD = re.compile(
 )
 _LOVDATA_ID = re.compile(r"[ \t]*(?:LOV|FOR)-\d{4}-\d{2}-\d{2}-\d+")
 _BARE_ID = re.compile(r"[ \t]*(?:LOV|FOR)-\d{4}-\d{2}-\d{2}-\d+[ \t]*")
+
+_OPPHEVET = re.compile(r"[ \t]*OPPHEVET[ \t]*")
+_IKRAFT = re.compile(r"[ \t]*Ikrafttredelse\b[ \t]*:?[ \t]*(.*)")
+_NUMERIC = r"\d{1,2}\.\d{1,2}\.\d{4}"
+_RANGE = re.compile(rf"[ \t]*{_NUMERIC}[ \t]*[-\u2013\u2014][ \t]*({_NUMERIC})[ \t]*")
 
 LOVDATA_PRINT = re.compile(r"utskrift\s+fra\s+lovdata", re.IGNORECASE)
 _PRINT_CHROME = r"(?:\d{1,2}[./]\d{1,2}[./]\d{2,4}(?:,?\s*\d{1,2}:\d{2})?|side\s+\d+\s+av\s+\d+)"
@@ -106,3 +122,26 @@ def _id_holder(lines: tuple[str, ...], anchor: _Field) -> int | None:
     if anchor.bare and following < len(lines) and _BARE_ID.fullmatch(lines[following]):
         return following
     return None
+
+
+def header_validity(block: tuple[str, ...]) -> HeaderValidity:
+    """What Lovdata's block ``block`` states about the regulation's validity."""
+    repealed = any(_OPPHEVET.fullmatch(line) for line in block)
+    return HeaderValidity(
+        status=RegulationStatus.REPEALED if repealed else None,
+        ikraft_end=_ikraft_end(block),
+    )
+
+
+def _ikraft_end(block: tuple[str, ...]) -> date | None:
+    for index, line in enumerate(block):
+        label = _IKRAFT.fullmatch(line)
+        if label is not None:
+            value = label.group(1) or _following(block, index)
+            stated = _RANGE.fullmatch(value)
+            return None if stated is None else parse_stated_date(stated.group(1))
+    return None
+
+
+def _following(block: tuple[str, ...], index: int) -> str:
+    return block[index + 1] if index + 1 < len(block) else ""
