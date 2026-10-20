@@ -57,7 +57,9 @@ _BARE_ID = re.compile(r"[ \t]*(?:LOV|FOR)-\d{4}-\d{2}-\d{2}-\d+[ \t]*")
 _OPPHEVET = re.compile(r"[ \t]*OPPHEVET[ \t]*")
 _IKRAFT = re.compile(r"[ \t]*Ikrafttredelse\b[ \t]*:?[ \t]*(.*)")
 _NUMERIC = r"\d{1,2}\.\d{1,2}\.\d{4}"
-_RANGE = re.compile(rf"[ \t]*{_NUMERIC}[ \t]*[-\u2013\u2014][ \t]*({_NUMERIC})[ \t]*")
+_RANGE = re.compile(
+    rf"[ \t]*(?P<start>{_NUMERIC})[ \t]*[-\u2013\u2014][ \t]*(?P<end>{_NUMERIC})[ \t]*"
+)
 
 LOVDATA_PRINT = re.compile(r"utskrift\s+fra\s+lovdata", re.IGNORECASE)
 _PRINT_CHROME = r"(?:\d{1,2}[./]\d{1,2}[./]\d{2,4}(?:,?\s*\d{1,2}:\d{2})?|side\s+\d+\s+av\s+\d+)"
@@ -138,9 +140,16 @@ def _ikraft_end(block: tuple[str, ...]) -> date | None:
         label = _IKRAFT.fullmatch(line)
         if label is not None:
             value = label.group(1) or _following(block, index)
-            stated = _RANGE.fullmatch(value)
-            return None if stated is None else parse_stated_date(stated.group(1))
+            return _range_end(value)
     return None
+
+
+def _range_end(value: str) -> date | None:
+    """The range's last day, when both of its ends are real dates."""
+    stated = _RANGE.fullmatch(value)
+    if stated is None or parse_stated_date(stated.group("start")) is None:
+        return None
+    return parse_stated_date(stated.group("end"))
 
 
 def _following(block: tuple[str, ...], index: int) -> str:
