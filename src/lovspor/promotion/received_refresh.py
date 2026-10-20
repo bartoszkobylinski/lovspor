@@ -2,8 +2,8 @@
 
 A received version promoted before the renderer learned a front-matter field
 (``status: "repealed"``, #639) keeps its old rendering: its ``content_hash``
-has not moved, so ``promote received local`` stops at ``Unchanged`` and
-``promote migrate`` does not read the received channel (#643). This command
+has not moved, so ``promote received local`` stops at ``Unchanged``, and
+``promote migrate`` never rewrites the Markdown (#643). This command
 re-renders every current ``basis: "received"`` document from its source in
 the innsyn workspace, the one its front matter names (``innsyn_request`` and
 ``source_sha256``), and rewrites the Markdown only where the bytes differ.
@@ -127,7 +127,7 @@ def is_received(document: Published) -> bool:
 
 def plan_refresh(inputs: RefreshInputs, document: Published) -> Refresh | None:
     """The document's re-rendering, ``None`` when it is byte-identical, or a refusal."""
-    artifact = _source(inputs.workspace, document)
+    artifact = named_source(inputs.workspace, document)
     klass_version = published_klass_version(document)
     authority = received_authority(inputs.workspace, document.record.authority_id, klass_version)
     decision = _standing(inputs.decisions, artifact.key)
@@ -162,7 +162,7 @@ def refresh_subject(refreshes: list[Refresh]) -> str:
     return REFRESH_BATCH_SUBJECT.format(count=len(refreshes))
 
 
-def _source(workspace: InnsynWorkspace, document: Published) -> ReceivedArtifact:
+def named_source(workspace: InnsynWorkspace, document: Published) -> ReceivedArtifact:
     """The received document the published rendering names as its source."""
     front = front_matter(document.markdown)
     try:

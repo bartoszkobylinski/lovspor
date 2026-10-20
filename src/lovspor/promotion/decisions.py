@@ -401,7 +401,7 @@ class MigratedRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["migrated"] = "migrated"
-    artifact: ArtifactKey
+    artifact: SourceKey
     recorded_at: AwareDatetime
     doc_id: str
     version: int

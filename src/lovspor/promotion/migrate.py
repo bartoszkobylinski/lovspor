@@ -57,18 +57,19 @@ from lovspor.promotion.carry import (
 )
 from lovspor.promotion.corpus import LOCAL_DIR, MANIFEST_NAME, CorpusCheckout, LocalRecord
 from lovspor.promotion.corpus import manifest_text as render_manifest
-from lovspor.promotion.decisions import ArtifactKey, DecisionLog, HumanDecision
+from lovspor.promotion.decisions import ArtifactKey, DecisionLog, HumanDecision, SourceKey
 from lovspor.promotion.evidence import evidence_path
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
 from lovspor.promotion.identity import mint_identity
 from lovspor.promotion.intervals import reproduction
 from lovspor.promotion.models import (
     Authority,
-    ExtractedDocument,
+    ExtractionResult,
     HeldExtraction,
     HeldIdentity,
     LocalDocument,
     ObservedSource,
+    ReceivedSource,
 )
 from lovspor.promotion.plan import Prepared
 from lovspor.promotion.render import render_local_regulation
@@ -117,7 +118,7 @@ class Migration(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     doc_id: str
-    key: ArtifactKey
+    key: SourceKey
     record: LocalRecord
     from_version: int
     approval: HumanDecision
@@ -193,14 +194,24 @@ def plan_migration(inputs: MigrationInputs, document: Published, authority: Auth
     prepared = _reread(inputs, document, key, authority)
     current = standing_approval(inputs.decisions.latest_decision(key), prepared)
     earlier = _require_earlier(_Subject(inputs, document, authority), prepared)
-    approvals = (*earlier, current)
+    return assemble(inputs, document, prepared, (*earlier, current))
+
+
+def assemble(
+    inputs: MigrationInputs,
+    document: Published,
+    prepared: Prepared,
+    approvals: tuple[VersionApproval, ...],
+) -> Migration:
+    """The migration of ``document`` on ``approvals``, the current version's last."""
+    current = approvals[-1]
     files = {
         document.observations_path: _observations(document, approvals, inputs.now),
         **_evidence(inputs.corpus, document, prepared),
     }
     return Migration(
         doc_id=document.doc_id,
-        key=key,
+        key=current.key,
         record=document.record.model_copy(update={"extractor_version": EXTRACTOR_VERSION}),
         from_version=document.record.extractor_version,
         approval=current.decision,
@@ -286,13 +297,26 @@ def _reread(
     inputs: MigrationInputs, document: Published, key: ArtifactKey, authority: Authority
 ) -> Prepared:
     """The source re-extracted by the running extractor, refused unless byte-identical."""
-    extracted = _extracted(inputs, document, key)
-    identity = mint_identity(extracted.regulation, authority, inputs.corpus.central_ref_ids())
+    artifact = read_artifact(inputs.log, inputs.fetches(key.authority_id), key, None)
+    extracted = extract_regulation(artifact.payload, artifact.content_type)
+    prepared = same_text(inputs.corpus, document, extracted, authority)
+    refuse_new_rendering(document, prepared, _published_source(document))
+    return prepared
+
+
+def same_text(
+    corpus: CorpusCheckout, document: Published, extracted: ExtractionResult, authority: Authority
+) -> Prepared:
+    """``document``'s version as re-extracted, refused unless it is the same id and text."""
+    if isinstance(extracted, HeldExtraction):
+        msg = f"{document.doc_id}: extractor v{EXTRACTOR_VERSION} holds its source "
+        raise PromotionRefusedError(msg + f"({extracted.reason.value}: {extracted.detail})")
+    identity = mint_identity(extracted.regulation, authority, corpus.central_ref_ids())
     if isinstance(identity, HeldIdentity) or identity.doc_id != document.doc_id:
         msg = f"{document.doc_id}: extractor v{EXTRACTOR_VERSION} names its text otherwise"
         raise PromotionRefusedError(msg)
     _refuse_new_text(document, identity.content_hash)
-    prepared = Prepared(
+    return Prepared(
         identity=identity,
         extracted=extracted,
         slug=document.record.slug,
@@ -300,17 +324,6 @@ def _reread(
         unchanged=True,
         markdown=document.markdown,
     )
-    _refuse_new_rendering(document, prepared)
-    return prepared
-
-
-def _extracted(inputs: MigrationInputs, document: Published, key: ArtifactKey) -> ExtractedDocument:
-    artifact = read_artifact(inputs.log, inputs.fetches(key.authority_id), key, None)
-    extracted = extract_regulation(artifact.payload, artifact.content_type)
-    if isinstance(extracted, HeldExtraction):
-        msg = f"{document.doc_id}: extractor v{EXTRACTOR_VERSION} holds its source "
-        raise PromotionRefusedError(msg + f"({extracted.reason.value}: {extracted.detail})")
-    return extracted
 
 
 def _refuse_new_text(document: Published, content_hash: str) -> None:
@@ -338,14 +351,17 @@ def _published_source(document: Published) -> ObservedSource:
         raise PromotionRefusedError(msg) from exc
 
 
-def _refuse_new_rendering(document: Published, prepared: Prepared) -> None:
+def refuse_new_rendering(
+    document: Published, prepared: Prepared, source: ObservedSource | ReceivedSource
+) -> None:
+    """Refuse unless ``prepared``, rendered with ``source``, is ``document``'s Markdown."""
     rendered = render_local_regulation(
         LocalDocument(
             identity=prepared.identity,
             extracted=prepared.extracted,
             slug=prepared.slug,
             version=prepared.version,
-            source=_published_source(document),
+            source=source,
         )
     )
     if rendered != document.markdown:
@@ -424,7 +440,7 @@ def _version_approval(
 
 def _require_identical_bytes(subject: _Subject, version: int, content_hash: str) -> None:
     """An earlier version's published Markdown re-rendered byte-identically, or a refusal."""
-    then = _published_then(subject, version, content_hash)
+    then = published_then(subject.inputs.corpus, subject.document, version, content_hash)
     try:
         _reread(subject.inputs, then, _source_key(then), subject.authority)
     except PromotionRefusedError as exc:
@@ -434,10 +450,12 @@ def _require_identical_bytes(subject: _Subject, version: int, content_hash: str)
         raise PromotionRefusedError(msg) from exc
 
 
-def _published_then(subject: _Subject, version: int, content_hash: str) -> Published:
+def published_then(
+    corpus: CorpusCheckout, document: Published, version: int, content_hash: str
+) -> Published:
     """The document as an earlier version's commit published it."""
-    record = subject.document.record
-    text = historical_markdown(subject.inputs.corpus, record.markdown_path, version, content_hash)
+    record = document.record
+    text = historical_markdown(corpus, record.markdown_path, version, content_hash)
     if text is None:
         msg = (
             "its published bytes are not in this checkout's history, so they cannot be shown "
@@ -445,7 +463,7 @@ def _published_then(subject: _Subject, version: int, content_hash: str) -> Publi
         )
         raise PromotionRefusedError(msg)
     then = record.model_copy(update={"version": version, "content_hash": content_hash})
-    return subject.document.model_copy(update={"record": then, "markdown": text})
+    return document.model_copy(update={"record": then, "markdown": text})
 
 
 def _observations(

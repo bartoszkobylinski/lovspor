@@ -1341,8 +1341,8 @@ make; a rerun prints `Unchanged`. The rules:
 
 A received version promoted before the renderer learned a front-matter field
 (`status: "repealed"`, #639) keeps its old rendering: its `content_hash` has
-not moved, so `local` prints `Unchanged`, and `promote migrate` does not read
-received documents (#643). `promote received refresh` re-renders every current
+not moved, so `local` prints `Unchanged`, and `promote migrate` never rewrites
+the Markdown (#643). `promote received refresh` re-renders every current
 `basis: "received"` document of the checkout from the source its front matter
 names (`innsyn_request`, `source_sha256`), under the `klass_version` it was
 published with, and rewrites the Markdown where the bytes differ:
@@ -1521,6 +1521,7 @@ identical:
 
 ```bash
 export LOVSPOR_OBSERVATORY_ROOT=/Volumes/T7/lovspor-observatory
+export LOVSPOR_INNSYN_DIR=/absolute/path/to/innsyn-workspace
 uv run lovspor promote migrate --corpus /absolute/path/to/lovverk --dry-run
 uv run lovspor promote migrate --corpus /absolute/path/to/lovverk
 git -C /absolute/path/to/lovverk add -- lokale-forskrifter
@@ -1537,6 +1538,17 @@ version and its blobs), then the same two `migrate` runs:
 ```bash
 uv run lovspor promote approve --authority 3118 --artifact <sha256> --decision decision-3118.json
 ```
+
+A document promoted from a received text (`basis: "received"`, #643) names
+its source by `innsyn_request` and `source_sha256`, not by a URL, so
+`migrate` re-reads it from the innsyn workspace `LOVSPOR_INNSYN_DIR` names —
+the read `promote received preview` makes — and carries its approval on the
+same terms: byte-identical rendering, under the `klass_version` it was
+published with; an earlier received version, on the bytes its own commit
+published. Without `LOVSPOR_INNSYN_DIR` each received document is refused
+with that reason and observed documents still migrate. A received document
+refused for a byte difference is re-approved with `promote received approve
+--request <innsyn_request> --document <sha256>`.
 
 `--dry-run` prints, per carried version, the approval it carries (time,
 extractor, basis), then the unified diff the run would write; it writes and
