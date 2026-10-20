@@ -149,6 +149,27 @@ class ReceivedForm(StrEnum):
     AUTHORITY_ORIGINAL = "authority_original"
 
 
+class RegulationStatus(StrEnum):
+    """A regulation's status, as Lovdata's block states it (#639); only a stamp is read."""
+
+    REPEALED = "repealed"
+
+
+class HeaderValidity(BaseModel):
+    """What Lovdata's removed metadata block states about the regulation's validity (#639).
+
+    ``status`` is ``repealed`` when the block carries Lovdata's ``OPPHEVET``
+    stamp, and ``ikraft_end`` the last day of the ``Ikrafttredelse`` range
+    (``15.02.2020 - 31.03.2020``). A block that states neither leaves both
+    ``None``: a regulation is never asserted to be in force.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: RegulationStatus | None = None
+    ikraft_end: date | None = None
+
+
 class ExtractionHoldReason(StrEnum):
     """Why extracted text may not be published (ADR-0016 4h): held, counted, never dropped."""
 
@@ -196,7 +217,9 @@ class RegulationFields(BaseModel):
     in-force phrase that is not a date ("straks") is kept verbatim in
     ``ikraft_text``. Each is the value every statement of the text agrees on
     (``stated_dates.py``); statements that disagree leave it ``None``. Nothing
-    here is filled from an observation time.
+    here is filled from an observation time. ``status`` and ``ikraft_end`` are
+    set on the received channel only, from Lovdata's removed block
+    (:class:`HeaderValidity`), and stay ``None`` when it states nothing.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -207,6 +230,8 @@ class RegulationFields(BaseModel):
     vedtatt_av: str | None = None
     ikraft: date | None = None
     ikraft_text: str | None = None
+    status: RegulationStatus | None = None
+    ikraft_end: date | None = None
 
 
 class ExtractedDocument(BaseModel):

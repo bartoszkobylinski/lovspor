@@ -8,11 +8,14 @@ enters the repository.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from lovspor.promotion import ExtractedDocument, ExtractionHoldReason, HeldExtraction
 from lovspor.promotion.extract import extract_regulation
-from lovspor.promotion.lovdata_header import has_lovdata_header
+from lovspor.promotion.lovdata_header import has_lovdata_header, header_validity
+from lovspor.promotion.models import RegulationStatus
 from tests.unit.promotion_fixtures import REGULATION_LINES, html_page, minimal_docx, pdf_pages
 
 HEADER = (
@@ -225,3 +228,22 @@ def test_metadata_header_preserves_the_documented_hold_order(
     held = extract_regulation(payload, "text/html; charset=utf-8")
     assert isinstance(held, HeldExtraction)
     assert (held.reason, held.detail) == (ExtractionHoldReason.LOVDATA_COPY, expected_detail)
+
+
+def test_validity_range_on_the_final_docx_line_keeps_its_end_date() -> None:
+    block = ("Dato: FOR-2020-02-15-9001", "Ikrafttredelse", "15.02.2020 \u2013 31.03.2020")
+    validity = header_validity(block)
+    assert validity.ikraft_end == date(2020, 3, 31)
+    assert validity.status is None
+
+
+@pytest.mark.parametrize("label", ["Ikrafttredelse", "Ikrafttredelse:"])
+@pytest.mark.parametrize("repealed", [False, True])
+def test_validity_label_without_a_following_value_states_no_end(label: str, repealed: bool) -> None:
+    prefix = ("OPPHEVET",) if repealed else ()
+    validity = header_validity((*prefix, "Dato: FOR-2020-02-15-9001", label))
+    assert validity.ikraft_end is None
+    if repealed:
+        assert validity.status is RegulationStatus.REPEALED
+    else:
+        assert validity.status is None

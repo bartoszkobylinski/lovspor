@@ -32,7 +32,10 @@ not held as ``lovdata_copy``. It is held as ``lovdata_copy`` instead when the
 metadata block cannot be bounded, or when anything of Lovdata's is left after
 removal. The lines that stated the id are kept for identity (§1a), and a text
 whose block names no enacting organ is read for a state instrument
-(``Fastsatt ved kgl.res.``, A1-4). The observed channel never calls it.
+(``Fastsatt ved kgl.res.``, A1-4). What a Lovdata print's block states about a
+repealed regulation fills ``status`` and ``ikraft_end`` (#639). It is read
+beside the text, never from it, so the extracted text is what it was without
+the stamp. The observed channel never calls it.
 """
 
 from __future__ import annotations
@@ -184,7 +187,10 @@ def _as_received(
     removed = "\n".join(stripped.identification) if stripped.identification else None
     regulation = result.regulation.model_copy(update={"removed_identification": removed})
     issuer = result.fields.vedtatt_av or instrument_issuer(regulation.identification_block)
-    fields = result.fields.model_copy(update={"vedtatt_av": issuer})
+    stated = stripped.validity
+    fields = result.fields.model_copy(
+        update={"vedtatt_av": issuer, "status": stated.status, "ikraft_end": stated.ikraft_end}
+    )
     update = {"regulation": regulation, "fields": fields, "received_form": received}
     return result.model_copy(update=update)
 

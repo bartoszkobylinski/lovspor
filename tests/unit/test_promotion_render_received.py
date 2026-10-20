@@ -7,7 +7,7 @@ place by the received axis, and nothing in the front matter points at a URL.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 import yaml
@@ -23,7 +23,7 @@ from lovspor.promotion import (
     mint_identity,
 )
 from lovspor.promotion.extract import extract_regulation
-from lovspor.promotion.models import ReceivedForm
+from lovspor.promotion.models import ReceivedForm, RegulationStatus
 from lovspor.promotion.render import render_local_regulation
 from tests.unit.promotion_fixtures import REGULATION_LINES, html_page
 
@@ -163,3 +163,53 @@ def test_the_received_form_follows_the_saksnummer(form: ReceivedForm) -> None:
     source = _source().model_copy(update={"received_form": form})
     markdown = render_local_regulation(_document(source))
     assert f'\ninnsyn_saksnummer: null\nreceived_form: "{form.value}"\nsource_sha256: ' in markdown
+
+
+def _stated(**validity: object) -> LocalDocument:
+    document = _document(_source())
+    fields = document.extracted.fields.model_copy(update=validity)
+    extracted = document.extracted.model_copy(update={"fields": fields})
+    return document.model_copy(update={"extracted": extracted})
+
+
+def test_a_repealed_version_says_so_right_after_ikraft_text() -> None:
+    repealed = _stated(status=RegulationStatus.REPEALED, ikraft_end=date(2020, 3, 31))
+    keys, values = _front_matter(render_local_regulation(repealed))
+    at = RECEIVED_FRONT_MATTER_KEYS.index("ikraft_text") + 1
+    expected = (*RECEIVED_FRONT_MATTER_KEYS[:at], "status", "ikraft_end")
+    assert keys == (*expected, *RECEIVED_FRONT_MATTER_KEYS[at:])
+    assert (values["status"], values["ikraft_end"]) == ("repealed", "2020-03-31")
+
+
+def test_repealed_rendering_is_byte_identical_and_preserves_body_and_hash() -> None:
+    original = render_local_regulation(_document(_source()))
+    document = _stated(status=RegulationStatus.REPEALED, ikraft_end=date(2020, 3, 31))
+    first = render_local_regulation(document)
+    assert render_local_regulation(document).encode("utf-8") == first.encode("utf-8")
+    assert first.split("---\n", 2)[2] == original.split("---\n", 2)[2]
+    _, before = _front_matter(original)
+    _, after = _front_matter(first)
+    assert {
+        key: value for key, value in after.items() if key not in {"status", "ikraft_end"}
+    } == before
+
+
+@pytest.mark.parametrize(
+    ("validity", "key"),
+    [
+        ({"status": RegulationStatus.REPEALED}, "status"),
+        ({"ikraft_end": date(2020, 3, 31)}, "ikraft_end"),
+    ],
+)
+def test_each_validity_key_is_written_only_when_stated(
+    validity: dict[str, object], key: str
+) -> None:
+    keys, _ = _front_matter(render_local_regulation(_stated(**validity)))
+    assert [k for k in keys if k not in RECEIVED_FRONT_MATTER_KEYS] == [key]
+
+
+def test_a_version_stating_no_validity_renders_as_before() -> None:
+    document = _document(_source())
+    unstated = _stated(status=None, ikraft_end=None)
+    assert render_local_regulation(unstated) == render_local_regulation(document)
+    assert "status" not in render_local_regulation(document).split("---\n")[1]

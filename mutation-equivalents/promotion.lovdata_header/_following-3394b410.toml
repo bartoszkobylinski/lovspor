@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/promotion/lovdata_header.py"
+symbol = "_following"
+registered = "2026-10-20, PR #647, from run 39361265492"
+mutation = """
+-    return block[index + 1] if index + 1 < len(block) else ""
++    return block[index + 1] if index + 1 < len(block) else "XXXX"
+"""
+justification = """
+The default is returned only when the Ikrafttredelse label is the block's last
+line, and its sole consumer is `_range_end`, which passes it to
+`_RANGE.fullmatch`. That pattern requires a dd.mm.yyyy date at both ends, so
+neither "" nor "XXXX" can match it: both make `_range_end` return None, and
+`_ikraft_end` returns that None either way (Python's own re module, not a
+dependency). No input can tell the two defaults apart.
+"""
