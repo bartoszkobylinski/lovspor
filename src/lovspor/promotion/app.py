@@ -9,6 +9,7 @@ from lovspor.promotion import (
     batch_commands,
     migrate_commands,
     received_commands,
+    received_refresh,
 )
 from lovspor.promotion.commands import promote_app
 
@@ -18,4 +19,5 @@ __all__ = [
     "migrate_commands",
     "promote_app",
     "received_commands",
+    "received_refresh",
 ]

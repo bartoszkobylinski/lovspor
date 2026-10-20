@@ -257,11 +257,15 @@ def planned_diff(corpus: CorpusCheckout, files: dict[str, str]) -> str:
     return "".join(chunks)
 
 
-def _front_matter(document: Published) -> dict[str, str]:
-    """The raw value of every front-matter line, by key."""
-    block = document.markdown.removeprefix("---\n").partition("\n---\n")[0]
+def front_matter(markdown: str) -> dict[str, str]:
+    """The raw value of every front-matter line of ``markdown``, by key."""
+    block = markdown.removeprefix("---\n").partition("\n---\n")[0]
     pairs = (line.partition(": ") for line in block.split("\n"))
     return {key: value for key, separator, value in pairs if separator}
+
+
+def _front_matter(document: Published) -> dict[str, str]:
+    return front_matter(document.markdown)
 
 
 def _source_key(document: Published) -> ArtifactKey:
