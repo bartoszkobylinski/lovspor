@@ -48,3 +48,18 @@ def test_a_malformed_promote_subject_falls_to_the_generic_rule(subject: str) -> 
 def test_central_subjects_are_read_as_before() -> None:
     assert _event_type("remove(forskrift): eksempelforskrift") == "removed"
     assert _event_type("migration: re-render 3 documents (renderer v9)") is None
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        "migration(lokal-forskrift): re-render 5025/molmannsdalslia front matter",
+        "migration(lokal-forskrift): re-render front matter of 3 received documents",
+    ],
+)
+def test_a_received_front_matter_re_render_is_no_event(subject: str) -> None:
+    assert _event_type(subject) is None
+
+
+def test_another_local_migration_subject_is_still_an_event() -> None:
+    assert _event_type("migration(lokal-forskrift): re-rendered 0301/x") == "added"
