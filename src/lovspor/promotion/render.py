@@ -12,7 +12,11 @@ as a flow list. The provenance is fixed: ``source_license: "åndsverkloven §
 with ``observed_at_first`` and ``source_url``, or ``"received"`` (ADR-0016 A5)
 with ``received_at``, ``innsyn_request``, ``innsyn_saksnummer`` and
 ``received_form`` (``lovdata_print``, ``lovtidend`` or ``authority_original``,
-A1-3) in their place — a received version names no URL. There is no
+A1-3) in their place — a received version names no URL. A repealed
+regulation adds ``status: "repealed"`` and ``ikraft_end`` right after
+``ikraft_text``, each only when its source states it (Lovdata's ``OPPHEVET``
+stamp and ``Ikrafttredelse`` range, #639): a version that states neither
+renders exactly as before, and none is ever said to be in force. There is no
 ``retrieved_at`` (Lovdata download time) and no ``observed_at_last`` (it would
 churn the file daily).
 
@@ -35,7 +39,13 @@ import re
 
 from lovspor.errors import PromotionRenderError
 from lovspor.promotion.identity import content_hash
-from lovspor.promotion.models import Authority, LocalDocument, ObservedSource, ReceivedSource
+from lovspor.promotion.models import (
+    Authority,
+    LocalDocument,
+    ObservedSource,
+    ReceivedSource,
+    RegulationFields,
+)
 
 LOCAL_RENDERER_VERSION = 1
 DOC_TYPE = "lokal-forskrift"
@@ -82,8 +92,17 @@ def _fields(document: LocalDocument) -> tuple[tuple[str, str], ...]:
         ("vedtatt_av", _scalar(fields.vedtatt_av)),
         ("ikraft", _scalar(fields.ikraft.isoformat() if fields.ikraft else None)),
         ("ikraft_text", _scalar(fields.ikraft_text)),
+        *_validity(fields),
         *_provenance(document),
     )
+
+
+def _validity(fields: RegulationFields) -> _Fields:
+    """``status`` and ``ikraft_end``, each only when the source states it (#639)."""
+    end = fields.ikraft_end.isoformat() if fields.ikraft_end else None
+    status = fields.status.value if fields.status else None
+    stated = (("status", status), ("ikraft_end", end))
+    return tuple((key, _scalar(value)) for key, value in stated if value is not None)
 
 
 def _provenance(document: LocalDocument) -> tuple[tuple[str, str], ...]:

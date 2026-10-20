@@ -1322,6 +1322,14 @@ make; a rerun prints `Unchanged`. The rules:
   names (`Fastsatt ved kgl.res.`, `Fastsatt av Miljødirektoratet`), never
   assumed to be the kommunestyre (A1-4). The observed channel still holds
   every Lovdata copy.
+* A repealed regulation is published, and says so (owner decision on #639):
+  when a Lovdata print's block carries the `OPPHEVET` stamp the front matter
+  adds `status: "repealed"` right after `ikraft_text`, and when its
+  `Ikrafttredelse` is a range (`15.02.2020 - 31.03.2020`) it adds
+  `ikraft_end` with the range's last day. Both are read from the block before
+  removal; a source that states neither leaves both keys out, so nothing is
+  ever said to be in force. `ikraft` stays the text's own statement, never
+  the range's start.
 * No file name, recipient mailbox or person's name is published. The
   reviewer is named by role, as for an observed promotion.
 * A document whose versions were observed is refused: switching the primary
