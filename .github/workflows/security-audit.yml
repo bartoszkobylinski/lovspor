@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   audit:
-    uses: bartoszkobylinski/security-audit/.github/workflows/audit.yml@5972eca0d4e504e417a978cdee36cc5b3da43636 # feat/audit-workflow
+    uses: bartoszkobylinski/security-audit/.github/workflows/audit.yml@b6ec8baca02688f2f336f44faa2f912d5cef3e91 # fix/report-only-steps (security-audit#2)
     with:
       # Public repo: hosted minutes are free.
       runner: '"ubuntu-latest"'
