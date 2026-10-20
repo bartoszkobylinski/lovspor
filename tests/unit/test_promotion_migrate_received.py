@@ -140,6 +140,31 @@ def _log(root: Path) -> list[dict[str, object]]:
 
 
 class TestMigratesAReceivedDocument:
+    def test_a_fresh_approval_is_not_recorded_as_carried(
+        self, promoted: str, corpus: Path, root: Path, tmp_path: Path
+    ) -> None:
+        assert _approve(promoted, tmp_path).exit_code == 0
+        before = len(_log(root))
+        markdown = _markdown_path(corpus).read_bytes()
+
+        result = _migrate(corpus)
+
+        assert result.exit_code == 0, result.output
+        assert _markdown_path(corpus).read_bytes() == markdown
+        assert _record(corpus)["extractor_version"] == EXTRACTOR_VERSION
+        [version] = _versions(corpus)
+        promotion = version["promotion"]
+        assert isinstance(promotion, dict)
+        assert promotion["extractor_version"] == EXTRACTOR_VERSION
+        assert promotion.get("approval_carried") is None
+        [migrated] = _log(root)[before:]
+        assert migrated["kind"] == "migrated"
+        assert migrated["artifact"] == {
+            "authority_id": "4646",
+            "innsyn_request": FJALER,
+            "sha256": promoted,
+        }
+
     def test_it_moves_the_version_metadata_and_carries_the_approval(
         self, promoted: str, corpus: Path, root: Path
     ) -> None:
@@ -216,6 +241,44 @@ class TestMigratesAReceivedDocument:
 
 
 class TestRefusals:
+    @pytest.mark.parametrize("damage", ["missing", "corrupt"])
+    def test_the_named_source_must_exist_and_match_its_hash(
+        self, promoted: str, workspace: Path, corpus: Path, root: Path, damage: str
+    ) -> None:
+        blob = workspace / "received" / promoted[:2] / promoted
+        if damage == "missing":
+            blob.unlink()
+        else:
+            blob.write_bytes(html_page(LATER))
+        before = _log(root)
+
+        error = self._refused(corpus)
+
+        expected = "missing or unreadable" if damage == "missing" else "does not hash to its name"
+        assert expected in error
+        assert _log(root) == before
+
+    def test_a_hold_on_an_earlier_version_blocks_the_whole_migration(
+        self,
+        workspace: Path,
+        corpus: Path,
+        root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        with _earlier_engine(monkeypatch):
+            first = _receive(workspace, REGULATION_LINES, FIRST_AT)
+            _promote_received(first, corpus, tmp_path)
+            _promote_received(_receive(workspace, LATER, SECOND_AT), corpus, tmp_path)
+        assert _approve(first, tmp_path, decision="hold").exit_code == 0
+        before = _log(root)
+
+        error = self._refused(corpus)
+
+        assert "v1 (approve one of" in error
+        assert "the standing decision is hold" in error
+        assert _log(root) == before
+
     def _refused(self, corpus: Path) -> str:
         before = tree(corpus)
         result = _migrate(corpus)
