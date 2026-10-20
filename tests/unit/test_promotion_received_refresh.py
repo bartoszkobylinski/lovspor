@@ -17,8 +17,14 @@ import pytest
 from click.testing import Result
 from pytest_httpx import HTTPXMock
 
+from lovspor.errors import PromotionRefusedError
 from lovspor.innsyn.workspace import ENV_INNSYN_DIR
-from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
+from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
+from lovspor.promotion.corpus import CorpusCheckout
+from lovspor.promotion.decisions import DecisionLog
+from lovspor.promotion.migrate import published
+from lovspor.promotion.plan import Held
+from lovspor.promotion.received_refresh import _body, _same_version
 from tests.unit.innsyn_support import FIXTURES, fetched
 from tests.unit.promotion_cli_fixtures import invoke, make_corpus, tree
 from tests.unit.promotion_fixtures import minimal_pdf
@@ -31,6 +37,7 @@ from tests.unit.test_promotion_received_commands import (
     _receive,
     _received,
 )
+from tests.unit.test_promotion_received_decisions import _withdrawal
 
 _VALIDITY = re.compile(r"\n(?:status|ikraft_end): [^\n]*")
 
@@ -117,7 +124,10 @@ class TestRefresh:
         subject = f"migration(lokal-forskrift): re-render 4646/{_slug(path)} front matter"
         assert f"commit -m '{subject}'" in result.stdout
         assert f"wrote {LOCAL}/4646/{path.name}" in result.stdout
-        assert "version, content_hash and provenance unchanged" in result.stdout
+        assert (
+            "lf-20010203-9001 v1: front matter re-rendered; "
+            "version, content_hash and provenance unchanged\n"
+        ) in result.stdout
 
     def test_a_current_rendering_is_left_alone(
         self, promoted: tuple[str, Path], corpus: Path
@@ -196,7 +206,15 @@ class TestRefusals:
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         reason = self._refused(corpus)
         assert "That is a new version, not a re-render" in reason
-        assert "`lovspor promote received local`" in reason
+        content_hash = re.search(
+            r'\ncontent_hash: "([^"]+)"', promoted[1].read_text(encoding="utf-8")
+        )
+        assert content_hash is not None
+        assert reason.endswith(
+            f"(content_hash {content_hash.group(1)[:12]}…). "
+            "That is a new version, not a re-render: "
+            "approve it and run `lovspor promote received local`\n"
+        )
 
     def test_front_matter_naming_no_received_source(
         self, promoted: tuple[str, Path], corpus: Path
@@ -271,3 +289,84 @@ def test_refresh_refuses_a_missing_or_corrupt_named_source(
     assert (
         "missing or unreadable" if damage == "missing" else "does not hash to its name"
     ) in reason
+
+
+@pytest.mark.parametrize("skip", ["removed", "observed"])
+def test_batch_skips_an_earlier_ineligible_document(
+    skip: str, promoted: tuple[str, Path], corpus: Path
+) -> None:
+    _, path = promoted
+    current = _stale(path)
+    manifest_path = corpus / LOCAL / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record = dict(manifest["documents"]["lf-20010203-9001"])
+    if skip == "removed":
+        record.update(status="removed", removed_reason="withdrawn_misclassified")
+    else:
+        earlier = path.with_name("earlier.md")
+        earlier.write_text(
+            current.replace('basis: "received"', 'basis: "observed"'), encoding="utf-8"
+        )
+        record["markdown_path"] = earlier.relative_to(corpus).as_posix()
+    manifest["documents"]["lf-20010203-9000"] = record
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    result = _refresh(corpus)
+    assert result.exit_code == 0, result.output
+    assert path.read_text(encoding="utf-8") == current
+
+
+def test_refresh_checks_document_withdrawal_even_in_an_old_checkout(
+    promoted: tuple[str, Path], corpus: Path, root: Path
+) -> None:
+    _stale(promoted[1])
+    withdrawal = _withdrawal().model_copy(update={"doc_id": "lf-20010203-9001"})
+    DecisionLog(ObservatoryRoot(root, [])).append(withdrawal)
+    assert "was withdrawn" in TestRefusals()._refused(corpus)
+
+
+def test_held_source_refusal_explains_stage_reason_and_detail(
+    promoted: tuple[str, Path], corpus: Path
+) -> None:
+    checkout = CorpusCheckout(corpus, [])
+    doc_id, record = next(iter(checkout.local_manifest().documents.items()))
+    document = published(checkout, doc_id, record)
+    held = Held(stage="identity", reason="no_identity", detail="no vedtaksdato")
+    with pytest.raises(PromotionRefusedError) as exc:
+        _same_version(document, held)
+    assert str(exc.value) == "its source is now held at identity (no_identity: no vedtaksdato)"
+
+
+def test_multiple_moved_fields_are_reported_in_sorted_order(
+    promoted: tuple[str, Path], corpus: Path
+) -> None:
+    _, path = promoted
+    _stale(path)
+    text = path.read_text(encoding="utf-8")
+    text = re.sub(r"(?m)^received_at: .*$", 'received_at: "2026-01-01T00:00:00Z"', text)
+    text = text.replace("version: 1", "version: 99")
+    assert "version: 99" in text
+    path.write_text(text, encoding="utf-8")
+    assert (
+        TestRefusals()
+        ._refused(corpus)
+        .endswith(
+            "re-rendering would change received_at, version; a refresh keeps the version as it is\n"
+        )
+    )
+
+
+@pytest.mark.parametrize("body", ["first\n---\nlast\n", "first\n---\n", "", "---\n"])
+def test_body_keeps_horizontal_rules_and_trailing_bytes(body: str) -> None:
+    assert _body('---\nid: "example"\n---\n' + body) == body
+
+
+def test_refresh_repairs_a_duplicate_opening_front_matter_marker(
+    promoted: tuple[str, Path], corpus: Path
+) -> None:
+    _, path = promoted
+    current = _stale(path)
+    stale = path.read_text(encoding="utf-8")
+    path.write_text("---\n" + stale, encoding="utf-8")
+    result = _refresh(corpus)
+    assert result.exit_code == 0, result.output
+    assert path.read_text(encoding="utf-8") == current
