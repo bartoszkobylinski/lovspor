@@ -181,6 +181,19 @@ def test_a_repealed_version_says_so_right_after_ikraft_text() -> None:
     assert (values["status"], values["ikraft_end"]) == ("repealed", "2020-03-31")
 
 
+def test_repealed_rendering_is_byte_identical_and_preserves_body_and_hash() -> None:
+    original = render_local_regulation(_document(_source()))
+    document = _stated(status=RegulationStatus.REPEALED, ikraft_end=date(2020, 3, 31))
+    first = render_local_regulation(document)
+    assert render_local_regulation(document).encode("utf-8") == first.encode("utf-8")
+    assert first.split("---\n", 2)[2] == original.split("---\n", 2)[2]
+    _, before = _front_matter(original)
+    _, after = _front_matter(first)
+    assert {
+        key: value for key, value in after.items() if key not in {"status", "ikraft_end"}
+    } == before
+
+
 @pytest.mark.parametrize(
     ("validity", "key"),
     [

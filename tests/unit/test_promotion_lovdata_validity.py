@@ -115,6 +115,16 @@ class TestHeaderValidity:
     def test_a_bare_label_on_the_last_line_states_no_end(self) -> None:
         assert header_validity(("Ikrafttredelse",)).ikraft_end is None
 
+    @pytest.mark.parametrize("start", ["31.02.2001", "29.02.2001", "00.02.2001", "03.13.2001"])
+    def test_an_invalid_start_date_states_no_range_end(self, start: str) -> None:
+        # lovdata_header's contract requires *two* real calendar dates.
+        assert header_validity((f"Ikrafttredelse {start} - 31.03.2001",)).ikraft_end is None
+
+    def test_a_leap_day_is_a_real_range_endpoint(self) -> None:
+        assert header_validity(("Ikrafttredelse 28.02.2000 - 29.02.2000",)).ikraft_end == date(
+            2000, 2, 29
+        )
+
 
 class TestStripMarkup:
     def test_a_repealed_print_carries_its_validity(self) -> None:
@@ -147,6 +157,20 @@ class TestStripMarkup:
 
 
 class TestExtractReceived:
+    @pytest.mark.parametrize(
+        ("stamp", "ikraft", "status", "end"),
+        [
+            (True, "03.02.2001", RegulationStatus.REPEALED, None),
+            (False, RANGE, None, date(2001, 3, 31)),
+        ],
+    )
+    def test_status_and_range_end_are_independent(
+        self, stamp: bool, ikraft: str, status: RegulationStatus | None, end: date | None
+    ) -> None:
+        lines = (*_docx_head(ikraft, stamp=stamp), PREAMBLE, *BODY)
+        fields = _received(minimal_docx(lines), DOCX).fields
+        assert (fields.status, fields.ikraft_end) == (status, end)
+
     def test_the_fields_say_repealed_and_when_it_stopped_applying(self) -> None:
         fields = _received(minimal_pdf(REPEALED_PRINT)).fields
         assert fields.status is RegulationStatus.REPEALED
