@@ -1,7 +1,9 @@
 """``lovspor promote migrate`` — the migration commit after an extractor bump (ADR-0016 4e).
 
 One document (``--authority`` and ``--slug``) or every current document of the
-checkout is re-read by the running extractor (:mod:`.migrate`). Where the text
+checkout is re-read by the running extractor (:mod:`.migrate`; a document
+promoted from a received text, from the innsyn workspace that
+``LOVSPOR_INNSYN_DIR`` names, :mod:`.migrate_received`). Where the text
 is byte-identical and the owner's standing approval names it at the running
 extractor, only the version metadata moves (and a missing evidence sidecar is
 written); the Markdown never does. Each migrated document is recorded in the
@@ -17,6 +19,7 @@ decorated command only calls :func:`migrate_impl` (#292).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +28,7 @@ from typing import Annotated
 import typer
 
 from lovspor.errors import PromotionError, PromotionRefusedError
+from lovspor.innsyn.workspace import ENV_INNSYN_DIR, InnsynWorkspace
 from lovspor.observatory.registry_io import _root
 from lovspor.observatory.storage import engine_root
 from lovspor.promotion.commands import _authority, _Corpus, _echo_commit, _refusing, promote_app
@@ -34,6 +38,7 @@ from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.migrate import (
     Migration,
     MigrationInputs,
+    Published,
     migration_files,
     plan_migration,
     planned_diff,
@@ -41,6 +46,9 @@ from lovspor.promotion.migrate import (
     published_klass_version,
     subject,
 )
+from lovspor.promotion.migrate_received import ReceivedSubject, plan_received_migration
+from lovspor.promotion.received_commands import _workspace
+from lovspor.promotion.received_refresh import is_received
 from lovspor.promotion.withdraw import locate_document
 from lovspor.promotion.writer import apply_files
 
@@ -68,9 +76,11 @@ class Outcome:
 def migrate_impl(request: MigrateRequest, now: datetime) -> None:
     """Migrate the selected documents to the running extractor. Never commits."""
     root = _root()
-    corpus = CorpusCheckout(request.corpus, [engine_root(), root.path])
+    workspace = _optional_workspace()
+    forbidden = [engine_root(), root.path, *([workspace.path] if workspace else [])]
+    corpus = CorpusCheckout(request.corpus, forbidden)
     inputs = MigrationInputs(root, DecisionLog(root), corpus, now)
-    outcome = _plan_all(inputs, _selected(corpus, request))
+    outcome = _plan_all(inputs, workspace, _selected(corpus, request))
     for doc_id, reason in outcome.refusals.items():
         typer.echo(f"Refused: {doc_id}: {reason}", err=True)
     if not outcome.migrations:
@@ -98,7 +108,16 @@ def _selected(corpus: CorpusCheckout, request: MigrateRequest) -> list[tuple[str
     raise PromotionRefusedError(msg)
 
 
-def _plan_all(inputs: MigrationInputs, selected: list[tuple[str, LocalRecord]]) -> Outcome:
+def _optional_workspace() -> InnsynWorkspace | None:
+    """The innsyn workspace when one is set; only a received document needs it."""
+    return _workspace() if os.environ.get(ENV_INNSYN_DIR, "").strip() else None
+
+
+def _plan_all(
+    inputs: MigrationInputs,
+    workspace: InnsynWorkspace | None,
+    selected: list[tuple[str, LocalRecord]],
+) -> Outcome:
     outcome = Outcome(migrations=[], refusals={})
     for doc_id, record in selected:
         try:
@@ -106,12 +125,21 @@ def _plan_all(inputs: MigrationInputs, selected: list[tuple[str, LocalRecord]]) 
             if document.is_current():
                 typer.echo(f"{doc_id}: already at extractor v{EXTRACTOR_VERSION}")
                 continue
-            klass = published_klass_version(document)
-            authority = _authority(inputs.root, record.authority_id, klass)
-            outcome.migrations.append(plan_migration(inputs, document, authority))
+            outcome.migrations.append(_plan_one(inputs, workspace, document))
         except PromotionError as exc:
             outcome.refusals[doc_id] = str(exc)
     return outcome
+
+
+def _plan_one(
+    inputs: MigrationInputs, workspace: InnsynWorkspace | None, document: Published
+) -> Migration:
+    """The document's migration, read from the channel its rendering names."""
+    if is_received(document):
+        return plan_received_migration(ReceivedSubject(inputs, workspace, document))
+    klass = published_klass_version(document)
+    authority = _authority(inputs.root, document.record.authority_id, klass)
+    return plan_migration(inputs, document, authority)
 
 
 def _write(inputs: MigrationInputs, migrations: list[Migration], now: datetime) -> None:
