@@ -92,3 +92,46 @@ def test_ordinary_refusal_preserves_the_exception_message(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "Refused: Value error, document: not received\n"
+
+
+def test_field_named_like_the_union_tag_is_preserved(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Outcome's location is ("outcome", "outcome"): only the tag is redundant.
+    with pytest.raises(typer.Exit) as caught:
+        event_from("4646-20261005T074425Z", "outcome", {"at": None})
+
+    assert caught.value.exit_code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Refused: outcome: Field required\n"
+
+
+def test_tagged_event_preserves_every_indexed_validation_reason(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fields = {
+        "authority_id": "4646",
+        "recipient": "post@example.no",
+        "sent_at": "2026-10-05T07:44:25Z",
+        "lf_ids": ["invalid-first", "invalid-second"],
+        "general_clause": True,
+        "letter_sha256": "a" * 64,
+    }
+    # Obtain pydantic's messages independently of the refusal formatter.
+    with pytest.raises(ValidationError) as validation:
+        Sent.model_validate(
+            {"request_id": "4646-20261005T074425Z", "recorded_at": "2026-10-05T07:44:25Z", **fields}
+        )
+    errors = validation.value.errors()
+    assert [error["loc"] for error in errors] == [("lf_ids", 0), ("lf_ids", 1)]
+
+    with pytest.raises(typer.Exit) as caught:
+        event_from("4646-20261005T074425Z", "sent", fields)
+
+    assert caught.value.exit_code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        f"Refused: lf_ids.0: {errors[0]['msg']}; lf_ids.1: {errors[1]['msg']}\n"
+    )
