@@ -1898,16 +1898,35 @@ def _root_names_read_by(module: Path) -> Iterator[tuple[str, int]]:
 def _repo_state_the_unit_suite_reads(unit_dir: Path) -> dict[str, str]:
     """Root-level entries the unit modules read, each mapped to one reading site.
 
-    Entries that exist in the checkout only: mutmut's copy step no-ops on a path
-    that is not there, so a name no file answers to cannot be carried anywhere.
+    Entries git tracks only. Mutmut's copy step no-ops on a path that is not
+    there, so a name no file answers to cannot be carried anywhere; and a name
+    only untracked state answers to (a runner's ``data/`` cache, issue #607) is
+    not repo state — judging it by ``exists()`` made the verdict depend on which
+    checkout ran the suite, so a PR failed in the mutation baseline alone.
     """
-    root = unit_dir.parents[1]
+    tracked = _tracked_root_names(unit_dir.parents[1])
     found: dict[str, str] = {}
     for module in sorted(unit_dir.glob("*.py")):
         for name, line in _root_names_read_by(module):
-            if (root / name).exists():
+            if name in tracked:
                 found.setdefault(name, f"tests/unit/{module.name}:{line}")
     return found
+
+
+def _tracked_root_names(repo_root: Path) -> frozenset[str]:
+    """Top-level names git tracks for ``repo_root``: the state a checkout carries.
+
+    Listed from git's own top level (``:/``), because mutmut runs this suite from
+    ``mutants/`` inside the checkout: that copy is untracked, and a listing of it
+    alone would leave the guard blind there.
+    """
+    listed = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-files", "-z", "--full-name", "--", ":/"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return frozenset(Path(entry).parts[0] for entry in listed.stdout.split("\0") if entry)
 
 
 def _shadow_tree_carries(repo_root: Path) -> set[str]:
@@ -1933,12 +1952,18 @@ class TestTheScanReadsRepoRootPaths:
     every file as carrying all of them."""
 
     @staticmethod
-    def _scan(tmp_path: Path, source: str, present: tuple[str, ...]) -> dict[str, str]:
+    def _scan(
+        tmp_path: Path, source: str, present: tuple[str, ...], untracked: tuple[str, ...] = ()
+    ) -> dict[str, str]:
         unit = tmp_path / "tests" / "unit"
         unit.mkdir(parents=True)
         (unit / "test_module.py").write_text(source, encoding="utf-8")
-        for name in present:
+        for name in (*present, *untracked):
+            (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
             (tmp_path / name).write_text("", encoding="utf-8")
+        git = ["git", "-C", str(tmp_path)]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "add", "--", *present], check=True)
         return _repo_state_the_unit_suite_reads(unit)
 
     def test_it_sees_a_path_built_from_a_root_constant(self, tmp_path: Path) -> None:
@@ -1947,6 +1972,46 @@ class TestTheScanReadsRepoRootPaths:
         found = self._scan(tmp_path, source, (".tool.yaml",))
 
         assert found == {".tool.yaml": "tests/unit/test_module.py:2"}
+
+    def test_it_reads_checkout_tracking_from_an_untracked_shadow_tree(self, tmp_path: Path) -> None:
+        """The helper's documented mutants/ case must not leave the guard blind."""
+        source = (
+            "ROOT = Path(__file__).resolve().parents[2]\n"
+            'CFG = ROOT / ".tool.yaml"\n'
+            'SCRIPT = ROOT / "scripts/ci/check.sh"\n'
+            'CACHE = ROOT / "data"\n'
+        )
+        expected = self._scan(tmp_path, source, (".tool.yaml", "scripts/ci/check.sh"))
+        shadow = tmp_path / "mutants"
+        unit = shadow / "tests" / "unit"
+        unit.mkdir(parents=True)
+        (unit / "test_module.py").write_text(source, encoding="utf-8")
+        (shadow / ".tool.yaml").write_text("", encoding="utf-8")
+        (shadow / "scripts" / "ci").mkdir(parents=True)
+        (shadow / "scripts" / "ci" / "check.sh").write_text("", encoding="utf-8")
+        (shadow / "data").mkdir()
+        (shadow / "data" / "cache.json").write_text("{}", encoding="utf-8")
+
+        found = _repo_state_the_unit_suite_reads(unit)
+
+        assert (
+            found
+            == expected
+            == {
+                ".tool.yaml": "tests/unit/test_module.py:2",
+                "scripts": "tests/unit/test_module.py:3",
+            }
+        )
+
+    def test_it_raises_when_git_cannot_list_tracked_state(self, tmp_path: Path) -> None:
+        """A failed git lookup cannot count as an empty set of required files."""
+        missing = tmp_path / "missing-checkout"
+
+        with pytest.raises(subprocess.CalledProcessError) as exc_info:
+            _tracked_root_names(missing)
+
+        assert exc_info.value.returncode != 0
+        assert "ls-files" in exc_info.value.cmd
 
     def test_it_sees_a_path_built_inline_and_reaching_deeper(self, tmp_path: Path) -> None:
         source = 'CFG = Path(__file__).parents[2] / ".tool.yaml" / "inner"\n'
@@ -1958,7 +2023,6 @@ class TestTheScanReadsRepoRootPaths:
     def test_a_multi_segment_literal_counts_as_its_top_level_entry(self, tmp_path: Path) -> None:
         """``ROOT / "scripts/ci/x.sh"`` reads inside ``scripts/``: also_copy carries
         that directory, so the literal must not be reported as a missing entry (#598)."""
-        (tmp_path / "scripts" / "ci").mkdir(parents=True)
         source = 'ROOT = Path(__file__).resolve().parents[2]\nX = ROOT / "scripts/ci/x.sh"\n'
 
         found = self._scan(tmp_path, source, ("scripts/ci/x.sh",))
@@ -1979,6 +2043,25 @@ class TestTheScanReadsRepoRootPaths:
         found = self._scan(tmp_path, source, ())
 
         assert found == {}
+
+    def test_it_ignores_an_entry_only_untracked_state_answers_to(self, tmp_path: Path) -> None:
+        """``repo / "data"`` named a workspace the test refuses, and a runner's
+        untracked ``data/`` cache made the guard fail in the mutation baseline
+        alone (#607): what git does not track is not repo state to carry."""
+        source = 'ROOT = Path(__file__).resolve().parents[2]\nINSIDE = ROOT / "data"\n'
+
+        found = self._scan(tmp_path, source, (), untracked=("data/cache.json",))
+
+        assert found == {}
+
+    def test_it_counts_a_tracked_file_the_checkout_also_has_untracked_state_beside(
+        self, tmp_path: Path
+    ) -> None:
+        source = 'ROOT = Path(__file__).resolve().parents[2]\nCFG = ROOT / ".tool.yaml"\n'
+
+        found = self._scan(tmp_path, source, (".tool.yaml",), untracked=("data/cache.json",))
+
+        assert found == {".tool.yaml": "tests/unit/test_module.py:2"}
 
 
 class TestShadowTreeCarriesRepoState:
