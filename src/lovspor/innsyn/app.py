@@ -14,6 +14,8 @@ from typing import Annotated
 
 import click
 import typer
+from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 
 from lovspor.errors import ConfigError, InnsynError, StorageUnavailableError
 from lovspor.innsyn.workspace import ENV_INNSYN_DIR, InnsynWorkspace, innsyn_workspace
@@ -53,10 +55,29 @@ def workspace() -> InnsynWorkspace:
         raise typer.Exit(1) from exc
 
 
-def refuse(exc: Exception) -> typer.Exit:
-    """Say why on stderr; the caller raises the returned exit from ``exc``."""
-    typer.echo(f"Refused: {exc}", err=True)
+def refuse(exc: Exception, under: str | None = None) -> typer.Exit:
+    """Say why on stderr; the caller raises the returned exit from ``exc``.
+
+    A ``ValidationError`` is one line of its reasons, each under the field it
+    names, never pydantic's union type names or its documentation URL (#628).
+    ``under`` is the tag the value was validated under in a tagged union; it
+    heads every location and the operator already typed it, so it is dropped.
+    """
+    reason = _reasons(exc, under) if isinstance(exc, ValidationError) else str(exc)
+    typer.echo(f"Refused: {reason}", err=True)
     return typer.Exit(1)
+
+
+def _reasons(exc: ValidationError, under: str | None) -> str:
+    return "; ".join(_reason(error, under) for error in exc.errors())
+
+
+def _reason(error: ErrorDetails, under: str | None) -> str:
+    message = error["msg"].removeprefix("Value error, ")
+    location = [str(part) for part in error["loc"]]
+    if under is not None and location[:1] == [under]:
+        location = location[1:]
+    return f"{'.'.join(location)}: {message}" if location else message
 
 
 def guarded[ResultT](action: Callable[[], ResultT]) -> ResultT:
