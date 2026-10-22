@@ -59,7 +59,7 @@ def test_faq_page_content_hash_does_not_depend_on_the_page_tail() -> None:
 
 
 def test_extractor_version_is_eight_since_pypdf_6_20_1() -> None:
-    assert EXTRACTOR_VERSION == 9
+    assert EXTRACTOR_VERSION == 10
 
 
 @pytest.mark.parametrize(
@@ -68,7 +68,7 @@ def test_extractor_version_is_eight_since_pypdf_6_20_1() -> None:
 )
 def test_binary_sources_record_extractor_version_eight(payload: bytes, content_type: str) -> None:
     """The library upgrade changes the engine version recorded on every source form."""
-    assert _extracted(payload, content_type).extractor_version == 9
+    assert _extracted(payload, content_type).extractor_version == 10
 
 
 def test_html_page_extracts_block_body_and_fields() -> None:
