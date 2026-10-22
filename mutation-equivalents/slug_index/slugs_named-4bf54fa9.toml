@@ -1,0 +1,21 @@
+[[equivalent]]
+file = "src/lovspor/slug_index.py"
+symbol = "slugs_named"
+registered = "2026-10-22, PR #660, from the mutation artifact at commit 8baccd2f"
+mutation = """
+-    key = name.lower().rstrip(".")
++    key = name.lower().rstrip("XX.XX")
+"""
+justification = """
+`str.rstrip(chars)` treats its argument as a set of characters, not a
+suffix: it removes trailing characters while each belongs to the set. The
+original set is {"."}; the mutant's is {"X", "."}. The string it is applied to
+is `name.lower()`, and `str.lower()` never yields an uppercase "X": every
+character of its result is either lowercase, caseless or unchanged
+lowercase-only text, so the result contains no "X" (the only character
+whose lowercase is "x" is "X" itself, and it is mapped). A trailing "X"
+therefore cannot exist in `name.lower()`, the extra member of the set never
+matches, and both calls strip exactly the same run of trailing dots for
+every input. This is Python's own `str.rstrip` / `str.lower` semantics, not a
+dependency's behaviour.
+"""
