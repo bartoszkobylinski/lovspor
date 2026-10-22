@@ -35,7 +35,7 @@ def event_from(request: str, event: str, fields: dict[str, object]) -> LedgerEve
     try:
         return parse_event(data)
     except ValidationError as exc:
-        raise refuse(exc) from exc
+        raise refuse(exc, under=event) from exc
 
 
 def record_event(request: str, event: str, fields: dict[str, object]) -> None:

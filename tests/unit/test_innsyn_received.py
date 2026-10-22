@@ -382,3 +382,48 @@ def test_receipt_with_storage_blocked_by_a_file_preserves_the_ledger(
     assert journal.read_bytes() == original
     assert blocked.read_bytes() == b"existing unrelated file"
     assert _held(workspace)[FJALER].documents == ()
+
+
+class TestRefusalMessage:
+    """#628: a validation refusal prints its reason, never the ledger union's type names."""
+
+    def test_a_model_validator_refusal_is_its_reason_alone(
+        self, workspace: Path, document: Path
+    ) -> None:
+        sha = _sha(document)
+        _receive(workspace, document)
+        code, out = _classify(workspace, sha, "--kind", "minutes", "--answers", REQUESTED)
+        assert code == 1
+        assert out == "Refused: only a regulation text or vedtak answers a requested id\n"
+
+    def test_another_event_model_validator_prints_the_same_way(self, workspace: Path) -> None:
+        result = innsyn(
+            workspace,
+            "record-outcome",
+            "--request",
+            FJALER,
+            "--outcome",
+            "full",
+            "--at",
+            RECEIVED_AT,
+            "--refusal-basis",
+            "offl. § 13",
+        )
+        assert result.exit_code == 1
+        assert result.stderr == "Refused: a refusal basis belongs to a refused or partial outcome\n"
+
+    def test_field_errors_name_the_field_on_one_line(self, workspace: Path) -> None:
+        code, out = _classify(workspace, "xyz", "--kind", "draft")
+        assert code == 1
+        assert out.count("\n") == 1
+        assert out.startswith("Refused: sha256: String should match pattern")
+        assert "; kind: Input should be 'regulation_text'" in out
+        assert "tagged-union" not in out
+        assert "errors.pydantic.dev" not in out
+
+    def test_a_directly_validated_event_keeps_its_field_names(
+        self, workspace: Path, document: Path
+    ) -> None:
+        out = _receive(workspace, document, request="invalid-request")
+        assert out.startswith("Refused: request_id: String should match pattern")
+        assert out.count("\n") == 1
