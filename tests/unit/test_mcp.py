@@ -8854,6 +8854,54 @@ def test_serve_http_writes_the_open_hour_to_stderr_on_shutdown(
 
 
 @pytest.mark.parametrize("name", ["skatteloven", "sktl."])
+def test_rejected_quote_with_short_name_reports_the_canonical_act(
+    tmp_path: Path, name: str
+) -> None:
+    """The canonical response slug also applies when a resolved section rejects a quote."""
+    reader = _seed_for_citation(tmp_path)
+    expected = reader.verify_quote("skatteloven-sktl", "5-12", "Hallusinert sitat.")
+
+    assert expected["verified"] is False
+    assert expected["slug"] == "skatteloven-sktl"
+    assert "Call get_section('skatteloven-sktl', '5-12')" in expected["reason"]
+    assert reader.verify_quote(name, "5-12", "Hallusinert sitat.") == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "added_slug"),
+    [("skatteloven", "skatteloven-2"), ("sktl.", "annenloven-sktl")],
+)
+def test_short_name_becomes_ambiguous_after_manifest_refresh(
+    tmp_path: Path, name: str, added_slug: str
+) -> None:
+    """A cached successful lookup must not hide a second act claiming the name."""
+    reader = _seed_for_citation(tmp_path)
+    assert reader.get_section(name, "5-12")["slug"] == "skatteloven-sktl"
+    assert reader.validate_citation(f"{name} § 5-12")["valid"] is True
+
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven-sktl", title="Skatteloven"),
+            "nl-2": _record(slug=added_slug, title="Another act"),
+        },
+    )
+    _bump_mtime(tmp_path / "manifest.json")
+
+    with pytest.raises(CorpusNotFoundError, match="names 2 laws") as exc_info:
+        reader.get_section(name, "5-12")
+    assert "skatteloven-sktl" in str(exc_info.value)
+    assert added_slug in str(exc_info.value)
+    verdict = reader.validate_citation(f"{name} § 5-12")
+    assert verdict["valid"] is False
+    assert verdict["slug"] is None
+    assert verdict["section_id"] == "5-12"
+    assert "names 2 acts" in verdict["reason"]
+    assert "skatteloven-sktl" in verdict["reason"]
+    assert added_slug in verdict["reason"]
+
+
+@pytest.mark.parametrize("name", ["skatteloven", "sktl."])
 def test_every_current_state_tool_resolves_the_same_short_names(tmp_path: Path, name: str) -> None:
     """One resolver behind every slug parameter: a name `get_law` takes,
     `get_eu_basis` takes too (Codex round 1 on #585 found it bypassing)."""
