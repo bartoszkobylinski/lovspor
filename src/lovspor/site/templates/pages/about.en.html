@@ -1,0 +1,29 @@
+{#- /en/about/: the English twin of about.nb.html. Same statements, same
+    sources — see the Norwegian template's header. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<h2>Who is behind it</h2>
+<p>lovspor is built and run by Bartosz Kobyliński, a developer and private individual in Norway. It is not a company, and one person answers the e-mail. lovspor is not affiliated with or endorsed by Lovdata.</p>
+
+<h2>Why</h2>
+<p>AI tools will happily answer questions about Norwegian law, but the paragraph numbers they cite are often invented. lovspor gives them the actual text of the statutes and regulations in force, with citations you can check against the source. The website lovspor.no shows the same text, and the hosted lovverk service at <code>https://lovspor.no/mcp</code> gives AI tools access to it — free of charge. <a href="/en/connect/">How to connect.</a></p>
+<p>lovspor provides the text of law for reference; it does not provide legal advice.</p>
+
+<h2>Licences</h2>
+<ul>
+  <li><strong>Acts and central regulations</strong> come from Lovdata's open data and are licensed under <span data-literal>NLOD 2.0</span>. Every file in the corpus carries the licence in its own front matter.</li>
+  <li><strong>Local regulations</strong> are observed on the municipalities' own websites and published on the basis of <span data-literal>åndsverkloven § 14</span>, labelled as observed, not asserted to be in force. They are not Lovdata data and carry no NLOD licence.</li>
+  <li><strong>The engine</strong>, lovspor, is open source under <span data-literal>AGPL-3.0</span>.</li>
+  <li><strong>The corpus structure</strong> — the manifest, the directory layout and the README — is released under <span data-literal>CC0 1.0</span>.</li>
+</ul>
+
+<h2>Code and corpus</h2>
+<p>Everything is open. The engine that fetches, normalises and renders the texts lives at <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>; the corpus it builds, with its full change history, lives at <a href="https://github.com/bartoszkobylinski/lovverk">github.com/bartoszkobylinski/lovverk</a>. If you need Norwegian legal text inside an AI tool, you can run the whole thing yourself.</p>
+
+<h2>Contact</h2>
+<p>Questions, errors and feedback: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>. How your e-mail is handled is described under <a href="/en/privacy/">privacy</a>; the terms of the service under <a href="/en/terms/">terms of use</a>.</p>
+{% endblock %}

@@ -445,8 +445,8 @@ class TestBaseTemplate:
         assert html.count("<style>") == 1
 
     def test_placeholder_pages_carry_the_badge_title_and_lede(self) -> None:
-        nb = _render("/about/")
-        en = _render("/en/about/")
+        nb = _render("/infrastructure/")
+        en = _render("/en/infrastructure/")
 
         assert '<span class="tag" data-status="planned">Planlagt</span>' in nb
         assert '<span class="tag" data-status="planned">Planned</span>' in en
@@ -475,6 +475,9 @@ class TestBaseTemplate:
             "_base.html",
             "_chrome_footer.html",
             "_chrome_header.html",
+            "pages/about.en.html",
+            "pages/about.nb.html",
+            "pages/about.pl.html",
             "pages/connect-chatgpt.en.html",
             "pages/connect-chatgpt.nb.html",
             "pages/connect-chatgpt.pl.html",

@@ -35,7 +35,7 @@ EXPECTED_STATUS = {
     "/research/pl-temporal/": "research",
     "/status/": "current",
     "/docs/": "current",
-    "/about/": "planned",
+    "/about/": "current",
     "/business/": "early_access",
     "/privacy/": "current",
     "/terms/": "current",
@@ -93,10 +93,13 @@ class TestSiteRoutes:
         assert len(paths) == len(set(paths))
         assert all(path.endswith("/") for path in paths)
 
-    @pytest.mark.parametrize("path", ["/privacy/", "/terms/"])
+    @pytest.mark.parametrize("path", ["/privacy/", "/terms/", "/about/"])
     def test_the_legal_pages_are_written_pages_not_placeholders(self, path: str) -> None:
-        """The OAuth consent screen links both pages, so neither may be the
-        "not published yet" placeholder (owner decision 2026-09-30)."""
+        """The OAuth consent screen links both legal pages, so neither may be
+        the "not published yet" placeholder (owner decision 2026-09-30); and
+        ``/about/`` is the first URL a stranger guesses, so a published
+        placeholder there read as an unfinished product (site audit
+        2026-10-22, B1)."""
         route = next(route for route in SITE_ROUTES if route.path == path)
 
         assert route.template == path.strip("/")

@@ -4,26 +4,27 @@
     (ADR-0014 Decision 5). The privacy and terms links are site chrome
     only: the corpus frame is on every law page, and a link there would
     re-render the whole corpus. The crawler page has no twin, so the
-    Polish footer says the page it links is in Norwegian. -#}
+    English and Polish footers say the page they link is in Norwegian
+    (site audit 2026-10-22). -#}
 <footer>
 {% if lang == "en" %}
   Contains data under <span data-literal>NLOD 2.0</span> from Lovdata. Not affiliated with or endorsed by Lovdata.
   lovspor provides the text of law for reference; it does not provide legal advice. Built by Bartosz Kobyliński.
-  <br><a href="/observatory/">About our crawler</a> — for site administrators who found <code>lovspor-observatory</code> in their logs.
+  <br><a href="/observatory/">About our crawler</a> (in Norwegian) — for site administrators who found <code>lovspor-observatory</code> in their logs.
 {% if not corpus %}
-  <br><a href="/en/privacy/">Privacy</a> · <a href="/en/terms/">Terms of use</a>
+  <br><a href="/en/about/">About lovspor</a> · <a href="/en/privacy/">Privacy</a> · <a href="/en/terms/">Terms of use</a>
 {% endif %}
 {% elif lang == "pl" %}
   Zawiera dane Lovdata udostępnione na licencji <span data-literal>NLOD 2.0</span>. Serwis nie jest powiązany z Lovdata ani przez nią zatwierdzony.
   lovspor udostępnia tekst prawa do wglądu; nie jest to porada prawna. Autor: Bartosz Kobyliński.
   <br><a href="/observatory/">O naszym robocie</a> (po norwesku) — dla administratorów stron, którzy znaleźli <code>lovspor-observatory</code> w swoich logach.
-  <br><a href="/pl/privacy/">Prywatność</a> · <a href="/pl/terms/">Warunki korzystania</a>
+  <br><a href="/pl/about/">O lovspor</a> · <a href="/pl/privacy/">Prywatność</a> · <a href="/pl/terms/">Warunki korzystania</a>
 {% else %}
   Inneholder data under <span data-literal>NLOD 2.0</span> fra Lovdata. Ikke tilknyttet eller godkjent av Lovdata.
   lovspor viser lovtekst til oppslag; det er ikke juridisk rådgivning. Bygget av Bartosz Kobyliński.
   <br><a href="/observatory/">Om roboten vår</a> — for nettstedsansvarlige som fant <code>lovspor-observatory</code> i loggene sine.
 {% if not corpus %}
-  <br><a href="/privacy/">Personvern</a> · <a href="/terms/">Vilkår for bruk</a>
+  <br><a href="/about/">Om lovspor</a> · <a href="/privacy/">Personvern</a> · <a href="/terms/">Vilkår for bruk</a>
 {% endif %}
 {% endif %}
 </footer>

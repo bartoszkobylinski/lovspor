@@ -1087,6 +1087,37 @@ class TestNoTokenAccess:
         assert "token" not in _text(markup).lower()
 
 
+class TestAboutPage:
+    """/about/ is the first URL a stranger guesses after an announcement; a
+    published "not yet" placeholder there read as an unfinished product (site
+    audit 2026-10-22, B1). It is a written page in every language, gathering
+    only what the other pages already state: the operator, both repositories,
+    every licence, the contact address — and no number outside a literal."""
+
+    @pytest.mark.parametrize("path", ["/about/", "/en/about/", "/pl/about/"])
+    def test_is_a_current_page_naming_the_operator_the_repos_and_the_licences(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+
+        assert '<span class="tag" data-status="current">' in markup
+        assert 'data-status="planned"' not in markup
+        assert "ikke publisert ennå" not in markup
+        assert "not published yet" not in markup
+        assert "Bartosz Kobyliński" in markup
+        assert '<a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>' in markup
+        for repo in ("lovspor", "lovverk"):
+            assert f'<a href="https://github.com/bartoszkobylinski/{repo}">' in markup
+        for licence in ("NLOD 2.0", "åndsverkloven § 14", "AGPL-3.0", "CC0 1.0"):
+            assert f"<span data-literal>{licence}</span>" in markup
+
+    def test_is_linked_from_the_site_footer_in_every_language(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        for path, href in (("/", "/about/"), ("/en/", "/en/about/"), ("/pl/", "/pl/about/")):
+            assert f'<a href="{href}">' in _page(built[0], path), path
+
+
 class TestLegalPages:
     """/privacy/ and /terms/ back the OAuth consent screen: they are written
     pages in both languages, name the operator's contact address, and each
