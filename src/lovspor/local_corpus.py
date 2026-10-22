@@ -37,7 +37,15 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 
 from lovspor.errors import AmbiguousSlugError, CorpusNotFoundError, LocalCorpusError
 from lovspor.promotion.corpus import (
@@ -102,6 +110,12 @@ def is_local_address(address: str) -> bool:
     return "/" in address or _LOCAL_ID.fullmatch(address) is not None
 
 
+#: What a version's front matter may state about its validity (#639): the
+#: renderer writes ``status: "repealed"`` and ``ikraft_end`` only when the
+#: source says so, and the label repeats them only then (#646).
+StatedStatus = Literal["repealed"] | None
+
+
 class ObservedAuthority(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
@@ -110,7 +124,25 @@ class ObservedAuthority(BaseModel):
     name: str
 
 
-class Observation(BaseModel):
+class _StatedLabel(BaseModel):
+    """A label whose validity keys (#639) appear only when the source stated them.
+
+    Every dump drops them when unstated — ``label()``, ``model_dump()`` and
+    the JSON block alike — so no response can show ``status: null`` as if
+    the absence of a repeal were a fact Lovspor asserts (#646).
+    """
+
+    @model_serializer(mode="wrap")
+    def _stated_only(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        dumped: dict[str, Any] = handler(self)
+        return {key: value for key, value in dumped.items() if value is not None}
+
+    def label(self) -> dict[str, Any]:
+        """The block as a response carries it; every field is already JSON-native."""
+        return self.model_dump()
+
+
+class Observation(_StatedLabel):
     """The label on every response carrying local content (ADR-0016 5), in its key order."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -121,14 +153,12 @@ class Observation(BaseModel):
     source_url: str
     observed_at_first: str
     observed_at_last: str
+    status: StatedStatus = None
+    ikraft_end: str | None = None
     notice: str = OBSERVATION_NOTICE
 
-    def label(self) -> dict[str, Any]:
-        """The block as a response carries it; every field is already JSON-native."""
-        return self.model_dump()
 
-
-class ReceivedObservation(BaseModel):
+class ReceivedObservation(_StatedLabel):
     """The label of a version received under offentleglova (ADR-0016 A6), in its key order."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -138,11 +168,9 @@ class ReceivedObservation(BaseModel):
     authority: ObservedAuthority
     received_at: str
     innsyn_request: str
+    status: StatedStatus = None
+    ikraft_end: str | None = None
     notice: str = RECEIVED_NOTICE
-
-    def label(self) -> dict[str, Any]:
-        """The block as a response carries it; every field is already JSON-native."""
-        return self.model_dump()
 
 
 LocalObservation = Annotated[Observation | ReceivedObservation, Field(discriminator="basis")]
@@ -176,6 +204,8 @@ class _FrontMatter(BaseModel):
     version: int
     content_hash: str
     basis: Literal["observed", "received"]
+    status: StatedStatus = None
+    ikraft_end: str | None = None
     observed_at_first: str | None = None
     source_url: str | None = None
     received_at: str | None = None
@@ -373,6 +403,8 @@ class LocalDataset:
             source_url=_given(front.source_url),
             observed_at_first=_given(front.observed_at_first),
             observed_at_last=entry.observed_at_last,
+            status=front.status,
+            ikraft_end=front.ikraft_end,
         )
 
     def _read(self, relative: str) -> tuple[Path, str]:
@@ -537,6 +569,8 @@ def _received_label(
         authority=front.authority,
         received_at=received_at,
         innsyn_request=_given(front.innsyn_request),
+        status=front.status,
+        ikraft_end=front.ikraft_end,
     )
 
 
