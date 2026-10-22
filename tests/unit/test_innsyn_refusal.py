@@ -2,12 +2,37 @@
 
 import pytest
 import typer
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lovspor.errors import InnsynRefusedError
 from lovspor.innsyn.app import refuse
 from lovspor.innsyn.ledger import Sent
 from lovspor.innsyn.ledger_commands import event_from
+
+
+def test_multiple_builtin_validation_errors_refuse_without_documentation_urls(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class Input(BaseModel):
+        count: int
+        enabled: bool
+
+    with pytest.raises(ValidationError) as caught:
+        Input.model_validate({"count": "invalid", "enabled": "invalid"})
+
+    # Exercise errors for which pydantic really supplies documentation URLs.
+    errors = caught.value.errors(include_url=True)
+    assert len(errors) == 2
+    assert all(error["url"].startswith("https://") for error in errors)
+    exit_error = refuse(caught.value)
+    assert exit_error.exit_code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "Refused: count: Input should be a valid integer, "
+        "unable to parse string as an integer; "
+        "enabled: Input should be a valid boolean, unable to interpret input\n"
+    )
 
 
 @pytest.mark.parametrize("under", [None, "sent", "outcome"])
