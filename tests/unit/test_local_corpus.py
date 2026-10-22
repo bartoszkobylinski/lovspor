@@ -11,6 +11,7 @@ from lovspor.local_corpus import (
     LOCAL_DATASET,
     OBSERVATION_NOTICE,
     LocalDataset,
+    ObservationLabel,
     is_local_address,
 )
 from tests.unit.local_dataset_fixtures import (
@@ -386,6 +387,38 @@ class TestFrontMatterGrammar:
 
 
 class TestStatedValidity:
+    @pytest.mark.parametrize(
+        ("fields", "stated"),
+        [
+            ('status: "repealed"', {"status": "repealed"}),
+            (f'ikraft_end: "{REPEALED_ON}"', {"ikraft_end": REPEALED_ON}),
+            ("status: null\nikraft_end: null", {}),
+        ],
+    )
+    def test_validity_keys_are_stated_independently_in_every_dump(
+        self, corpus: Path, fields: str, stated: dict[str, str]
+    ) -> None:
+        # promotion.render._validity emits each source-stated field independently.
+        path = corpus / "lokale-forskrifter" / "9999" / f"{LOCAL_SLUG}.md"
+        path.write_text(
+            path.read_text("utf-8").replace("ikraft_text: null", f"ikraft_text: null\n{fields}"),
+            "utf-8",
+        )
+        observation = LocalDataset(corpus).document(ADDRESS).observation
+        expected = {
+            **{key: value for key, value in OBSERVATION.items() if key != "notice"},
+            **stated,
+            "notice": OBSERVATION_NOTICE,
+        }
+
+        assert observation.label() == expected
+        assert observation.model_dump() == expected
+        assert json.loads(observation.model_dump_json()) == expected
+        block = ObservationLabel(observation=observation)
+        assert block.model_dump() == {"observation": expected}
+        assert json.loads(block.model_dump_json()) == {"observation": expected}
+        assert list(observation.label()) == list(expected)
+
     def test_a_repealed_version_labels_its_status_and_end(self, tmp_path: Path) -> None:
         build_central(tmp_path)
         add_local_dataset(tmp_path, repealed_on=REPEALED_ON)
