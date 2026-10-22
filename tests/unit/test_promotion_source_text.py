@@ -996,3 +996,66 @@ def test_docx_empty_instruction_run_does_not_interrupt_pageref_keyword() -> None
         "<w:r><w:t> gjelder.</w:t></w:r></w:p>"
     )
     assert docx_lines(_docx_body(paragraph)) == ("Forskrift om gebyr gjelder.",)
+
+
+# --- DOCX tabs and soft line breaks (#652) ------------------------------------
+
+
+def test_docx_tab_between_runs_is_a_space() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Gebyr</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>kr 200</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Gebyr kr 200",)
+
+
+def test_docx_soft_line_breaks_start_new_lines() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Gebyret er kr 200.</w:t><w:br/><w:t>Klage sendes kommunen.</w:t>"
+        '<w:br w:type="page"/><w:t>Vedtatt 2024.</w:t><w:cr/><w:t>Kunngjort 2025.</w:t></w:r></w:p>'
+    )
+    assert docx_lines(_docx_body(paragraph)) == (
+        "Gebyret er kr 200.",
+        "Klage sendes kommunen.",
+        "Vedtatt 2024.",
+        "Kunngjort 2025.",
+    )
+
+
+def test_docx_tabs_after_a_section_heading_start_its_text_on_a_new_line() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>§ 9. Arbeidsgodtgjøring for møtende varamedlemmer</w:t></w:r>"
+        "<w:r><w:tab/><w:tab/></w:r>"
+        "<w:r><w:t>Møtende varamedlemmer til organene nevnt i § 7 godtgjøres med kr. 600 per møte."
+        "</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == (
+        "§ 9. Arbeidsgodtgjøring for møtende varamedlemmer",
+        "Møtende varamedlemmer til organene nevnt i § 7 godtgjøres med kr. 600 per møte.",
+    )
+
+
+def test_docx_tab_after_a_sentence_that_is_not_a_heading_stays_a_space() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>§ 9 gjelder fra 1. januar 2025.</w:t></w:r>"
+        "<w:r><w:tab/></w:r><w:r><w:t>Gebyret er kr 200.</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == (
+        "§ 9 gjelder fra 1. januar 2025. Gebyret er kr 200.",
+    )
+
+
+def test_docx_break_and_tab_inside_a_pageref_field_add_nothing() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Kapittel 1 Formål</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> PAGEREF _Toc1 \\h </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:tab/><w:br/><w:t>3</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Kapittel 1 Formål",)
+
+
+def test_docx_empty_lines_from_leading_and_trailing_breaks_are_dropped() -> None:
+    paragraph = "<w:p><w:r><w:br/><w:t>Gebyr</w:t><w:br/><w:br/></w:r></w:p>"
+    assert docx_lines(_docx_body(paragraph)) == ("Gebyr",)

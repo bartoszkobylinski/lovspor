@@ -30,7 +30,11 @@ same rules, but only inside one block element, never across two. DOCX
 carries its author's paragraphs and is never rejoined.
 
 **DOCX.** ``word/document.xml`` read in memory — nothing is extracted to
-disk — under a size cap, through the pipeline's hardened XML parser.
+disk — under a size cap, through the pipeline's hardened XML parser. A
+paragraph is one line; a soft line break (``w:br``, ``w:cr``) inside it starts
+another, and a tab is a space — except right after a section heading, where
+Word's "heading, tabs, text" layout in one paragraph is a heading and its
+text on two lines (#652).
 
 Lines that are page furniture rather than law — update stamps ("Sist
 endra"), "Skriv ut", "Del på", "Til toppen", a CMS feedback widget ("Fant du
@@ -63,6 +67,9 @@ MAX_DOCX_PART_BYTES = 20 * 1024 * 1024
 _DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _DOCX_PART = "word/document.xml"
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_TAB = "\t"
+_BREAK = "\n"
+_INLINE_TEXT = {f"{_W}tab": _TAB, f"{_W}br": _BREAK, f"{_W}cr": _BREAK}
 
 _BLOCK_TAGS = frozenset(
     {"p", "div", "section", "article", "header", "main", "li", "ul", "ol", "dl", "dt", "dd"}
@@ -154,7 +161,8 @@ def docx_lines(payload: bytes) -> tuple[str, ...]:
         root = etree.fromstring(_docx_part(payload), parser=safe_parser(remove_blank_text=False))
     except etree.XMLSyntaxError as error:
         raise UnreadableSourceError(f"DOCX {_DOCX_PART} did not parse: {error}") from error
-    return _clean_lines(_paragraph_text(paragraph) for paragraph in root.iter(f"{_W}p"))
+    paragraphs = (_paragraph_text(paragraph) for paragraph in root.iter(f"{_W}p"))
+    return _clean_lines(line for text in paragraphs for line in _paragraph_lines(text))
 
 
 def _paragraph_text(paragraph: etree._Element) -> str:
@@ -162,18 +170,31 @@ def _paragraph_text(paragraph: etree._Element) -> str:
 
     A contents entry ends on its page number, a field Word computes; joined to
     the title it reads ``Sør-Trøndelag1``. Fields nest (the whole contents is a
-    ``TOC`` field), so the innermost open field decides.
+    ``TOC`` field), so the innermost open field decides. A tab and a soft line
+    break are text too (#652), as ``_TAB`` and ``_BREAK``.
     """
     fields: list[str] = []
     text: list[str] = []
-    for node in paragraph.iter(f"{_W}fldChar", f"{_W}instrText", f"{_W}t"):
+    for node in paragraph.iter(f"{_W}fldChar", f"{_W}instrText", f"{_W}t", *_INLINE_TEXT):
         if node.tag == f"{_W}fldChar":
             _step_field(fields, node.get(f"{_W}fldCharType"))
         elif node.tag == f"{_W}instrText":
             fields[-1:] = [f"{field}{node.text or ''}" for field in fields[-1:]]
         elif not (fields and fields[-1].split()[:1] == ["PAGEREF"]):
-            text.append(node.text or "")
+            text.append(_INLINE_TEXT.get(node.tag, node.text or ""))
     return "".join(text)
+
+
+def _paragraph_lines(text: str) -> Iterable[str]:
+    """One line per soft break; a section heading's text after its tabs is a line of its own."""
+    for piece in text.split(_BREAK):
+        heading, tab, rest = piece.partition(_TAB)
+        heading = " ".join(heading.split())
+        if tab and _is_section_heading(heading):
+            yield heading
+            yield rest.replace(_TAB, " ")
+        else:
+            yield piece.replace(_TAB, " ")
 
 
 def _step_field(fields: list[str], kind: str | None) -> None:
