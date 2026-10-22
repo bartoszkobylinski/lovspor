@@ -137,14 +137,16 @@ def cited_acts(
     if len(acts) > 1:
         return [], _short_name_ambiguity(named)
     if acts and acts[0] in claimed:
-        return [], _claimed_slug_ambiguity(named)
+        return [], _claimed_slug_ambiguity(acts[0], list(named))
     return acts, None
 
 
-def _claimed_slug_ambiguity(named: dict[str, list[str]]) -> str:
-    ((token, slugs),) = named.items()
+def _claimed_slug_ambiguity(slug: str, names: list[str]) -> str:
+    """Every name in the citation resolved to ``slug``, which several records claim."""
+    who = " and ".join(repr(name) for name in names)
+    verb = "names" if len(names) == 1 else "name"
     return (
-        f"ambiguous citation: {token!r} names {slugs[0]!r}, a slug several current "
+        f"ambiguous citation: {who} {verb} {slug!r}, a slug several current "
         f"documents claim; search_laws lists them with their doc_id"
     )
 

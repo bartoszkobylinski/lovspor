@@ -8963,3 +8963,47 @@ def test_short_name_naming_only_a_claimed_slug_is_refused_as_that_collision(
             "documents claim; search_laws lists them with their doc_id"
         ),
     }
+
+
+def test_two_names_of_one_claimed_slug_are_one_collision_not_a_crash(tmp_path: Path) -> None:
+    """Codex round 3 on #585: the kortform and the dotted abbreviation of one
+    claimed slug in one citation unpacked as 'exactly one name' and raised."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="testloven-abc", title="First"),
+            "nl-2": _record(
+                slug="testloven-abc",
+                title="Second",
+                source_dataset="gjeldende-sentrale-forskrifter",
+            ),
+        },
+    )
+    result = CorpusReader(tmp_path).validate_citation("testloven (abc.) § 1")
+    assert result == {
+        "valid": False,
+        "slug": None,
+        "section_id": "1",
+        "heading": None,
+        "reason": (
+            "ambiguous citation: 'testloven' and 'abc.' name 'testloven-abc', a slug several "
+            "current documents claim; search_laws lists them with their doc_id"
+        ),
+    }
+
+
+def test_two_names_naming_overlapping_acts_list_every_act_per_name(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven-sktl", title="Skatteloven"),
+            "nl-2": _record(slug="skatteloven-2", title="Skatteloven (gammel)"),
+        },
+    )
+    result = CorpusReader(tmp_path).validate_citation("skatteloven (sktl.) § 5-12")
+    assert result["valid"] is False
+    assert result["slug"] is None
+    assert result["reason"] == (
+        "ambiguous citation: 'skatteloven' names skatteloven-sktl, skatteloven-2; "
+        "'sktl.' names skatteloven-sktl; cite the canonical slug"
+    )
