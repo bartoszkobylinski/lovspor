@@ -105,7 +105,7 @@ from lovspor.hosted_calls import record_usage
 from lovspor.mcp_contract import ContractServer
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
-from lovspor.slug_index import SlugIndex, build_slug_index
+from lovspor.slug_index import SlugIndex, build_slug_index, cited_acts, short_name_entry
 from lovspor.snapshot import (
     CorpusSnapshot,
     CorpusStateRef,
@@ -711,14 +711,10 @@ class CorpusReader:
         AI prompts produce many forms (``§ 5-12 skatteloven``,
         ``skatteloven § 5-12``, ``§ 5-12 i skatteloven``, etc.).
 
-        Slug match is strict: the cited slug must equal a known
-        manifest slug (case-insensitive substring on the slug field).
-        ``"skatteloven"`` will not match production slug
-        ``"skatteloven-sktl"`` — return ``valid: false`` with a
-        descriptive ``reason`` instead. Strict because the slug is the
-        authoritative id and AI consumers should be using results from
-        ``search_laws`` (which returns canonical slugs) rather than
-        guessing.
+        Act match is exact, never fuzzy: a canonical slug token, else an
+        exact short name — the kortform without Lovdata's abbreviation
+        (``skatteloven``) or the abbreviation with its dot (``sktl.``) —
+        when it names one act (#585). Several acts → ``valid: false``.
 
         Returns ``{valid, slug, section_id, heading, reason}``. ``valid``
         is true only when both the slug and (if present) the section
@@ -2008,7 +2004,8 @@ class CorpusReader:
             return self._slug_index
 
     def _find_current_by_slug(self, slug: str) -> ManifestRecord:
-        entry = self._load_slug_index().resolve(slug)
+        index = self._load_slug_index()
+        entry = index.resolve(slug) or short_name_entry(index, slug)
         if entry is None:
             suggestions = self._slug_suggestions(slug)
             hint = f"did you mean {', '.join(suggestions)}? " if suggestions else ""
@@ -2032,11 +2029,9 @@ class CorpusReader:
     def _slug_suggestions(self, slug: str) -> list[str]:
         """Up to three near-miss canonical slugs for an unknown input.
 
-        The most common AI mistake is the colloquial kortform
-        ('skatteloven') for the canonical slug ('skatteloven-sktl');
-        offering the near-miss in the error lets the AI recover in
-        one step instead of a search_laws round trip. Suggestions
-        are advisory — the strict-match contract is unchanged.
+        A typo ('skattelov') gets the near-miss in the error so the AI
+        recovers in one step instead of a search_laws round trip.
+        Suggestions are advisory — the exact-match contract is unchanged.
         """
         return _slug_suggestions_from(self._load_slug_index(), slug)
 
@@ -2110,18 +2105,12 @@ def _slug_token_in_citation(slug: str, citation_lower: str) -> bool:
 
     - ``N == 0`` (start of citation), or
     - ``N == len(citation_lower)`` (end of citation), or
-    - ``citation_lower[N]`` is not a slug character (per
-      ``_SLUG_CHARACTER`` — i.e. not in ``[a-z0-9æøåäøåäöü-]``).
+    - ``citation_lower[N]`` is not a slug character (``_SLUG_CHARACTER``).
 
-    The slug matches as a token only when both ends of its occurrence
-    are at boundaries. This rejects ``"skatteloven-sktl"`` matching
-    inside ``"skatteloven-sktlX"`` — the trailing ``X`` is itself a
-    slug character so the right end is not at a boundary.
-
-    Walks all occurrences of ``slug`` in ``citation_lower`` because
-    the first occurrence may not be a token (e.g. ``"presskatteloven-
-    sktl notes about skatteloven-sktl"`` — first match is inside a
-    longer word, second is a real token).
+    Both ends of the occurrence must be boundaries: ``"skatteloven-sktl"``
+    is not a token of ``"skatteloven-sktlX"``. Every occurrence is tried,
+    because the first may sit inside a longer word (``"presskatteloven-
+    sktl notes about skatteloven-sktl"``) while a later one is a token.
     """
     idx = citation_lower.find(slug)
     while idx >= 0:
@@ -2930,6 +2919,17 @@ def _citation_invalid(
     }
 
 
+def _no_act_reason(citation: str, section_id: str | None, slugs: Collection[str]) -> str:
+    """Why a citation naming no act is invalid: unparseable, or a § without its act."""
+    hint = _citation_hint_from(slugs, citation.lower())
+    if section_id is None:
+        return f"could not parse citation {citation!r}: no § id and no known slug found{hint}"
+    return (
+        f"ambiguous citation: § {section_id} found but no act "
+        f"identifier; many acts have a section by that id{hint}"
+    )
+
+
 def _citation_verdict(
     citation: str,
     slugs: Collection[str],
@@ -2947,20 +2947,11 @@ def _citation_verdict(
     section_match = _CITATION_SECTION_ID.search(citation)
     section_id = section_match.group(1) if section_match else None
     citation_lower = citation.lower()
-    candidates = [slug for slug in slugs if _slug_token_in_citation(slug, citation_lower)]
+    candidates, ambiguity = cited_acts(slugs, citation_lower, _slug_token_in_citation)
     matched_slug = max(candidates, key=len) if candidates else None
-    if matched_slug is None and section_id is None:
-        return _citation_invalid(
-            f"could not parse citation {citation!r}: no § id and no known slug found"
-            f"{_citation_hint_from(slugs, citation_lower)}",
-        )
     if matched_slug is None:
-        return _citation_invalid(
-            f"ambiguous citation: § {section_id} found but no act "
-            f"identifier; many acts have a section by that id"
-            f"{_citation_hint_from(slugs, citation_lower)}",
-            section_id=section_id,
-        )
+        why = ambiguity or _no_act_reason(citation, section_id, slugs)
+        return _citation_invalid(why, section_id=section_id)
     if section_id is None:
         return {
             "valid": True,
@@ -3783,9 +3774,12 @@ class _SnapshotState:
         historical negative — never a silent fallback to today's
         namespace.
         """
-        entry = self._slug_index().resolve(slug)
+        index = self._slug_index()
+        entry, mapped = index.resolve(slug), None
+        if entry is None:
+            entry, mapped = short_name_entry(index, slug), slug
         if entry is not None:
-            return entry[1], None
+            return entry[1], mapped
         record = self._record_via_lineage(slug)
         if record is None:
             raise self._unknown_slug_error(slug)

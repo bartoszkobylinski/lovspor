@@ -824,9 +824,8 @@ def test_get_law_raises_for_unknown_slug(tmp_path: Path) -> None:
 
 
 def test_get_law_unknown_slug_suggests_closest_match(tmp_path: Path) -> None:
-    """The most common first call from an AI is the colloquial kortform
-    ('skatteloven') instead of the canonical slug ('skatteloven-sktl').
-    The error must offer the near-miss so the AI recovers in one step
+    """A near-miss that is not a short name ('skattelov') stays unknown;
+    the error must offer the near-miss so the AI recovers in one step
     instead of a search_laws round trip."""
     _seed_corpus(
         tmp_path,
@@ -836,7 +835,7 @@ def test_get_law_unknown_slug_suggests_closest_match(tmp_path: Path) -> None:
         },
     )
     with pytest.raises(CorpusNotFoundError) as exc_info:
-        CorpusReader(tmp_path).get_law("skatteloven")
+        CorpusReader(tmp_path).get_law("skattelov")
 
     message = str(exc_info.value)
     assert "skatteloven-sktl" in message
@@ -873,7 +872,7 @@ def test_validate_citation_unmatched_slug_suggests_canonical_form(tmp_path: Path
         tmp_path,
         {"nl-1": _record(slug="skatteloven-sktl", title="Skatteloven")},
     )
-    out = CorpusReader(tmp_path).validate_citation("§ 5-12 skatteloven")
+    out = CorpusReader(tmp_path).validate_citation("§ 5-12 skattelov")
 
     assert out["valid"] is False
     assert "skatteloven-sktl" in (out["reason"] or "")
@@ -3637,15 +3636,148 @@ def test_validate_citation_slug_only_is_valid(tmp_path: Path) -> None:
 
 
 def test_validate_citation_unknown_slug_is_invalid(tmp_path: Path) -> None:
-    """Strict slug match: 'skatteloven' (without -sktl) does NOT
-    fuzzy-match production slug 'skatteloven-sktl'. Per Q2=A
-    decision: cleaner contract, AI should use canonical slugs from
-    search_laws."""
-    result = _seed_for_citation(tmp_path).validate_citation("§ 5-12 skatteloven")
+    """A near miss ('skattelov') never fuzzy-matches 'skatteloven-sktl'
+    (Q2=A): only an exact slug or an exact short name resolves (#585)."""
+    result = _seed_for_citation(tmp_path).validate_citation("§ 5-12 skattelov")
     assert result["valid"] is False
     assert result["slug"] is None
     assert result["section_id"] == "5-12"
     assert "ambiguous" in result["reason"].lower()
+
+
+# --- short names and abbreviations (#585) ---------------------------------------
+
+
+def test_validate_citation_resolves_the_short_name_without_the_abbreviation(
+    tmp_path: Path,
+) -> None:
+    """'skatteloven § 5-12' is how a person writes it; the slug carries
+    Lovdata's abbreviation ('skatteloven-sktl')."""
+    result = _seed_for_citation(tmp_path).validate_citation("skatteloven § 5-12")
+    assert result == {
+        "valid": True,
+        "slug": "skatteloven-sktl",
+        "section_id": "5-12",
+        "heading": "§ 5-12. Boligsparing",
+        "reason": None,
+    }
+
+
+def test_validate_citation_resolves_the_abbreviation_written_with_its_dot(
+    tmp_path: Path,
+) -> None:
+    result = _seed_for_citation(tmp_path).validate_citation("sktl. § 5-12")
+    assert result["valid"] is True
+    assert result["slug"] == "skatteloven-sktl"
+    assert result["heading"] == "§ 5-12. Boligsparing"
+
+
+def test_validate_citation_abbreviation_without_its_dot_is_not_an_act(tmp_path: Path) -> None:
+    """Without the dot a short token is a word, not an abbreviation."""
+    result = _seed_for_citation(tmp_path).validate_citation("sktl § 5-12")
+    assert result["valid"] is False
+    assert result["slug"] is None
+    assert result["reason"].startswith("ambiguous citation: § 5-12 found but no act identifier")
+
+
+def test_validate_citation_short_name_is_the_whole_kortform(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="plan-og-bygningsloven-pbl", title="Plan- og bygningsloven")},
+        body_for={"plan-og-bygningsloven-pbl": "### § 1-1. Formål\nContent.\n"},
+    )
+    reader = CorpusReader(tmp_path)
+    assert reader.validate_citation("plan-og-bygningsloven § 1-1")["valid"] is True
+    assert reader.validate_citation("bygningsloven § 1-1")["valid"] is False
+    assert reader.validate_citation("pbl. § 1-1")["slug"] == "plan-og-bygningsloven-pbl"
+
+
+def test_validate_citation_short_name_never_prefix_matches(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="folketrygdloven-ftrl", title="Folketrygdloven"),
+            "nl-2": _record(slug="folketrygdfondloven", title="Folketrygdfondloven"),
+        },
+    )
+    result = CorpusReader(tmp_path).validate_citation("folketrygd § 8-18")
+    assert result["valid"] is False
+    assert result["slug"] is None
+
+
+def test_validate_citation_short_name_naming_several_acts_stays_refused(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven-sktl", title="Skatteloven"),
+            "nl-2": _record(slug="skatteloven-2", title="Skatteloven (gammel)"),
+        },
+    )
+    result = CorpusReader(tmp_path).validate_citation("skatteloven § 5-12")
+    assert result == {
+        "valid": False,
+        "slug": None,
+        "section_id": "5-12",
+        "heading": None,
+        "reason": (
+            "ambiguous citation: 'skatteloven' names 2 acts: skatteloven-sktl, "
+            "skatteloven-2; cite the canonical slug"
+        ),
+    }
+
+
+def test_validate_citation_short_names_of_two_acts_in_one_citation_are_ambiguous(
+    tmp_path: Path,
+) -> None:
+    result = _seed_for_citation(tmp_path).validate_citation(
+        "skatteloven § 5-12, jf. opplaeringslova"
+    )
+    # opplaeringslova is itself a slug: an exact slug match wins over any short name.
+    assert result["slug"] == "opplaeringslova"
+    _seed_corpus(
+        tmp_path / "two",
+        {
+            "nl-1": _record(slug="skatteloven-sktl", title="Skatteloven"),
+            "nl-2": _record(slug="husleieloven-husll", title="Husleieloven"),
+        },
+    )
+    result = CorpusReader(tmp_path / "two").validate_citation("skatteloven § 5-12 og husll.")
+    assert result["valid"] is False
+    assert result["reason"] == (
+        "ambiguous citation: 'skatteloven' names skatteloven-sktl; 'husll.' names "
+        "husleieloven-husll; cite the canonical slug"
+    )
+
+
+def test_get_section_resolves_the_short_name_to_the_canonical_slug(tmp_path: Path) -> None:
+    section = _seed_for_citation(tmp_path).get_section("skatteloven", "5-12")
+    assert section["slug"] == "skatteloven-sktl"
+    assert section["heading"] == "§ 5-12. Boligsparing"
+
+
+def test_get_section_resolves_the_abbreviation_written_with_its_dot(tmp_path: Path) -> None:
+    section = _seed_for_citation(tmp_path).get_section("sktl.", "5-12")
+    assert section["slug"] == "skatteloven-sktl"
+
+
+def test_get_law_short_name_naming_several_acts_is_refused_with_its_candidates(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven-sktl", title="Skatteloven"),
+            "nl-2": _record(slug="skatteloven-2", title="Skatteloven (gammel)"),
+        },
+    )
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path).get_law("skatteloven")
+    assert str(exc_info.value) == (
+        "short name 'skatteloven' names 2 laws: skatteloven-sktl, skatteloven-2; "
+        "cite the canonical slug"
+    )
 
 
 def test_validate_citation_paragraph_only_is_ambiguous(tmp_path: Path) -> None:

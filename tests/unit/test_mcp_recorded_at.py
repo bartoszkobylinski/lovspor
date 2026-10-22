@@ -478,6 +478,20 @@ def test_mapping_is_reported_only_when_applied(
     assert "mapped_from_slug" not in result
 
 
+def test_short_name_resolves_within_the_state_and_reports_the_mapping(
+    corpus_with_rename: tuple[Path, str, str, str],
+) -> None:
+    """At the date the act is slugged 'testloven-tl'; its short name
+    'testloven' names it there without any lineage walk (#585)."""
+    repo, _, _, sha3 = corpus_with_rename
+
+    result = CorpusReader(repo).at_state("2026-05-20").get_section("testloven", "9-8")
+
+    assert result["slug"] == "testloven-tl"
+    assert result["mapped_from_slug"] == "testloven"
+    assert result["corpus_commit"] == sha3
+
+
 def test_verify_quote_resolves_through_the_same_lineage(
     corpus_with_rename: tuple[Path, str, str, str],
 ) -> None:
