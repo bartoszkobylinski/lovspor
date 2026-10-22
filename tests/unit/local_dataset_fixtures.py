@@ -144,10 +144,20 @@ def local_record(
     }
 
 
-def front_matter(doc_id: str = LOCAL_ID, authority_id: str = "9999", slug: str = LOCAL_SLUG) -> str:
+REPEALED_ON = "2026-03-31"
+
+
+def front_matter(
+    doc_id: str = LOCAL_ID,
+    authority_id: str = "9999",
+    slug: str = LOCAL_SLUG,
+    repealed_on: str | None = None,
+) -> str:
+    """The S2 front matter; ``repealed_on`` adds the #639 validity keys after ``ikraft_text``."""
     authority = (
         f'{{id: "{authority_id}", type: "kommune", name: "Prøvestad", klass_version: "2026"}}'
     )
+    validity = [] if repealed_on is None else ['status: "repealed"', f'ikraft_end: "{repealed_on}"']
     lines = [
         f'id: "{doc_id}"',
         f'slug: "{slug}"',
@@ -160,6 +170,7 @@ def front_matter(doc_id: str = LOCAL_ID, authority_id: str = "9999", slug: str =
         'vedtatt_av: "kommunestyret i Prøvestad kommune"',
         'ikraft: "2024-08-01"',
         "ikraft_text: null",
+        *validity,
         "version: 1",
         f'content_hash: "{"c" * 64}"',
         f'observed_at_first: "{OBSERVED_FIRST}"',
@@ -196,10 +207,16 @@ def observations(doc_id: str = LOCAL_ID, authority_id: str = "9999") -> dict[str
     }
 
 
-def write_local_document(root: Path, doc_id: str = LOCAL_ID, authority_id: str = "9999") -> None:
+def write_local_document(
+    root: Path,
+    doc_id: str = LOCAL_ID,
+    authority_id: str = "9999",
+    repealed_on: str | None = None,
+) -> None:
     base = root / "lokale-forskrifter" / authority_id
     base.mkdir(parents=True, exist_ok=True)
-    markdown = front_matter(doc_id, authority_id) + f"\n# {LOCAL_TITLE}\n\n{LOCAL_BODY}"
+    front = front_matter(doc_id, authority_id, repealed_on=repealed_on)
+    markdown = front + f"\n# {LOCAL_TITLE}\n\n{LOCAL_BODY}"
     (base / f"{LOCAL_SLUG}.md").write_text(markdown, encoding="utf-8")
     _write_json(base / "observations" / f"{LOCAL_SLUG}.json", observations(doc_id, authority_id))
     history = {"doc_id": doc_id, "events": [], "schema_version": 1, "slug": LOCAL_SLUG}
@@ -211,9 +228,9 @@ def write_local_manifest(root: Path, documents: dict[str, dict[str, Any]]) -> No
     _write_json(root / "lokale-forskrifter" / "manifest.json", payload)
 
 
-def add_local_dataset(root: Path) -> None:
+def add_local_dataset(root: Path, *, repealed_on: str | None = None) -> None:
     """The S4 shape: one current local regulation, beside the central corpus."""
-    write_local_document(root)
+    write_local_document(root, repealed_on=repealed_on)
     write_local_manifest(root, {LOCAL_ID: local_record()})
 
 

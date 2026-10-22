@@ -24,6 +24,7 @@ from tests.unit.local_dataset_fixtures import (
     LOCAL_URL,
     OBSERVED_FIRST,
     OBSERVED_LAST,
+    REPEALED_ON,
     add_local_dataset,
     build_central,
     local_record,
@@ -453,3 +454,51 @@ class TestPassThrough:
         assert [(r["target_slug"], r["target_section_id"], r["valid"]) for r in references] == [
             ("ordensloven", "3", False)
         ]
+
+
+# --- a repealed regulation says so in its label (#646) ---------------------------
+
+
+@pytest.fixture
+def repealed(tmp_path: Path) -> Path:
+    build_central(tmp_path)
+    add_local_dataset(tmp_path, repealed_on=REPEALED_ON)
+    return tmp_path
+
+
+REPEALED_OBSERVATION = {
+    **{key: value for key, value in OBSERVATION.items() if key != "notice"},
+    "status": "repealed",
+    "ikraft_end": REPEALED_ON,
+    "notice": OBSERVATION_NOTICE,
+}
+
+
+class TestRepealedLabel:
+    def test_get_law_carries_status_and_ikraft_end_before_the_notice(self, repealed: Path) -> None:
+        block = _observation_block(_text(repealed, "get_law", slug=ADDRESS))
+
+        assert block == {"observation": REPEALED_OBSERVATION}
+        assert list(block["observation"]) == list(REPEALED_OBSERVATION)
+
+    def test_a_section_of_a_repealed_regulation_is_labelled_repealed(self, repealed: Path) -> None:
+        section = _structured(repealed, "get_section", slug=ADDRESS, section_id="§ 2")
+
+        assert section["observation"] == REPEALED_OBSERVATION
+        assert "status" not in section  # the label carries it, the section shape is unchanged
+
+    def test_a_search_hit_of_a_repealed_regulation_is_labelled_repealed(
+        self, repealed: Path
+    ) -> None:
+        [hit] = _structured(
+            repealed, "search_laws", query="lekeplasser", dataset="lokale-forskrifter"
+        )["result"]
+
+        assert hit["observation"] == REPEALED_OBSERVATION
+
+    def test_a_regulation_stating_no_validity_gains_no_keys(self, corpus: Path) -> None:
+        block = _observation_block(_text(corpus, "get_law", slug=ADDRESS))["observation"]
+        section = _structured(corpus, "get_section", slug=ADDRESS, section_id="§ 2")
+
+        assert "status" not in block and "ikraft_end" not in block
+        assert "status" not in section["observation"]

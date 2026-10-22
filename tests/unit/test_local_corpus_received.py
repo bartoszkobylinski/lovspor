@@ -206,3 +206,65 @@ def test_missing_validated_front_matter_key_reports_internal_invariant() -> None
     with pytest.raises(LocalCorpusError) as refused:
         _given(None)
     assert str(refused.value) == "front matter lost a key its basis requires"
+
+
+class TestReceivedValidity:
+    """The #639 validity keys of a received version reach its label (#646)."""
+
+    @pytest.mark.parametrize(
+        ("fields", "stated"),
+        [
+            ('status: "repealed"', {"status": "repealed"}),
+            ('ikraft_end: "2020-03-31"', {"ikraft_end": "2020-03-31"}),
+            ("status: null\nikraft_end: null", {}),
+        ],
+    )
+    def test_validity_keys_are_stated_independently_in_every_dump(
+        self, received: Path, fields: str, stated: dict[str, str]
+    ) -> None:
+        # The received renderer shares the independent source-stated validity fields.
+        _edit_front_matter(_markdown_file(received), "\nversion:", f"\n{fields}\nversion:")
+        observation = LocalDataset(received).document(_address(received)).observation
+        expected = {
+            "basis": "received",
+            "asserted": False,
+            "authority": AUTHORITY,
+            "received_at": RECEIVED_AT,
+            "innsyn_request": FJALER,
+            **stated,
+            "notice": NOTICE,
+        }
+
+        assert observation.label() == expected
+        assert observation.model_dump() == expected
+        assert json.loads(observation.model_dump_json()) == expected
+        block = ObservationLabel(observation=observation)
+        assert block.model_dump() == {"observation": expected}
+        assert json.loads(block.model_dump_json()) == {"observation": expected}
+        assert list(observation.label()) == list(expected)
+
+    def test_a_repealed_received_version_labels_its_status_and_end(self, received: Path) -> None:
+        path = _markdown_file(received)
+        _edit_front_matter(
+            path, "\nversion:", '\nstatus: "repealed"\nikraft_end: "2020-03-31"\nversion:'
+        )
+
+        label = LocalDataset(received).document(_address(received)).observation.label()
+
+        assert list(label) == [
+            "basis",
+            "asserted",
+            "authority",
+            "received_at",
+            "innsyn_request",
+            "status",
+            "ikraft_end",
+            "notice",
+        ]
+        assert (label["status"], label["ikraft_end"]) == ("repealed", "2020-03-31")
+
+    def test_a_received_version_stating_no_validity_labels_none(self, received: Path) -> None:
+        served = LocalDataset(received).document(_address(received))
+        block = json.loads(ObservationLabel(observation=served.observation).model_dump_json())
+        assert "status" not in block["observation"]
+        assert "ikraft_end" not in block["observation"]
