@@ -1128,7 +1128,7 @@ Every response carrying local content carries this label; `asserted` is always `
 }
 ```
 
-`observed_at_first` is the first observation of the served version (front matter); `observed_at_last` comes from `observations/<slug>.json` and is refreshed by the corpus at most weekly. Between observations nothing is asserted. A listed document whose files are missing or disagree with the manifest is an error (`LocalCorpusError`), never served unlabelled.
+`observed_at_first` is the first observation of the served version (front matter); `observed_at_last` comes from `observations/<slug>.json` and is refreshed by the corpus at most weekly. Between observations nothing is asserted. When the served version's front matter states a validity (#639: `status: "repealed"` and `ikraft_end`, written only when the source says so), the label repeats them right before `notice` — on `get_law`, on a `get_section` answer and on a `search_laws` hit alike, so a section or a hit from a repealed regulation says so even though its front matter is not returned. A version stating no validity has neither key: absence is not a claim that the regulation is in force (#646). A listed document whose files are missing or disagree with the manifest is an error (`LocalCorpusError`), never served unlabelled.
 
 Not yet served for local regulations (later ADR-0016 slices): `list_sections`, `verify_quote`, `validate_citation`, `search_body`, `list_recent_changes`, `semantic_search`, the version tools, and `recorded_at` on any tool but `get_section`.
 
