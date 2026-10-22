@@ -368,6 +368,22 @@ class TestTheCaddyfile:
             "/.well-known/oauth-protected-resource/*",
         }
 
+    def test_answers_the_trailing_slash_spelling_of_the_endpoint_itself(self) -> None:
+        """Left to the app, `/mcp/` redirected to https://127.0.0.1:8000/mcp — the
+        Host it is told it is — leaking the upstream and stranding a user who
+        typed the commonest typo (site audit 2026-10-22, B2). Caddy answers it
+        before the proxy with a relative Location and 308, which keeps the
+        method of a POSTed JSON-RPC call; the matcher still carries `/mcp/*`,
+        so every deeper path reaches the app as before."""
+        lines = [line.strip() for line in _significant()]
+
+        assert "redir /mcp/ /mcp 308" in lines
+        assert lines.index("redir /mcp/ /mcp 308") < lines.index("handle @app {")
+        assert "/mcp/*" in _app_paths()
+        assert "127.0.0.1" not in "".join(
+            line for line in lines if line.startswith(("redir", "@app"))
+        )
+
     def test_keeps_the_response_security_headers_declared(self) -> None:
         text = _CADDYFILE.read_text(encoding="utf-8")
 

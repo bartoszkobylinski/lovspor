@@ -166,12 +166,12 @@ def _directive(line: str, matchers: dict[str, list[str]]) -> dict[str, Any] | No
             handlers[line] = {"handler": "vars", "root": path}
         case ["reverse_proxy", upstream]:
             handlers[line] = {"handler": "reverse_proxy", "upstreams": [{"dial": upstream}]}
-        case ["redir", source, target, "301"]:
+        case ["redir", source, target, ("301" | "308") as code]:
             handlers[line] = {
                 "match": [{"path": [source]}],
                 "handler": "static_response",
                 "headers": {"Location": [target]},
-                "status_code": 301,
+                "status_code": int(code),
             }
         case ["respond", matcher, "410"]:
             handlers[line] = {
