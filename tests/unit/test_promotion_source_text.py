@@ -1086,3 +1086,61 @@ def test_a_private_use_bullet_starting_a_line_marks_a_list_item_in_every_form() 
 def test_a_private_use_character_inside_a_line_is_left_as_it_is() -> None:
     paragraph = "<w:p><w:r><w:t>Søknad  gebyr</w:t></w:r></w:p>"
     assert docx_lines(_docx_body(paragraph)) == ("Søknad  gebyr",)
+
+
+@pytest.mark.parametrize("bullet", ["\uf0b7", "\uf0a7", "\uf076", "\uf0d8"])
+def test_pdf_private_use_bullets_keep_wrapped_items_separate(
+    monkeypatch: pytest.MonkeyPatch, bullet: str
+) -> None:
+    """#654 promises PDF items remain apart after the shared line rejoining."""
+    monkeypatch.setattr(
+        pypdf.PageObject,
+        "extract_text",
+        lambda self: (
+            f"Kommunen kan gi fritak for:\n  {bullet}\tbygning som\n"
+            f"brukes til lager,\n{bullet}annen bruk.\nSøknad {bullet} gebyr."
+        ),
+    )
+    assert pdf_lines(minimal_pdf()) == (
+        "Kommunen kan gi fritak for:",
+        "- bygning som brukes til lager,",
+        "- annen bruk.",
+        f"Søknad {bullet} gebyr.",
+    )
+
+
+def test_docx_break_before_heading_tabs_and_body_tabs_preserves_line_order() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Innledning</w:t><w:br/>"
+        "<w:t>§ 2 Gebyr</w:t><w:tab/><w:t>Gebyret</w:t><w:tab/>"
+        "<w:t>betales årlig.</w:t><w:cr/><w:t>Klage sendes kommunen.</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>Neste avsnitt.</w:t></w:r></w:p>"
+    )
+    payload = _docx_body(paragraph)
+    expected = (
+        "Innledning",
+        "§ 2 Gebyr",
+        "Gebyret betales årlig.",
+        "Klage sendes kommunen.",
+        "Neste avsnitt.",
+    )
+    assert docx_lines(payload) == docx_lines(payload) == expected
+
+
+def test_docx_inline_controls_resume_after_pageref_ends() -> None:
+    paragraph = (
+        '<w:p><w:r><w:t>Gebyr</w:t><w:fldChar w:fldCharType="begin"/>'
+        '<w:instrText> PAGEREF _Toc1 </w:instrText><w:fldChar w:fldCharType="separate"/>'
+        '<w:tab/><w:br/><w:cr/><w:t>7</w:t><w:fldChar w:fldCharType="end"/>'
+        "<w:tab/><w:t>kr 200</w:t><w:cr/><w:t>Betales årlig.</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Gebyr kr 200", "Betales årlig.")
+
+
+@pytest.mark.parametrize("bullet", ["\uf0b7", "\uf0a7", "\uf076", "\uf0d8"])
+def test_docx_soft_break_starts_a_private_use_bullet_line(bullet: str) -> None:
+    paragraph = (
+        f"<w:p><w:r><w:t>Søknad {bullet} gebyr</w:t><w:br/>"
+        f"<w:t>  {bullet}lager</w:t><w:cr/><w:t>{bullet} bolig</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == (f"Søknad {bullet} gebyr", "- lager", "- bolig")
