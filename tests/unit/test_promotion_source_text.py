@@ -1059,3 +1059,30 @@ def test_docx_break_and_tab_inside_a_pageref_field_add_nothing() -> None:
 def test_docx_empty_lines_from_leading_and_trailing_breaks_are_dropped() -> None:
     paragraph = "<w:p><w:r><w:br/><w:t>Gebyr</w:t><w:br/><w:br/></w:r></w:p>"
     assert docx_lines(_docx_body(paragraph)) == ("Gebyr",)
+
+
+# --- Word's Symbol-font bullets (#654) ------------------------------------------
+
+
+@pytest.mark.parametrize("bullet", ["", "", "", ""])
+def test_a_private_use_bullet_starting_a_line_becomes_the_list_marker(bullet: str) -> None:
+    paragraph = (
+        f"<w:p><w:r><w:t>{bullet}  Søknad etter forurensningsforskriften § 2</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("- Søknad etter forurensningsforskriften § 2",)
+
+
+def test_a_private_use_bullet_starting_a_line_marks_a_list_item_in_every_form() -> None:
+    page = _main(
+        "<p>Kommunen kan gi fritak for:<br> bygning som<br>brukes til lager,<br> annen bruk.</p>"
+    )
+    assert html_lines(page, "text/html; charset=utf-8") == (
+        "Kommunen kan gi fritak for:",
+        "- bygning som brukes til lager,",
+        "- annen bruk.",
+    )
+
+
+def test_a_private_use_character_inside_a_line_is_left_as_it_is() -> None:
+    paragraph = "<w:p><w:r><w:t>Søknad  gebyr</w:t></w:r></w:p>"
+    assert docx_lines(_docx_body(paragraph)) == ("Søknad  gebyr",)

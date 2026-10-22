@@ -36,6 +36,11 @@ another, and a tab is a space — except right after a section heading, where
 Word's "heading, tabs, text" layout in one paragraph is a heading and its
 text on two lines (#652).
 
+Word's Symbol-font bullet reaches the text as a Private Use Area character
+(U+F0B7; Wingdings U+F0A7, U+F076, U+F0D8) that renders as nothing or as
+tofu. At the start of a line it is the list marker and is read as one
+(#654); anywhere else it is kept as it is.
+
 Lines that are page furniture rather than law — update stamps ("Sist
 endra"), "Skriv ut", "Del på", "Til toppen", a CMS feedback widget ("Fant du
 det du trengte?"), page numbers — are dropped in every form: a stamp that
@@ -70,6 +75,7 @@ _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _TAB = "\t"
 _BREAK = "\n"
 _INLINE_TEXT = {f"{_W}tab": _TAB, f"{_W}br": _BREAK, f"{_W}cr": _BREAK}
+_PUA_BULLET = re.compile(r"^\s*[\uf0b7\uf0a7\uf076\uf0d8]\s*")
 
 _BLOCK_TAGS = frozenset(
     {"p", "div", "section", "article", "header", "main", "li", "ul", "ol", "dl", "dt", "dd"}
@@ -283,7 +289,7 @@ def _spaced(text: str | None) -> str:
 
 
 def _clean_lines(lines: Iterable[str]) -> tuple[str, ...]:
-    collapsed = (" ".join(line.split()) for line in lines)
+    collapsed = (" ".join(_PUA_BULLET.sub("- ", line).split()) for line in lines)
     return tuple(line for line in collapsed if line and not _FURNITURE_LINE.fullmatch(line))
 
 
