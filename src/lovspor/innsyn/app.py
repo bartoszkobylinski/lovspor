@@ -69,7 +69,7 @@ def refuse(exc: Exception, under: str | None = None) -> typer.Exit:
 
 
 def _reasons(exc: ValidationError, under: str | None) -> str:
-    return "; ".join(_reason(error, under) for error in exc.errors(include_url=False))
+    return "; ".join(_reason(error, under) for error in exc.errors())
 
 
 def _reason(error: ErrorDetails, under: str | None) -> str:
