@@ -8894,3 +8894,72 @@ def test_every_history_tool_resolves_the_same_short_names(tmp_path: Path, name: 
     at = reader.at_state("2020-06-01")
     assert at.get_section(name, "5-12")["mapped_from_slug"] == name
     assert "mapped_from_slug" not in at.get_section(slug, "5-12")
+
+
+# --- a short name never hides a slug several records claim (#585, #243) --------
+
+
+def _seed_duplicate_claimants(root: Path) -> CorpusReader:
+    """``testloven-abc`` is claimed by two current records (an ambiguous slug,
+    #243) beside ``testloven-2``, a second act with the same kortform."""
+    _seed_corpus(
+        root,
+        {
+            "nl-1": _record(slug="testloven-abc", title="First"),
+            "nl-2": _record(
+                slug="testloven-abc",
+                title="Second",
+                source_dataset="gjeldende-sentrale-forskrifter",
+            ),
+            "nl-3": _record(slug="testloven-2", title="Third"),
+        },
+    )
+    return CorpusReader(root)
+
+
+def test_short_name_lookup_lists_a_claimed_slug_among_its_candidates(tmp_path: Path) -> None:
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        _seed_duplicate_claimants(tmp_path).get_law("testloven")
+    assert str(exc_info.value) == (
+        "short name 'testloven' names 2 laws: testloven-2, testloven-abc; cite the canonical slug"
+    )
+
+
+def test_short_name_citation_lists_a_claimed_slug_among_its_candidates(tmp_path: Path) -> None:
+    result = _seed_duplicate_claimants(tmp_path).validate_citation("testloven § 1")
+    assert result["valid"] is False
+    assert result["slug"] is None
+    assert result["reason"] == (
+        "ambiguous citation: 'testloven' names 2 acts: testloven-2, testloven-abc; "
+        "cite the canonical slug"
+    )
+
+
+def test_short_name_naming_only_a_claimed_slug_is_refused_as_that_collision(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="testloven-abc", title="First"),
+            "nl-2": _record(
+                slug="testloven-abc",
+                title="Second",
+                source_dataset="gjeldende-sentrale-forskrifter",
+            ),
+        },
+    )
+    reader = CorpusReader(tmp_path)
+    with pytest.raises(AmbiguousSlugError, match="slug 'testloven-abc' names 2 current documents"):
+        reader.get_law("testloven")
+    result = reader.validate_citation("testloven")
+    assert result == {
+        "valid": False,
+        "slug": None,
+        "section_id": None,
+        "heading": None,
+        "reason": (
+            "ambiguous citation: 'testloven' names 'testloven-abc', a slug several current "
+            "documents claim; search_laws lists them with their doc_id"
+        ),
+    }

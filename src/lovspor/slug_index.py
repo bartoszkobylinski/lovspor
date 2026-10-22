@@ -103,35 +103,50 @@ def slugs_named(slugs: Iterable[str], name: str) -> list[str]:
 def short_name_entry(index: SlugIndex, name: str) -> SlugEntry | None:
     """The one entry an exact short name identifies; ``None`` when none does.
 
-    Several is a refusal naming them all: a short name is resolved only when
-    it cannot pick the wrong act.
+    Several is a refusal naming them all, and a slug several records claim
+    (``index.ambiguous``) counts as one of them: a short name is resolved
+    only when it cannot pick the wrong act, and never hides a collision.
     """
-    named = slugs_named(index, name)
+    named = slugs_named([*index, *index.ambiguous], name)
     if len(named) > 1:
         raise CorpusNotFoundError(
             f"short name {name!r} names {len(named)} laws: {', '.join(named)}; "
             f"cite the canonical slug"
         )
-    return index[named[0]] if named else None
+    return index.resolve(named[0]) if named else None
 
 
 def cited_acts(
-    slugs: Collection[str], citation_lower: str, token_in: Callable[[str, str], bool]
+    slugs: Collection[str],
+    citation_lower: str,
+    token_in: Callable[[str, str], bool],
+    claimed: Collection[str] = (),
 ) -> tuple[list[str], str | None]:
     """The acts a citation names: its exact slug tokens, else its exact short names.
 
-    ``token_in(slug, citation_lower)`` is the caller's slug-token test. The
-    second element is the refusal when short names name more than one act;
-    the first is then empty.
+    ``token_in(slug, citation_lower)`` is the caller's slug-token test;
+    ``claimed`` are the slugs several records claim, which a short name may
+    name but never resolve to. The second element is the refusal when short
+    names name more than one act or a claimed one; the first is then empty.
     """
     candidates = [slug for slug in slugs if token_in(slug, citation_lower)]
     if candidates:
         return candidates, None
-    named = _short_names_in(slugs, citation_lower)
+    named = _short_names_in([*slugs, *claimed], citation_lower)
     acts = list(dict.fromkeys(slug for found in named.values() for slug in found))
     if len(acts) > 1:
         return [], _short_name_ambiguity(named)
+    if acts and acts[0] in claimed:
+        return [], _claimed_slug_ambiguity(named)
     return acts, None
+
+
+def _claimed_slug_ambiguity(named: dict[str, list[str]]) -> str:
+    ((token, slugs),) = named.items()
+    return (
+        f"ambiguous citation: {token!r} names {slugs[0]!r}, a slug several current "
+        f"documents claim; search_laws lists them with their doc_id"
+    )
 
 
 def _short_names_in(slugs: Collection[str], citation_lower: str) -> dict[str, list[str]]:
