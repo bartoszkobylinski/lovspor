@@ -1973,6 +1973,46 @@ class TestTheScanReadsRepoRootPaths:
 
         assert found == {".tool.yaml": "tests/unit/test_module.py:2"}
 
+    def test_it_reads_checkout_tracking_from_an_untracked_shadow_tree(self, tmp_path: Path) -> None:
+        """The helper's documented mutants/ case must not leave the guard blind."""
+        source = (
+            "ROOT = Path(__file__).resolve().parents[2]\n"
+            'CFG = ROOT / ".tool.yaml"\n'
+            'SCRIPT = ROOT / "scripts/ci/check.sh"\n'
+            'CACHE = ROOT / "data"\n'
+        )
+        expected = self._scan(tmp_path, source, (".tool.yaml", "scripts/ci/check.sh"))
+        shadow = tmp_path / "mutants"
+        unit = shadow / "tests" / "unit"
+        unit.mkdir(parents=True)
+        (unit / "test_module.py").write_text(source, encoding="utf-8")
+        (shadow / ".tool.yaml").write_text("", encoding="utf-8")
+        (shadow / "scripts" / "ci").mkdir(parents=True)
+        (shadow / "scripts" / "ci" / "check.sh").write_text("", encoding="utf-8")
+        (shadow / "data").mkdir()
+        (shadow / "data" / "cache.json").write_text("{}", encoding="utf-8")
+
+        found = _repo_state_the_unit_suite_reads(unit)
+
+        assert (
+            found
+            == expected
+            == {
+                ".tool.yaml": "tests/unit/test_module.py:2",
+                "scripts": "tests/unit/test_module.py:3",
+            }
+        )
+
+    def test_it_raises_when_git_cannot_list_tracked_state(self, tmp_path: Path) -> None:
+        """A failed git lookup cannot count as an empty set of required files."""
+        missing = tmp_path / "missing-checkout"
+
+        with pytest.raises(subprocess.CalledProcessError) as exc_info:
+            _tracked_root_names(missing)
+
+        assert exc_info.value.returncode != 0
+        assert "ls-files" in exc_info.value.cmd
+
     def test_it_sees_a_path_built_inline_and_reaching_deeper(self, tmp_path: Path) -> None:
         source = 'CFG = Path(__file__).parents[2] / ".tool.yaml" / "inner"\n'
 
