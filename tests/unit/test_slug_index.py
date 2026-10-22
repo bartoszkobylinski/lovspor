@@ -1,8 +1,11 @@
 """Regression tests for the exact short-name citation contract (#585)."""
 
+import json
+from pathlib import Path
+
 import pytest
 
-from lovspor.mcp import _slug_token_in_citation
+from lovspor.mcp import CorpusReader, _slug_token_in_citation
 from lovspor.slug_index import cited_acts, slugs_named
 
 
@@ -64,3 +67,70 @@ def test_shared_abbreviation_includes_a_multiply_claimed_slug() -> None:
         "ambiguous citation: 'abc.' names 2 acts: testloven-abc, annenloven-abc; "
         "cite the canonical slug",
     )
+
+
+@pytest.mark.parametrize("name", ["lex", "LEX", "lex.", "LEX."])
+def test_three_character_name_requires_abbreviation_dot(name: str) -> None:
+    expected = ["lex"] if name.endswith(".") else []
+    assert slugs_named(["lex"], name) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "slug"),
+    [("LEX.", "lex"), ("lex..", "lex"), ("appendix", "appendix"), ("APPENDIX.", "appendix")],
+)
+def test_short_name_preserves_terminal_letters_when_stripping_dots(
+    name: str,
+    slug: str,
+) -> None:
+    assert slugs_named([slug], name) == [slug]
+
+
+@pytest.mark.parametrize(
+    "citation",
+    [
+        "testloven-abc pretestloven-abc",
+        "pretestloven-abc testloven-abc pretestloven-abc",
+    ],
+)
+def test_slug_token_finds_valid_occurrence_before_invalid_last(citation: str) -> None:
+    assert _slug_token_in_citation("testloven-abc", citation)
+
+
+@pytest.mark.parametrize(
+    ("slug", "citation", "expected"),
+    [("a", "aa a", True), ("aaa", "aaaa aaa", True), ("aaa", "aaaa", False)],
+)
+def test_overlapping_slug_occurrences_respect_word_boundaries(
+    slug: str,
+    citation: str,
+    expected: bool,
+) -> None:
+    assert _slug_token_in_citation(slug, citation) is expected
+
+
+def test_citation_checks_adjacent_occurrences_of_manifest_slug(tmp_path: Path) -> None:
+    # Manifests accept string slugs without an alphabet restriction. An underscore
+    # is a non-word boundary under the citation parser's documented alphabet.
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generated_at": "2026-05-01T04:00:00Z",
+                "documents": {
+                    "doc-a": {
+                        "doc_type": "lov",
+                        "xml_hash": "hash-a",
+                        "markdown_path": "lover/_.md",
+                        "source_dataset": "gjeldende-lover",
+                        "last_seen": "2026-05-01T04:00:00Z",
+                        "status": "current",
+                        "slug": "_",
+                    },
+                },
+            },
+        ),
+    )
+    verdict = CorpusReader(tmp_path).validate_citation("a__")
+    assert verdict["valid"] is True
+    assert verdict["slug"] == "_"
