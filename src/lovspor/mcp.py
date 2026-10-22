@@ -733,11 +733,8 @@ class CorpusReader:
         """
         # Slug matching is token-based and longest-wins; the reasoning
         # lives on ``_citation_verdict`` and ``_slug_token_in_citation``.
-        return _citation_verdict(
-            citation,
-            self._load_slug_index(),
-            self._resolve_cited_section,
-        )
+        index = self._load_slug_index()
+        return _citation_verdict(citation, index, self._resolve_cited_section, index.ambiguous)
 
     def _resolve_cited_section(
         self,
@@ -2926,12 +2923,10 @@ def _citation_verdict(
     citation: str,
     slugs: Collection[str],
     resolve: Callable[[str, str], tuple[str, dict[str, Any] | None, str | None]],
+    claimed: Collection[str] = (),
 ) -> dict[str, Any]:
-    """The whole ``validate_citation`` algorithm against one state.
-
-    ``slugs`` is that state's slug namespace; ``resolve`` is that state's
-    cited-section resolution (the ``_resolve_cited_section`` contract).
-    """
+    """The whole ``validate_citation`` algorithm against one state: its slug
+    namespace, its cited-section resolution, its slugs several records claim."""
     if "§§" in citation:
         return _citation_invalid(
             "range citations (§§) are not supported; cite a single § section instead",
@@ -2939,7 +2934,7 @@ def _citation_verdict(
     section_match = _CITATION_SECTION_ID.search(citation)
     section_id = section_match.group(1) if section_match else None
     citation_lower = citation.lower()
-    candidates, ambiguity = cited_acts(slugs, citation_lower, _slug_token_in_citation)
+    candidates, ambiguity = cited_acts(slugs, citation_lower, _slug_token_in_citation, claimed)
     matched_slug = max(candidates, key=len) if candidates else None
     if matched_slug is None:
         why = ambiguity or _no_act_reason(citation, section_id, slugs)
@@ -2969,13 +2964,8 @@ def _resolve_cited_section_with(
     slug: str,
     section_id: str,
 ) -> tuple[str, dict[str, Any] | None, str | None]:
-    """Resolve a citation-extracted id via one state's ``get_section``.
-
-    Same longest-read-first / `` i``-tail fallback contract as the live
-    ``_resolve_cited_section`` (whose docstring holds the reasoning);
-    parameterized on the section lookup so a snapshot resolves against
-    its own state.
-    """
+    """Resolve a citation-extracted id via one state's ``get_section`` — the
+    live ``_resolve_cited_section`` contract, parameterized on the lookup."""
     try:
         return section_id, get_section(slug, section_id), None
     except CorpusAmbiguousSectionError as exc:
@@ -3936,7 +3926,8 @@ class _SnapshotState:
         """
         aliases = self._lineage_aliases_in(citation.lower())
         namespace = set(self._slug_index()) | set(aliases)
-        verdict = _citation_verdict(citation, namespace, self._resolve_cited)
+        claimed = self._slug_index().ambiguous
+        verdict = _citation_verdict(citation, namespace, self._resolve_cited, claimed)
         matched = verdict["slug"]
         if matched in aliases:
             verdict["mapped_from_slug"] = matched
