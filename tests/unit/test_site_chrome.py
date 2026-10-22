@@ -64,6 +64,19 @@ class TestChromeSignature:
 
 
 class TestChromeInvariance:
+    @pytest.mark.parametrize(("lang", "prefix"), [("nb", ""), ("en", "/en"), ("pl", "/pl")])
+    def test_about_link_is_in_the_site_footer_only(self, lang: Lang, prefix: str) -> None:
+        """The new about link follows the site-only footer contract."""
+        assert f'href="{prefix}/about/"' in chrome_html(lang).footer
+        assert "/about/" not in corpus_chrome_html().footer
+
+    def test_english_crawler_link_discloses_the_destination_language(self) -> None:
+        """The crawler has no English twin (site audit 2026-10-22)."""
+        assert (
+            '<a href="/observatory/">About our crawler</a> (in Norwegian)'
+            in chrome_html("en").footer
+        )
+
     def test_identical_bytes_under_two_different_fact_sets(self) -> None:
         registry_a, hosted_a = _fact_set(5900, hosted_ready=True)
         registry_b, hosted_b = _fact_set(87052, hosted_ready=False)

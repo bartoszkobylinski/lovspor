@@ -1474,6 +1474,18 @@ class TestDocsPage:
     to the checkout's own descriptor, and no hosted claim."""
 
     @pytest.mark.parametrize("path", ["/docs/", "/en/docs/", "/pl/docs/"])
+    def test_local_regulations_document_the_opt_in_and_observed_status(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        """The audit correction names the separate dataset and its limits."""
+        markup = _page(built[0], path)
+
+        assert "<code>lokale-forskrifter</code>" in markup
+        assert '<code>dataset="lokale-forskrifter"</code>' in markup
+        assert "<code>asserted: false</code>" in markup
+        assert "<span data-literal>åndsverkloven § 14</span>" in markup
+
+    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/", "/pl/docs/"])
     def test_the_counts_are_facts_never_typed_numbers(
         self, built: tuple[Path, SiteBuildReport], world: World, path: str
     ) -> None:
