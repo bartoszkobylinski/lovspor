@@ -86,6 +86,11 @@ def test_short_name_preserves_terminal_letters_when_stripping_dots(
     assert slugs_named([slug], name) == [slug]
 
 
+@pytest.mark.parametrize("name", ["APPENDIXX", "APPENDIXX.", "APPENDIXX..", "appendiXX."])
+def test_short_name_keeps_repeated_terminal_x_after_case_normalization(name: str) -> None:
+    assert slugs_named(["appendi", "appendix", "appendixx"], name) == ["appendixx"]
+
+
 @pytest.mark.parametrize(
     "citation",
     [
