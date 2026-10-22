@@ -8848,3 +8848,49 @@ def test_serve_http_writes_the_open_hour_to_stderr_on_shutdown(
     ]
     assert len(metric_lines) == 1
     assert '"by_tool":{"get_law":1}' in metric_lines[0]
+
+
+# --- every slug-taking tool resolves the same short names (#585) ---------------
+
+
+@pytest.mark.parametrize("name", ["skatteloven", "sktl."])
+def test_every_current_state_tool_resolves_the_same_short_names(tmp_path: Path, name: str) -> None:
+    """One resolver behind every slug parameter: a name `get_law` takes,
+    `get_eu_basis` takes too (Codex round 1 on #585 found it bypassing)."""
+    slug = "skatteloven-sktl"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug=slug, title="Skatteloven", eu_basis=["32016R0679"])},
+        body_for={slug: "## Kapittel 5.\n\n### § 5-12. Boligsparing\nContent.\n"},
+        write_history_for=[slug],
+    )
+    reader = CorpusReader(tmp_path)
+
+    assert reader.get_law(name) == reader.get_law(slug)
+    assert reader.list_sections(name) == reader.list_sections(slug)
+    assert reader.get_section(name, "5-12") == reader.get_section(slug, "5-12")
+    assert reader.verify_quote(name, "5-12", "Content.") == reader.verify_quote(
+        slug, "5-12", "Content."
+    )
+    assert reader.get_eu_basis(name) == reader.get_eu_basis(slug)
+    assert reader.get_law_history(name) == reader.get_law_history(slug)
+    assert reader.list_law_versions(name) == reader.list_law_versions(slug)
+
+
+@pytest.mark.parametrize("name", ["skatteloven", "sktl."])
+def test_every_history_tool_resolves_the_same_short_names(tmp_path: Path, name: str) -> None:
+    repo = tmp_path / "lovverk"
+    _git_init_corpus(repo)
+    slug = "skatteloven-sktl"
+    body = _law_body("Skatteloven", [("5-12", "Boligsparing", "Content.")])
+    _seed_corpus(repo, {"nl-1": _record(slug=slug, title="Skatteloven")}, body_for={slug: body})
+    _commit_corpus_at(repo, "add(lov): sktl", "2020-01-01T12:00:00+00:00")
+    reader = CorpusReader(repo)
+
+    assert reader.get_law_at(name, "2020-06-01") == reader.get_law_at(slug, "2020-06-01")
+    assert reader.diff_law_versions(name, "2020-06-01", "2020-06-02") == (
+        reader.diff_law_versions(slug, "2020-06-01", "2020-06-02")
+    )
+    at = reader.at_state("2020-06-01")
+    assert at.get_section(name, "5-12")["mapped_from_slug"] == name
+    assert "mapped_from_slug" not in at.get_section(slug, "5-12")

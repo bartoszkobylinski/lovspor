@@ -105,7 +105,7 @@ from lovspor.hosted_calls import record_usage
 from lovspor.mcp_contract import ContractServer
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
-from lovspor.slug_index import SlugIndex, build_slug_index, cited_acts, short_name_entry
+from lovspor.slug_index import SlugEntry, SlugIndex, build_slug_index, cited_acts, short_name_entry
 from lovspor.snapshot import (
     CorpusSnapshot,
     CorpusStateRef,
@@ -1203,13 +1203,7 @@ class CorpusReader:
         + ``git pull`` to remediate rather than treating the field
         as 'unset'.
         """
-        entry = self._load_slug_index().resolve(slug)
-        if entry is None:
-            raise CorpusNotFoundError(
-                f"no current law with slug {slug!r}; "
-                f"use search_laws or list_recent_changes to discover slugs",
-            )
-        doc_id, record = entry
+        doc_id, record = self._find_current_entry(slug)
         # eu_basis is None signals a pre-Sprint-8 manifest record.
         # The backfill migration runs on the next sync, but until
         # then the MCP server has no authoritative answer to give.
@@ -2004,6 +1998,10 @@ class CorpusReader:
             return self._slug_index
 
     def _find_current_by_slug(self, slug: str) -> ManifestRecord:
+        return self._find_current_entry(slug)[1]
+
+    def _find_current_entry(self, slug: str) -> SlugEntry:
+        """The one entry a slug or an exact short name names; every slug tool resolves here."""
         index = self._load_slug_index()
         entry = index.resolve(slug) or short_name_entry(index, slug)
         if entry is None:
@@ -2013,17 +2011,11 @@ class CorpusReader:
                 f"no current law with slug {slug!r}; {hint}"
                 f"use search_laws or list_recent_changes to discover slugs",
             )
-        return entry[1]
+        return entry
 
     def _citation_suggestion_hint(self, citation_lower: str) -> str:
-        """Near-miss hint for a citation whose act token matched nothing.
-
-        Walks the citation's slug-shaped tokens (4+ chars, so filler
-        like ``i`` / ``jf`` never queries) and collects close matches
-        against the canonical slugs. Empty string when there is
-        nothing to suggest, so pinned exact-reason contracts stay
-        intact for token-less citations.
-        """
+        """Near-miss hint for a citation whose act token matched nothing;
+        empty when there is nothing to suggest (see ``_citation_hint_from``)."""
         return _citation_hint_from(self._load_slug_index(), citation_lower)
 
     def _slug_suggestions(self, slug: str) -> list[str]:
@@ -3036,19 +3028,21 @@ def _quote_verdict(
         section = get_section(query.slug, section_id, query.occurrence)
     except (CorpusAmbiguousSectionError, CorpusNotFoundError) as exc:
         return _quote_result(False, query.slug, section_id, str(exc))
+    slug = section["slug"]  # canonical: the query may name the act by a short name (#585)
     section_normalized = _normalize_for_quote_match(section["body"])
     quote_normalized = _normalize_for_quote_match(query.quote)
     if quote_normalized in section_normalized:
-        return _quote_result(True, query.slug, section_id, None)
-    return _quote_result(
-        False,
-        query.slug,
-        section_id,
-        f"quote not found in § {section_id} of {query.slug!r} after case, "
+        return _quote_result(True, slug, section_id, None)
+    return _quote_result(False, slug, section_id, _quote_not_found(slug, section_id))
+
+
+def _quote_not_found(slug: str, section_id: str) -> str:
+    return (
+        f"quote not found in § {section_id} of {slug!r} after case, "
         f"whitespace and typographic-punctuation normalization. The quote "
         f"may be from a different section, paraphrased rather than "
         f"verbatim, or hallucinated. "
-        f"Call get_section({query.slug!r}, {section_id!r}) to read the actual text.",
+        f"Call get_section({slug!r}, {section_id!r}) to read the actual text."
     )
 
 
