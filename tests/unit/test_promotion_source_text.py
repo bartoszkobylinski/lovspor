@@ -996,3 +996,151 @@ def test_docx_empty_instruction_run_does_not_interrupt_pageref_keyword() -> None
         "<w:r><w:t> gjelder.</w:t></w:r></w:p>"
     )
     assert docx_lines(_docx_body(paragraph)) == ("Forskrift om gebyr gjelder.",)
+
+
+# --- DOCX tabs and soft line breaks (#652) ------------------------------------
+
+
+def test_docx_tab_between_runs_is_a_space() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Gebyr</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>kr 200</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Gebyr kr 200",)
+
+
+def test_docx_soft_line_breaks_start_new_lines() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Gebyret er kr 200.</w:t><w:br/><w:t>Klage sendes kommunen.</w:t>"
+        '<w:br w:type="page"/><w:t>Vedtatt 2024.</w:t><w:cr/><w:t>Kunngjort 2025.</w:t></w:r></w:p>'
+    )
+    assert docx_lines(_docx_body(paragraph)) == (
+        "Gebyret er kr 200.",
+        "Klage sendes kommunen.",
+        "Vedtatt 2024.",
+        "Kunngjort 2025.",
+    )
+
+
+def test_docx_tabs_after_a_section_heading_start_its_text_on_a_new_line() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>§ 9. Arbeidsgodtgjøring for møtende varamedlemmer</w:t></w:r>"
+        "<w:r><w:tab/><w:tab/></w:r>"
+        "<w:r><w:t>Møtende varamedlemmer til organene nevnt i § 7 godtgjøres med kr. 600 per møte."
+        "</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == (
+        "§ 9. Arbeidsgodtgjøring for møtende varamedlemmer",
+        "Møtende varamedlemmer til organene nevnt i § 7 godtgjøres med kr. 600 per møte.",
+    )
+
+
+def test_docx_tab_after_a_sentence_that_is_not_a_heading_stays_a_space() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>§ 9 gjelder fra 1. januar 2025.</w:t></w:r>"
+        "<w:r><w:tab/></w:r><w:r><w:t>Gebyret er kr 200.</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == (
+        "§ 9 gjelder fra 1. januar 2025. Gebyret er kr 200.",
+    )
+
+
+def test_docx_break_and_tab_inside_a_pageref_field_add_nothing() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Kapittel 1 Formål</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        "<w:r><w:instrText> PAGEREF _Toc1 \\h </w:instrText></w:r>"
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+        "<w:r><w:tab/><w:br/><w:t>3</w:t></w:r>"
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Kapittel 1 Formål",)
+
+
+def test_docx_empty_lines_from_leading_and_trailing_breaks_are_dropped() -> None:
+    paragraph = "<w:p><w:r><w:br/><w:t>Gebyr</w:t><w:br/><w:br/></w:r></w:p>"
+    assert docx_lines(_docx_body(paragraph)) == ("Gebyr",)
+
+
+# --- Word's Symbol-font bullets (#654) ------------------------------------------
+
+
+@pytest.mark.parametrize("bullet", ["", "", "", ""])
+def test_a_private_use_bullet_starting_a_line_becomes_the_list_marker(bullet: str) -> None:
+    paragraph = (
+        f"<w:p><w:r><w:t>{bullet}  Søknad etter forurensningsforskriften § 2</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("- Søknad etter forurensningsforskriften § 2",)
+
+
+def test_a_private_use_bullet_starting_a_line_marks_a_list_item_in_every_form() -> None:
+    page = _main(
+        "<p>Kommunen kan gi fritak for:<br> bygning som<br>brukes til lager,<br> annen bruk.</p>"
+    )
+    assert html_lines(page, "text/html; charset=utf-8") == (
+        "Kommunen kan gi fritak for:",
+        "- bygning som brukes til lager,",
+        "- annen bruk.",
+    )
+
+
+def test_a_private_use_character_inside_a_line_is_left_as_it_is() -> None:
+    paragraph = "<w:p><w:r><w:t>Søknad  gebyr</w:t></w:r></w:p>"
+    assert docx_lines(_docx_body(paragraph)) == ("Søknad  gebyr",)
+
+
+@pytest.mark.parametrize("bullet", ["\uf0b7", "\uf0a7", "\uf076", "\uf0d8"])
+def test_pdf_private_use_bullets_keep_wrapped_items_separate(
+    monkeypatch: pytest.MonkeyPatch, bullet: str
+) -> None:
+    """#654 promises PDF items remain apart after the shared line rejoining."""
+    monkeypatch.setattr(
+        pypdf.PageObject,
+        "extract_text",
+        lambda self: (
+            f"Kommunen kan gi fritak for:\n  {bullet}\tbygning som\n"
+            f"brukes til lager,\n{bullet}annen bruk.\nSøknad {bullet} gebyr."
+        ),
+    )
+    assert pdf_lines(minimal_pdf()) == (
+        "Kommunen kan gi fritak for:",
+        "- bygning som brukes til lager,",
+        "- annen bruk.",
+        f"Søknad {bullet} gebyr.",
+    )
+
+
+def test_docx_break_before_heading_tabs_and_body_tabs_preserves_line_order() -> None:
+    paragraph = (
+        "<w:p><w:r><w:t>Innledning</w:t><w:br/>"
+        "<w:t>§ 2 Gebyr</w:t><w:tab/><w:t>Gebyret</w:t><w:tab/>"
+        "<w:t>betales årlig.</w:t><w:cr/><w:t>Klage sendes kommunen.</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>Neste avsnitt.</w:t></w:r></w:p>"
+    )
+    payload = _docx_body(paragraph)
+    expected = (
+        "Innledning",
+        "§ 2 Gebyr",
+        "Gebyret betales årlig.",
+        "Klage sendes kommunen.",
+        "Neste avsnitt.",
+    )
+    assert docx_lines(payload) == docx_lines(payload) == expected
+
+
+def test_docx_inline_controls_resume_after_pageref_ends() -> None:
+    paragraph = (
+        '<w:p><w:r><w:t>Gebyr</w:t><w:fldChar w:fldCharType="begin"/>'
+        '<w:instrText> PAGEREF _Toc1 </w:instrText><w:fldChar w:fldCharType="separate"/>'
+        '<w:tab/><w:br/><w:cr/><w:t>7</w:t><w:fldChar w:fldCharType="end"/>'
+        "<w:tab/><w:t>kr 200</w:t><w:cr/><w:t>Betales årlig.</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == ("Gebyr kr 200", "Betales årlig.")
+
+
+@pytest.mark.parametrize("bullet", ["\uf0b7", "\uf0a7", "\uf076", "\uf0d8"])
+def test_docx_soft_break_starts_a_private_use_bullet_line(bullet: str) -> None:
+    paragraph = (
+        f"<w:p><w:r><w:t>Søknad {bullet} gebyr</w:t><w:br/>"
+        f"<w:t>  {bullet}lager</w:t><w:cr/><w:t>{bullet} bolig</w:t></w:r></w:p>"
+    )
+    assert docx_lines(_docx_body(paragraph)) == (f"Søknad {bullet} gebyr", "- lager", "- bolig")
