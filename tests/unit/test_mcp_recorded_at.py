@@ -1071,3 +1071,31 @@ def test_historical_state_with_duplicate_slug_raises_ambiguous_slug_error(
         reader.at_state("2026-05-01").get_section("dupe", "1")
     with pytest.raises(AmbiguousSlugError, match=r"names 2 current documents"):
         reader.get_law_at("dupe", "2026-05-01")
+
+
+def test_historical_citation_refuses_short_name_of_duplicate_claimants(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _, _ = corpus
+    (repo / "manifest.json").write_text(
+        _manifest(
+            {
+                "doc-a": {
+                    **_record("testloven-abc", "hash-a2"),
+                    "markdown_path": "lover/grunnloven-grl.md",
+                },
+                "doc-b": {
+                    **_record("testloven-abc", "hash-b2"),
+                    "markdown_path": "lover/testloven.md",
+                },
+            },
+        ),
+    )
+    _commit_all(repo, "duplicate claimants", "2026-05-12T12:00:00Z")
+    state = CorpusReader(repo).at_state("2026-05-13")
+
+    for citation in ("testloven § 1", "abc. § 1"):
+        verdict = state.validate_citation(citation)
+        assert verdict["valid"] is False
+        assert "'testloven-abc', a slug several current documents claim" in verdict["reason"]
+        assert "search_laws" in verdict["reason"]
