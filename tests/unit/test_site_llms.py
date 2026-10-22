@@ -130,14 +130,18 @@ class TestWhatItNames:
         assert "https://lovspor.no/docs/" in text
 
     def test_the_limits_that_docs_already_states(self) -> None:
-        """The same four refusals as ``/docs/``: no case law, no preparatory
-        works, no municipal regulations, and history that answers what the
-        corpus held at a date rather than what was legally in force."""
-        text = _text().lower()
+        """The same refusals as ``/docs/``: no case law, no preparatory works,
+        local regulations only as a separate opt-in dataset (site audit
+        2026-10-22: the docs page denied them while the landing offered them),
+        and history that answers what the corpus held at a date rather than
+        what was legally in force."""
+        text = " ".join(_text().lower().split())
 
         assert "case law" in text
         assert "preparatory works" in text
-        assert "municipal regulations" in text
+        assert "municipal regulations" not in text
+        assert "local regulations are a separate" in text
+        assert "not asserted to be in force" in text
         assert "in force" in text
         assert "legal advice" in text
 

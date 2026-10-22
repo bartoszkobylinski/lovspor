@@ -25,13 +25,14 @@
 <ul>
   <li><strong>Ikke juridisk rådgivning.</strong> Verktøyene viser lovteksten. Tolkningen er din.</li>
   <li><strong>Ikke gjeldende rett på en dato.</strong> Historikkverktøyene svarer på hva <em>korpuset inneholdt</em> ved en dato — ikke hvilke bestemmelser som var rettslig i kraft da. Det er to forskjellige spørsmål, og bare det første kan besvares herfra.</li>
-  <li><strong>Ikke rettspraksis, forarbeider, rundskriv eller kommunale forskrifter.</strong> En regel kan være bindende og likevel mangle her. Et tomt svar er ikke bevis for at regelen ikke finnes.</li>
+  <li><strong>Ikke rettspraksis, forarbeider eller rundskriv.</strong> En regel kan være bindende og likevel mangle her. Et tomt svar er ikke bevis for at regelen ikke finnes.</li>
   <li><strong>Ikke parafrase.</strong> <code>verify_quote</code> bekrefter at en ordrett streng står i bestemmelsen. Om en omskrivning er juridisk dekkende, kan den ikke svare på — der må du lese teksten selv.</li>
 </ul>
 
 <h2>Korpuset bak</h2>
 <p>{{ fact("corpus.documents", kind="corpus") }} dokumenter ved siste utgivelse: gjeldende lover og sentrale forskrifter, hentet fra Lovdatas åpne data og gjengitt som Markdown. Bla i dem her — <a href="/lov/">lover</a> og <a href="/forskrift/">forskrifter</a>.</p>
-<p>Skillet er kildens eget: <em>lover</em> er vedtatt av Stortinget, <em>sentrale forskrifter</em> er gitt med hjemmel i en lov av et departement eller direktorat. Lokale og kommunale forskrifter er ikke med.</p>
+<p>Skillet er kildens eget: <em>lover</em> er vedtatt av Stortinget, <em>sentrale forskrifter</em> er gitt med hjemmel i en lov av et departement eller direktorat.</p>
+<p>Lokale forskrifter er et eget datasett, <code>lokale-forskrifter</code>: forskrifter observert på kommunenes egne nettsider, publisert med hjemmel i <span data-literal>åndsverkloven § 14</span> og merket som observert, ikke hevdet å gjelde (<code>asserted: false</code>). Datasettet er lite og vokser. Verktøyene leser det bare når du ber om det med <code>dataset="lokale-forskrifter"</code>; ellers svarer de fra lover og sentrale forskrifter.</p>
 <p class="muted">Kilde: Lovdata, lisensiert under <span data-literal>NLOD 2.0</span>, og hver fil bærer lisensen i frontmatteren sin. Korpuset ligger åpent i <a href="https://github.com/bartoszkobylinski/lovverk">lovverk</a>; motoren som bygger det er <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>, under <span data-literal>AGPL-3.0</span>.</p>
 
 <h2>Autentisering</h2>

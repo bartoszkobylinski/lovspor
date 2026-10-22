@@ -21,13 +21,14 @@
 <ul>
   <li><strong>Not legal advice.</strong> The tools show you the text of the law. The interpretation is yours.</li>
   <li><strong>Not the law in force on a date.</strong> The history tools answer what the <em>corpus held</em> at a date — not which provisions were legally in force then. Those are two different questions, and only the first can be answered from here.</li>
-  <li><strong>No case law, preparatory works, circulars or municipal regulations.</strong> A rule can be binding and still be absent here. An empty result is not evidence that no such rule exists.</li>
+  <li><strong>No case law, preparatory works or circulars.</strong> A rule can be binding and still be absent here. An empty result is not evidence that no such rule exists.</li>
   <li><strong>No paraphrase checking.</strong> <code>verify_quote</code> confirms that a verbatim string appears in the provision. Whether a rewording is legally faithful, it cannot answer — for that, read the text yourself.</li>
 </ul>
 
 <h2>The corpus behind it</h2>
 <p>{{ fact("corpus.documents", kind="corpus") }} documents at the last release: Norwegian acts and central regulations currently in force, taken from Lovdata's open data and rendered as Markdown. Browse them here — <a href="/lov/">acts</a> and <a href="/forskrift/">regulations</a>.</p>
-<p>The distinction is the source's own: <em>lover</em> are passed by the Storting, <em>sentrale forskrifter</em> are issued under the authority of an act by a ministry or directorate. Local and municipal regulations are not included.</p>
+<p>The distinction is the source's own: <em>lover</em> are passed by the Storting, <em>sentrale forskrifter</em> are issued under the authority of an act by a ministry or directorate.</p>
+<p>Local regulations are a dataset of their own, <code>lokale-forskrifter</code>: regulations observed on the municipalities' own websites, published on the basis of <span data-literal>åndsverkloven § 14</span> and labelled as observed, not asserted to be in force (<code>asserted: false</code>). The dataset is small and growing. The tools read it only when you ask for it with <code>dataset="lokale-forskrifter"</code>; otherwise they answer from acts and central regulations.</p>
 <p class="muted">Source: Lovdata, licensed under <span data-literal>NLOD 2.0</span>, and every file carries the licence in its own front matter. The corpus is public in <a href="https://github.com/bartoszkobylinski/lovverk">lovverk</a>; the engine that builds it is <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>, under <span data-literal>AGPL-3.0</span>.</p>
 
 <h2>Authentication</h2>
