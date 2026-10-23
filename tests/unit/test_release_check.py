@@ -22,6 +22,7 @@ from lovspor.release.envelope import (
     write_fragment,
 )
 from lovspor.release.errors import EnvelopeError, IncompleteEnvelopeError
+from lovspor.site.routes import emitted_pages
 from tests.unit.release_fixtures import World, build, make_world
 
 FACTS = "site/site-facts.json"
@@ -506,3 +507,32 @@ class TestTheTrees:
 
         with pytest.raises(EnvelopeError, match="does not list the emitted page set"):
             check_envelope(envelope)
+
+    def test_the_not_found_page_is_required(self, envelope: Path) -> None:
+        """The fragment rewrites every 404 to it (#662): absent, the error would be Caddy's."""
+        (envelope / "site" / "404.html").unlink()
+
+        with pytest.raises(EnvelopeError, match=r"site/: page /404\.html is not in the tree"):
+            check_envelope(envelope)
+
+    def test_the_not_found_page_is_scanned_like_every_page(self, envelope: Path) -> None:
+        page = envelope / "site" / "404.html"
+        page.write_text(
+            page.read_text(encoding="utf-8").replace("</h1>", " 404</h1>"), encoding="utf-8"
+        )
+
+        with pytest.raises(EnvelopeError, match=r"site/: numeral .* page /404\.html"):
+            check_envelope(envelope)
+
+    def test_a_not_found_page_link_outside_the_tree_is_refused(self, envelope: Path) -> None:
+        page = envelope / "site" / "404.html"
+        page.write_text(
+            page.read_text(encoding="utf-8").replace("</h1>", '<a href="/gone/">x</a></h1>'),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(EnvelopeError, match=r"site/: page /404\.html links to '/gone/'"):
+            check_envelope(envelope)
+
+    def test_the_not_found_page_is_not_counted_as_a_site_page(self, built: Path) -> None:
+        assert check_envelope(built).site_pages == len(emitted_pages())

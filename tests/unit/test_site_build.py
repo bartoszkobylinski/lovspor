@@ -43,6 +43,7 @@ from lovspor.site.errors import CapabilityDocumentError, SiteBuildError
 from lovspor.site.facts import KindMismatchError
 from lovspor.site.fingerprint import release_content_id, toolchain_fingerprint
 from lovspor.site.llms import LLMS_PAGE
+from lovspor.site.not_found import NOT_FOUND_NAME, NOT_FOUND_PATH, render_not_found
 from lovspor.site.routes import emitted_pages
 from lovspor.site.scan import check_links, scan_page
 from lovspor.site.templates import TEMPLATES_DIR
@@ -477,10 +478,22 @@ class TestTree:
         out, _ = built
         expected = {f"{page.path.lstrip('/')}index.html" for page in emitted_pages()}
 
-        assert _files(out) == expected | _ROOT_FILES
+        assert _files(out) == expected | _ROOT_FILES | {NOT_FOUND_NAME}
         assert {
             name for name in _files(out) if name.startswith("connect/") and name.count("/") > 1
         } == {"connect/claude/index.html", "connect/chatgpt/index.html"}
+
+    def test_the_not_found_page_is_written_but_is_not_a_route(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        """Caddy serves ``404.html`` for every 404 (#662): in the tree, rendered as
+        ``render_not_found`` renders it, never in the report's pages or the sitemap."""
+        out, report = built
+        emitted = {page.path: "" for page in emitted_pages()}
+
+        assert (out / NOT_FOUND_NAME).read_text(encoding="utf-8") == render_not_found(emitted)
+        assert NOT_FOUND_PATH not in report.pages
+        assert "404" not in (out / "sitemap-site.xml").read_text(encoding="utf-8")
 
     def test_sitemap_lists_exactly_the_emitted_pages(
         self, built: tuple[Path, SiteBuildReport]
