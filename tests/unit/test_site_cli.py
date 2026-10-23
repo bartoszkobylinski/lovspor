@@ -15,6 +15,7 @@ work tree is dirty exactly while these tests are being written.
 
 import grp
 import json
+import os
 import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -495,6 +496,38 @@ class TestReleaseProbeCommand:
         ]
         assert probe_lines == [line]
         assert "probe credential" not in result.stdout
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a 000 file by path anyway")
+    def test_a_credential_file_the_user_cannot_read_is_recorded_not_fatal(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An existing path the invoking user cannot read degrades like a missing
+        one (issue #470): the option must not refuse it before the loader runs."""
+        _, _, corpus, _ = repos
+        monkeypatch.delenv("CREDENTIALS_DIRECTORY", raising=False)
+        token_file = tmp_path / "root-only"
+        token_file.write_text("lsp_secret-root-only\n", encoding="utf-8")
+        token_file.chmod(0)
+        _host(httpx_mock, corpus)
+        out = tmp_path / "c.json"
+
+        try:
+            result = runner.invoke(
+                app, _probe_args(corpus, out, "--probe-token-file", str(token_file))
+            )
+        finally:
+            token_file.chmod(0o600)
+
+        assert result.exit_code == 0, result.output
+        step = load_capabilities(out).observation.transport.authenticated
+        assert (step.status, step.reason) == ("unobserved", "probe_credential_missing")
+        assert f"probe credential unreadable: {token_file}: Permission denied" in result.stderr
+        assert "lsp_secret" not in result.output
 
     def test_the_credential_is_read_as_utf_8_whatever_the_process_locale(
         self,
