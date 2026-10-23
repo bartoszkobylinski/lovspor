@@ -47,6 +47,8 @@ def test_section_ten_or_a_mid_line_citation_does_not_start_the_body() -> None:
         "Kapittel 1 Innleiing ............ 2",
         "§ 1 Heimel .... 3",
         "§ 1 Heimel \u2026. 3",
+        "§ 1 Heimel ....\t3",
+        "§ 1 Heimel ....\u00a03",
     ],
 )
 def test_a_contents_entry_never_starts_the_body(entry: str) -> None:
