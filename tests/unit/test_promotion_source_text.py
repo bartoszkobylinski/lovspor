@@ -1214,3 +1214,10 @@ def test_a_lowercase_line_after_a_contents_entry_is_not_joined_onto_it() -> None
     lines = ("Innhald", "Innleiing ........ 2", "kommunen gjev desse reglane.")
 
     assert pdf_lines(minimal_pdf(lines)) == ("kommunen gjev desse reglane.",)
+
+
+def test_a_lowercase_contents_entry_is_not_joined_onto_the_title_above_it() -> None:
+    """Joined, the title would read as an entry and be dropped with the contents."""
+    lines = ("Forskrift om gebyr", "innleiing ........ 2", "§ 1 Formål")
+
+    assert pdf_lines(minimal_pdf(lines)) == ("Forskrift om gebyr", "§ 1 Formål")
