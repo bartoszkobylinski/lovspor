@@ -3,12 +3,14 @@
 import re
 
 import pytest
+from jinja2 import DictLoader
 
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site.errors import SiteBuildError
 from lovspor.site.not_found import NOT_FOUND_NAME, NOT_FOUND_PATH, render_not_found
 from lovspor.site.routes import emitted_pages
 from lovspor.site.scan import scan_page
+from lovspor.site.templates import site_environment
 
 
 def _emitted() -> dict[str, str]:
@@ -63,3 +65,25 @@ class TestNotFoundPage:
 
         with pytest.raises(SiteBuildError, match="/pl/"):
             render_not_found(pages)
+
+    @pytest.mark.parametrize(
+        ("before", "after", "message"),
+        [
+            ("</h1>", " 404</h1>", "numeral outside the fact mechanism"),
+            ("</body>", "<script></script></body>", "outside the no-script rule"),
+            (f"{SITE_ORIGIN}/404.html", f"{SITE_ORIGIN}/", "rel=canonical"),
+        ],
+    )
+    def test_invalid_template_output_is_refused_during_rendering(
+        self, monkeypatch: pytest.MonkeyPatch, before: str, after: str, message: str
+    ) -> None:
+        """The non-route page must pass the same scans before it can be written."""
+        markup = render_not_found(_emitted())
+        assert before in markup
+        environment = site_environment()
+        environment.loader = DictLoader({"pages/not-found.html": markup.replace(before, after)})
+        monkeypatch.setattr("lovspor.site.not_found.site_environment", lambda: environment)
+
+        with pytest.raises(SiteBuildError, match=message) as caught:
+            render_not_found(_emitted())
+        assert NOT_FOUND_PATH in str(caught.value)

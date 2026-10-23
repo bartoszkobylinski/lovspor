@@ -536,3 +536,27 @@ class TestTheTrees:
 
     def test_the_not_found_page_is_not_counted_as_a_site_page(self, built: Path) -> None:
         assert check_envelope(built).site_pages == len(emitted_pages())
+
+    @pytest.mark.parametrize("invalid", [b"\xff", b"\xe2\x82", b"\xc0\xaf"])
+    def test_not_found_codec_errors_are_named_envelope_refusals(
+        self, envelope: Path, invalid: bytes
+    ) -> None:
+        page = envelope / "site" / "404.html"
+        page.write_bytes(page.read_bytes() + invalid)
+
+        with pytest.raises(EnvelopeError) as caught:
+            check_envelope(envelope)
+        assert str(caught.value).startswith("site/: page /404.html is not UTF-8: ")
+        assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+
+    def test_a_script_on_the_not_found_page_is_refused(self, envelope: Path) -> None:
+        page = envelope / "site" / "404.html"
+        page.write_text(
+            page.read_text(encoding="utf-8").replace("</body>", "<script></script></body>"),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(
+            EnvelopeError, match=r"site/: page /404\.html is outside the no-script rule"
+        ):
+            check_envelope(envelope)
