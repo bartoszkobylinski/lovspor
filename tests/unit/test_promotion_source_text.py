@@ -12,6 +12,7 @@ from lxml import html
 
 from lovspor.errors import LovsporError, UnreadableSourceError
 from lovspor.promotion import SourceForm
+from lovspor.promotion.identity import content_hash
 from lovspor.promotion.source_text import (
     FONT_LIBRARY_VERSION,
     PDF_LIBRARY_VERSION,
@@ -457,6 +458,62 @@ def test_pdf_contents_on_the_first_line_is_not_read() -> None:
 def test_pdf_contents_entry_after_other_text_drops_no_heading() -> None:
     lines = ("Forskrift om gebyr", "§1 Formål ........ 2", "§ 1 Formål")
     assert pdf_lines(minimal_pdf(lines)) == ("Forskrift om gebyr", "§ 1 Formål")
+
+
+@pytest.mark.parametrize("numbered_first", [False, True])
+def test_pdf_contents_run_across_pages_is_removed_at_eof(numbered_first: bool) -> None:
+    """One numbered entry qualifies the whole run, including unnumbered entries (#597)."""
+    entries = ("Innleiing ........ 12", "Vedlegg ........")
+    if not numbered_first:
+        entries = entries[::-1]
+    payload = pdf_pages(
+        ("Forskrift om gebyr", "Innhald", entries[0]),
+        (entries[1],),
+    )
+    assert pdf_lines(payload) == ("Forskrift om gebyr",)
+
+
+def test_pdf_numbered_contents_does_not_remove_separate_form_blanks() -> None:
+    """A non-entry closes the run; page evidence must not leak into another run."""
+    lines = (
+        "Namn ........",
+        "§ 1 Formål",
+        "Innhald",
+        "Innleiing ........ 2",
+        "§ 2 Søknad",
+        "Adresse ........",
+    )
+    assert pdf_lines(minimal_pdf(lines)) == (
+        "Namn ........",
+        "§ 1 Formål",
+        "§ 2 Søknad",
+        "Adresse ........",
+    )
+
+
+def test_pdf_contents_page_changes_leave_extracted_text_and_hash_identical() -> None:
+    expected = pdf_lines(minimal_pdf(REGULATION_LINES))
+    for page in ("2", "123"):
+        payload = minimal_pdf(
+            (*REGULATION_LINES[:2], "Innhald", f"§ 1 Formål ........ {page}", *REGULATION_LINES[2:])
+        )
+        first = pdf_lines(payload)
+        assert first == pdf_lines(payload) == expected
+        assert content_hash("\n".join(first)) == content_hash("\n".join(expected))
+
+
+def test_html_contents_only_article_does_not_compete_with_regulation_holder() -> None:
+    """The shared first-section anchor must reject contents in HTML too (#597)."""
+    page = _main(
+        "<article><h1>Forskrift om gebyr</h1><p>§ 1 Formål ........ 2</p></article>"
+        "<article><h1>Forskrift om gebyr</h1><h2>§ 1 Formål</h2>"
+        "<p>Forskriften gjelder kommunen.</p></article><p>Nyheter</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "§ 1 Formål",
+        "Forskriften gjelder kommunen.",
+    )
 
 
 def test_docx_reads_one_line_per_paragraph_joining_runs() -> None:
