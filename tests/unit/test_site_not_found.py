@@ -23,6 +23,11 @@ def _emitted() -> dict[str, str]:
     [
         ("", b""),
         (
+            "\x00\x7f\u0080\u07ff\u0800\ud7ff\ue000\uffff\U00010000\U0010ffff",
+            b"\x00\x7f\xc2\x80\xdf\xbf\xe0\xa0\x80\xed\x9f\xbf"
+            b"\xee\x80\x80\xef\xbf\xbf\xf0\x90\x80\x80\xf4\x8f\xbf\xbf",
+        ),
+        (
             "<p>blå — żółć 😀</p>\r\n",
             b"<p>bl\xc3\xa5 \xe2\x80\x94 \xc5\xbc\xc3\xb3\xc5\x82\xc4\x87 \xf0\x9f\x98\x80</p>\r\n",
         ),
@@ -37,9 +42,10 @@ def test_write_not_found_preserves_exact_utf8_bytes(
     assert list(tmp_path.iterdir()) == [tmp_path / "404.html"]
 
 
-def test_write_not_found_refuses_unpaired_surrogates(tmp_path: Path) -> None:
+@pytest.mark.parametrize("markup", ["\ud800", "\udfff", "before\ud800after", "\ud800\udc00"])
+def test_write_not_found_refuses_unpaired_surrogates(tmp_path: Path, markup: str) -> None:
     with pytest.raises(UnicodeEncodeError):
-        write_not_found(tmp_path, "\ud800")
+        write_not_found(tmp_path, markup)
 
     assert not (tmp_path / "404.html").exists()
 
