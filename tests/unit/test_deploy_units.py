@@ -7,9 +7,11 @@ the unit files, so a unit that drifts from the ADR's contract fails a
 test rather than a droplet.
 """
 
+import os
 import re
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -348,3 +350,51 @@ class TestRootNeverWritesIntoTheVenv:
         assert text.index("export PYTHONDONTWRITEBYTECODE=1") < text.index(
             'LOVSPOR="$APP/.venv/bin/lovspor"'
         )
+
+    @pytest.mark.parametrize("unit", _root_venv_units(), ids=lambda unit: unit.name)
+    def test_bytecode_setting_is_in_the_service_section(self, unit: Path) -> None:
+        """Environment= in [Unit] or [Install] cannot protect the root process."""
+        text = unit.read_text(encoding="utf-8")
+        service = text.split("[Service]", 1)[1].split("\n[", 1)[0]
+
+        assert "PYTHONDONTWRITEBYTECODE=1" in _directive(service, "Environment")
+
+    @pytest.mark.parametrize("script", ["publish-release.sh", "rehearse-migration.sh"])
+    @pytest.mark.parametrize("inherited", [None, "0"], ids=["unset", "enabled-by-parent"])
+    def test_script_exports_bytecode_protection_to_python(
+        self, tmp_path: Path, script: str, inherited: str | None
+    ) -> None:
+        """Manual runs must suppress caches even if the caller enabled them (#667)."""
+        # Execute only environment preparation, before paths, locks, commands or
+        # rehearsal setup can touch the host. The import stands in for the CLI.
+        prefix = (_DEPLOY / script).read_text(encoding="utf-8").split("\nAPP=", 1)[0]
+        module = tmp_path / "bytecode_probe_667.py"
+        module.write_text("value = 667\n", encoding="utf-8")
+        env = os.environ.copy()
+        env.pop("PYTHONDONTWRITEBYTECODE", None)
+        if inherited is not None:
+            env["PYTHONDONTWRITEBYTECODE"] = inherited
+        env["LOVSPOR_DOMAIN"] = "example.invalid"
+        result = subprocess.run(
+            [
+                "/bin/bash",
+                "-c",
+                prefix + '\nexec "$@"',
+                script,
+                sys.executable,
+                "-c",
+                "import sys; sys.path.insert(0, sys.argv[1]); "
+                "import bytecode_probe_667; "
+                "assert bytecode_probe_667.value == 667; "
+                "assert sys.dont_write_bytecode",
+                str(tmp_path),
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert not (tmp_path / "__pycache__").exists()
