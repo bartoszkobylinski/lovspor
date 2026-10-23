@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import zipfile
 
+import fontTools
 import pypdf
 import pytest
 from lxml import html
@@ -12,6 +13,7 @@ from lxml import html
 from lovspor.errors import LovsporError, UnreadableSourceError
 from lovspor.promotion import SourceForm
 from lovspor.promotion.source_text import (
+    FONT_LIBRARY_VERSION,
     PDF_LIBRARY_VERSION,
     _lines_of,
     docx_lines,
@@ -28,6 +30,7 @@ from tests.unit.promotion_fixtures import (
     minimal_docx,
     minimal_pdf,
     pdf_pages,
+    pdf_with_cff_font,
 )
 
 DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -394,6 +397,19 @@ def test_pdf_library_is_the_pinned_one() -> None:
     Bump PDF_LIBRARY_VERSION and EXTRACTOR_VERSION together, deliberately.
     """
     assert pypdf.__version__ == PDF_LIBRARY_VERSION
+
+
+def test_pdf_reads_a_cff_font_by_its_own_encoding() -> None:
+    """A subset CFF font without ToUnicode is read by its program's encoding (#573)."""
+    assert pdf_lines(pdf_with_cff_font("Forskrift om skulereglar")) == ("Forskrift om skulereglar",)
+
+
+def test_font_library_is_the_pinned_one() -> None:
+    """pypdf reads a CFF font's encoding through fontTools, so a fontTools bump can change text.
+
+    Bump FONT_LIBRARY_VERSION and EXTRACTOR_VERSION together, deliberately.
+    """
+    assert fontTools.version == FONT_LIBRARY_VERSION
 
 
 def test_docx_reads_one_line_per_paragraph_joining_runs() -> None:
