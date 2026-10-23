@@ -99,6 +99,14 @@ class TestNotFoundPage:
         with pytest.raises(SiteBuildError, match="/pl/"):
             render_not_found(pages)
 
+    def test_supplied_pages_are_also_link_checked(self) -> None:
+        """The combined tree must pass the link check, including its emitted pages."""
+        pages = _emitted()
+        pages["/en/"] = '<a href="/gone/">Missing page</a>'
+
+        with pytest.raises(SiteBuildError, match="page /en/ links to '/gone/'"):
+            render_not_found(pages)
+
     @pytest.mark.parametrize(
         ("before", "after", "message"),
         [
