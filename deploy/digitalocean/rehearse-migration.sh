@@ -24,6 +24,10 @@ set -euo pipefail
 # ./.env and get EACCES, not "absent" — the build dies (#300).
 cd /
 
+# Root must not write bytecode into the lovspor user's venv: a root-owned
+# __pycache__ makes the next deploy's `uv sync` fail to remove it (#667).
+export PYTHONDONTWRITEBYTECODE=1
+
 APP=/opt/lovspor/app
 CORPUS=/opt/lovspor/.cache/lovverk
 LOVSPOR="$APP/.venv/bin/lovspor"

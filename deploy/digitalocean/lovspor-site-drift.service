@@ -24,6 +24,9 @@ Type=oneshot
 # itself only reads — the admin socket, loopback /readyz, the public /mcp as a
 # client, the served document — and writes nothing.
 User=root
+# Root must not write bytecode into the lovspor user's venv: a root-owned
+# __pycache__ makes the next deploy's `uv sync` fail to remove it (#667).
+Environment=PYTHONDONTWRITEBYTECODE=1
 WorkingDirectory=/opt/lovspor/app
 # The probe credential: an operator-issued opaque token with tiny limits, kept
 # root-owned 0600 at the source path and handed to the process as

@@ -61,7 +61,8 @@ class TestDriftService:
         assert _directive(text, "LoadCredential") == [
             "site-probe:/etc/lovspor/credentials/site-probe"
         ]
-        assert not _directive(text, "Environment")
+        # The one variable is a bytecode switch, never a secret (#667).
+        assert _directive(text, "Environment") == ["PYTHONDONTWRITEBYTECODE=1"]
         assert not _directive(text, "EnvironmentFile")
 
     def test_runs_the_drift_check_from_the_venv_as_the_drift_timer(self) -> None:
@@ -308,3 +309,42 @@ class TestNoUnitStopsALongRunningJob:
         text = _PUBLISH.read_text(encoding="utf-8")
 
         assert "lovspor-fetch-corpus.service" in _directive(text, "After")
+
+
+def _root_venv_units() -> list[Path]:
+    return [
+        unit
+        for unit in sorted(_DEPLOY.glob("*.service"))
+        if _directive(unit.read_text(encoding="utf-8"), "User") == ["root"]
+        and "/opt/lovspor/app/"
+        in "".join(_directive(unit.read_text(encoding="utf-8"), "ExecStart"))
+    ]
+
+
+class TestRootNeverWritesIntoTheVenv:
+    """Issue #667: Python run as root wrote root-owned ``__pycache__`` into the
+    lovspor user's venv, and the next deploy's ``uv sync`` failed removing it."""
+
+    def test_the_root_units_that_run_the_app_are_the_known_three(self) -> None:
+        names = [unit.name for unit in _root_venv_units()]
+
+        assert names == [
+            "lovspor-alert@.service",
+            "lovspor-publish.service",
+            "lovspor-site-drift.service",
+        ]
+
+    @pytest.mark.parametrize("unit", _root_venv_units(), ids=lambda unit: unit.name)
+    def test_a_root_unit_that_runs_the_app_writes_no_bytecode(self, unit: Path) -> None:
+        text = unit.read_text(encoding="utf-8")
+
+        assert "PYTHONDONTWRITEBYTECODE=1" in _directive(text, "Environment")
+
+    @pytest.mark.parametrize("script", ["publish-release.sh", "rehearse-migration.sh"])
+    def test_a_root_script_writes_no_bytecode_before_it_runs_the_app(self, script: str) -> None:
+        text = (_DEPLOY / script).read_text(encoding="utf-8")
+
+        assert "\nexport PYTHONDONTWRITEBYTECODE=1\n" in text
+        assert text.index("export PYTHONDONTWRITEBYTECODE=1") < text.index(
+            'LOVSPOR="$APP/.venv/bin/lovspor"'
+        )
