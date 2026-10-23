@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/site/not_found.py"
+symbol = "write_not_found"
+registered = "2026-10-23, PR #666, from run 39943801052"
+mutation = """
+-    (site / NOT_FOUND_NAME).write_bytes(markup.encode("utf-8"))
++    (site / NOT_FOUND_NAME).write_bytes(markup.encode("UTF-8"))
+"""
+justification = """
+Codec names are case-insensitive: `str.encode` resolves the name through the
+codec registry, which normalises it, so "utf-8" and "UTF-8" select the same
+codec and write identical bytes. Python's codec registry, not a dependency.
+Same argument as the registered `site/build._write_tree` entry.
+"""
