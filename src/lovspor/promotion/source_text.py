@@ -348,7 +348,8 @@ def _wrapped_at_hyphen(previous: str, line: str) -> bool:
 
 
 def _continues(previous: str, line: str) -> bool:
-    if _starts_a_unit(line) or _is_section_heading(previous):
+    # Joined text would hide a contents entry's page number from _without_contents.
+    if _starts_a_unit(line) or _is_section_heading(previous) or is_contents_entry(previous):
         return False
     if line[0].islower() or previous.endswith(","):
         return True

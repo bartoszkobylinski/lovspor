@@ -1207,3 +1207,10 @@ def test_docx_soft_break_starts_a_private_use_bullet_line(bullet: str) -> None:
         f"<w:t>  {bullet}lager</w:t><w:cr/><w:t>{bullet} bolig</w:t></w:r></w:p>"
     )
     assert docx_lines(_docx_body(paragraph)) == (f"Søknad {bullet} gebyr", "- lager", "- bolig")
+
+
+def test_a_lowercase_line_after_a_contents_entry_is_not_joined_onto_it() -> None:
+    """The rejoin pass must not hide the last entry's page number (#597, #669)."""
+    lines = ("Innhald", "Innleiing ........ 2", "kommunen gjev desse reglane.")
+
+    assert pdf_lines(minimal_pdf(lines)) == ("kommunen gjev desse reglane.",)
