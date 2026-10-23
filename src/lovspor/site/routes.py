@@ -25,8 +25,11 @@ Copy: the landing and the observatory keep the titles and descriptions
 of the hand-written pages they replace; ``/connect/`` and ``/docs/`` carry
 pages written against this repository's own evidence, and so do
 ``/privacy/`` and ``/terms/``, whose every processing statement is read
-from the code and deploy recipe that does the processing; the remaining routes
-carry short, honest placeholders until their content lands.
+from the code and deploy recipe that does the processing; ``/about/``
+gathers on one page what the other pages already state (site audit
+2026-10-22: a published placeholder is the first URL a stranger guesses);
+the remaining routes carry short, honest placeholders until their content
+lands.
 """
 
 from typing import Annotated, Self
@@ -271,11 +274,12 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
             ),
         ),
     ),
-    _route(
-        "/about/",
-        "planned",
-        Localised(nb="Om lovspor", en="About lovspor", pl="O lovspor"),
-        Localised(
+    SiteRoute(
+        path="/about/",
+        template="about",
+        status="current",
+        title=Localised(nb="Om lovspor", en="About lovspor", pl="O lovspor"),
+        description=Localised(
             nb=(
                 "Hvem som står bak, hvorfor, hvilke lisenser som gjelder, og hvordan du tar "
                 "kontakt."

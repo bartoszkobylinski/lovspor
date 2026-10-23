@@ -32,6 +32,16 @@
 	# the app answers 200 on localhost while the public URL 404s from file_server,
 	# so every connector reports "cannot authenticate" against a server that looks
 	# perfectly healthy from every other angle.
+	# A trailing slash is the commonest typo in a connector address. Left to
+	# the app, `/mcp/` answered with the app's own redirect, whose Location
+	# named the host it had been told it is — the Host rewrite below — so the
+	# public response pointed at https://127.0.0.1:8000/mcp: a dead loopback
+	# URL for the user and the upstream's bind address for anyone who looked
+	# (site audit 2026-10-22, B2). Caddy answers it first, with a relative
+	# Location the client resolves against the public host, and 308 keeps the
+	# method, so a POSTed JSON-RPC call survives the hop.
+	redir /mcp/ /mcp 308
+
 	@app path /mcp /mcp/* /healthz /readyz /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
 	handle @app {
 		reverse_proxy 127.0.0.1:8000 {

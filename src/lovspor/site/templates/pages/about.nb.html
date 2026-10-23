@@ -1,0 +1,35 @@
+{#- /about/ (ADR-0014 Decision 2; site audit 2026-10-22, B1). Every
+    statement here is one the site already makes elsewhere, gathered on
+    one page: who runs the service (privacy, terms), why it exists (the
+    landing), what the licences are (the landing, the footer, the lovverk
+    README), where the code and the corpus live (the landing, /docs/) and
+    how to get in touch (every page). No count, no date, no capability
+    state: those belong to the fact ledger and to /status/. The English
+    and Polish twins say the same things. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<h2>Hvem som står bak</h2>
+<p>lovspor lages og driftes av Bartosz Kobyliński, utvikler og privatperson i Norge. Det er ikke et selskap, og det er én person som svarer på e-post. lovspor er ikke tilknyttet eller godkjent av Lovdata.</p>
+
+<h2>Hvorfor</h2>
+<p>KI-verktøy svarer gjerne på spørsmål om norsk rett, men paragrafnumrene de oppgir er ofte funnet på. lovspor gir dem den faktiske teksten i gjeldende lover og forskrifter, med henvisninger du kan etterprøve mot kilden. Nettstedet lovspor.no viser den samme teksten, og den driftede lovverk-tjenesten på <code>https://lovspor.no/mcp</code> gir KI-verktøy tilgang til den — gratis. <a href="/connect/">Slik kobler du til.</a></p>
+<p>lovspor viser lovtekst til oppslag; det er ikke juridisk rådgivning.</p>
+
+<h2>Lisenser</h2>
+<ul>
+  <li><strong>Lover og sentrale forskrifter</strong> kommer fra Lovdatas åpne data og er lisensiert under <span data-literal>NLOD 2.0</span>. Hver fil i korpuset bærer lisensen i sin egen frontmatter.</li>
+  <li><strong>Lokale forskrifter</strong> er observert på kommunenes egne nettsider og publisert med hjemmel i <span data-literal>åndsverkloven § 14</span>, merket som observert, ikke hevdet å gjelde. De er ikke Lovdata-data og har ingen NLOD-lisens.</li>
+  <li><strong>Motoren</strong>, lovspor, er åpen kildekode under <span data-literal>AGPL-3.0</span>.</li>
+  <li><strong>Korpusets struktur</strong> — manifestet, mappene og README — er frigitt under <span data-literal>CC0 1.0</span>.</li>
+</ul>
+
+<h2>Kode og korpus</h2>
+<p>Alt er åpent. Motoren som henter, normaliserer og gjengir tekstene ligger i <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>; korpuset den bygger, med hele endringshistorikken, ligger i <a href="https://github.com/bartoszkobylinski/lovverk">github.com/bartoszkobylinski/lovverk</a>. Trenger du norsk lovtekst i et KI-verktøy, kan du kjøre hele greia selv.</p>
+
+<h2>Kontakt</h2>
+<p>Spørsmål, feil og tilbakemeldinger: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>. Hvordan e-posten din behandles står under <a href="/privacy/">personvern</a>; vilkårene for tjenesten under <a href="/terms/">vilkår for bruk</a>.</p>
+{% endblock %}

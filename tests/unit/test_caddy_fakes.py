@@ -463,9 +463,11 @@ class TestHide:
 
         assert raw.count(fragment) == 2
         assert staged.release_id == served.release_id == CAPTURED_RELEASE.rsplit("/", 1)[1]
+        # Recaptured 2026-10-22 (Caddy v2.8.4) after `redir /mcp/ /mcp 308` joined the
+        # Caddyfile; the pair moves with every recapture, the release id never does.
         assert (served.config_hash[:12], staged.config_hash[:12]) == (
-            "532753583c47",
-            "dbeff478487d",
+            "92aa1d662a24",
+            "59332e97be15",
         )
 
     def _release(self, box: Box, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:

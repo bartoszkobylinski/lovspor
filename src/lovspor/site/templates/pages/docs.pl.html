@@ -22,13 +22,14 @@
 <ul>
   <li><strong>To nie porada prawna.</strong> Narzędzia pokazują tekst prawa. Interpretacja należy do ciebie.</li>
   <li><strong>Nie prawo obowiązujące w danym dniu.</strong> Narzędzia historii odpowiadają, co <em>korpus zawierał</em> w danym dniu — a nie, które przepisy wtedy obowiązywały. To dwa różne pytania i tylko na pierwsze da się tu odpowiedzieć.</li>
-  <li><strong>Bez orzecznictwa, prac przygotowawczych, okólników i rozporządzeń gminnych.</strong> Przepis może być wiążący, a mimo to go tu nie być. Pusty wynik nie dowodzi, że takiego przepisu nie ma.</li>
+  <li><strong>Bez orzecznictwa, prac przygotowawczych i okólników.</strong> Przepis może być wiążący, a mimo to go tu nie być. Pusty wynik nie dowodzi, że takiego przepisu nie ma.</li>
   <li><strong>Bez sprawdzania parafraz.</strong> <code>verify_quote</code> potwierdza, że dosłowny ciąg znaków występuje w przepisie. Czy przeredagowanie jest wierne prawnie, tego nie rozstrzygnie — w tym celu przeczytaj tekst sam.</li>
 </ul>
 
 <h2>Korpus</h2>
 <p>{{ fact("corpus.documents", kind="corpus") }} dokumentów w ostatnim wydaniu: obowiązujące norweskie ustawy i centralne rozporządzenia, pobrane z otwartych danych Lovdata i zapisane jako Markdown. Możesz je przeglądać tutaj — <a href="/lov/">ustawy</a> i <a href="/forskrift/">rozporządzenia</a> (po norwesku).</p>
-<p>Podział pochodzi od samego źródła: <em lang="nb">lover</em> (ustawy) uchwala Storting, a <em lang="nb">sentrale forskrifter</em> (centralne rozporządzenia) wydaje ministerstwo lub dyrektoriat na podstawie upoważnienia ustawowego. Lokalne i gminne rozporządzenia nie są tu ujęte.</p>
+<p>Podział pochodzi od samego źródła: <em lang="nb">lover</em> (ustawy) uchwala Storting, a <em lang="nb">sentrale forskrifter</em> (centralne rozporządzenia) wydaje ministerstwo lub dyrektoriat na podstawie upoważnienia ustawowego.</p>
+<p>Lokalne rozporządzenia to osobny zbiór danych, <code>lokale-forskrifter</code>: rozporządzenia zaobserwowane na stronach internetowych samych gmin, publikowane na podstawie <span data-literal>åndsverkloven § 14</span> i oznaczone jako zaobserwowane, bez twierdzenia, że obowiązują (<code>asserted: false</code>). Zbiór jest mały i rośnie. Narzędzia czytają go tylko wtedy, gdy o niego poprosisz przez <code>dataset="lokale-forskrifter"</code>; w przeciwnym razie odpowiadają z ustaw i centralnych rozporządzeń.</p>
 <p class="muted">Źródło: Lovdata, na licencji <span data-literal>NLOD 2.0</span>; każdy plik zawiera licencję we własnym nagłówku (front matter). Korpus jest publiczny w <a href="https://github.com/bartoszkobylinski/lovverk">lovverk</a>; silnik, który go buduje, to <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>, na licencji <span data-literal>AGPL-3.0</span>.</p>
 
 <h2>Logowanie</h2>

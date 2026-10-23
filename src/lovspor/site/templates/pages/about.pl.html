@@ -1,0 +1,29 @@
+{#- /pl/about/: the Polish twin of about.nb.html. Same statements, same
+    sources — see the Norwegian template's header. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<h2>Kto za tym stoi</h2>
+<p>lovspor tworzy i prowadzi Bartosz Kobyliński, programista i osoba prywatna mieszkająca w Norwegii. To nie firma — na e-maile odpowiada jedna osoba. lovspor nie jest powiązany z Lovdata ani przez nią zatwierdzony.</p>
+
+<h2>Po co</h2>
+<p>Narzędzia AI chętnie odpowiadają na pytania o norweskie prawo, ale numery paragrafów, które podają, są często zmyślone. lovspor daje im prawdziwy tekst obowiązujących ustaw i rozporządzeń, z odesłaniami, które możesz sprawdzić u źródła. Serwis lovspor.no pokazuje ten sam tekst, a hostowana usługa lovverk pod adresem <code>https://lovspor.no/mcp</code> udostępnia go narzędziom AI — bezpłatnie. <a href="/pl/connect/">Jak się połączyć.</a></p>
+<p>lovspor udostępnia tekst prawa do wglądu; nie jest to porada prawna.</p>
+
+<h2>Licencje</h2>
+<ul>
+  <li><strong>Ustawy i centralne rozporządzenia</strong> pochodzą z otwartych danych Lovdata i są na licencji <span data-literal>NLOD 2.0</span>. Każdy plik w korpusie zawiera licencję we własnym nagłówku (front matter).</li>
+  <li><strong>Lokalne rozporządzenia</strong> są zaobserwowane na stronach internetowych samych gmin i publikowane na podstawie <span data-literal>åndsverkloven § 14</span>, oznaczone jako zaobserwowane, bez twierdzenia, że obowiązują. Nie są danymi Lovdata i nie mają licencji NLOD.</li>
+  <li><strong>Silnik</strong>, lovspor, jest otwartym oprogramowaniem na licencji <span data-literal>AGPL-3.0</span>.</li>
+  <li><strong>Struktura korpusu</strong> — manifest, układ katalogów i README — jest udostępniona na licencji <span data-literal>CC0 1.0</span>.</li>
+</ul>
+
+<h2>Kod i korpus</h2>
+<p>Wszystko jest otwarte. Silnik, który pobiera, normalizuje i renderuje teksty, jest pod adresem <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>; korpus, który buduje, z pełną historią zmian, pod adresem <a href="https://github.com/bartoszkobylinski/lovverk">github.com/bartoszkobylinski/lovverk</a>. Jeśli potrzebujesz norweskiego tekstu prawnego w narzędziu AI, możesz uruchomić całość sam.</p>
+
+<h2>Kontakt</h2>
+<p>Pytania, błędy i uwagi: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>. Jak przetwarzamy twój e-mail, opisuje strona <a href="/pl/privacy/">prywatność</a>; zasady korzystania z usługi — <a href="/pl/terms/">warunki korzystania</a>.</p>
+{% endblock %}

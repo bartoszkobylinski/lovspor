@@ -134,22 +134,51 @@ def plan_for(
     return StagedPlan(runner, paths.previous, paths.proposed, paths.release, layout.www(world))
 
 
-def dropping(config: object, *indices: int) -> object:
-    """One capture with named routes of the site block taken out, by index.
+def dropping(config: object, *names: str) -> object:
+    """One capture with named routes of the site block taken out.
 
     A hand edit of real `caddy adapt` output, and labelled as one: the
     route shapes below are ones neither Caddyfile produces — a
     configuration that reaches no route at all for a URL — so there is
-    nothing to capture.
+    nothing to capture. A route is named by what it matches, never by its
+    index: the two Caddyfiles adapt to different route lists (the proposed
+    one answers `/mcp/` with a redirect of its own, 2026-10-22), and an
+    index that meant the corpus in one would mean the proxy in the other.
     """
     routes = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]  # type: ignore[index]
-    for index in sorted(indices, reverse=True):
-        del routes[index]
+    for name in names:
+        del routes[_route_index(routes, name)]
     return config
 
 
-APP_ROUTE, CORPUS_ROUTE, CATCH_ALL = 1, 2, 3
-"""The site block's routes, in the order Caddy adapts both Caddyfiles."""
+APP_ROUTE, CORPUS_ROUTE, CATCH_ALL = "/mcp", "/lov", ""
+"""The site block's routes, each by a path its matcher names; the catch-all names none."""
+
+
+def _route_index(routes: list[dict[str, object]], name: str) -> int:
+    """The one route whose path matcher names ``name``; the last unmatched subroute for ``""``."""
+    found = [
+        index
+        for index, route in enumerate(routes)
+        if (name and name in _matched_paths(route))
+        or (not name and "match" not in route and _handler_kind(route) == "subroute")
+    ]
+    assert found, name
+    return found[-1] if not name else found[0]
+
+
+def _matched_paths(route: dict[str, object]) -> list[str]:
+    match = route.get("match")
+    first = match[0] if isinstance(match, list) and match else {}
+    paths = first.get("path") if isinstance(first, dict) else None
+    return list(paths) if isinstance(paths, list) else []
+
+
+def _handler_kind(route: dict[str, object]) -> str | None:
+    handle = route.get("handle")
+    first = handle[0] if isinstance(handle, list) and handle else {}
+    kind = first.get("handler") if isinstance(first, dict) else None
+    return str(kind) if isinstance(kind, str) else None
 
 
 def hosting(config: object, *names: str) -> object:

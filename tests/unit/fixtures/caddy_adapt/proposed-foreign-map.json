@@ -64,7 +64,31 @@
 															]
 														}
 													}
-												},
+												}
+											]
+										},
+										{
+											"handle": [
+												{
+													"handler": "static_response",
+													"headers": {
+														"Location": [
+															"/mcp"
+														]
+													},
+													"status_code": 308
+												}
+											],
+											"match": [
+												{
+													"path": [
+														"/mcp/"
+													]
+												}
+											]
+										},
+										{
+											"handle": [
 												{
 													"encodings": {
 														"gzip": {},
