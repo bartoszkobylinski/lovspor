@@ -1,13 +1,14 @@
 """The site-framed not-found page Caddy serves for every 404 (#662)."""
 
 import re
+from pathlib import Path
 
 import pytest
 from jinja2 import DictLoader
 
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site.errors import SiteBuildError
-from lovspor.site.not_found import NOT_FOUND_NAME, NOT_FOUND_PATH, render_not_found
+from lovspor.site.not_found import NOT_FOUND_NAME, NOT_FOUND_PATH, render_not_found, write_not_found
 from lovspor.site.routes import emitted_pages
 from lovspor.site.scan import scan_page
 from lovspor.site.templates import site_environment
@@ -15,6 +16,32 @@ from lovspor.site.templates import site_environment
 
 def _emitted() -> dict[str, str]:
     return {page.path: "" for page in emitted_pages()}
+
+
+@pytest.mark.parametrize(
+    ("markup", "expected"),
+    [
+        ("", b""),
+        (
+            "<p>blå — żółć 😀</p>\r\n",
+            b"<p>bl\xc3\xa5 \xe2\x80\x94 \xc5\xbc\xc3\xb3\xc5\x82\xc4\x87 \xf0\x9f\x98\x80</p>\r\n",
+        ),
+    ],
+)
+def test_write_not_found_preserves_exact_utf8_bytes(
+    tmp_path: Path, markup: str, expected: bytes
+) -> None:
+    write_not_found(tmp_path, markup)
+
+    assert (tmp_path / "404.html").read_bytes() == expected
+    assert list(tmp_path.iterdir()) == [tmp_path / "404.html"]
+
+
+def test_write_not_found_refuses_unpaired_surrogates(tmp_path: Path) -> None:
+    with pytest.raises(UnicodeEncodeError):
+        write_not_found(tmp_path, "\ud800")
+
+    assert not (tmp_path / "404.html").exists()
 
 
 class TestNotFoundPage:
