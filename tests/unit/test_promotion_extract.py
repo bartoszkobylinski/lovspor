@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from datetime import date
 
 import pytest
@@ -17,7 +18,7 @@ from lovspor.promotion import (
     SourceForm,
     content_hash,
 )
-from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_regulation
+from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_received, extract_regulation
 from tests.unit.promotion_fixtures import (
     REGULATION_LINES,
     SIDEBAR,
@@ -58,8 +59,44 @@ def test_faq_page_content_hash_does_not_depend_on_the_page_tail() -> None:
     assert content_hash(with_tail) == content_hash(without)
 
 
-def test_extractor_version_is_eight_since_pypdf_6_20_1() -> None:
-    assert EXTRACTOR_VERSION == 10
+def test_extractor_version_is_eleven_since_pypdf_6_21_1() -> None:
+    assert EXTRACTOR_VERSION == 11
+
+
+@pytest.mark.parametrize("extract", [extract_regulation, extract_received])
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        (b"%PDF-1.4 broken", ExtractionHoldReason.UNREADABLE),
+        (minimal_pdf(()), ExtractionHoldReason.EMPTY_TEXT),
+        (minimal_pdf(glyph_shift=-29), ExtractionHoldReason.GARBLED_TEXT),
+    ],
+)
+def test_pdf_holds_record_the_upgraded_extractor_version(
+    extract: Callable[[bytes, str], ExtractionResult],
+    payload: bytes,
+    reason: ExtractionHoldReason,
+) -> None:
+    """Refused PDFs still identify the engine that made the hold decision."""
+    result = extract(payload, PDF)
+    assert isinstance(result, HeldExtraction), result
+    assert result.reason is reason
+    assert result.source_form is SourceForm.PDF
+    assert result.extractor_version == 11
+
+
+@pytest.mark.parametrize(
+    ("payload", "content_type"),
+    [(html_page(), HTML), (minimal_pdf(), PDF), (minimal_docx(), DOCX)],
+)
+def test_received_sources_record_the_upgraded_extractor_version(
+    payload: bytes, content_type: str
+) -> None:
+    """The shared engine bump applies to the received channel in every form."""
+    result = extract_received(payload, content_type)
+    assert isinstance(result, ExtractedDocument), result
+    assert result.extractor_version == 11
+    assert result.regulation.full_text == "\n".join(REGULATION_LINES)
 
 
 @pytest.mark.parametrize(
@@ -68,7 +105,7 @@ def test_extractor_version_is_eight_since_pypdf_6_20_1() -> None:
 )
 def test_binary_sources_record_extractor_version_eight(payload: bytes, content_type: str) -> None:
     """The library upgrade changes the engine version recorded on every source form."""
-    assert _extracted(payload, content_type).extractor_version == 10
+    assert _extracted(payload, content_type).extractor_version == 11
 
 
 def test_html_page_extracts_block_body_and_fields() -> None:
