@@ -11,6 +11,10 @@ command prints one line naming the path, never the content.
 ``publish-release.sh`` hands the build user a root-only credential that way
 (issue #467); re-opening it as ``/dev/stdin`` is permission-checked against
 the root-owned file and fails.
+
+The option itself checks nothing (``readable=False``): a path the invoking
+user cannot read must reach the loader and degrade, not be refused by Click
+with exit 2 before it runs (issue #470).
 """
 
 import os
@@ -31,6 +35,7 @@ ProbeTokenFileOption = Annotated[
         "--probe-token-file",
         envvar="LOVSPOR_PROBE_TOKEN_FILE",
         allow_dash=True,
+        readable=False,
         help="File holding the probe credential, or '-' for stdin (default: "
         "$CREDENTIALS_DIRECTORY/site-probe, as systemd LoadCredential= delivers it). "
         "Missing, empty or unreadable: step (b) is recorded unobserved with reason "

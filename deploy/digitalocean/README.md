@@ -871,8 +871,11 @@ migration involved. That is the proof the steady state works end to end.
 The build runs as the build user, which cannot open the root-only credential,
 so `publish-release.sh` hands it over as stdin with `--probe-token-file -`:
 the command reads the already-open fd 0. Naming `/dev/stdin` instead re-opens
-the root-owned file by path and fails as `Path '/dev/stdin' is not readable`,
-exit 2 (issue #467).
+the root-owned file by path, which the build user cannot do (issue #467): the
+credential is then reported `probe credential unreadable: … Permission denied`
+and step (b) recorded `unobserved, probe_credential_missing` — the same
+degradation as any path the invoking user cannot read (issue #470), never an
+exit 2.
 
 Install and enable the drift check in the same operator run:
 
