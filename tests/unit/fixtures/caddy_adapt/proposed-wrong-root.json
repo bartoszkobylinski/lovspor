@@ -103,7 +103,7 @@
 											]
 										},
 										{
-											"group": "group3",
+											"group": "group5",
 											"handle": [
 												{
 													"handler": "subroute",
@@ -146,7 +146,7 @@
 											]
 										},
 										{
-											"group": "group3",
+											"group": "group5",
 											"handle": [
 												{
 													"handler": "subroute",
@@ -226,7 +226,7 @@
 											]
 										},
 										{
-											"group": "group3",
+											"group": "group5",
 											"handle": [
 												{
 													"handler": "subroute",
@@ -257,6 +257,71 @@
 							"terminal": true
 						}
 					],
+					"errors": {
+						"routes": [
+							{
+								"match": [
+									{
+										"host": [
+											"lovspor.test"
+										]
+									}
+								],
+								"handle": [
+									{
+										"handler": "subroute",
+										"routes": [
+											{
+												"handle": [
+													{
+														"handler": "subroute",
+														"routes": [
+															{
+																"handle": [
+																	{
+																		"handler": "vars",
+																		"root": "/var/www/lovspor-releases/3d1f7a0c9b2e4856af03c17d5e9b6284fa71c0d38e52194b7c6a0fd8e31b5947/site"
+																	}
+																]
+															},
+															{
+																"group": "group3",
+																"handle": [
+																	{
+																		"handler": "rewrite",
+																		"uri": "/404.html"
+																	}
+																]
+															},
+															{
+																"handle": [
+																	{
+																		"handler": "file_server",
+																		"hide": [
+																			"/etc/caddy/Caddyfile.proposed",
+																			"/etc/caddy/release-wrong-root.caddy",
+																			"/var/www/lovspor-releases-flat/20260901T120000Z-abcdef123456/redirects.caddy"
+																		],
+																		"status_code": "{http.error.status_code}"
+																	}
+																]
+															}
+														]
+													}
+												],
+												"match": [
+													{
+														"expression": "{http.error.status_code} == 404"
+													}
+												]
+											}
+										]
+									}
+								],
+								"terminal": true
+							}
+						]
+					},
 					"logs": {
 						"logger_names": {
 							"lovspor.test": [

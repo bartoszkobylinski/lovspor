@@ -182,12 +182,16 @@ def _handler_kind(route: dict[str, object]) -> str | None:
 
 
 def hosting(config: object, *names: str) -> object:
-    """One capture with the site block matched on ``names``, or on no host at all."""
-    route = config["apps"]["http"]["servers"]["srv0"]["routes"][0]  # type: ignore[index]
-    if names:
-        route["match"] = [{"host": list(names)}]
-    else:
-        route.pop("match", None)
+    """One capture with the site block matched on ``names``, or on no host at all.
+
+    Caddy matches the site's error routes on the same hosts (#662), so both move.
+    """
+    server = config["apps"]["http"]["servers"]["srv0"]  # type: ignore[index]
+    for route in (server["routes"][0], *server.get("errors", {}).get("routes", [])[:1]):
+        if names:
+            route["match"] = [{"host": list(names)}]
+        else:
+            route.pop("match", None)
     return config
 
 

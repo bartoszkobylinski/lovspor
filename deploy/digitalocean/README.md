@@ -229,7 +229,9 @@ hash of every page.
 
 Rollback is the previous release's own fragment through the same transaction
 — the marker's `previous` is kept for exactly this; run it twice to roll
-forward:
+forward. A release keeps the fragment it was built with, so rolling back to
+one built before the framed 404 page (#662) serves Caddy's empty 404 again
+until a newer release is committed:
 
 ```bash
 sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --rollback

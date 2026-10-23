@@ -76,7 +76,26 @@ def box(tmp_path: Path) -> Box:
     return Box(tmp_path)
 
 
+ERRORS = (
+    "\thandle_errors {\n\t\t@nf expression {http.error.status_code} == 404\n"
+    "\t\thandle @nf {\n\t\t\troot * /srv/site\n\t\t\trewrite * /404.html\n"
+    "\t\t\tfile_server {\n\t\t\t\tstatus {http.error.status_code}\n\t\t\t}\n\t\t}\n\t}\n"
+)
+"""The release fragment's error routes (#662): Caddy adapts them outside the site's routes."""
+
+
 class TestToyAdapt:
+    def test_a_handle_errors_block_adds_no_route(self, tmp_path: Path) -> None:
+        """``handle_errors {`` is not a ``handle``: the nested block it holds is skipped whole."""
+        plain = tmp_path / "plain"
+        plain.write_text(SITE, encoding="utf-8")
+        with_errors = tmp_path / "with_errors"
+        with_errors.write_text(SITE.replace("\t}\n}", "\t}\n" + ERRORS + "}"), encoding="utf-8")
+
+        adapted = toy_adapt(with_errors, {}, config_file=plain)
+
+        assert adapted == toy_adapt(plain, {})
+
     def test_a_global_options_block_leaves_the_servers_alone_and_records_admin(
         self, box: Box
     ) -> None:
@@ -443,7 +462,8 @@ class TestHide:
 
     def test_the_committed_capture_hides_every_imported_file_sorted(self) -> None:
         """#317: beside ``Caddyfile.proposed``, the release's fragment and the redirect map the
-        fragment imports — the map first, so the order is sorted, not the order of import."""
+        fragment imports — the map first, so the order is sorted, not the order of import. The
+        third ``file_server`` is the fragment's not-found error route (#662)."""
         hides = _hides(json.loads(CAPTURED_PROPOSED.read_text(encoding="utf-8")))
 
         listed = [
@@ -451,7 +471,7 @@ class TestHide:
             f"{CAPTURED_RELEASE}/corpus/redirects.caddy",
             f"{CAPTURED_RELEASE}/release.caddy",
         ]
-        assert hides == [listed, listed]
+        assert hides == [listed, listed, listed]
 
     def test_in_the_committed_capture_the_fragment_path_alone_moves_the_release_pair(self) -> None:
         """#317's evidence: the same capture with only the fragment's path spelled ``.next``."""
@@ -461,13 +481,14 @@ class TestHide:
         served = config_pair(json.loads(raw))
         staged = config_pair(json.loads(raw.replace(fragment, fragment + ".next")))
 
-        assert raw.count(fragment) == 2
+        assert raw.count(fragment) == 3
         assert staged.release_id == served.release_id == CAPTURED_RELEASE.rsplit("/", 1)[1]
-        # Recaptured 2026-10-22 (Caddy v2.8.4) after `redir /mcp/ /mcp 308` joined the
-        # Caddyfile; the pair moves with every recapture, the release id never does.
+        # Recaptured 2026-10-23 (Caddy v2.8.4) after the fragment gained its
+        # `handle_errors` block (#662); the pair moves with every recapture, the
+        # release id never does.
         assert (served.config_hash[:12], staged.config_hash[:12]) == (
-            "92aa1d662a24",
-            "59332e97be15",
+            "709c9b313eb3",
+            "545a5eb46f4c",
         )
 
     def _release(self, box: Box, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
