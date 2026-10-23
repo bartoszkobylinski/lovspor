@@ -331,9 +331,13 @@ def _clean_lines(lines: Iterable[str]) -> tuple[str, ...]:
 def _rejoined(lines: tuple[str, ...]) -> tuple[str, ...]:
     joined: list[str] = []
     for line in lines:
-        if joined and _wrapped_at_hyphen(joined[-1], line):
+        # A contents entry joins nothing: joined, its page number is no longer
+        # last, or a title joined to it is dropped with the contents (#597).
+        if not joined or is_contents_entry(joined[-1]) or is_contents_entry(line):
+            joined.append(line)
+        elif _wrapped_at_hyphen(joined[-1], line):
             joined[-1] = f"{joined[-1]}{line}"
-        elif joined and _continues(joined[-1], line):
+        elif _continues(joined[-1], line):
             joined[-1] = f"{joined[-1]} {line}"
         else:
             joined.append(line)
@@ -348,8 +352,7 @@ def _wrapped_at_hyphen(previous: str, line: str) -> bool:
 
 
 def _continues(previous: str, line: str) -> bool:
-    # Joined text would hide a contents entry's page number from _without_contents.
-    if _starts_a_unit(line) or _is_section_heading(previous) or is_contents_entry(previous):
+    if _starts_a_unit(line) or _is_section_heading(previous):
         return False
     if line[0].islower() or previous.endswith(","):
         return True
