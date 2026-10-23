@@ -412,6 +412,53 @@ def test_font_library_is_the_pinned_one() -> None:
     assert fontTools.version == FONT_LIBRARY_VERSION
 
 
+CONTENTS = (
+    "Innhald",
+    "Innleiing ..........................................",
+    "Generelt om skulereglane .......................... 3",
+    "§1 Heimel ......................................... 3",
+    "§2 Føremål ........................................ 3",
+)
+
+
+def test_pdf_table_of_contents_and_its_heading_are_not_read() -> None:
+    """A table of contents is navigation, not the regulation (#597)."""
+    head = ("Forskrift om skulereglar", "Vedtatt av Levekårsutvalet 28.05.2024")
+    body = ("§ 1 Heimel", "Forskrifta har heimel i opplæringslova.")
+    assert pdf_lines(minimal_pdf((*head, *CONTENTS, *body))) == (*head, *body)
+
+
+@pytest.mark.parametrize("heading", ["Innhold", "Innholdsfortegnelse", "Innhaldsliste:"])
+def test_pdf_contents_heading_spellings(heading: str) -> None:
+    lines = (heading, "§1 Formål ........ 2", "§ 1 Formål")
+    assert pdf_lines(minimal_pdf(lines)) == ("§ 1 Formål",)
+
+
+def test_pdf_dotted_blanks_without_a_page_number_are_kept() -> None:
+    """A form's fill-in lines lead with dots too, but no entry names a page."""
+    lines = ("Innhald", "Namn ..............", "Adresse ..............", "§ 1 Formål")
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_pdf_contents_heading_without_entries_is_kept() -> None:
+    lines = ("Forskrift om gebyr", "Innhald", "§ 1 Formål", "Teksten.")
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_pdf_dotted_blanks_first_and_last_are_kept() -> None:
+    lines = ("Namn ..............", "§ 1 Formål", "Adresse ..............")
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_pdf_contents_on_the_first_line_is_not_read() -> None:
+    assert pdf_lines(minimal_pdf(("X .......... 12", "§ 1 Formål"))) == ("§ 1 Formål",)
+
+
+def test_pdf_contents_entry_after_other_text_drops_no_heading() -> None:
+    lines = ("Forskrift om gebyr", "§1 Formål ........ 2", "§ 1 Formål")
+    assert pdf_lines(minimal_pdf(lines)) == ("Forskrift om gebyr", "§ 1 Formål")
+
+
 def test_docx_reads_one_line_per_paragraph_joining_runs() -> None:
     assert docx_lines(minimal_docx()) == (*REGULATION_LINES,)
 

@@ -32,6 +32,12 @@ into a CMS keeps the same hard wraps as ``<br>``; those are rejoined by the
 same rules, but only inside one block element, never across two. DOCX
 carries its author's paragraphs and is never rejoined.
 
+A PDF's table of contents is navigation, not the regulation, and is not read
+(#597): a run of entries (text, a dot leader, ``anchors.is_contents_entry``)
+of which at least one names a page, with the ``Innhald`` / ``Innhold`` /
+``Innholdsfortegnelse`` line right before it. A run that names no page is a
+form's fill-in lines (``Namn ........``) and is kept.
+
 **DOCX.** ``word/document.xml`` read in memory — nothing is extracted to
 disk — under a size cap, through the pipeline's hardened XML parser. A
 paragraph is one line; a soft line break (``w:br``, ``w:cr``) inside it starts
@@ -66,7 +72,7 @@ from pypdf.errors import PyPdfError
 from lovspor.errors import UnreadableSourceError
 from lovspor.observatory.document_report import _decoded, _region, blob_form
 from lovspor.parsing.xml_normalizer import safe_parser
-from lovspor.promotion.anchors import anchor_lines
+from lovspor.promotion.anchors import anchor_lines, is_contents_entry
 from lovspor.promotion.models import SourceForm
 
 PDF_LIBRARY_VERSION = "6.21.1"
@@ -130,6 +136,9 @@ _MAX_HEADING_CHARS = 100
 _HYPHEN_WRAP = re.compile(r"\w-$")
 _FIRST_WORD = re.compile(r"[^\s/,.]+")
 _SUSPENDED_BEFORE = frozenset({"og", "eller", "samt"})
+_CONTENTS_HEADING = re.compile(
+    r"innh(?:old|ald)(?:sfortegnelse|sliste|soversikt)?\s*:?", re.IGNORECASE
+)
 
 
 def source_form(content_type: str) -> SourceForm | None:
@@ -162,7 +171,7 @@ def pdf_lines(payload: bytes) -> tuple[str, ...]:
         # pypdf reports a malformed file through its own errors and, deeper in
         # the object graph, through these builtins; each is "cannot read".
         raise UnreadableSourceError(f"PDF did not parse: {error}") from error
-    return _rejoined(_clean_lines("\n".join(pages).split("\n")))
+    return _without_contents(_rejoined(_clean_lines("\n".join(pages).split("\n"))))
 
 
 def docx_lines(payload: bytes) -> tuple[str, ...]:
@@ -290,6 +299,28 @@ def _block_text(region: html.HtmlElement) -> str:
 
 def _spaced(text: str | None) -> str:
     return _WHITESPACE.sub(" ", text or "")
+
+
+def _without_contents(lines: tuple[str, ...]) -> tuple[str, ...]:
+    kept: list[str] = []
+    entries: list[str] = []
+    for line in lines:
+        if is_contents_entry(line):
+            entries.append(line)
+            continue
+        _close_contents(kept, entries)
+        entries = []
+        kept.append(line)
+    _close_contents(kept, entries)
+    return tuple(kept)
+
+
+def _close_contents(kept: list[str], entries: list[str]) -> None:
+    """Keep a run of dotted lines unless one names a page; drop a table's heading with it."""
+    if not any(entry[-1].isdigit() for entry in entries):
+        kept.extend(entries)
+    elif kept and _CONTENTS_HEADING.fullmatch(kept[-1]):
+        kept.pop()
 
 
 def _clean_lines(lines: Iterable[str]) -> tuple[str, ...]:
