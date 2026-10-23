@@ -75,7 +75,7 @@ from lovspor.promotion.source_text import docx_lines, html_lines, pdf_lines, sou
 #: including a pypdf or fontTools bump (``source_text.PDF_LIBRARY_VERSION``,
 #: ``source_text.FONT_LIBRARY_VERSION``). A bump is a
 #: ``migration:`` commit across the dataset, never new versions (ADR-0016 4e).
-EXTRACTOR_VERSION = 11
+EXTRACTOR_VERSION = 12
 MIN_TEXT_CHARS = 200
 
 # Measured 2026-10-03 over the archive's extracted texts longer than 200
