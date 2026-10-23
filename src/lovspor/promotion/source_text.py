@@ -22,6 +22,9 @@ news item the page lists.
 
 **PDF.** ``pypdf``, pinned exactly: the page text stream, never the document
 metadata (Author, Creator), which names people and is not the regulation.
+``fontTools`` is pinned with it: pypdf reads an embedded CFF font's own
+encoding through it, and a subset font with no ToUnicode map is otherwise
+read as control characters (#573).
 The page's hard line wraps are rejoined, so a wrapped title or paragraph is
 one line again; a section heading, a list item, an enactment line and a new
 sentence after a full line stay lines of their own. A page pasted from Word
@@ -67,6 +70,7 @@ from lovspor.promotion.anchors import anchor_lines
 from lovspor.promotion.models import SourceForm
 
 PDF_LIBRARY_VERSION = "6.21.1"
+FONT_LIBRARY_VERSION = "4.67.0"
 MAX_DOCX_PART_BYTES = 20 * 1024 * 1024
 
 _DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

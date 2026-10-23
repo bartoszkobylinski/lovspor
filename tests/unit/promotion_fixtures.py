@@ -14,6 +14,9 @@ import io
 import zipfile
 from html import escape
 
+from fontTools.fontBuilder import FontBuilder
+from fontTools.pens.t2CharStringPen import T2CharStringPen
+
 REGULATION_LINES = (
     "Forskrift om renovasjon og slam, Eksempel kommune",
     "Vedtatt av kommunestyret i møte 12.12.2019 med hjemmel i lov 13. mars 1981 nr. 6 om "
@@ -131,7 +134,47 @@ def _pdf_escape(raw: bytes) -> bytes:
     return raw.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
 
 
-def _pdf_document(*streams: bytes) -> bytes:
+_HELVETICA = (b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",)
+
+
+def pdf_with_cff_font(line: str) -> bytes:
+    """A one-page PDF whose one line is set in an embedded CFF (Type1C) subset font.
+
+    The font dictionary has no ``/Encoding`` and no ``/ToUnicode``: what a code
+    means is written only in the font program's own encoding, codes 1, 2, 3 ...
+    in glyph order, as subsetting writers emit it. pypdf reads that encoding
+    through fontTools; without it the line comes out as control characters
+    (issue #573).
+    """
+    program, codes = _cff_program(line)
+    stream = b"BT /F1 11 Tf 72 760 Td <" + bytes(codes[c] for c in line).hex().encode() + b"> Tj ET"
+    descriptor = (
+        b"<< /Type /FontDescriptor /FontName /EKSMPL+Test /Flags 4 /FontBBox [0 0 1000 1000] "
+        b"/ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 /FontFile3 7 0 R >>"
+    )
+    font = b"<< /Type /Font /Subtype /Type1 /BaseFont /EKSMPL+Test /FontDescriptor 6 0 R >>"
+    embedded = b"<< /Subtype /Type1C /Length %d >>\nstream\n" % len(program)
+    return _pdf_document(stream, fonts=(font, descriptor, embedded + program + b"\nendstream"))
+
+
+def _cff_program(line: str) -> tuple[bytes, dict[str, int]]:
+    glyphs = {char: char if char != " " else "space" for char in sorted(set(line))}
+    order = [".notdef", *glyphs.values()]
+    builder = FontBuilder(1000, isTTF=False)
+    builder.setupGlyphOrder(order)
+    builder.setupCharacterMap({ord(char): glyph for char, glyph in glyphs.items()})
+    blank = {glyph: T2CharStringPen(500, None).getCharString() for glyph in order}
+    builder.setupCFF("EKSMPL+Test", {"FullName": "Test"}, blank, {})
+    cff = builder.font["CFF "].cff
+    encoding = [".notdef"] * 256
+    encoding[1 : len(order)] = order[1:]
+    cff.topDictIndex[0].Encoding = encoding
+    program = io.BytesIO()
+    cff.compile(program, builder.font)
+    return program.getvalue(), {char: order.index(glyph) for char, glyph in glyphs.items()}
+
+
+def _pdf_document(*streams: bytes, fonts: tuple[bytes, ...] = _HELVETICA) -> bytes:
     font = 3 + 2 * len(streams)
     kids = b" ".join(b"%d 0 R" % (3 + 2 * i) for i in range(len(streams)))
     objects: list[bytes] = [
@@ -144,9 +187,7 @@ def _pdf_document(*streams: bytes) -> bytes:
             b"/Resources << /Font << /F1 %d 0 R >> >> >>" % (4 + 2 * i, font)
         )
         objects.append(b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream")
-    objects.append(
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
-    )
+    objects.extend(fonts)
     objects.append(b"<< /Author (Kari Testperson) /Title (Utkast) >>")
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
