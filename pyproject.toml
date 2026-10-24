@@ -63,7 +63,13 @@ dependencies = [
     # reads one glyph differently would mint a new version of every PDF-sourced
     # regulation. A bump is a deliberate extractor_version change, and
     # tests/unit/test_promotion_extract.py fails until EXTRACTOR_VERSION says so.
-    "pypdf==6.21.1",
+    "pypdf==6.21.2",
+    # pypdf reads the encoding of an embedded CFF (Type1C) font with no
+    # ToUnicode map through fontTools, and without it extracts that font's text
+    # as control characters (issue #573). Pinned exactly for the same reason as
+    # pypdf: it decides the extracted text, so a bump is a deliberate
+    # extractor_version change (tests/unit/test_promotion_source_text.py).
+    "fonttools==4.67.0",
     # The MCP server validates every tool call against its listed input schema
     # (lovspor.mcp_contract, issue #570). Already a transitive mcp dep (its
     # low-level server imports it); declared because we import it directly.

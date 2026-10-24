@@ -5,13 +5,16 @@ from __future__ import annotations
 import io
 import zipfile
 
+import fontTools
 import pypdf
 import pytest
 from lxml import html
 
 from lovspor.errors import LovsporError, UnreadableSourceError
 from lovspor.promotion import SourceForm
+from lovspor.promotion.identity import content_hash
 from lovspor.promotion.source_text import (
+    FONT_LIBRARY_VERSION,
     PDF_LIBRARY_VERSION,
     _lines_of,
     docx_lines,
@@ -28,6 +31,7 @@ from tests.unit.promotion_fixtures import (
     minimal_docx,
     minimal_pdf,
     pdf_pages,
+    pdf_with_cff_font,
 )
 
 DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -394,6 +398,122 @@ def test_pdf_library_is_the_pinned_one() -> None:
     Bump PDF_LIBRARY_VERSION and EXTRACTOR_VERSION together, deliberately.
     """
     assert pypdf.__version__ == PDF_LIBRARY_VERSION
+
+
+def test_pdf_reads_a_cff_font_by_its_own_encoding() -> None:
+    """A subset CFF font without ToUnicode is read by its program's encoding (#573)."""
+    assert pdf_lines(pdf_with_cff_font("Forskrift om skulereglar")) == ("Forskrift om skulereglar",)
+
+
+def test_font_library_is_the_pinned_one() -> None:
+    """pypdf reads a CFF font's encoding through fontTools, so a fontTools bump can change text.
+
+    Bump FONT_LIBRARY_VERSION and EXTRACTOR_VERSION together, deliberately.
+    """
+    assert fontTools.version == FONT_LIBRARY_VERSION
+
+
+CONTENTS = (
+    "Innhald",
+    "Innleiing ..........................................",
+    "Generelt om skulereglane .......................... 3",
+    "§1 Heimel ......................................... 3",
+    "§2 Føremål ........................................ 3",
+)
+
+
+def test_pdf_table_of_contents_and_its_heading_are_not_read() -> None:
+    """A table of contents is navigation, not the regulation (#597)."""
+    head = ("Forskrift om skulereglar", "Vedtatt av Levekårsutvalet 28.05.2024")
+    body = ("§ 1 Heimel", "Forskrifta har heimel i opplæringslova.")
+    assert pdf_lines(minimal_pdf((*head, *CONTENTS, *body))) == (*head, *body)
+
+
+@pytest.mark.parametrize("heading", ["Innhold", "Innholdsfortegnelse", "Innhaldsliste:"])
+def test_pdf_contents_heading_spellings(heading: str) -> None:
+    lines = (heading, "§1 Formål ........ 2", "§ 1 Formål")
+    assert pdf_lines(minimal_pdf(lines)) == ("§ 1 Formål",)
+
+
+def test_pdf_dotted_blanks_without_a_page_number_are_kept() -> None:
+    """A form's fill-in lines lead with dots too, but no entry names a page."""
+    lines = ("Innhald", "Namn ..............", "Adresse ..............", "§ 1 Formål")
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_pdf_contents_heading_without_entries_is_kept() -> None:
+    lines = ("Forskrift om gebyr", "Innhald", "§ 1 Formål", "Teksten.")
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_pdf_dotted_blanks_first_and_last_are_kept() -> None:
+    lines = ("Namn ..............", "§ 1 Formål", "Adresse ..............")
+    assert pdf_lines(minimal_pdf(lines)) == lines
+
+
+def test_pdf_contents_on_the_first_line_is_not_read() -> None:
+    assert pdf_lines(minimal_pdf(("X .......... 12", "§ 1 Formål"))) == ("§ 1 Formål",)
+
+
+def test_pdf_contents_entry_after_other_text_drops_no_heading() -> None:
+    lines = ("Forskrift om gebyr", "§1 Formål ........ 2", "§ 1 Formål")
+    assert pdf_lines(minimal_pdf(lines)) == ("Forskrift om gebyr", "§ 1 Formål")
+
+
+@pytest.mark.parametrize("numbered_first", [False, True])
+def test_pdf_contents_run_across_pages_is_removed_at_eof(numbered_first: bool) -> None:
+    """One numbered entry qualifies the whole run, including unnumbered entries (#597)."""
+    entries = ("Innleiing ........ 12", "Vedlegg ........")
+    if not numbered_first:
+        entries = entries[::-1]
+    payload = pdf_pages(
+        ("Forskrift om gebyr", "Innhald", entries[0]),
+        (entries[1],),
+    )
+    assert pdf_lines(payload) == ("Forskrift om gebyr",)
+
+
+def test_pdf_numbered_contents_does_not_remove_separate_form_blanks() -> None:
+    """A non-entry closes the run; page evidence must not leak into another run."""
+    lines = (
+        "Namn ........",
+        "§ 1 Formål",
+        "Innhald",
+        "Innleiing ........ 2",
+        "§ 2 Søknad",
+        "Adresse ........",
+    )
+    assert pdf_lines(minimal_pdf(lines)) == (
+        "Namn ........",
+        "§ 1 Formål",
+        "§ 2 Søknad",
+        "Adresse ........",
+    )
+
+
+def test_pdf_contents_page_changes_leave_extracted_text_and_hash_identical() -> None:
+    expected = pdf_lines(minimal_pdf(REGULATION_LINES))
+    for page in ("2", "123"):
+        payload = minimal_pdf(
+            (*REGULATION_LINES[:2], "Innhald", f"§ 1 Formål ........ {page}", *REGULATION_LINES[2:])
+        )
+        first = pdf_lines(payload)
+        assert first == pdf_lines(payload) == expected
+        assert content_hash("\n".join(first)) == content_hash("\n".join(expected))
+
+
+def test_html_contents_only_article_does_not_compete_with_regulation_holder() -> None:
+    """The shared first-section anchor must reject contents in HTML too (#597)."""
+    page = _main(
+        "<article><h1>Forskrift om gebyr</h1><p>§ 1 Formål ........ 2</p></article>"
+        "<article><h1>Forskrift om gebyr</h1><h2>§ 1 Formål</h2>"
+        "<p>Forskriften gjelder kommunen.</p></article><p>Nyheter</p>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "§ 1 Formål",
+        "Forskriften gjelder kommunen.",
+    )
 
 
 def test_docx_reads_one_line_per_paragraph_joining_runs() -> None:
@@ -1144,3 +1264,57 @@ def test_docx_soft_break_starts_a_private_use_bullet_line(bullet: str) -> None:
         f"<w:t>  {bullet}lager</w:t><w:cr/><w:t>{bullet} bolig</w:t></w:r></w:p>"
     )
     assert docx_lines(_docx_body(paragraph)) == (f"Søknad {bullet} gebyr", "- lager", "- bolig")
+
+
+def test_a_lowercase_line_after_a_contents_entry_is_not_joined_onto_it() -> None:
+    """The rejoin pass must not hide the last entry's page number (#597, #669)."""
+    lines = ("Innhald", "Innleiing ........ 2", "kommunen gjev desse reglane.")
+
+    assert pdf_lines(minimal_pdf(lines)) == ("kommunen gjev desse reglane.",)
+
+
+def test_a_lowercase_contents_entry_is_not_joined_onto_the_title_above_it() -> None:
+    """Joined, the title would read as an entry and be dropped with the contents."""
+    lines = ("Forskrift om gebyr", "innleiing ........ 2", "§ 1 Formål")
+
+    assert pdf_lines(minimal_pdf(lines)) == ("Forskrift om gebyr", "§ 1 Formål")
+
+
+@pytest.mark.parametrize(
+    ("entry", "removed"),
+    [
+        ("Innleiing ... 2", False),
+        ("Innleiing … 2", False),
+        ("Innleiing .... 2", True),
+        ("Innleiing …. 2", True),
+        ("Innleiing … … 12", True),
+        ("Innleiing . . . . 12", True),
+        (".... 2", False),
+        ("Innleiing 2024", False),
+    ],
+)
+def test_pdf_contents_leader_boundary_preserves_non_entries(entry: str, removed: bool) -> None:
+    """Four dots and preceding text distinguish leaders from elision (#597)."""
+    lines = ("Innhald", entry, "§ 1 Formål")
+    expected = ("§ 1 Formål",) if removed else lines
+    assert pdf_lines(minimal_pdf(lines)) == expected
+
+
+def test_html_soft_break_contents_entries_remain_separate_and_readable() -> None:
+    """Only PDF drops contents; HTML's shared rejoin pass preserves its lines."""
+    page = _main(
+        "<p>Forskrift om gebyr<br>innleiing ........ 2<br>kommunen gjev reglane.</p>"
+        "<h2>§ 1 Formål</h2>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "innleiing ........ 2",
+        "kommunen gjev reglane.",
+        "§ 1 Formål",
+    )
+
+
+def test_pdf_contents_entry_does_not_rejoin_a_hyphenated_title() -> None:
+    """The contents boundary also takes precedence over hyphen rejoining (#597)."""
+    lines = ("Forskrift om Sør-", "innleiing ........ 2", "§ 1 Formål")
+    assert pdf_lines(minimal_pdf(lines)) == ("Forskrift om Sør-", "§ 1 Formål")

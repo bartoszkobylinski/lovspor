@@ -37,6 +37,42 @@ def test_section_ten_or_a_mid_line_citation_does_not_start_the_body() -> None:
     assert read_regulation(lines) == ExtractionHoldReason.NO_BODY
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "§1 Heimel ......................................... 3",
+        "§ 1 Heimel . . . . . . . . 3",
+        "§1 Heimel ..........",
+        "§ 1 Heimel \u2026\u2026 3",
+        "Kapittel 1 Innleiing ............ 2",
+        "§ 1 Heimel .... 3",
+        "§ 1 Heimel \u2026. 3",
+        "§ 1 Heimel ....\t3",
+        "§ 1 Heimel ....\u00a03",
+    ],
+)
+def test_a_contents_entry_never_starts_the_body(entry: str) -> None:
+    """A table-of-contents line names § 1; the section itself opens it (#597)."""
+    lines = ("Forskrift om skulereglar", entry, "§ 1 Heimel", "Forskrifta gjeld alle.")
+    result = read_regulation(lines)
+    assert not isinstance(result, ExtractionHoldReason), result
+    assert result[0].body == "§ 1 Heimel\nForskrifta gjeld alle."
+
+
+def test_a_contents_entry_alone_is_held_as_no_body() -> None:
+    lines = ("Forskrift om skulereglar", "§1 Heimel ............ 3", "Teksten.")
+    assert read_regulation(lines) == ExtractionHoldReason.NO_BODY
+
+
+@pytest.mark.parametrize(
+    "first", ["§ 1 Kommunen kan ...", "§ 1 Kommunen kan \u2026", "§ 1. Formål.", "§ 1 Heimel 2024"]
+)
+def test_a_section_ending_in_dots_or_a_number_still_starts_the_body(first: str) -> None:
+    result = read_regulation(("Forskrift om gebyr", first, "Teksten."))
+    assert not isinstance(result, ExtractionHoldReason), result
+    assert result[0].body == f"{first}\nTeksten."
+
+
 def test_no_title_before_the_body_is_held_as_no_title() -> None:
     lines = ("Vedtatt av kommunestyret 12.12.2019", "§ 1 Formål", "Forskrift om noe")
     assert read_regulation(lines) == ExtractionHoldReason.NO_TITLE

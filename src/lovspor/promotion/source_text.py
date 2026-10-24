@@ -22,12 +22,21 @@ news item the page lists.
 
 **PDF.** ``pypdf``, pinned exactly: the page text stream, never the document
 metadata (Author, Creator), which names people and is not the regulation.
+``fontTools`` is pinned with it: pypdf reads an embedded CFF font's own
+encoding through it, and a subset font with no ToUnicode map is otherwise
+read as control characters (#573).
 The page's hard line wraps are rejoined, so a wrapped title or paragraph is
 one line again; a section heading, a list item, an enactment line and a new
 sentence after a full line stay lines of their own. A page pasted from Word
 into a CMS keeps the same hard wraps as ``<br>``; those are rejoined by the
 same rules, but only inside one block element, never across two. DOCX
 carries its author's paragraphs and is never rejoined.
+
+A PDF's table of contents is navigation, not the regulation, and is not read
+(#597): a run of entries (text, a dot leader, ``anchors.is_contents_entry``)
+of which at least one names a page, with the ``Innhald`` / ``Innhold`` /
+``Innholdsfortegnelse`` line right before it. A run that names no page is a
+form's fill-in lines (``Namn ........``) and is kept.
 
 **DOCX.** ``word/document.xml`` read in memory — nothing is extracted to
 disk — under a size cap, through the pipeline's hardened XML parser. A
@@ -63,10 +72,11 @@ from pypdf.errors import PyPdfError
 from lovspor.errors import UnreadableSourceError
 from lovspor.observatory.document_report import _decoded, _region, blob_form
 from lovspor.parsing.xml_normalizer import safe_parser
-from lovspor.promotion.anchors import anchor_lines
+from lovspor.promotion.anchors import anchor_lines, is_contents_entry
 from lovspor.promotion.models import SourceForm
 
-PDF_LIBRARY_VERSION = "6.21.1"
+PDF_LIBRARY_VERSION = "6.21.2"
+FONT_LIBRARY_VERSION = "4.67.0"
 MAX_DOCX_PART_BYTES = 20 * 1024 * 1024
 
 _DOCX_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -126,6 +136,9 @@ _MAX_HEADING_CHARS = 100
 _HYPHEN_WRAP = re.compile(r"\w-$")
 _FIRST_WORD = re.compile(r"[^\s/,.]+")
 _SUSPENDED_BEFORE = frozenset({"og", "eller", "samt"})
+_CONTENTS_HEADING = re.compile(
+    r"innh(?:old|ald)(?:sfortegnelse|sliste|soversikt)?\s*:?", re.IGNORECASE
+)
 
 
 def source_form(content_type: str) -> SourceForm | None:
@@ -158,7 +171,7 @@ def pdf_lines(payload: bytes) -> tuple[str, ...]:
         # pypdf reports a malformed file through its own errors and, deeper in
         # the object graph, through these builtins; each is "cannot read".
         raise UnreadableSourceError(f"PDF did not parse: {error}") from error
-    return _rejoined(_clean_lines("\n".join(pages).split("\n")))
+    return _without_contents(_rejoined(_clean_lines("\n".join(pages).split("\n"))))
 
 
 def docx_lines(payload: bytes) -> tuple[str, ...]:
@@ -288,6 +301,28 @@ def _spaced(text: str | None) -> str:
     return _WHITESPACE.sub(" ", text or "")
 
 
+def _without_contents(lines: tuple[str, ...]) -> tuple[str, ...]:
+    kept: list[str] = []
+    entries: list[str] = []
+    for line in lines:
+        if is_contents_entry(line):
+            entries.append(line)
+            continue
+        _close_contents(kept, entries)
+        entries = []
+        kept.append(line)
+    _close_contents(kept, entries)
+    return tuple(kept)
+
+
+def _close_contents(kept: list[str], entries: list[str]) -> None:
+    """Keep a run of dotted lines unless one names a page; drop a table's heading with it."""
+    if not any(entry[-1].isdigit() for entry in entries):
+        kept.extend(entries)
+    elif kept and _CONTENTS_HEADING.fullmatch(kept[-1]):
+        kept.pop()
+
+
 def _clean_lines(lines: Iterable[str]) -> tuple[str, ...]:
     collapsed = (" ".join(_PUA_BULLET.sub("- ", line).split()) for line in lines)
     return tuple(line for line in collapsed if line and not _FURNITURE_LINE.fullmatch(line))
@@ -296,9 +331,13 @@ def _clean_lines(lines: Iterable[str]) -> tuple[str, ...]:
 def _rejoined(lines: tuple[str, ...]) -> tuple[str, ...]:
     joined: list[str] = []
     for line in lines:
-        if joined and _wrapped_at_hyphen(joined[-1], line):
+        # A contents entry joins nothing: joined, its page number is no longer
+        # last, or a title joined to it is dropped with the contents (#597).
+        if not joined or is_contents_entry(joined[-1]) or is_contents_entry(line):
+            joined.append(line)
+        elif _wrapped_at_hyphen(joined[-1], line):
             joined[-1] = f"{joined[-1]}{line}"
-        elif joined and _continues(joined[-1], line):
+        elif _continues(joined[-1], line):
             joined[-1] = f"{joined[-1]} {line}"
         else:
             joined.append(line)
