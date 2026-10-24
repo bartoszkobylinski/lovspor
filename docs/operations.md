@@ -216,8 +216,10 @@ The corpus site (ADR-0013) and the ADR-0014 site are released **together**, as
 one envelope under `/var/www/lovspor-releases/<release_content_id>/` with two
 trees, `corpus/` and `site/`, and two root files written once the id is
 known: `release.json` (the record) and `release.caddy` (the per-release Caddy
-fragment: `vars lovspor_release <id>`, both roots and the corpus's own
-redirect map, every path absolute and immutable). The cutover is one Caddy
+fragment: `vars lovspor_release <id>`, both roots, the corpus's own
+redirect map and a `handle_errors` block that answers every 404 with the
+release's own `site/404.html`, status kept, every path absolute and
+immutable). The cutover is one Caddy
 configuration swap — the host's Caddyfile imports the active fragment — so a
 request is served entirely by the old release or entirely by the new one, and
 **no symlink exists**. What is live is never a pointer but a reconciled

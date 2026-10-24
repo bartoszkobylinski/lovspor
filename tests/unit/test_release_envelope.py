@@ -127,6 +127,16 @@ class TestFragment:
             f"\troot * {root}/site\n"
             "\tfile_server\n"
             "}\n"
+            "handle_errors {\n"
+            "\t@lovspor_not_found expression {http.error.status_code} == 404\n"
+            "\thandle @lovspor_not_found {\n"
+            f"\t\troot * {root}/site\n"
+            "\t\trewrite * /404.html\n"
+            "\t\tfile_server {\n"
+            "\t\t\tstatus {http.error.status_code}\n"
+            "\t\t}\n"
+            "\t}\n"
+            "}\n"
         )
 
     def test_carries_the_vars_directive_and_only_absolute_immutable_paths(self) -> None:
@@ -137,6 +147,7 @@ class TestFragment:
         assert fragment_paths(text) == (
             f"/var/www/lovspor-releases/{ID_A}/corpus/redirects*.caddy",
             f"/var/www/lovspor-releases/{ID_A}/corpus",
+            f"/var/www/lovspor-releases/{ID_A}/site",
             f"/var/www/lovspor-releases/{ID_A}/site",
         )
         assert "lovspor-current" not in text
@@ -163,6 +174,23 @@ class TestFragment:
         site_handle = lines.index("handle {")
         assert lines[site_handle + 1] == f"root * /r/{ID_A}/site"
         assert lines[site_handle + 2] == "file_server"
+
+    def test_a_not_found_error_is_answered_from_the_releases_own_site_tree(self) -> None:
+        """#662: a 404 is the site's framed page with its status kept, from this release.
+
+        Only a handler error reaches ``handle_errors``: an upstream's 404 through
+        ``reverse_proxy`` is a response, so ``/mcp`` and ``/healthz`` stay untouched.
+        """
+        text = fragment_text(Path("/r") / ID_A, ID_A)
+        lines = [line.strip() for line in text.splitlines()]
+
+        errors = lines.index("handle_errors {")
+        assert lines[errors + 1] == "@lovspor_not_found expression {http.error.status_code} == 404"
+        assert lines[errors + 2] == "handle @lovspor_not_found {"
+        assert lines[errors + 3] == f"root * /r/{ID_A}/site"
+        assert lines[errors + 4] == "rewrite * /404.html"
+        assert lines[errors + 6] == "status {http.error.status_code}"
+        assert "reverse_proxy" not in text
 
     @pytest.mark.parametrize(
         "text",

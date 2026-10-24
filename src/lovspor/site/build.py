@@ -29,7 +29,8 @@ the corpus (plan F.3) — reads the LLHB publication manifest from the
 checkout (``lovspor.site.benchmark``; absent manifest, no benchmark
 section), renders every route in both languages through
 the fact mechanism, scans every page (``lovspor.site.scan``), and
-writes the tree: pages, ``sitemap-site.xml``, ``llms.txt``
+writes the tree: pages, the non-route ``404.html`` (``lovspor.site.not_found``),
+``sitemap-site.xml``, ``llms.txt``
 (``lovspor.site.llms``, whose counts are read through the same ledger),
 the capability document byte for byte, and ``site-facts.json`` with
 ``release_content_id`` left ``null`` for the release script to fill
@@ -52,6 +53,7 @@ from lovspor.site.errors import SiteBuildError
 from lovspor.site.facts import FactLedger, Lang
 from lovspor.site.fingerprint import ReleaseKey, Toolchain, release_key, toolchain_fingerprint
 from lovspor.site.llms import LLMS_NAME, llms_txt
+from lovspor.site.not_found import render_not_found, write_not_found
 from lovspor.site.routes import emitted_pages
 from lovspor.site.scan import check_links, scan_page
 from lovspor.site.sitemap import sitemap_site_xml
@@ -296,7 +298,9 @@ def build_site(inputs: SiteInputs) -> SiteBuildReport:
     toolchain = toolchain_fingerprint(inputs.checkout)
     key = release_key(artifacts.manifest.corpus_commit, lovspor_commit, document.state, toolchain)
     pages, llms, ledger = _render_pages(artifacts)
+    not_found = render_not_found(pages)
     _write_tree(inputs, pages, llms, _site_facts(artifacts, toolchain, key, ledger))
+    write_not_found(inputs.out, not_found)
     return SiteBuildReport(
         lovspor_commit=lovspor_commit,
         corpus_commit=artifacts.manifest.corpus_commit,

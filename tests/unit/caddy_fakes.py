@@ -182,11 +182,30 @@ def _directive(line: str, matchers: dict[str, list[str]]) -> dict[str, Any] | No
     return handlers.get(line, copy.deepcopy(_PLAIN.get(line)))
 
 
+def _without_error_routes(lines: list[str]) -> list[str]:
+    """Drop every ``handle_errors`` block, nested blocks and all (#662).
+
+    Caddy adapts it into the server's ``errors`` routes, never the site's
+    routes, and the toy models no error handling: read as a ``handle`` it
+    would add a route the real configuration does not have.
+    """
+    kept: list[str] = []
+    depth = 0
+    for line in lines:
+        if depth == 0 and line.startswith("handle_errors") and line.endswith("{"):
+            depth = 1
+        elif depth:
+            depth += line.endswith("{") - (line == "}")
+        else:
+            kept.append(line)
+    return kept
+
+
 def _routes(lines: list[str], matchers: dict[str, list[str]]) -> list[dict[str, Any]]:
     """The site block's routes: one per ``handle``, the rest as bare handlers."""
     routes: list[dict[str, Any]] = []
     stack: list[dict[str, Any]] = []
-    for line in lines:
+    for line in _without_error_routes(lines):
         if line.startswith("@"):
             name, _, rest = line.partition(" path ")
             matchers[name] = rest.split()
