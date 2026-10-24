@@ -75,7 +75,7 @@ from lovspor.parsing.xml_normalizer import safe_parser
 from lovspor.promotion.anchors import anchor_lines, is_contents_entry
 from lovspor.promotion.models import SourceForm
 
-PDF_LIBRARY_VERSION = "6.21.1"
+PDF_LIBRARY_VERSION = "6.21.2"
 FONT_LIBRARY_VERSION = "4.67.0"
 MAX_DOCX_PART_BYTES = 20 * 1024 * 1024
 
