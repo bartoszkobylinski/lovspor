@@ -49,6 +49,15 @@ class CorpusStateError(LovsporError):
     """
 
 
+class ReadmeBlockError(LovsporError):
+    """The corpus README's generated corpus-status markers are not one ordered pair.
+
+    The engine owns only the text between the markers (#661). With a marker
+    missing, doubled or out of order it cannot tell its block from the
+    hand-written prose, so it changes nothing rather than guess.
+    """
+
+
 class CorpusNotFoundError(LovsporError):
     """Raised when the requested doc or corpus path is not present."""
 

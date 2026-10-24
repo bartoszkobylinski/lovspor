@@ -6,7 +6,8 @@ inside the engine repository or the observatory archive, that is not a git
 checkout, or that has no ``lokale-forskrifter/manifest.json`` (the S0
 skeleton) cannot be constructed, so nothing can write into it.
 
-Promotion writes only under ``lokale-forskrifter/``. The root
+Promotion writes only under ``lokale-forskrifter/``, apart from the README's
+generated corpus-status block (:mod:`lovspor.corpus_readme`, #661). The root
 ``manifest.json`` is read — never written — for the central ref-ids an
 ``lf-`` id must not collide with (ADR-0016 1a).
 

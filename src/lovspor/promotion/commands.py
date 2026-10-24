@@ -44,6 +44,7 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 
+from lovspor.corpus_readme import README_NAME, ReadmeOutcome, refresh_readme
 from lovspor.errors import (
     ConfigError,
     ParseError,
@@ -56,7 +57,7 @@ from lovspor.observatory.registry import read_registry, registry_path
 from lovspor.observatory.registry_io import _root
 from lovspor.observatory.storage import ObservatoryRoot, engine_root, observatory_root
 from lovspor.promotion.archive import Fetch, authority_fetches, locate, read_artifact
-from lovspor.promotion.corpus import CorpusCheckout
+from lovspor.promotion.corpus import LOCAL_DIR, CorpusCheckout
 from lovspor.promotion.decisions import (
     ArtifactKey,
     Decision,
@@ -438,10 +439,32 @@ def _echo_promoted(corpus: CorpusCheckout, prepared: Prepared, written: tuple[st
 
 
 def _echo_commit(corpus: CorpusCheckout, subject: str) -> None:
+    """Bring the README's status block up to date, then print the commit that carries both.
+
+    Every command that leaves the corpus with something to commit ends here,
+    so this is the one place the block follows the local manifest (#661).
+    """
+    _refresh_readme(corpus)
     where = shlex.quote(str(corpus.path))
     typer.echo("Nothing is committed. Commit now, at promotion time (never backdated):")
-    typer.echo(f"  git -C {where} add -- lokale-forskrifter")
+    typer.echo(f"  git -C {where} add -- {staged_paths(corpus.path)}")
     typer.echo(f"  git -C {where} commit -m {shlex.quote(subject)}")
+
+
+def _refresh_readme(corpus: CorpusCheckout) -> None:
+    outcome = refresh_readme(corpus.path)
+    if outcome is ReadmeOutcome.WRITTEN:
+        typer.echo(f"wrote {README_NAME}")
+    elif outcome is ReadmeOutcome.MALFORMED:
+        warning = f"Warning: {README_NAME} corpus-status markers are broken; it was left unchanged."
+        typer.echo(warning, err=True)
+
+
+def staged_paths(corpus_path: Path) -> str:
+    """What the operator stages: the local dataset, and the README when the checkout has one."""
+    if (corpus_path / README_NAME).is_file():
+        return f"{LOCAL_DIR} {README_NAME}"
+    return LOCAL_DIR
 
 
 @promote_app.command("preview")
