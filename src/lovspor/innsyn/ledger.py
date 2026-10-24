@@ -11,6 +11,9 @@ request, recorded by its own command:
   A follow-up request (#625) names the request it ``follows``: a new request
   to another body of the same authority, after a referral, with its own
   recipient and its own § 32 clock; it asks what the request it follows asked.
+  A letter the owner sent by hand through a web form or KS eDialog has that
+  ``channel``, the form's page as its recipient, and the SHA-256 of the
+  receipt saved from it (``receipt_sha256``) instead of a Message-ID.
 * ``acknowledged`` — the authority's receipt, automatic or not.
 * ``case_number`` — the authority's saksnummer, quoted in every later mail.
 * ``outcome`` — one of :data:`OUTCOMES`, with the time it arrived and, for a
@@ -38,6 +41,7 @@ the Oslo day of ``sent_at``. Free-text notes are not kept: they name case
 officers, and personopplysningsloven asks for the minimum.
 """
 
+import re
 from collections.abc import Callable
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
@@ -45,7 +49,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from lovspor.errors import InnsynRefusedError
-from lovspor.innsyn.directory import MAILBOX_PATTERN
+from lovspor.innsyn.directory import MAILBOX_PATTERN, Channel
 from lovspor.innsyn.journal import Journal
 from lovspor.innsyn.population import AUTHORITY_ID_PATTERN
 from lovspor.innsyn.workdays import klage_mark
@@ -100,6 +104,7 @@ DSN_STATUS_PATTERN = r"^5\.\d{1,3}\.\d{1,3}$"
 REQUEST_ID_PATTERN = r"^(?:\d{2}|\d{4})-\d{8}T\d{6}Z$"
 MESSAGE_ID_PATTERN = r"^<[^<>@\s]+@[^<>@\s]+>$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_FORM_PAGE_PATTERN = r"^https?://\S+$"
 _LfId = Annotated[str, Field(pattern=LF_ID_PATTERN)]
 Source = Literal["cli", "pilot-import"]
 
@@ -128,13 +133,15 @@ class _Event(BaseModel):
 class Sent(_Event):
     event: Literal["sent"] = "sent"
     authority_id: str = Field(pattern=AUTHORITY_ID_PATTERN)
-    recipient: str = Field(pattern=MAILBOX_PATTERN)
+    recipient: str
     sent_at: datetime
     lf_ids: tuple[_LfId, ...]
     general_clause: bool
     letter_sha256: str = Field(pattern=_SHA256_PATTERN)
     message_id: str | None = Field(default=None, pattern=MESSAGE_ID_PATTERN)
     follows: str | None = Field(default=None, pattern=REQUEST_ID_PATTERN)
+    channel: Channel = "email"
+    receipt_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
 
     @field_validator("sent_at")
     @classmethod
@@ -149,6 +156,18 @@ class Sent(_Event):
             raise ValueError("a request asks for known LF ids, the general clause, or both")
         if list(self.lf_ids) != sorted(set(self.lf_ids)):
             raise ValueError("lf_ids must be sorted and distinct")
+        return self
+
+    @model_validator(mode="after")
+    def _by_channel(self) -> "Sent":
+        by_mail = self.channel == "email"
+        pattern = MAILBOX_PATTERN if by_mail else _FORM_PAGE_PATTERN
+        if re.fullmatch(pattern, self.recipient) is None:
+            raise ValueError("an e-mail goes to a mailbox, a form's letter to its page")
+        if by_mail == (self.receipt_sha256 is not None):
+            raise ValueError("a letter sent by hand carries its receipt, an e-mail none")
+        if not by_mail and self.message_id is not None:
+            raise ValueError("a letter sent by hand has no Message-ID")
         return self
 
 

@@ -58,6 +58,23 @@ def set_recipient(
     typer.echo(f"{authority_id}: recipient {address.strip().lower()} (evidence {evidence_url})")
 
 
+@innsyn_app.command("set-channel")
+def set_channel(
+    authority_id: _Id,
+    channel: Annotated[str, typer.Option("--channel", help="webform or edialog.")],
+    evidence_url: Annotated[
+        str, typer.Option("--evidence-url", help="The form's or eDialog's own page.")
+    ],
+    read_at: _ReadAt,
+) -> None:
+    """Record that an authority takes requests only by web form or eDialog: sent by hand.
+
+    It replaces a recorded recipient, as a later ``set-recipient`` replaces it.
+    """
+    _record({**_fact("channel", authority_id, evidence_url, read_at), "channel": channel})
+    typer.echo(f"{authority_id}: {channel} {evidence_url}")
+
+
 @innsyn_app.command("set-maalform")
 def set_maalform(
     authority_id: _Id,
@@ -85,15 +102,22 @@ def set_sender(
     typer.echo(f"sender: {sender.name} <{sender.email}>")
 
 
+def _route(contact: Contact) -> tuple[str, str]:
+    if contact.recipient is not None:
+        return contact.recipient.address, contact.recipient.evidence.url
+    route = contact.route
+    if route is None:
+        return "UNRESOLVED", ""
+    return f"{route.channel} {route.address}", route.address
+
+
 def _row(authority: Authority, contact: Contact) -> str:
-    recipient = contact.recipient
     form = contact.letter_form if contact.maalform else f"{contact.letter_form} (unset)"
     fields = (
         authority.authority_id,
         authority.kind,
         authority.letter_name,
-        recipient.address if recipient else "UNRESOLVED",
-        recipient.evidence.url if recipient else "",
+        *_route(contact),
         form,
     )
     return "\t".join(fields)
@@ -101,9 +125,10 @@ def _row(authority: Authority, contact: Contact) -> str:
 
 @innsyn_app.command("authorities")
 def authorities() -> None:
-    """List every authority with its recipient (or UNRESOLVED) and målform, tab-separated.
+    """List every authority with its route (or UNRESOLVED) and målform, tab-separated.
 
-    Columns: id, kind, name, recipient, evidence URL, målform. Counts go to stderr.
+    Columns: id, kind, name, recipient (a mailbox, or ``webform``/``edialog`` and
+    the form's page), evidence URL, målform. Counts go to stderr.
     """
     target = workspace()
     snapshot = guarded(lambda: latest_snapshot(target))
@@ -111,10 +136,10 @@ def authorities() -> None:
     for authority in snapshot.authorities:
         typer.echo(_row(authority, held.get(authority.authority_id, Contact())))
     ids = [a.authority_id for a in snapshot.authorities]
-    resolved = sum(1 for i in ids if i in held and held[i].recipient is not None)
+    resolved = sum(1 for i in ids if i in held and held[i].route is not None)
     formed = sum(1 for i in ids if i in held and held[i].maalform is not None)
     typer.echo(
-        f"{len(ids)} authorities: {resolved} with a recorded recipient, "
+        f"{len(ids)} authorities: {resolved} with a recorded recipient or channel, "
         f"{len(ids) - resolved} unresolved; {formed} with a recorded målform",
         err=True,
     )

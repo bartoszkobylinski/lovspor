@@ -20,7 +20,7 @@ invites narrowing rather than a refusal. Electronic copies: § 30 første ledd.
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.innsyn.directory import Maalform
+from lovspor.innsyn.directory import Channel, Maalform
 from lovspor.innsyn.population import Authority
 from lovspor.innsyn.sender import Sender
 
@@ -35,6 +35,7 @@ class LetterRequest(BaseModel):
 
     authority: Authority
     recipient: str
+    channel: Channel = "email"
     maalform: Maalform
     lf_ids: tuple[str, ...]
     sender: Sender

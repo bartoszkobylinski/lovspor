@@ -1,5 +1,6 @@
 """``innsyn letters`` writes a wave; ``record-sent`` and ``record-follow-up`` record one sent."""
 
+import hashlib
 from pathlib import Path
 from typing import Annotated
 
@@ -10,8 +11,15 @@ from lovspor.innsyn.app import guarded, innsyn_app, instant, now, refuse, worksp
 from lovspor.innsyn.directory import contacts, directory_journal
 from lovspor.innsyn.ledger import record_events, requests
 from lovspor.innsyn.population import latest_snapshot
+from lovspor.innsyn.received import read_document
 from lovspor.innsyn.sender import read_sender
-from lovspor.innsyn.sent import follow_up_event, letter_digest, manifest_entry, sent_event
+from lovspor.innsyn.sent import (
+    follow_up_event,
+    letter_digest,
+    manifest_entry,
+    manual_sent_event,
+    sent_event,
+)
 from lovspor.innsyn.waves import WaveInputs, write_wave
 from lovspor.innsyn.workspace import InnsynWorkspace
 from lovspor.observatory.lf_ledger import LedgerEntry, ledger_path, read_ledger_file
@@ -107,6 +115,35 @@ def record_sent(
     """Record a letter of a wave as sent, with the SHA-256 of the letter as sent."""
     try:
         guarded(lambda: _sent(manifest, authority_id, sent_at, message_id))
+    except (OSError, ValueError) as exc:
+        raise refuse(exc) from exc
+
+
+def _sent_manually(manifest_path: Path, authority_id: str, sent_at: str, evidence: Path) -> None:
+    entry = manifest_entry(manifest_path, authority_id)
+    receipt = hashlib.sha256(read_document(evidence)).hexdigest()
+    moment = instant(sent_at, "--sent-at")
+    event = manual_sent_event(entry, letter_digest(manifest_path, entry), moment, receipt)
+    record_events(workspace(), [event])
+    typer.echo(f"{event.request_id}: sent by {entry.channel} to {entry.recipient} recorded")
+
+
+@innsyn_app.command("record-sent-manual")
+def record_sent_manual(
+    manifest: Annotated[Path, typer.Option("--manifest", help="The wave's manifest.json.")],
+    authority_id: Annotated[str, typer.Option("--id", help="The authority the letter went to.")],
+    sent_at: Annotated[str, typer.Option("--sent-at", help="When it was submitted (UTC).")],
+    evidence: Annotated[
+        Path,
+        typer.Option("--evidence", help="The receipt saved from the form (page, PDF, screenshot)."),
+    ],
+) -> None:
+    """Record a letter the owner sent by hand through a web form or eDialog, with its receipt.
+
+    Only the receipt's SHA-256 is kept; keep the file with the wave.
+    """
+    try:
+        guarded(lambda: _sent_manually(manifest, authority_id, sent_at, evidence))
     except (OSError, ValueError) as exc:
         raise refuse(exc) from exc
 
