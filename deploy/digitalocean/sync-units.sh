@@ -77,16 +77,19 @@ alert_webhook() {
 			-e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
-# Never prints the URL: for most targets it is a bearer secret.
+# Never prints the URL: for most targets it is a bearer secret. A scheme with no
+# authority (`https://`, `http:///x`) is refused, as `lovspor ops alert` refuses
+# a URL whose netloc is empty.
 verify_alert_target() {
 	local webhook
 	if [ -e "$ALERT_ENV" ] && [ ! -r "$ALERT_ENV" ]; then
 		echo "alert target: unknown (cannot read $ALERT_ENV; run as root)"
+		echo "cannot tell whether failure alerts reach anyone: $ALERT_ENV is unreadable; run as root" >&2
 		return 3
 	fi
 	webhook="$( [ -r "$ALERT_ENV" ] && alert_webhook "$ALERT_ENV" || true)"
 	case "$webhook" in
-		http://?* | https://?*) echo "alert target: configured" ;;
+		http://[!/?#]* | https://[!/?#]*) echo "alert target: configured" ;;
 		*)
 			echo "alert target: not configured"
 			echo "failure alerts reach no one: set LOVSPOR_ALERT_WEBHOOK in $ALERT_ENV (README § Failure alerts)" >&2

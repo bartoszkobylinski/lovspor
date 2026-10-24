@@ -245,6 +245,7 @@ class TestTheAlertTarget:
 
         assert result.returncode == 3
         assert "alert target: unknown" in result.stdout
+        assert str(tmp_path / "alert.env") in result.stderr
 
     @pytest.mark.parametrize(
         "text",
@@ -287,3 +288,26 @@ class TestTheAlertTarget:
 
         assert result.returncode == 1
         assert "alert target: not configured" in result.stdout
+
+    @pytest.mark.parametrize("url", ["http:///secret-topic", "https://?secret-topic"])
+    def test_a_url_without_an_authority_is_not_configured(self, tmp_path: Path, url: str) -> None:
+        """The script promises the same URL reading as ops.alert._webhook:
+        an http(s) scheme alone is insufficient without a netloc.
+        """
+        result = _run(tmp_path, alert_env=f"LOVSPOR_ALERT_WEBHOOK={url}\n")
+
+        assert result.returncode == 3
+        assert "alert target: not configured" in result.stdout
+        assert "secret-topic" not in result.stdout + result.stderr
+
+    def test_reading_the_target_does_not_execute_shell_substitutions(self, tmp_path: Path) -> None:
+        """EnvironmentFile values are data, including shell-looking URL paths."""
+        sentinel = tmp_path / "executed"
+        text = f'LOVSPOR_ALERT_WEBHOOK="http://example.test/$(touch {sentinel})"\n'
+
+        result = _run(tmp_path, alert_env=text)
+
+        assert result.returncode == 0, result.stderr
+        assert "alert target: configured" in result.stdout
+        assert not sentinel.exists()
+        assert "example.test" not in result.stdout + result.stderr
