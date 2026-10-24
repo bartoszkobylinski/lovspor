@@ -10,6 +10,10 @@ latest line for an authority stands; earlier ones stay as history.
   here derives an address from a domain pattern. A guessed mailbox looks
   exactly like a verified one in a letter, and a request that went nowhere
   would start a § 32 clock that is not running.
+* ``channel`` — ``webform`` or ``edialog``: the authority takes requests only
+  through a web form or KS eDialog, not by e-mail, so the owner sends its
+  letter by hand. The evidence URL is the form's own page. A recipient and a
+  channel are the same slot: whichever was recorded last is the route.
 * ``maalform`` — ``nb`` or ``nn`` for the letter. No machine-readable source
   of the authorities' språkvedtak was found reliable enough to read
   automatically, so the operator records it from the evidence they read
@@ -34,6 +38,9 @@ from lovspor.observatory.model import require_utc
 
 Maalform = Literal["nb", "nn"]
 DEFAULT_MAALFORM: Maalform = "nb"
+
+ManualChannel = Literal["webform", "edialog"]
+Channel = Literal["email", "webform", "edialog"]
 
 MAILBOX_PATTERN = r"^[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}$"
 
@@ -75,12 +82,28 @@ class RecipientRecorded(_Recorded):
         return value.strip().lower() if isinstance(value, str) else value
 
 
+class ChannelRecorded(_Recorded):
+    kind: Literal["channel"] = "channel"
+    channel: ManualChannel
+
+
+class Route(BaseModel):
+    """How a letter reaches the authority: a mailbox, or a form's page."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    channel: Channel
+    address: str
+
+
 class MaalformRecorded(_Recorded):
     kind: Literal["maalform"] = "maalform"
     maalform: Maalform
 
 
-DirectoryRecord = Annotated[RecipientRecorded | MaalformRecorded, Field(discriminator="kind")]
+DirectoryRecord = Annotated[
+    RecipientRecorded | ChannelRecorded | MaalformRecorded, Field(discriminator="kind")
+]
 _ADAPTER: TypeAdapter[DirectoryRecord] = TypeAdapter(DirectoryRecord)
 
 
@@ -90,7 +113,17 @@ class Contact(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     recipient: RecipientRecorded | None = None
+    channel: ChannelRecorded | None = None
     maalform: MaalformRecorded | None = None
+
+    @property
+    def route(self) -> Route | None:
+        """The standing route, or None: unresolved."""
+        if self.recipient is not None:
+            return Route(channel="email", address=self.recipient.address)
+        if self.channel is not None:
+            return Route(channel=self.channel.channel, address=self.channel.evidence.url)
+        return None
 
     @property
     def letter_form(self) -> Maalform:
@@ -98,7 +131,7 @@ class Contact(BaseModel):
 
 
 def parse_fact(data: dict[str, object]) -> DirectoryRecord:
-    """Raises: ValidationError: not a recipient or målform record."""
+    """Raises: ValidationError: not a recipient, channel or målform record."""
     return _ADAPTER.validate_python(data)
 
 
@@ -106,13 +139,23 @@ def directory_journal(workspace: InnsynWorkspace) -> Journal[DirectoryRecord]:
     return Journal(workspace.directory_log, _ADAPTER)
 
 
+def _update(record: DirectoryRecord) -> dict[str, object]:
+    if isinstance(record, MaalformRecorded):
+        return {"maalform": record}
+    if isinstance(record, RecipientRecorded):
+        return {"recipient": record, "channel": None}
+    return {"recipient": None, "channel": record}
+
+
 def contacts(records: list[DirectoryRecord]) -> dict[str, Contact]:
-    """The standing recipient and målform per authority: the latest line of each kind."""
+    """The standing route and målform per authority: the latest line of each.
+
+    A recipient and a channel replace each other.
+    """
     held: dict[str, Contact] = {}
     for record in records:
         contact = held.get(record.authority_id, Contact())
-        field = "recipient" if isinstance(record, RecipientRecorded) else "maalform"
-        held[record.authority_id] = contact.model_copy(update={field: record})
+        held[record.authority_id] = contact.model_copy(update=_update(record))
     return held
 
 

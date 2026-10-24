@@ -2,7 +2,8 @@
 
 A wave is the next ``wave_size`` authorities that
 
-* have a recorded recipient, other than an address an earlier letter to the
+* have a recorded route — a mailbox, or a web form or eDialog the owner
+  sends to by hand — other than an address an earlier letter to the
   authority was recorded undelivered at — the rest are listed as
   ``unresolved`` and get no letter; and
 * have no open request in the ledger — those are listed as ``skipped_open``.
@@ -35,7 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lovspor.atomic_io import atomic_replace_bytes
 from lovspor.errors import InnsynRefusedError
-from lovspor.innsyn.directory import Contact, Maalform
+from lovspor.innsyn.directory import Channel, Contact, Maalform
 from lovspor.innsyn.ledger import RequestState
 from lovspor.innsyn.letters import LetterRequest, render
 from lovspor.innsyn.population import Authority, AuthorityKind, PopulationSnapshot
@@ -55,6 +56,7 @@ class ManifestEntry(BaseModel):
     kind: AuthorityKind
     name: str
     recipient: str
+    channel: Channel = "email"
     maalform: Maalform
     maalform_recorded: bool
     lf_ids: tuple[str, ...]
@@ -118,8 +120,8 @@ def _failed(requests: dict[str, RequestState]) -> set[tuple[str, str]]:
 
 
 def _usable(contact: Contact, authority_id: str, failed: set[tuple[str, str]]) -> bool:
-    recipient = contact.recipient
-    return recipient is not None and (authority_id, recipient.address) not in failed
+    route = contact.route
+    return route is not None and (authority_id, route.address) not in failed
 
 
 class _Plan(BaseModel):
@@ -155,13 +157,14 @@ def plan(inputs: WaveInputs, wave_size: int) -> _Plan:
 
 
 def _letter(inputs: WaveInputs, authority: Authority, ids: tuple[str, ...]) -> LetterRequest:
-    recipient = inputs.contacts[authority.authority_id].recipient
-    if recipient is None:
-        raise InnsynRefusedError(f"{authority.authority_id} has no recorded recipient")
     contact = inputs.contacts[authority.authority_id]
+    route = contact.route
+    if route is None:
+        raise InnsynRefusedError(f"{authority.authority_id} has no recorded recipient")
     return LetterRequest(
         authority=authority,
-        recipient=recipient.address,
+        recipient=route.address,
+        channel=route.channel,
         maalform=contact.letter_form,
         lf_ids=ids,
         sender=inputs.sender,
@@ -177,6 +180,7 @@ def _write_letter(out: Path, request: LetterRequest, recorded: bool) -> Manifest
         kind=request.authority.kind,
         name=request.authority.letter_name,
         recipient=request.recipient,
+        channel=request.channel,
         maalform=request.maalform,
         maalform_recorded=recorded,
         lf_ids=request.lf_ids,
