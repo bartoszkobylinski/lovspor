@@ -209,7 +209,8 @@ the configuration adapted from `/etc/caddy/Caddyfile` with the active
 fragment (D) and the marker `/var/www/lovspor-releases/ACTIVE` (M) must name
 one release with equal configuration hashes; an unreconciled host, or one
 whose admin socket cannot be reached, stops here. `lovspor release build`
-(as `lovspor`) runs the release probe, computes the candidate's
+(as `lovspor`) runs the release probe (waiting up to 90 s for an MCP still
+warming after a restart, #584), computes the candidate's
 `release_key` and stops with "already live" when it equals the live
 release's; otherwise it builds `corpus/` and `site/` under
 `/var/www/lovspor-releases/.build-<random>/`, hard-links unchanged files to

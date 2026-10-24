@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import click
+import httpx
 import pytest
 import typer
 from pytest_httpx import HTTPXMock
@@ -38,6 +39,7 @@ from lovspor.release.errors import MigrationFailedError, RehearsalFailedError, R
 from lovspor.release.migrate import first_migration
 from lovspor.release.rehearsal import Rehearsal, RehearsalReport, Step
 from lovspor.release.staged import StagedPlan
+from lovspor.site.capabilities import parse_capabilities
 from tests.unit.caddy_fakes import FakeCaddy
 from tests.unit.cli_output import said
 from tests.unit.migrate_fixtures import Droplet, make_droplet
@@ -1103,6 +1105,35 @@ class TestBuild:
         assert TOKEN not in result.output
         document = (releases / content_id / "site" / "deployment-capabilities.json").read_text()
         assert '"observer": "release-probe"' in document
+
+    def test_a_build_inside_the_mcp_warm_window_records_the_warmed_process(
+        self,
+        world: World,
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Issue #584: a publish right after `systemctl restart lovspor-mcp` met a
+        refused loopback and a Caddy 502, and published `unavailable`."""
+        slept: list[float] = []
+        monkeypatch.setattr(time, "sleep", slept.append)
+        httpx_mock.add_exception(httpx.ConnectError("refused"), url=READINESS_URL)
+        httpx_mock.add_response(url=MCP_URL, status_code=502)
+        absent_discovery(httpx_mock)
+        _fake_host(httpx_mock)
+        releases = tmp_path / "releases"
+
+        result = runner.invoke(app, _build_args(world, releases, "none", None))
+
+        assert result.exit_code == 0, result.output
+        assert slept == [5.0]
+        assert "hosted MCP not answering" in result.stderr
+        content_id = result.stdout.strip()
+        raw = (releases / content_id / "site" / "deployment-capabilities.json").read_bytes()
+        document = parse_capabilities(raw)
+        assert document.observation.process.status == "observed"
+        assert document.state.hosted_state != "unavailable"
 
     def test_the_same_release_is_reused_and_the_live_one_is_already_live(
         self,
