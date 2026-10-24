@@ -12,8 +12,8 @@ transaction; ``prune`` (root) removes what no record names.
 Exit codes: 0 done (``commit`` of the live release included — it is
 already live); 1 refused, unreconciled or failed, one line on stderr;
 2 usage; 3 the precondition *Caddy admin reachable* is unmet, with D
-and M printed. The only clock in the release package is read here, for
-the probe, and passed in.
+and M printed. The probe's wall clock is read here and passed in; the
+warm-window wait (``release.warm``, #584) has a monotonic one of its own.
 """
 
 from collections.abc import Callable, Iterator
@@ -62,6 +62,7 @@ from lovspor.release.migrate import (
 from lovspor.release.reconcile import ReconcileAction, prune, reconcile
 from lovspor.release.rehearsal import Rehearsal, RehearsalFixtures, rehearse
 from lovspor.release.staged import Progress, StagedPlan, staged_rehearsal
+from lovspor.release.warm import warm_observer
 from lovspor.site.build import discover_checkout
 from lovspor.site.capabilities import CapabilityDocument, Checkout
 from lovspor.site.errors import SiteBuildError
@@ -267,7 +268,7 @@ def build_command(
         request = BuildRequest(
             releases=releases, checkout=discover_checkout(), corpus=corpus, corpus_ref=ref
         )
-        outcome = build_release(request, _observer(settings), live_id)
+        outcome = build_release(request, warm_observer(_observer(settings)), live_id)
     typer.echo(f"release {outcome.release_content_id[:12]}: {_state(outcome)}", err=True)
     typer.echo(outcome.release_content_id)
 
