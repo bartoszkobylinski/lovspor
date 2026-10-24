@@ -123,6 +123,7 @@ def _row(state: RequestState) -> str:
         _text(state.klage_sent_at),
         _text(sent.message_id),
         _text(state.undelivered),
+        _text(state.reminded_at),
     )
     return "\t".join(fields)
 
@@ -133,7 +134,7 @@ def list_requests() -> None:
 
     Columns: request, authority, recipient, sent_at, LF ids, general clause,
     saksnummer, acknowledged_at, answered_at, outcome, § 32 mark, klage_sent_at,
-    Message-ID, undelivered (bounced or mailbox_closed).
+    Message-ID, undelivered (bounced or mailbox_closed), last reminder sent.
     """
     held = guarded(lambda: requests(workspace()))
     for state in held.values():

@@ -1,4 +1,4 @@
-"""What became of a letter on its way: it never arrived (#644).
+"""What became of a letter on its way: it never arrived (#644), or it was chased (#625).
 
 A bounce and a mailbox closed to e-mail are two commands rather than one with
 a ``--reason``, because only a bounce carries a DSN status. Either takes the
@@ -25,8 +25,8 @@ _Evidence = Annotated[
 _Arrived = Annotated[str, typer.Option("--at", help="When the bounce or auto-reply arrived (UTC).")]
 
 
-def _digest(evidence: Path) -> str:
-    return hashlib.sha256(guarded(lambda: read_document(evidence))).hexdigest()
+def _digest(path: Path) -> str:
+    return hashlib.sha256(guarded(lambda: read_document(path))).hexdigest()
 
 
 @innsyn_app.command("record-bounce")
@@ -48,3 +48,14 @@ def record_mailbox_closed(request: Request, at: _Arrived, evidence: _Evidence) -
     """Record that the mailbox answered it takes no e-mail: the letter was not accepted."""
     fields = {"reason": "mailbox_closed", "at": instant(at, "--at")}
     record_event(request, "undelivered", {**fields, "evidence_sha256": _digest(evidence)})
+
+
+@innsyn_app.command("record-reminder")
+def record_reminder(
+    request: Request,
+    at: Annotated[str, typer.Option("--at", help="When the reminder was sent (UTC).")],
+    letter: Annotated[Path, typer.Option("--letter", help="The reminder as sent.")],
+) -> None:
+    """Record a reminder (offentleglova § 29 første ledd); the request stays due."""
+    fields = {"reminder_sent_at": instant(at, "--at"), "letter_sha256": _digest(letter)}
+    record_event(request, "reminder", fields)

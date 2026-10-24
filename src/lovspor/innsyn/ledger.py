@@ -14,6 +14,9 @@ request, recorded by its own command:
   refusal or partial answer, the stated basis. An interim reply without a
   date, or a recorded ``no_answer``, is not an answer.
 * ``klage`` — a complaint was sent.
+* ``reminder`` — a påminning was sent (offentleglova § 29 første ledd), with
+  the SHA-256 of the letter as sent. It is not a klage, so the request stays
+  due; ``due`` shows the latest one.
 * ``document_received`` — a document the authority sent, by SHA-256 and media
   type, with when it arrived; the file itself is held by
   :mod:`lovspor.innsyn.received`, and its name is not kept.
@@ -192,6 +195,17 @@ class KlageSent(_Event):
         return require_utc(value)
 
 
+class ReminderSent(_Event):
+    event: Literal["reminder"] = "reminder"
+    reminder_sent_at: datetime
+    letter_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("reminder_sent_at")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        return require_utc(value)
+
+
 class DocumentReceived(_Event):
     event: Literal["document_received"] = "document_received"
     received_at: datetime
@@ -253,6 +267,7 @@ _Transition = (
     | CaseNumber
     | Outcome
     | KlageSent
+    | ReminderSent
     | DocumentReceived
     | DocumentClassified
     | Undelivered
@@ -273,6 +288,7 @@ class RequestState(BaseModel):
     outcome: OutcomeClass | None = None
     refusal_basis: str | None = None
     klage_sent_at: datetime | None = None
+    reminded_at: datetime | None = None
     documents: tuple[ReceivedDocument, ...] = ()
     undelivered: UndeliveredReason | None = None
 
@@ -324,6 +340,13 @@ def _answer(state: RequestState, event: Outcome) -> RequestState:
     return state.model_copy(update={**update, "refusal_basis": event.refusal_basis})
 
 
+def _remind(state: RequestState, event: ReminderSent) -> RequestState:
+    latest = event.reminder_sent_at
+    if state.reminded_at is not None:
+        latest = max(latest, state.reminded_at)
+    return state.model_copy(update={"reminded_at": latest})
+
+
 def _receive(state: RequestState, event: DocumentReceived) -> RequestState:
     document = ReceivedDocument(
         sha256=event.sha256, content_type=event.content_type, received_at=event.received_at
@@ -351,6 +374,7 @@ def _setting(field: str, attribute: str) -> _Updater:
 _APPLY: dict[type[_Event], _Updater] = {
     Outcome: _answer,
     DocumentReceived: _receive,
+    ReminderSent: _remind,
     DocumentClassified: _classify,
     Acknowledged: _setting("acknowledged_at", "acknowledged_at"),
     CaseNumber: _setting("saksnummer", "saksnummer"),
@@ -383,6 +407,8 @@ def _moment(event: LedgerEvent) -> datetime | None:
         return event.acknowledged_at
     if isinstance(event, KlageSent):
         return event.klage_sent_at
+    if isinstance(event, ReminderSent):
+        return event.reminder_sent_at
     if isinstance(event, DocumentReceived):
         return event.received_at
     return event.at if isinstance(event, Outcome | Undelivered) else None

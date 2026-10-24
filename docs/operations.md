@@ -1797,6 +1797,7 @@ $I record-ack --request 4646-20261005T074425Z --at <UTC>
 $I record-case-number --request 4646-20261005T074425Z --number 2026/2348
 $I record-outcome --request 4646-20261005T074425Z --outcome partial --at <UTC> [--refusal-basis "…"]
 $I record-klage --request 4646-20261005T074425Z --at <UTC>
+$I record-reminder --request 4646-20261005T074425Z --at <UTC> --letter <reminder.txt>
 $I record-bounce --request 4646-20261005T074425Z --at <UTC> --evidence <dsn.eml> --status 5.4.1
 $I record-mailbox-closed --request 4646-20261005T074425Z --at <UTC> --evidence <auto-reply.eml>
 $I requests                               # every request, with its § 32 mark
@@ -1864,6 +1865,11 @@ $I received                               # every document; requested ids still 
   authority in a later wave as usual, and `send` sends it there. An authority that
   takes requests only through a contact form or KS eDialog has no mailbox to record,
   so it stays unresolved; how such a request is lodged and recorded is not decided yet.
+- **Reminders (#625).** `record-reminder` records a påminning (offentleglova § 29 første
+  ledd) with the SHA-256 of the letter as sent (`--letter`, the text saved as a file).
+  A reminder is not a klage: the request stays on `due`, which shows the latest reminder
+  in the column after `undelivered`, so a klage is not sent on a request reminded two
+  days ago without the operator seeing it.
 - **Sending a wave.** `send` delivers the manifest's letters by SMTP submission with
   STARTTLS and certificate verification (port 587), in manifest order. A server that does
   not offer STARTTLS is refused before the password is sent. Without `--send` it is a dry
