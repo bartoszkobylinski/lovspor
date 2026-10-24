@@ -171,6 +171,27 @@ def test_the_default_window_is_bounded() -> None:
     assert 0 < window.interval_seconds < window.budget_seconds <= 120.0
 
 
+@pytest.mark.parametrize(
+    ("status", "payload", "reason"),
+    [(500, {}, "http_500"), (200, {}, "schema_invalid")],
+)
+def test_a_readiness_answer_without_an_attestation_is_recorded_without_retry(
+    httpx_mock: HTTPXMock, status: int, payload: dict[str, object], reason: str
+) -> None:
+    """An HTTP or schema failure is an answer, not a process still warming."""
+    time = FakeTime()
+    httpx_mock.add_response(url=READINESS_URL, status_code=status, json=payload)
+    httpx_mock.add_callback(FakeMcp(), url=MCP_URL)
+    absent_discovery(httpx_mock)
+
+    document = settled(_observe, _checkout(), time.window())
+
+    assert document.observation.process.status == "unobserved"
+    assert document.observation.process.reason == reason
+    assert time.slept == []
+    assert time.said == []
+
+
 @pytest.mark.parametrize("status", [200, 400, 401, 403, 404, 500])
 def test_other_public_http_answers_are_recorded_without_retry(
     httpx_mock: HTTPXMock, status: int
