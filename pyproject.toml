@@ -63,7 +63,7 @@ dependencies = [
     # reads one glyph differently would mint a new version of every PDF-sourced
     # regulation. A bump is a deliberate extractor_version change, and
     # tests/unit/test_promotion_extract.py fails until EXTRACTOR_VERSION says so.
-    "pypdf==6.21.1",
+    "pypdf==6.21.2",
     # pypdf reads the encoding of an embedded CFF (Type1C) font with no
     # ToUnicode map through fontTools, and without it extracts that font's text
     # as control characters (issue #573). Pinned exactly for the same reason as
