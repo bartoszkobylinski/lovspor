@@ -16,6 +16,9 @@ README untouched.
 
 A README with no block yet gets one before its first second-level heading (at
 the end when it has none): that is how the block first reaches ``lovverk``.
+Prose keeps its exact bytes either way: a marker counts only as a line of its
+own outside fenced code, the separators added around the block use the
+README's own line ending, and none of the prose's blank lines is removed.
 A README with a broken marker pair is left as it is and reported. A checkout
 with no README gets none; the README is the corpus's own file.
 
@@ -42,6 +45,7 @@ STATUS_END = "<!-- lovspor:corpus-status:end -->"
 _MANIFEST = "manifest.json"
 _LOCAL_DATASET = "lokale-forskrifter"
 _CENTRAL = (("lover/", "gjeldende-lover"), ("forskrifter/", "gjeldende-sentrale-forskrifter"))
+_FENCES = ("```", "~~~")
 _LOVDATA_BASIS = "Lovdata public data, NLOD 2.0"
 _LOCAL_BASIS = "åndsverkloven § 14"
 _HEADER = (
@@ -192,22 +196,47 @@ def _count(number: int, singular: str, plural: str | None = None) -> str:
 
 def splice(readme: str, block: str) -> str:
     """``readme`` with ``block`` in place of its generated block, or inserted if it has none."""
-    starts, ends = readme.count(STATUS_START), readme.count(STATUS_END)
-    if starts == ends == 0:
-        return _insert(readme, block)
-    head, _, rest = readme.partition(STATUS_START)
-    if starts != 1 or ends != 1 or STATUS_END not in rest:
+    newline = "\r\n" if "\r\n" in readme else "\n"
+    block = block.replace("\n", newline)
+    lines = readme.splitlines(keepends=True)
+    unfenced = _unfenced(lines)
+    starts = [i for i in unfenced if lines[i].strip() == STATUS_START]
+    ends = [i for i in unfenced if lines[i].strip() == STATUS_END]
+    if not starts and not ends:
+        return _insert(lines, unfenced, block, newline)
+    if len(starts) != 1 or len(ends) != 1 or ends[0] < starts[0]:
         msg = f"{README_NAME} needs one corpus-status start marker followed by one end marker"
         raise ReadmeBlockError(msg)
-    return head + block + rest.partition(STATUS_END)[2]
+    end_line = lines[ends[0]]
+    line_break = end_line[len(end_line.rstrip("\r\n")) :]
+    return "".join(lines[: starts[0]]) + block + line_break + "".join(lines[ends[0] + 1 :])
 
 
-def _insert(readme: str, block: str) -> str:
-    lines = readme.splitlines(keepends=True)
+def _unfenced(lines: list[str]) -> list[int]:
+    """Indices of the lines outside fenced code: a marker or heading in an example is prose."""
+    indices: list[int] = []
+    fenced = False
     for index, line in enumerate(lines):
-        if line.startswith("## "):
-            return "".join(lines[:index]) + block + "\n\n" + "".join(lines[index:])
-    return readme.rstrip("\n") + "\n\n" + block + "\n"
+        if line.lstrip().startswith(_FENCES):
+            fenced = not fenced
+        elif not fenced:
+            indices.append(index)
+    return indices
+
+
+def _insert(lines: list[str], unfenced: list[int], block: str, newline: str) -> str:
+    for index in unfenced:
+        if lines[index].startswith("## "):
+            return "".join(lines[:index]) + block + newline * 2 + "".join(lines[index:])
+    readme = "".join(lines)
+    return readme + _separator(readme, newline) + block + newline
+
+
+def _separator(readme: str, newline: str) -> str:
+    """What puts the appended block after a blank line, adding nothing the prose already has."""
+    if not readme.strip("\r\n") or readme.endswith(("\n\n", "\n\r\n")):
+        return ""
+    return newline if readme.endswith("\n") else newline * 2
 
 
 def refresh_readme(repo: Path) -> ReadmeOutcome:

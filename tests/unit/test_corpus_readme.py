@@ -200,6 +200,66 @@ class TestSplice:
         with pytest.raises(ReadmeBlockError, match="corpus-status"):
             splice(readme, self.BLOCK)
 
+    @pytest.mark.parametrize(
+        ("prose", "appended"),
+        [
+            ("# lovverk\n\nintro\n\n\n\n", f"{BLOCK}\n"),
+            ("# lovverk\n\nintro\n\n", f"{BLOCK}\n"),
+            ("# lovverk\n\nintro\n", f"\n{BLOCK}\n"),
+            ("# lovverk\n\nintro", f"\n\n{BLOCK}\n"),
+            ("\n\n\n", f"{BLOCK}\n"),
+            ("", f"{BLOCK}\n"),
+        ],
+    )
+    def test_appending_keeps_every_byte_of_the_prose_before_it(
+        self, prose: str, appended: str
+    ) -> None:
+        assert splice(prose, self.BLOCK) == prose + appended
+
+    def test_appending_to_crlf_prose_keeps_it_and_uses_crlf(self) -> None:
+        prose = "# lovverk\r\n\r\nintro"
+
+        assert splice(prose, self.BLOCK) == (
+            f"{prose}\r\n\r\n{STATUS_START}\r\nnew\r\n{STATUS_END}\r\n"
+        )
+
+    def test_inserting_into_crlf_prose_keeps_it_and_uses_crlf(self) -> None:
+        readme = "# lovverk\r\n\r\nintro\r\n\r\n## A\r\n"
+
+        assert splice(readme, self.BLOCK) == (
+            f"# lovverk\r\n\r\nintro\r\n\r\n{STATUS_START}\r\nnew\r\n{STATUS_END}\r\n\r\n## A\r\n"
+        )
+
+    def test_crlf_splicing_twice_is_idempotent(self) -> None:
+        once = splice("# lovverk\r\n\r\n## A\r\n", self.BLOCK)
+
+        assert splice(once, self.BLOCK) == once
+
+    @pytest.mark.parametrize("tail", ["", "\n", "\n\n\n"])
+    def test_a_block_at_the_end_of_the_file_keeps_what_follows_its_end_marker(
+        self, tail: str
+    ) -> None:
+        readme = f"# lovverk\n\n{STATUS_START}\nold\n{STATUS_END}{tail}"
+
+        assert splice(readme, self.BLOCK) == f"# lovverk\n\n{self.BLOCK}{tail}"
+
+    def test_markers_and_headings_inside_a_code_fence_are_prose(self) -> None:
+        fenced = f"```markdown\n{STATUS_START}\nexample\n{STATUS_END}\n## Not a heading\n```\n"
+        readme = f"# lovverk\n\n{fenced}\n## Real\n"
+
+        assert splice(readme, self.BLOCK) == f"# lovverk\n\n{fenced}\n{self.BLOCK}\n\n## Real\n"
+
+    def test_a_fenced_example_beside_the_real_block_is_left_alone(self) -> None:
+        fenced = f"~~~\n{STATUS_START}\nexample\n{STATUS_END}\n~~~\n"
+        readme = f"{fenced}\n{STATUS_START}\nold\n{STATUS_END}\n"
+
+        assert splice(readme, self.BLOCK) == f"{fenced}\n{self.BLOCK}\n"
+
+    def test_a_marker_quoted_inside_a_prose_line_is_not_a_marker(self) -> None:
+        readme = f"# lovverk\n\nThe block starts at `{STATUS_START}`.\n"
+
+        assert splice(readme, self.BLOCK) == f"{readme}\n{self.BLOCK}\n"
+
 
 class TestRefreshReadme:
     def test_writes_the_block_and_keeps_the_prose(self, tmp_path: Path) -> None:
