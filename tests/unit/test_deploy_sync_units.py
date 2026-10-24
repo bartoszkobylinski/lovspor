@@ -17,6 +17,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 _DEPLOY = Path(__file__).resolve().parents[2] / "deploy" / "digitalocean"
 _SYNC = _DEPLOY / "sync-units.sh"
 _PROVISION = _DEPLOY / "provision.sh"
@@ -40,13 +42,32 @@ def _fake_systemctl(tmp_path: Path, exit_code: int = 0) -> Path:
     return bin_dir
 
 
-def _run(tmp_path: Path, *args: str, systemctl_exit: int = 0) -> subprocess.CompletedProcess[str]:
+_TARGET = "LOVSPOR_ALERT_WEBHOOK=https://ntfy.sh/a-topic\n"
+
+
+def _alert_env(tmp_path: Path, text: str | None, mode: int) -> Path:
+    path = tmp_path / "alert.env"
+    path.unlink(missing_ok=True)
+    if text is not None:
+        path.write_text(text)
+        path.chmod(mode)
+    return path
+
+
+def _run(
+    tmp_path: Path,
+    *args: str,
+    systemctl_exit: int = 0,
+    alert_env: str | None = _TARGET,
+    alert_mode: int = 0o600,
+) -> subprocess.CompletedProcess[str]:
     unit_dir = tmp_path / "system"
     unit_dir.mkdir(exist_ok=True)
     bin_dir = tmp_path / "bin"
     if not bin_dir.exists():
         _fake_systemctl(tmp_path, systemctl_exit)
     env = {**os.environ, "LOVSPOR_UNIT_DIR": str(unit_dir)}
+    env["LOVSPOR_ALERT_ENV"] = str(_alert_env(tmp_path, alert_env, alert_mode))
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     command = ["bash", str(_SYNC), *args]
     return subprocess.run(command, check=False, capture_output=True, text=True, env=env)
@@ -160,3 +181,109 @@ class TestTheSupportedPaths:
         sync = "sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh"
         assert block.index("uv sync --frozen --no-dev") < block.index(sync)
         assert block.index(sync) < block.index("sudo systemctl restart lovspor-mcp")
+
+    def test_the_deploy_and_provisioning_tolerate_a_missing_target_and_nothing_else(
+        self,
+    ) -> None:
+        """#671: exit 3 is reported, not a reason to skip the restart; drift (1) still stops."""
+        readme = _README.read_text(encoding="utf-8")
+        block = readme[readme.index("**Deploy an update**") :]
+        block = block[: block.index("```\n\n")]
+
+        assert "sync-units.sh || [ $? -eq 3 ]\n" in block
+        assert 'sync-units.sh" || [ $? -eq 3 ]\n' in _PROVISION.read_text(encoding="utf-8")
+
+
+class TestTheAlertTarget:
+    """Issue #671: alerts fired 450 times into an empty LOVSPOR_ALERT_WEBHOOK and
+    nothing said so. The units can be right and still reach no one; the deploy
+    now says which, with its own exit code."""
+
+    def test_a_configured_target_passes_without_naming_it(self, tmp_path: Path) -> None:
+        url = "https://ntfy.sh/secret-topic"
+        result = _run(tmp_path, alert_env=f"LOVSPOR_ALERT_WEBHOOK={url}\n")
+
+        assert result.returncode == 0, result.stderr
+        assert "alert target: configured" in result.stdout
+        assert "secret-topic" not in result.stdout + result.stderr
+
+    def test_an_empty_webhook_is_not_configured_and_exits_three(self, tmp_path: Path) -> None:
+        """The droplet's state on 2026-10-24: the key present, its value empty."""
+        result = _run(tmp_path, alert_env="LOVSPOR_ALERT_WEBHOOK=\nLOVSPOR_ALERT_FORMAT=text\n")
+
+        assert result.returncode == 3
+        assert "alert target: not configured" in result.stdout
+        assert "LOVSPOR_ALERT_WEBHOOK" in result.stderr
+
+    def test_the_units_are_still_installed_when_the_target_is_missing(self, tmp_path: Path) -> None:
+        result = _run(tmp_path, alert_env="")
+
+        assert result.returncode == 3
+        assert _systemctl_calls(tmp_path) == ["daemon-reload"]
+        for unit in _deployed_units():
+            assert f"OK   {unit}" in result.stdout
+
+    def test_check_reports_a_missing_target_too(self, tmp_path: Path) -> None:
+        assert _run(tmp_path, alert_env=_TARGET).returncode == 0
+
+        result = _run(tmp_path, "--check", alert_env="#LOVSPOR_ALERT_WEBHOOK=https://x.test/t\n")
+
+        assert result.returncode == 3
+        assert "alert target: not configured" in result.stdout
+
+    def test_an_absent_file_is_not_configured(self, tmp_path: Path) -> None:
+        result = _run(tmp_path, alert_env=None)
+
+        assert result.returncode == 3
+        assert "alert target: not configured" in result.stdout
+
+    def test_an_unreadable_file_is_not_a_pass(self, tmp_path: Path) -> None:
+        if os.geteuid() == 0:
+            pytest.skip("root reads a mode-000 file")
+
+        result = _run(tmp_path, alert_env=_TARGET, alert_mode=0o000)
+
+        assert result.returncode == 3
+        assert "alert target: unknown" in result.stdout
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "LOVSPOR_ALERT_WEBHOOK=https://ntfy.sh/a\nLOVSPOR_ALERT_WEBHOOK=\n",
+            'LOVSPOR_ALERT_WEBHOOK=""\n',
+            "LOVSPOR_ALERT_WEBHOOK='  '\n",
+            "LOVSPOR_ALERT_WEBHOOK=   \n",
+        ],
+    )
+    def test_the_last_assignment_wins_and_quotes_go_as_systemd_reads_them(
+        self, tmp_path: Path, text: str
+    ) -> None:
+        """The same reading ``load_alert_config`` makes of the file."""
+        assert _run(tmp_path, alert_env=text).returncode == 3
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "LOVSPOR_ALERT_WEBHOOK=\nLOVSPOR_ALERT_WEBHOOK=https://ntfy.sh/a\n",
+            '  LOVSPOR_ALERT_WEBHOOK = "https://ntfy.sh/a"\n',
+            "LOVSPOR_ALERT_WEBHOOK='https://ntfy.sh/a'\n",
+        ],
+    )
+    def test_a_target_set_as_systemd_reads_it_passes(self, tmp_path: Path, text: str) -> None:
+        assert _run(tmp_path, alert_env=text).returncode == 0
+
+    def test_a_value_the_alert_would_refuse_is_not_configured(self, tmp_path: Path) -> None:
+        """``lovspor ops alert`` refuses anything but an http(s) URL (AlertConfigError)."""
+        result = _run(tmp_path, alert_env="LOVSPOR_ALERT_WEBHOOK=ntfy.sh/topic\n")
+
+        assert result.returncode == 3
+        assert "alert target: not configured" in result.stdout
+
+    def test_drift_outranks_a_missing_target(self, tmp_path: Path) -> None:
+        assert _run(tmp_path, alert_env="").returncode == 3
+        (tmp_path / "system" / "lovspor-mcp.service").write_text("stale\n")
+
+        result = _run(tmp_path, "--check", alert_env="")
+
+        assert result.returncode == 1
+        assert "alert target: not configured" in result.stdout

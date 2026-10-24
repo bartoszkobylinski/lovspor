@@ -14,12 +14,22 @@
 # It never enables, starts or restarts a unit: enabling is provisioning's job,
 # restarting the MCP is the deploy's.
 #
-# Exit 0 every unit matches; 1 an installed unit differs or is missing (each one
-# printed as DIFF); 2 a bad argument.
+# Units that match can still reach no one: from 2026-10-01 to 10-23 450 failure
+# alerts went to an empty LOVSPOR_ALERT_WEBHOOK and every one was a logged
+# no-op (#671). So both modes end by reading the alert target from
+# /etc/lovspor/alert.env (root-only: run as root) and printing one
+# `alert target:` line.
+#
+# Exit 0 every unit matches and the alert target is set; 1 an installed unit
+# differs or is missing (each one printed as DIFF); 2 a bad argument; 3 every
+# unit matches but the alert target is not configured, or the file cannot be
+# read. Units are installed and verified either way: 3 is the deploy's to
+# report, not a reason to skip the restart (README: `|| [ $? -eq 3 ]`).
 set -euo pipefail
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UNIT_DIR="${LOVSPOR_UNIT_DIR:-/etc/systemd/system}"
+ALERT_ENV="${LOVSPOR_ALERT_ENV:-/etc/lovspor/alert.env}"
 # Every unit in this directory the box runs. caddy-rehearsal.service is not one:
 # rehearse-migration.sh installs it for a rehearsal and removes it after.
 UNITS=(
@@ -56,8 +66,46 @@ verify_units() {
 	fi
 }
 
+# LOVSPOR_ALERT_WEBHOOK as `lovspor ops alert` reads the file (systemd's
+# EnvironmentFile rules, as release.caddy.environment_file_value): the last
+# assignment wins, an indented one counts, surrounding quotes go, and a value
+# that is blank once trimmed is unset.
+alert_webhook() {
+	sed -n 's/^[[:space:]]*LOVSPOR_ALERT_WEBHOOK[[:space:]]*=//p' "$1" | tail -n 1 \
+		| sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+			-e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/" \
+			-e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+# Never prints the URL: for most targets it is a bearer secret.
+verify_alert_target() {
+	local webhook
+	if [ -e "$ALERT_ENV" ] && [ ! -r "$ALERT_ENV" ]; then
+		echo "alert target: unknown (cannot read $ALERT_ENV; run as root)"
+		return 3
+	fi
+	webhook="$( [ -r "$ALERT_ENV" ] && alert_webhook "$ALERT_ENV" || true)"
+	case "$webhook" in
+		http://?* | https://?*) echo "alert target: configured" ;;
+		*)
+			echo "alert target: not configured"
+			echo "failure alerts reach no one: set LOVSPOR_ALERT_WEBHOOK in $ALERT_ENV (README § Failure alerts)" >&2
+			return 3
+			;;
+	esac
+}
+
+# Drift (1) outranks a missing alert target (3); both lines are printed.
+verify_all() {
+	local units=0 target=0
+	verify_units || units=$?
+	verify_alert_target || target=$?
+	[ "$units" -eq 0 ] || return "$units"
+	return "$target"
+}
+
 case "${1:-}" in
-	"") install_units; verify_units ;;
-	--check) verify_units ;;
+	"") install_units; verify_all ;;
+	--check) verify_all ;;
 	*) echo "usage: sync-units.sh [--check]" >&2; exit 2 ;;
 esac

@@ -169,7 +169,7 @@ Hand-issued `lsp_…` tokens keep working either way — see
 ```bash
 sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
 sudo -u lovspor sh -c 'cd /opt/lovspor/app && /opt/lovspor/.local/bin/uv sync --frozen --no-dev'
-sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh
+sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh || [ $? -eq 3 ]
 sudo systemctl restart lovspor-mcp
 sudo journalctl -u lovspor-mcp -n 40 --no-pager
 ```
@@ -177,12 +177,23 @@ sudo journalctl -u lovspor-mcp -n 40 --no-pager
 `sync-units.sh` installs every systemd unit this checkout ships (the list
 `provision.sh` installs too), runs `systemctl daemon-reload`, then compares each
 installed unit with the repository copy: one `OK` line per unit, and on any
-difference a `DIFF` line per unit and a non-zero exit — in an `&&` chain that
+difference a `DIFF` line per unit and exit `1` — in an `&&` chain that
 stops the deploy before the restart. It enables, starts and restarts nothing.
-To see drift without changing anything:
-`bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh --check`. (#484: the
-deploy used to leave `/etc/systemd/system` alone, so a merged unit change never
-reached the box.)
+It then reads the failure-alert target from `/etc/lovspor/alert.env` and prints
+`alert target: configured` or `alert target: not configured` (never the URL);
+not configured, or the file unreadable (`alert target: unknown`, run it as
+root), is exit `3` with a stderr line naming the file. Exit `3` means the units
+are installed and verified but a failed unit would alert no one (#671: 450
+site-drift alerts went to an empty `LOVSPOR_ALERT_WEBHOOK` unseen). It is
+deliberately **not** a reason to skip the restart — the restart ships the code
+just pulled, and a missing webhook is fixed without one — so the deploy line
+above tolerates `3` alone (`|| [ $? -eq 3 ]`) while drift (`1`) still stops
+the chain; the `not configured` line stays on screen. Set the webhook (see
+**Failure alerts**) and the next run exits `0`. To see drift and the alert
+target without changing anything:
+`sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh --check` (same
+exit codes). (#484: the deploy used to leave `/etc/systemd/system` alone, so a
+merged unit change never reached the box.)
 
 Restart and release are independent, and neither waits for the other. A release
 run before the restart is not refused: it publishes `runtime_tree_match: false`
@@ -305,8 +316,10 @@ configure. The target is yours: ntfy, Discord, Slack, an e-mail-to-webhook gatew
   over the file (handy for a one-off test; prefer the file).
 - **`LOVSPOR_ALERT_WEBHOOK`:** the full `http(s)://` URL. Unset, empty or file
   absent: the alert unit logs `alert webhook not configured` and exits 0 —
-  never a second failed unit. Logs name only the scheme and host
-  (`https://ntfy.sh/…`), never the path or credentials.
+  never a second failed unit. The gap is reported where an operator looks
+  instead: `sync-units.sh`, which every deploy runs, prints `alert target: not
+  configured` and exits `3` until the webhook is set (#671). Logs name only
+  the scheme and host (`https://ntfy.sh/…`), never the path or credentials.
 - **`LOVSPOR_ALERT_FORMAT`:** `text` (default) posts the message as
   `text/plain` with ntfy's `Title`/`Priority: high`/`Tags` headers — right for
   ntfy (`https://ntfy.sh/<topic>`) and any plain-body endpoint. `json` posts
@@ -353,7 +366,7 @@ the repository copy or checks first:
 ```bash
 sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
 sudo -u lovspor sh -c 'cd /opt/lovspor/app && /opt/lovspor/.local/bin/uv sync --frozen --no-dev'
-sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh
+sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh || [ $? -eq 3 ]
 sudo sh -c 'test -f /etc/lovspor/alert.env || printf "%s\n" "LOVSPOR_ALERT_WEBHOOK=" "LOVSPOR_ALERT_FORMAT=text" > /etc/lovspor/alert.env'
 sudo chown root:root /etc/lovspor/alert.env
 sudo chmod 600 /etc/lovspor/alert.env
@@ -368,7 +381,8 @@ sudo /opt/lovspor/app/.venv/bin/lovspor ops alert --unit lovspor-publish.service
 
 The `sync-units.sh` line installs the units, reloads systemd and prints one
 `OK` per unit; a `DIFF` means the installed copy is not the repository's, and
-the script exits non-zero. The drift check's first run (the next `:17`) presents
+the script exits `1`. Its `alert target: not configured` line (exit `3`,
+tolerated by that line) stays until the webhook is set. The drift check's first run (the next `:17`) presents
 the release probe's credential, `/etc/lovspor/credentials/site-probe` — the
 `present` line above; without it every hourly run fails and, with a webhook set,
 alerts. The last line prints `alert webhook not configured` until you set
@@ -412,7 +426,7 @@ sudo -u lovspor /opt/lovspor/app/.venv/bin/lovspor tokens revoke <id>
 ```bash
 sudo -u lovspor git -C /opt/lovspor/app checkout <good-sha>
 sudo -u lovspor sh -c 'cd /opt/lovspor/app && /opt/lovspor/.local/bin/uv sync --frozen --no-dev'
-sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh
+sudo bash /opt/lovspor/app/deploy/digitalocean/sync-units.sh || [ $? -eq 3 ]
 sudo systemctl restart lovspor-mcp
 # return to the tip once the fix is in — leaves a clean, trackable branch for future pulls:
 sudo -u lovspor git -C /opt/lovspor/app checkout main
