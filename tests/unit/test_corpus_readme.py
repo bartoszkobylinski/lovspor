@@ -255,6 +255,61 @@ class TestSplice:
 
         assert splice(readme, self.BLOCK) == f"{fenced}\n{self.BLOCK}\n"
 
+    @pytest.mark.parametrize(
+        ("opening", "inner", "closing"),
+        [
+            ("````markdown", "```", "````"),
+            ("```markdown", "~~~", "```"),
+            ("~~~~", "~~~", "~~~~~"),
+            ("```", "```js", "   ```"),
+            ("~~~", "```", "~~~ \t"),
+        ],
+        ids=[
+            "shorter-run-does-not-close",
+            "other-character-does-not-close",
+            "longer-run-closes",
+            "info-string-does-not-close-indent-3-closes",
+            "trailing-whitespace-closes",
+        ],
+    )
+    def test_only_a_commonmark_closing_fence_ends_the_code(
+        self, opening: str, inner: str, closing: str
+    ) -> None:
+        fenced = (
+            f"{opening}\n{inner}\n{STATUS_START}\nexample\n"
+            f"{STATUS_END}\n## Example heading\n{closing}\n"
+        )
+        readme = f"# lovverk\n\n{fenced}\n## Real\n"
+
+        assert splice(readme, self.BLOCK) == f"# lovverk\n\n{fenced}\n{self.BLOCK}\n\n## Real\n"
+
+    def test_an_unclosed_fence_runs_to_the_end_of_the_document(self) -> None:
+        readme = f"# lovverk\n\n```\n{STATUS_START}\nexample\n{STATUS_END}\n## Fenced\n"
+
+        assert splice(readme, self.BLOCK) == f"{readme}\n{self.BLOCK}\n"
+
+    @pytest.mark.parametrize(
+        "not_a_fence",
+        ["    ```", "``", "~~", "```a`b"],
+        ids=["indented-4", "two-backticks", "two-tildes", "backtick-in-info"],
+    )
+    def test_a_line_that_cannot_open_a_fence_leaves_the_markers_live(
+        self, not_a_fence: str
+    ) -> None:
+        readme = f"{not_a_fence}\n\n{STATUS_START}\nold\n{STATUS_END}\n"
+
+        assert splice(readme, self.BLOCK) == f"{not_a_fence}\n\n{self.BLOCK}\n"
+
+    def test_a_fence_indented_up_to_three_spaces_still_opens(self) -> None:
+        fenced = f"   ~~~\n{STATUS_START}\n{STATUS_END}\n~~~\n"
+
+        assert splice(fenced, self.BLOCK) == f"{fenced}\n{self.BLOCK}\n"
+
+    def test_a_marker_indented_four_spaces_is_code_not_a_marker(self) -> None:
+        readme = f"# lovverk\n\n    {STATUS_START}\n    {STATUS_END}\n"
+
+        assert splice(readme, self.BLOCK) == f"{readme}\n{self.BLOCK}\n"
+
     def test_a_marker_quoted_inside_a_prose_line_is_not_a_marker(self) -> None:
         readme = f"# lovverk\n\nThe block starts at `{STATUS_START}`.\n"
 
