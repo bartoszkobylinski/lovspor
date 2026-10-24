@@ -276,3 +276,83 @@ def test_a_bad_manual_sent_at_names_the_option(
     assert result.exit_code == 2
     assert said(reason, result.output)
     assert not (workspace / "requests.jsonl").exists()
+
+
+@pytest.mark.parametrize("channel", ["webform", "edialog"])
+def test_manual_wave_letters_are_deterministic_and_match_manifest_digests(
+    workspace: Path, tmp_path: Path, channel: str
+) -> None:
+    _channel(workspace, channel)
+    first_dir, second_dir = tmp_path / "first", tmp_path / "second"
+    first = _wave(workspace, first_dir)
+    second = _wave(workspace, second_dir)
+    assert first["letters"] == second["letters"]
+    for entry in first["letters"]:
+        payload = (first_dir / entry["letter_file"]).read_bytes()
+        assert payload == (second_dir / entry["letter_file"]).read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == entry["letter_sha256"]
+
+
+@pytest.mark.parametrize("channel", ["webform", "edialog"])
+def test_manual_recording_hashes_actual_letter_and_keeps_only_receipt_digest(
+    workspace: Path, tmp_path: Path, channel: str
+) -> None:
+    """operations.md promises the letter as sent and no receipt content in the ledger."""
+    _channel(workspace, channel)
+    manifest = tmp_path / "wave" / "manifest.json"
+    wave = _wave(workspace, manifest.parent)
+    entry = next(e for e in wave["letters"] if e["authority_id"] == HAREID)
+    letter = manifest.parent / entry["letter_file"]
+    payload = letter.read_bytes() + b"\nTillegg som vart sendt.\n"
+    letter.write_bytes(payload)
+    receipt = tmp_path / "private-receipt.png"
+    receipt_payload = b"\x89PNG\r\nOfficer: Private Person\xff\x00"
+    receipt.write_bytes(receipt_payload)
+
+    result = _manual(workspace, manifest, receipt)
+    assert result.exit_code == 0, result.output
+    sent = _held(workspace)[f"{HAREID}-20261021T090000Z"].sent
+    assert sent.letter_sha256 == hashlib.sha256(payload).hexdigest()
+    assert sent.letter_sha256 != entry["letter_sha256"]
+    assert sent.receipt_sha256 == hashlib.sha256(receipt_payload).hexdigest()
+    raw = (workspace / "requests.jsonl").read_bytes()
+    assert b"Private Person" not in raw
+    assert receipt.name.encode() not in raw
+
+
+@pytest.mark.parametrize("channel", ["webform", "edialog"])
+def test_manual_request_supports_klage_and_outcome_without_losing_receipt(
+    workspace: Path, tmp_path: Path, receipt: Path, channel: str
+) -> None:
+    """operations.md: manual requests use the same outcome and klage commands."""
+    _channel(workspace, channel)
+    manifest = tmp_path / "wave" / "manifest.json"
+    _wave(workspace, manifest.parent)
+    assert _manual(workspace, manifest, receipt).exit_code == 0
+    request = f"{HAREID}-20261021T090000Z"
+    sent = _held(workspace)[request].sent
+    next_wave = _wave(workspace, tmp_path / "next")
+    assert HAREID in next_wave["skipped_open"]
+    assert not next_wave["letters"]
+
+    _ok(workspace, "record-klage", "--request", request, "--at", "2026-10-30T08:00:00Z")
+    state = _held(workspace)[request]
+    assert state.klage_sent_at == datetime(2026, 10, 30, 8, tzinfo=UTC)
+    assert not state.is_due(datetime(2026, 11, 2).date())
+    assert state.is_open
+    _ok(
+        workspace,
+        "record-outcome",
+        "--request",
+        request,
+        "--outcome",
+        "full",
+        "--at",
+        "2026-11-02T08:00:00Z",
+    )
+    state = _held(workspace)[request]
+    assert state.sent == sent
+    assert state.outcome == "full"
+    assert state.answered_at == datetime(2026, 11, 2, 8, tzinfo=UTC)
+    assert not state.is_open
+    assert not state.is_due(datetime(2026, 11, 3).date())
