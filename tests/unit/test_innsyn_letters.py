@@ -555,7 +555,7 @@ class TestRecordSentMessageId:
         held = requests(InnsynWorkspace(workspace, []))
         assert [s.sent.message_id for s in held.values()] == ["<abc.123@example.no>"]
         listing = innsyn(workspace, "requests").stdout.splitlines()
-        assert listing[0].split("\t")[-1] == "<abc.123@example.no>"
+        assert listing[0].split("\t")[12] == "<abc.123@example.no>"
 
     def test_without_a_message_id_the_column_is_empty(
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
@@ -565,7 +565,7 @@ class TestRecordSentMessageId:
         args = ("--manifest", manifest, "--id", "46", "--sent-at", "2026-10-13T08:00:00Z")
         _set(workspace, "record-sent", *args)
         listing = innsyn(workspace, "requests").stdout.splitlines()
-        assert listing[0].split("\t")[-1] == ""
+        assert listing[0].split("\t")[12] == ""
 
     @pytest.mark.parametrize("bad", ["not-an-id", "<no-at-sign>", "<a@b> <c@d>"])
     def test_a_malformed_message_id_is_refused(

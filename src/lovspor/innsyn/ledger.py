@@ -8,31 +8,48 @@ request, recorded by its own command:
   the SHA-256 of the letter as sent, and, for a letter ``send`` delivered (or
   one recorded with ``--message-id``), the Message-ID it went out with. A
   request is identified by authority and ``sent_at`` (``4646-20261005T074425Z``).
+  A follow-up request (#625) names the request it ``follows``: a new request
+  to another body of the same authority, after a referral, with its own
+  recipient and its own § 32 clock; it asks what the request it follows asked.
+  A letter the owner sent by hand through a web form or KS eDialog has that
+  ``channel``, the form's page as its recipient, and the SHA-256 of the
+  receipt saved from it (``receipt_sha256``) instead of a Message-ID.
 * ``acknowledged`` — the authority's receipt, automatic or not.
 * ``case_number`` — the authority's saksnummer, quoted in every later mail.
 * ``outcome`` — one of :data:`OUTCOMES`, with the time it arrived and, for a
   refusal or partial answer, the stated basis. An interim reply without a
   date, or a recorded ``no_answer``, is not an answer.
 * ``klage`` — a complaint was sent.
+* ``reminder`` — a påminning was sent (offentleglova § 29 første ledd), with
+  the SHA-256 of the letter as sent. It is not a klage, so the request stays
+  due; ``due`` shows the latest one.
 * ``document_received`` — a document the authority sent, by SHA-256 and media
   type, with when it arrived; the file itself is held by
   :mod:`lovspor.innsyn.received`, and its name is not kept.
 * ``document_classified`` — what the operator read the document to be, and
   which requested LF id it answers, if any. A later classification replaces
   an earlier one; a document never classified is not yet evidence of anything.
+* ``undelivered`` — the letter never reached the authority: a permanent
+  bounce, with its DSN status code, or a mailbox closed to e-mail; with when
+  that arrived and the SHA-256 of the saved bounce or auto-reply. The text is
+  not kept: an auto-reply can name a case officer. An undelivered request
+  starts no § 32 clock and is not open, so the authority gets a new letter
+  once its recipient is no longer the address that failed.
 
 The § 32 andre ledd mark is computed, never stored: five working days after
 the Oslo day of ``sent_at``. Free-text notes are not kept: they name case
 officers, and personopplysningsloven asks for the minimum.
 """
 
+import re
+from collections.abc import Callable
 from datetime import date, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from lovspor.errors import InnsynRefusedError
-from lovspor.innsyn.directory import MAILBOX_PATTERN
+from lovspor.innsyn.directory import MAILBOX_PATTERN, Channel
 from lovspor.innsyn.journal import Journal
 from lovspor.innsyn.population import AUTHORITY_ID_PATTERN
 from lovspor.innsyn.workdays import klage_mark
@@ -80,9 +97,14 @@ ReceivedMediaType = Literal[
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]
 
+UndeliveredReason = Literal["bounced", "mailbox_closed"]
+#: An RFC 3463 permanent-failure status: a transient 4.x.x is not undelivered yet.
+DSN_STATUS_PATTERN = r"^5\.\d{1,3}\.\d{1,3}$"
+
 REQUEST_ID_PATTERN = r"^(?:\d{2}|\d{4})-\d{8}T\d{6}Z$"
 MESSAGE_ID_PATTERN = r"^<[^<>@\s]+@[^<>@\s]+>$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_FORM_PAGE_PATTERN = r"^https?://\S+$"
 _LfId = Annotated[str, Field(pattern=LF_ID_PATTERN)]
 Source = Literal["cli", "pilot-import"]
 
@@ -111,12 +133,15 @@ class _Event(BaseModel):
 class Sent(_Event):
     event: Literal["sent"] = "sent"
     authority_id: str = Field(pattern=AUTHORITY_ID_PATTERN)
-    recipient: str = Field(pattern=MAILBOX_PATTERN)
+    recipient: str
     sent_at: datetime
     lf_ids: tuple[_LfId, ...]
     general_clause: bool
     letter_sha256: str = Field(pattern=_SHA256_PATTERN)
     message_id: str | None = Field(default=None, pattern=MESSAGE_ID_PATTERN)
+    follows: str | None = Field(default=None, pattern=REQUEST_ID_PATTERN)
+    channel: Channel = "email"
+    receipt_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
 
     @field_validator("sent_at")
     @classmethod
@@ -131,6 +156,18 @@ class Sent(_Event):
             raise ValueError("a request asks for known LF ids, the general clause, or both")
         if list(self.lf_ids) != sorted(set(self.lf_ids)):
             raise ValueError("lf_ids must be sorted and distinct")
+        return self
+
+    @model_validator(mode="after")
+    def _by_channel(self) -> "Sent":
+        by_mail = self.channel == "email"
+        pattern = MAILBOX_PATTERN if by_mail else _FORM_PAGE_PATTERN
+        if re.fullmatch(pattern, self.recipient) is None:
+            raise ValueError("an e-mail goes to a mailbox, a form's letter to its page")
+        if by_mail == (self.receipt_sha256 is not None):
+            raise ValueError("a letter sent by hand carries its receipt, an e-mail none")
+        if not by_mail and self.message_id is not None:
+            raise ValueError("a letter sent by hand has no Message-ID")
         return self
 
 
@@ -181,6 +218,17 @@ class KlageSent(_Event):
         return require_utc(value)
 
 
+class ReminderSent(_Event):
+    event: Literal["reminder"] = "reminder"
+    reminder_sent_at: datetime
+    letter_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("reminder_sent_at")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        return require_utc(value)
+
+
 class DocumentReceived(_Event):
     event: Literal["document_received"] = "document_received"
     received_at: datetime
@@ -206,6 +254,25 @@ class DocumentClassified(_Event):
         return self
 
 
+class Undelivered(_Event):
+    event: Literal["undelivered"] = "undelivered"
+    reason: UndeliveredReason
+    at: datetime
+    evidence_sha256: str = Field(pattern=_SHA256_PATTERN)
+    dsn_status: str | None = Field(default=None, pattern=DSN_STATUS_PATTERN)
+
+    @field_validator("at")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        return require_utc(value)
+
+    @model_validator(mode="after")
+    def _status_with_bounce(self) -> "Undelivered":
+        if (self.dsn_status is None) == (self.reason == "bounced"):
+            raise ValueError("a bounce carries its DSN status, a closed mailbox none")
+        return self
+
+
 class ReceivedDocument(BaseModel):
     """One received document as its receipt and latest classification leave it."""
 
@@ -219,7 +286,14 @@ class ReceivedDocument(BaseModel):
 
 
 _Transition = (
-    Acknowledged | CaseNumber | Outcome | KlageSent | DocumentReceived | DocumentClassified
+    Acknowledged
+    | CaseNumber
+    | Outcome
+    | KlageSent
+    | ReminderSent
+    | DocumentReceived
+    | DocumentClassified
+    | Undelivered
 )
 LedgerEvent = Annotated[Sent | _Transition, Field(discriminator="event")]
 _ADAPTER: TypeAdapter[LedgerEvent] = TypeAdapter(LedgerEvent)
@@ -237,7 +311,13 @@ class RequestState(BaseModel):
     outcome: OutcomeClass | None = None
     refusal_basis: str | None = None
     klage_sent_at: datetime | None = None
+    reminded_at: datetime | None = None
     documents: tuple[ReceivedDocument, ...] = ()
+    undelivered: UndeliveredReason | None = None
+
+    @property
+    def delivered(self) -> bool:
+        return self.undelivered is None
 
     @property
     def unanswered_ids(self) -> tuple[str, ...]:
@@ -251,15 +331,19 @@ class RequestState(BaseModel):
 
     @property
     def is_open(self) -> bool:
-        return self.outcome not in CLOSING
+        return self.delivered and self.outcome not in CLOSING
 
     @property
     def answered(self) -> bool:
         return self.answered_at is not None or self.outcome in ANSWERS
 
     def is_due(self, today: date) -> bool:
-        """Past the § 32 mark with no answer and no klage: a klage candidate."""
-        return today > self.klage_mark and not self.answered and self.klage_sent_at is None
+        """Past the § 32 mark with no answer and no klage: a klage candidate.
+
+        A letter that never arrived started no clock.
+        """
+        waiting = self.delivered and not self.answered and self.klage_sent_at is None
+        return waiting and today > self.klage_mark
 
 
 def parse_event(data: dict[str, object]) -> LedgerEvent:
@@ -279,6 +363,13 @@ def _answer(state: RequestState, event: Outcome) -> RequestState:
     return state.model_copy(update={**update, "refusal_basis": event.refusal_basis})
 
 
+def _remind(state: RequestState, event: ReminderSent) -> RequestState:
+    latest = event.reminder_sent_at
+    if state.reminded_at is not None:
+        latest = max(latest, state.reminded_at)
+    return state.model_copy(update={"reminded_at": latest})
+
+
 def _receive(state: RequestState, event: DocumentReceived) -> RequestState:
     document = ReceivedDocument(
         sha256=event.sha256, content_type=event.content_type, received_at=event.received_at
@@ -295,18 +386,28 @@ def _classify(state: RequestState, event: DocumentClassified) -> RequestState:
     return state.model_copy(update={"documents": documents})
 
 
+_Updater = Callable[[RequestState, Any], RequestState]
+
+
+def _setting(field: str, attribute: str) -> _Updater:
+    """A transition that sets one field of the state from one field of the event."""
+    return lambda state, event: state.model_copy(update={field: getattr(event, attribute)})
+
+
+_APPLY: dict[type[_Event], _Updater] = {
+    Outcome: _answer,
+    DocumentReceived: _receive,
+    ReminderSent: _remind,
+    DocumentClassified: _classify,
+    Acknowledged: _setting("acknowledged_at", "acknowledged_at"),
+    CaseNumber: _setting("saksnummer", "saksnummer"),
+    KlageSent: _setting("klage_sent_at", "klage_sent_at"),
+    Undelivered: _setting("undelivered", "reason"),
+}
+
+
 def _apply(state: RequestState, event: _Transition) -> RequestState:
-    if isinstance(event, Outcome):
-        return _answer(state, event)
-    if isinstance(event, DocumentReceived):
-        return _receive(state, event)
-    if isinstance(event, DocumentClassified):
-        return _classify(state, event)
-    if isinstance(event, Acknowledged):
-        return state.model_copy(update={"acknowledged_at": event.acknowledged_at})
-    if isinstance(event, CaseNumber):
-        return state.model_copy(update={"saksnummer": event.saksnummer})
-    return state.model_copy(update={"klage_sent_at": event.klage_sent_at})
+    return _APPLY[type(event)](state, event)
 
 
 def _step(held: dict[str, RequestState], event: LedgerEvent) -> None:
@@ -329,9 +430,11 @@ def _moment(event: LedgerEvent) -> datetime | None:
         return event.acknowledged_at
     if isinstance(event, KlageSent):
         return event.klage_sent_at
+    if isinstance(event, ReminderSent):
+        return event.reminder_sent_at
     if isinstance(event, DocumentReceived):
         return event.received_at
-    return event.at if isinstance(event, Outcome) else None
+    return event.at if isinstance(event, Outcome | Undelivered) else None
 
 
 def _check_document(state: RequestState, event: LedgerEvent) -> None:
@@ -346,26 +449,42 @@ def _check_document(state: RequestState, event: LedgerEvent) -> None:
         raise InnsynRefusedError(f"{event.request_id} did not ask for {event.answers}")
 
 
+def _check_sent(held: dict[str, RequestState], event: Sent) -> None:
+    if event.request_id in held:
+        raise InnsynRefusedError(f"{event.request_id} is already in the ledger")
+    if event.follows is None:
+        return
+    parent = held.get(event.follows)
+    if parent is None:
+        raise InnsynRefusedError(f"no request {event.follows} in the ledger to follow")
+    if parent.sent.authority_id != event.authority_id:
+        raise InnsynRefusedError(f"{event.follows} is another authority's request")
+    if event.sent_at <= parent.sent.sent_at:
+        raise InnsynRefusedError(f"{event.request_id}: not sent after {event.follows}")
+
+
 def check(held: dict[str, RequestState], event: LedgerEvent) -> None:
     """Refuse an event the ledger cannot take.
 
     Raises:
-        InnsynRefusedError: a second ``sent`` for one request, a transition of
+        InnsynRefusedError: a second ``sent`` for one request, a follow-up of a
+            request not held, of another authority's, or sent before it; a transition of
             a request never sent, or one dated before the request was sent; a
             document received twice on one request, or classified without
             having been received, or said to answer an id the request did not
-            ask for.
+            ask for; a second ``undelivered`` on one request.
     """
     state = held.get(event.request_id)
     if isinstance(event, Sent):
-        if state is not None:
-            raise InnsynRefusedError(f"{event.request_id} is already in the ledger")
+        _check_sent(held, event)
         return
     if state is None:
         raise InnsynRefusedError(f"no request {event.request_id} in the ledger")
     moment = _moment(event)
     if moment is not None and moment < state.sent.sent_at:
         raise InnsynRefusedError(f"{event.request_id}: {moment} is before it was sent")
+    if isinstance(event, Undelivered) and not state.delivered:
+        raise InnsynRefusedError(f"{event.request_id} is already recorded undelivered")
     _check_document(state, event)
 
 

@@ -2,8 +2,10 @@
 
 A wave is the next ``wave_size`` authorities that
 
-* have a recorded recipient — the rest are listed as ``unresolved`` and get
-  no letter; and
+* have a recorded route — a mailbox, or a web form or eDialog the owner
+  sends to by hand — other than an address an earlier letter to the
+  authority was recorded undelivered at — the rest are listed as
+  ``unresolved`` and get no letter; and
 * have no open request in the ledger — those are listed as ``skipped_open``.
   A request stays open until its outcome is ``full`` or ``refused``.
 
@@ -13,7 +15,8 @@ is in authority-id order (owner decision 2026-10-12).
 
 Part (a) of each letter is the LF and LTII ids the LF ledger saw linked from
 the authority's own pages, less the ids whose text is held (``--held``) and
-the ids an earlier request to the same authority already asked for. The short
+the ids an earlier request to the same authority already asked for; a request
+recorded undelivered asked for nothing. The short
 ``lovdata.no/forskrift/<id>`` form is left out: it does not say whether the
 regulation is local. Part (b), the general request, is in every letter.
 
@@ -33,7 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lovspor.atomic_io import atomic_replace_bytes
 from lovspor.errors import InnsynRefusedError
-from lovspor.innsyn.directory import Contact, Maalform
+from lovspor.innsyn.directory import Channel, Contact, Maalform
 from lovspor.innsyn.ledger import RequestState
 from lovspor.innsyn.letters import LetterRequest, render
 from lovspor.innsyn.population import Authority, AuthorityKind, PopulationSnapshot
@@ -53,6 +56,7 @@ class ManifestEntry(BaseModel):
     kind: AuthorityKind
     name: str
     recipient: str
+    channel: Channel = "email"
     maalform: Maalform
     maalform_recorded: bool
     lf_ids: tuple[str, ...]
@@ -90,6 +94,8 @@ class WaveInputs(BaseModel):
 def _asked(requests: dict[str, RequestState]) -> dict[str, set[str]]:
     asked: dict[str, set[str]] = {}
     for state in requests.values():
+        if not state.delivered:
+            continue
         asked.setdefault(state.sent.authority_id, set()).update(state.sent.lf_ids)
     return asked
 
@@ -108,6 +114,16 @@ def _open(requests: dict[str, RequestState]) -> set[str]:
     return {state.sent.authority_id for state in requests.values() if state.is_open}
 
 
+def _failed(requests: dict[str, RequestState]) -> set[tuple[str, str]]:
+    """(authority, address) pairs a letter was recorded undelivered at."""
+    return {(s.sent.authority_id, s.sent.recipient) for s in requests.values() if not s.delivered}
+
+
+def _usable(contact: Contact, authority_id: str, failed: set[tuple[str, str]]) -> bool:
+    route = contact.route
+    return route is not None and (authority_id, route.address) not in failed
+
+
 class _Plan(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -119,13 +135,13 @@ class _Plan(BaseModel):
 
 def plan(inputs: WaveInputs, wave_size: int) -> _Plan:
     """Which authorities this wave writes to, and why the others are not in it."""
-    busy = _open(inputs.requests)
+    busy, failed = _open(inputs.requests), _failed(inputs.requests)
     eligible, unresolved, skipped = [], [], []
     for authority in inputs.population.authorities:
         contact = inputs.contacts.get(authority.authority_id, Contact())
         if authority.authority_id in busy:
             skipped.append(authority.authority_id)
-        elif contact.recipient is None:
+        elif not _usable(contact, authority.authority_id, failed):
             unresolved.append(authority.authority_id)
         else:
             eligible.append(authority)
@@ -141,13 +157,14 @@ def plan(inputs: WaveInputs, wave_size: int) -> _Plan:
 
 
 def _letter(inputs: WaveInputs, authority: Authority, ids: tuple[str, ...]) -> LetterRequest:
-    recipient = inputs.contacts[authority.authority_id].recipient
-    if recipient is None:
-        raise InnsynRefusedError(f"{authority.authority_id} has no recorded recipient")
     contact = inputs.contacts[authority.authority_id]
+    route = contact.route
+    if route is None:
+        raise InnsynRefusedError(f"{authority.authority_id} has no recorded recipient")
     return LetterRequest(
         authority=authority,
-        recipient=recipient.address,
+        recipient=route.address,
+        channel=route.channel,
         maalform=contact.letter_form,
         lf_ids=ids,
         sender=inputs.sender,
@@ -163,6 +180,7 @@ def _write_letter(out: Path, request: LetterRequest, recorded: bool) -> Manifest
         kind=request.authority.kind,
         name=request.authority.letter_name,
         recipient=request.recipient,
+        channel=request.channel,
         maalform=request.maalform,
         maalform_recorded=recorded,
         lf_ids=request.lf_ids,

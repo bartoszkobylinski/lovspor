@@ -1778,6 +1778,8 @@ $I set-sender --name "…" --email kontakt@lovspor.no
 $I recipient-candidates --id 4646         # proposals from the archive's captures; records nothing
 $I set-recipient --id 4646 --address postmottak@fjaler.kommune.no \
    --evidence-url https://www.fjaler.kommune.no/ --read-at 2026-10-03T10:00:00Z
+$I set-channel --id 1517 --channel edialog \
+   --evidence-url https://svarut.ks.no/edialog/mottaker/964979278 --read-at <when>   # no e-mail: sent by hand
 $I set-maalform --id 4646 --form nn --evidence-url <page read> --read-at <when>
 $I authorities                            # recipient or UNRESOLVED, målform; counts on stderr
 
@@ -1793,10 +1795,15 @@ $I send --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --limit 25 --send
 
 # 6. A letter sent by hand, and the answers as they arrive.
 $I record-sent --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --id 4646 --sent-at <UTC> [--message-id '<…@lovspor.no>']
+$I record-sent-manual --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --id 1517 --sent-at <UTC> --evidence <receipt.pdf>
 $I record-ack --request 4646-20261005T074425Z --at <UTC>
 $I record-case-number --request 4646-20261005T074425Z --number 2026/2348
 $I record-outcome --request 4646-20261005T074425Z --outcome partial --at <UTC> [--refusal-basis "…"]
 $I record-klage --request 4646-20261005T074425Z --at <UTC>
+$I record-reminder --request 4646-20261005T074425Z --at <UTC> --letter <reminder.txt>
+$I record-follow-up --parent 0301-20261005T074343Z --letter <follow-up.txt> --sent-at <UTC> [--message-id '<…>']
+$I record-bounce --request 4646-20261005T074425Z --at <UTC> --evidence <dsn.eml> --status 5.4.1
+$I record-mailbox-closed --request 4646-20261005T074425Z --at <UTC> --evidence <auto-reply.eml>
 $I requests                               # every request, with its § 32 mark
 $I due                                    # past the mark with no answer and no klage
 
@@ -1827,7 +1834,8 @@ $I received                               # every document; requested ids still 
   Unset, the letter is in bokmål and the manifest says `maalform_recorded: false`. That
   default is the owner's decision (2026-10-12).
 - **Letters.** A wave takes the next `--wave-size` resolved authorities and skips any
-  authority with an open request (open until the outcome is `full` or `refused`).
+  authority with an open request (open until the outcome is `full` or `refused`, or the
+  letter is recorded undelivered).
   Authorities with known ids still to ask for come first, then the rest, each group in
   id order (owner decision 2026-10-12). Point 1 lists the `LF`/`LTII` ids the LF ledger saw on the authority's
   pages, less the ids in `--held` (one per line, `#` comments) and the ids an earlier
@@ -1847,6 +1855,56 @@ $I received                               # every document; requested ids still 
   time before the send are all refused. Outcome classes: `referred_to_lovdata`,
   `interim_reply_no_date`, `partial`, `full`, `refused`, `no_answer`. Only the first
   four are answers, so an interim reply leaves the request due.
+- **Undelivered letters (#644).** `send` records every letter the SMTP server accepted,
+  but acceptance is not delivery. A permanent bounce is recorded with `record-bounce`
+  and its DSN status (`5.x.x` only: a transient `4.x.x` is not a failure yet). A mailbox
+  that answers it takes no e-mail ("tek vi ikkje imot e-post på denne adressa") is
+  recorded with `record-mailbox-closed`. Both take `--evidence`, the bounce or
+  auto-reply saved from Gmail as `.eml`, and record its SHA-256, never its text: an
+  auto-reply can name a case officer. Keep the saved file with the wave. An undelivered
+  request started no § 32 clock, so `due` leaves it out, and it is not open, so it no
+  longer holds the authority back. Its ids count as not yet asked for. The address it
+  failed at is not used again: until `set-recipient` names another, the authority is
+  `unresolved` and the next wave writes it no letter. Once it does, `letters` puts the
+  authority in a later wave as usual, and `send` sends it there. An authority that
+  takes requests only through a contact form or KS eDialog is given that channel with
+  `set-channel` (see "Sent by hand").
+- **Sent by hand: web forms and KS eDialog.** Some authorities take no e-mail (Hareid,
+  Ulstein, Herøy: "tek vi ikkje imot e-post på denne adressa"). The owner sends those
+  by hand (owner decision 2026-10-24). `set-channel --channel webform|edialog` records
+  the route, with the form's or eDialog's own page as `--evidence-url`. A channel and a
+  recipient fill the same slot: the one recorded last stands, so `set-recipient` later
+  puts the authority back on e-mail. An authority with a channel is not unresolved
+  (`authorities` shows `edialog <page>`). `letters` writes its letter as usual, with the
+  page on the `Til:` line and `channel` in the manifest entry. `send` refuses it ("goes
+  by edialog, not e-mail") and sends the others. To send it: 1. open the page and paste
+  the letter's subject and body; 2. save the receipt (the confirmation page, the
+  kvittering PDF, or a screenshot); 3. `record-sent-manual --manifest … --id …
+  --sent-at <UTC> --evidence <receipt>`. The ledger keeps the channel, the page, the
+  letter's SHA-256 and the receipt's SHA-256, never the receipt itself, so keep the file
+  with the wave. From then on the request is like any other: its § 32 mark runs from
+  `--sent-at`, `due` lists it (last column: the channel), and `record-reminder`,
+  `record-outcome` and `record-klage` work on it. `record-sent` refuses a letter that
+  goes by hand, and `record-sent-manual` refuses one that goes by e-mail.
+- **Reminders (#625).** `record-reminder` records a påminning (offentleglova § 29 første
+  ledd) with the SHA-256 of the letter as sent (`--letter`, the text saved as a file).
+  A reminder is not a klage: the request stays on `due`, which shows the latest reminder
+  in the column after `undelivered`, so a klage is not sent on a request reminded two
+  days ago without the operator seeing it.
+- **Follow-up requests (#625).** After a referral, a new request to another body of the
+  same authority (Oslo's Byrådet after `referred_to_lovdata`) is recorded with
+  `record-follow-up --parent <request>`. It is a request of its own, with its own id,
+  recipient, Message-ID and § 32 mark, linked to the one it follows (the last column of
+  `requests`). Its recipient is the `Til:` line of `--letter`, the letter as sent saved
+  in the wave format (`Til:`, `Emne:`, a blank line, the body), and it is not taken from
+  the directory, which keeps the authority's main mailbox. It asks what the request it
+  follows asked: the same ids and general clause. A parent not in the ledger, another
+  authority's request, and a follow-up not sent after its parent are refused.
+- **Answers in parts.** An authority that answers in several mails (Røros: "Her kjem
+  første del") gets one `record-outcome` per part, each with its own `--at`. Every part
+  stays in the ledger. The first answer is the request's `answered_at`, and the last
+  part's class is its outcome, so the part that completes it is recorded `full`. The
+  documents of each part are recorded with `record-received`.
 - **Sending a wave.** `send` delivers the manifest's letters by SMTP submission with
   STARTTLS and certificate verification (port 587), in manifest order. A server that does
   not offer STARTTLS is refused before the password is sent. Without `--send` it is a dry
@@ -1860,7 +1918,7 @@ $I received                               # every document; requested ids still 
   authority already has a `sent` with this letter's SHA-256 is skipped, so a rerun never
   sends twice. Each accepted letter is recorded at once, through the same event as
   `record-sent`, with the acceptance time (UTC) as `sent_at` and its Message-ID (on the
-  sender's domain), which `requests` shows as its last column. The first letter the
+  sender's domain), which `requests` shows after the klage time. The first letter the
   server does not accept stops the run: nothing is recorded for it, and the summary says
   `sent N, skipped (already sent) M, refused K, remaining R`. `--pause-seconds` (default
   20) is the gap between two letters, to stay inside Gmail's sending limits.

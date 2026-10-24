@@ -371,6 +371,10 @@ class TestListings:
             "2026-10-12",
             "",
             "",
+            "",
+            "",
+            "",
+            "email",
         ]
         assert "5 requests" in result.stderr
 

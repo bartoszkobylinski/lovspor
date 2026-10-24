@@ -5,7 +5,8 @@ order:
 
 * **skipped** — the ledger already holds a ``sent`` for the authority with this
   letter's SHA-256: it went out from this manifest, and never goes twice;
-* **refused** — the authority has another open request; the directory's
+* **refused** — the authority has another open request; the letter goes by
+  a web form or eDialog, which the owner sends by hand; the directory's
   recipient is no longer the manifest's; the letter file is missing, changed
   since the manifest (SHA-256), or not a letter; each with its reason;
 * **ready** — everything else.
@@ -90,6 +91,12 @@ def _open_elsewhere(context: _Context, entry: ManifestEntry) -> str | None:
     return None
 
 
+def _by_hand(entry: ManifestEntry) -> str | None:
+    if entry.channel == "email":
+        return None
+    return f"goes by {entry.channel}, not e-mail: send it by hand and run record-sent-manual"
+
+
 def _recipient_moved(context: _Context, entry: ManifestEntry) -> str | None:
     recorded = context.contacts.get(entry.authority_id, Contact()).recipient
     address = None if recorded is None else recorded.address
@@ -132,7 +139,7 @@ def _judge(context: _Context, entry: ManifestEntry) -> Ready | Refusal | None:
     """None: already sent from this manifest."""
     if _from_manifest(context, entry):
         return None
-    reason = _open_elsewhere(context, entry) or _recipient_moved(context, entry)
+    reason = _open_elsewhere(context, entry) or _by_hand(entry) or _recipient_moved(context, entry)
     outcome = _letter(context, entry) if reason is None else reason
     if isinstance(outcome, str):
         return Refusal(authority_id=entry.authority_id, reason=outcome)
