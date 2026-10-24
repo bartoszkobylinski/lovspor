@@ -169,3 +169,79 @@ def test_the_default_window_is_bounded() -> None:
     window = WarmWindow()
 
     assert 0 < window.interval_seconds < window.budget_seconds <= 120.0
+
+
+@pytest.mark.parametrize("status", [200, 400, 401, 403, 404, 500])
+def test_other_public_http_answers_are_recorded_without_retry(
+    httpx_mock: HTTPXMock, status: int
+) -> None:
+    """docs/mcp.md: any step (a) status outside 502/503/504 settles immediately."""
+    time = FakeTime()
+    ready(httpx_mock)
+    httpx_mock.add_response(url=MCP_URL, status_code=status)
+    absent_discovery(httpx_mock)
+
+    document = settled(_observe, _checkout(), time.window())
+
+    step = document.observation.transport.unauthenticated
+    assert step is not None
+    assert step.status_code == status
+    assert time.slept == []
+    assert time.said == []
+
+
+@pytest.mark.parametrize("url", [READINESS_URL, MCP_URL])
+def test_a_timeout_is_retried_until_an_answer_arrives(httpx_mock: HTTPXMock, url: str) -> None:
+    time = FakeTime()
+    if url == READINESS_URL:
+        httpx_mock.add_exception(httpx.ReadTimeout("warming"), url=url)
+        httpx_mock.add_callback(FakeMcp(), url=MCP_URL)
+        absent_discovery(httpx_mock)
+    else:
+        ready(httpx_mock)
+        httpx_mock.add_exception(httpx.ReadTimeout("warming"), url=url)
+    _warm(httpx_mock)
+
+    document = settled(_observe, _checkout(), time.window())
+
+    assert document.observation.process.status == "observed"
+    assert document.observation.transport.status == "observed"
+    assert time.slept == [5.0]
+
+
+def test_probe_duration_counts_toward_budget_and_the_last_document_is_returned(
+    httpx_mock: HTTPXMock,
+) -> None:
+    """The bounded wait includes observing, and exhaustion records the last observation."""
+    time = FakeTime()
+    checkout = _checkout()
+    documents: list[CapabilityDocument] = []
+    for _ in range(2):
+        _warming(httpx_mock)
+
+    def slow_observe(subject: Checkout) -> CapabilityDocument:
+        assert subject is checkout
+        document = _observe(subject)
+        documents.append(document)
+        time.now += 3.0
+        return document
+
+    document = settled(slow_observe, checkout, time.window(budget=12.0))
+
+    assert len(documents) == 2
+    assert document is documents[-1]
+    assert time.slept == [5.0]
+    assert time.said == [
+        "release probe: hosted MCP not answering (warm window?); observing again in 5 s"
+    ]
+
+
+def test_zero_budget_still_records_one_observation(httpx_mock: HTTPXMock) -> None:
+    time = FakeTime()
+    _warming(httpx_mock)
+
+    document = settled(_observe, _checkout(), time.window(budget=0.0))
+
+    assert document.observation.process.reason == "network"
+    assert time.slept == []
+    assert time.said == []
