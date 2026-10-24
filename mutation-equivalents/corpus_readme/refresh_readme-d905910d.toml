@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/corpus_readme.py"
+symbol = "refresh_readme"
+registered = "2026-10-24, PR #677, from run on 247f36c0"
+mutation = """
+-    current = path.read_bytes().decode("utf-8")
++    current = path.read_bytes().decode("UTF-8")
+"""
+justification = """
+Codec names are case-insensitive: `bytes.decode` resolves the name through
+the codec registry, which normalises it, so "utf-8" and "UTF-8" select the
+same codec and decode identical text. Python's codec registry, not a
+dependency. Same argument as the registered `site/build._write_tree` entry.
+"""

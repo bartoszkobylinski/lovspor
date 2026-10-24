@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/corpus_readme.py"
+symbol = "_closes"
+registered = "2026-10-24, PR #677, from run on 247f36c0"
+mutation = """
+-    return run[0] == opener[0] and len(run) >= len(opener) and not rest.strip(" \\t")
++    return run[0] == opener[1] and len(run) >= len(opener) and not rest.strip(" \\t")
+"""
+justification = """
+`opener` is only ever a value returned by `_fence_opener`, i.e. group 1 of
+`_FENCE` `(`{3,}|~{3,})`: at least three copies of one character, so
+`opener[1] == opener[0]` always. Python `re` semantics, no dependency.
+"""

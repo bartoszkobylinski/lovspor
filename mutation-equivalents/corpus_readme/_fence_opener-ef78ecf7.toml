@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/corpus_readme.py"
+symbol = "_fence_opener"
+registered = "2026-10-24, PR #677, from run on 247f36c0"
+mutation = """
+-    match = _FENCE.fullmatch(line.rstrip("\\r\\n"))
++    match = _FENCE.fullmatch(line.rstrip("XX\\r\\nXX"))
+"""
+justification = """
+`rstrip` takes a CHARACTER SET; "XX\r\nXX" is {X, \r, \n}. Removing trailing
+`X` characters only shortens the info string after the fence run (`X` is not a
+fence character, so the run `{3,}` backticks/tildes at the start is untouched),
+`.*` matches either way under `fullmatch`, and dropping `X`s cannot add or
+remove a backtick from the info string. Same run, same None decision. Python
+`str`/`re` semantics, no dependency.
+"""
