@@ -1278,3 +1278,43 @@ def test_a_lowercase_contents_entry_is_not_joined_onto_the_title_above_it() -> N
     lines = ("Forskrift om gebyr", "innleiing ........ 2", "§ 1 Formål")
 
     assert pdf_lines(minimal_pdf(lines)) == ("Forskrift om gebyr", "§ 1 Formål")
+
+
+@pytest.mark.parametrize(
+    ("entry", "removed"),
+    [
+        ("Innleiing ... 2", False),
+        ("Innleiing … 2", False),
+        ("Innleiing .... 2", True),
+        ("Innleiing …. 2", True),
+        ("Innleiing … … 12", True),
+        ("Innleiing . . . . 12", True),
+        (".... 2", False),
+        ("Innleiing 2024", False),
+    ],
+)
+def test_pdf_contents_leader_boundary_preserves_non_entries(entry: str, removed: bool) -> None:
+    """Four dots and preceding text distinguish leaders from elision (#597)."""
+    lines = ("Innhald", entry, "§ 1 Formål")
+    expected = ("§ 1 Formål",) if removed else lines
+    assert pdf_lines(minimal_pdf(lines)) == expected
+
+
+def test_html_soft_break_contents_entries_remain_separate_and_readable() -> None:
+    """Only PDF drops contents; HTML's shared rejoin pass preserves its lines."""
+    page = _main(
+        "<p>Forskrift om gebyr<br>innleiing ........ 2<br>kommunen gjev reglane.</p>"
+        "<h2>§ 1 Formål</h2>"
+    )
+    assert html_lines(page, "text/html") == (
+        "Forskrift om gebyr",
+        "innleiing ........ 2",
+        "kommunen gjev reglane.",
+        "§ 1 Formål",
+    )
+
+
+def test_pdf_contents_entry_does_not_rejoin_a_hyphenated_title() -> None:
+    """The contents boundary also takes precedence over hyphen rejoining (#597)."""
+    lines = ("Forskrift om Sør-", "innleiing ........ 2", "§ 1 Formål")
+    assert pdf_lines(minimal_pdf(lines)) == ("Forskrift om Sør-", "§ 1 Formål")
