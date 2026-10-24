@@ -5,11 +5,14 @@ loop. The orchestrator ties them together; keeping them separate makes
 the pipeline easy to test in isolation.
 """
 
+import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
 from lovspor.atomic_io import atomic_write_text
+from lovspor.corpus_readme import README_NAME, ReadmeOutcome, refresh_readme
 from lovspor.rendering.document import (
     FrontmatterContext,
     build_frontmatter,
@@ -17,6 +20,8 @@ from lovspor.rendering.document import (
 from lovspor.rendering.frontmatter import serialize_frontmatter
 from lovspor.rendering.markdown_renderer import render_markdown
 from lovspor.storage.manifest import Manifest
+
+logger = logging.getLogger(__name__)
 
 
 class _IndexFrontMatter(BaseModel):
@@ -161,3 +166,24 @@ def generate_index(
     front = serialize_frontmatter(_IndexFrontMatter(dataset=source_dataset))
     write_document(index_path, front + "\n" + "\n".join(lines))
     return index_path
+
+
+def write_derived_views(
+    corpus_root: Path,
+    manifest: Manifest,
+    datasets: Sequence[str],
+) -> list[Path]:
+    """Every dataset's INDEX.md and the README's corpus-status block; the paths to stage.
+
+    The README block is read from the manifests on disk, so ``manifest`` must
+    already be written. The README is staged only when its block changed; a
+    README whose markers are broken is left alone and logged, because a
+    hand-edit gone wrong in a derived view must not stop the corpus sync.
+    """
+    paths = [generate_index(corpus_root, dataset, manifest) for dataset in datasets]
+    outcome = refresh_readme(corpus_root)
+    if outcome is ReadmeOutcome.MALFORMED:
+        logger.warning("%s: corpus-status markers are broken; left unchanged", README_NAME)
+    if outcome is ReadmeOutcome.WRITTEN:
+        paths.append(corpus_root / README_NAME)
+    return paths

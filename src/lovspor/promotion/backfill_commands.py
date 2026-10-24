@@ -57,6 +57,7 @@ from lovspor.promotion.commands import (
     _KlassVersion,
     _refusing,
     promote_app,
+    staged_paths,
 )
 from lovspor.promotion.corpus import LOCAL_DIR, CorpusCheckout, LocalRecord
 from lovspor.promotion.decisions import (
@@ -206,7 +207,7 @@ def _echo_remaining(request: Request, plan: BackfillPlan, step: NextVersion) -> 
     for number in remaining:
         subject = step.prepared.commit_subject.removesuffix(f" v{step.prepared.version}")
         typer.echo(f"  {command}")
-        typer.echo(f"  git -C {where} add -- {LOCAL_DIR}")
+        typer.echo(f"  git -C {where} add -- {staged_paths(request.corpus)}")
         typer.echo(f"  git -C {where} commit -m {shlex.quote(f'{subject} v{number}')}")
 
 

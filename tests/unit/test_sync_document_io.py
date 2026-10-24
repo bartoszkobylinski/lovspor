@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from lovspor.corpus_readme import STATUS_START
 from lovspor.rendering.document import FrontmatterContext
-from lovspor.storage.manifest import Manifest, ManifestRecord
+from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
 from lovspor.sync.document_io import (
     dataset_dir,
     delete_document,
@@ -14,6 +15,7 @@ from lovspor.sync.document_io import (
     document_path,
     generate_index,
     render_full_document,
+    write_derived_views,
     write_document,
 )
 
@@ -354,3 +356,58 @@ def test_generate_index_sorts_missing_slug_by_markdown_path(tmp_path: Path) -> N
     )
 
     assert text.index("alfa") < text.index("zeta")
+
+
+_DATASETS = ("gjeldende-lover", "gjeldende-sentrale-forskrifter")
+
+
+def _written_corpus(tmp_path: Path, readme: str | None) -> Manifest:
+    manifest = _manifest({"lov-1": _record(slug="skatteloven", title="Skatteloven")})
+    write_manifest(manifest, tmp_path / "manifest.json")
+    if readme is not None:
+        (tmp_path / "README.md").write_text(readme, encoding="utf-8")
+    return manifest
+
+
+def test_write_derived_views_stages_every_index_and_a_changed_readme(tmp_path: Path) -> None:
+    manifest = _written_corpus(tmp_path, "# lovverk\n")
+
+    paths = write_derived_views(tmp_path, manifest, _DATASETS)
+
+    assert paths == [
+        tmp_path / "lover" / "INDEX.md",
+        tmp_path / "forskrifter" / "INDEX.md",
+        tmp_path / "README.md",
+    ]
+    assert "| `lover/` | 1 |" in (tmp_path / "README.md").read_text(encoding="utf-8")
+
+
+def test_write_derived_views_does_not_stage_an_unchanged_readme(tmp_path: Path) -> None:
+    manifest = _written_corpus(tmp_path, "# lovverk\n")
+    write_derived_views(tmp_path, manifest, _DATASETS)
+
+    paths = write_derived_views(tmp_path, manifest, _DATASETS)
+
+    assert tmp_path / "README.md" not in paths
+
+
+def test_write_derived_views_without_a_readme_stages_only_the_indexes(tmp_path: Path) -> None:
+    manifest = _written_corpus(tmp_path, None)
+
+    paths = write_derived_views(tmp_path, manifest, ("gjeldende-lover",))
+
+    assert paths == [tmp_path / "lover" / "INDEX.md"]
+    assert not (tmp_path / "README.md").exists()
+
+
+def test_write_derived_views_logs_and_keeps_a_readme_with_broken_markers(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    broken = f"# lovverk\n\n{STATUS_START}\nno end marker\n"
+    manifest = _written_corpus(tmp_path, broken)
+
+    paths = write_derived_views(tmp_path, manifest, _DATASETS)
+
+    assert tmp_path / "README.md" not in paths
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == broken
+    assert caplog.messages == ["README.md: corpus-status markers are broken; left unchanged"]

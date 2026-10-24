@@ -58,6 +58,7 @@ facade.
 | `timetravel.py` | Time-machine: a doc's text as of a past date via `git log --follow` + `git show <sha>:<path>`. | `get_law_at_revision(...)`, `resolve_law_at_revision(...)` |
 | `mcp.py` | Stdio MCP server exposing 16 read-only tools over a local `lovverk` clone. | `serve()`, `build_server()`, `CorpusReader` |
 | `corpus_fetch.py` | Clone / fast-forward the local `lovverk` cache (`~/.cache/lovverk`) that `lovspor fetch-corpus` populates and `lovspor mcp` reads by default. | `fetch_corpus()`, `default_corpus_path()`, `is_corpus()`, `FetchResult`, `CorpusFetchError` |
+| `corpus_readme.py` | The generated corpus-status block of `lovverk`'s `README.md` (#661): per-dataset counts and the local dataset's state, rendered deterministically from both manifests and spliced between its markers; prose outside them is never touched. Called by sync and every `promote` write. | `refresh_readme()`, `render_block()`, `read_status()`, `splice()` |
 
 ### `sources/` — Lovdata API boundary
 
@@ -98,7 +99,7 @@ facade.
 |---|---|---|
 | `sync/orchestrator.py` | **The pipeline.** `run_sync()` composes download→extract→hash→diff→render→embed→commit; handles renames, tombstones, the mass-removal guard, and one-time migrations. | `run_sync()`, `SyncReport` |
 | `sync/change_detector.py` | Pure classifier: upstream hashes vs prior manifest → new/changed/removed/unchanged. | `detect_changes()`, `ChangeSet` |
-| `sync/document_io.py` | Compose renderer + front matter + filesystem IO; dataset↔subdir mapping; write/delete docs; generate `INDEX.md`. | `render_full_document()`, `write_document()`, `generate_index()` |
+| `sync/document_io.py` | Compose renderer + front matter + filesystem IO; dataset↔subdir mapping; write/delete docs; generate `INDEX.md` and, with it, the README status block. | `render_full_document()`, `write_document()`, `generate_index()`, `write_derived_views()` |
 | `sync/git_commit.py` | Thin `git` CLI wrappers (list args, never `shell=True`). | `add()`, `commit()`, `has_staged_changes()` |
 
 ### `embeddings/` — semantic-search vectors
@@ -215,7 +216,8 @@ In order:
 9. **Commit** — mode-aware (`git_commit_mode`, default `per-document`): one commit
    per add/update/rename/remove, then history is extracted (`git log --follow` needs
    those commits to exist), then one final commit bundling manifest + `INDEX.md` +
-   history. The `single` mode and migration paths use one bulk commit plus a history
+   history + the README's generated corpus-status block (`corpus_readme.py`, #661;
+   staged only when it changed). The `single` mode and migration paths use one bulk commit plus a history
    follow-up (history needs the docs commit first).
 10. **Return** a `SyncReport` of new/changed/removed/unchanged counts.
 

@@ -100,8 +100,8 @@ from lovspor.sync.document_io import (
     delete_document,
     doc_type_for_dataset,
     document_path,
-    generate_index,
     render_full_document,
+    write_derived_views,
     write_document,
 )
 from lovspor.sync.git_commit import add as git_add
@@ -1435,7 +1435,7 @@ def _commit_with_history(
         )
         manifest = Manifest(generated_at=now, documents=new_records)
         write_manifest(manifest, manifest_path)
-        index_paths = [generate_index(repo, dataset, manifest) for dataset in _TRACKED_DATASETS]
+        index_paths = write_derived_views(repo, manifest, _TRACKED_DATASETS)
         _commit_bulk(repo, other_actions, [manifest_path, *index_paths], message)
         _commit_history_followup(repo, manifest_path, new_records, target_doc_ids, now)
         return
@@ -1444,7 +1444,7 @@ def _commit_with_history(
     new_records, history_paths = _generate_and_apply_history(repo, new_records, target_doc_ids)
     manifest = Manifest(generated_at=now, documents=new_records)
     write_manifest(manifest, manifest_path)
-    index_paths = [generate_index(repo, dataset, manifest) for dataset in _TRACKED_DATASETS]
+    index_paths = write_derived_views(repo, manifest, _TRACKED_DATASETS)
     git_add(repo, [manifest_path, *index_paths, *history_paths])
     if has_staged_changes(repo):
         git_commit_msg(repo, "sync: update manifest, index, and history")

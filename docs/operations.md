@@ -1052,6 +1052,18 @@ checkout (ADR-0016 slice S3). It is the only writer of that directory. It never
 touches the root `manifest.json`, `lover/` or `forskrifter/`, and it never
 commits: committing is your step, made at promotion time.
 
+Outside that directory it writes one thing: the generated corpus-status block
+of `lovverk`'s `README.md`, between `<!-- lovspor:corpus-status:start -->` and
+`<!-- lovspor:corpus-status:end -->` (#661). Every command that leaves
+something to commit re-renders the block from both manifests — counts per
+dataset, the local regulations per authority, each manifest's own
+`generated_at` date — prints `wrote README.md` when it changed, and names
+`README.md` in the `git add` it prints. `lovspor sync` does the same in its
+final commit. The prose outside the markers is never touched; a README
+without the block gets it before its first `##` heading, and a README whose
+markers are broken is left alone with a warning on stderr. The README is
+neither dataset, so the `lovverk` dataset-separation check is unaffected.
+
 What you need:
 
 * `LOVSPOR_OBSERVATORY_ROOT` — the archive. It is read through the
@@ -1194,7 +1206,7 @@ once.
 ### 4. Commit, at promotion time
 
 ```bash
-git -C /absolute/path/to/lovverk add -- lokale-forskrifter
+git -C /absolute/path/to/lovverk add -- lokale-forskrifter README.md
 git -C /absolute/path/to/lovverk commit -m 'promote(lokal-forskrift): 0301/<slug> v1'
 ```
 
@@ -1210,7 +1222,7 @@ never fused.
 
 ```bash
 uv run lovspor promote history --corpus /absolute/path/to/lovverk
-git -C /absolute/path/to/lovverk add -- lokale-forskrifter
+git -C /absolute/path/to/lovverk add -- lokale-forskrifter README.md
 git -C /absolute/path/to/lovverk commit -m 'history(lokal-forskrift): derive history for 1 documents'
 ```
 
@@ -1424,7 +1436,7 @@ the refresh.
 
 ```bash
 uv run lovspor promote observe --corpus /absolute/path/to/lovverk [--authority 0301]
-git -C /absolute/path/to/lovverk add -- lokale-forskrifter
+git -C /absolute/path/to/lovverk add -- lokale-forskrifter README.md
 git -C /absolute/path/to/lovverk commit -m 'observe: refresh observation intervals (<n> documents)'
 ```
 
@@ -1526,7 +1538,7 @@ export LOVSPOR_OBSERVATORY_ROOT=/Volumes/T7/lovspor-observatory
 export LOVSPOR_INNSYN_DIR=/absolute/path/to/innsyn-workspace
 uv run lovspor promote migrate --corpus /absolute/path/to/lovverk --dry-run
 uv run lovspor promote migrate --corpus /absolute/path/to/lovverk
-git -C /absolute/path/to/lovverk add -- lokale-forskrifter
+git -C /absolute/path/to/lovverk add -- lokale-forskrifter README.md
 git -C /absolute/path/to/lovverk commit -m 'migration(lokal-forskrift): <n> documents to extractor v<new>'
 ```
 
