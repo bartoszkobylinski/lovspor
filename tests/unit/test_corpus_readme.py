@@ -540,3 +540,51 @@ def test_refresh_rejects_invalid_utf8_without_rewriting_readme(tmp_path: Path) -
         refresh_readme(corpus)
 
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("manifest_name", ["manifest.json", "lokale-forskrifter/manifest.json"])
+@pytest.mark.parametrize(
+    "payload",
+    [b"{not json", b'{"documents": {"broken": {"status": "current"}}}', b"\xff"],
+    ids=["invalid-json", "missing-source-dataset", "invalid-utf8"],
+)
+def test_invalid_manifest_does_not_replace_existing_status_block(
+    tmp_path: Path, manifest_name: str, payload: bytes
+) -> None:
+    corpus = _corpus(tmp_path, _central(2, 1), _local({"0301": 1}), "# lovverk\n")
+    assert refresh_readme(corpus) is ReadmeOutcome.WRITTEN
+    readme = corpus / README_NAME
+    original = readme.read_bytes()
+    manifest = corpus / manifest_name
+    manifest.write_bytes(payload)
+
+    with pytest.raises(ParseError) as error:
+        refresh_readme(corpus)
+
+    assert str(manifest) in str(error.value)
+    assert readme.read_bytes() == original
+    assert manifest.read_bytes() == payload
+
+
+def test_refresh_discovers_a_new_local_dataset_after_a_central_only_refresh(tmp_path: Path) -> None:
+    corpus = _corpus(tmp_path, _central(2, 1), None, "# lovverk\n\n## Usage\nProse.\n")
+    assert refresh_readme(corpus) is ReadmeOutcome.WRITTEN
+    central_bytes = (corpus / "manifest.json").read_bytes()
+    assert "lokale-forskrifter" not in (corpus / README_NAME).read_text(encoding="utf-8")
+    local_dir = corpus / "lokale-forskrifter"
+    local_dir.mkdir()
+    local_manifest = local_dir / "manifest.json"
+    local_manifest.write_text(json.dumps(_local({"0301": 1})), encoding="utf-8")
+    local_bytes = local_manifest.read_bytes()
+
+    assert refresh_readme(corpus) is ReadmeOutcome.WRITTEN
+
+    text = (corpus / README_NAME).read_text(encoding="utf-8")
+    assert "| `lokale-forskrifter/` | 1 | åndsverkloven § 14 | 2026-10-20 |" in text
+    assert "holds 1 local regulation from 1 authority," in text
+    assert "kommune 0301 (1)." in text
+    assert text.count(STATUS_START) == text.count(STATUS_END) == 1
+    assert text.endswith("\n\n## Usage\nProse.\n")
+    assert (corpus / "manifest.json").read_bytes() == central_bytes
+    assert local_manifest.read_bytes() == local_bytes
+    assert refresh_readme(corpus) is ReadmeOutcome.UNCHANGED
