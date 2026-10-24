@@ -53,6 +53,9 @@ def corpus(tmp_path: Path) -> Path:
     (corpus / "README.md").write_text(PROSE, encoding="utf-8")
     git(corpus, "add", "README.md")
     git(corpus, "commit", "-q", "-m", "docs: hand-written README")
+    # The printed commit runs as the operator would, with the checkout's own identity.
+    git(corpus, "config", "user.name", "Operator")
+    git(corpus, "config", "user.email", "op@example.invalid")
     return corpus
 
 

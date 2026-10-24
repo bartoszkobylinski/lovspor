@@ -1171,8 +1171,8 @@ def test_commit_with_history_routing_matrix(
     monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
-        "generate_index",
-        lambda repo, dataset, _manifest: repo / dataset / "INDEX.md",
+        "write_derived_views",
+        lambda repo, _manifest, datasets: [repo / dataset / "INDEX.md" for dataset in datasets],
     )
     monkeypatch.setattr(orchestrator_module, "git_add", lambda _repo, _paths: None)
     monkeypatch.setattr(orchestrator_module, "has_staged_changes", lambda _repo: False)
@@ -1227,8 +1227,8 @@ def test_commit_with_history_default_force_bulk_commit_keeps_per_doc_mode(
     monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
-        "generate_index",
-        lambda repo, dataset, _manifest: repo / dataset / "INDEX.md",
+        "write_derived_views",
+        lambda repo, _manifest, datasets: [repo / dataset / "INDEX.md" for dataset in datasets],
     )
     monkeypatch.setattr(orchestrator_module, "git_add", lambda _repo, _paths: None)
     monkeypatch.setattr(orchestrator_module, "has_staged_changes", lambda _repo: False)
@@ -1282,8 +1282,8 @@ def test_commit_with_history_bulk_stages_manifest_and_both_indexes(
     monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
-        "generate_index",
-        lambda repo, dataset, _manifest: repo / dataset / "INDEX.md",
+        "write_derived_views",
+        lambda repo, _manifest, datasets: [repo / dataset / "INDEX.md" for dataset in datasets],
     )
 
     settings = Settings(
@@ -1341,8 +1341,8 @@ def test_commit_with_history_bulk_excludes_removed_docs_from_history_followup(
     monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
-        "generate_index",
-        lambda repo, dataset, _manifest: repo / dataset / "INDEX.md",
+        "write_derived_views",
+        lambda repo, _manifest, datasets: [repo / dataset / "INDEX.md" for dataset in datasets],
     )
 
     settings = Settings(
