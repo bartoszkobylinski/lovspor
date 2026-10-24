@@ -20,14 +20,21 @@ request, recorded by its own command:
 * ``document_classified`` — what the operator read the document to be, and
   which requested LF id it answers, if any. A later classification replaces
   an earlier one; a document never classified is not yet evidence of anything.
+* ``undelivered`` — the letter never reached the authority: a permanent
+  bounce, with its DSN status code, or a mailbox closed to e-mail; with when
+  that arrived and the SHA-256 of the saved bounce or auto-reply. The text is
+  not kept: an auto-reply can name a case officer. An undelivered request
+  starts no § 32 clock and is not open, so the authority gets a new letter
+  once its recipient is no longer the address that failed.
 
 The § 32 andre ledd mark is computed, never stored: five working days after
 the Oslo day of ``sent_at``. Free-text notes are not kept: they name case
 officers, and personopplysningsloven asks for the minimum.
 """
 
+from collections.abc import Callable
 from datetime import date, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
@@ -79,6 +86,10 @@ ReceivedMediaType = Literal[
     "text/html",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]
+
+UndeliveredReason = Literal["bounced", "mailbox_closed"]
+#: An RFC 3463 permanent-failure status: a transient 4.x.x is not undelivered yet.
+DSN_STATUS_PATTERN = r"^5\.\d{1,3}\.\d{1,3}$"
 
 REQUEST_ID_PATTERN = r"^(?:\d{2}|\d{4})-\d{8}T\d{6}Z$"
 MESSAGE_ID_PATTERN = r"^<[^<>@\s]+@[^<>@\s]+>$"
@@ -206,6 +217,25 @@ class DocumentClassified(_Event):
         return self
 
 
+class Undelivered(_Event):
+    event: Literal["undelivered"] = "undelivered"
+    reason: UndeliveredReason
+    at: datetime
+    evidence_sha256: str = Field(pattern=_SHA256_PATTERN)
+    dsn_status: str | None = Field(default=None, pattern=DSN_STATUS_PATTERN)
+
+    @field_validator("at")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        return require_utc(value)
+
+    @model_validator(mode="after")
+    def _status_with_bounce(self) -> "Undelivered":
+        if (self.dsn_status is None) == (self.reason == "bounced"):
+            raise ValueError("a bounce carries its DSN status, a closed mailbox none")
+        return self
+
+
 class ReceivedDocument(BaseModel):
     """One received document as its receipt and latest classification leave it."""
 
@@ -219,7 +249,13 @@ class ReceivedDocument(BaseModel):
 
 
 _Transition = (
-    Acknowledged | CaseNumber | Outcome | KlageSent | DocumentReceived | DocumentClassified
+    Acknowledged
+    | CaseNumber
+    | Outcome
+    | KlageSent
+    | DocumentReceived
+    | DocumentClassified
+    | Undelivered
 )
 LedgerEvent = Annotated[Sent | _Transition, Field(discriminator="event")]
 _ADAPTER: TypeAdapter[LedgerEvent] = TypeAdapter(LedgerEvent)
@@ -238,6 +274,11 @@ class RequestState(BaseModel):
     refusal_basis: str | None = None
     klage_sent_at: datetime | None = None
     documents: tuple[ReceivedDocument, ...] = ()
+    undelivered: UndeliveredReason | None = None
+
+    @property
+    def delivered(self) -> bool:
+        return self.undelivered is None
 
     @property
     def unanswered_ids(self) -> tuple[str, ...]:
@@ -251,15 +292,19 @@ class RequestState(BaseModel):
 
     @property
     def is_open(self) -> bool:
-        return self.outcome not in CLOSING
+        return self.delivered and self.outcome not in CLOSING
 
     @property
     def answered(self) -> bool:
         return self.answered_at is not None or self.outcome in ANSWERS
 
     def is_due(self, today: date) -> bool:
-        """Past the § 32 mark with no answer and no klage: a klage candidate."""
-        return today > self.klage_mark and not self.answered and self.klage_sent_at is None
+        """Past the § 32 mark with no answer and no klage: a klage candidate.
+
+        A letter that never arrived started no clock.
+        """
+        waiting = self.delivered and not self.answered and self.klage_sent_at is None
+        return waiting and today > self.klage_mark
 
 
 def parse_event(data: dict[str, object]) -> LedgerEvent:
@@ -295,18 +340,27 @@ def _classify(state: RequestState, event: DocumentClassified) -> RequestState:
     return state.model_copy(update={"documents": documents})
 
 
+_Updater = Callable[[RequestState, Any], RequestState]
+
+
+def _setting(field: str, attribute: str) -> _Updater:
+    """A transition that sets one field of the state from one field of the event."""
+    return lambda state, event: state.model_copy(update={field: getattr(event, attribute)})
+
+
+_APPLY: dict[type[_Event], _Updater] = {
+    Outcome: _answer,
+    DocumentReceived: _receive,
+    DocumentClassified: _classify,
+    Acknowledged: _setting("acknowledged_at", "acknowledged_at"),
+    CaseNumber: _setting("saksnummer", "saksnummer"),
+    KlageSent: _setting("klage_sent_at", "klage_sent_at"),
+    Undelivered: _setting("undelivered", "reason"),
+}
+
+
 def _apply(state: RequestState, event: _Transition) -> RequestState:
-    if isinstance(event, Outcome):
-        return _answer(state, event)
-    if isinstance(event, DocumentReceived):
-        return _receive(state, event)
-    if isinstance(event, DocumentClassified):
-        return _classify(state, event)
-    if isinstance(event, Acknowledged):
-        return state.model_copy(update={"acknowledged_at": event.acknowledged_at})
-    if isinstance(event, CaseNumber):
-        return state.model_copy(update={"saksnummer": event.saksnummer})
-    return state.model_copy(update={"klage_sent_at": event.klage_sent_at})
+    return _APPLY[type(event)](state, event)
 
 
 def _step(held: dict[str, RequestState], event: LedgerEvent) -> None:
@@ -331,7 +385,7 @@ def _moment(event: LedgerEvent) -> datetime | None:
         return event.klage_sent_at
     if isinstance(event, DocumentReceived):
         return event.received_at
-    return event.at if isinstance(event, Outcome) else None
+    return event.at if isinstance(event, Outcome | Undelivered) else None
 
 
 def _check_document(state: RequestState, event: LedgerEvent) -> None:
@@ -354,7 +408,7 @@ def check(held: dict[str, RequestState], event: LedgerEvent) -> None:
             a request never sent, or one dated before the request was sent; a
             document received twice on one request, or classified without
             having been received, or said to answer an id the request did not
-            ask for.
+            ask for; a second ``undelivered`` on one request.
     """
     state = held.get(event.request_id)
     if isinstance(event, Sent):
@@ -366,6 +420,8 @@ def check(held: dict[str, RequestState], event: LedgerEvent) -> None:
     moment = _moment(event)
     if moment is not None and moment < state.sent.sent_at:
         raise InnsynRefusedError(f"{event.request_id}: {moment} is before it was sent")
+    if isinstance(event, Undelivered) and not state.delivered:
+        raise InnsynRefusedError(f"{event.request_id} is already recorded undelivered")
     _check_document(state, event)
 
 

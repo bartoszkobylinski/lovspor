@@ -122,6 +122,7 @@ def _row(state: RequestState) -> str:
         _text(state.klage_mark),
         _text(state.klage_sent_at),
         _text(sent.message_id),
+        _text(state.undelivered),
     )
     return "\t".join(fields)
 
@@ -132,7 +133,7 @@ def list_requests() -> None:
 
     Columns: request, authority, recipient, sent_at, LF ids, general clause,
     saksnummer, acknowledged_at, answered_at, outcome, § 32 mark, klage_sent_at,
-    Message-ID.
+    Message-ID, undelivered (bounced or mailbox_closed).
     """
     held = guarded(lambda: requests(workspace()))
     for state in held.values():
@@ -157,7 +158,8 @@ def due(
 ) -> None:
     """List the klage candidates: past the § 32 andre ledd mark, no answer, no klage.
 
-    Same columns as ``requests``. An interim reply without a date is not an answer.
+    Same columns as ``requests``. An interim reply without a date is not an answer;
+    a letter recorded undelivered started no clock.
     """
     day = _today(today)
     chosen = [s for s in guarded(lambda: requests(workspace())).values() if s.is_due(day)]
