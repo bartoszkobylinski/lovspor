@@ -5,6 +5,11 @@ the operator runs with ``--test`` to prove the target receives it. Exit codes:
 0 sent, or no webhook configured (a logged no-op — an unconfigured alert must
 never be a second failed unit); 1 the configuration or the delivery failed;
 2 the unit name is malformed.
+
+``alert-target`` is what ``sync-units.sh`` asks on every deploy (#671): is the
+file's webhook one ``alert`` would send to? It reads the file only, through the
+same ``load_alert_config``, and never prints the URL. Exit codes: 0 configured;
+3 not configured, refused by the reader, or the file unreadable (not root).
 """
 
 import os
@@ -13,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import httpx
 import typer
@@ -28,7 +33,7 @@ from lovspor.ops.alert import (
     redact_url,
     send_alert,
 )
-from lovspor.ops.errors import AlertConfigError, AlertDeliveryError
+from lovspor.ops.errors import AlertConfigError, AlertDeliveryError, AlertEnvUnreadableError
 from lovspor.ops.unit_facts import Runner, UnitFacts, UnitName, read_unit_facts, run_command
 
 ops_app = typer.Typer(
@@ -36,6 +41,8 @@ ops_app = typer.Typer(
     help="Operate the droplet: alerts for failed lovspor units, hourly usage.",
     no_args_is_help=True,
 )
+
+EXIT_NO_ALERT_TARGET = 3
 
 _TEST_FACTS = UnitFacts(
     result="test",
@@ -128,3 +135,37 @@ def _deliver(alert: Alert, config: AlertConfig, client: httpx.Client) -> None:
         typer.echo(f"error: alert for {alert.unit} not delivered to {target}: {error}", err=True)
         raise typer.Exit(code=1) from error
     typer.echo(f"alert sent for {alert.unit} to {target} ({config.format}, HTTP {status})")
+
+
+@ops_app.command(name="alert-target")
+def alert_target_command(
+    env_file: Annotated[
+        Path,
+        typer.Option(
+            "--env-file",
+            # click's own check would make a non-root run a usage error (2).
+            readable=False,
+            help="Root-only file holding LOVSPOR_ALERT_WEBHOOK.",
+        ),
+    ] = DEFAULT_ALERT_ENV,
+) -> None:
+    """Say whether a failed unit's alert would reach a webhook; exit 3 when it would not."""
+    try:
+        config = load_alert_config({}, env_file)
+    except AlertEnvUnreadableError as error:
+        typer.echo(f"alert target: unknown ({error}; run as root)")
+        _no_target(f"cannot tell whether failure alerts reach anyone: {env_file} is unreadable")
+    except AlertConfigError:
+        # The reason stays with `ops alert --test`: echoing it here would print
+        # fragments of the refused value next to the deploy's other output.
+        typer.echo("alert target: not configured (refused by `lovspor ops alert`)")
+        _no_target(f"failure alerts would be refused: fix the settings in {env_file}")
+    if config.webhook is None:
+        typer.echo("alert target: not configured")
+        _no_target(f"failure alerts reach no one: set {WEBHOOK_VAR} in {env_file}")
+    typer.echo("alert target: configured")
+
+
+def _no_target(line: str) -> NoReturn:
+    typer.echo(f"{line} (README § Failure alerts)", err=True)
+    raise typer.Exit(code=EXIT_NO_ALERT_TARGET)

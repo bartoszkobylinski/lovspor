@@ -179,10 +179,13 @@ sudo journalctl -u lovspor-mcp -n 40 --no-pager
 installed unit with the repository copy: one `OK` line per unit, and on any
 difference a `DIFF` line per unit and exit `1` — in an `&&` chain that
 stops the deploy before the restart. It enables, starts and restarts nothing.
-It then reads the failure-alert target from `/etc/lovspor/alert.env` and prints
-`alert target: configured` or `alert target: not configured` (never the URL);
-not configured, or the file unreadable (`alert target: unknown`, run it as
-root), is exit `3` with a stderr line naming the file. Exit `3` means the units
+It then asks `lovspor ops alert-target` about `/etc/lovspor/alert.env` — the
+alert's own reader, so the verdict cannot drift from what an alert would do —
+and prints `alert target: configured` or `alert target: not configured` (never
+the URL). Not configured, refused by the reader (`lovspor ops alert --test`
+names the reason), or
+unknown (the file unreadable — run it as root — or the venv not synced) is exit
+`3` with a stderr line naming the file. Exit `3` means the units
 are installed and verified but a failed unit would alert no one (#671: 450
 site-drift alerts went to an empty `LOVSPOR_ALERT_WEBHOOK` unseen). It is
 deliberately **not** a reason to skip the restart — the restart ships the code
@@ -354,7 +357,9 @@ goes back to `inactive`, not `failed`. `lovspor-mcp` has no `OnFailure=`: it res
 limit, so the hook would either never fire or fire on every crash; its
 availability is an external probe's job. Exit codes of `lovspor ops alert`: 0
 sent or not configured, 1 the configuration or the delivery failed (the reason is
-in the alert unit's journal), 2 a malformed `--unit`.
+in the alert unit's journal), 2 a malformed `--unit`. `lovspor ops alert-target
+[--env-file …]` reads the file only (never the calling shell's variables): 0
+configured, 3 not (#671).
 
 **Install the alerts on the existing droplet** (it predates this in
 `provision.sh`; do not re-run provisioning there — see First migration). The same
