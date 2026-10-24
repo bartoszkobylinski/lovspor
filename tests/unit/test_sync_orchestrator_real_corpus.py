@@ -361,3 +361,49 @@ def test_assumption_a_hash_matched_rerender_always_carries_an_observation(
 
     assert carried is not None
     assert carried == prior.last_seen
+
+
+def _commit_readme(settings: Settings, text: str) -> Path:
+    readme = settings.lovverk_repo_path / "README.md"
+    readme.write_text(text, encoding="utf-8")
+    _git(settings.lovverk_repo_path, "add", "README.md")
+    _git(settings.lovverk_repo_path, "commit", "-q", "-m", "docs: hand-written README")
+    return readme
+
+
+def test_a_sync_that_writes_commits_the_readme_status_block_from_its_manifest(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    """#661: the operator's route to a current README is ``sync`` itself."""
+    settings = _settings(tmp_path)
+    readme = _commit_readme(settings, "# lovverk\n\nProse.\n\n## Usage\n\nMore prose.\n")
+    _serve(httpx_mock, {"lov-17990401-000": _law("Drageloven"), _REGULATION_ID: _REGULATION})
+
+    run_sync(settings)
+
+    repo = settings.lovverk_repo_path
+    committed = _git_out(repo, "show", "HEAD:README.md")
+    generated = read_manifest(repo / "manifest.json").generated_at.date().isoformat()
+    assert committed == readme.read_text(encoding="utf-8")
+    assert committed.startswith("# lovverk\n\nProse.\n\n<!-- lovspor:corpus-status:start -->\n")
+    assert committed.endswith("<!-- lovspor:corpus-status:end -->\n\n## Usage\n\nMore prose.\n")
+    assert f"| `lover/` | 1 | Lovdata public data, NLOD 2.0 | {generated} |" in committed
+    assert f"| `forskrifter/` | 1 | Lovdata public data, NLOD 2.0 | {generated} |" in committed
+    assert _git_out(repo, "status", "--porcelain") == ""
+
+
+def test_a_sync_with_nothing_to_do_leaves_the_readme_alone(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    settings = _settings(tmp_path)
+    laws = {"lov-17990401-000": _law("Drageloven")}
+    _serve(httpx_mock, laws)
+    run_sync(settings)
+    readme = _commit_readme(settings, "# lovverk\n")
+    head = _git_out(settings.lovverk_repo_path, "rev-parse", "HEAD")
+    _serve(httpx_mock, laws)
+
+    run_sync(settings)
+
+    assert readme.read_text(encoding="utf-8") == "# lovverk\n"
+    assert _git_out(settings.lovverk_repo_path, "rev-parse", "HEAD") == head

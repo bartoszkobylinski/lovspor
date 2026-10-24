@@ -879,16 +879,18 @@ def test_commit_with_history_bulk_path_writes_manifest_indexes_and_followup(
         ),
     ]
     written_manifests: list[tuple[Manifest, Path]] = []
-    generated_indexes: list[tuple[Path, str, Manifest]] = []
+    derived_calls: list[tuple[Path, Manifest, tuple[str, ...]]] = []
     bulk_calls: list[tuple[list[_DocAction], list[Path], str]] = []
     followups: list[list[str]] = []
 
     def fake_write_manifest(manifest: Manifest, path: Path) -> None:
         written_manifests.append((manifest, path))
 
-    def fake_generate_index(repo: Path, dataset: str, manifest: Manifest) -> Path:
-        generated_indexes.append((repo, dataset, manifest))
-        return repo / dataset / "INDEX.md"
+    def fake_write_derived_views(
+        repo: Path, manifest: Manifest, datasets: tuple[str, ...]
+    ) -> list[Path]:
+        derived_calls.append((repo, manifest, datasets))
+        return [repo / dataset / "INDEX.md" for dataset in datasets]
 
     def fake_commit_bulk(
         _repo: Path,
@@ -908,7 +910,7 @@ def test_commit_with_history_bulk_path_writes_manifest_indexes_and_followup(
         followups.append(target_doc_ids)
 
     monkeypatch.setattr(orchestrator_module, "write_manifest", fake_write_manifest)
-    monkeypatch.setattr(orchestrator_module, "generate_index", fake_generate_index)
+    monkeypatch.setattr(orchestrator_module, "write_derived_views", fake_write_derived_views)
     monkeypatch.setattr(orchestrator_module, "_commit_bulk", fake_commit_bulk)
     monkeypatch.setattr(
         orchestrator_module,
@@ -929,9 +931,12 @@ def test_commit_with_history_bulk_path_writes_manifest_indexes_and_followup(
 
     manifest = Manifest(generated_at=now, documents=records)
     assert written_manifests == [(manifest, settings.lovverk_repo_path / "manifest.json")]
-    assert [dataset for _, dataset, _ in generated_indexes] == [
-        "gjeldende-lover",
-        "gjeldende-sentrale-forskrifter",
+    assert derived_calls == [
+        (
+            settings.lovverk_repo_path,
+            manifest,
+            ("gjeldende-lover", "gjeldende-sentrale-forskrifter"),
+        )
     ]
     assert bulk_calls == [
         (
@@ -991,8 +996,8 @@ def test_commit_with_history_per_doc_path_generates_history_and_final_commit(
     monkeypatch.setattr(orchestrator_module, "_generate_and_apply_history", fake_history)
     monkeypatch.setattr(
         orchestrator_module,
-        "generate_index",
-        lambda repo, dataset, _manifest: repo / dataset / "INDEX.md",
+        "write_derived_views",
+        lambda repo, _manifest, datasets: [repo / dataset / "INDEX.md" for dataset in datasets],
     )
     monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(

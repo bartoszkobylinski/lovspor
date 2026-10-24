@@ -16,7 +16,12 @@ rather than being silently dropped. The render- and result-side models (e.g.
 
 ## On-disk artifacts
 
-The engine writes six kinds of file into the `lovverk` clone:
+The engine writes six kinds of file into the `lovverk` clone, and one block of
+a seventh: the corpus-status block of `README.md`, between
+`<!-- lovspor:corpus-status:start -->` and `<!-- lovspor:corpus-status:end -->`,
+re-rendered by sync and by every `promote` write from both manifests
+(`corpus_readme.py`, #661). The rest of the README is hand-written and never
+touched.
 
 | Path | Content | Defined by |
 |---|---|---|
