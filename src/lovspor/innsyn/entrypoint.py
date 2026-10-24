@@ -7,6 +7,7 @@ observatory. Mounted there rather than in :mod:`lovspor.cli`, which sits at
 its size ratchet.
 """
 
+from lovspor.innsyn import delivery_commands as _delivery_commands  # noqa: F401
 from lovspor.innsyn import directory_commands as _directory_commands  # noqa: F401
 from lovspor.innsyn import ledger_commands as _ledger_commands  # noqa: F401
 from lovspor.innsyn import letter_commands as _letter_commands  # noqa: F401
