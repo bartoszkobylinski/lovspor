@@ -1,4 +1,4 @@
-"""``innsyn letters`` writes a wave; ``innsyn record-sent`` records one letter as sent."""
+"""``innsyn letters`` writes a wave; ``record-sent`` and ``record-follow-up`` record one sent."""
 
 from pathlib import Path
 from typing import Annotated
@@ -11,7 +11,7 @@ from lovspor.innsyn.directory import contacts, directory_journal
 from lovspor.innsyn.ledger import record_events, requests
 from lovspor.innsyn.population import latest_snapshot
 from lovspor.innsyn.sender import read_sender
-from lovspor.innsyn.sent import letter_digest, manifest_entry, sent_event
+from lovspor.innsyn.sent import follow_up_event, letter_digest, manifest_entry, sent_event
 from lovspor.innsyn.waves import WaveInputs, write_wave
 from lovspor.innsyn.workspace import InnsynWorkspace
 from lovspor.observatory.lf_ledger import LedgerEntry, ledger_path, read_ledger_file
@@ -107,5 +107,36 @@ def record_sent(
     """Record a letter of a wave as sent, with the SHA-256 of the letter as sent."""
     try:
         guarded(lambda: _sent(manifest, authority_id, sent_at, message_id))
+    except (OSError, ValueError) as exc:
+        raise refuse(exc) from exc
+
+
+def _follow_up(parent: str, letter: Path, sent_at: str, message_id: str | None) -> None:
+    target = workspace()
+    first = requests(target).get(parent)
+    if first is None:
+        raise InnsynRefusedError(f"no request {parent} in the ledger to follow")
+    event = follow_up_event(first.sent, letter, instant(sent_at, "--sent-at"), message_id)
+    record_events(target, [event])
+    typer.echo(f"{event.request_id}: follow-up of {parent} to {event.recipient} recorded")
+
+
+@innsyn_app.command("record-follow-up")
+def record_follow_up(
+    parent: Annotated[str, typer.Option("--parent", help="The request it follows up.")],
+    letter: Annotated[
+        Path, typer.Option("--letter", help="The letter as sent; first line `Til:`.")
+    ],
+    sent_at: Annotated[str, typer.Option("--sent-at", help="When it was sent (UTC).")],
+    message_id: Annotated[
+        str | None, typer.Option("--message-id", help="The Message-ID it went out with.")
+    ] = None,
+) -> None:
+    """Record a new request to another body of the same authority, after a referral.
+
+    It asks what the request it follows asked; its recipient is the letter's ``Til:``.
+    """
+    try:
+        guarded(lambda: _follow_up(parent, letter, sent_at, message_id))
     except (OSError, ValueError) as exc:
         raise refuse(exc) from exc

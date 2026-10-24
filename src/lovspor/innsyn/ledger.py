@@ -8,6 +8,9 @@ request, recorded by its own command:
   the SHA-256 of the letter as sent, and, for a letter ``send`` delivered (or
   one recorded with ``--message-id``), the Message-ID it went out with. A
   request is identified by authority and ``sent_at`` (``4646-20261005T074425Z``).
+  A follow-up request (#625) names the request it ``follows``: a new request
+  to another body of the same authority, after a referral, with its own
+  recipient and its own § 32 clock; it asks what the request it follows asked.
 * ``acknowledged`` — the authority's receipt, automatic or not.
 * ``case_number`` — the authority's saksnummer, quoted in every later mail.
 * ``outcome`` — one of :data:`OUTCOMES`, with the time it arrived and, for a
@@ -131,6 +134,7 @@ class Sent(_Event):
     general_clause: bool
     letter_sha256: str = Field(pattern=_SHA256_PATTERN)
     message_id: str | None = Field(default=None, pattern=MESSAGE_ID_PATTERN)
+    follows: str | None = Field(default=None, pattern=REQUEST_ID_PATTERN)
 
     @field_validator("sent_at")
     @classmethod
@@ -426,11 +430,26 @@ def _check_document(state: RequestState, event: LedgerEvent) -> None:
         raise InnsynRefusedError(f"{event.request_id} did not ask for {event.answers}")
 
 
+def _check_sent(held: dict[str, RequestState], event: Sent) -> None:
+    if event.request_id in held:
+        raise InnsynRefusedError(f"{event.request_id} is already in the ledger")
+    if event.follows is None:
+        return
+    parent = held.get(event.follows)
+    if parent is None:
+        raise InnsynRefusedError(f"no request {event.follows} in the ledger to follow")
+    if parent.sent.authority_id != event.authority_id:
+        raise InnsynRefusedError(f"{event.follows} is another authority's request")
+    if event.sent_at <= parent.sent.sent_at:
+        raise InnsynRefusedError(f"{event.request_id}: not sent after {event.follows}")
+
+
 def check(held: dict[str, RequestState], event: LedgerEvent) -> None:
     """Refuse an event the ledger cannot take.
 
     Raises:
-        InnsynRefusedError: a second ``sent`` for one request, a transition of
+        InnsynRefusedError: a second ``sent`` for one request, a follow-up of a
+            request not held, of another authority's, or sent before it; a transition of
             a request never sent, or one dated before the request was sent; a
             document received twice on one request, or classified without
             having been received, or said to answer an id the request did not
@@ -438,8 +457,7 @@ def check(held: dict[str, RequestState], event: LedgerEvent) -> None:
     """
     state = held.get(event.request_id)
     if isinstance(event, Sent):
-        if state is not None:
-            raise InnsynRefusedError(f"{event.request_id} is already in the ledger")
+        _check_sent(held, event)
         return
     if state is None:
         raise InnsynRefusedError(f"no request {event.request_id} in the ledger")

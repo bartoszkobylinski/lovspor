@@ -1798,6 +1798,7 @@ $I record-case-number --request 4646-20261005T074425Z --number 2026/2348
 $I record-outcome --request 4646-20261005T074425Z --outcome partial --at <UTC> [--refusal-basis "…"]
 $I record-klage --request 4646-20261005T074425Z --at <UTC>
 $I record-reminder --request 4646-20261005T074425Z --at <UTC> --letter <reminder.txt>
+$I record-follow-up --parent 0301-20261005T074343Z --letter <follow-up.txt> --sent-at <UTC> [--message-id '<…>']
 $I record-bounce --request 4646-20261005T074425Z --at <UTC> --evidence <dsn.eml> --status 5.4.1
 $I record-mailbox-closed --request 4646-20261005T074425Z --at <UTC> --evidence <auto-reply.eml>
 $I requests                               # every request, with its § 32 mark
@@ -1870,6 +1871,20 @@ $I received                               # every document; requested ids still 
   A reminder is not a klage: the request stays on `due`, which shows the latest reminder
   in the column after `undelivered`, so a klage is not sent on a request reminded two
   days ago without the operator seeing it.
+- **Follow-up requests (#625).** After a referral, a new request to another body of the
+  same authority (Oslo's Byrådet after `referred_to_lovdata`) is recorded with
+  `record-follow-up --parent <request>`. It is a request of its own, with its own id,
+  recipient, Message-ID and § 32 mark, linked to the one it follows (the last column of
+  `requests`). Its recipient is the `Til:` line of `--letter`, the letter as sent saved
+  in the wave format (`Til:`, `Emne:`, a blank line, the body), and it is not taken from
+  the directory, which keeps the authority's main mailbox. It asks what the request it
+  follows asked: the same ids and general clause. A parent not in the ledger, another
+  authority's request, and a follow-up not sent after its parent are refused.
+- **Answers in parts.** An authority that answers in several mails (Røros: "Her kjem
+  første del") gets one `record-outcome` per part, each with its own `--at`. Every part
+  stays in the ledger. The first answer is the request's `answered_at`, and the last
+  part's class is its outcome, so the part that completes it is recorded `full`. The
+  documents of each part are recorded with `record-received`.
 - **Sending a wave.** `send` delivers the manifest's letters by SMTP submission with
   STARTTLS and certificate verification (port 587), in manifest order. A server that does
   not offer STARTTLS is refused before the password is sent. Without `--send` it is a dry
