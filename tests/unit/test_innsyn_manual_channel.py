@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from pytest_httpx import HTTPXMock
 
 from lovspor.innsyn.ledger import RequestState, Sent, ledger_journal, requests
@@ -162,3 +163,84 @@ def test_a_sent_line_written_before_channels_still_loads(tmp_path: Path) -> None
     sent = [state.sent for state in _held(target).values()]
     assert all(isinstance(s, Sent) and s.channel == "email" for s in sent)
     assert len(ledger_journal(InnsynWorkspace(target, [])).records()) == len(lines)
+
+
+@pytest.mark.parametrize("channel", ["webform", "edialog"])
+def test_manual_sent_schema_requires_page_receipt_and_no_message_id(channel: str) -> None:
+    """The manual-delivery contract in operations.md must also hold on journal reload."""
+    data = {
+        "request_id": f"{HAREID}-20261021T090000Z",
+        "authority_id": HAREID,
+        "recorded_at": "2026-10-21T09:00:00Z",
+        "sent_at": "2026-10-21T09:00:00Z",
+        "recipient": EDIALOG,
+        "channel": channel,
+        "receipt_sha256": hashlib.sha256(RECEIPT).hexdigest(),
+        "letter_sha256": "a" * 64,
+        "lf_ids": [],
+        "general_clause": True,
+    }
+    sent = Sent.model_validate(data)
+    assert Sent.model_validate_json(sent.model_dump_json()) == sent
+    for invalid in (
+        {"receipt_sha256": None},
+        {"receipt_sha256": "not-a-sha256"},
+        {"message_id": "<mail@example.no>"},
+        {"recipient": "post@example.no"},
+    ):
+        with pytest.raises(ValidationError):
+            Sent.model_validate({**data, **invalid})
+    email = {**data, "channel": "email", "recipient": "post@example.no"}
+    with pytest.raises(ValidationError, match="receipt"):
+        Sent.model_validate(email)
+    assert Sent.model_validate({**email, "receipt_sha256": None}).channel == "email"
+
+
+@pytest.mark.parametrize("channel", ["webform", "edialog"])
+def test_manual_channel_replaces_mailbox_without_losing_maalform(
+    workspace: Path, tmp_path: Path, channel: str
+) -> None:
+    page = ("--evidence-url", EDIALOG, *READ_AT)
+    _ok(workspace, "set-maalform", "--id", HAREID, "--form", "nn", *page)
+    _ok(workspace, "set-recipient", "--id", HAREID, "--address", "post@example.no", *page)
+    _channel(workspace, channel)
+    wave = _wave(workspace, tmp_path / "wave")
+    entry = next(e for e in wave["letters"] if e["authority_id"] == HAREID)
+    assert (entry["channel"], entry["recipient"]) == (channel, EDIALOG)
+    assert entry["maalform"] == "nn"
+    assert entry["maalform_recorded"] is True
+    _ok(workspace, "set-recipient", "--id", HAREID, "--address", "new@example.no", *page)
+    wave = _wave(workspace, tmp_path / "email-wave")
+    entry = next(e for e in wave["letters"] if e["authority_id"] == HAREID)
+    assert (entry["channel"], entry["recipient"]) == ("email", "new@example.no")
+    assert entry["maalform"] == "nn"
+    assert entry["maalform_recorded"] is True
+
+
+@pytest.mark.parametrize("failure", ["empty-receipt", "wrong-addressee", "duplicate"])
+def test_refused_manual_recording_preserves_existing_ledger(
+    workspace: Path, tmp_path: Path, receipt: Path, failure: str
+) -> None:
+    _channel(workspace)
+    manifest = tmp_path / "wave" / "manifest.json"
+    wave = _wave(workspace, manifest.parent)
+    assert _manual(workspace, manifest, receipt).exit_code == 0
+    journal = workspace / "requests.jsonl"
+    before = journal.read_bytes()
+    if failure == "empty-receipt":
+        receipt.write_bytes(b"")
+    elif failure == "wrong-addressee":
+        entry = next(e for e in wave["letters"] if e["authority_id"] == HAREID)
+        (manifest.parent / entry["letter_file"]).write_text(
+            "Til: https://other.example.no/\nEmne: Innsyn\n\nBody\n", encoding="utf-8"
+        )
+    result = _manual(workspace, manifest, receipt)
+    assert result.exit_code == 1
+    assert "Refused" in result.output
+    reason = {
+        "empty-receipt": "is empty",
+        "wrong-addressee": "is not the manifest's recipient",
+        "duplicate": "already in the ledger",
+    }[failure]
+    assert reason in result.output
+    assert journal.read_bytes() == before
