@@ -12,6 +12,10 @@ class AlertConfigError(ConfigError):
     """The alert configuration cannot be read or is malformed."""
 
 
+class AlertEnvUnreadableError(AlertConfigError):
+    """The alert's env file exists but this process cannot read it (not root)."""
+
+
 class AlertDeliveryError(NetworkError):
     """The webhook could not be reached or refused the alert."""
 

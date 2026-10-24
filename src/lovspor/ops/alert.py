@@ -28,7 +28,7 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, SecretStr
 
-from lovspor.ops.errors import AlertConfigError, AlertDeliveryError
+from lovspor.ops.errors import AlertConfigError, AlertDeliveryError, AlertEnvUnreadableError
 from lovspor.release.caddy import environment_file_value
 
 WEBHOOK_VAR = "LOVSPOR_ALERT_WEBHOOK"
@@ -80,7 +80,7 @@ def _read_env_file(env_file: Path) -> str:
     except FileNotFoundError:
         return ""
     except OSError as error:
-        raise AlertConfigError(f"cannot read {env_file}: {error.strerror}") from error
+        raise AlertEnvUnreadableError(f"cannot read {env_file}: {error.strerror}") from error
 
 
 def _setting(environ: dict[str, str], text: str, name: str) -> str | None:
@@ -91,9 +91,14 @@ def _setting(environ: dict[str, str], text: str, name: str) -> str | None:
 def _webhook(value: str | None) -> SecretStr | None:
     if value is None:
         return None
-    parts = urlsplit(value)
+    refusal = f"{WEBHOOK_VAR} must be an http:// or https:// URL"
+    try:
+        parts = urlsplit(value)
+    except ValueError as error:
+        # urlsplit's message quotes the netloc, which can be the secret part.
+        raise AlertConfigError(refusal) from error
     if parts.scheme not in ("http", "https") or not parts.netloc:
-        raise AlertConfigError(f"{WEBHOOK_VAR} must be an http:// or https:// URL")
+        raise AlertConfigError(refusal)
     return SecretStr(value)
 
 

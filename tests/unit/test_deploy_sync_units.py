@@ -15,9 +15,13 @@ root.
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+from lovspor.ops.alert import load_alert_config
+from lovspor.ops.errors import AlertConfigError
 
 _DEPLOY = Path(__file__).resolve().parents[2] / "deploy" / "digitalocean"
 _SYNC = _DEPLOY / "sync-units.sh"
@@ -43,6 +47,9 @@ def _fake_systemctl(tmp_path: Path, exit_code: int = 0) -> Path:
 
 
 _TARGET = "LOVSPOR_ALERT_WEBHOOK=https://ntfy.sh/a-topic\n"
+# The interpreter running the tests is the project's venv: its `lovspor` is the
+# command the box's sync-units.sh asks.
+_LOVSPOR = Path(sys.executable).with_name("lovspor")
 
 
 def _alert_env(tmp_path: Path, text: str | None, mode: int) -> Path:
@@ -68,6 +75,7 @@ def _run(
         _fake_systemctl(tmp_path, systemctl_exit)
     env = {**os.environ, "LOVSPOR_UNIT_DIR": str(unit_dir)}
     env["LOVSPOR_ALERT_ENV"] = str(_alert_env(tmp_path, alert_env, alert_mode))
+    env["LOVSPOR_BIN"] = str(_LOVSPOR)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     command = ["bash", str(_SYNC), *args]
     return subprocess.run(command, check=False, capture_output=True, text=True, env=env)
@@ -311,3 +319,113 @@ class TestTheAlertTarget:
         assert "alert target: configured" in result.stdout
         assert not sentinel.exists()
         assert "example.test" not in result.stdout + result.stderr
+
+    @pytest.mark.parametrize("scheme", ["http", "https", "HTTP", "HTTPS"])
+    def test_supported_webhook_schemes_match_the_alert_reader(
+        self, tmp_path: Path, scheme: str
+    ) -> None:
+        """sync-units.sh promises to read the target as lovspor ops alert does."""
+        url = f"{scheme}://example.test/secret-topic"
+        text = f"LOVSPOR_ALERT_WEBHOOK={url}\n"
+        config_path = _alert_env(tmp_path, text, 0o600)
+        assert load_alert_config({}, config_path).webhook is not None
+
+        result = _run(tmp_path, alert_env=text)
+
+        assert result.returncode == 0, result.stderr
+        assert "alert target: configured" in result.stdout
+        assert url not in result.stdout + result.stderr
+
+    def test_a_callers_webhook_does_not_hide_an_unconfigured_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The deploy reports /etc/lovspor/alert.env, not the caller's shell."""
+        monkeypatch.setenv("LOVSPOR_ALERT_WEBHOOK", "https://example.test/secret-topic")
+
+        result = _run(tmp_path, alert_env="LOVSPOR_ALERT_WEBHOOK=\n")
+
+        assert result.returncode == 3
+        assert "alert target: not configured" in result.stdout
+        assert str(tmp_path / "alert.env") in result.stderr
+        assert "secret-topic" not in result.stdout + result.stderr
+
+    @pytest.mark.parametrize("url", ["http://", "https://", "https://#secret-topic"])
+    def test_an_empty_authority_does_not_pass_the_target_check(
+        self, tmp_path: Path, url: str
+    ) -> None:
+        """The script explicitly refuses schemes without an authority."""
+        result = _run(tmp_path, alert_env=f"LOVSPOR_ALERT_WEBHOOK={url}\n")
+
+        assert result.returncode == 3
+        assert "alert target: not configured" in result.stdout
+        assert str(tmp_path / "alert.env") in result.stderr
+        assert url not in result.stdout + result.stderr
+
+
+def _reader_accepts(env_file: Path) -> bool:
+    """What `lovspor ops alert` makes of the file: a webhook it would POST to."""
+    try:
+        return load_alert_config({}, env_file).webhook is not None
+    except AlertConfigError:
+        return False
+
+
+# Every value a shell reading of the file got, or could get, wrong (#671 review).
+_PARITY = [
+    "https://ntfy.sh/t",
+    "HTTPS://ntfy.sh/t",
+    "Http://ntfy.sh/t",
+    "https://",
+    "http:///t",
+    "https://?t",
+    "https://#t",
+    "https://:443/t",
+    "https://user:pw@/t",
+    "https://user:pw@ntfy.sh/t",
+    "https://[::1]/t",
+    "https://[::1/t",
+    "https://ex\uff0fample/t",
+    "ht\ttps://ntfy.sh/t",
+    "\x01https://ntfy.sh/t",
+    '"https://ntfy.sh/t"',
+    "'https://ntfy.sh/t'",
+    '"  "',
+    "   ",
+    "",
+    "ntfy.sh/t",
+    "ftp://ntfy.sh/t",
+    "https:ntfy.sh/t",
+    "https://ntfy.sh/t # comment",
+]
+
+
+class TestTheVerdictIsTheReaders:
+    @pytest.mark.parametrize("value", _PARITY)
+    def test_sync_units_and_the_alert_reader_agree(self, tmp_path: Path, value: str) -> None:
+        text = f"LOVSPOR_ALERT_WEBHOOK={value}\n"
+        expected = _reader_accepts(_alert_env(tmp_path, text, 0o600))
+
+        result = _run(tmp_path, alert_env=text)
+
+        assert result.returncode == (0 if expected else 3), result.stdout + result.stderr
+        assert ("alert target: configured\n" in result.stdout) is expected
+
+    def test_a_missing_lovspor_is_unknown_not_configured(self, tmp_path: Path) -> None:
+        unit_dir = tmp_path / "system"
+        assert _run(tmp_path).returncode == 0
+        env = {**os.environ, "LOVSPOR_UNIT_DIR": str(unit_dir)}
+        env["LOVSPOR_ALERT_ENV"] = str(_alert_env(tmp_path, _TARGET, 0o600))
+        env["LOVSPOR_BIN"] = str(tmp_path / "absent" / "lovspor")
+
+        result = subprocess.run(
+            ["bash", str(_SYNC), "--check"], check=False, capture_output=True, text=True, env=env
+        )
+
+        assert result.returncode == 3
+        assert "alert target: unknown" in result.stdout
+
+    def test_the_script_asks_the_reader_without_writing_bytecode(self) -> None:
+        """Root runs the lovspor user's venv; a root-owned __pycache__ breaks uv sync (#667)."""
+        text = _SYNC.read_text(encoding="utf-8")
+
+        assert 'PYTHONDONTWRITEBYTECODE=1 "$LOVSPOR_BIN" ops alert-target' in text
