@@ -16,6 +16,9 @@ Type=oneshot
 # neither read the file nor inherit the value. Unset or absent => the command
 # logs "alert webhook not configured" and exits 0.
 User=root
+# Root must not write bytecode into the lovspor user's venv: a root-owned
+# __pycache__ makes the next deploy's `uv sync` fail to remove it (#667).
+Environment=PYTHONDONTWRITEBYTECODE=1
 WorkingDirectory=/opt/lovspor/app
 ExecStart=/opt/lovspor/app/.venv/bin/lovspor ops alert --unit %i
 # systemctl + journalctl are bounded at 30 s each and the POST at 15 s.

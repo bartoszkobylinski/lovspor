@@ -20,6 +20,9 @@ Type=oneshot
 # admin socket, writes the release fragment and reloads Caddy. The build itself
 # is run as the lovspor user inside the script.
 User=root
+# Root must not write bytecode into the lovspor user's venv: a root-owned
+# __pycache__ makes the next deploy's `uv sync` fail to remove it (#667).
+Environment=PYTHONDONTWRITEBYTECODE=1
 # `caddy validate`/`caddy adapt` inside the release commands need LOVSPOR_DOMAIN,
 # which only Caddy's own drop-in exports. Read the same file; the script also
 # reads it for manual runs.

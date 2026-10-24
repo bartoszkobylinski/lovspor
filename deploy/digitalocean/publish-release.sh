@@ -44,6 +44,10 @@ set -euo pipefail
 # ./.env and get EACCES, not "absent" — the build dies (#300).
 cd /
 
+# Root must not write bytecode into the lovspor user's venv: a root-owned
+# __pycache__ makes the next deploy's `uv sync` fail to remove it (#667).
+export PYTHONDONTWRITEBYTECODE=1
+
 # The Caddyfile's site block is `{$LOVSPOR_DOMAIN} {`. Caddy the SERVICE gets
 # that variable from its systemd drop-in; `caddy validate`/`caddy adapt` run by
 # the release commands do not, the placeholder expands to nothing, the site
