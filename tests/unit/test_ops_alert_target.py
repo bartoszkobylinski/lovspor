@@ -96,6 +96,41 @@ class TestAlertTarget:
 
         assert (code, out) == (3, "alert target: not configured\n")
 
+    def test_the_callers_format_does_not_override_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LOVSPOR_ALERT_FORMAT", "xml")
+        env_file = _env(tmp_path, f"LOVSPOR_ALERT_WEBHOOK={WEBHOOK}\nLOVSPOR_ALERT_FORMAT=json\n")
+
+        code, out, err = _target(env_file)
+
+        assert (code, out, err) == (0, "alert target: configured\n", "")
+
+    def test_a_directory_is_reported_as_unreadable_even_as_root(self, tmp_path: Path) -> None:
+        """The reader's OSError must become exit 3 rather than a CLI traceback."""
+        code, out, err = _target(tmp_path)
+
+        assert code == 3
+        assert out.startswith("alert target: unknown (")
+        assert str(tmp_path) in out
+        assert "run as root" in out
+        assert str(tmp_path) in err
+        assert "is unreadable" in err
+
+    @pytest.mark.parametrize("url", ["https://[secret/x", "https://secret\uff0fhost/private-topic"])
+    def test_an_unparseable_url_is_reported_as_refused_without_secrets(
+        self, tmp_path: Path, url: str
+    ) -> None:
+        env_file = _env(tmp_path, f"LOVSPOR_ALERT_WEBHOOK={url}\n")
+
+        code, out, err = _target(env_file)
+
+        assert code == 3
+        assert out == "alert target: not configured (refused by `lovspor ops alert`)\n"
+        assert str(env_file) in err
+        assert "secret" not in out + err
+        assert "private-topic" not in out + err
+
 
 class TestTheReaderRefusesWithItsOwnError:
     """A URL ``urlsplit`` cannot parse raised a bare ``ValueError`` out of
