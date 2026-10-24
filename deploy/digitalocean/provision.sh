@@ -259,7 +259,10 @@ UPSTREAM_HEAD="$(sudo -u "$APP_USER" git -C "$APP_DIR" rev-parse '@{upstream}')"
 # --- 13. Install units + Caddyfile from the (verified) repo ---
 log "Installing systemd units and Caddyfile"
 # The same script every deploy runs (#484): one list of units, verified installed.
-bash "$APP_DIR/deploy/digitalocean/sync-units.sh"
+# Exit 3 is "units installed, alert target not set" (#671): expected on a fresh
+# box, whose alert.env is written commented out above. It is printed, not fatal;
+# the summary at the end says how to set and test it.
+bash "$APP_DIR/deploy/digitalocean/sync-units.sh" || [ $? -eq 3 ]
 install -d /etc/caddy
 install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile
 # The site's privacy page promises the server log is kept at most 30 days; journald
@@ -309,6 +312,6 @@ cat <<EOF
   6. Start:       sudo systemctl restart caddy lovspor-mcp
   7. Verify:      curl -fsS https://lovspor.yourdomain.com/healthz && echo ' OK'
   8. First site:  sudo systemctl start lovspor-publish    # until it runs, / answers 503
-  9. Alerts:      sudo nano $ALERT_ENV               # optional: LOVSPOR_ALERT_WEBHOOK=...
+  9. Alerts:      sudo nano $ALERT_ENV               # LOVSPOR_ALERT_WEBHOOK=... (unset: sync-units.sh exits 3)
                   sudo $APP_DIR/.venv/bin/lovspor ops alert --unit lovspor-publish.service --test
 EOF
