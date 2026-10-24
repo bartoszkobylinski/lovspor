@@ -495,3 +495,48 @@ def test_refresh_preserves_unicode_prose_with_utf8_manifest(tmp_path: Path) -> N
     assert (corpus / README_NAME).read_bytes() == (
         prose + "\n" + render_block(read_status(corpus)) + "\n"
     ).encode("utf-8")
+
+
+def test_start_and_end_markers_on_one_line_are_prose() -> None:
+    readme = f"{STATUS_START}{STATUS_END}\n"
+
+    assert splice(readme, TestSplice.BLOCK) == readme + "\n" + TestSplice.BLOCK + "\n"
+
+
+@pytest.mark.parametrize("fence", ["```", "````", "~~~", "~~~~"])
+@pytest.mark.parametrize("info", ["X", "XX", " \t", "\u00a0", "X`X", " ` \t"])
+def test_fence_info_trimming_keeps_backtick_validity(fence: str, info: str) -> None:
+    example = f"{fence}{info}\n{STATUS_START}\nold\n{STATUS_END}\n"
+    if fence.startswith("`") and "`" in info:
+        expected = f"{fence}{info}\n{TestSplice.BLOCK}\n"
+    else:
+        expected = example + "\n" + TestSplice.BLOCK + "\n"
+
+    assert splice(example, TestSplice.BLOCK) == expected
+
+
+@pytest.mark.parametrize("opener", ["```", "````", "~~~", "~~~~"])
+@pytest.mark.parametrize("candidate", ["`", "~", "``", "~~", "```", "~~~", "````", "~~~~"])
+def test_only_matching_long_enough_runs_expose_following_markers(
+    opener: str, candidate: str
+) -> None:
+    prefix = f"{opener}\n{candidate}\n"
+    readme = prefix + f"{STATUS_START}\nold\n{STATUS_END}\n"
+    closes = candidate[0] == opener[0] and len(candidate) >= len(opener)
+    expected = (
+        prefix + TestSplice.BLOCK + "\n" if closes else readme + "\n" + TestSplice.BLOCK + "\n"
+    )
+
+    assert splice(readme, TestSplice.BLOCK) == expected
+
+
+def test_refresh_rejects_invalid_utf8_without_rewriting_readme(tmp_path: Path) -> None:
+    corpus = _corpus(tmp_path, _central(1, 0), None, None)
+    path = corpus / README_NAME
+    original = b"# Lovverk\n\xff\n"
+    path.write_bytes(original)
+
+    with pytest.raises(UnicodeDecodeError):
+        refresh_readme(corpus)
+
+    assert path.read_bytes() == original
