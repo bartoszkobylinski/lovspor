@@ -159,6 +159,16 @@ class TestReadStatus:
 class TestSplice:
     BLOCK = f"{STATUS_START}\nnew\n{STATUS_END}"
 
+    @pytest.mark.parametrize("indent", ["", " ", "  ", "   "])
+    def test_standalone_markers_allow_up_to_three_spaces_and_trailing_whitespace(
+        self, indent: str
+    ) -> None:
+        prefix = "# lovverk\n\nHåndskrevet tekst.\n\n"
+        suffix = "\n\n## Bruk\n"
+        readme = f"{prefix}{indent}{STATUS_START} \t\nold\n{indent}{STATUS_END}\t{suffix}"
+
+        assert splice(readme, self.BLOCK) == prefix + self.BLOCK + suffix
+
     def test_replaces_only_the_text_between_the_markers(self) -> None:
         readme = f"# lovverk\n\nprose\n\n{STATUS_START}\nold\n{STATUS_END}\n\n## Next\n\nmore\n"
 
@@ -317,6 +327,52 @@ class TestSplice:
 
 
 class TestRefreshReadme:
+    def test_manifest_changes_refresh_counts_dates_and_authorities(self, tmp_path: Path) -> None:
+        corpus = _corpus(tmp_path, _central(2, 1), _local({"0301": 1, "5025": 1}), "# lovverk\n")
+        assert refresh_readme(corpus) is ReadmeOutcome.WRITTEN
+        central = _central(1, 2, removed=1)
+        central["generated_at"] = "2026-10-23T12:00:00Z"
+        local = _local({"5025": 2}, generated_at="2026-10-24T12:00:00Z")
+        (corpus / "manifest.json").write_text(json.dumps(central), encoding="utf-8")
+        (corpus / "lokale-forskrifter" / "manifest.json").write_text(
+            json.dumps(local), encoding="utf-8"
+        )
+
+        assert refresh_readme(corpus) is ReadmeOutcome.WRITTEN
+
+        text = (corpus / README_NAME).read_text(encoding="utf-8")
+        assert "| `lover/` | 1 | Lovdata public data, NLOD 2.0 | 2026-10-23 |" in text
+        assert "| `forskrifter/` | 2 | Lovdata public data, NLOD 2.0 | 2026-10-23 |" in text
+        assert "| `lokale-forskrifter/` | 2 | åndsverkloven § 14 | 2026-10-24 |" in text
+        assert "together hold 3 current documents;" in text
+        assert "holds 2 local regulations from 1 authority," in text
+        assert "kommune 5025 (2)." in text
+        assert "0301" not in text
+        assert refresh_readme(corpus) is ReadmeOutcome.UNCHANGED
+
+    @pytest.mark.parametrize("manifest_name", ["manifest.json", "lokale-forskrifter/manifest.json"])
+    @pytest.mark.parametrize(
+        "invalid",
+        [b"{not json", b"\xff", b'{"documents": {"broken": {"status": "current"}}}'],
+        ids=["malformed-json", "invalid-utf8", "missing-dataset"],
+    )
+    def test_invalid_manifest_raises_without_overwriting_readme(
+        self, tmp_path: Path, manifest_name: str, invalid: bytes
+    ) -> None:
+        corpus = _corpus(tmp_path, _central(1, 1), _local({"0301": 1}), "# lovverk\n")
+        assert refresh_readme(corpus) is ReadmeOutcome.WRITTEN
+        before = (corpus / README_NAME).read_bytes()
+        (corpus / manifest_name).write_bytes(invalid)
+
+        with pytest.raises(ParseError, match="manifest.json"):
+            refresh_readme(corpus)
+
+        assert (corpus / README_NAME).read_bytes() == before
+
+    def test_absent_readme_needs_no_manifests(self, tmp_path: Path) -> None:
+        assert refresh_readme(tmp_path) is ReadmeOutcome.ABSENT
+        assert list(tmp_path.iterdir()) == []
+
     def test_writes_the_block_and_keeps_the_prose(self, tmp_path: Path) -> None:
         readme = "# lovverk\n\nHand-written intro.\n\n## Usage\n\nHand-written usage.\n"
         corpus = _corpus(tmp_path, _central(2, 1), _local({"5025": 1}), readme)
