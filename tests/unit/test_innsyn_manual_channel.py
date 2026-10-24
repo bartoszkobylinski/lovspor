@@ -16,8 +16,10 @@ import pytest
 from pydantic import ValidationError
 from pytest_httpx import HTTPXMock
 
+from lovspor.innsyn.directory import Contact, RecipientRecorded, contacts, directory_journal
 from lovspor.innsyn.ledger import RequestState, Sent, ledger_journal, requests
 from lovspor.innsyn.workspace import InnsynWorkspace
+from tests.unit.cli_output import said
 from tests.unit.innsyn_support import FIXTURES, fetched, innsyn
 
 HAREID = "1517"
@@ -244,3 +246,33 @@ def test_refused_manual_recording_preserves_existing_ledger(
     }[failure]
     assert reason in result.output
     assert journal.read_bytes() == before
+
+
+def test_a_recipient_after_a_channel_leaves_no_channel_behind(workspace: Path) -> None:
+    _channel(workspace)
+    page = ("--evidence-url", "https://www.hareid.kommune.no/", *READ_AT)
+    _ok(workspace, "set-recipient", "--id", HAREID, "--address", "post@hareid.kommune.no", *page)
+    records = directory_journal(InnsynWorkspace(workspace, [])).records()
+    recipient = records[-1]
+    assert isinstance(recipient, RecipientRecorded)
+    assert contacts(records)[HAREID] == Contact(recipient=recipient)
+
+
+@pytest.mark.parametrize(
+    ("at", "reason"),
+    [
+        ("2026-10-21T09:00:00", "--sent-at: give an offset or Z"),
+        ("yesterday", "--sent-at: not an ISO-8601 instant: yesterday"),
+    ],
+)
+def test_a_bad_manual_sent_at_names_the_option(
+    workspace: Path, tmp_path: Path, receipt: Path, at: str, reason: str
+) -> None:
+    _channel(workspace)
+    manifest = tmp_path / "wave" / "manifest.json"
+    _wave(workspace, manifest.parent)
+    args = ("--manifest", str(manifest), "--id", HAREID, "--sent-at", at)
+    result = innsyn(workspace, "record-sent-manual", *args, "--evidence", str(receipt))
+    assert result.exit_code == 2
+    assert said(reason, result.output)
+    assert not (workspace / "requests.jsonl").exists()

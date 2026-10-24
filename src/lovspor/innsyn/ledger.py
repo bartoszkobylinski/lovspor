@@ -389,9 +389,19 @@ def _classify(state: RequestState, event: DocumentClassified) -> RequestState:
 _Updater = Callable[[RequestState, Any], RequestState]
 
 
-def _setting(field: str, attribute: str) -> _Updater:
-    """A transition that sets one field of the state from one field of the event."""
-    return lambda state, event: state.model_copy(update={field: getattr(event, attribute)})
+#: The transitions that set one field of the state (key) from one field of the event (value).
+_SETS: dict[type[_Event], tuple[str, str]] = {
+    Acknowledged: ("acknowledged_at", "acknowledged_at"),
+    CaseNumber: ("saksnummer", "saksnummer"),
+    KlageSent: ("klage_sent_at", "klage_sent_at"),
+    Undelivered: ("undelivered", "reason"),
+}
+
+
+def _set(state: RequestState, event: _Transition) -> RequestState:
+    # Per call, not a closure built at import: no test re-runs an import-time factory.
+    field, attribute = _SETS[type(event)]
+    return state.model_copy(update={field: getattr(event, attribute)})
 
 
 _APPLY: dict[type[_Event], _Updater] = {
@@ -399,10 +409,7 @@ _APPLY: dict[type[_Event], _Updater] = {
     DocumentReceived: _receive,
     ReminderSent: _remind,
     DocumentClassified: _classify,
-    Acknowledged: _setting("acknowledged_at", "acknowledged_at"),
-    CaseNumber: _setting("saksnummer", "saksnummer"),
-    KlageSent: _setting("klage_sent_at", "klage_sent_at"),
-    Undelivered: _setting("undelivered", "reason"),
+    **dict.fromkeys(_SETS, _set),
 }
 
 
@@ -450,17 +457,20 @@ def _check_document(state: RequestState, event: LedgerEvent) -> None:
 
 
 def _check_sent(held: dict[str, RequestState], event: Sent) -> None:
+    if event.follows is not None:
+        _check_follows(held, event, event.follows)
     if event.request_id in held:
         raise InnsynRefusedError(f"{event.request_id} is already in the ledger")
-    if event.follows is None:
-        return
-    parent = held.get(event.follows)
+
+
+def _check_follows(held: dict[str, RequestState], event: Sent, follows: str) -> None:
+    parent = held.get(follows)
     if parent is None:
-        raise InnsynRefusedError(f"no request {event.follows} in the ledger to follow")
+        raise InnsynRefusedError(f"no request {follows} in the ledger to follow")
     if parent.sent.authority_id != event.authority_id:
-        raise InnsynRefusedError(f"{event.follows} is another authority's request")
+        raise InnsynRefusedError(f"{follows} is another authority's request")
     if event.sent_at <= parent.sent.sent_at:
-        raise InnsynRefusedError(f"{event.request_id}: not sent after {event.follows}")
+        raise InnsynRefusedError(f"{event.request_id}: not sent after {follows}")
 
 
 def check(held: dict[str, RequestState], event: LedgerEvent) -> None:

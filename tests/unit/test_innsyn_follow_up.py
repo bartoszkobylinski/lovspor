@@ -21,6 +21,7 @@ from lovspor.innsyn.ledger import (
     requests,
 )
 from lovspor.innsyn.workspace import InnsynWorkspace
+from tests.unit.cli_output import said
 from tests.unit.innsyn_support import FIXTURES, innsyn
 
 PILOT = FIXTURES / "pilot"
@@ -149,7 +150,7 @@ class TestFollowUp:
         ("parent", "at", "reason"),
         [
             ("0301-20991005T074343Z", "2026-10-15T06:59:34Z", "no request 0301-20991005T074343Z"),
-            (OSLO, "2026-10-05T07:43:43Z", "already in the ledger"),
+            (OSLO, "2026-10-05T07:43:43Z", "not sent after"),
             (OSLO, "2026-10-04T07:00:00Z", "not sent after"),
         ],
     )
@@ -280,3 +281,57 @@ def test_final_part_closes_request_and_preserves_first_answer(workspace: Path) -
         if isinstance(e, Outcome) and e.request_id == ROROS
     ]
     assert parts == ["partial", "full"]
+
+
+class TestFollowUpRefusalsNameTheirCause:
+    @pytest.mark.parametrize(
+        ("at", "reason"),
+        [
+            ("2026-10-15T06:59:34", "--sent-at: give an offset or Z"),
+            ("yesterday", "--sent-at: not an ISO-8601 instant: yesterday"),
+        ],
+    )
+    def test_a_bad_sent_at_names_the_option(
+        self, workspace: Path, follow_up: Path, at: str, reason: str
+    ) -> None:
+        args = ("--parent", OSLO, "--letter", str(follow_up), "--sent-at", at)
+        result = innsyn(workspace, "record-follow-up", *args)
+        assert result.exit_code == 2
+        assert said(reason, result.output)
+
+    def test_a_letter_without_til_is_refused_naming_the_file(
+        self, workspace: Path, tmp_path: Path
+    ) -> None:
+        letter = tmp_path / "no-til.txt"
+        letter.write_text("Emne: x\n\nbody\n", encoding="utf-8")
+        code, output = _follow_up(workspace, letter)
+        assert code == 1
+        assert said(f"{letter}: the first line is not `Til: <mailbox>`", output)
+
+    def test_an_unknown_parent_is_refused_by_the_ledger_with_its_reason(
+        self, workspace: Path
+    ) -> None:
+        unknown = "0301-20991005T074343Z"
+        event = _held(workspace)[OSLO].sent.model_copy(
+            update={
+                "follows": unknown,
+                "request_id": BYRADET,
+                "sent_at": datetime(2026, 10, 15, 6, 59, 34, tzinfo=UTC),
+            }
+        )
+        with pytest.raises(InnsynRefusedError) as raised:
+            record_events(InnsynWorkspace(workspace, []), [event])
+        assert str(raised.value) == f"no request {unknown} in the ledger to follow"
+
+    def test_a_follow_up_is_recorded_by_the_cli_whatever_its_parent_came_from(
+        self, workspace: Path, follow_up: Path
+    ) -> None:
+        held = _held(workspace)
+        assert held[OSLO].sent.source == "pilot-import"
+        assert _follow_up(workspace, follow_up)[0] == 0
+        second = _held(workspace)[BYRADET].sent
+        assert second.source == "cli"
+        assert second.model_dump(include={"channel", "receipt_sha256"}) == {
+            "channel": "email",
+            "receipt_sha256": None,
+        }

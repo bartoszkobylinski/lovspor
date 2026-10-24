@@ -248,3 +248,40 @@ def test_delivery_evidence_keeps_only_digest_not_personal_text(
     assert b"case-officer" not in raw
     assert b"Private officer name" not in raw
     assert evidence.name.encode() not in raw
+
+
+def _lf(authority_id: str, lf_id: str) -> str:
+    return LedgerEntry(
+        authority_id=authority_id,
+        lf_id=lf_id,
+        kind="LF",
+        first_seen=datetime(2026, 10, 1, tzinfo=UTC),
+        url=PAGE,
+        sha256="a" * 64,
+    ).model_dump_json()
+
+
+def test_an_undelivered_request_does_not_hide_what_later_requests_asked(
+    tmp_path: Path, httpx_mock: HTTPXMock, evidence: Path
+) -> None:
+    target = fetched(tmp_path / "innsyn", httpx_mock)
+    _ok(target, "set-sender", "--name", "Ola Nordmann", "--email", "kontakt@example.no")
+    _recipient(target, "postmottak@fjaler.kommune.no")
+    page = ("--evidence-url", "https://www.suldal.kommune.no/", "--read-at", "2026-10-03T10:00Z")
+    _ok(target, "set-recipient", "--id", "1134", "--address", "post@suldal.kommune.no", *page)
+    lf_ledger = tmp_path / "lf-ledger.jsonl"
+    lines = (_lf("4646", "2024-09-19-2196"), _lf("1134", "2019-03-20-400"))
+    lf_ledger.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+    first = tmp_path / "wave-01" / "manifest.json"
+    _wave(target, lf_ledger, first.parent)
+    for authority_id, at in (("4646", "2026-10-19T23:46:00Z"), ("1134", "2026-10-19T23:47:00Z")):
+        _ok(target, "record-sent", "--manifest", str(first), "--id", authority_id, "--sent-at", at)
+    fjaler, suldal = (state.sent.request_id for state in _held(target).values())
+    bounce = ("--at", "2026-10-19T23:50:00Z", "--evidence", str(evidence), "--status", "5.4.1")
+    _ok(target, "record-bounce", "--request", fjaler, *bounce)
+    answer = ("--outcome", "full", "--at", "2026-10-20T10:00:00Z")
+    _ok(target, "record-outcome", "--request", suldal, *answer)
+    _recipient(target, "post@fjaler.kommune.no")
+    wave = _wave(target, lf_ledger, tmp_path / "wave-02")
+    ids = {letter["authority_id"]: letter["lf_ids"] for letter in wave["letters"]}
+    assert ids == {"4646": ["2024-09-19-2196"], "1134": []}
