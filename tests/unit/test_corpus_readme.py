@@ -417,3 +417,81 @@ class TestRefreshReadme:
 
         assert refresh_readme(corpus) is ReadmeOutcome.MALFORMED
         assert (corpus / README_NAME).read_text(encoding="utf-8") == readme
+
+
+@pytest.mark.parametrize("missing", [None, ""])
+def test_missing_authority_fields_group_as_empty_strings(
+    tmp_path: Path, missing: str | None
+) -> None:
+    local = {
+        "documents": {
+            "missing": {
+                "status": "current",
+                "source_dataset": "lokale-forskrifter",
+                "authority_type": missing,
+                "authority_id": missing,
+            },
+            "empty": {
+                "status": "current",
+                "source_dataset": "lokale-forskrifter",
+                "authority_type": "",
+                "authority_id": "",
+            },
+        }
+    }
+    corpus = _corpus(tmp_path, _central(0, 0), local, None)
+
+    authorities = read_status(corpus).authorities
+
+    assert [a.model_dump() for a in authorities] == [
+        {"authority_type": "", "authority_id": "", "current": 2}
+    ]
+    assert "from 1 authority," in render_block(read_status(corpus))
+
+
+@pytest.mark.parametrize("prefix", ["\t", "X"])
+def test_non_space_marker_prefix_is_preserved_as_prose(prefix: str) -> None:
+    readme = f"{prefix}{STATUS_START}\nexample\n{prefix}{STATUS_END}\n"
+    block = TestSplice.BLOCK
+
+    assert splice(readme, block) == readme + "\n" + block + "\n"
+
+
+@pytest.mark.parametrize("ending", ["\u00a0", "X"])
+def test_fence_closer_rejects_non_space_non_tab_suffix(ending: str) -> None:
+    # Neither a non-breaking space nor X is permitted after a closing fence.
+    readme = f"```\n```{ending}\n{STATUS_START}\nexample\n{STATUS_END}\n```\n"
+
+    assert splice(readme, TestSplice.BLOCK) == readme + "\n" + TestSplice.BLOCK + "\n"
+
+
+@pytest.mark.parametrize(
+    ("prose", "separator"),
+    [(" \t", "\n\n"), ("XXX", "\n\n"), ("intro\r\n\r\n", "")],
+)
+def test_appended_block_separates_nonempty_prose_without_adding_blank_lines(
+    prose: str, separator: str
+) -> None:
+    newline = "\r\n" if "\r\n" in prose else "\n"
+    block = TestSplice.BLOCK.replace("\n", newline)
+
+    assert splice(prose, TestSplice.BLOCK) == prose + separator + block + newline
+
+
+@pytest.mark.parametrize("fence", ["```", "~~~~"])
+@pytest.mark.parametrize("info", ["", " \t", "X", "\u00a0"])
+def test_fence_info_preserves_examples_and_adjacent_marker_pair(fence: str, info: str) -> None:
+    example = f"{fence}{info}\n{STATUS_START}\nexample\n{STATUS_END}\n{fence}\n"
+    readme = example + f"{STATUS_START}\n{STATUS_END}\n"
+
+    assert splice(readme, TestSplice.BLOCK) == example + TestSplice.BLOCK + "\n"
+
+
+def test_refresh_preserves_unicode_prose_with_utf8_manifest(tmp_path: Path) -> None:
+    prose = "# Lovverk: håndskrevet § 14\n"
+    corpus = _corpus(tmp_path, _central(1, 0), None, prose)
+
+    assert refresh_readme(corpus) is ReadmeOutcome.WRITTEN
+    assert (corpus / README_NAME).read_bytes() == (
+        prose + "\n" + render_block(read_status(corpus)) + "\n"
+    ).encode("utf-8")
