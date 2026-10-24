@@ -1,0 +1,25 @@
+{#- The page Caddy answers every 404 with (#662), through the release
+    fragment's handle_errors block. It is not a route: one file at the site
+    root, served for whatever address was mistyped, so it cannot know the
+    visitor's language from its own path. It is framed in Norwegian, like
+    the corpus it most often stands in for, and says the same thing in
+    English and Polish below, each pointing at its own front page. No
+    status code is typed: the numerals rule holds here as on every page. -#}
+{% extends "_base.html" %}
+{% block main %}
+<h1>Siden finnes ikke</h1>
+<p class="lede">Adressen du åpnet, fører ikke til noen side på lovspor.no. Kanskje lenken er skrevet feil: adressene til lover og forskrifter er lange, og én feil bokstav er nok.</p>
+<p><a href="/">Gå til forsiden</a> · <a href="/lov/">Lover</a> · <a href="/forskrift/">Forskrifter</a></p>
+
+<section lang="en">
+<h2>Page not found</h2>
+<p>The address you opened does not lead to any page on lovspor.no. Perhaps the link was mistyped: the addresses of acts and regulations are long, and one wrong letter is enough.</p>
+<p><a href="/en/">Go to the English front page</a></p>
+</section>
+
+<section lang="pl">
+<h2>Nie ma takiej strony</h2>
+<p>Ten adres nie prowadzi do żadnej strony w serwisie lovspor.no. Być może w linku jest literówka: adresy ustaw i rozporządzeń są długie i wystarczy jedna błędna litera.</p>
+<p><a href="/pl/">Przejdź do polskiej strony głównej</a></p>
+</section>
+{% endblock %}

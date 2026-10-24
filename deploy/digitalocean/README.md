@@ -229,7 +229,9 @@ hash of every page.
 
 Rollback is the previous release's own fragment through the same transaction
 — the marker's `previous` is kept for exactly this; run it twice to roll
-forward:
+forward. A release keeps the fragment it was built with, so rolling back to
+one built before the framed 404 page (#662) serves Caddy's empty 404 again
+until a newer release is committed:
 
 ```bash
 sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --rollback
@@ -871,8 +873,11 @@ migration involved. That is the proof the steady state works end to end.
 The build runs as the build user, which cannot open the root-only credential,
 so `publish-release.sh` hands it over as stdin with `--probe-token-file -`:
 the command reads the already-open fd 0. Naming `/dev/stdin` instead re-opens
-the root-owned file by path and fails as `Path '/dev/stdin' is not readable`,
-exit 2 (issue #467).
+the root-owned file by path, which the build user cannot do (issue #467): the
+credential is then reported `probe credential unreadable: … Permission denied`
+and step (b) recorded `unobserved, probe_credential_missing` — the same
+degradation as any path the invoking user cannot read (issue #470), never an
+exit 2.
 
 Install and enable the drift check in the same operator run:
 

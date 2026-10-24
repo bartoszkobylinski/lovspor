@@ -506,6 +506,7 @@ class TestBaseTemplate:
             "pages/landing.en.html",
             "pages/landing.nb.html",
             "pages/landing.pl.html",
+            "pages/not-found.html",
             "pages/observatory.nb.html",
             "pages/placeholder.en.html",
             "pages/placeholder.nb.html",

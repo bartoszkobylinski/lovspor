@@ -8,7 +8,11 @@ of the builder) and ``release.caddy``, the fragment the host's
 Caddyfile imports: one ``vars lovspor_release <id>`` directive so the
 running configuration can name its release, the ``@corpus`` handle
 rooted at the immutable ``corpus/`` with that tree's own redirect map,
-and the catch-all rooted at ``site/``. Every path in the fragment is
+the catch-all rooted at ``site/``, and a ``handle_errors`` block that
+answers a not-found error with ``site/404.html`` under the error's own
+status (#662). Only a handler error reaches it — ``file_server`` finding
+nothing — so an upstream's 404 through the host's ``reverse_proxy``
+(``/mcp``, ``/healthz``) stays the upstream's. Every path in the fragment is
 absolute and names the one directory the envelope will occupy after
 the rename, so a configuration composed from it is one release, never
 a mix.
@@ -29,6 +33,7 @@ from lovspor.atomic_io import atomic_write_bytes, atomic_write_text
 from lovspor.publish.companion import companion_json_bytes
 from lovspor.release.errors import IncompleteEnvelopeError
 from lovspor.site.fingerprint import ReleaseKey
+from lovspor.site.not_found import NOT_FOUND_PATH
 
 CORPUS_DIR = "corpus"
 SITE_DIR = "site"
@@ -142,6 +147,23 @@ def fragment_text(release_root: Path, content_id: str) -> str:
         "handle {\n"
         f"\troot * {root}/{SITE_DIR}\n"
         "\tfile_server\n"
+        "}\n"
+        f"{_error_routes(root)}"
+    )
+
+
+def _error_routes(root: str) -> str:
+    """A not-found error answered with the release's own ``404.html``, its status kept."""
+    return (
+        "handle_errors {\n"
+        "\t@lovspor_not_found expression {http.error.status_code} == 404\n"
+        "\thandle @lovspor_not_found {\n"
+        f"\t\troot * {root}/{SITE_DIR}\n"
+        f"\t\trewrite * {NOT_FOUND_PATH}\n"
+        "\t\tfile_server {\n"
+        "\t\t\tstatus {http.error.status_code}\n"
+        "\t\t}\n"
+        "\t}\n"
         "}\n"
     )
 

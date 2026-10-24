@@ -51,6 +51,7 @@ from lovspor.site.capabilities import CapabilityDocument, load_capabilities, sta
 from lovspor.site.errors import SiteBuildError
 from lovspor.site.fingerprint import ReleaseKey, release_content_id
 from lovspor.site.llms import LLMS_NAME
+from lovspor.site.not_found import NOT_FOUND_NAME, NOT_FOUND_PATH
 from lovspor.site.routes import emitted_pages
 from lovspor.site.scan import check_links, scan_page
 from lovspor.site.sitemap import sitemap_site_xml
@@ -193,6 +194,10 @@ def check_structure(root: Path) -> Structure:
 def _page_markup(site: Path, route: str) -> str:
     """One emitted page's text; a codec error is a named refusal, not a traceback."""
     path = site / route.lstrip("/") / "index.html"
+    return _markup(path, route)
+
+
+def _markup(path: Path, route: str) -> str:
     if not path.is_file():
         raise EnvelopeError(f"{SITE_DIR}/: page {route} is not in the tree")
     try:
@@ -202,12 +207,13 @@ def _page_markup(site: Path, route: str) -> str:
 
 
 def _check_site_tree(site: Path) -> int:
-    """The route closure, re-scanned from the bytes on disk."""
+    """The route closure and the not-found page, re-scanned from the bytes on disk."""
     pages = {page.path: _page_markup(site, page.path) for page in emitted_pages()}
+    scanned = pages | {NOT_FOUND_PATH: _markup(site / NOT_FOUND_NAME, NOT_FOUND_PATH)}
     try:
-        for name, markup in pages.items():
+        for name, markup in scanned.items():
             scan_page(name, markup)
-        check_links(pages)
+        check_links(scanned)
     except SiteBuildError as error:
         raise EnvelopeError(f"{SITE_DIR}/: {error}") from error
     if (site / SITEMAP_NAME).read_bytes() != sitemap_site_xml(emitted_pages()):
