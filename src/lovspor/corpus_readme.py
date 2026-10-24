@@ -28,6 +28,7 @@ the lines that describe it name only that basis.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import date, datetime
 from enum import StrEnum
@@ -45,7 +46,8 @@ STATUS_END = "<!-- lovspor:corpus-status:end -->"
 _MANIFEST = "manifest.json"
 _LOCAL_DATASET = "lokale-forskrifter"
 _CENTRAL = (("lover/", "gjeldende-lover"), ("forskrifter/", "gjeldende-sentrale-forskrifter"))
-_FENCES = ("```", "~~~")
+_MAX_INDENT = 3
+_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
 _LOVDATA_BASIS = "Lovdata public data, NLOD 2.0"
 _LOCAL_BASIS = "åndsverkloven § 14"
 _HEADER = (
@@ -200,8 +202,8 @@ def splice(readme: str, block: str) -> str:
     block = block.replace("\n", newline)
     lines = readme.splitlines(keepends=True)
     unfenced = _unfenced(lines)
-    starts = [i for i in unfenced if lines[i].strip() == STATUS_START]
-    ends = [i for i in unfenced if lines[i].strip() == STATUS_END]
+    starts = [i for i in unfenced if _is_marker(lines[i], STATUS_START)]
+    ends = [i for i in unfenced if _is_marker(lines[i], STATUS_END)]
     if not starts and not ends:
         return _insert(lines, unfenced, block, newline)
     if len(starts) != 1 or len(ends) != 1 or ends[0] < starts[0]:
@@ -213,15 +215,47 @@ def splice(readme: str, block: str) -> str:
 
 
 def _unfenced(lines: list[str]) -> list[int]:
-    """Indices of the lines outside fenced code: a marker or heading in an example is prose."""
+    """Indices of the lines outside fenced code: a marker or heading in an example is prose.
+
+    Fences follow CommonMark §4.5: an opener is three or more backticks or
+    tildes indented at most three spaces (a backtick opener's info string has
+    no backtick); only a run of the same character, at least as long, with
+    nothing after it but spaces or tabs closes it; an unclosed fence runs to
+    the end of the document. Fences inside lists or block quotes are not
+    tracked; the README's block lives at top level.
+    """
     indices: list[int] = []
-    fenced = False
+    opener: str | None = None
     for index, line in enumerate(lines):
-        if line.lstrip().startswith(_FENCES):
-            fenced = not fenced
-        elif not fenced:
+        if opener is not None:
+            if _closes(line, opener):
+                opener = None
+        elif (opener := _fence_opener(line)) is None:
             indices.append(index)
     return indices
+
+
+def _fence_opener(line: str) -> str | None:
+    match = _FENCE.fullmatch(line.rstrip("\r\n"))
+    if match is None:
+        return None
+    run, info = match.groups()
+    return None if run[0] == "`" and "`" in info else run
+
+
+def _closes(line: str, opener: str) -> bool:
+    match = _FENCE.fullmatch(line.rstrip("\r\n"))
+    if match is None:
+        return False
+    run, rest = match.groups()
+    return run[0] == opener[0] and len(run) >= len(opener) and not rest.strip(" \t")
+
+
+def _is_marker(line: str, marker: str) -> bool:
+    """A marker on a line of its own, indented at most three spaces (four is indented code)."""
+    text = line.rstrip()
+    content = text.lstrip(" ")
+    return content == marker and len(text) - len(content) <= _MAX_INDENT
 
 
 def _insert(lines: list[str], unfenced: list[int], block: str, newline: str) -> str:
