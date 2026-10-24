@@ -215,7 +215,8 @@ def refresh_readme(repo: Path) -> ReadmeOutcome:
     path = repo / README_NAME
     if not path.is_file():
         return ReadmeOutcome.ABSENT
-    current = path.read_text(encoding="utf-8")
+    # Decoded, not read_text: universal-newline reading would rewrite CRLF prose to LF.
+    current = path.read_bytes().decode("utf-8")
     try:
         updated = splice(current, render_block(read_status(repo)))
     except ReadmeBlockError:

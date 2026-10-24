@@ -213,6 +213,19 @@ class TestRefreshReadme:
         assert text.endswith(STATUS_END + "\n\n## Usage\n\nHand-written usage.\n")
         assert "| `forskrifter/` | 1 |" in text
 
+    def test_prose_with_crlf_newlines_keeps_its_bytes(self, tmp_path: Path) -> None:
+        corpus = _corpus(tmp_path, _central(2, 1), None, None)
+        prefix = "# lovverk\r\n\r\nHåndskrevet innledning.\r\n\r\n".encode()
+        suffix = "\r\n\r\n## Bruk\r\n\r\nHåndskrevet tekst.\r\n".encode()
+        path = corpus / README_NAME
+        path.write_bytes(prefix + f"{STATUS_START}\r\nold\r\n{STATUS_END}".encode() + suffix)
+
+        assert refresh_readme(corpus) is ReadmeOutcome.WRITTEN
+
+        updated = path.read_bytes()
+        assert updated.split(STATUS_START.encode(), 1)[0] == prefix
+        assert updated.split(STATUS_END.encode(), 1)[1] == suffix
+
     def test_a_second_refresh_over_the_same_manifests_writes_nothing(self, tmp_path: Path) -> None:
         corpus = _corpus(tmp_path, _central(2, 1), _local({"5025": 1}), "# lovverk\n")
         refresh_readme(corpus)
