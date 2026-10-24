@@ -373,6 +373,7 @@ class TestListings:
             "",
             "",
             "",
+            "",
         ]
         assert "5 requests" in result.stderr
 
