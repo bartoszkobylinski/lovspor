@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/corpus_readme.py"
+symbol = "_fence_opener"
+registered = "2026-10-24, PR #677, from run on 247f36c0"
+mutation = """
+-    return None if run[0] == "`" and "`" in info else run
++    return None if run[1] == "`" and "`" in info else run
+"""
+justification = """
+`run` is group 1 of `_FENCE`, `(`{3,}|~{3,})`: at least three copies of one
+character. So `run[1] == run[0]` always, and the backtick test reads the same
+character. Python `re` semantics, no dependency.
+"""

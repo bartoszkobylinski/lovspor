@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/corpus_readme.py"
+symbol = "splice"
+registered = "2026-10-24, PR #677, from run on 247f36c0"
+mutation = """
+-    if len(starts) != 1 or len(ends) != 1 or ends[0] < starts[0]:
++    if len(starts) != 1 or len(ends) != 1 or ends[0] <= starts[0]:
+"""
+justification = """
+`starts` and `ends` hold indices of lines for which `_is_marker` returned
+True for STATUS_START and STATUS_END respectively. `_is_marker` requires the
+stripped line to EQUAL the marker string, and the two marker strings differ,
+so no line index is in both lists: `ends[0] == starts[0]` is impossible and
+`<` and `<=` decide every reachable input identically. Python semantics, no
+dependency.
+"""

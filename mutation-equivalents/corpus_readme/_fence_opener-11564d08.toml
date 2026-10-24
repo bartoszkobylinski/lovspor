@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/corpus_readme.py"
+symbol = "_fence_opener"
+registered = "2026-10-24, PR #677, from run on 247f36c0"
+mutation = """
+-    match = _FENCE.fullmatch(line.rstrip("\\r\\n"))
++    match = _FENCE.fullmatch(line.rstrip(None))
+"""
+justification = """
+`_FENCE` is `" {0,3}(`{3,}|~{3,})(.*)"` under `fullmatch`. Stripping more
+trailing characters (all whitespace instead of only CR/LF) can neither change
+whether the leading ` {0,3}` + fence run matches nor the captured run: `.*`
+already accepts every character a split line can still contain (the lines are
+split on newlines, and `.` matches everything but `\n`). The info string only
+loses trailing whitespace, which cannot add or remove a backtick, so the
+`"`" in info` test and the returned run are identical. Python `re`/`str`
+semantics, no dependency.
+"""
