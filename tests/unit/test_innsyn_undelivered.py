@@ -208,3 +208,43 @@ class TestResend:
         _ok(target, "record-sent", "--manifest", str(second), "--id", "4646", *_AT_RESEND)
         resent = [s for s in _held(target).values() if s.delivered]
         assert [s.sent.recipient for s in resent] == ["post@fjaler.kommune.no"]
+
+
+@pytest.mark.parametrize("command", ["record-bounce", "record-mailbox-closed"])
+def test_delivery_evidence_keeps_only_digest_not_personal_text(
+    workspace: Path, tmp_path: Path, command: str
+) -> None:
+    payload = b"From: case-officer@example.no\r\n\r\nPrivate officer name\xff\r\n"
+    evidence = tmp_path / "private-officer-name.eml"
+    evidence.write_bytes(payload)
+    args = [
+        command,
+        "--request",
+        ROROS,
+        "--at",
+        "2026-10-05T07:48:56Z",
+        "--evidence",
+        str(evidence),
+    ]
+    if command == "record-bounce":
+        args.extend(["--status", "5.4.1"])
+    result = innsyn(workspace, *args)
+    assert result.exit_code == 0, result.output
+    journal = ledger_journal(InnsynWorkspace(workspace, []))
+    event = journal.records()[-1].model_dump(mode="json")
+    assert event["evidence_sha256"] == hashlib.sha256(payload).hexdigest()
+    assert event["source"] == "cli"
+    assert set(event) == {
+        "event",
+        "request_id",
+        "recorded_at",
+        "reason",
+        "at",
+        "evidence_sha256",
+        "dsn_status",
+        "source",
+    }
+    raw = journal.path.read_bytes()
+    assert b"case-officer" not in raw
+    assert b"Private officer name" not in raw
+    assert evidence.name.encode() not in raw

@@ -213,3 +213,70 @@ class TestAnswerInParts:
             datetime(2026, 10, 20, 10, tzinfo=UTC),
         ]
         assert _held(workspace)[ROROS].answered_at == parts[0]
+
+
+@pytest.mark.parametrize("payload", [None, b"\xff", b"Til: \nEmne: x\n\nbody\n"])
+def test_unreadable_or_empty_addressee_follow_up_preserves_ledger(
+    workspace: Path, tmp_path: Path, payload: bytes | None
+) -> None:
+    letter = tmp_path / "invalid-follow-up.txt"
+    if payload is not None:
+        letter.write_bytes(payload)
+    journal = workspace / "requests.jsonl"
+    before = journal.read_bytes()
+    code, output = _follow_up(workspace, letter)
+    assert code == 1
+    assert "Refused" in output
+    assert journal.read_bytes() == before
+
+
+def test_follow_up_answer_does_not_answer_or_close_its_parent(
+    workspace: Path, follow_up: Path
+) -> None:
+    assert _follow_up(workspace, follow_up)[0] == 0
+    parent_before = _held(workspace)[OSLO]
+    result = innsyn(
+        workspace,
+        "record-outcome",
+        "--request",
+        BYRADET,
+        "--outcome",
+        "full",
+        "--at",
+        "2026-10-20T10:00:00Z",
+    )
+    assert result.exit_code == 0, result.output
+    held = _held(workspace)
+    assert held[OSLO] == parent_before
+    assert held[BYRADET].outcome == "full"
+    assert not held[BYRADET].is_open
+    assert held[BYRADET].answered_at == datetime(2026, 10, 20, 10, tzinfo=UTC)
+
+
+def test_final_part_closes_request_and_preserves_first_answer(workspace: Path) -> None:
+    for outcome, at in (
+        ("partial", "2026-10-16T08:09:26Z"),
+        ("full", "2026-10-20T10:00:00Z"),
+    ):
+        result = innsyn(
+            workspace,
+            "record-outcome",
+            "--request",
+            ROROS,
+            "--outcome",
+            outcome,
+            "--at",
+            at,
+        )
+        assert result.exit_code == 0, result.output
+    state = _held(workspace)[ROROS]
+    assert state.outcome == "full"
+    assert state.answered_at == datetime(2026, 10, 16, 8, 9, 26, tzinfo=UTC)
+    assert not state.is_open
+    assert not state.is_due(datetime(2026, 10, 21).date())
+    parts = [
+        e.outcome
+        for e in ledger_journal(InnsynWorkspace(workspace, [])).records()
+        if isinstance(e, Outcome) and e.request_id == ROROS
+    ]
+    assert parts == ["partial", "full"]
