@@ -12,6 +12,10 @@ between two snapshots of the same Lovdata document means the document's
 - regardless of whitespace between elements (pretty-printed vs compact)
 - regardless of comments (which may carry volatile upstream timestamps)
 - regardless of self-closing vs open-close tag style
+- regardless of the header's ELI row (``dt``/``dd`` of class ``eli``), which
+  Lovdata added to every document on 2026-10-20 and which only restates the
+  document's identity; counting it called all 5,886 documents changed and
+  timed the sync out (#679)
 
 Whitespace inside element text content IS significant and is preserved.
 
@@ -82,10 +86,28 @@ def canonicalize_xml(xml_bytes: bytes) -> bytes:
         tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser())
     except etree.XMLSyntaxError as exc:
         raise ParseError(f"malformed XML: {exc}") from exc
+    _drop_identity_rows(tree)
     try:
         return etree.tostring(tree, method="c14n")
     except etree.C14NError as exc:
         raise ParseError(f"cannot canonicalize XML: {exc}") from exc
+
+
+_IDENTITY_ROWS = etree.XPath(
+    '//dl[contains(concat(" ", normalize-space(@class), " "), " data-document-key-info ")]'
+    '/*[self::dt or self::dd][contains(concat(" ", normalize-space(@class), " "), " eli ")]'
+)
+
+
+def _drop_identity_rows(tree: etree._ElementTree) -> None:
+    found = _IDENTITY_ROWS(tree)
+    rows = (
+        [row for row in found if isinstance(row, etree._Element)] if isinstance(found, list) else []
+    )
+    for row in rows:
+        parent = row.getparent()
+        if parent is not None:
+            parent.remove(row)
 
 
 def hash_normalized_xml(xml_bytes: bytes) -> str:

@@ -234,3 +234,46 @@ def test_hash_normalized_xml_differs_for_different_content() -> None:
 def test_hash_normalized_xml_propagates_parse_error() -> None:
     with pytest.raises(ParseError):
         hash_normalized_xml(b"not xml")
+
+
+_HEADER = (
+    b'<html><head><title>T</title></head><body><header class="documentHeader">'
+    b'<dl class="data-document-key-info">'
+    b'<dt class="refid">RefID</dt><dd class="refid">lov/1949-07-08-13</dd>'
+    b"%s"
+    b'</dl></header><main class="documentBody"><p>%s</p></main></body></html>'
+)
+_ELI = (
+    b'<dt class="eli">European Legislative Identifier</dt>'
+    b'<dd class="eli">/eli/lov/1949/07/08/13</dd>'
+)
+
+
+def test_hash_ignores_the_eli_header_field_lovdata_added() -> None:
+    """Issue #679: Lovdata added the ELI row to every header on 2026-10-20;
+    a hash that saw it called all 5,886 documents changed and the sync timed out."""
+    before = _HEADER % (b"", b"Teksten.")
+    after = _HEADER % (_ELI, b"Teksten.")
+
+    assert hash_normalized_xml(after) == hash_normalized_xml(before)
+
+
+def test_hash_still_sees_a_content_change_next_to_the_eli_field() -> None:
+    before = _HEADER % (_ELI, b"Teksten.")
+    after = _HEADER % (_ELI, b"Endret tekst.")
+
+    assert hash_normalized_xml(after) != hash_normalized_xml(before)
+
+
+def test_hash_still_sees_a_change_in_another_header_field() -> None:
+    before = _HEADER % (_ELI, b"Teksten.")
+    after = before.replace(b"lov/1949-07-08-13</dd>", b"lov/1949-07-08-14</dd>")
+
+    assert hash_normalized_xml(after) != hash_normalized_xml(before)
+
+
+def test_hash_ignores_only_the_eli_class_not_classes_containing_it() -> None:
+    before = _HEADER % (b"", b"Teksten.")
+    after = _HEADER % (b'<dd class="delivery">x</dd>', b"Teksten.")
+
+    assert hash_normalized_xml(after) != hash_normalized_xml(before)
