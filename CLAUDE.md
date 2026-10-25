@@ -20,6 +20,7 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 - **Renderer must be deterministic.** Same XML input → byte-identical Markdown output. Tested.
 - **Hash is on normalized XML, never on rendered Markdown or HTML.** Change-detection invariant.
 - **Raw XML never to git.** Cache in `data/cache/` is gitignored. Conservative posture: avoid argument over Lovdata's editorial markup.
+- **The alert target is a secret.** `LOVSPOR_ALERT_WEBHOOK` (an ntfy topic, #671) lives only in the droplet's `/etc/lovspor/alert.env` (root 0600) and the owner's gitignored `.env`. On public ntfy the topic name is the only access control, and this repo is public: never write the URL or topic into a commit, PR, issue, doc, test fixture or CI log, and print its length, never its value, when verifying. A leaked topic is rotated: a new random one, both files updated, the owner re-subscribes.
 
 ## How I work in this project
 
