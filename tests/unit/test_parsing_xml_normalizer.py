@@ -429,3 +429,44 @@ def test_an_eli_row_outside_the_key_info_header_still_counts() -> None:
     after = before.replace(b"<p>Teksten.</p>", body_row + b"<p>Teksten.</p>")
 
     assert hash_normalized_xml(after) != hash_normalized_xml(before)
+
+
+@pytest.mark.parametrize("class_attribute", [b"", b' class=""'])
+@pytest.mark.parametrize("unclassified_element", ["container", "row"])
+def test_hash_preserves_unclassified_metadata(
+    class_attribute: bytes, unclassified_element: str
+) -> None:
+    container_class = b' class="data-document-key-info"'
+    row_class = b' class="eli"'
+    if unclassified_element == "container":
+        container_class = class_attribute
+    else:
+        row_class = class_attribute
+    template = b"<root><dl%s><dd%s>%%s</dd></dl></root>" % (container_class, row_class)
+
+    before = template % b"original"
+    after = template % b"changed"
+
+    assert b"original" in canonicalize_xml(before)
+    assert hash_normalized_xml(before) != hash_normalized_xml(after)
+
+
+def test_hash_preserves_nested_eli_rows_inside_non_identity_metadata() -> None:
+    """The exclusion selects direct dt/dd children, not arbitrary descendants."""
+    row = b'<dd class="notes"><dl><dd class="eli">%s</dd></dl></dd>'
+    before = _HEADER % (_ELI + row % b"original", b"Teksten.")
+    after = _HEADER % (_ELI + row % b"changed", b"Teksten.")
+
+    assert b'<dd class="eli">original</dd>' in canonicalize_xml(before)
+    assert hash_normalized_xml(before) != hash_normalized_xml(after)
+
+
+@pytest.mark.parametrize("invalid_content", [b"<unclosed>", b"\xff", b"&undefined;"])
+def test_identity_row_exclusion_does_not_hide_invalid_xml(invalid_content: bytes) -> None:
+    """Excluded metadata still goes through the normal well-formedness check."""
+    xml = _HEADER % (b'<dd class="eli">' + invalid_content + b"</dd>", b"Teksten.")
+
+    with pytest.raises(ParseError, match="malformed XML:"):
+        canonicalize_xml(xml)
+    with pytest.raises(ParseError, match="malformed XML:"):
+        hash_normalized_xml(xml)
