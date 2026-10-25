@@ -39,6 +39,7 @@ Required by ``CLAUDE.md``.
 
 import hashlib
 from io import BytesIO
+from typing import cast
 
 from lxml import etree
 
@@ -100,11 +101,8 @@ _IDENTITY_ROWS = etree.XPath(
 
 
 def _drop_identity_rows(tree: etree._ElementTree) -> None:
-    found = _IDENTITY_ROWS(tree)
-    rows = (
-        [row for row in found if isinstance(row, etree._Element)] if isinstance(found, list) else []
-    )
-    for row in rows:
+    # The expression selects dt/dd elements only, so the result is a list of elements.
+    for row in cast("list[etree._Element]", _IDENTITY_ROWS(tree)):
         parent = row.getparent()
         if parent is not None:
             parent.remove(row)
