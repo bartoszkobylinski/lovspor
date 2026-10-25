@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/parsing/xml_normalizer.py"
+symbol = "_classes"
+registered = "2026-10-25, PR #680, from run on 91e34ac8"
+mutation = """
+-    return str(element.get("class") or "").split()
++    return str(element.get("class") or "XXXX").split()
+"""
+justification = """
+`_classes` has exactly two callers, both in `_drop_identity_rows`, and both
+only test membership of a fixed constant: `_KEY_INFO_CLASS`
+("data-document-key-info") and `_IDENTITY_ROW_CLASS` ("eli"). For an element
+without a class attribute the original returns `[]` and the mutant `["XXXX"]`;
+neither list contains either constant, so every membership test, and so every
+removal decision and every hash, is identical. Python `str`/`list` semantics,
+no dependency.
+"""
