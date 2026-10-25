@@ -302,6 +302,29 @@ def test_canonicalize_drops_all_eli_rows_with_class_tokens(row_class: bytes) -> 
     assert canonicalize_xml(expected) == expected
 
 
+@pytest.mark.parametrize(
+    ("xml", "expected"),
+    [
+        (b"<root/>", b"<root></root>"),
+        (
+            b'<root><dl class="data-document-key-info"/></root>',
+            b'<root><dl class="data-document-key-info"></dl></root>',
+        ),
+        (
+            b'<root><dl class="data-document-key-info">'
+            b'<dt class="eli">ELI</dt><dd class="eli">identifier</dd>'
+            b'<dd class="title">Retained</dd></dl></root>',
+            b'<root><dl class="data-document-key-info"><dd class="title">Retained</dd></dl></root>',
+        ),
+    ],
+)
+def test_identity_row_selection_handles_empty_and_populated_results(
+    xml: bytes, expected: bytes
+) -> None:
+    """Real XPath results may be empty or contain multiple identity rows."""
+    assert canonicalize_xml(xml) == expected
+
+
 def test_hash_ignores_pretty_printed_eli_rows() -> None:
     before = _HEADER % (b"", b"Teksten.")
     after = _HEADER % (b"\n  " + _ELI.replace(b"><", b">\n  <") + b"\n", b"Teksten.")
