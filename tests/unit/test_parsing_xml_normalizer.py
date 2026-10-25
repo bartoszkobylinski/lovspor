@@ -289,6 +289,41 @@ def test_hash_still_sees_a_content_change_next_to_the_eli_field() -> None:
     assert hash_normalized_xml(after) != hash_normalized_xml(before)
 
 
+def test_hash_ignores_changes_to_existing_eli_row_text_and_link() -> None:
+    """The documented identity exclusion covers row updates as well as insertion."""
+    updated_eli = (
+        b'<dt class="eli">ELI</dt>'
+        b'<dd class="eli"><a href="https://lovdata.no/eli/lov/1949/07/08/13">'
+        b"European Legislative Identifier</a></dd>"
+    )
+    before = _HEADER % (_ELI, b"Teksten.")
+    after = _HEADER % (updated_eli, b"Teksten.")
+
+    assert canonicalize_xml(after) == canonicalize_xml(before)
+    assert hash_normalized_xml(after) == hash_normalized_xml(before)
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement"),
+    [
+        (b"Teksten.", b"Endret tekst."),
+        (b"lov/1949-07-08-13</dd>", b"lov/1949-07-08-14</dd>"),
+    ],
+    ids=["body-amendment", "other-header-field"],
+)
+def test_eli_rollout_does_not_mask_simultaneous_content_changes(
+    original: bytes, replacement: bytes
+) -> None:
+    """A real amendment during the #679 rollout must still trigger change detection."""
+    before = _HEADER % (b"", b"Teksten.")
+    amended_without_eli = before.replace(original, replacement)
+    amended_with_eli = (_HEADER % (_ELI, b"Teksten.")).replace(original, replacement)
+
+    assert canonicalize_xml(amended_with_eli) == canonicalize_xml(amended_without_eli)
+    assert hash_normalized_xml(amended_with_eli) == hash_normalized_xml(amended_without_eli)
+    assert hash_normalized_xml(amended_with_eli) != hash_normalized_xml(before)
+
+
 def test_hash_still_sees_a_change_in_another_header_field() -> None:
     before = _HEADER % (_ELI, b"Teksten.")
     after = before.replace(b"lov/1949-07-08-13</dd>", b"lov/1949-07-08-14</dd>")
