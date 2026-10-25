@@ -39,7 +39,6 @@ Required by ``CLAUDE.md``.
 
 import hashlib
 from io import BytesIO
-from typing import cast
 
 from lxml import etree
 
@@ -94,18 +93,22 @@ def canonicalize_xml(xml_bytes: bytes) -> bytes:
         raise ParseError(f"cannot canonicalize XML: {exc}") from exc
 
 
-_IDENTITY_ROWS = etree.XPath(
-    '//dl[contains(concat(" ", normalize-space(@class), " "), " data-document-key-info ")]'
-    '/*[self::dt or self::dd][contains(concat(" ", normalize-space(@class), " "), " eli ")]'
-)
+_KEY_INFO_CLASS = "data-document-key-info"
+_IDENTITY_ROW_TAGS = ("dt", "dd")
+_IDENTITY_ROW_CLASS = "eli"
+
+
+def _classes(element: etree._Element) -> list[str]:
+    return str(element.get("class") or "").split()
 
 
 def _drop_identity_rows(tree: etree._ElementTree) -> None:
-    # The expression selects dt/dd elements only, so the result is a list of elements.
-    for row in cast("list[etree._Element]", _IDENTITY_ROWS(tree)):
-        parent = row.getparent()
-        if parent is not None:
-            parent.remove(row)
+    for key_info in tree.iter("dl"):
+        if _KEY_INFO_CLASS not in _classes(key_info):
+            continue
+        for row in list(key_info):
+            if row.tag in _IDENTITY_ROW_TAGS and _IDENTITY_ROW_CLASS in _classes(row):
+                key_info.remove(row)
 
 
 def hash_normalized_xml(xml_bytes: bytes) -> str:
