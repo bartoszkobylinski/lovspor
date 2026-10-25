@@ -23,6 +23,13 @@ from lovspor.parsing.xml_normalizer import (
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 
 
+@pytest.mark.parametrize("xml", [b"<dd/>", b'<dd class=""/>', b'<dd class=" \t\n"/>'])
+def test_classes_returns_no_tokens_without_class_names(xml: bytes) -> None:
+    element = etree.fromstring(xml)
+
+    assert xml_normalizer._classes(element) == []
+
+
 def test_identity_removal_preserves_nested_content_and_content_hash() -> None:
     xml = (
         b'<lov><dl class="data-document-key-info">'
