@@ -23,6 +23,23 @@ from lovspor.parsing.xml_normalizer import (
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 
 
+def test_identity_removal_preserves_nested_content_and_content_hash() -> None:
+    xml = (
+        b'<lov><dl class="data-document-key-info">'
+        b'<dt class="eli"><span>ELI</span></dt>'
+        b'<dd class="eli"><a href="/eli/lov/2000/1">identifier</a></dd>'
+        b'<dd class="title"><strong>Law</strong></dd></dl>'
+        b"<p>Content <em>remains</em>.</p></lov>"
+    )
+    expected = (
+        b'<lov><dl class="data-document-key-info">'
+        b'<dd class="title"><strong>Law</strong></dd></dl>'
+        b"<p>Content <em>remains</em>.</p></lov>"
+    )
+    assert canonicalize_xml(xml) == expected
+    assert hash_normalized_xml(xml) == hash_normalized_xml(expected)
+
+
 def test_canonicalize_is_deterministic_across_calls() -> None:
     xml = b"<lov><paragraph>x</paragraph></lov>"
     assert canonicalize_xml(xml) == canonicalize_xml(xml)
