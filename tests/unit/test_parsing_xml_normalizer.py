@@ -413,3 +413,19 @@ def test_hash_preserves_eli_rows_under_non_dl_key_info_container(tag: bytes) -> 
     after = _HEADER % (_ELI, template % b"changed")
 
     assert hash_normalized_xml(after) != hash_normalized_xml(before)
+
+
+def test_hash_finds_the_key_info_header_after_another_definition_list() -> None:
+    other = b'<dl class="glossary"><dt>Ord</dt><dd>Forklaring</dd></dl>'
+    before = (_HEADER % (b"", b"Teksten.")).replace(b"<header", other + b"<header")
+    after = (_HEADER % (_ELI, b"Teksten.")).replace(b"<header", other + b"<header")
+
+    assert hash_normalized_xml(after) == hash_normalized_xml(before)
+
+
+def test_an_eli_row_outside_the_key_info_header_still_counts() -> None:
+    body_row = b'<dl class="glossary"><dt class="eli">ELI</dt><dd class="eli">/eli/x</dd></dl>'
+    before = _HEADER % (b"", b"Teksten.")
+    after = before.replace(b"<p>Teksten.</p>", body_row + b"<p>Teksten.</p>")
+
+    assert hash_normalized_xml(after) != hash_normalized_xml(before)
