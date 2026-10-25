@@ -362,3 +362,37 @@ def test_hash_preserves_non_identity_content_in_key_info(row: bytes) -> None:
     after = _HEADER % (row % b"changed", b"Teksten.")
 
     assert hash_normalized_xml(after) != hash_normalized_xml(before)
+
+
+@pytest.mark.parametrize("tag", [b"dt", b"dd"])
+def test_hash_ignores_an_individual_eli_row(tag: bytes) -> None:
+    """Each identity row is excluded independently of a matching partner."""
+    before = _HEADER % (b"", b"Teksten.")
+    row = b'<%s class="eli">identifier</%s>' % (tag, tag)
+
+    assert canonicalize_xml(_HEADER % (row, b"Teksten.")) == canonicalize_xml(before)
+    assert hash_normalized_xml(_HEADER % (row, b"Teksten.")) == hash_normalized_xml(before)
+
+
+def test_canonicalize_removes_eli_rows_from_every_key_info_list() -> None:
+    """Selection must not stop after the first matching metadata list."""
+    before = (
+        b'<root><dl class="data-document-key-info"><dd class="title">First</dd></dl>'
+        b'<dl class="data-document-key-info"><dd class="title">Second</dd></dl></root>'
+    )
+    after = before.replace(b"</dl>", _ELI + b"</dl>")
+
+    assert canonicalize_xml(after) == canonicalize_xml(before)
+    assert hash_normalized_xml(after) == hash_normalized_xml(before)
+
+
+@pytest.mark.parametrize("tag", [b"div", b"section"])
+def test_hash_preserves_eli_rows_under_non_dl_key_info_container(tag: bytes) -> None:
+    """A matching class alone does not make an element a key-info dl."""
+    template = (
+        b'<%s class="data-document-key-info"><dt class="eli">ELI</dt><dd class="eli">%%s</dd></%s>'
+    ) % (tag, tag)
+    before = _HEADER % (_ELI, template % b"original")
+    after = _HEADER % (_ELI, template % b"changed")
+
+    assert hash_normalized_xml(after) != hash_normalized_xml(before)
