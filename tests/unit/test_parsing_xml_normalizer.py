@@ -277,3 +277,65 @@ def test_hash_ignores_only_the_eli_class_not_classes_containing_it() -> None:
     after = _HEADER % (b'<dd class="delivery">x</dd>', b"Teksten.")
 
     assert hash_normalized_xml(after) != hash_normalized_xml(before)
+
+
+@pytest.mark.parametrize(
+    "row_class",
+    [b"eli", b"extra eli", b"eli extra", b" extra\teli\nother "],
+)
+def test_canonicalize_drops_all_eli_rows_with_class_tokens(row_class: bytes) -> None:
+    """The identity exclusion applies to both dt/dd and every matching row."""
+    rows = (
+        b'<dt class="%s">ELI</dt><dd class="%s"><a href="/eli/old">old</a></dd>'
+        b'<dt class="eli">ELI again</dt><dd class="eli">/eli/new</dd>'
+    ) % (row_class, row_class)
+    before = (_HEADER % (b"", b"Teksten.")).replace(
+        b'class="data-document-key-info"', b'class="extra data-document-key-info other"'
+    )
+    after = (_HEADER % (rows, b"Teksten.")).replace(
+        b'class="data-document-key-info"', b'class="extra data-document-key-info other"'
+    )
+
+    expected = canonicalize_xml(before)
+    assert canonicalize_xml(after) == expected
+    assert canonicalize_xml(after) == expected
+    assert canonicalize_xml(expected) == expected
+
+
+def test_hash_ignores_pretty_printed_eli_rows() -> None:
+    before = _HEADER % (b"", b"Teksten.")
+    after = _HEADER % (b"\n  " + _ELI.replace(b"><", b">\n  <") + b"\n", b"Teksten.")
+
+    assert canonicalize_xml(after) == canonicalize_xml(before)
+    assert hash_normalized_xml(after) == hash_normalized_xml(before)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b'<dl><dt class="eli">ELI</dt><dd class="eli">%s</dd></dl>',
+        b'<dl class="other-data-document-key-info"><dd class="eli">%s</dd></dl>',
+        b'<p class="eli">%s</p>',
+    ],
+)
+def test_hash_preserves_eli_content_outside_key_info_rows(content: bytes) -> None:
+    """Only the key-info identity rows are excluded, not arbitrary ELI content."""
+    before = _HEADER % (_ELI, content % b"original")
+    after = _HEADER % (_ELI, content % b"changed")
+
+    assert hash_normalized_xml(after) != hash_normalized_xml(before)
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        b'<div class="eli">%s</div>',
+        b'<dd class="refid"><span class="eli">%s</span></dd>',
+        b'<dd class="eli-other">%s</dd>',
+    ],
+)
+def test_hash_preserves_non_identity_content_in_key_info(row: bytes) -> None:
+    before = _HEADER % (row % b"original", b"Teksten.")
+    after = _HEADER % (row % b"changed", b"Teksten.")
+
+    assert hash_normalized_xml(after) != hash_normalized_xml(before)
