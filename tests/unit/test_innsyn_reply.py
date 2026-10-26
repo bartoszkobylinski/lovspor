@@ -154,6 +154,24 @@ class TestNarrowing:
 
 
 class TestOtherReplies:
+    @pytest.mark.parametrize(
+        ("first_kind", "last_kind"),
+        [("narrowing", "answer"), ("answer", "narrowing")],
+    )
+    def test_equal_reply_times_use_the_last_recorded_kind(
+        self, workspace: Path, letter: Path, first_kind: str, last_kind: str
+    ) -> None:
+        for kind in (first_kind, last_kind):
+            code, output = _reply(workspace, letter, NARROWED_AT, kind)
+            assert code == 0, output
+
+        state = _held(workspace)[SULDAL]
+        instant = datetime(2026, 10, 15, 9, 39, 49, tzinfo=UTC)
+        assert (state.replied_at, state.reply_kind) == (instant, last_kind)
+        assert state.narrowed_at == instant
+        rows = _rows(workspace, "requests")
+        assert rows[SULDAL][REPLIED_AT_COLUMN:] == [instant.isoformat(), last_kind]
+
     def test_backfilled_narrowing_moves_the_mark_but_preserves_the_latest_reply(
         self, workspace: Path, letter: Path
     ) -> None:
