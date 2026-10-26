@@ -108,6 +108,8 @@ class TestRecordReceivedLink:
         [
             (URL, "application/pdf; charset=binary", "application/pdf"),
             (URL, "application/octet-stream", "application/pdf"),
+            (URL, "text/html; charset=utf-8", "text/html"),
+            ("https://example.no/answer.PDF?token=42#page=1", "", "application/pdf"),
             ("https://einnsyn.no/api/document/42", "text/html; charset=utf-8", "text/html"),
             ("https://einnsyn.no/api/document/42.docx", "", DOCX),
         ],
@@ -135,6 +137,7 @@ class TestRefusals:
         ("status", "header", "content", "reason"),
         [
             (404, "text/html", b"<p>Not found</p>", "HTTP 404"),
+            (206, "application/pdf", PDF[:12], "HTTP 206"),
             (200, "application/pdf", b"", "is empty"),
             (200, "image/png", b"\x89PNG", "not a format the extractor reads"),
             (200, "application/octet-stream", b"bytes", "not a format the extractor reads"),
@@ -170,6 +173,18 @@ class TestRefusals:
         assert code == 1
         assert "could not fetch" in output
         assert _lines(workspace) == before
+
+    @pytest.mark.parametrize("error", [httpx.ReadTimeout, httpx.ReadError])
+    def test_an_interrupted_read_holds_no_document(
+        self, workspace: Path, httpx_mock: HTTPXMock, error: type[httpx.RequestError]
+    ) -> None:
+        httpx_mock.add_exception(error("interrupted response"), url=URL)
+        before = _lines(workspace)
+        code, output = _link(workspace)
+        assert code == 1
+        assert "could not fetch: interrupted response" in output
+        assert _lines(workspace) == before
+        assert not (workspace / "received").exists()
 
     def test_a_link_fetched_before_the_mail_arrived_is_refused(
         self, workspace: Path, httpx_mock: HTTPXMock
@@ -218,3 +233,36 @@ def test_a_linked_receipt_needs_both_url_and_fetch_time() -> None:
         DocumentReceived.model_validate(
             {**base, "fetched_at": datetime(2026, 10, 21, 16, 5, tzinfo=UTC)}
         )
+
+
+@pytest.mark.parametrize("fetched_at", ["2026-10-21T16:05:00", "2026-10-21T18:05:00+02:00"])
+def test_link_fetch_time_must_be_explicit_utc(fetched_at: str) -> None:
+    with pytest.raises(ValueError, match="UTC"):
+        DocumentReceived.model_validate(
+            {
+                "request_id": FJALER,
+                "recorded_at": ARRIVED,
+                "received_at": ARRIVED,
+                "sha256": hashlib.sha256(PDF).hexdigest(),
+                "content_type": "application/pdf",
+                "source_url": URL,
+                "fetched_at": fetched_at,
+            }
+        )
+
+
+def test_receipts_round_trip_with_legacy_attachments_and_simultaneous_link_fetch() -> None:
+    base = {
+        "request_id": FJALER,
+        "recorded_at": ARRIVED,
+        "received_at": ARRIVED,
+        "sha256": hashlib.sha256(PDF).hexdigest(),
+        "content_type": "application/pdf",
+    }
+    attachment = DocumentReceived.model_validate(base)
+    assert attachment.source_url is None
+    assert attachment.fetched_at is None
+    linked = DocumentReceived.model_validate({**base, "source_url": URL, "fetched_at": ARRIVED})
+    assert linked.fetched_at == linked.received_at
+    for receipt in (attachment, linked):
+        assert DocumentReceived.model_validate_json(receipt.model_dump_json()) == receipt
