@@ -14,6 +14,7 @@ import pytest
 
 from lovspor.innsyn.ledger import RequestState, ledger_journal, requests
 from lovspor.innsyn.workspace import InnsynWorkspace
+from tests.unit.cli_output import said
 from tests.unit.innsyn_support import FIXTURES, innsyn
 
 PILOT = FIXTURES / "pilot"
@@ -164,3 +165,24 @@ class TestRefusals:
         assert code == 1
         assert "no such file" in output
         assert _lines(workspace) == before
+
+
+class TestRefusalsNameTheirCause:
+    """Read through ``said``: the unit console is 20 columns wide (#295), so rich wraps."""
+
+    @pytest.mark.parametrize(
+        ("at", "reason"),
+        [
+            ("2026-10-15T09:39:49", "--at: give an offset or Z"),
+            ("yesterday", "--at: not an ISO-8601 instant: yesterday"),
+        ],
+    )
+    def test_a_bad_at_names_the_option_and_appends_nothing(
+        self, workspace: Path, letter: Path, at: str, reason: str
+    ) -> None:
+        journal = workspace / "requests.jsonl"
+        before = journal.read_bytes()
+        code, output = _reply(workspace, letter, at)
+        assert code == 2
+        assert said(reason, output)
+        assert journal.read_bytes() == before
