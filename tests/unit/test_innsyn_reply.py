@@ -63,6 +63,33 @@ def _reply(
 
 
 class TestNarrowing:
+    def test_narrowing_mark_uses_the_oslo_day_of_the_reply(
+        self, workspace: Path, letter: Path
+    ) -> None:
+        # Sunday in UTC, Monday in Oslo: the fifth working day is the next Monday.
+        assert _reply(workspace, letter, "2026-10-18T22:30:00Z")[0] == 0
+        state = _held(workspace)[SULDAL]
+        assert state.klage_mark == date(2026, 10, 26)
+        assert not state.is_due(date(2026, 10, 26))
+        assert state.is_due(date(2026, 10, 27))
+
+    def test_message_digest_covers_exact_bytes_without_retaining_the_text(
+        self, workspace: Path, letter: Path
+    ) -> None:
+        payload = b"Subject: Re: Innsyn\r\n\r\nVi avgrensar kravet: \xc3\xa6\r\n"
+        letter.write_bytes(payload)
+        assert _reply(workspace, letter, NARROWED_AT)[0] == 0
+        event = ledger_journal(InnsynWorkspace(workspace, [])).records()[-1]
+        assert event.model_dump(mode="json") == {
+            "event": "reply",
+            "request_id": SULDAL,
+            "recorded_at": event.recorded_at.isoformat().replace("+00:00", "Z"),
+            "source": "cli",
+            "reply_sent_at": NARROWED_AT,
+            "kind": "narrowing",
+            "letter_sha256": hashlib.sha256(payload).hexdigest(),
+        }
+
     def test_a_narrowing_is_recorded_with_the_letter_as_sent(
         self, workspace: Path, letter: Path
     ) -> None:
@@ -127,6 +154,24 @@ class TestNarrowing:
 
 
 class TestOtherReplies:
+    def test_backfilled_narrowing_moves_the_mark_but_preserves_the_latest_reply(
+        self, workspace: Path, letter: Path
+    ) -> None:
+        before = _held(workspace)[SULDAL]
+        assert _reply(workspace, letter, "2026-10-20T08:00:00Z", "answer")[0] == 0
+        assert _reply(workspace, letter, NARROWED_AT)[0] == 0
+        state = _held(workspace)[SULDAL]
+        assert (state.replied_at, state.reply_kind) == (
+            datetime(2026, 10, 20, 8, tzinfo=UTC),
+            "answer",
+        )
+        assert state.narrowed_at == datetime(2026, 10, 15, 9, 39, 49, tzinfo=UTC)
+        assert state.klage_mark == date(2026, 10, 22)
+        assert state.answered_at == before.answered_at
+        assert state.outcome == before.outcome
+        assert state.klage_sent_at == before.klage_sent_at
+        assert state.is_due(date(2026, 10, 23))
+
     @pytest.mark.parametrize("kind", ["answer", "other"])
     def test_an_answer_or_other_reply_moves_nothing(
         self, workspace: Path, letter: Path, kind: str
