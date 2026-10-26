@@ -1974,8 +1974,9 @@ $I received                               # every document; requested ids still 
   `record-received` would an attachment, and records the URL as delivered and when it
   was read (`fetched_at`), with `--at` still the arrival of the mail carrying the link.
   `received` shows the URL in its last column; an attachment's is empty. The format is
-  the server's Content-Type, or the link's suffix when the server declares a generic
-  one; a link that is not answered 200, comes back empty, or is not PDF, HTML or DOCX
+  the server's Content-Type, or the link's suffix when the server declares none or a
+  generic `application/octet-stream`; a declared type the extractor cannot read (a PNG
+  from a `.pdf` link) is believed, and the link refused; a link that is not answered 200, comes back empty, or is not PDF, HTML or DOCX
   is refused and nothing is held. One command per link: a link the engine cannot read
   (a login page, a viewer that needs a browser) is a finding to file, not a file to
   record by hand.

@@ -31,6 +31,8 @@ MEDIA_TYPES: dict[str, ReceivedMediaType] = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 _BY_HEADER: dict[str, ReceivedMediaType] = {value: value for value in MEDIA_TYPES.values()}
+#: A Content-Type that says nothing about the document: the link's suffix is read instead.
+_GENERIC = frozenset({"", "application/octet-stream"})
 LINK_TIMEOUT_SECONDS = 60.0
 _HTTP_OK = 200
 
@@ -67,7 +69,10 @@ def link_client() -> httpx.Client:
 
 
 def _link_media_type(url: str, header: str) -> ReceivedMediaType:
-    """The header's type when the extractor reads it, else the URL's suffix.
+    """The header's type when the extractor reads it; the URL's suffix when it says nothing.
+
+    A server that names a type the extractor cannot read is believed: a PNG
+    served from a ``.pdf`` link is not a PDF.
 
     Raises: InnsynRefusedError: neither names PDF, HTML or DOCX.
     """
@@ -75,7 +80,7 @@ def _link_media_type(url: str, header: str) -> ReceivedMediaType:
     if declared in _BY_HEADER:
         return _BY_HEADER[declared]
     suffix = Path(urlsplit(url).path).suffix.lower()
-    if suffix in MEDIA_TYPES:
+    if declared in _GENERIC and suffix in MEDIA_TYPES:
         return MEDIA_TYPES[suffix]
     raise InnsynRefusedError(
         f"{url}: {declared or 'no content type'} is not a format the extractor reads "

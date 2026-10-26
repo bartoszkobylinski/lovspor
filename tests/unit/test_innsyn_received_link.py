@@ -215,6 +215,18 @@ class TestRefusals:
         assert said(reason, result.output)
         assert _lines(workspace) == before
 
+    @pytest.mark.parametrize("header", ["image/png", "application/zip; charset=binary"])
+    def test_a_declared_type_the_extractor_cannot_read_is_believed_over_the_suffix(
+        self, workspace: Path, httpx_mock: HTTPXMock, header: str
+    ) -> None:
+        httpx_mock.add_response(url=URL, content=b"not a pdf", headers={"content-type": header})
+        before = _lines(workspace)
+        code, output = _link(workspace)
+        assert code == 1
+        assert f"{header.partition(';')[0]} is not a format the extractor reads" in output
+        assert _lines(workspace) == before
+        assert not (workspace / "received").exists()
+
     def test_a_link_that_does_not_answer_is_refused(
         self, workspace: Path, httpx_mock: HTTPXMock
     ) -> None:
