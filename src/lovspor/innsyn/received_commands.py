@@ -6,6 +6,7 @@ A document delivered as a link is a third (#688): the engine reads it.
 """
 
 import hashlib
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -41,10 +42,9 @@ def _receipt(request: str, fields: dict[str, object]) -> DocumentReceived:
         raise refuse(exc) from exc
 
 
-def _held(payload: bytes, content_type: ReceivedMediaType, at: str) -> dict[str, object]:
+def _held(payload: bytes, content_type: ReceivedMediaType, at: datetime) -> dict[str, object]:
     sha256 = hashlib.sha256(payload).hexdigest()
-    received_at = instant(at, "--at")
-    return {"received_at": received_at, "sha256": sha256, "content_type": content_type}
+    return {"received_at": at, "sha256": sha256, "content_type": content_type}
 
 
 @innsyn_app.command("record-received")
@@ -58,9 +58,10 @@ def record_received_command(
     The file name is not kept. Formats: PDF, HTML, DOCX.
     """
     target = workspace()
+    received_at = instant(at, "--at")
     content_type = guarded(lambda: media_type(file))
     payload = guarded(lambda: read_document(file))
-    event = _receipt(request, _held(payload, content_type, at))
+    event = _receipt(request, _held(payload, content_type, received_at))
     guarded(lambda: record_received(target, event, payload))
     typer.echo(f"{request}: document {event.sha256} received")
 
@@ -78,10 +79,11 @@ def record_received_link(
     link's suffix.
     """
     target = workspace()
+    received_at = instant(at, "--at")
     with link_client() as client:
         payload, content_type = guarded(lambda: fetch_document(client, url))
     link = {"source_url": url, "fetched_at": now()}
-    event = _receipt(request, {**_held(payload, content_type, at), **link})
+    event = _receipt(request, {**_held(payload, content_type, received_at), **link})
     guarded(lambda: record_received(target, event, payload))
     typer.echo(f"{request}: document {event.sha256} received from {url}")
 

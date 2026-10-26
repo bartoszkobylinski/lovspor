@@ -15,8 +15,9 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from lovspor.innsyn.ledger import DocumentReceived, RequestState, ledger_journal, requests
-from lovspor.innsyn.received import blob_path
+from lovspor.innsyn.received import blob_path, link_client
 from lovspor.innsyn.workspace import InnsynWorkspace
+from tests.unit.cli_output import said
 from tests.unit.innsyn_support import FIXTURES, innsyn
 
 PILOT = FIXTURES / "pilot"
@@ -111,6 +112,7 @@ class TestRecordReceivedLink:
             (URL, "text/html; charset=utf-8", "text/html"),
             ("https://example.no/answer.PDF?token=42#page=1", "", "application/pdf"),
             ("https://einnsyn.no/api/document/42", "text/html; charset=utf-8", "text/html"),
+            ("https://einnsyn.no/api/document/42", "application/pdf", "application/pdf"),
             ("https://einnsyn.no/api/document/42.docx", "", DOCX),
         ],
     )
@@ -121,6 +123,12 @@ class TestRecordReceivedLink:
         httpx_mock.add_response(url=url, content=PDF, headers=headers)
         assert _link(workspace, url)[0] == 0
         assert _held(workspace)[FJALER].documents[0].content_type == expected
+
+    def test_the_client_times_out_follows_redirects_and_names_lovspor(self) -> None:
+        with link_client() as client:
+            assert client.timeout == httpx.Timeout(60.0)
+            assert client.follow_redirects
+            assert client.headers["User-Agent"].startswith("lovspor/")
 
     def test_a_redirect_is_followed_and_the_url_as_delivered_is_kept(
         self, workspace: Path, httpx_mock: HTTPXMock
@@ -163,6 +171,49 @@ class TestRefusals:
         assert reason in output
         assert _lines(workspace) == before
         assert not (workspace / "received").exists()
+
+    @pytest.mark.parametrize(
+        ("headers", "named"),
+        [
+            ({"content-type": "image/png"}, "image/png"),
+            (
+                {"content-type": "Application/Octet-Stream; charset=binary"},
+                "application/octet-stream",
+            ),
+            ({}, "no content type"),
+        ],
+    )
+    def test_the_refusal_names_the_declared_type_or_its_absence(
+        self, workspace: Path, httpx_mock: HTTPXMock, headers: dict[str, str], named: str
+    ) -> None:
+        url = "https://einnsyn.no/api/document/42"
+        httpx_mock.add_response(url=url, content=b"bytes", headers=headers)
+        code, output = _link(workspace, url)
+        assert code == 1
+        assert (
+            f"Refused: {url}: {named} is not a format the extractor reads (PDF, HTML, DOCX)"
+            in output
+        )
+
+    @pytest.mark.parametrize(
+        ("command", "at", "reason"),
+        [
+            ("record-received-link", "2026-10-21T16:01:12", "--at: give an offset or Z"),
+            ("record-received", "yesterday", "--at: not an ISO-8601 instant: yesterday"),
+        ],
+    )
+    def test_a_bad_at_names_the_option_before_anything_is_read(
+        self, workspace: Path, tmp_path: Path, command: str, at: str, reason: str
+    ) -> None:
+        """No transport is mocked here: a bad --at is refused before the link is read."""
+        path = tmp_path / "attachment.pdf"
+        path.write_bytes(PDF)
+        source = ("--url", URL) if command == "record-received-link" else ("--file", str(path))
+        before = _lines(workspace)
+        result = innsyn(workspace, command, "--request", FJALER, *source, "--at", at)
+        assert result.exit_code == 2
+        assert said(reason, result.output)
+        assert _lines(workspace) == before
 
     def test_a_link_that_does_not_answer_is_refused(
         self, workspace: Path, httpx_mock: HTTPXMock

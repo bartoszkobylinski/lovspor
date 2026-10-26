@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/innsyn/received.py"
+symbol = "fetch_document"
+registered = "2026-10-26, PR #692, from the mutation artifact at commit d1396a1f"
+mutation = """
+-    return response.content, _link_media_type(url, response.headers.get("content-type", ""))
++    return response.content, _link_media_type(url, response.headers.get("CONTENT-TYPE", ""))
+"""
+justification = """
+An httpx `Headers` lookup lower-cases the requested name before reading, so
+`get("CONTENT-TYPE", "")` and `get("content-type", "")` return the one stored
+Content-Type value, or the same default when the server sent none; the media
+type chosen downstream is identical for every response. Argued from the
+dependency, hence pinned; the same entry exists for site.probe._rpc_result.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_httpx_header_lookup_is_case_insensitive"
