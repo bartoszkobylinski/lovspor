@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/innsyn/received.py"
+symbol = "link_client"
+registered = "2026-10-26, PR #692, from the mutation artifact at commit d1396a1f"
+mutation = """
+-        headers={"User-Agent": DEFAULT_USER_AGENT},
++        headers={"user-agent": DEFAULT_USER_AGENT},
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 §5.1), and httpx's `Headers`
+resolves any spelling of a request header's name to the same value, so the
+server, the transport and every assertion a test can make on the recorded
+request see one User-Agent whatever the case of its name. Only the raw bytes
+differ, and no conforming peer may read a meaning into them. Argued from the
+protocol and the dependency, hence pinned; the same entry exists for
+observatory.fetch._load and survey_probe._body.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"

@@ -1822,6 +1822,7 @@ $I due                                    # past the mark with no answer and no 
 
 # 6. The documents an answer carried (#509 point 5).
 $I record-received --request 4646-20261005T074425Z --file <attachment.pdf> --at <UTC>
+$I record-received-link --request 3207-20261021T160112Z --url <link as delivered> --at <UTC>
 $I classify-received --request 4646-20261005T074425Z --document <sha256> \
    --kind regulation_text --answers 2009-02-16-306
 $I received                               # every document; requested ids still without a text
@@ -1977,6 +1978,18 @@ $I received                               # every document; requested ids still 
   classification replaces an earlier one. `received` lists every document and, per
   request, how many requested ids no received regulation text answers yet. A kommune
   that sent some texts and said nothing of the rest is not saying the rest do not exist.
+- **Documents delivered as links (#688).** An authority that answers with links (Nordre
+  Follo: 47 opengov links; Akershus: eInnsyn links) delivers all the same.
+  `record-received-link --url <link> --at <UTC>` reads the link once, holds the bytes as
+  `record-received` would an attachment, and records the URL as delivered and when it
+  was read (`fetched_at`), with `--at` still the arrival of the mail carrying the link.
+  `received` shows the URL in its last column; an attachment's is empty. The format is
+  the server's Content-Type, or the link's suffix when the server declares none or a
+  generic `application/octet-stream`; a declared type the extractor cannot read (a PNG
+  from a `.pdf` link) is believed, and the link refused; a link that is not answered 200, comes back empty, or is not PDF, HTML or DOCX
+  is refused and nothing is held. One command per link: a link the engine cannot read
+  (a login page, a viewer that needs a browser) is a finding to file, not a file to
+  record by hand.
 - **Pilot import.** `import-pilot` reads `sent.csv` with the letters as sent
   (`innsyn-<id>.txt` beside it, or `--letters`). The ids come from the letter, and a row
   whose letter lists a different number of ids is refused. The outcome class is the

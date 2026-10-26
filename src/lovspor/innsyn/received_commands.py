@@ -2,6 +2,7 @@
 
 Two commands rather than one: receiving is a fact read off the mail, while
 classifying is the operator's reading of the document, which can be revised.
+A document delivered as a link is a third (#688): the engine reads it.
 """
 
 import hashlib
@@ -21,13 +22,18 @@ from lovspor.innsyn.ledger import (
     requests,
 )
 from lovspor.innsyn.ledger_commands import Request, record_event
-from lovspor.innsyn.received import media_type, read_document, record_received
+from lovspor.innsyn.received import (
+    fetch_document,
+    link_client,
+    media_type,
+    read_document,
+    record_received,
+)
+
+_Arrived = Annotated[str, typer.Option("--at", help="When the mail carrying it arrived (UTC).")]
 
 
-def _receipt(
-    request: str, sha256: str, content_type: ReceivedMediaType, received_at: datetime
-) -> DocumentReceived:
-    fields = {"received_at": received_at, "sha256": sha256, "content_type": content_type}
+def _receipt(request: str, fields: dict[str, object]) -> DocumentReceived:
     try:
         return DocumentReceived.model_validate(
             {"request_id": request, "recorded_at": now(), **fields}
@@ -36,23 +42,50 @@ def _receipt(
         raise refuse(exc) from exc
 
 
+def _held(payload: bytes, content_type: ReceivedMediaType, at: datetime) -> dict[str, object]:
+    sha256 = hashlib.sha256(payload).hexdigest()
+    return {"received_at": at, "sha256": sha256, "content_type": content_type}
+
+
 @innsyn_app.command("record-received")
 def record_received_command(
     request: Request,
     file: Annotated[Path, typer.Option("--file", help="The document as the authority sent it.")],
-    at: Annotated[str, typer.Option("--at", help="When the mail carrying it arrived (UTC).")],
+    at: _Arrived,
 ) -> None:
     """Hold a document the authority sent, by content, and record when it arrived.
 
     The file name is not kept. Formats: PDF, HTML, DOCX.
     """
     target = workspace()
+    received_at = instant(at, "--at")
     content_type = guarded(lambda: media_type(file))
     payload = guarded(lambda: read_document(file))
-    sha256 = hashlib.sha256(payload).hexdigest()
-    event = _receipt(request, sha256, content_type, instant(at, "--at"))
+    event = _receipt(request, _held(payload, content_type, received_at))
     guarded(lambda: record_received(target, event, payload))
-    typer.echo(f"{request}: document {sha256} received")
+    typer.echo(f"{request}: document {event.sha256} received")
+
+
+@innsyn_app.command("record-received-link")
+def record_received_link(
+    request: Request,
+    url: Annotated[str, typer.Option("--url", help="The link as the authority delivered it.")],
+    at: _Arrived,
+) -> None:
+    """Read a document the authority delivered as a link, hold it, and record both.
+
+    The bytes are held as an attachment's would be; the ledger keeps the URL and
+    when it was read. Formats: PDF, HTML, DOCX, by the server's Content-Type or the
+    link's suffix.
+    """
+    target = workspace()
+    received_at = instant(at, "--at")
+    with link_client() as client:
+        payload, content_type = guarded(lambda: fetch_document(client, url))
+    link = {"source_url": url, "fetched_at": now()}
+    event = _receipt(request, {**_held(payload, content_type, received_at), **link})
+    guarded(lambda: record_received(target, event, payload))
+    typer.echo(f"{request}: document {event.sha256} received from {url}")
 
 
 @innsyn_app.command("classify-received")
@@ -82,6 +115,7 @@ def _rows(state: RequestState) -> list[str]:
             document.content_type,
             document.kind or "unclassified",
             answers,
+            document.source_url or "",
         )
         rows.append("\t".join(fields))
     return rows
@@ -92,7 +126,8 @@ def list_received() -> None:
     """List every received document, tab-separated.
 
     Columns: request, received_at, sha256, media type, kind (or unclassified),
-    the requested LF id it answers (or unrequested). On stderr, per request
+    the requested LF id it answers (or unrequested), the URL it was delivered as
+    (empty for an attachment). On stderr, per request
     with documents: the requested ids no received regulation text answers.
     """
     held = [s for s in guarded(lambda: requests(workspace())).values() if s.documents]

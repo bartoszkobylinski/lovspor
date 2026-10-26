@@ -31,7 +31,10 @@ request, recorded by its own command:
   it now stands, so the § 32 mark runs from the latest narrowing.
 * ``document_received`` — a document the authority sent, by SHA-256 and media
   type, with when it arrived; the file itself is held by
-  :mod:`lovspor.innsyn.received`, and its name is not kept.
+  :mod:`lovspor.innsyn.received`, and its name is not kept. A document the
+  authority delivered as a link (#688) also carries the ``source_url`` as
+  delivered and ``fetched_at``, when the engine read it; ``received_at`` is
+  still when the mail carrying the link arrived.
 * ``document_classified`` — what the operator read the document to be, and
   which requested LF id it answers, if any. A later classification replaces
   an earlier one; a document never classified is not yet evidence of anything.
@@ -112,7 +115,8 @@ DSN_STATUS_PATTERN = r"^5\.\d{1,3}\.\d{1,3}$"
 REQUEST_ID_PATTERN = r"^(?:\d{2}|\d{4})-\d{8}T\d{6}Z$"
 MESSAGE_ID_PATTERN = r"^<[^<>@\s]+@[^<>@\s]+>$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
-_FORM_PAGE_PATTERN = r"^https?://\S+$"
+_URL_PATTERN = r"^https?://\S+$"
+_FORM_PAGE_PATTERN = _URL_PATTERN
 _LfId = Annotated[str, Field(pattern=LF_ID_PATTERN)]
 Source = Literal["cli", "pilot-import"]
 
@@ -254,11 +258,26 @@ class DocumentReceived(_Event):
     received_at: datetime
     sha256: str = Field(pattern=_SHA256_PATTERN)
     content_type: ReceivedMediaType
+    source_url: str | None = Field(default=None, pattern=_URL_PATTERN)
+    fetched_at: datetime | None = None
 
     @field_validator("received_at")
     @classmethod
     def _utc(cls, value: datetime) -> datetime:
         return require_utc(value)
+
+    @field_validator("fetched_at")
+    @classmethod
+    def _utc_fetched(cls, value: datetime | None) -> datetime | None:
+        return _utc_or_none(value)
+
+    @model_validator(mode="after")
+    def _link(self) -> "DocumentReceived":
+        if (self.source_url is None) != (self.fetched_at is None):
+            raise ValueError("a linked document carries its URL and when it was fetched, both")
+        if self.fetched_at is not None and self.fetched_at < self.received_at:
+            raise ValueError("a link is fetched after the mail carrying it arrived")
+        return self
 
 
 class DocumentClassified(_Event):
@@ -301,6 +320,7 @@ class ReceivedDocument(BaseModel):
     sha256: str
     content_type: ReceivedMediaType
     received_at: datetime
+    source_url: str | None = None
     kind: DocumentKind | None = None
     answers: str | None = None
 
@@ -408,9 +428,8 @@ def _reply(state: RequestState, event: ReplySent) -> RequestState:
 
 
 def _receive(state: RequestState, event: DocumentReceived) -> RequestState:
-    document = ReceivedDocument(
-        sha256=event.sha256, content_type=event.content_type, received_at=event.received_at
-    )
+    received = event.model_dump(include={"sha256", "content_type", "received_at", "source_url"})
+    document = ReceivedDocument.model_validate(received)
     return state.model_copy(update={"documents": (*state.documents, document)})
 
 

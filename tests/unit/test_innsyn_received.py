@@ -207,7 +207,7 @@ class TestListing:
         _receive(workspace, document)
         result = innsyn(workspace, "received")
         assert result.exit_code == 0, result.output
-        assert result.stdout.endswith("\tapplication/pdf\tunclassified\t\n")
+        assert result.stdout.endswith("\tapplication/pdf\tunclassified\t\t\n")
         assert "1 documents, 1 unclassified" in result.stderr
 
     def test_requested_ids_without_a_received_text_are_counted(
