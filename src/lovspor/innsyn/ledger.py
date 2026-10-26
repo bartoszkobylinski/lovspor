@@ -23,6 +23,12 @@ request, recorded by its own command:
 * ``reminder`` — a påminning was sent (offentleglova § 29 første ledd), with
   the SHA-256 of the letter as sent. It is not a klage, so the request stays
   due; ``due`` shows the latest one.
+* ``reply`` — the owner wrote back to the authority in the request's thread
+  (#686): a ``narrowing`` of the request after the authority asked for one
+  under offentleglova § 28 andre ledd, an ``answer`` to a question it put, or
+  ``other``; with when it was sent and the SHA-256 of the message as sent.
+  ``requests`` and ``due`` show the latest one. A narrowing is the request as
+  it now stands, so the § 32 mark runs from the latest narrowing.
 * ``document_received`` — a document the authority sent, by SHA-256 and media
   type, with when it arrived; the file itself is held by
   :mod:`lovspor.innsyn.received`, and its name is not kept.
@@ -37,8 +43,8 @@ request, recorded by its own command:
   once its recipient is no longer the address that failed.
 
 The § 32 andre ledd mark is computed, never stored: five working days after
-the Oslo day of ``sent_at``. Free-text notes are not kept: they name case
-officers, and personopplysningsloven asks for the minimum.
+the Oslo day of ``sent_at``, or of the latest narrowing. Free-text notes are not
+kept: they name case officers, and personopplysningsloven asks for the minimum.
 """
 
 import re
@@ -98,6 +104,8 @@ ReceivedMediaType = Literal[
 ]
 
 UndeliveredReason = Literal["bounced", "mailbox_closed"]
+ReplyKind = Literal["narrowing", "answer", "other"]
+REPLY_KINDS: tuple[ReplyKind, ...] = ("narrowing", "answer", "other")
 #: An RFC 3463 permanent-failure status: a transient 4.x.x is not undelivered yet.
 DSN_STATUS_PATTERN = r"^5\.\d{1,3}\.\d{1,3}$"
 
@@ -229,6 +237,18 @@ class ReminderSent(_Event):
         return require_utc(value)
 
 
+class ReplySent(_Event):
+    event: Literal["reply"] = "reply"
+    reply_sent_at: datetime
+    kind: ReplyKind
+    letter_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator("reply_sent_at")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        return require_utc(value)
+
+
 class DocumentReceived(_Event):
     event: Literal["document_received"] = "document_received"
     received_at: datetime
@@ -291,6 +311,7 @@ _Transition = (
     | Outcome
     | KlageSent
     | ReminderSent
+    | ReplySent
     | DocumentReceived
     | DocumentClassified
     | Undelivered
@@ -312,6 +333,9 @@ class RequestState(BaseModel):
     refusal_basis: str | None = None
     klage_sent_at: datetime | None = None
     reminded_at: datetime | None = None
+    replied_at: datetime | None = None
+    reply_kind: ReplyKind | None = None
+    narrowed_at: datetime | None = None
     documents: tuple[ReceivedDocument, ...] = ()
     undelivered: UndeliveredReason | None = None
 
@@ -327,7 +351,8 @@ class RequestState(BaseModel):
 
     @property
     def klage_mark(self) -> date:
-        return klage_mark(self.sent.sent_at)
+        """From the latest narrowing when there is one: that is the request as it stands."""
+        return klage_mark(self.narrowed_at or self.sent.sent_at)
 
     @property
     def is_open(self) -> bool:
@@ -370,6 +395,18 @@ def _remind(state: RequestState, event: ReminderSent) -> RequestState:
     return state.model_copy(update={"reminded_at": latest})
 
 
+def _reply(state: RequestState, event: ReplySent) -> RequestState:
+    update: dict[str, object] = {}
+    if state.replied_at is None or event.reply_sent_at >= state.replied_at:
+        update = {"replied_at": event.reply_sent_at, "reply_kind": event.kind}
+    if event.kind == "narrowing":
+        latest = event.reply_sent_at
+        if state.narrowed_at is not None:
+            latest = max(latest, state.narrowed_at)
+        update["narrowed_at"] = latest
+    return state.model_copy(update=update)
+
+
 def _receive(state: RequestState, event: DocumentReceived) -> RequestState:
     document = ReceivedDocument(
         sha256=event.sha256, content_type=event.content_type, received_at=event.received_at
@@ -408,6 +445,7 @@ _APPLY: dict[type[_Event], _Updater] = {
     Outcome: _answer,
     DocumentReceived: _receive,
     ReminderSent: _remind,
+    ReplySent: _reply,
     DocumentClassified: _classify,
     **dict.fromkeys(_SETS, _set),
 }
@@ -439,6 +477,8 @@ def _moment(event: LedgerEvent) -> datetime | None:
         return event.klage_sent_at
     if isinstance(event, ReminderSent):
         return event.reminder_sent_at
+    if isinstance(event, ReplySent):
+        return event.reply_sent_at
     if isinstance(event, DocumentReceived):
         return event.received_at
     return event.at if isinstance(event, Outcome | Undelivered) else None

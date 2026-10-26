@@ -1813,6 +1813,7 @@ $I record-case-number --request 4646-20261005T074425Z --number 2026/2348
 $I record-outcome --request 4646-20261005T074425Z --outcome partial --at <UTC> [--refusal-basis "…"]
 $I record-klage --request 4646-20261005T074425Z --at <UTC>
 $I record-reminder --request 4646-20261005T074425Z --at <UTC> --letter <reminder.txt>
+$I record-reply --request 1520-20261019T064500Z --at <UTC> --kind narrowing --letter <reply.txt>
 $I record-follow-up --parent 0301-20261005T074343Z --letter <follow-up.txt> --sent-at <UTC> [--message-id '<…>']
 $I record-bounce --request 4646-20261005T074425Z --at <UTC> --evidence <dsn.eml> --status 5.4.1
 $I record-mailbox-closed --request 4646-20261005T074425Z --at <UTC> --evidence <auto-reply.eml>
@@ -1903,6 +1904,15 @@ $I received                               # every document; requested ids still 
   A reminder is not a klage: the request stays on `due`, which shows the latest reminder
   in the column after `undelivered`, so a klage is not sent on a request reminded two
   days ago without the operator seeing it.
+- **Replies to the authority (#686).** When the owner writes back in a request's thread,
+  `record-reply` records it with the SHA-256 of the message as sent (`--letter`) and its
+  kind: `narrowing`, when the authority asked for a nærare avgrensing under offentleglova
+  § 28 andre ledd (Ørsta, Hareid, Sande, Ørland, 2026-10) and the owner narrowed the
+  request; `answer`, to a question the authority put; or `other`. `requests` and `due`
+  show the latest reply and its kind in the last two columns. A narrowing is the request
+  as it now stands, so its § 32 mark runs from the latest narrowing, and a request
+  narrowed today leaves `due` until five working days have passed. An answer or other
+  reply moves nothing. The text is not kept: it can quote the case officer's mail.
 - **Follow-up requests (#625).** After a referral, a new request to another body of the
   same authority (Oslo's Byrådet after `referred_to_lovdata`) is recorded with
   `record-follow-up --parent <request>`. It is a request of its own, with its own id,

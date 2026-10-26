@@ -1,4 +1,5 @@
-"""What became of a letter on its way: it never arrived (#644), or it was chased (#625).
+"""What became of a letter on its way: it never arrived (#644), it was chased (#625),
+or the owner wrote back in its thread (#686).
 
 A bounce and a mailbox closed to e-mail are two commands rather than one with
 a ``--reason``, because only a bounce carries a DSN status. Either takes the
@@ -13,6 +14,7 @@ from typing import Annotated
 import typer
 
 from lovspor.innsyn.app import guarded, innsyn_app, instant
+from lovspor.innsyn.ledger import REPLY_KINDS
 from lovspor.innsyn.ledger_commands import Request, record_event
 from lovspor.innsyn.received import read_document
 
@@ -59,3 +61,19 @@ def record_reminder(
     """Record a reminder (offentleglova § 29 første ledd); the request stays due."""
     fields = {"reminder_sent_at": instant(at, "--at"), "letter_sha256": _digest(letter)}
     record_event(request, "reminder", fields)
+
+
+@innsyn_app.command("record-reply")
+def record_reply(
+    request: Request,
+    at: Annotated[str, typer.Option("--at", help="When the reply was sent (UTC).")],
+    kind: Annotated[str, typer.Option("--kind", help=" | ".join(REPLY_KINDS))],
+    letter: Annotated[Path, typer.Option("--letter", help="The reply as sent.")],
+) -> None:
+    """Record the owner's reply to the authority in the request's thread.
+
+    A narrowing (offentleglova § 28 andre ledd) is the request as it now stands:
+    the § 32 mark runs from it. An answer to a question, or any other reply, moves nothing.
+    """
+    fields = {"reply_sent_at": instant(at, "--at"), "kind": kind}
+    record_event(request, "reply", {**fields, "letter_sha256": _digest(letter)})

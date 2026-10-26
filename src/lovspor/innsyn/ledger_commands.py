@@ -127,9 +127,10 @@ def _row(state: RequestState) -> str:
 
 
 def _since_sent(state: RequestState) -> tuple[str, ...]:
-    """The columns of what became of the letter beyond an answer (#644, #625)."""
+    """The columns of what became of the letter beyond an answer (#644, #625, #686)."""
     sent = state.sent
-    return (_text(state.undelivered), _text(state.reminded_at), _text(sent.follows), sent.channel)
+    since = (_text(state.undelivered), _text(state.reminded_at), _text(sent.follows))
+    return (*since, sent.channel, _text(state.replied_at), _text(state.reply_kind))
 
 
 @innsyn_app.command("requests")
@@ -139,7 +140,8 @@ def list_requests() -> None:
     Columns: request, authority, recipient, sent_at, LF ids, general clause,
     saksnummer, acknowledged_at, answered_at, outcome, § 32 mark, klage_sent_at,
     Message-ID, undelivered (bounced or mailbox_closed), last reminder sent, the request a
-    follow-up follows, channel (email, webform or edialog).
+    follow-up follows, channel (email, webform or edialog), last reply sent and its kind
+    (narrowing, answer or other).
     """
     held = guarded(lambda: requests(workspace()))
     for state in held.values():
