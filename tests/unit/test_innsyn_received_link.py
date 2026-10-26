@@ -329,3 +329,76 @@ def test_receipts_round_trip_with_legacy_attachments_and_simultaneous_link_fetch
     assert linked.fetched_at == linked.received_at
     for receipt in (attachment, linked):
         assert DocumentReceived.model_validate_json(receipt.model_dump_json()) == receipt
+
+
+@pytest.mark.parametrize(
+    ("url", "header", "expected"),
+    [
+        ("https://example.no/answer", DOCX, DOCX),
+        ("https://example.no/answer.pdf", " Text/HTML ; charset=UTF-8", "text/html"),
+        ("https://example.no/answer.HTML?download=1", "", "text/html"),
+        ("https://example.no/answer.HTM#text", "application/octet-stream", "text/html"),
+        (
+            "https://example.no/answer.DOCX?download=1",
+            "Application/Octet-Stream; charset=binary",
+            DOCX,
+        ),
+    ],
+)
+def test_html_and_docx_links_use_the_declared_type_or_generic_suffix(
+    workspace: Path, httpx_mock: HTTPXMock, url: str, header: str, expected: str
+) -> None:
+    """operations.md: PDF, HTML and DOCX use Content-Type, else the link suffix."""
+    payload = b"synthetic document bytes\r\n\x00\xff"
+    httpx_mock.add_response(url=url, content=payload, headers={"content-type": header})
+    code, output = _link(workspace, url)
+    assert code == 0, output
+    (document,) = _held(workspace)[FJALER].documents
+    assert document.content_type == expected
+    assert document.source_url == url
+    assert document.sha256 == hashlib.sha256(payload).hexdigest()
+    assert blob_path(InnsynWorkspace(workspace, []), document.sha256).read_bytes() == payload
+
+
+def test_changed_bytes_at_the_same_url_are_held_as_distinct_documents(
+    workspace: Path, httpx_mock: HTTPXMock
+) -> None:
+    """Linked documents are held by content, just as attachments are (received.py)."""
+    payloads = (PDF, PDF + b"\nrevised text")
+    for payload in payloads:
+        httpx_mock.add_response(
+            url=URL, content=payload, headers={"content-type": "application/pdf"}
+        )
+        code, output = _link(workspace)
+        assert code == 0, output
+    documents = _held(workspace)[FJALER].documents
+    assert [document.sha256 for document in documents] == [
+        hashlib.sha256(payload).hexdigest() for payload in payloads
+    ]
+    assert [document.source_url for document in documents] == [URL, URL]
+    assert [
+        blob_path(InnsynWorkspace(workspace, []), document.sha256).read_bytes()
+        for document in documents
+    ] == list(payloads)
+    assert len(httpx_mock.get_requests()) == 2
+
+
+def test_a_failed_later_fetch_preserves_the_existing_receipt_and_blob(
+    workspace: Path, httpx_mock: HTTPXMock
+) -> None:
+    """operations.md: a non-200 link is refused and nothing is held."""
+    httpx_mock.add_response(url=URL, content=PDF, headers={"content-type": "application/pdf"})
+    code, output = _link(workspace)
+    assert code == 0, output
+    journal = workspace / "requests.jsonl"
+    before = journal.read_bytes()
+    documents = _held(workspace)[FJALER].documents
+    httpx_mock.add_response(url=URL, status_code=503, content=b"temporary failure")
+    code, output = _link(workspace)
+    assert code == 1
+    assert "HTTP 503" in output
+    assert journal.read_bytes() == before
+    assert _held(workspace)[FJALER].documents == documents
+    blobs = [path for path in (workspace / "received").rglob("*") if path.is_file()]
+    assert blobs == [blob_path(InnsynWorkspace(workspace, []), hashlib.sha256(PDF).hexdigest())]
+    assert blobs[0].read_bytes() == PDF
