@@ -20,7 +20,14 @@ from lovspor.innsyn.population import Authority
 from lovspor.innsyn.sender import Sender
 from lovspor.innsyn.waves import read_manifest
 from lovspor.innsyn.workspace import InnsynWorkspace
-from tests.unit.innsyn_support import innsyn, letters_workspace, lf_entry, ok, sample_lf_ledger
+from tests.unit.innsyn_support import (
+    innsyn,
+    letters_workspace,
+    lf_entry,
+    ok,
+    sample_lf_ledger,
+    set_recipient,
+)
 
 OSLO, FJALER = "0301", "4646"
 
@@ -153,6 +160,14 @@ class TestAnsweredAuthorities:
         _, manifest_next = _wave(workspace, tmp_path / "next", lf_ledger)
         assert manifest_next["skipped_closed"] == []
         assert OSLO in manifest_next["unresolved"]
+        set_recipient(workspace, OSLO, "new-postmottak@example.no")
+        out = tmp_path / "retry"
+        _, retry = _wave(workspace, out, lf_ledger)
+        entry = _entries(retry)[OSLO]
+        assert entry["general_clause"] is True
+        assert entry["lf_ids"] == ["2019-03-20-400"]
+        text = (out / f"{OSLO}.txt").read_text(encoding="utf-8")
+        assert "Andre lokale forskrifter" in text
 
 
 @pytest.mark.parametrize("kind", ["LF", "LTII", "forskrift"])
