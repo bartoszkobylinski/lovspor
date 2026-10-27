@@ -17,8 +17,11 @@ request, recorded by its own command:
 * ``acknowledged`` — the authority's receipt, automatic or not.
 * ``case_number`` — the authority's saksnummer, quoted in every later mail.
 * ``outcome`` — one of :data:`OUTCOMES`, with the time it arrived and, for a
-  refusal or partial answer, the stated basis. An interim reply without a
-  date, or a recorded ``no_answer``, is not an answer.
+  refusal or partial answer, the stated basis. An interim reply, with or
+  without a date, or a recorded ``no_answer``, is not an answer. An interim
+  reply that names a date (#689) carries it as ``promised_by``, the Oslo day
+  the authority promised to answer by: until that day has passed the request
+  is not due, after it the authority has missed its own date.
 * ``klage`` — a complaint was sent.
 * ``reminder`` — a påminning was sent (offentleglova § 29 første ledd), with
   the SHA-256 of the letter as sent. It is not a klage, so the request stays
@@ -61,7 +64,7 @@ from lovspor.errors import InnsynRefusedError
 from lovspor.innsyn.directory import MAILBOX_PATTERN, Channel
 from lovspor.innsyn.journal import Journal
 from lovspor.innsyn.population import AUTHORITY_ID_PATTERN
-from lovspor.innsyn.workdays import klage_mark
+from lovspor.innsyn.workdays import OSLO, klage_mark
 from lovspor.innsyn.workspace import InnsynWorkspace
 from lovspor.observatory.fields import TrimmedNonBlankStr
 from lovspor.observatory.lf_refs import LF_ID_PATTERN
@@ -70,6 +73,7 @@ from lovspor.observatory.model import require_utc
 OutcomeClass = Literal[
     "referred_to_lovdata",
     "interim_reply_no_date",
+    "interim_reply_with_date",
     "partial",
     "full",
     "refused",
@@ -78,6 +82,7 @@ OutcomeClass = Literal[
 OUTCOMES: tuple[OutcomeClass, ...] = (
     "referred_to_lovdata",
     "interim_reply_no_date",
+    "interim_reply_with_date",
     "partial",
     "full",
     "refused",
@@ -88,6 +93,8 @@ ANSWERS = frozenset({"referred_to_lovdata", "partial", "full", "refused"})
 #: An outcome after which the request is closed; any other leaves it open.
 CLOSING = frozenset({"full", "refused"})
 _WITH_BASIS = frozenset({"partial", "refused"})
+#: The one outcome that names the day the authority promised to answer by.
+WITH_DATE: OutcomeClass = "interim_reply_with_date"
 
 DocumentKind = Literal["regulation_text", "vedtak", "minutes", "cover_letter", "other"]
 DOCUMENT_KINDS: tuple[DocumentKind, ...] = (
@@ -205,6 +212,7 @@ class Outcome(_Event):
     outcome: OutcomeClass
     at: datetime | None
     refusal_basis: TrimmedNonBlankStr | None = None
+    promised_by: date | None = None
 
     @field_validator("at")
     @classmethod
@@ -217,6 +225,17 @@ class Outcome(_Event):
             raise ValueError("a refusal basis belongs to a refused or partial outcome")
         if self.at is None and self.source != "pilot-import":
             raise ValueError("an outcome recorded now says when it arrived")
+        return self
+
+    @model_validator(mode="after")
+    def _promise(self) -> "Outcome":
+        if self.outcome == WITH_DATE and self.promised_by is None:
+            raise ValueError("an interim reply with a date says the day it promised")
+        if self.outcome != WITH_DATE and self.promised_by is not None:
+            raise ValueError("only an interim reply with a date promises a day")
+        replied = None if self.at is None else self.at.astimezone(OSLO).date()
+        if self.promised_by is not None and replied is not None and self.promised_by < replied:
+            raise ValueError("the promised day is before the reply that promised it")
         return self
 
 
@@ -351,6 +370,7 @@ class RequestState(BaseModel):
     answered_at: datetime | None = None
     outcome: OutcomeClass | None = None
     refusal_basis: str | None = None
+    promised_by: date | None = None
     klage_sent_at: datetime | None = None
     reminded_at: datetime | None = None
     replied_at: datetime | None = None
@@ -382,13 +402,21 @@ class RequestState(BaseModel):
     def answered(self) -> bool:
         return self.answered_at is not None or self.outcome in ANSWERS
 
+    @property
+    def due_from(self) -> date:
+        """The last day to wait: the § 32 mark, or the day the authority promised if later."""
+        if self.promised_by is None:
+            return self.klage_mark
+        return max(self.klage_mark, self.promised_by)
+
     def is_due(self, today: date) -> bool:
-        """Past the § 32 mark with no answer and no klage: a klage candidate.
+        """Past the § 32 mark, and past any day the authority promised, with no answer
+        and no klage: a klage candidate.
 
         A letter that never arrived started no clock.
         """
         waiting = self.delivered and not self.answered and self.klage_sent_at is None
-        return waiting and today > self.klage_mark
+        return waiting and today > self.due_from
 
 
 def parse_event(data: dict[str, object]) -> LedgerEvent:
@@ -404,8 +432,9 @@ def _answer(state: RequestState, event: Outcome) -> RequestState:
     answered = state.answered_at
     if answered is None and event.outcome in ANSWERS:
         answered = event.at
-    update = {"outcome": event.outcome, "answered_at": answered}
-    return state.model_copy(update={**update, "refusal_basis": event.refusal_basis})
+    update: dict[str, object] = {"outcome": event.outcome, "answered_at": answered}
+    update |= {"refusal_basis": event.refusal_basis, "promised_by": event.promised_by}
+    return state.model_copy(update=update)
 
 
 def _remind(state: RequestState, event: ReminderSent) -> RequestState:

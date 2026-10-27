@@ -137,8 +137,9 @@ class TestNarrowing:
         ):
             assert _reply(workspace, letter, at, kind)[0] == 0
         rows = _rows(workspace, "requests")
-        assert rows[SULDAL][REPLIED_AT_COLUMN:] == ["2026-10-20T08:00:00+00:00", "answer"]
-        assert rows[ROROS][REPLIED_AT_COLUMN:] == ["", ""]
+        reply = slice(REPLIED_AT_COLUMN, KIND_COLUMN + 1)
+        assert rows[SULDAL][reply] == ["2026-10-20T08:00:00+00:00", "answer"]
+        assert rows[ROROS][reply] == ["", ""]
         state = _held(workspace)[SULDAL]
         assert state.narrowed_at == datetime(2026, 10, 15, 9, 39, 49, tzinfo=UTC)
         assert state.klage_mark == date(2026, 10, 22)
@@ -170,7 +171,8 @@ class TestOtherReplies:
         assert (state.replied_at, state.reply_kind) == (instant, last_kind)
         assert state.narrowed_at == instant
         rows = _rows(workspace, "requests")
-        assert rows[SULDAL][REPLIED_AT_COLUMN:] == [instant.isoformat(), last_kind]
+        reply = slice(REPLIED_AT_COLUMN, KIND_COLUMN + 1)
+        assert rows[SULDAL][reply] == [instant.isoformat(), last_kind]
 
     def test_backfilled_narrowing_moves_the_mark_but_preserves_the_latest_reply(
         self, workspace: Path, letter: Path
