@@ -124,6 +124,16 @@ class TestRefusals:
         _interim(workspace, "2026-10-08")
         assert _held(workspace)[ROROS].promised_by == date(2026, 10, 8)
 
+    def test_record_interim_without_the_day_is_a_usage_error_that_writes_nothing(
+        self, workspace: Path
+    ) -> None:
+        journal = InnsynWorkspace(workspace, []).requests_log
+        before = journal.read_bytes()
+        result = innsyn(workspace, "record-interim", "--request", ROROS, "--at", REPLY_AT)
+        assert result.exit_code == 2, result.output
+        assert said("Missing option '--promised-by'", result.output)
+        assert journal.read_bytes() == before
+
     def test_a_malformed_day_is_a_usage_error(self, workspace: Path) -> None:
         args = ("--request", ROROS, "--at", REPLY_AT, "--promised-by", "22.11.2026")
         result = innsyn(workspace, "record-interim", *args)
