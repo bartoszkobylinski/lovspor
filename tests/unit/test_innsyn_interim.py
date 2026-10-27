@@ -83,6 +83,21 @@ class TestPromisedDay:
         _interim(workspace, "2026-11-22", at="2026-10-20T10:00:00Z")
         assert _held(workspace)[ROROS].promised_by == date(2026, 11, 22)
 
+    def test_a_replacement_promise_can_move_the_deadline_earlier(self, workspace: Path) -> None:
+        _interim(workspace, "2026-11-22")
+        _interim(workspace, "2026-10-25", at="2026-10-20T10:00:00Z")
+        roros = _held(workspace)[ROROS]
+        assert roros.promised_by == date(2026, 10, 25)
+        assert not roros.is_due(date(2026, 10, 25))
+        assert roros.is_due(date(2026, 10, 26))
+
+    def test_due_shows_the_promised_day_as_the_last_column(self, workspace: Path) -> None:
+        _interim(workspace, "2026-11-22")
+        result = innsyn(workspace, "due", "--today", "2026-11-23")
+        assert result.exit_code == 0, result.output
+        rows = {row.split("\t")[0]: row.split("\t") for row in result.stdout.splitlines()}
+        assert rows[ROROS][-1] == "2026-11-22"
+
     def test_an_answer_after_the_promise_drops_it(self, workspace: Path) -> None:
         _interim(workspace, "2026-11-22")
         closing = ("--request", ROROS, "--outcome", "full", "--at", "2026-11-10T10:00:00Z")
@@ -104,6 +119,40 @@ class TestPromisedDay:
 
 
 class TestRefusals:
+    @pytest.mark.parametrize(
+        ("at", "promised_by", "accepted"),
+        [
+            ("2026-10-24T21:59:59Z", "2026-10-24", True),
+            ("2026-10-24T22:00:00Z", "2026-10-24", False),
+            ("2026-10-24T22:00:00Z", "2026-10-25", True),
+            ("2026-10-25T22:59:59Z", "2026-10-25", True),
+            ("2026-10-25T23:00:00Z", "2026-10-25", False),
+            ("2026-10-25T23:00:00Z", "2026-10-26", True),
+        ],
+    )
+    def test_promise_validation_uses_the_oslo_reply_day_across_dst(
+        self, workspace: Path, at: str, promised_by: str, accepted: bool
+    ) -> None:
+        journal = InnsynWorkspace(workspace, []).requests_log
+        before = journal.read_bytes()
+        result = innsyn(
+            workspace,
+            "record-interim",
+            "--request",
+            ROROS,
+            "--at",
+            at,
+            "--promised-by",
+            promised_by,
+        )
+        if accepted:
+            assert result.exit_code == 0, result.output
+            assert _held(workspace)[ROROS].promised_by == date.fromisoformat(promised_by)
+        else:
+            assert result.exit_code == 1, result.output
+            assert "the promised day is before the reply that promised it" in result.stderr
+            assert journal.read_bytes() == before
+
     def test_record_outcome_cannot_record_the_dated_class_without_its_day(
         self, workspace: Path
     ) -> None:
