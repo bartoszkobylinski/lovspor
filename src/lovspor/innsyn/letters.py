@@ -18,7 +18,7 @@ the specific one with it. The general point is phrased as cases of one kind
 invites narrowing rather than a refusal. Electronic copies: § 30 første ledd.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from lovspor.innsyn.directory import Channel, Maalform
 from lovspor.innsyn.population import Authority
@@ -38,7 +38,16 @@ class LetterRequest(BaseModel):
     channel: Channel = "email"
     maalform: Maalform
     lf_ids: tuple[str, ...]
+    #: False for a letter that asks for its ids alone (#696): the authority has
+    #: already answered the general point, so it is not put again.
+    general_clause: bool = True
     sender: Sender
+
+    @model_validator(mode="after")
+    def _asks_for_something(self) -> "LetterRequest":
+        if not self.lf_ids and not self.general_clause:
+            raise ValueError("a letter asks for known ids, the general point, or both")
+        return self
 
 
 class Letter(BaseModel):
@@ -93,6 +102,10 @@ _NB = {
         "teksten slik den ble oversendt til kunngjøring i Norsk Lovtidend. Teksten på Lovdata er "
         "Lovdatas redaksjonelle gjengivelse; jeg trenger kildedokumentene fra {owns} arkiv."
     ),
+    "again": (
+        "Kravet kommer i tillegg til mitt tidligere innsynskrav til {the} og gjelder bare "
+        "forskriftene nedenfor."
+    ),
     "known_head": "1. Forskrifter med kjent nummer",
     "known": (
         "Forskriftene nedenfor er oppgitt med Lovdata-/Lovtidend-nummer (dato og nummer), slik de "
@@ -146,6 +159,10 @@ _NN = {
         "teksten slik han vart send til kunngjering i Norsk Lovtidend. Teksten på Lovdata er "
         "Lovdata si redaksjonelle attgjeving; eg treng kjeldedokumenta frå arkivet til {the}."
     ),
+    "again": (
+        "Kravet kjem i tillegg til mitt tidlegare innsynskrav til {the} og gjeld berre "
+        "forskriftene nedanfor."
+    ),
     "known_head": "1. Forskrifter med kjent nummer",
     "known": (
         "Forskriftene nedanfor er oppgitt med Lovdata-/Lovtidend-nummer (dato og nummer), slik "
@@ -190,7 +207,9 @@ _SUBJECT = "Innsynskrav etter offentleglova \N{EN DASH} lokale forskrifter i {na
 
 def _intro(phrases: dict[str, str], request: LetterRequest) -> list[str]:
     first = phrases["intro"]
-    if request.lf_ids:
+    if not request.general_clause:
+        first = f"{first} {phrases['again']}"
+    elif request.lf_ids:
         first = f"{first} {phrases['two']}"
     return [first, phrases["archive"]]
 
@@ -200,6 +219,8 @@ def _points(phrases: dict[str, str], request: LetterRequest) -> list[str]:
         return [phrases["general_head_alone"], phrases["general_alone"], phrases["overview"]]
     ids = "\n".join(id_line(lf_id) for lf_id in request.lf_ids)
     known = [phrases["known_head"], phrases["known"], ids]
+    if not request.general_clause:
+        return known
     return [*known, phrases["general_head_after"], phrases["general_after"], phrases["overview"]]
 
 

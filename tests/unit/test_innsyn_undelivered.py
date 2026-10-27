@@ -284,4 +284,7 @@ def test_an_undelivered_request_does_not_hide_what_later_requests_asked(
     _recipient(target, "post@fjaler.kommune.no")
     wave = _wave(target, lf_ledger, tmp_path / "wave-02")
     ids = {letter["authority_id"]: letter["lf_ids"] for letter in wave["letters"]}
-    assert ids == {"4646": ["2024-09-19-2196"], "1134": []}
+    # Fjaler's bounced letter asked for nothing, so its id is asked again; Suldal
+    # answered in full and has nothing new, so it gets no letter (#696).
+    assert ids == {"4646": ["2024-09-19-2196"]}
+    assert wave["skipped_closed"] == ["1134"]

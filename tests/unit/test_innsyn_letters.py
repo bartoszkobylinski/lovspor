@@ -7,7 +7,6 @@ must, and can each letter be recorded as sent with what it asked for?
 
 import hashlib
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -16,77 +15,27 @@ from pytest_httpx import HTTPXMock
 from lovspor.innsyn.ledger import requests
 from lovspor.innsyn.waves import Manifest, read_manifest
 from lovspor.innsyn.workspace import InnsynWorkspace
-from lovspor.observatory.lf_ledger import LedgerEntry
-from tests.unit.innsyn_support import fetched, innsyn
+from tests.unit.innsyn_support import (
+    fetched,
+    innsyn,
+    letters_workspace,
+    lf_entry,
+    ok,
+    sample_lf_ledger,
+)
 
-PAGE = "https://www.example.kommune.no/forskrifter"
-
-
-def _set(workspace: Path, command: str, *args: str) -> None:
-    result = innsyn(workspace, command, *args)
-    assert result.exit_code == 0, result.output
-
-
-def _recipient(workspace: Path, authority_id: str, address: str) -> None:
-    _set(
-        workspace,
-        "set-recipient",
-        "--id",
-        authority_id,
-        "--address",
-        address,
-        "--evidence-url",
-        PAGE,
-        "--read-at",
-        "2026-10-03T10:00:00Z",
-    )
-
-
-def _entry(authority_id: str, lf_id: str, kind: str = "LF") -> str:
-    return LedgerEntry(
-        authority_id=authority_id,
-        lf_id=lf_id,
-        kind=kind,  # type: ignore[arg-type]
-        first_seen=datetime(2026, 10, 1, tzinfo=UTC),
-        url=PAGE,
-        sha256="a" * 64,
-    ).model_dump_json()
+_set = ok
+_entry = lf_entry
 
 
 @pytest.fixture
 def lf_ledger(tmp_path: Path) -> Path:
-    path = tmp_path / "lf-ledger.jsonl"
-    lines = [
-        _entry("4646", "2024-09-19-2196"),
-        _entry("4646", "2009-02-16-306", "LTII"),
-        _entry("4646", "2022-12-15-2677"),
-        _entry("4646", "2020-01-01-1", "forskrift"),
-        _entry("0301", "2019-03-20-400"),
-    ]
-    path.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
-    return path
+    return sample_lf_ledger(tmp_path / "lf-ledger.jsonl")
 
 
 @pytest.fixture
 def workspace(tmp_path: Path, httpx_mock: HTTPXMock) -> Path:
-    target = fetched(tmp_path / "innsyn", httpx_mock)
-    _set(target, "set-sender", "--name", "Test Requester", "--email", "kontakt@example.no")
-    _recipient(target, "4646", "postmottak@fjaler.kommune.no")
-    _recipient(target, "0301", "postmottak@oslobystyre.no")
-    _recipient(target, "46", "post@vlfk.no")
-    _set(
-        target,
-        "set-maalform",
-        "--id",
-        "4646",
-        "--form",
-        "nn",
-        "--evidence-url",
-        PAGE,
-        "--read-at",
-        "2026-10-03T10:00:00Z",
-    )
-    return target
+    return letters_workspace(tmp_path / "innsyn", httpx_mock)
 
 
 def _wave(workspace: Path, out: Path, lf_ledger: Path, *extra: str) -> dict[str, object]:
@@ -143,12 +92,12 @@ class TestWave:
         before = (workspace / "requests.jsonl").read_bytes()
         manifest = _wave(workspace, tmp_path / "next", lf_ledger)
         letters = _letters(manifest)
-        assert list(letters) == (["4646", "0301", "46"] if closed else ["4646", "46"])
+        # #696: an authority that answered the general request and has nothing new
+        # to ask for is not written to again; an open one is still skipped.
+        assert list(letters) == ["4646", "46"]
         assert manifest["skipped_open"] == ([] if closed else ["0301"])
+        assert manifest["skipped_closed"] == (["0301"] if closed else [])
         assert manifest["remaining"] == 0
-        if closed:
-            assert letters["0301"]["lf_ids"] == []
-            assert letters["0301"]["general_clause"] is True
         assert (workspace / "requests.jsonl").read_bytes() == before
 
     def test_known_ids_are_distinct_and_belong_to_each_authority(
@@ -305,8 +254,10 @@ class TestWave:
         request = "0301-20261013T080000Z"
         closing = ("--outcome", "full", "--at", "2026-10-15T08:00:00Z")
         _set(workspace, "record-outcome", "--request", request, *closing)
+        with lf_ledger.open("a", encoding="utf-8") as handle:
+            handle.write(_entry("0301", "2025-06-12-900") + "\n")
         again = _wave(workspace, tmp_path / "two", lf_ledger)
-        assert _letters(again)["0301"]["lf_ids"] == []
+        assert _letters(again)["0301"]["lf_ids"] == ["2025-06-12-900"]
 
 
 class TestLetterText:

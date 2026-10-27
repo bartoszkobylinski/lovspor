@@ -317,7 +317,7 @@ def test_unresolved_letter_refuses_with_authority() -> None:
         sender=Sender(name="Åse", email="ase@example.no", recorded_at=MOMENT),
     )
     with pytest.raises(InnsynRefusedError, match="4646 has no recorded recipient"):
-        _letter(inputs, authority, ())
+        _letter(inputs, authority, (), True)
 
 
 def _register(tmp_path: Path, fields: dict[str, str]) -> Path:
