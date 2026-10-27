@@ -114,6 +114,9 @@ class TestRecordReceivedLink:
             ("https://einnsyn.no/api/document/42", "text/html; charset=utf-8", "text/html"),
             ("https://einnsyn.no/api/document/42", "application/pdf", "application/pdf"),
             ("https://einnsyn.no/api/document/42.docx", "", DOCX),
+            ("https://einnsyn.no/api/document/42", "image/tiff", "image/tiff"),
+            ("https://example.no/arkiv/Forskrift.TIF", "application/octet-stream", "image/tiff"),
+            ("https://example.no/arkiv/kart.jpg", "", "image/jpeg"),
         ],
     )
     def test_the_format_is_the_header_or_else_the_suffix(
@@ -147,8 +150,8 @@ class TestRefusals:
             (404, "text/html", b"<p>Not found</p>", "HTTP 404"),
             (206, "application/pdf", PDF[:12], "HTTP 206"),
             (200, "application/pdf", b"", "is empty"),
-            (200, "image/png", b"\x89PNG", "not a format the extractor reads"),
-            (200, "application/octet-stream", b"bytes", "not a format the extractor reads"),
+            (200, "image/gif", b"GIF89a", "not a format the ledger holds"),
+            (200, "application/octet-stream", b"bytes", "not a format the ledger holds"),
         ],
     )
     def test_a_link_the_engine_cannot_hold_is_refused_and_nothing_is_held(
@@ -175,7 +178,7 @@ class TestRefusals:
     @pytest.mark.parametrize(
         ("headers", "named"),
         [
-            ({"content-type": "image/png"}, "image/png"),
+            ({"content-type": "image/gif"}, "image/gif"),
             (
                 {"content-type": "Application/Octet-Stream; charset=binary"},
                 "application/octet-stream",
@@ -191,8 +194,8 @@ class TestRefusals:
         code, output = _link(workspace, url)
         assert code == 1
         assert (
-            f"Refused: {url}: {named} is not a format the extractor reads (PDF, HTML, DOCX)"
-            in output
+            f"Refused: {url}: {named} is not a format the ledger holds "
+            "(PDF, HTML, DOCX, TIFF, JPEG, PNG)" in output
         )
 
     @pytest.mark.parametrize(
@@ -215,15 +218,15 @@ class TestRefusals:
         assert said(reason, result.output)
         assert _lines(workspace) == before
 
-    @pytest.mark.parametrize("header", ["image/png", "application/zip; charset=binary"])
-    def test_a_declared_type_the_extractor_cannot_read_is_believed_over_the_suffix(
+    @pytest.mark.parametrize("header", ["image/gif", "application/zip; charset=binary"])
+    def test_a_declared_type_the_ledger_does_not_hold_is_believed_over_the_suffix(
         self, workspace: Path, httpx_mock: HTTPXMock, header: str
     ) -> None:
         httpx_mock.add_response(url=URL, content=b"not a pdf", headers={"content-type": header})
         before = _lines(workspace)
         code, output = _link(workspace)
         assert code == 1
-        assert f"{header.partition(';')[0]} is not a format the extractor reads" in output
+        assert f"{header.partition(';')[0]} is not a format the ledger holds" in output
         assert _lines(workspace) == before
         assert not (workspace / "received").exists()
 

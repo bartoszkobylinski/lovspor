@@ -115,6 +115,11 @@ class TestRecordReceived:
                 "a.docx",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ),
+            ("Forskrift.TIF", "image/tiff"),
+            ("scan.tiff", "image/tiff"),
+            ("kart.jpg", "image/jpeg"),
+            ("kart.JPEG", "image/jpeg"),
+            ("kart.png", "image/png"),
         ],
     )
     def test_the_media_type_is_read_from_the_suffix(
@@ -125,14 +130,14 @@ class TestRecordReceived:
         _receive(workspace, path)
         assert _held(workspace)[FJALER].documents[0].content_type == media_type
 
-    @pytest.mark.parametrize("name", ["a.doc", "a.odt", "a"])
-    def test_a_format_the_extractor_cannot_read_is_refused(
+    @pytest.mark.parametrize("name", ["a.doc", "a.odt", "a.gif", "a.zip", "a"])
+    def test_a_format_the_ledger_does_not_hold_is_refused(
         self, workspace: Path, tmp_path: Path, name: str
     ) -> None:
         path = tmp_path / name
         path.write_bytes(b"x")
         out = _receive(workspace, path)
-        assert "not a format the extractor reads" in out
+        assert f"{name}: not a format the ledger holds (PDF, HTML, DOCX, TIFF, JPEG, PNG)" in out
         assert _held(workspace)[FJALER].documents == ()
 
     def test_a_missing_or_empty_file_is_refused(self, workspace: Path, tmp_path: Path) -> None:
