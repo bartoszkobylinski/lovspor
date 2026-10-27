@@ -1,5 +1,6 @@
 """Scanned archive documents and maps arrive as images (#691): held, never read."""
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -100,3 +101,66 @@ class TestNoTextIsRead:
         assert isinstance(result, HeldExtraction)
         assert result.reason is ExtractionHoldReason.UNSUPPORTED_FORMAT
         assert media_type in result.detail
+
+
+@pytest.mark.parametrize(
+    ("suffix", "header", "expected"),
+    [
+        (".pdf", " Image/JPEG; charset=binary", "image/jpeg"),
+        ("", "image/png", "image/png"),
+        (".TIFF", "application/octet-stream", "image/tiff"),
+        (".JPEG", "", "image/jpeg"),
+        (".PNG", "application/octet-stream", "image/png"),
+    ],
+)
+def test_linked_images_preserve_bytes_and_round_trip_the_media_type(
+    workspace: Path, httpx_mock: HTTPXMock, suffix: str, header: str, expected: str
+) -> None:
+    """received.py: images are held by content; the declared type precedes the suffix."""
+    url = f"https://example.no/archive/scan{suffix}?download=1"
+    payload = b"\x89PNG\r\n\x1a\n\x00\xff synthetic scan\r\n"
+    headers = {"content-type": header} if header else {}
+    httpx_mock.add_response(url=url, content=payload, headers=headers)
+    result = innsyn(
+        workspace, "record-received-link", "--request", FJALER, "--url", url, "--at", ARRIVED
+    )
+    assert result.exit_code == 0, result.output
+    (document,) = _held(workspace)[FJALER].documents
+    assert document.content_type == expected
+    assert document.source_url == url
+    assert document.sha256 == hashlib.sha256(payload).hexdigest()
+    assert blob_path(InnsynWorkspace(workspace, []), document.sha256).read_bytes() == payload
+    assert len(httpx_mock.get_requests()) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "header", "payload", "reason"),
+    [
+        (200, "image/png", b"", "the document is empty"),
+        (206, "image/png", b"partial scan", "HTTP 206"),
+        (200, "image/gif", b"GIF89a", "image/gif is not a format the ledger holds"),
+    ],
+)
+def test_refused_image_links_leave_no_receipt_or_blob(
+    workspace: Path,
+    httpx_mock: HTTPXMock,
+    status: int,
+    header: str,
+    payload: bytes,
+    reason: str,
+) -> None:
+    """fetch_document requires a nonempty 200 response and believes an unsupported type."""
+    url = "https://example.no/archive/scan.png"
+    journal = workspace / "requests.jsonl"
+    before = journal.read_bytes()
+    httpx_mock.add_response(
+        url=url, status_code=status, content=payload, headers={"content-type": header}
+    )
+    result = innsyn(
+        workspace, "record-received-link", "--request", FJALER, "--url", url, "--at", ARRIVED
+    )
+    assert result.exit_code == 1
+    assert reason in result.output
+    assert journal.read_bytes() == before
+    assert _held(workspace)[FJALER].documents == ()
+    assert not (workspace / "received").exists()
