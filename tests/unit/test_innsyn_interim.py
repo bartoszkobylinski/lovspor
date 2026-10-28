@@ -14,6 +14,7 @@ from tests.unit.innsyn_support import FIXTURES, innsyn
 PILOT = FIXTURES / "pilot"
 ROROS = "5025-20261005T074355Z"  # sent 2026-10-05, § 32 mark 2026-10-12
 REPLY_AT = "2026-10-08T10:00:00Z"
+PROMISED_BY_COLUMN = 19
 
 
 def _held(workspace: Path) -> dict[str, RequestState]:
@@ -70,13 +71,13 @@ class TestPromisedDay:
         after = innsyn(workspace, "due", "--today", "2026-11-23")
         assert ROROS in after.stdout
 
-    def test_requests_shows_the_promised_day_as_the_last_column(self, workspace: Path) -> None:
+    def test_requests_shows_the_promised_day_in_its_column(self, workspace: Path) -> None:
         _interim(workspace, "2026-11-22")
         listing = innsyn(workspace, "requests").stdout.splitlines()
         rows = {r.split("\t")[0]: r.split("\t") for r in listing}
         assert rows[ROROS][9] == "interim_reply_with_date"
-        assert rows[ROROS][-1] == "2026-11-22"
-        assert rows["1134-20261005T074406Z"][-1] == ""
+        assert rows[ROROS][PROMISED_BY_COLUMN] == "2026-11-22"
+        assert rows["1134-20261005T074406Z"][PROMISED_BY_COLUMN] == ""
 
     def test_a_later_promise_replaces_the_earlier_one(self, workspace: Path) -> None:
         _interim(workspace, "2026-11-01")
@@ -91,12 +92,12 @@ class TestPromisedDay:
         assert not roros.is_due(date(2026, 10, 25))
         assert roros.is_due(date(2026, 10, 26))
 
-    def test_due_shows_the_promised_day_as_the_last_column(self, workspace: Path) -> None:
+    def test_due_shows_the_promised_day_in_its_column(self, workspace: Path) -> None:
         _interim(workspace, "2026-11-22")
         result = innsyn(workspace, "due", "--today", "2026-11-23")
         assert result.exit_code == 0, result.output
         rows = {row.split("\t")[0]: row.split("\t") for row in result.stdout.splitlines()}
-        assert rows[ROROS][-1] == "2026-11-22"
+        assert rows[ROROS][PROMISED_BY_COLUMN] == "2026-11-22"
 
     def test_an_answer_after_the_promise_drops_it(self, workspace: Path) -> None:
         _interim(workspace, "2026-11-22")
