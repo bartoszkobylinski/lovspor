@@ -45,6 +45,38 @@ def _received(lines: tuple[str, ...]) -> ExtractedDocument:
 
 class TestStateInstrument:
     @pytest.mark.parametrize(
+        "enactment",
+        [
+            "Fastsatt ved kgl.res. av 21. desember 1990.",
+            "Fastsatt av Eksempel kommunestyre, sak 78/90, 21. desember 1990.",
+        ],
+    )
+    @pytest.mark.parametrize("day", [21, 22])
+    def test_new_forms_resolve_all_statements_without_moving_the_identity_date(
+        self, enactment: str, day: int
+    ) -> None:
+        # fields.py requires agreement for front matter, but the first date
+        # continues to seed identity even when a later statement disagrees.
+        extracted = _received(
+            (
+                TITLE,
+                enactment,
+                *SECTIONS,
+                f"Forskriften er vedtatt av Eksempel kommunestyre {day}. desember 1990.",
+            )
+        )
+        verdict = stated_vedtatt(extracted.regulation)
+        assert [s.date for s in verdict.statements] == [date(1990, 12, 21), date(1990, 12, day)]
+        assert extracted.regulation.vedtaksdato == date(1990, 12, 21)
+        if day == 21:
+            assert verdict.status == "stated"
+            assert extracted.fields.vedtatt == verdict.value == date(1990, 12, 21)
+        else:
+            assert verdict.status == "held"
+            assert verdict.hold_reason == "conflicting_statements"
+            assert extracted.fields.vedtatt is verdict.value is None
+
+    @pytest.mark.parametrize(
         ("enactment", "organ"),
         [
             ("Fastsatt ved kgl.res. av 21. desember 1990. Fremmet av Departementet.", "kgl.res."),
