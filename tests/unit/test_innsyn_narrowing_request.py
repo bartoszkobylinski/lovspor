@@ -269,6 +269,24 @@ def test_a_newer_request_without_a_deadline_replaces_the_previous_deadline(
     ]
 
 
+@pytest.mark.parametrize("deadline", ["2026-10-30", None])
+def test_the_last_recorded_request_at_the_same_instant_replaces_the_deadline(
+    workspace: Path, deadline: str | None
+) -> None:
+    """Equal arrival times retain journal order when correcting the deadline."""
+    _asked(workspace, "--narrow-by", "2026-10-22")
+    extra = ("--narrow-by", deadline) if deadline is not None else ()
+    _asked(workspace, *extra)
+
+    state = _held(workspace)[SULDAL]
+    assert state.narrowing_requested_at == datetime(2026, 10, 8, 10, tzinfo=UTC)
+    assert state.narrow_by == (date.fromisoformat(deadline) if deadline else None)
+    assert _rows(workspace, "requests")[SULDAL][REQUESTED_AT_COLUMN:] == [
+        "2026-10-08T10:00:00+00:00",
+        deadline or "",
+    ]
+
+
 @pytest.mark.parametrize("outcome", ["partial", "full", "refused"])
 def test_an_answer_after_the_request_only_ends_the_wait_if_it_closes(
     workspace: Path, outcome: str
