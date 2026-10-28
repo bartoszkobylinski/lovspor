@@ -25,6 +25,15 @@ Hard constraints:
 If a correct new test exposes a production bug or requires a methodological decision,
 do not repair production code. Record the issue clearly in your final result.
 
+CLI output is asserted by what the command printed, never by how the terminal laid
+it out (issues #295, #608). The unit conftest pins `COLUMNS=20`, so typer/rich help and
+usage-error panels wrap mid-token and carry ANSI colour and box drawing: an assert such
+as `'--at: give an offset or Z' in result.output` passes on your terminal and fails on
+the verifier. For help text or a usage error (exit 2) assert through
+`tests.unit.cli_output.said(phrase, result.output)`, plus the exit code and what the
+command left on disk. A plain `typer.echo` line is not wrapped and may be matched as
+text. Three rounds were lost to this alone (PRs #690, #692, #697).
+
 Two kinds of failing test, and you must say which each one is (issue #248):
 
 - A **contract violation**: the implementation contradicts what the PR itself states, what
