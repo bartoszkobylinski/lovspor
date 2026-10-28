@@ -391,6 +391,17 @@ Six entries, and the distinctions carry weight:
 with. A survey does not take the sweep's archive lock, so it can run while a
 nightly sweep is in progress — different hosts do not share a politeness budget.
 
+Every observatory client — the survey, the robots read at registration, capture
+and the sweep — connects under `observatory/tls.py` (#508): Python's default
+cipher list first, then the two RSA-key-exchange AES-GCM suites as the last
+resort, because five Romerike municipalities (Nes, Gjerdrum, Nannestad, Eidsvoll,
+Hurdal; one server) serve TLS 1.2 with RSA key exchange only and reset the
+connection on a ClientHello that offers nothing they accept, which read as
+`robots_unreadable` and so as a denial. TLS 1.2 stays the minimum and the
+certificate is verified as before; against such a server the session has no
+forward secrecy, which for public pages the archive stores is the accepted
+trade-off. The site and release probes keep httpx's defaults.
+
 What this does **not** do: it does not resolve #194, it only sizes the population
 that issue is about. And it does not register anything. Activation still needs a
 named human's conclusion about the site's terms, which is the next section.

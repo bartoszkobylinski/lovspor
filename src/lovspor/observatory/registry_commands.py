@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-import httpx
 import typer
 from pydantic import ValidationError
 
@@ -45,6 +44,7 @@ from lovspor.observatory.registry_io import (
 )
 from lovspor.observatory.robots_live import refuse_rate_below_crawl_delay
 from lovspor.observatory.storage import ObservatoryRoot
+from lovspor.observatory.tls import observatory_client
 
 _ROBOTS_TIMEOUT_SECONDS = 30.0
 
@@ -132,7 +132,7 @@ def _cleared(record: SourceRecord, check: Path) -> SourceRecord:
     """
     access = read_access_policy_check(check)
     activated = activate(record, access)
-    with httpx.Client(timeout=_ROBOTS_TIMEOUT_SECONDS) as client:
+    with observatory_client(timeout=_ROBOTS_TIMEOUT_SECONDS) as client:
         refuse_rate_below_crawl_delay(client, access, activated.canonical_domain)
     return activated
 
