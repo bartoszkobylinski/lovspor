@@ -1807,6 +1807,20 @@ class TestShadowTreeCarriesTheRegister:
 
         assert Path("mutation-equivalents") in also_copy
 
+    def test_the_repos_mutmut_config_also_copies_agents_md(self) -> None:
+        """Issue #707: test_agents_states_the_cli_output_contract reads AGENTS.md
+        through the test file's parents, which resolve inside the shadow tree."""
+        repo_root = Path(__file__).parents[2]
+        with pytest.MonkeyPatch.context() as mp:
+            mp.chdir(repo_root)
+            reset_mutmut_config()
+            try:
+                also_copy = mutmut_config().also_copy
+            finally:
+                reset_mutmut_config()
+
+        assert Path("AGENTS.md") in also_copy
+
     def test_also_copy_lands_the_register_inside_mutants(self, tmp_path: Path) -> None:
         """Exercises mutmut's own copy_also_copy_files() the way the mutation
         run does: also_copy naming the register is only useful if every entry
@@ -2078,6 +2092,17 @@ class TestShadowTreeCarriesRepoState:
         assert ".pre-commit-config.yaml" in found
         assert "mutation-equivalents" in found
         assert "pyproject.toml" in found
+
+    @pytest.mark.codex_proposal
+    @pytest.mark.xfail(strict=True, reason="Scanner does not follow indirect repository-root joins")
+    def test_the_scan_finds_the_indirect_agents_md_dependency(self) -> None:
+        """Advisory #707 follow-up: detect the consumer's indirect root join,
+        so the general guard can protect the newly configured copy entry too.
+        The PR promises the copy entry, not this extension of the scanner.
+        """
+        found = _repo_state_the_unit_suite_reads(Path(__file__).parent)
+
+        assert "AGENTS.md" in found
 
     def test_the_repos_config_copies_the_hook_config_into_the_shadow_tree(
         self, tmp_path: Path
