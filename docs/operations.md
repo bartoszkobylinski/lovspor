@@ -1811,6 +1811,7 @@ $I record-sent-manual --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --id
 $I record-ack --request 4646-20261005T074425Z --at <UTC>
 $I record-case-number --request 4646-20261005T074425Z --number 2026/2348
 $I record-outcome --request 4646-20261005T074425Z --outcome partial --at <UTC> [--refusal-basis "…"]
+$I record-interim --request 1515-20261019T235216Z --at <UTC> --promised-by 2026-11-22
 $I record-klage --request 4646-20261005T074425Z --at <UTC>
 $I record-reminder --request 4646-20261005T074425Z --at <UTC> --letter <reminder.txt>
 $I record-reply --request 1520-20261019T064500Z --at <UTC> --kind narrowing --letter <reply.txt>
@@ -1867,8 +1868,21 @@ $I received                               # every document; requested ids still 
   letter whose `Til:` line no longer matches, and records the SHA-256 of the letter as
   it stands. A transition on an unknown request, a second send of one request, and a
   time before the send are all refused. Outcome classes: `referred_to_lovdata`,
-  `interim_reply_no_date`, `partial`, `full`, `refused`, `no_answer`. Only the first
-  four are answers, so an interim reply leaves the request due.
+  `interim_reply_no_date`, `interim_reply_with_date`, `partial`, `full`, `refused`,
+  `no_answer`. Only `referred_to_lovdata`, `partial`, `full` and `refused` are answers,
+  so an interim reply leaves the request open and, once the § 32 mark has passed, due.
+- **Interim replies that name a date (#689).** An authority that says when it will
+  answer ("innen 22.11.2026", "i løpet av uke 44") gets `record-interim` with `--at`
+  and `--promised-by`, the Oslo day it promised, converted by the owner when it was
+  given as a week (week 44 of 2026 ends 2026-11-01). It is not an answer. `due` leaves
+  the request out until that day has passed, and lists it from the next day on, so a
+  klage is never aimed at an authority still inside the date it named, and one that
+  misses its own date is flagged. `record-outcome --outcome interim_reply_with_date`
+  is refused: the day is mandatory. A promised day before the reply's own day is
+  refused. A later outcome on the request replaces the promise: a `full` answer drops
+  it, a second `record-interim` moves it, an `interim_reply_no_date` drops it so the
+  § 32 mark alone decides. `requests` and `due` show the promised day as their last
+  column.
 - **Undelivered letters (#644).** `send` records every letter the SMTP server accepted,
   but acceptance is not delivery. A permanent bounce is recorded with `record-bounce`
   and its DSN status (`5.x.x` only: a transient `4.x.x` is not a failure yet). A mailbox

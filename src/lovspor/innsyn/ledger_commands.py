@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from lovspor.innsyn.app import guarded, innsyn_app, instant, now, refuse, workspace
 from lovspor.innsyn.ledger import (
     OUTCOMES,
+    WITH_DATE,
     LedgerEvent,
     RequestState,
     parse_event,
@@ -70,8 +71,29 @@ def record_outcome(
         typer.Option("--refusal-basis", help="The hjemmel given, for refused or partial."),
     ] = None,
 ) -> None:
-    """Record what the authority answered (or that it has not), and when."""
+    """Record what the authority answered (or that it has not), and when.
+
+    An interim reply that names a date is recorded with ``record-interim``.
+    """
     fields = {"outcome": outcome, "at": instant(at, "--at"), "refusal_basis": refusal_basis}
+    record_event(request, "outcome", fields)
+
+
+@innsyn_app.command("record-interim")
+def record_interim(
+    request: Request,
+    at: _At,
+    promised_by: Annotated[
+        str, typer.Option("--promised-by", help="The Oslo day it promised to answer by.")
+    ],
+) -> None:
+    """Record an interim reply that names the day the authority will answer by (#689).
+
+    Not an answer: the request is due once that day and the § 32 mark have both passed.
+    """
+    promised = _day(promised_by, "--promised-by")
+    fields: dict[str, object] = {"outcome": WITH_DATE, "promised_by": promised}
+    fields["at"] = instant(at, "--at")
     record_event(request, "outcome", fields)
 
 
@@ -127,10 +149,11 @@ def _row(state: RequestState) -> str:
 
 
 def _since_sent(state: RequestState) -> tuple[str, ...]:
-    """The columns of what became of the letter beyond an answer (#644, #625, #686)."""
+    """The columns of what became of the letter beyond an answer (#644, #625, #686, #689)."""
     sent = state.sent
     since = (_text(state.undelivered), _text(state.reminded_at), _text(sent.follows))
-    return (*since, sent.channel, _text(state.replied_at), _text(state.reply_kind))
+    replied = (_text(state.replied_at), _text(state.reply_kind))
+    return (*since, sent.channel, *replied, _text(state.promised_by))
 
 
 @innsyn_app.command("requests")
@@ -141,7 +164,7 @@ def list_requests() -> None:
     saksnummer, acknowledged_at, answered_at, outcome, § 32 mark, klage_sent_at,
     Message-ID, undelivered (bounced or mailbox_closed), last reminder sent, the request a
     follow-up follows, channel (email, webform or edialog), last reply sent and its kind
-    (narrowing, answer or other).
+    (narrowing, answer or other), the day the authority promised to answer by.
     """
     held = guarded(lambda: requests(workspace()))
     for state in held.values():
@@ -149,13 +172,15 @@ def list_requests() -> None:
     typer.echo(f"{len(held)} requests", err=True)
 
 
-def _today(raw: str | None) -> date:
-    if raw is None:
-        return now().astimezone(OSLO).date()
+def _day(raw: str, option: str) -> date:
     try:
         return date.fromisoformat(raw)
     except ValueError as exc:
-        raise typer.BadParameter(f"--today: not an ISO date (YYYY-MM-DD): {raw}") from exc
+        raise typer.BadParameter(f"{option}: not an ISO date (YYYY-MM-DD): {raw}") from exc
+
+
+def _today(raw: str | None) -> date:
+    return now().astimezone(OSLO).date() if raw is None else _day(raw, "--today")
 
 
 @innsyn_app.command("due")
@@ -166,8 +191,9 @@ def due(
 ) -> None:
     """List the klage candidates: past the § 32 andre ledd mark, no answer, no klage.
 
-    Same columns as ``requests``. An interim reply without a date is not an answer;
-    a letter recorded undelivered started no clock.
+    Same columns as ``requests``. An interim reply is not an answer, but one that
+    promised a day keeps the request off this list until that day has passed; a
+    letter recorded undelivered started no clock.
     """
     day = _today(today)
     chosen = [s for s in guarded(lambda: requests(workspace())).values() if s.is_due(day)]
