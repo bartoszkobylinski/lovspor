@@ -20,6 +20,18 @@ import yaml  # type: ignore[import-untyped]
 _WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 
 
+def test_agents_states_the_cli_output_contract() -> None:
+    instructions = " ".join(
+        (_WORKFLOWS.parents[1] / "AGENTS.md").read_text(encoding="utf-8").split()
+    )
+
+    assert "`COLUMNS=20`" in instructions
+    assert "`tests.unit.cli_output.said(phrase, result.output)`" in instructions
+    assert "the exit code and what the command left on disk" in instructions
+    assert "never `phrase in result.output` against a panel" in instructions
+    assert "A plain `typer.echo` line may be matched as text." in instructions
+
+
 def _workflow(workflow_name: str) -> dict[str, Any]:
     workflow: dict[str, Any] = yaml.safe_load(
         (_WORKFLOWS / workflow_name).read_text(encoding="utf-8")
@@ -1264,6 +1276,12 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
 
         assert "tests.unit.cli_output.said(phrase, result.output)" in prompt
         assert "`COLUMNS=20`" in prompt
+        instructions = " ".join(prompt.split())
+        assert "For help text or a usage error (exit 2) assert through" in instructions
+        assert "plus the exit code and what the command left on disk" in instructions
+        assert (
+            "A plain `typer.echo` line is not wrapped and may be matched as text." in instructions
+        )
 
     def test_the_suite_runs_on_the_hosted_verdict_lane(self) -> None:
         job = _workflow("pr-pipeline.yml")["jobs"]["codex-tests"]
@@ -1455,6 +1473,12 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
 
         assert "tests.unit.cli_output.said(phrase, result.output)" in prompt
         assert "`COLUMNS=20`" in prompt
+        instructions = " ".join(prompt.split())
+        assert "For help text or a usage error (exit 2) assert through" in instructions
+        assert "plus the exit code and what the command left on disk" in instructions
+        assert (
+            "A plain `typer.echo` line is not wrapped and may be matched as text." in instructions
+        )
 
     def test_the_suite_runs_on_the_hosted_verifier(self) -> None:
         job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
