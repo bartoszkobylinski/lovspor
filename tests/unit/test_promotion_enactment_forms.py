@@ -119,6 +119,22 @@ class TestCaseNumber:
     @pytest.mark.parametrize(
         "enactment",
         [
+            "Fastsatt ved statsrådsbeslutning med hjemmel i lov av 14. juni 2002.",
+            "Fastsatt av Eksempel kommunestyre, sak 78/24, med hjemmel i lov av 14. juni 2002.",
+        ],
+    )
+    def test_new_forms_do_not_take_a_statutes_date_as_the_enactment(self, enactment: str) -> None:
+        # fields.py's contract: a hjemmel date never dates the enactment.
+        read = read_regulation((TITLE, enactment, *SECTIONS))
+        assert isinstance(read, tuple)
+        regulation, fields = read
+        assert regulation.vedtaksdato is None
+        assert fields.vedtatt is None
+        assert stated_vedtatt(regulation).status == "absent"
+
+    @pytest.mark.parametrize(
+        "enactment",
+        [
             "Hjemmel: Fastsatt av Eksempel kommunestyre, sak 78/24, 29. august 2024 med hjemmel "
             "i lov.",
             "Fastsatt av Eksempel kommunestyre, sak 78/24, 29. august 2024.",
@@ -142,6 +158,34 @@ class TestCaseNumber:
 class TestGluedFootnote:
     GLUED = "Forskriften erstatter forskrift av 30. oktober 19841 med senere endringer."
     FOOTNOTE = "1 Ikke kunngjort i Norsk Lovtidend."
+
+    def test_multiple_removed_footnotes_are_unglued_and_stripping_is_idempotent(self) -> None:
+        line = "Forskriftene fra 19841, 199012 og 20012 oppheves."
+        stripped = strip_markup(
+            (
+                *LOVDATA_PRINT,
+                line,
+                self.FOOTNOTE,
+                "12 Ikke kunngjort i Norsk Lovtidend.",
+            ),
+            ReceivedForm.LOVDATA_PRINT,
+        )
+        assert stripped is not None
+        assert stripped.lines[-1] == "Forskriftene fra 1984, 1990 og 20012 oppheves."
+        assert self.FOOTNOTE not in stripped.lines
+        assert "12 Ikke kunngjort i Norsk Lovtidend." not in stripped.lines
+        again = strip_markup((*PRINT_HEAD[:-4], *stripped.lines), ReceivedForm.LOVDATA_PRINT)
+        assert again is not None
+        assert again.lines == stripped.lines
+
+    @pytest.mark.parametrize("number", ["119841", "198410", "19841a", "1984 nr. 1"])
+    def test_marker_removal_preserves_numbers_without_a_glued_year_boundary(
+        self, number: str
+    ) -> None:
+        line = f"Henvisningen {number} beholdes."
+        stripped = strip_markup((*LOVDATA_PRINT, line, self.FOOTNOTE), ReceivedForm.LOVDATA_PRINT)
+        assert stripped is not None
+        assert stripped.lines[-1] == line
 
     def test_the_marker_of_a_removed_footnote_is_unglued_from_the_year(self) -> None:
         lines = (*LOVDATA_PRINT, self.GLUED, self.FOOTNOTE)
