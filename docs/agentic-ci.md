@@ -614,6 +614,20 @@ Two rules follow, and they are pinned by tests:
   `permissions: contents: read`, so an agent session cannot reach the branch.
 - Mutation and fast-ci run on GitHub-hosted runners — free for this public repo, no LLM
   auth anywhere near them.
+- Stranded worktrees (issue #621): a subagent that fixes a PR in
+  `.claude/worktrees/agent-*` and commits without pushing leaves the PR BLOCKED and the
+  fix invisible (PR #609 sat three days on two such commits). Subagent work on a PR
+  branch ends with a push, or with an explicit "not pushed: <reason>". The check that
+  surfaces what slipped through is
+  `uv run python scripts/quality/check_stranded_worktrees.py [--all] [--untracked]`:
+  it lists every linked worktree that is `dirty` (staged or modified tracked files),
+  `ahead N` of its upstream, on a branch with `no upstream` whose head no remote holds,
+  or `detached` on a commit no remote holds, and names `prunable` ones (directory gone,
+  nothing to lose). Exit 1 when anything is stranded, so a periodic run is loud. It is
+  read-only: it never deletes, resets, fetches or pushes. The operator pushes or
+  discards each one after checking whose branch it is and whether its PR still exists,
+  and `git worktree prune` stays a separate, deliberate step. On 2026-10-28 it found 10
+  agent worktrees whose branches had commits on no remote and one with modified files.
 
 ## Mac mini runner (issue #445)
 
