@@ -248,10 +248,12 @@ def _is_garbled(text: str) -> bool:
 def _document(
     form: SourceForm,
     lines: tuple[str, ...],
-    reader: _Reader = read_regulation,
+    reader: _Reader | None = None,
     details: dict[ExtractionHoldReason, str] = _SPLIT_DETAIL,
 ) -> ExtractionResult:
-    read = reader(lines)
+    # Resolved per call, not bound at definition: a test stands an earlier
+    # release's reading in for ``read_regulation`` on this module.
+    read = (reader or read_regulation)(lines)
     if isinstance(read, ExtractionHoldReason):
         return _held(form, read, details[read])
     regulation, fields = read
