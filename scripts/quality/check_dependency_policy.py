@@ -142,14 +142,16 @@ def undeclared_imports(root: Path) -> list[Violation]:
 
 
 def _git_paths(root: Path, *args: str) -> list[str]:
+    """Paths from a ``-z`` git listing, so a non-ASCII name arrives unquoted."""
     done = subprocess.run(  # noqa: S603 -- fixed argv, no shell
-        [_GIT, "-C", str(root), *args],
+        [_GIT, "-C", str(root), *args, "-z"],
         capture_output=True,
-        text=True,
         check=False,
         timeout=_GIT_TIMEOUT,
     )
-    return done.stdout.splitlines() if done.returncode == 0 else []
+    if done.returncode != 0:
+        return []
+    return [part.decode("utf-8", "surrogateescape") for part in done.stdout.split(b"\0") if part]
 
 
 def artefact_paths(paths: Iterable[str]) -> list[Violation]:

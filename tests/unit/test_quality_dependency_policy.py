@@ -126,6 +126,14 @@ class TestCommittableArtefacts:
 
         assert [v.path for v in policy.committable_artefacts(tmp_path)] == ["keep.py.bak"]
 
+    def test_a_non_ascii_staged_artefact_is_found_unquoted(self, tmp_path: Path) -> None:
+        _git(tmp_path, "init", "-q")
+        _git(tmp_path, "config", "core.quotePath", "true")
+        (tmp_path / "lovendring-æ.py.bak").write_text("", encoding="utf-8")
+        _git(tmp_path, "add", "--", "lovendring-æ.py.bak")
+
+        assert [v.path for v in policy.committable_artefacts(tmp_path)] == ["lovendring-æ.py.bak"]
+
     def test_outside_a_repository_there_is_no_verdict(self, tmp_path: Path) -> None:
         assert policy.committable_artefacts(tmp_path) == []
 
