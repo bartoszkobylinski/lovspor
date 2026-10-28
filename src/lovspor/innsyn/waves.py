@@ -6,14 +6,15 @@ A wave is the next ``wave_size`` authorities that
   sends to by hand — other than an address an earlier letter to the
   authority was recorded undelivered at — the rest are listed as
   ``unresolved`` and get no letter; and
-* have no open request in the ledger — those are listed as ``skipped_open``.
-  A request stays open until its outcome is ``full`` or ``refused``; and
-* have not had the general request answered — ``full`` or ``refused`` — unless
-  their pages have since linked ids not asked for yet (#696). An authority
-  that answered it and has nothing new is listed as ``skipped_closed``; one
-  with new ids gets a letter for those ids alone, without the general point,
-  so a fulfilled request is never put again and a refusal (klage track) is
-  never answered with a fresh general request.
+* have no request in the ledger yet, or have one and pages that have since
+  linked ids not asked for yet (#696, #695). An authority with an open request
+  — open until its outcome is ``full`` or ``refused`` — and nothing new is
+  listed as ``skipped_open``; one that answered the general request and has
+  nothing new as ``skipped_closed``. Either one with new ids gets a letter for
+  those ids alone, without the general point, as a request of its own: the
+  open case is neither reopened nor merged, a fulfilled request is never put
+  again, and a refusal (klage track) is never answered with a fresh general
+  request.
 
 Authorities with at least one known id still to ask for (part a, after held
 and already-asked ids are taken out) come first, then the rest; each group
@@ -127,6 +128,11 @@ def _closed(requests: dict[str, RequestState]) -> set[str]:
     return {s.sent.authority_id for s in states if s.delivered and not s.is_open}
 
 
+def _requested(requests: dict[str, RequestState]) -> set[str]:
+    """Authorities a letter reached: the general point is put to each once (#695)."""
+    return {s.sent.authority_id for s in requests.values() if s.delivered}
+
+
 def _failed(requests: dict[str, RequestState]) -> set[tuple[str, str]]:
     """(authority, address) pairs a letter was recorded undelivered at."""
     return {(s.sent.authority_id, s.sent.recipient) for s in requests.values() if not s.delivered}
@@ -164,7 +170,7 @@ def _sort(inputs: WaveInputs, ids: dict[str, tuple[str, ...]]) -> _Sorted:
     eligible, unresolved, skipped, closed = [], [], [], []
     for authority in inputs.population.authorities:
         contact = inputs.contacts.get(authority.authority_id, Contact())
-        if authority.authority_id in busy:
+        if authority.authority_id in busy and not ids.get(authority.authority_id):
             skipped.append(authority.authority_id)
         elif authority.authority_id in done and not ids.get(authority.authority_id):
             closed.append(authority.authority_id)
@@ -230,7 +236,7 @@ def _write_letter(out: Path, request: LetterRequest, recorded: bool) -> Manifest
 
 
 def _letters(inputs: WaveInputs, chosen: list[Authority], out: Path) -> list[ManifestEntry]:
-    ids, done = known_ids(inputs), _closed(inputs.requests)
+    ids, done = known_ids(inputs), _requested(inputs.requests)
     entries = []
     for authority in chosen:
         new_ids = ids.get(authority.authority_id, ())

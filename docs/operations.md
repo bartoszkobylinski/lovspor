@@ -1848,14 +1848,17 @@ $I received                               # every document; requested ids still 
   to read automatically, so the operator records it with evidence (`set-maalform`).
   Unset, the letter is in bokmål and the manifest says `maalform_recorded: false`. That
   default is the owner's decision (2026-10-12).
-- **Letters.** A wave takes the next `--wave-size` resolved authorities and skips any
-  authority with an open request (open until the outcome is `full` or `refused`, or the
-  letter is recorded undelivered). An authority whose request closed, `full` or
-  `refused`, is not written to again unless its pages have since linked ids no request
-  asked for (#696): with nothing new it is listed as `skipped_closed`, and with new ids
-  its letter asks for those ids alone, says it comes in addition to the earlier request,
-  and does not put the general point again — a fulfilled request is never repeated and
-  a refusal is answered on the klage track, not with a fresh general request. The
+- **Letters.** A wave takes the next `--wave-size` resolved authorities. An authority
+  a request already reached is not written to again unless its pages have since linked
+  ids no request asked for (#696, #695): with nothing new it is listed as
+  `skipped_open` while a request is open (open until the outcome is `full` or
+  `refused`; a letter recorded undelivered reached nobody) and as `skipped_closed` once
+  it closed. With new ids its letter asks for those ids alone, says it comes in
+  addition to the earlier request, and does not put the general point again — a
+  fulfilled request is never repeated, a refusal is answered on the klage track, not
+  with a fresh general request, and an authority delivering in parts, holding, or
+  pointing to Lovdata still gets every newly seen id as a short request of its own,
+  under its own request id, with the open case neither reopened nor merged. The
   manifest entry then says `general_clause: false`, and `record-sent` records it so.
   Authorities with known ids still to ask for come first, then the rest, each group in
   id order (owner decision 2026-10-12). Point 1 lists the `LF`/`LTII` ids the LF ledger saw on the authority's
