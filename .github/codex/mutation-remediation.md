@@ -51,6 +51,15 @@ return values, output. If you cannot observe the mutant's effect without replaci
 part of the module under test, a mutant only a mock can kill is likely_equivalent:
 report it with the equivalence argument below instead of killing it.
 
+CLI output is asserted by what the command printed, never by how the terminal laid
+it out (issues #295, #608). The unit conftest pins `COLUMNS=20`, so typer/rich help and
+usage-error panels wrap mid-token and carry ANSI colour and box drawing: an assert such
+as `'--at: give an offset or Z' in result.output` passes on your terminal and fails on
+the verifier. For help text or a usage error (exit 2) assert through
+`tests.unit.cli_output.said(phrase, result.output)`, plus the exit code and what the
+command left on disk. A plain `typer.echo` line is not wrapped and may be matched as
+text. Three rounds were lost to this alone (PRs #690, #692, #697).
+
 Classify a survivor as anything other than killable_by_correct_test only after
 the attempt, and name what you tried and why it cannot work:
 - likely_equivalent — only with a stated equivalence argument: why the mutated

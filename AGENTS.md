@@ -23,6 +23,7 @@ For every PR, evaluate:
 5. **Tar extraction safety** — extraction is read-only via `extractfile()` (never `extractall()`/`extract()`) with member-name validation, so path traversal and unsafe symlinks are structurally impossible — no data filter needed.
 6. **Manifest round-trip** — write → read → assertions identical.
 7. **Edge cases** — empty tarball, missing fields, malformed UTF-8, very large files, network timeout, partial download.
+8. **CLI output by what was printed** — the unit conftest pins `COLUMNS=20`, so typer/rich help and usage-error panels wrap mid-token with ANSI colour and box drawing (#295, #608). Assert such output through `tests.unit.cli_output.said(phrase, result.output)`, the exit code and what the command left on disk; never `phrase in result.output` against a panel. A plain `typer.echo` line may be matched as text.
 
 ## Mutation testing
 

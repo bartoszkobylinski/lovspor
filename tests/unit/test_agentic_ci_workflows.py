@@ -1257,6 +1257,14 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
         assert "Do NOT run `uv run pytest tests/unit/`" in prompt
         assert "run ONLY the test files you touched" in prompt
 
+    def test_the_prompt_states_the_cli_output_contract(self) -> None:
+        """Three rounds were lost to `phrase in result.output` against a rich panel the
+        pinned 20-column console wraps mid-token (#608): the prompt names the contract."""
+        prompt = (_WORKFLOWS.parent / "codex" / "pr-tests.md").read_text(encoding="utf-8")
+
+        assert "tests.unit.cli_output.said(phrase, result.output)" in prompt
+        assert "`COLUMNS=20`" in prompt
+
     def test_the_suite_runs_on_the_hosted_verdict_lane(self) -> None:
         job = _workflow("pr-pipeline.yml")["jobs"]["codex-tests"]
         pytest_step = _named_step(job["steps"], "Run tests on Codex additions")
@@ -1439,6 +1447,14 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
         ).read_text(encoding="utf-8")
 
         assert "Do NOT run `uv run pytest tests/unit/`" in prompt
+
+    def test_the_prompt_states_the_cli_output_contract(self) -> None:
+        prompt = (_WORKFLOWS.parent / "codex" / "mutation-remediation.md").read_text(
+            encoding="utf-8"
+        )
+
+        assert "tests.unit.cli_output.said(phrase, result.output)" in prompt
+        assert "`COLUMNS=20`" in prompt
 
     def test_the_suite_runs_on_the_hosted_verifier(self) -> None:
         job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
