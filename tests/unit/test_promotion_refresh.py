@@ -12,6 +12,7 @@ state is reached the way an operator reaches it, as in
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -71,6 +72,28 @@ def stale(root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 
 class TestRefresh:
+    def test_refresh_keeps_published_provenance_independent_of_run_time(
+        self, stale: str, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        _approve(stale, tmp_path)
+        path, before = _markdown(corpus)
+        original = path.read_bytes()
+        log = _log(root)
+        request = observed_refresh.RefreshAllRequest(corpus, dry_run=False)
+
+        observed_refresh.refresh_all_impl(request, datetime(2000, 1, 1, tzinfo=UTC))
+        first = tree(corpus)
+        after = path.read_text(encoding="utf-8")
+        assert after != before
+        for key in ("observed_at_first", "source_url", "source_sha256", "version"):
+            assert front_matter(after)[key] == front_matter(before)[key]
+
+        path.write_bytes(original)
+        observed_refresh.refresh_all_impl(request, datetime(2099, 12, 31, tzinfo=UTC))
+
+        assert tree(corpus) == first
+        assert _log(root) == log
+
     def test_it_rewrites_the_front_matter_alone_and_keeps_the_version(
         self, stale: str, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
