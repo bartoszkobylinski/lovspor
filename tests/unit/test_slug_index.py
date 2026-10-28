@@ -175,3 +175,33 @@ def test_slug_token_search_is_bounded_by_the_citation_length() -> None:
     citation = "x" + "presskatteloven-sktl " * 2_000
     assert not _slug_token_in_citation("skatteloven-sktl", citation)
     assert _slug_token_in_citation("skatteloven-sktl", citation + "skatteloven-sktl")
+
+
+@pytest.mark.parametrize("slug", ["a+b", "a*b", "a?b", "a[b", "a(b", r"a\b", "a|b", "^a$"])
+def test_slug_token_regex_metacharacters_remain_literal(slug: str) -> None:
+    # The former str.find contract accepts literal strings, including strings
+    # that would be invalid regex syntax or would match different text.
+    assert _slug_token_in_citation(slug, f"({slug})")
+    assert not _slug_token_in_citation(slug, "ab aab a b")
+
+
+@pytest.mark.parametrize(
+    ("adjacent", "expected"),
+    [
+        ("0", False),
+        ("-", False),
+        ("ä", False),
+        ("ö", False),
+        ("ü", False),
+        ("_", True),
+        (".", True),
+        ("\n", True),
+    ],
+)
+def test_slug_token_preserves_boundary_alphabet_on_each_side(
+    adjacent: str,
+    expected: bool,
+) -> None:
+    # Both boundaries use _SLUG_CHARACTER, rather than regex word boundaries.
+    assert _slug_token_in_citation("lov", adjacent + "lov") is expected
+    assert _slug_token_in_citation("lov", "lov" + adjacent) is expected
