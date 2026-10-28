@@ -1807,6 +1807,20 @@ class TestShadowTreeCarriesTheRegister:
 
         assert Path("mutation-equivalents") in also_copy
 
+    def test_the_repos_mutmut_config_also_copies_agents_md(self) -> None:
+        """Issue #707: test_agents_states_the_cli_output_contract reads AGENTS.md
+        through the test file's parents, which resolve inside the shadow tree."""
+        repo_root = Path(__file__).parents[2]
+        with pytest.MonkeyPatch.context() as mp:
+            mp.chdir(repo_root)
+            reset_mutmut_config()
+            try:
+                also_copy = mutmut_config().also_copy
+            finally:
+                reset_mutmut_config()
+
+        assert Path("AGENTS.md") in also_copy
+
     def test_also_copy_lands_the_register_inside_mutants(self, tmp_path: Path) -> None:
         """Exercises mutmut's own copy_also_copy_files() the way the mutation
         run does: also_copy naming the register is only useful if every entry
