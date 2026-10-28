@@ -15,11 +15,13 @@ import pytest
 from click.testing import Result
 from pytest_httpx import HTTPXMock
 
+from lovspor.innsyn.waves import Manifest
 from lovspor.observatory.storage import engine_root
 from lovspor.promotion.identity import ledger_lf_id
 from tests.unit.innsyn_support import (
     innsyn,
     letters_workspace,
+    lf_entry,
     lovverk_checkout,
     sample_lf_ledger,
 )
@@ -175,3 +177,74 @@ def test_ledger_lf_id_maps_a_minted_lf_doc_id_to_the_ledger_form(
     doc_id: str, expected: str | None
 ) -> None:
     assert ledger_lf_id(doc_id) == expected
+
+
+def test_explicit_corpus_overrides_environment(
+    workspace: Path, tmp_path: Path, lf_ledger: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    explicit = lovverk_checkout(tmp_path / "explicit")
+    monkeypatch.setenv("LOVVERK_CORPUS_PATH", str(tmp_path / "missing-environment-corpus"))
+    # Remove the helper's environment default so this exercises Click's precedence.
+    (tmp_path / "lovverk-held" / "manifest.json").unlink()
+    manifest = _wave(workspace, tmp_path / "wave", lf_ledger, "--corpus", str(explicit))
+    assert "2022-12-15-2677" in _ids(manifest, "4646")
+    assert manifest["held_out"] == []
+
+
+@pytest.mark.parametrize("payload", [b"\xff", b'{"documents": {"lf-20221215-2677": {}}}', None])
+def test_invalid_or_unreadable_manifest_refuses_before_writing(
+    workspace: Path, tmp_path: Path, lf_ledger: Path, payload: bytes | None
+) -> None:
+    corpus = lovverk_checkout(tmp_path / "lovverk")
+    path = corpus / "lokale-forskrifter" / "manifest.json"
+    if payload is None:
+        path.unlink()
+        path.mkdir()  # Exists, but cannot be read as a file on any supported OS.
+    else:
+        path.write_bytes(payload)
+    out = tmp_path / "wave"
+    result = _letters(workspace, out, lf_ledger, "--corpus", str(corpus))
+    assert result.exit_code == 1, result.output
+    assert "Refused:" in result.stderr
+    assert str(path) in result.stderr
+    assert not out.exists()
+
+
+def test_held_audit_is_complete_deduplicated_and_independent_of_ledger_order(
+    workspace: Path, tmp_path: Path
+) -> None:
+    corpus = _corpus(tmp_path / "lovverk")
+    held = tmp_path / "held.txt"
+    held.write_text("2009-02-16-306\n2020-01-01-1\n1999-01-01-1\n", encoding="utf-8")
+    rows = [
+        lf_entry("4646", "2022-12-15-2677"),
+        lf_entry("4646", "2022-12-15-2677", "LTII"),
+        lf_entry("0301", "2022-12-15-2677"),
+        lf_entry("4646", "2009-02-16-306", "LTII"),
+        lf_entry("4646", "2020-01-01-1", "forskrift"),
+    ]
+    expected = [
+        {"authority_id": "0301", "lf_id": "2022-12-15-2677", "held": "corpus"},
+        {"authority_id": "4646", "lf_id": "2009-02-16-306", "held": "file"},
+        {"authority_id": "4646", "lf_id": "2022-12-15-2677", "held": "corpus"},
+    ]
+    for index, ordered in enumerate((rows, list(reversed(rows)))):
+        ledger = tmp_path / f"ledger-{index}.jsonl"
+        ledger.write_text("\n".join(ordered) + "\n", encoding="utf-8")
+        out = tmp_path / f"wave-{index}"
+        manifest = _wave(
+            workspace,
+            out,
+            ledger,
+            "--corpus",
+            str(corpus),
+            "--held",
+            str(held),
+            "--wave-size",
+            "1",
+        )
+        assert manifest["held_out"] == expected
+        assert len(manifest["letters"]) == 1  # type: ignore[arg-type]
+        restored = Manifest.model_validate_json((out / "manifest.json").read_bytes())
+        assert [row.model_dump() for row in restored.held_out] == expected
+        assert Manifest.model_validate_json(restored.model_dump_json()) == restored
