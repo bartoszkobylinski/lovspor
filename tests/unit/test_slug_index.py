@@ -139,3 +139,39 @@ def test_citation_checks_adjacent_occurrences_of_manifest_slug(tmp_path: Path) -
     verdict = CorpusReader(tmp_path).validate_citation("a__")
     assert verdict["valid"] is True
     assert verdict["slug"] == "_"
+
+
+@pytest.mark.parametrize(
+    ("slug", "citation", "expected"),
+    [
+        ("", "", True),
+        ("", "x", False),
+        ("", "x y", False),
+        ("lov", "lov", True),
+        ("lov", "", False),
+        ("lov", "blov lovb lov-x xlov", False),
+        ("lov", "blov lovb lov-x xlov lov", True),
+        ("lov", "lovlovlov lov", True),
+        ("æøå-loven", "xæøå-loven, æøå-loven.", True),
+        ("æøå-loven", "xæøå-lovenå", False),
+        ("a.b", "a.b", True),
+        ("a.b", "axb", False),
+    ],
+)
+def test_slug_token_every_occurrence_is_tried_and_both_ends_are_boundaries(
+    slug: str,
+    citation: str,
+    expected: bool,
+) -> None:
+    # Guards #674: a bounded iteration must still visit every occurrence,
+    # including overlapping ones, and judge both boundaries of each.
+    assert _slug_token_in_citation(slug, citation) is expected
+
+
+def test_slug_token_search_is_bounded_by_the_citation_length() -> None:
+    # Guards #674: the search over a citation that repeats a non-token
+    # occurrence many times ends after a number of steps proportional to
+    # the citation, so a broken advance cannot loop forever.
+    citation = "x" + "presskatteloven-sktl " * 2_000
+    assert not _slug_token_in_citation("skatteloven-sktl", citation)
+    assert _slug_token_in_citation("skatteloven-sktl", citation + "skatteloven-sktl")
