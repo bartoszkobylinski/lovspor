@@ -5,6 +5,7 @@ to Lovdata, do the ids its pages newly link reach it? They do, as a separate
 id-only request; with nothing new the authority is still skipped as open.
 """
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from lovspor.innsyn.ledger import requests
+from lovspor.innsyn.waves import read_manifest
 from lovspor.innsyn.workspace import InnsynWorkspace
 from tests.unit.innsyn_support import innsyn, letters_workspace, lf_entry, ok, sample_lf_ledger
 
@@ -62,6 +64,61 @@ def _link(ledger: Path, authority: str, lf_id: str = NEW_ID) -> None:
 
 
 class TestOpenAuthorities:
+    def test_new_ids_compete_in_id_order_within_the_wave_limit(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        _send(workspace, tmp_path, lf_ledger, OSLO)
+        _link(lf_ledger, OSLO)
+        out = tmp_path / "limited"
+        result = innsyn(
+            workspace,
+            "letters",
+            "--out",
+            str(out),
+            "--lf-ledger",
+            str(lf_ledger),
+            "--wave-size",
+            "1",
+        )
+        assert result.exit_code == 0, result.output
+        manifest = read_manifest(out / "manifest.json")
+        # Oslo's new ids put it before Fjaler's known ids and the general-only county.
+        assert [entry.authority_id for entry in manifest.letters] == [OSLO]
+        assert manifest.letters[0].lf_ids == (NEW_ID,)
+        assert manifest.letters[0].general_clause is False
+        assert manifest.remaining == 2
+        assert manifest.skipped_open == ()
+
+    def test_a_new_short_form_link_does_not_trigger_another_request(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        _send(workspace, tmp_path, lf_ledger, OSLO)
+        with lf_ledger.open("a", encoding="utf-8") as handle:
+            handle.write(lf_entry(OSLO, NEW_ID, "forskrift") + "\n")
+        out = tmp_path / "short-form"
+        _, manifest = _wave(workspace, out, lf_ledger)
+        assert manifest["skipped_open"] == [OSLO]
+        assert OSLO not in _entries(manifest)
+        assert not (out / f"{OSLO}.txt").exists()
+
+    def test_repeated_open_id_only_waves_are_deterministic_and_leave_requests_untouched(
+        self, workspace: Path, tmp_path: Path, lf_ledger: Path
+    ) -> None:
+        _send(workspace, tmp_path, lf_ledger, OSLO)
+        _link(lf_ledger, OSLO)
+        before = (workspace / "requests.jsonl").read_bytes()
+        first, second = tmp_path / "repeat-one", tmp_path / "repeat-two"
+        _wave(workspace, first, lf_ledger)
+        _wave(workspace, second, lf_ledger)
+        manifest = read_manifest(first / "manifest.json")
+        assert manifest.letters == read_manifest(second / "manifest.json").letters
+        entry = next(entry for entry in manifest.letters if entry.authority_id == OSLO)
+        assert entry.general_clause is False
+        payload = (first / entry.letter_file).read_bytes()
+        assert payload == (second / entry.letter_file).read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == entry.letter_sha256
+        assert (workspace / "requests.jsonl").read_bytes() == before
+
     def test_with_nothing_new_it_is_still_skipped_as_open(
         self, workspace: Path, tmp_path: Path, lf_ledger: Path
     ) -> None:
