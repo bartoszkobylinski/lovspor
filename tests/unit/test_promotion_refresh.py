@@ -145,6 +145,34 @@ class TestRefresh:
 
 
 class TestRefusals:
+    @pytest.mark.parametrize("key", ["observed_at_first", "source_url"])
+    def test_observed_provenance_cannot_move(
+        self,
+        key: str,
+        stale: str,
+        root: Path,
+        corpus: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Operations #595 requires every provenance field to remain byte-identical."""
+        _approve(stale, tmp_path)
+        rendered = observed_refresh.render_published
+
+        def moved(p, s):
+            markdown = rendered(p, s)
+            value = front_matter(markdown)[key]
+            return markdown.replace(f"{key}: {value}", f'{key}: "changed"', 1)
+
+        monkeypatch.setattr(observed_refresh, "render_published", moved)
+        before, log = tree(corpus), _log(root)
+
+        result = _refresh(corpus)
+
+        assert result.exit_code == 1, result.output
+        assert f"re-rendering would change {key};" in result.stderr
+        assert (tree(corpus), _log(root)) == (before, log)
+
     def test_without_an_approval_at_the_running_extractor(
         self, stale: str, root: Path, corpus: Path
     ) -> None:

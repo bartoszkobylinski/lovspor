@@ -26,9 +26,11 @@ from lovspor.promotion.migrate import published
 from lovspor.promotion.plan import Held
 from lovspor.promotion.received_refresh import _body, _same_version
 from tests.unit.innsyn_support import FIXTURES, fetched
-from tests.unit.promotion_cli_fixtures import invoke, make_corpus, tree
+from tests.unit.promotion_cli_fixtures import AUTHORITY, git, invoke, make_corpus, register, tree
 from tests.unit.promotion_fixtures import minimal_pdf
 from tests.unit.test_promotion_lovdata_validity import REPEALED_PRINT
+from tests.unit.test_promotion_migrate import _approve as approve_observed
+from tests.unit.test_promotion_migrate import _promoted_once
 from tests.unit.test_promotion_received_commands import (
     LOCAL,
     _approve,
@@ -38,6 +40,7 @@ from tests.unit.test_promotion_received_commands import (
     _received,
 )
 from tests.unit.test_promotion_received_decisions import _withdrawal
+from tests.unit.test_promotion_refresh import _straks
 
 _VALIDITY = re.compile(r"\n(?:status|ikraft_end): [^\n]*")
 
@@ -370,3 +373,55 @@ def test_refresh_repairs_a_duplicate_opening_front_matter_marker(
     result = _refresh(corpus)
     assert result.exit_code == 0, result.output
     assert path.read_text(encoding="utf-8") == current
+
+
+@pytest.mark.parametrize("mode", ["write", "dry-run", "missing-workspace"])
+def test_general_refresh_handles_both_channels_without_losing_observed_work(
+    mode: str,
+    promoted: tuple[str, Path],
+    workspace: Path,
+    corpus: Path,
+    root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operations #595: received refusal must still allow observed refreshes."""
+    register(root)
+    sha256 = _promoted_once(root, corpus, tmp_path, monkeypatch, _straks)
+    approve_observed(sha256, tmp_path)
+    [observed] = (corpus / LOCAL / AUTHORITY).glob("*.md")
+    received = promoted[1]
+    received_current = _stale(received)
+    if mode == "missing-workspace":
+        monkeypatch.delenv(ENV_INNSYN_DIR)
+    before, log, held = tree(corpus), _log(root), tree(workspace)
+    head = git(corpus, "rev-parse", "HEAD")
+
+    result = invoke(
+        "promote",
+        "refresh",
+        "--corpus",
+        str(corpus),
+        *(("--dry-run",) if mode == "dry-run" else ()),
+    )
+
+    assert result.exit_code == (1 if mode == "missing-workspace" else 0), result.output
+    expected = before.copy()
+    if mode == "dry-run":
+        assert '-ikraft_text: "straks"' in result.stdout
+        assert '+status: "repealed"' in result.stdout
+        assert "Dry run: nothing written." in result.stdout
+    else:
+        observed_after = observed.read_bytes()
+        assert observed_after != before[observed.relative_to(corpus).as_posix()]
+        assert b'ikraft_text: "straks"' not in observed_after
+        expected[observed.relative_to(corpus).as_posix()] = observed_after
+        if mode == "write":
+            expected[received.relative_to(corpus).as_posix()] = received_current.encode("utf-8")
+        else:
+            assert "Refused: lf-20010203-9001:" in result.stderr
+            assert f"set {ENV_INNSYN_DIR}" in result.stderr
+    assert tree(corpus) == expected
+    assert _log(root) == log
+    assert tree(workspace) == held
+    assert git(corpus, "rev-parse", "HEAD") == head
