@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import ssl
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -33,6 +34,41 @@ def _python_default() -> ssl.SSLContext:
 
 
 class TestContext:
+    def test_documented_rsa_fallback_suites_are_offered(self) -> None:
+        """Pin the server's required suites independently of policy constants."""
+        found = tls.observatory_ssl_context()
+
+        assert _names(found)[-2:] == ["AES256-GCM-SHA384", "AES128-GCM-SHA256"]
+
+    def test_platform_defaults_cannot_lower_the_tls_floor(self) -> None:
+        """The policy also holds on builds with permissive OpenSSL defaults."""
+        default = httpx.create_ssl_context()
+        default.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+        default.set_ciphers("ALL:@SECLEVEL=0")
+        trusted = default.get_ca_certs(binary_form=True)
+
+        with patch.object(tls.httpx, "create_ssl_context", return_value=default) as create:
+            found = tls.observatory_ssl_context()
+
+        create.assert_called_once_with()
+        assert found is default
+        assert found.minimum_version == ssl.TLSVersion.TLSv1_2
+        assert (found.verify_mode, found.check_hostname) == (ssl.CERT_REQUIRED, True)
+        assert found.get_ca_certs(binary_form=True) == trusted
+        assert _names(found) == _names(tls.observatory_ssl_context())
+
+    def test_client_passes_the_policy_context_and_options_to_httpx(self) -> None:
+        context = tls.observatory_ssl_context()
+        with (
+            patch.object(tls, "observatory_ssl_context", return_value=context) as policy,
+            patch.object(tls.httpx, "Client") as client,
+        ):
+            found = tls.observatory_client(timeout=7.0, follow_redirects=True)
+
+        policy.assert_called_once_with()
+        client.assert_called_once_with(verify=context, timeout=7.0, follow_redirects=True)
+        assert found is client.return_value
+
     def test_pythons_default_suites_come_first_in_their_order(self) -> None:
         default = _names(_python_default(), "TLSv1.2")
 
