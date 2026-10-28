@@ -218,3 +218,12 @@ class TestRefusals:
             }
         )
         assert asked.narrow_by == date(2026, 10, 8)
+
+
+def test_a_narrowing_at_the_same_instant_as_the_request_does_not_end_the_wait(
+    workspace: Path, letter: Path
+) -> None:
+    """The narrowing that ends the wait is later than the request, not as early."""
+    _asked(workspace)
+    _narrowed(workspace, letter, ASKED_AT)
+    assert _held(workspace)[SULDAL].awaits_narrowing

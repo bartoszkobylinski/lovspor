@@ -436,7 +436,7 @@ class RequestState(BaseModel):
         asked = self.narrowing_requested_at
         if asked is None or not self.is_open:
             return False
-        return self.narrowed_at is None or self.narrowed_at < asked
+        return self.narrowed_at is None or self.narrowed_at <= asked
 
     @property
     def due_from(self) -> date:
