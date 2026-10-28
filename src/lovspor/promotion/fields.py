@@ -33,11 +33,14 @@ what the text states, verbatim or as a parsed date, or empty:
 * ``vedtatt_av`` — the organ of the first ``vedtatt av <organ> <dato>``
   (or ``fastsatt``, ``vedteke``) in the block, else of the body's
   ``Forskriften er vedtatt av <organ> den <dato>``. The organ stops at
-  ``med hjemmel`` / ``i medhold av``, and a date right after a law's name is
-  that statute's date, never the vedtaksdato. On the received channel a
-  text whose block names no such organ is read for a state instrument
-  (``instrument_issuer``: ``Fastsatt ved kgl.res.``), as the text writes it
-  (ADR-0016 A1-4); nothing ever defaults to the kommunestyre;
+  ``med hjemmel`` / ``i medhold av``, a case number between it and the date
+  (``, sak 78/24,``) is stepped over, and a date right after a law's name is
+  that statute's date, never the vedtaksdato. A state instrument enacts
+  ``ved``: ``Fastsatt ved kgl.res. av 21. desember 1990`` dates the enactment
+  and names the instrument as the text writes it (ADR-0016 A1-4, #637). On
+  the received channel a text whose block names no organ at all is still
+  read for an undated instrument (``instrument_issuer``); nothing ever
+  defaults to the kommunestyre;
 * ``vedtatt`` / ``ikraft`` / ``ikraft_text`` — the date (or, for ``ikraft``,
   the non-date phrase such as "straks") that **every** statement of the text
   agrees on, as ``stated_dates.py`` resolves it for the evidence sidecar

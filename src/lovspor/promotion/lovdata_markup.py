@@ -22,9 +22,11 @@ this module: a Lovdata copy found on a website is still held.
   and the contents entries after it; amendment annotations (``Endret ved
   forskrift 12 nov 2008 nr. …``, ``0 Opphevet …``, ``Tilføyd hjemmel: …``,
   ``… (Lovdatas anm.)``), also when one ends a preamble line; and the footnote
-  "Ikke kunngjort i Norsk Lovtidend". An annotation is told from regulation
-  text by Lovdata's own date form, ``12 nov 2008`` with no period after the
-  day, which a regulation's text does not use;
+  "Ikke kunngjort i Norsk Lovtidend", and, when that footnote's line is
+  removed, its marker where the PDF glued it to a year in the text
+  (``forskrift av 30. oktober 19841``, #637). An annotation is told from
+  regulation text by Lovdata's own date form, ``12 nov 2008`` with no period
+  after the day, which a regulation's text does not use;
 * from a Lovtidend PDF: the banner (``NORSK LOVTIDEND``, ``Avd. II …``,
   ``Utgitt i henhold til …``, ``Kunngjort … PDF-versjon …``) and the
   "For ev. rettelser …" link to lovdata.no, keeping what a page break joined
@@ -76,6 +78,8 @@ _ANNOTATION = re.compile(
     r"|\d{1,2}\s+Ikke\s+kunngjort\s+i\s+Norsk\s+Lovtidend\.?"
 )
 _ANNOTATION_TAIL = re.compile(rf"(?:(?<=\.)\s+|\s+0\s+){_AMENDED}.*$")
+_FOOTNOTE = re.compile(r"(\d{1,2})\s+Ikke\s+kunngjort\s+i\s+Norsk\s+Lovtidend\.?")
+_YEAR = r"(?<=\b(?:1[89]|20)\d{2})"
 _LOVDATA_NOTE = re.compile(r"\(Lovdatas\s+anm\.\)")
 _LOVTIDEND_MARK = "NORSK LOVTIDEND"
 _KUNNGJORT = re.compile(r"Kunngjort\s+.*\bPDF-versjon\b.*")
@@ -139,8 +143,22 @@ def _lovdata_print(lines: Lines) -> Stripped | None:
     bound = next((i for i in range(dato[1], len(kept)) if _CONTENTS.fullmatch(kept[i])), None)
     if bound is None:
         return None
-    published = tuple(_annotation_free(_without_contents(kept[bound + 1 :])))
+    text = _without_contents(kept[bound + 1 :])
+    published = tuple(_unglued(_annotation_free(text), _footnote_markers(text)))
     return Stripped(published, kept[dato[0] : dato[1] + 1], header_validity(kept[:bound]))
+
+
+def _footnote_markers(lines: Lines) -> tuple[str, ...]:
+    return tuple(m.group(1) for line in lines if (m := _FOOTNOTE.fullmatch(line)))
+
+
+def _unglued(lines: Iterator[str], markers: tuple[str, ...]) -> Iterator[str]:
+    """Each removed footnote's marker taken off the year the PDF glued it to."""
+    for line in lines:
+        unglued = line
+        for marker in markers:
+            unglued = re.sub(rf"{_YEAR}{marker}\b", "", unglued)
+        yield unglued
 
 
 def _is_chrome_line(line: str) -> bool:

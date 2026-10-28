@@ -1355,6 +1355,19 @@ make; a rerun prints `Unchanged`. The rules:
   `no_title`) and left the 23 already extracted byte-identical; two stubs
   that name a phone number are now held as `personal_data` instead. Run
   `promote migrate` after deploying (the bump is a migration, ADR-0016 4e).
+* Three enactment forms a Lovdata print uses are read since `EXTRACTOR_VERSION`
+  14 (#637): `Fastsatt ved kgl.res. av 21. desember 1990` dates the enactment
+  (`vedtatt`) and names the instrument as written (`kgl.res.`,
+  `Kronprinsreg.res.`, never mapped to "Kongen i statsråd" — observed, not
+  asserted; owner decision 2026-10-28); a case number between the organ and
+  the date (`Fastsatt av Røros kommunestyre, sak 78/24, 29. august 2024`) is
+  stepped over; and the marker of a removed `Ikke kunngjort i Norsk Lovtidend`
+  footnote is taken off the year the PDF glued it to (`19841` → `1984`). On
+  Røros's 45 documents this fills `vedtatt` for 17 kgl.res. texts and the
+  organ for one; a date with an abbreviated month (`2. okt. 1981`) is still
+  not read (the three written forms stand). Texts already promoted whose
+  front matter gains a date are a new version, not a migration (`promote
+  migrate` refuses them; approve and `promote backfill`).
 * A repealed regulation is published, and says so (owner decision on #639):
   when a Lovdata print's block carries the `OPPHEVET` stamp the front matter
   adds `status: "repealed"` right after `ikraft_text`, and when its
