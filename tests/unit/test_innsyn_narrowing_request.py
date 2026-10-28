@@ -227,3 +227,101 @@ def test_a_narrowing_at_the_same_instant_as_the_request_does_not_end_the_wait(
     _asked(workspace)
     _narrowed(workspace, letter, ASKED_AT)
     assert _held(workspace)[SULDAL].awaits_narrowing
+
+
+@pytest.mark.parametrize("kind", ["answer", "other"])
+def test_a_reply_that_does_not_narrow_keeps_the_request_waiting(
+    workspace: Path, letter: Path, kind: str
+) -> None:
+    """Operations §28 flow: only a later narrowing ends the owner's wait."""
+    _asked(workspace)
+    result = innsyn(
+        workspace,
+        "record-reply",
+        "--request",
+        SULDAL,
+        "--at",
+        "2026-10-15T09:39:49Z",
+        "--kind",
+        kind,
+        "--letter",
+        str(letter),
+    )
+    assert result.exit_code == 0, result.output
+    assert _held(workspace)[SULDAL].awaits_narrowing
+    assert SULDAL in _rows(workspace, "requests", "--waiting")
+    assert SULDAL not in _rows(workspace, "due", "--today", "2026-11-30")
+
+
+def test_a_newer_request_without_a_deadline_replaces_the_previous_deadline(
+    workspace: Path,
+) -> None:
+    """A second request replaces the first, including its optional deadline."""
+    _asked(workspace, "--narrow-by", "2026-10-22")
+    _asked(workspace, at="2026-10-20T10:00:00Z")
+    state = _held(workspace)[SULDAL]
+    assert state.narrowing_requested_at == datetime(2026, 10, 20, 10, tzinfo=UTC)
+    assert state.narrow_by is None
+    assert state.awaits_narrowing
+    assert _rows(workspace, "requests")[SULDAL][REQUESTED_AT_COLUMN:] == [
+        "2026-10-20T10:00:00+00:00",
+        "",
+    ]
+
+
+@pytest.mark.parametrize("outcome", ["partial", "full", "refused"])
+def test_an_answer_after_the_request_only_ends_the_wait_if_it_closes(
+    workspace: Path, outcome: str
+) -> None:
+    """Operations explicitly keeps partial answers waiting but closes full/refused."""
+    _asked(workspace)
+    result = innsyn(
+        workspace,
+        "record-outcome",
+        "--request",
+        SULDAL,
+        "--outcome",
+        outcome,
+        "--at",
+        "2026-10-20T10:00:00Z",
+    )
+    assert result.exit_code == 0, result.output
+    waiting = outcome == "partial"
+    assert _held(workspace)[SULDAL].awaits_narrowing is waiting
+    assert (SULDAL in _rows(workspace, "requests", "--waiting")) is waiting
+
+
+@pytest.mark.parametrize(("deadline", "accepted"), [("2026-10-08", False), ("2026-10-09", True)])
+def test_the_deadline_is_compared_with_the_oslo_day_of_arrival(
+    workspace: Path, deadline: str, accepted: bool
+) -> None:
+    """At 22:30 UTC in October, the authority's Oslo day is already tomorrow."""
+    before = _lines(workspace)
+    result = innsyn(
+        workspace,
+        "record-narrowing-request",
+        "--request",
+        SULDAL,
+        "--at",
+        "2026-10-08T22:30:00Z",
+        "--narrow-by",
+        deadline,
+    )
+    if accepted:
+        assert result.exit_code == 0, result.output
+        assert _held(workspace)[SULDAL].narrow_by == date(2026, 10, 9)
+        assert _lines(workspace) == before + 1
+    else:
+        assert result.exit_code == 1
+        assert "before the request that set it" in result.stderr
+        assert _lines(workspace) == before
+
+
+def test_due_keeps_the_narrowing_request_columns_after_the_owner_replies(
+    workspace: Path, letter: Path
+) -> None:
+    """The documented due columns retain the authority's request and deadline."""
+    _asked(workspace, "--narrow-by", "2026-10-22")
+    _narrowed(workspace, letter, "2026-10-15T09:39:49Z")
+    row = _rows(workspace, "due", "--today", "2026-10-23")[SULDAL]
+    assert row[REQUESTED_AT_COLUMN:] == ["2026-10-08T10:00:00+00:00", "2026-10-22"]
