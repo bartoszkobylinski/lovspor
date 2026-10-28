@@ -72,6 +72,45 @@ def _by_branch(findings: list[object]) -> dict[str, list[str]]:
 
 
 class TestStates:
+    @pytest.mark.parametrize("change", ["staged-add", "staged-delete", "unstaged-delete"])
+    def test_index_changes_and_tracked_deletions_are_dirty(self, repo: Path, change: str) -> None:
+        path = _worktree(repo, "w-index", pushed=True)
+        if change == "staged-add":
+            (path / "new").write_text("pending", encoding="utf-8")
+            _git(path, "add", "new")
+        elif change == "staged-delete":
+            _git(path, "rm", "base")
+        else:
+            (path / "base").unlink()
+        before = _git(path, "status", "--porcelain")
+
+        assert _by_branch(check.scan(repo)) == {"w-index": ["dirty"]}
+        assert _git(path, "status", "--porcelain") == before
+
+    @pytest.mark.parametrize("local_commit", [False, True], ids=["behind", "diverged"])
+    def test_only_local_commits_count_as_ahead(self, repo: Path, local_commit: bool) -> None:
+        path = _worktree(repo, "w-tracking", pushed=True)
+        _commit(repo, "remote-only")
+        _git(repo, "push", "-q", "origin", "HEAD:refs/heads/w-tracking")
+        if local_commit:
+            _commit(path, "local-only")
+
+        expected = ["ahead 1"] if local_commit else []
+        assert _by_branch(check.scan(repo)) == {"w-tracking": expected}
+
+    @pytest.mark.parametrize("detached", [False, True], ids=["branch", "detached"])
+    def test_a_remote_descendant_preserves_the_worktree_commit(
+        self, repo: Path, detached: bool
+    ) -> None:
+        path = _worktree(repo, "w-ancestor", pushed=False, detached=detached)
+        _commit(path, "shared-work")
+        _git(repo, "merge", "--ff-only", str(_git(path, "rev-parse", "HEAD")))
+        _commit(repo, "remote-descendant")
+        _git(repo, "push", "-q", "origin", "main")
+
+        key = "detached" if detached else "w-ancestor"
+        assert _by_branch(check.scan(repo)) == {key: []}
+
     def test_a_pushed_clean_worktree_is_not_stranded(self, repo: Path) -> None:
         _worktree(repo, "w-clean", pushed=True)
 
@@ -128,6 +167,39 @@ class TestStates:
 
 
 class TestTheCommand:
+    def test_untracked_option_reports_and_preserves_untracked_work(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = _worktree(repo, "w-scratch", pushed=True)
+        scratch = path / "scratch.txt"
+        scratch.write_bytes(b"uncommitted work\n")
+
+        assert check.main(["--repo", str(repo)]) == 0
+        assert capsys.readouterr().out == ""
+        assert check.main(["--repo", str(repo), "--untracked"]) == 1
+        out, err = capsys.readouterr()
+        assert out.splitlines() == [f"{path}\tw-scratch\tdirty"]
+        assert "1 stranded of 1 linked worktrees" in err
+        assert scratch.read_bytes() == b"uncommitted work\n"
+        assert _git(path, "status", "--porcelain") == "?? scratch.txt"
+
+    def test_prunable_is_reported_but_does_not_fail_or_prune(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = _worktree(repo, "w-missing", pushed=False)
+        for file in path.iterdir():
+            file.unlink()
+        path.rmdir()
+        before = _git(repo, "worktree", "list", "--porcelain")
+
+        assert check.main(["--repo", str(repo)]) == 0
+
+        out, err = capsys.readouterr()
+        assert out.splitlines() == [f"{path}\tw-missing\tprunable"]
+        assert "0 stranded of 1 linked worktrees (1 prunable)" in err
+        assert _git(repo, "worktree", "list", "--porcelain") == before
+        assert not path.exists()
+
     def test_it_lists_the_stranded_ones_and_exits_1_without_changing_anything(
         self, repo: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
