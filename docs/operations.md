@@ -1748,6 +1748,7 @@ uv run lovspor observatory lf-ledger                 # bring it up to date (chea
 uv run lovspor observatory lf-ledger --rebuild       # read the whole log again (idempotent)
 uv run lovspor observatory lf-first-seen --day 2026-10-02
 uv run lovspor observatory lf-first-seen --since 2026-10-01
+uv run lovspor observatory lf-last-seen --unlinked      # candidate repeals for review (#694)
 ```
 
 - `lf-ledger.jsonl` sits beside the observation log (ADR-0010 §5). It is append-only,
@@ -1768,6 +1769,22 @@ uv run lovspor observatory lf-first-seen --since 2026-10-01
 - `lf-first-seen` prints tab-separated rows (Oslo day, first `ObservedAt` in UTC,
   authority, kind, id, page) to stdout and the count to stderr. Days are Oslo calendar
   days.
+- `lf-last-seen` (#694) is the other half of the ledger, derived from the whole log on
+  each run and persisted nowhere: for every (authority, kind, id) the latest 2xx HTML
+  capture that linked it, and whether every page that ever linked it has since been
+  read again without the link. Rows are tab-separated (authority, kind, id, first seen,
+  last seen linked, `linked`/`unlinked`, unlinked since or `-`, the latest readable
+  capture of those pages, pages that ever linked it, pages failing since their last
+  readable capture, the page of the latest sighting); `--unlinked` keeps the candidates
+  alone; the counts go to stderr. `unlinked` is a candidate repeal for a human to
+  review, never a retraction: the ledger keeps its entry, the next wave still asks for
+  the id, and a promoted text is not withdrawn. Only a later readable capture of the
+  same page is evidence that a link went away — a fetch failure, an error page, a
+  non-HTML answer or a capture whose blob is gone (tombstoned, or damage `verify`
+  reports) leaves the id `linked` and counts the page as failing, so a kommune whose
+  site is down does not read as a repeal. Verdicts follow `ObservedAt`, not log order.
+  A damaged log is refused. Holding `unlinked` ids out of a wave, and tying an LTII
+  amendment to its base regulation, are later slices of #694.
 
 ### Innsyn requests to every local authority (issue #509)
 
