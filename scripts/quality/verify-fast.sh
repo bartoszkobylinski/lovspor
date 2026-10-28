@@ -31,6 +31,7 @@ check mypy uv run mypy src/
 check equivalents uv run python scripts/ci/mutation_to_json.py --check-equivalents
 check ratchets uv run python scripts/quality/check_ratchets.py
 check boundaries uv run python scripts/quality/check_boundaries.py
+check dependency-policy uv run python scripts/quality/check_dependency_policy.py
 # One named module, never the unit suite: the release contracts (#323 D1/D2)
 # are the cheapest form of two failure classes already shipped once.
 check release-contracts uv run pytest tests/unit/test_release_contracts.py -q -p no:cacheprovider
