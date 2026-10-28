@@ -190,6 +190,14 @@ class TestBodyAnchors:
 
 
 class TestTitle:
+    @pytest.mark.parametrize("banner", [PRINT_HEAD[:-4], LOVTIDEND[:5]])
+    def test_received_splitter_still_holds_a_truncated_title(self, banner: tuple[str, ...]) -> None:
+        # title.py: a title ending on a function word must never mint an id.
+        lines = ("Regulering av grensen mellom Eksempel og", *BOUNDARY[1:])
+        result = extract_received(minimal_pdf((*banner, *lines)), PDF)
+        assert isinstance(result, HeldExtraction), result
+        assert result.reason is ExtractionHoldReason.TITLE_TRUNCATED
+
     def test_the_first_line_is_the_title_whatever_it_opens_with(self) -> None:
         assert _received(COMPOUND_TITLE).regulation.title == COMPOUND_TITLE[0]
 

@@ -45,6 +45,32 @@ def _received(lines: tuple[str, ...]) -> ExtractedDocument:
 
 class TestStateInstrument:
     @pytest.mark.parametrize(
+        ("enactment", "organ"),
+        [
+            ("fastsatt ved statsrådsbeslutning av 21. desember 1990", "statsrådsbeslutning"),
+            (
+                "vedtatt av Eksempel kommunestyre, sak 78/90, 21. desember 1990",
+                "Eksempel kommunestyre",
+            ),
+        ],
+    )
+    def test_body_own_enactment_reads_new_forms_but_not_a_repealed_regulations(
+        self, enactment: str, organ: str
+    ) -> None:
+        # stated_dates.py: only the body's own adoption statement counts.
+        own = f"Forskriften er {enactment}."
+        cited = f"Den tidligere forskriften, som ble {enactment}, oppheves."
+        for statement, expected in [(own, date(1990, 12, 21)), (cited, None)]:
+            read = read_regulation((TITLE, "Fremmet av Departementet.", *SECTIONS, statement))
+            assert isinstance(read, tuple)
+            regulation, fields = read
+            verdict = stated_vedtatt(regulation)
+            assert regulation.vedtaksdato == fields.vedtatt == verdict.value == expected
+            assert fields.vedtatt_av == (organ if expected else None)
+            assert verdict.status == ("stated" if expected else "absent")
+            assert [s.evidence for s in verdict.statements] == ([own[:-1]] if expected else [])
+
+    @pytest.mark.parametrize(
         "enactment",
         [
             "Fastsatt ved kgl.res. av 21. desember 1990.",
