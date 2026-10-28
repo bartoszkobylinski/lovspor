@@ -7,7 +7,13 @@ A wave is the next ``wave_size`` authorities that
   authority was recorded undelivered at — the rest are listed as
   ``unresolved`` and get no letter; and
 * have no open request in the ledger — those are listed as ``skipped_open``.
-  A request stays open until its outcome is ``full`` or ``refused``.
+  A request stays open until its outcome is ``full`` or ``refused``; and
+* have not had the general request answered — ``full`` or ``refused`` — unless
+  their pages have since linked ids not asked for yet (#696). An authority
+  that answered it and has nothing new is listed as ``skipped_closed``; one
+  with new ids gets a letter for those ids alone, without the general point,
+  so a fulfilled request is never put again and a refusal (klage track) is
+  never answered with a fresh general request.
 
 Authorities with at least one known id still to ask for (part a, after held
 and already-asked ids are taken out) come first, then the rest; each group
@@ -60,7 +66,7 @@ class ManifestEntry(BaseModel):
     maalform: Maalform
     maalform_recorded: bool
     lf_ids: tuple[str, ...]
-    general_clause: Literal[True] = True
+    general_clause: bool = True
     letter_file: str
     letter_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -75,6 +81,7 @@ class Manifest(BaseModel):
     letters: tuple[ManifestEntry, ...]
     unresolved: tuple[str, ...]
     skipped_open: tuple[str, ...]
+    skipped_closed: tuple[str, ...] = ()
     remaining: int = Field(ge=0)
 
 
@@ -114,6 +121,12 @@ def _open(requests: dict[str, RequestState]) -> set[str]:
     return {state.sent.authority_id for state in requests.values() if state.is_open}
 
 
+def _closed(requests: dict[str, RequestState]) -> set[str]:
+    """Authorities whose general request was answered: ``full`` or ``refused`` (#696)."""
+    states = requests.values()
+    return {s.sent.authority_id for s in states if s.delivered and not s.is_open}
+
+
 def _failed(requests: dict[str, RequestState]) -> set[tuple[str, str]]:
     """(authority, address) pairs a letter was recorded undelivered at."""
     return {(s.sent.authority_id, s.sent.recipient) for s in requests.values() if not s.delivered}
@@ -130,33 +143,58 @@ class _Plan(BaseModel):
     chosen: list[Authority]
     unresolved: list[str]
     skipped_open: list[str]
+    skipped_closed: list[str]
     remaining: int
 
 
-def plan(inputs: WaveInputs, wave_size: int) -> _Plan:
-    """Which authorities this wave writes to, and why the others are not in it."""
+class _Sorted(BaseModel):
+    """The authorities a wave may write to, by bucket, in population order."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    eligible: list[Authority]
+    unresolved: list[str]
+    skipped_open: list[str]
+    skipped_closed: list[str]
+
+
+def _sort(inputs: WaveInputs, ids: dict[str, tuple[str, ...]]) -> _Sorted:
     busy, failed = _open(inputs.requests), _failed(inputs.requests)
-    eligible, unresolved, skipped = [], [], []
+    done = _closed(inputs.requests)
+    eligible, unresolved, skipped, closed = [], [], [], []
     for authority in inputs.population.authorities:
         contact = inputs.contacts.get(authority.authority_id, Contact())
         if authority.authority_id in busy:
             skipped.append(authority.authority_id)
+        elif authority.authority_id in done and not ids.get(authority.authority_id):
+            closed.append(authority.authority_id)
         elif not _usable(contact, authority.authority_id, failed):
             unresolved.append(authority.authority_id)
         else:
             eligible.append(authority)
+    return _Sorted(
+        eligible=eligible, unresolved=unresolved, skipped_open=skipped, skipped_closed=closed
+    )
+
+
+def plan(inputs: WaveInputs, wave_size: int) -> _Plan:
+    """Which authorities this wave writes to, and why the others are not in it."""
     ids = known_ids(inputs)
-    eligible.sort(key=lambda a: (not ids.get(a.authority_id), a.authority_id))
+    buckets = _sort(inputs, ids)
+    eligible = sorted(buckets.eligible, key=lambda a: (not ids.get(a.authority_id), a.authority_id))
     chosen = eligible[:wave_size]
     return _Plan(
         chosen=chosen,
-        unresolved=unresolved,
-        skipped_open=skipped,
+        unresolved=buckets.unresolved,
+        skipped_open=buckets.skipped_open,
+        skipped_closed=buckets.skipped_closed,
         remaining=len(eligible) - len(chosen),
     )
 
 
-def _letter(inputs: WaveInputs, authority: Authority, ids: tuple[str, ...]) -> LetterRequest:
+def _letter(
+    inputs: WaveInputs, authority: Authority, ids: tuple[str, ...], general: bool
+) -> LetterRequest:
     contact = inputs.contacts[authority.authority_id]
     route = contact.route
     if route is None:
@@ -167,6 +205,7 @@ def _letter(inputs: WaveInputs, authority: Authority, ids: tuple[str, ...]) -> L
         channel=route.channel,
         maalform=contact.letter_form,
         lf_ids=ids,
+        general_clause=general,
         sender=inputs.sender,
     )
 
@@ -184,16 +223,18 @@ def _write_letter(out: Path, request: LetterRequest, recorded: bool) -> Manifest
         maalform=request.maalform,
         maalform_recorded=recorded,
         lf_ids=request.lf_ids,
+        general_clause=request.general_clause,
         letter_file=name,
         letter_sha256=hashlib.sha256(payload).hexdigest(),
     )
 
 
 def _letters(inputs: WaveInputs, chosen: list[Authority], out: Path) -> list[ManifestEntry]:
-    ids = known_ids(inputs)
+    ids, done = known_ids(inputs), _closed(inputs.requests)
     entries = []
     for authority in chosen:
-        request = _letter(inputs, authority, ids.get(authority.authority_id, ()))
+        new_ids = ids.get(authority.authority_id, ())
+        request = _letter(inputs, authority, new_ids, authority.authority_id not in done)
         recorded = inputs.contacts[authority.authority_id].maalform is not None
         entries.append(_write_letter(out, request, recorded))
     return entries
@@ -215,6 +256,7 @@ def write_wave(inputs: WaveInputs, out: Path, wave_size: int, generated_at: date
         letters=tuple(entries),
         unresolved=tuple(chosen.unresolved),
         skipped_open=tuple(chosen.skipped_open),
+        skipped_closed=tuple(chosen.skipped_closed),
         remaining=chosen.remaining,
     )
     atomic_replace_bytes(

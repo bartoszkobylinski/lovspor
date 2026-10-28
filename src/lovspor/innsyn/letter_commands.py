@@ -90,7 +90,8 @@ def letters(
     typer.echo(
         f"letters: {len(manifest.letters)} written to {out} ({with_ids} with known LF ids); "
         f"{len(manifest.unresolved)} unresolved, {len(manifest.skipped_open)} with an open "
-        f"request, {manifest.remaining} left for later waves"
+        f"request, {len(manifest.skipped_closed)} answered with nothing new, "
+        f"{manifest.remaining} left for later waves"
     )
 
 

@@ -1850,7 +1850,13 @@ $I received                               # every document; requested ids still 
   default is the owner's decision (2026-10-12).
 - **Letters.** A wave takes the next `--wave-size` resolved authorities and skips any
   authority with an open request (open until the outcome is `full` or `refused`, or the
-  letter is recorded undelivered).
+  letter is recorded undelivered). An authority whose request closed, `full` or
+  `refused`, is not written to again unless its pages have since linked ids no request
+  asked for (#696): with nothing new it is listed as `skipped_closed`, and with new ids
+  its letter asks for those ids alone, says it comes in addition to the earlier request,
+  and does not put the general point again — a fulfilled request is never repeated and
+  a refusal is answered on the klage track, not with a fresh general request. The
+  manifest entry then says `general_clause: false`, and `record-sent` records it so.
   Authorities with known ids still to ask for come first, then the rest, each group in
   id order (owner decision 2026-10-12). Point 1 lists the `LF`/`LTII` ids the LF ledger saw on the authority's
   pages, less the ids in `--held` (one per line, `#` comments) and the ids an earlier
