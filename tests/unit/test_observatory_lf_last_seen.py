@@ -156,6 +156,7 @@ class TestStillLinked:
         seen = _by_key(report.entries)[KEY_A]
 
         assert (seen.status, seen.evidence_at) == ("linked", T0)
+        assert seen.pages_failing == 1
         assert report.blobs_missing == 1
 
     def test_one_page_still_linking_outweighs_another_that_dropped_it(self, tmp_path: Path) -> None:
@@ -295,8 +296,13 @@ class TestTheLogIsTheOnlySource:
         with log.log_path.open("a", encoding="utf-8") as handle:
             handle.write("{torn")
 
-        with pytest.raises(LogIntegrityError, match="observatory verify"):
+        clean_through = log.log_path.stat().st_size - len("{torn")
+        with pytest.raises(LogIntegrityError) as caught:
             last_seen_report(log)
+        assert str(caught.value) == (
+            f"{log.log_path}: unreadable record after byte {clean_through}; "
+            "the last-seen view is not built from a damaged log (run `observatory verify`)"
+        )
 
     def test_an_empty_log_is_an_empty_report(self, tmp_path: Path) -> None:
         report = last_seen_report(make_log(tmp_path))
@@ -362,6 +368,21 @@ class TestTheCommand:
         assert [line.split("\t")[2] for line in out.splitlines()] == ["2020-11-19-2630"]
         assert "1 unlinked" in err
 
+    @pytest.mark.parametrize("drop", [False, True])
+    def test_summary_counts_a_single_id(self, tmp_path: Path, drop: bool) -> None:
+        log = make_log(tmp_path)
+        _capture(log, _page(LF_A))
+        if drop:
+            _capture(log, _page(salt="dropped"), observed_at=T1)
+
+        code, out, err = self._run(tmp_path)
+
+        assert code == 0, err
+        assert len(out.splitlines()) == 1
+        assert (
+            f"1 ids: {int(drop)} unlinked (candidate repeals for review), {int(not drop)} linked;"
+        ) in err
+
     def test_a_damaged_log_is_refused_with_exit_1(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         _capture(log, _page(LF_A))
@@ -372,3 +393,35 @@ class TestTheCommand:
 
         assert (code, out) == (1, "")
         assert "Refused:" in err
+
+
+@pytest.mark.parametrize("failure_at", [T0, T1])
+def test_repeated_equal_time_failures_preserve_the_page_verdict(
+    tmp_path: Path, failure_at: datetime
+) -> None:
+    log = make_log(tmp_path)
+    _capture(log, _page(LF_A))
+    _failure(log, failure_at, "timeout")
+    _failure(log, failure_at, "http_404")
+
+    seen = _by_key(last_seen_report(log).entries)[KEY_A]
+
+    assert (seen.status, seen.evidence_at) == ("linked", T0)
+    assert seen.pages_failing == int(failure_at > T0)
+
+
+def test_missing_blob_count_counts_distinct_blobs_not_captures(tmp_path: Path) -> None:
+    log = make_log(tmp_path)
+    _capture(log, _page(LF_A))
+    missing_payloads = [_page(salt="missing one"), _page(salt="missing two")]
+    for payload in missing_payloads:
+        record = _capture(log, payload, observed_at=T1)
+        log.blob_path(record.sha256).unlink()
+    # Repeated observations of a missing blob use the same cached absence.
+    log.append(record.model_copy(update={"observed_at": T2}))
+
+    report = last_seen_report(log)
+
+    assert (report.html_records, report.blobs_read, report.blobs_missing) == (4, 1, 2)
+    seen = _by_key(report.entries)[KEY_A]
+    assert (seen.status, seen.evidence_at, seen.pages_failing) == ("linked", T0, 1)
