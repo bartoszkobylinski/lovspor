@@ -17,7 +17,7 @@ from lovspor.promotion import ExtractedDocument, ExtractionHoldReason, HeldExtra
 from lovspor.promotion.anchors import MAX_TITLE_CHARS, first_numbered_section
 from lovspor.promotion.extract import EXTRACTOR_VERSION, extract_received, extract_regulation
 from lovspor.promotion.fields import read_received_regulation
-from lovspor.promotion.models import ReceivedForm
+from lovspor.promotion.models import PersonalDataKind, ReceivedForm
 from tests.unit.promotion_fixtures import html_page, minimal_pdf
 from tests.unit.test_promotion_lovdata_markup import LOVTIDEND, PRINT_HEAD
 
@@ -104,6 +104,32 @@ def _held(lines: tuple[str, ...]) -> HeldExtraction:
 
 
 class TestBodyAnchors:
+    def test_unsectioned_body_follows_all_enactment_lines_and_their_wraps(self) -> None:
+        # decisions.md §20: the fallback is after enactment, including wraps.
+        lines = (
+            BOUNDARY[0],
+            "Hjemmel: Fastsatt ved kgl.res. av 21. august 1987 med hjemmel i",
+            "lov om kommunal inndeling.",
+            "Fremmet av",
+            "Kommunal- og arbeidsdepartementet.",
+            BOUNDARY[2],
+        )
+        result = read_received_regulation(lines)
+        assert not isinstance(result, ExtractionHoldReason), result
+        regulation, _ = result
+        assert regulation.identification_block == "\n".join(lines[:5])
+        assert regulation.body == lines[5]
+
+    def test_section_anchor_takes_precedence_over_an_earlier_numbered_point(self) -> None:
+        lines = (*COMPOUND_TITLE[:2], "1. Tidligere vedtak omtales her.", *COMPOUND_TITLE[2:])
+        extracted = _received(lines)
+        assert extracted.regulation.identification_block == "\n".join(lines[:3])
+        assert extracted.regulation.body == "\n".join(COMPOUND_TITLE[2:])
+
+    def test_wrapped_enactment_without_any_body_is_still_held(self) -> None:
+        lines = (BOUNDARY[0], "Fastsatt ved kgl.res. av 21. august 1987. Fremmet av", FILLER)
+        assert _held(lines).reason is ExtractionHoldReason.NO_BODY
+
     @pytest.mark.parametrize("lines", [VERNEFORSKRIFT, KGL_RES_POINTS, BOUNDARY, COMPOUND_TITLE])
     def test_lovtidend_uses_the_received_splitter(self, lines: tuple[str, ...]) -> None:
         result = extract_received(minimal_pdf((*LOVTIDEND[:5], *lines)), PDF)
@@ -180,6 +206,31 @@ class TestTitle:
 
 
 class TestUnchangedElsewhere:
+    @pytest.mark.parametrize("lines", [VERNEFORSKRIFT, KGL_RES_POINTS, BOUNDARY, COMPOUND_TITLE])
+    def test_lovtidend_uses_the_received_splitter(self, lines: tuple[str, ...]) -> None:
+        # The same new rules apply to both forms named in decisions.md §20.
+        result = extract_received(minimal_pdf((*LOVTIDEND[:5], *lines)), PDF)
+        assert isinstance(result, ExtractedDocument), result
+        expected = _received(lines)
+        assert result.received_form is ReceivedForm.LOVTIDEND
+        assert result.regulation.title == expected.regulation.title
+        assert result.regulation.identification_block == expected.regulation.identification_block
+        assert result.regulation.body == expected.regulation.body
+        assert result.regulation.vedtaksdato == expected.regulation.vedtaksdato
+        assert result.regulation.removed_identification == LOVTIDEND[4]
+        assert result.fields == expected.fields
+
+    @pytest.mark.parametrize("lines", [VERNEFORSKRIFT, BOUNDARY])
+    def test_newly_accepted_body_still_reaches_the_personal_data_gate(
+        self, lines: tuple[str, ...]
+    ) -> None:
+        # §20 explicitly changes phone-bearing stubs from no_body to personal_data.
+        held = _held((*lines, "Telefon: 12 34 56 78"))
+        assert held.reason is ExtractionHoldReason.PERSONAL_DATA
+        assert [(hit.kind, hit.line) for hit in held.personal_data] == [
+            (PersonalDataKind.PHONE, len(lines) + 1)
+        ]
+
     @pytest.mark.parametrize(
         ("lines", "reason"),
         [
