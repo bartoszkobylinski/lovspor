@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/observatory/lf_last_seen.py"
+symbol = "failed"
+registered = "2026-10-28, PR #713, from the mutation run on c274bf8c"
+mutation = """
+-    if self.failed_at is None or at > self.failed_at:
++    if self.failed_at is None or at >= self.failed_at:
+"""
+justification = """
+The branch assigns `self.failed_at = at`. The two conditions differ only when
+`at == self.failed_at`, and then the assignment writes the value the field
+already holds, so the object is the same afterwards either way. Python
+comparison and assignment semantics on an immutable datetime; no dependency.
+"""
