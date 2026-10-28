@@ -29,15 +29,29 @@ from typing import Any
 
 import httpx
 
+#: CPython's own default cipher string (what ``ssl.create_default_context`` sets on
+#: a build that applies it), spelled out: a Python built against a distribution's
+#: OpenSSL may run on that OpenSSL's ``DEFAULT`` list instead -- PSK and CBC suites
+#: included, no version floor -- so the policy is stated here rather than read back.
+PYTHON_DEFAULT_CIPHERS = (
+    "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:ECDH+AES:DHE+AES"
+    ":!aNULL:!eNULL:!aDSS:!SHA1:!AESCCM"
+)
 #: RSA-key-exchange AEAD suites, the last resort for a server that offers no ECDHE.
 RSA_KEY_EXCHANGE_SUITES: tuple[str, ...] = ("AES256-GCM-SHA384", "AES128-GCM-SHA256")
 
 
 def observatory_ssl_context() -> ssl.SSLContext:
-    """httpx's default context with the RSA-key-exchange AEAD suites appended last."""
+    """httpx's context (its trust store and verification), on the observatory's suites.
+
+    TLS 1.2 is the floor whatever the build's default; the TLS 1.2 list is
+    CPython's default list first, in its order, then the two RSA-key-exchange
+    AEAD suites; the TLS 1.3 suites are the build's own.
+    """
     context = httpx.create_ssl_context()
-    default = [c["name"] for c in context.get_ciphers() if c["protocol"] != "TLSv1.3"]
-    context.set_ciphers(":".join([*default, *RSA_KEY_EXCHANGE_SUITES]))
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    suites = ":".join([PYTHON_DEFAULT_CIPHERS, *RSA_KEY_EXCHANGE_SUITES])
+    context.set_ciphers(f"@SECLEVEL=2:{suites}")
     return context
 
 
