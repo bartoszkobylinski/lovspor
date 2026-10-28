@@ -162,3 +162,102 @@ class TestTheCommand:
         payload = json.loads(out.read_text(encoding="utf-8"))
         assert payload["undated_classes"] == {quality.NO_FIELD: 1}
         assert payload["glued_shape_top"] == [["vedlegg1", 1]]
+
+
+class TestMeasurementBoundaries:
+    @pytest.mark.parametrize(
+        ("in_force", "last_change"),
+        [("2020-01-01", "2020-01-01"), (None, "2020-01-01"), ("2020-01-01", None)],
+    )
+    def test_equal_dates_and_one_known_date_are_neither_reversed_nor_undated(
+        self, in_force: str | None, last_change: str | None
+    ) -> None:
+        found = quality.Measurement()
+        quality.measure_document("nl-example", {}, _doc(in_force, last_change, ""), found)
+
+        assert found.current == 1
+        assert found.reversed_dates == []
+        assert found.undated == []
+
+    def test_markers_are_counted_only_in_body_and_attachment_requires_a_letter(self) -> None:
+        text = _doc("2020-01-01", None, "æ[^1] 2[^2] _[^3] .[^4] [^5] vedlegg1 vedlegg1")
+        text = text.replace('type: "lov"', 'title: "ord[^99] vedlegg9"')
+        found = quality.Measurement()
+
+        quality.measure_document("nl-example", {}, text, found)
+
+        assert (found.markers, found.attached_markers) == (5, 1)
+        assert dict(found.glued_shape) == {"vedlegg1": 2}
+        assert found.glued_shape_docs == 1
+        assert found.as_json()["glued_shape_tokens"] == 2
+
+    def test_measurement_is_repeatable_and_independent_of_manifest_order(
+        self, tmp_path: Path
+    ) -> None:
+        corpus = _corpus(tmp_path / "lovverk")
+        manifest_path = corpus / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        # Make multiple rows in each list, so ordering is observable.
+        (corpus / "lover/c.md").write_text(_doc(None, None, "vedlegg2"), encoding="utf-8")
+        record = dict(manifest["documents"]["nl-20200101-001"])
+        manifest["documents"]["nl-20200101-005"] = record
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        first = quality.measure(corpus).as_json()
+        manifest["documents"] = dict(reversed(list(manifest["documents"].items())))
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        assert quality.measure(corpus).as_json() == first
+        assert quality.measure(corpus).as_json() == first
+        assert [row["id"] for row in first["reversed_dates"]] == [
+            "nl-20200101-001",
+            "nl-20200101-005",
+        ]
+        assert [row["id"] for row in first["undated"]] == [
+            "nl-20200101-002",
+            "nl-20200101-003",
+        ]
+
+    def test_both_tarballs_are_read_without_extracting_members(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cache = tmp_path / "cache"
+        _tarball(cache, {"nl-example": "Kongen bestemmer"})
+        with tarfile.open(cache / "gjeldende-sentrale-forskrifter.tar.bz2", "w:bz2") as archive:
+            payload = (
+                b'<dd class="dateInForce">2020-01-01</dd>'
+                b'<dd class="lastChangeInForce">2021-01-01</dd>'
+            )
+            member = tarfile.TarInfo("sf/sf-example.xml")
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+            link = tarfile.TarInfo("sf/linked.xml")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "sf-example.xml"
+            archive.addfile(link)
+
+        def refuse_extraction(*args: object, **kwargs: object) -> None:
+            pytest.fail("measurement must read members without extracting to disk")
+
+        monkeypatch.setattr(tarfile.TarFile, "extract", refuse_extraction)
+        monkeypatch.setattr(tarfile.TarFile, "extractall", refuse_extraction)
+        before = {p.relative_to(cache): p.read_bytes() for p in cache.iterdir()}
+
+        assert quality.header_dates(cache, {"nl-example", "sf-example", "linked"}) == {
+            "nl-example": {"dateInForce": "Kongen bestemmer"},
+            "sf-example": {"dateInForce": "2020-01-01", "lastChangeInForce": "2021-01-01"},
+        }
+        assert {p.relative_to(cache): p.read_bytes() for p in cache.iterdir()} == before
+
+    def test_empty_manifest_produces_zero_counts(self, tmp_path: Path) -> None:
+        (tmp_path / "manifest.json").write_text('{"documents": {}}', encoding="utf-8")
+
+        assert quality.measure(tmp_path).as_json() == {
+            "current": 0,
+            "reversed_dates": [],
+            "undated": [],
+            "markers": 0,
+            "attached_markers": 0,
+            "glued_shape_tokens": 0,
+            "glued_shape_docs": 0,
+            "glued_shape_top": [],
+        }
