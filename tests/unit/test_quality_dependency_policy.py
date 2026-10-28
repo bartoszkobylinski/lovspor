@@ -86,6 +86,55 @@ class TestUndeclaredImports:
             "src/lovspor/b.py",
         ]
 
+    def test_dev_only_dependency_does_not_authorise_a_runtime_import(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _tree(tmp_path, "", {"a.py": "import yaml\n"})
+        with (root / "pyproject.toml").open("a", encoding="utf-8") as stream:
+            stream.write('[dependency-groups]\ndev = ["PyYAML>=6"]\n')
+        monkeypatch.setattr(policy, "packages_distributions", lambda: {"yaml": ["PyYAML"]})
+
+        [found] = policy.undeclared_imports(root)
+
+        assert (found.rule, found.path) == ("undeclared-import", "src/lovspor/a.py")
+        assert "imports 'yaml', provided by pyyaml" in found.detail
+
+    def test_nested_absolute_imports_are_checked_but_relative_imports_are_local(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _tree(
+            tmp_path,
+            "",
+            {
+                "a.py": (
+                    "from ..helpers import local\n"
+                    "def load():\n"
+                    "    import vendor.client as client\n"
+                    "    from vendor.types import Item\n"
+                    "if False:\n"
+                    "    import vendor\n"
+                ),
+            },
+        )
+        monkeypatch.setattr(policy, "packages_distributions", lambda: {"vendor": ["vendor-dist"]})
+
+        [found] = policy.undeclared_imports(root)
+
+        assert (found.rule, found.path) == ("undeclared-import", "src/lovspor/a.py")
+        assert "imports 'vendor', provided by vendor-dist" in found.detail
+
+    def test_any_declared_namespace_provider_passes_after_name_normalisation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _tree(tmp_path, '"Vendor.Core>=1"', {"a.py": "import vendor.api\n"})
+        monkeypatch.setattr(
+            policy,
+            "packages_distributions",
+            lambda: {"vendor": ["unrelated-provider", "vendor_core"]},
+        )
+
+        assert policy.undeclared_imports(root) == []
+
     @pytest.mark.parametrize(
         ("raw", "expected"), [("PyYAML", "pyyaml"), ("pydantic_core", "pydantic-core")]
     )
@@ -133,6 +182,22 @@ class TestCommittableArtefacts:
         _git(tmp_path, "add", "--", "lovendring-æ.py.bak")
 
         assert [v.path for v in policy.committable_artefacts(tmp_path)] == ["lovendring-æ.py.bak"]
+
+    def test_untracked_artefacts_are_ignored_and_staged_paths_are_reported_once(
+        self, tmp_path: Path
+    ) -> None:
+        _git(tmp_path, "init", "-q")
+        (tmp_path / "untracked.bak").write_text("backup\n", encoding="utf-8")
+        staged = tmp_path / "staged.orig"
+        staged.write_text("original\n", encoding="utf-8")
+        _git(tmp_path, "add", "--", staged.name)
+        staged.unlink()  # The index, rather than the working tree, determines committability.
+
+        found = policy.committable_artefacts(tmp_path)
+
+        assert [(v.rule, v.path) for v in found] == [("committable-artefact", "staged.orig")]
+        assert (tmp_path / "untracked.bak").read_text(encoding="utf-8") == "backup\n"
+        assert not staged.exists()
 
     def test_outside_a_repository_there_is_no_verdict(self, tmp_path: Path) -> None:
         assert policy.committable_artefacts(tmp_path) == []
