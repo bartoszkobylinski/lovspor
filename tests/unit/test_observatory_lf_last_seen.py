@@ -184,6 +184,63 @@ class TestStillLinked:
 
 
 class TestUnlinked:
+    def test_a_second_drop_uses_the_drop_after_the_latest_link(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        _capture(log, _page(LF_A))
+        _capture(log, _page(salt="first drop"), observed_at=T1)
+        _capture(log, _page(LF_A, salt="returned"), observed_at=T2)
+        _capture(log, _page(salt="second drop"), observed_at=T3)
+
+        seen = _by_key(last_seen_report(log).entries)[KEY_A]
+
+        assert (seen.first_seen, seen.last_seen_linked) == (T0, T2)
+        assert (seen.status, seen.unlinked_since, seen.evidence_at) == ("unlinked", T3, T3)
+
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_a_capture_at_the_same_time_is_not_a_later_capture(
+        self, tmp_path: Path, reverse: bool
+    ) -> None:
+        log = make_log(tmp_path)
+        payloads = [_page(LF_A), _page(salt="without link")]
+        for payload in reversed(payloads) if reverse else payloads:
+            _capture(log, payload)
+
+        seen = _by_key(last_seen_report(log).entries)[KEY_A]
+
+        assert (seen.status, seen.unlinked_since, seen.evidence_at) == ("linked", None, T0)
+
+    def test_the_same_url_under_another_authority_cannot_drop_a_link(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        _capture(log, _page(LF_A))
+        _capture(log, _page(LF_A), authority_id="3203")
+        _capture(log, _page(salt="dropped"), authority_id="3203", observed_at=T1)
+
+        report = last_seen_report(log)
+        seen = _by_key(report.entries)
+
+        assert [entry.key for entry in report.entries] == [KEY_A, ("3203", *KEY_A[1:])]
+        assert (seen[KEY_A].status, seen[KEY_A].evidence_at) == ("linked", T0)
+        other = seen[("3203", *KEY_A[1:])]
+        assert (other.status, other.unlinked_since, other.pages) == ("unlinked", T1, 1)
+        assert (report.html_records, report.blobs_read) == (3, 2)
+
+    @pytest.mark.parametrize("late_failure", [False, True])
+    def test_readable_recovery_clears_failure_regardless_of_append_order(
+        self, tmp_path: Path, late_failure: bool
+    ) -> None:
+        log = make_log(tmp_path)
+        _capture(log, _page(LF_A))
+        if not late_failure:
+            _failure(log, T1)
+        _capture(log, _page(salt="recovered without link"), observed_at=T2)
+        if late_failure:
+            _failure(log, T1)
+
+        seen = _by_key(last_seen_report(log).entries)[KEY_A]
+
+        assert (seen.status, seen.unlinked_since, seen.evidence_at) == ("unlinked", T2, T2)
+        assert seen.pages_failing == 0
+
     def test_a_later_readable_capture_without_the_link_makes_a_candidate(
         self, tmp_path: Path
     ) -> None:
