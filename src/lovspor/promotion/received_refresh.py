@@ -75,6 +75,8 @@ KEPT_KEYS: Final = frozenset(
         "innsyn_request",
         "innsyn_saksnummer",
         "received_form",
+        "observed_at_first",
+        "source_url",
         "source_sha256",
         "source_provider",
         "source_license",
@@ -137,7 +139,7 @@ def plan_refresh(inputs: RefreshInputs, document: Published) -> Refresh | None:
     markdown = render_prepared(prepared, artifact)
     if markdown == document.markdown:
         return None
-    _refuse_beyond_front_matter(document, markdown)
+    refuse_beyond_front_matter(document, markdown)
     return Refresh(
         doc_id=document.doc_id,
         authority_id=document.record.authority_id,
@@ -189,7 +191,7 @@ def _same_version(document: Published, prepared: Held | Prepared) -> Prepared:
     return prepared
 
 
-def _refuse_beyond_front_matter(document: Published, markdown: str) -> None:
+def refuse_beyond_front_matter(document: Published, markdown: str) -> None:
     """Refuse a re-rendering that moves the body, the version or its provenance."""
     if _body(markdown) != _body(document.markdown):
         msg = "its body would change though its text does not; a refresh rewrites front matter only"
@@ -228,7 +230,7 @@ def refresh_impl(request: RefreshRequest) -> None:
         diff = planned_diff(corpus, refresh_files(outcome.refreshes))
         typer.echo(diff + "Dry run: nothing written.")
     else:
-        _write(corpus, outcome.refreshes)
+        write_refreshes(corpus, outcome.refreshes)
     if outcome.refusals:
         raise typer.Exit(1)
 
@@ -253,7 +255,7 @@ def _plan_all(inputs: RefreshInputs) -> RefreshOutcome:
     return outcome
 
 
-def _write(corpus: CorpusCheckout, refreshes: list[Refresh]) -> None:
+def write_refreshes(corpus: CorpusCheckout, refreshes: list[Refresh]) -> None:
     written = apply_files(corpus, refresh_files(refreshes))
     for refresh in refreshes:
         typer.echo(

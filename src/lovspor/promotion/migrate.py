@@ -351,11 +351,9 @@ def _published_source(document: Published) -> ObservedSource:
         raise PromotionRefusedError(msg) from exc
 
 
-def refuse_new_rendering(
-    document: Published, prepared: Prepared, source: ObservedSource | ReceivedSource
-) -> None:
-    """Refuse unless ``prepared``, rendered with ``source``, is ``document``'s Markdown."""
-    rendered = render_local_regulation(
+def render_published(prepared: Prepared, source: ObservedSource | ReceivedSource) -> str:
+    """``prepared`` rendered by the running extractor with the provenance ``source``."""
+    return render_local_regulation(
         LocalDocument(
             identity=prepared.identity,
             extracted=prepared.extracted,
@@ -364,10 +362,17 @@ def refuse_new_rendering(
             source=source,
         )
     )
-    if rendered != document.markdown:
+
+
+def refuse_new_rendering(
+    document: Published, prepared: Prepared, source: ObservedSource | ReceivedSource
+) -> None:
+    """Refuse unless ``prepared``, rendered with ``source``, is ``document``'s Markdown."""
+    if render_published(prepared, source) != document.markdown:
         msg = (
             f"{document.doc_id}: under extractor v{EXTRACTOR_VERSION} its rendering changes "
-            "though its text does not; a migration never rewrites the Markdown"
+            "though its text does not; a migration never rewrites the Markdown "
+            "(`lovspor promote refresh` re-renders front matter, #595)"
         )
         raise PromotionRefusedError(msg)
 

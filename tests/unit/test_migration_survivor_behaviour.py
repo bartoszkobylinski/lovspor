@@ -221,7 +221,8 @@ def test_changed_rendering_is_refused_without_rewriting(state):
         plan_migration(inputs, changed, authority)
     assert str(error.value) == (
         f"{document.doc_id}: under extractor v{EXTRACTOR_VERSION} its rendering changes "
-        "though its text does not; a migration never rewrites the Markdown"
+        "though its text does not; a migration never rewrites the Markdown "
+        "(`lovspor promote refresh` re-renders front matter, #595)"
     )
 
 
