@@ -396,18 +396,26 @@ class TestTheCommand:
 
 
 @pytest.mark.parametrize("failure_at", [T0, T1])
+@pytest.mark.parametrize("repeated_outcome", ["timeout", "http_404", "connection_error"])
 def test_repeated_equal_time_failures_preserve_the_page_verdict(
-    tmp_path: Path, failure_at: datetime
+    tmp_path: Path, failure_at: datetime, repeated_outcome: str
 ) -> None:
     log = make_log(tmp_path)
     _capture(log, _page(LF_A))
     _failure(log, failure_at, "timeout")
-    _failure(log, failure_at, "http_404")
+    before = last_seen_report(log)
+    _failure(log, failure_at, repeated_outcome)
 
-    seen = _by_key(last_seen_report(log).entries)[KEY_A]
+    after = last_seen_report(log)
+    assert after == before
+    seen = _by_key(after.entries)[KEY_A]
 
     assert (seen.status, seen.evidence_at) == ("linked", T0)
     assert seen.pages_failing == int(failure_at > T0)
+
+    _capture(log, _page(LF_A, salt="recovered"), observed_at=T2)
+    recovered = _by_key(last_seen_report(log).entries)[KEY_A]
+    assert (recovered.status, recovered.evidence_at, recovered.pages_failing) == ("linked", T2, 0)
 
 
 def test_missing_blob_count_counts_distinct_blobs_not_captures(tmp_path: Path) -> None:
