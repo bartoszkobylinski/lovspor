@@ -270,4 +270,8 @@ also_copy = [
     # baseline and the gate again reports tool_failed for every PR touching
     # src/lovspor/ (issue #338).
     ".pre-commit-config.yaml",
+    # And one file later again: the test that pins the CLI output contract in
+    # the agent instructions (#608) reads AGENTS.md through the test file's
+    # own parents, which resolve inside the shadow tree (issue #707).
+    "AGENTS.md",
 ]
