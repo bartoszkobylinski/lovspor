@@ -20,9 +20,14 @@ from lovspor.observatory.lf_last_seen import LastSeen, last_seen_report
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import (
     ArtifactObservation,
+    Correction,
     FetchFailure,
+    RecordTombstone,
+    RefiledObservation,
     RetrievalProvenance,
     Tombstone,
+    record_key,
+    record_to_json_line,
 )
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
 
@@ -433,3 +438,68 @@ def test_missing_blob_count_counts_distinct_blobs_not_captures(tmp_path: Path) -
     assert (report.html_records, report.blobs_read, report.blobs_missing) == (4, 1, 2)
     seen = _by_key(report.entries)[KEY_A]
     assert (seen.status, seen.evidence_at, seen.pages_failing) == ("linked", T0, 1)
+
+
+@pytest.mark.parametrize("status", [199, 200, 299, 300])
+def test_only_2xx_html_can_establish_that_a_link_disappeared(tmp_path: Path, status: int) -> None:
+    log = make_log(tmp_path)
+    _capture(log, _page(LF_A))
+    _capture(log, _page(salt="no link"), observed_at=T1, http_status=status)
+
+    report = last_seen_report(log)
+    seen = _by_key(report.entries)[KEY_A]
+    readable = 200 <= status < 300
+    assert seen.status == ("unlinked" if readable else "linked")
+    assert seen.unlinked_since == (T1 if readable else None)
+    assert seen.evidence_at == (T1 if readable else T0)
+    assert seen.pages_failing == int(not readable)
+    assert (report.html_records, report.blobs_read, report.blobs_missing) == (
+        1 + int(readable),
+        1 + int(readable),
+        0,
+    )
+
+
+def test_corrected_authority_uses_original_capture_time_not_correction_time(tmp_path: Path) -> None:
+    log = make_log(tmp_path)
+    original = _capture(log, _page(LF_A))
+    _capture(log, _page(salt="dropped"), authority_id="3203", observed_at=T1)
+    key = record_key(record_to_json_line(original).encode("utf-8"))
+    attribution = {"reason": "misattributed", "corrected_by": "operator"}
+    log.append(
+        RefiledObservation(
+            observation=original.model_copy(update={"authority_id": "3203"}),
+            correction=Correction(
+                supersedes=key,
+                correction_id="c1",
+                corrected_fields=("authority_id",),
+                previous_values={"authority_id": "3201"},
+                corrected_at=T3,
+                **attribution,
+            ),
+        )
+    )
+    log.append(RecordTombstone(retracts=key, correction_id="c1", corrected_at=T3, **attribution))
+
+    report = last_seen_report(log)
+
+    assert len(report.entries) == 1
+    seen = report.entries[0]
+    assert seen.key == ("3203", *KEY_A[1:])
+    assert (seen.first_seen, seen.last_seen_linked) == (T0, T0)
+    assert (seen.status, seen.unlinked_since, seen.evidence_at) == ("unlinked", T1, T1)
+    assert (report.html_records, report.blobs_read) == (2, 2)
+
+
+def test_report_is_repeatable_and_persists_nothing(tmp_path: Path) -> None:
+    log = make_log(tmp_path)
+    _capture(log, _page(LF_A, LF_B))
+    _capture(log, _page(LF_B), observed_at=T1)
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    first = last_seen_report(log).model_dump_json()
+    second = last_seen_report(make_log(tmp_path)).model_dump_json()
+
+    assert first == second
+    after = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert after == before
