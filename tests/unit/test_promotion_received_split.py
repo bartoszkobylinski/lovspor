@@ -104,6 +104,35 @@ def _held(lines: tuple[str, ...]) -> HeldExtraction:
 
 
 class TestBodyAnchors:
+    @pytest.mark.parametrize("ending", [".", ":", ";"])
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "Hjemmel:",
+            "Heimel:",
+            "Fastsatt",
+            "Fastsett",
+            "Vedtatt",
+            "Vedteke",
+            "Fremmet",
+            "Fremja",
+            "Kunngjort",
+        ],
+    )
+    def test_fallback_keeps_enactment_lines_out_of_body(self, prefix: str, ending: str) -> None:
+        # operations.md: enactment lines and their wraps precede the fallback body.
+        lines = (
+            BOUNDARY[0],
+            f"{prefix} med hjemmel i",
+            f"lov om kommunal inndeling{ending}",
+            BOUNDARY[2],
+        )
+        result = read_received_regulation(lines)
+        assert not isinstance(result, ExtractionHoldReason), result
+        regulation, _ = result
+        assert regulation.identification_block == "\n".join(lines[:3])
+        assert regulation.body == lines[3]
+
     def test_unsectioned_body_follows_all_enactment_lines_and_their_wraps(self) -> None:
         # decisions.md §20: the fallback is after enactment, including wraps.
         lines = (
@@ -198,6 +227,18 @@ class TestTitle:
         assert isinstance(result, HeldExtraction), result
         assert result.reason is ExtractionHoldReason.TITLE_TRUNCATED
 
+    @pytest.mark.parametrize("length", [MAX_TITLE_CHARS, MAX_TITLE_CHARS + 1])
+    def test_first_line_title_length_boundary(self, length: int) -> None:
+        title = "A" * length
+        result = read_received_regulation((title, *VERNEFORSKRIFT[1:]))
+        if length > MAX_TITLE_CHARS:
+            assert result is ExtractionHoldReason.NO_TITLE
+        else:
+            assert not isinstance(result, ExtractionHoldReason), result
+            regulation, _ = result
+            assert regulation.title == title
+            assert regulation.body == "\n".join(VERNEFORSKRIFT[2:])
+
     def test_the_first_line_is_the_title_whatever_it_opens_with(self) -> None:
         assert _received(COMPOUND_TITLE).regulation.title == COMPOUND_TITLE[0]
 
@@ -276,6 +317,19 @@ class TestUnchangedElsewhere:
 
 
 class TestAnchors:
+    @pytest.mark.parametrize("entry", ["1. Vegetasjonen ........ 3", "1. Vegetasjonen …… 3"])
+    def test_numbered_contents_entry_does_not_open_the_body(self, entry: str) -> None:
+        lines = (*KGL_RES_POINTS[:2], entry, *KGL_RES_POINTS[2:])
+        result = read_received_regulation(lines)
+        assert not isinstance(result, ExtractionHoldReason), result
+        regulation, _ = result
+        assert regulation.identification_block == "\n".join(lines[:4])
+        assert regulation.body == "\n".join(KGL_RES_POINTS[3:])
+
+    @pytest.mark.parametrize("anchor", ["§ 1. Virkeområde", "I", "1. Første punkt"])
+    def test_body_anchor_without_a_preceding_title_is_held(self, anchor: str) -> None:
+        assert read_received_regulation((anchor, FILLER)) is ExtractionHoldReason.NO_BODY
+
     @pytest.mark.parametrize(
         ("lines", "index"),
         [
