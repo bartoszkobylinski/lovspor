@@ -21,7 +21,11 @@ request, recorded by its own command:
   without a date, or a recorded ``no_answer``, is not an answer. An interim
   reply that names a date (#689) carries it as ``promised_by``, the Oslo day
   the authority promised to answer by: until that day has passed the request
-  is not due, after it the authority has missed its own date.
+  is not due, after it the authority has missed its own date. An authority's
+  request to narrow (offentleglova § 28 andre ledd, #700) is recorded as
+  ``narrowing_requested``, with an optional ``narrow_by``, the Oslo day it
+  asked for the narrowing by: the request then waits on the owner, off ``due``,
+  until a later ``reply`` of kind ``narrowing``.
 * ``klage`` — a complaint was sent.
 * ``reminder`` — a påminning was sent (offentleglova § 29 første ledd), with
   the SHA-256 of the letter as sent. It is not a klage, so the request stays
@@ -74,6 +78,7 @@ OutcomeClass = Literal[
     "referred_to_lovdata",
     "interim_reply_no_date",
     "interim_reply_with_date",
+    "narrowing_requested",
     "partial",
     "full",
     "refused",
@@ -83,6 +88,7 @@ OUTCOMES: tuple[OutcomeClass, ...] = (
     "referred_to_lovdata",
     "interim_reply_no_date",
     "interim_reply_with_date",
+    "narrowing_requested",
     "partial",
     "full",
     "refused",
@@ -95,6 +101,8 @@ CLOSING = frozenset({"full", "refused"})
 _WITH_BASIS = frozenset({"partial", "refused"})
 #: The one outcome that names the day the authority promised to answer by.
 WITH_DATE: OutcomeClass = "interim_reply_with_date"
+#: The one outcome that puts the request in the owner's hands (#700).
+NARROWING_REQUESTED: OutcomeClass = "narrowing_requested"
 
 DocumentKind = Literal["regulation_text", "vedtak", "minutes", "cover_letter", "other"]
 DOCUMENT_KINDS: tuple[DocumentKind, ...] = (
@@ -218,6 +226,7 @@ class Outcome(_Event):
     at: datetime | None
     refusal_basis: TrimmedNonBlankStr | None = None
     promised_by: date | None = None
+    narrow_by: date | None = None
 
     @field_validator("at")
     @classmethod
@@ -230,6 +239,18 @@ class Outcome(_Event):
             raise ValueError("a refusal basis belongs to a refused or partial outcome")
         if self.at is None and self.source != "pilot-import":
             raise ValueError("an outcome recorded now says when it arrived")
+        if self.at is None and self.outcome == NARROWING_REQUESTED:
+            raise ValueError("a request to narrow says when it arrived")
+        return self
+
+    @model_validator(mode="after")
+    def _deadline(self) -> "Outcome":
+        if self.narrow_by is None:
+            return self
+        if self.outcome != NARROWING_REQUESTED:
+            raise ValueError("only a request to narrow sets a deadline")
+        if self.at is not None and self.narrow_by < self.at.astimezone(OSLO).date():
+            raise ValueError("the deadline is before the request that set it")
         return self
 
     @model_validator(mode="after")
@@ -376,6 +397,8 @@ class RequestState(BaseModel):
     outcome: OutcomeClass | None = None
     refusal_basis: str | None = None
     promised_by: date | None = None
+    narrowing_requested_at: datetime | None = None
+    narrow_by: date | None = None
     klage_sent_at: datetime | None = None
     reminded_at: datetime | None = None
     replied_at: datetime | None = None
@@ -408,6 +431,14 @@ class RequestState(BaseModel):
         return self.answered_at is not None or self.outcome in ANSWERS
 
     @property
+    def awaits_narrowing(self) -> bool:
+        """The authority asked the owner to narrow, and no narrowing has followed (#700)."""
+        asked = self.narrowing_requested_at
+        if asked is None or not self.is_open:
+            return False
+        return self.narrowed_at is None or self.narrowed_at < asked
+
+    @property
     def due_from(self) -> date:
         """The last day to wait: the § 32 mark, or the day the authority promised if later."""
         if self.promised_by is None:
@@ -418,10 +449,11 @@ class RequestState(BaseModel):
         """Past the § 32 mark, and past any day the authority promised, with no answer
         and no klage: a klage candidate.
 
-        A letter that never arrived started no clock.
+        A letter that never arrived started no clock, and a request waiting on the
+        owner's narrowing is not the authority's delay.
         """
         waiting = self.delivered and not self.answered and self.klage_sent_at is None
-        return waiting and today > self.due_from
+        return waiting and not self.awaits_narrowing and today > self.due_from
 
 
 def parse_event(data: dict[str, object]) -> LedgerEvent:
@@ -439,7 +471,17 @@ def _answer(state: RequestState, event: Outcome) -> RequestState:
         answered = event.at
     update: dict[str, object] = {"outcome": event.outcome, "answered_at": answered}
     update |= {"refusal_basis": event.refusal_basis, "promised_by": event.promised_by}
-    return state.model_copy(update=update)
+    return state.model_copy(update=update | _narrowing_request(state, event))
+
+
+def _narrowing_request(state: RequestState, event: Outcome) -> dict[str, object]:
+    """The latest request to narrow stands, whatever the order recorded."""
+    if event.outcome != NARROWING_REQUESTED or event.at is None:
+        return {}
+    asked = state.narrowing_requested_at
+    if asked is not None and event.at < asked:
+        return {}
+    return {"narrowing_requested_at": event.at, "narrow_by": event.narrow_by}
 
 
 def _remind(state: RequestState, event: ReminderSent) -> RequestState:

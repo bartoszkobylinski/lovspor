@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from lovspor.innsyn.app import guarded, innsyn_app, instant, now, refuse, workspace
 from lovspor.innsyn.ledger import (
+    NARROWING_REQUESTED,
     OUTCOMES,
     WITH_DATE,
     LedgerEvent,
@@ -73,7 +74,8 @@ def record_outcome(
 ) -> None:
     """Record what the authority answered (or that it has not), and when.
 
-    An interim reply that names a date is recorded with ``record-interim``.
+    An interim reply that names a date is recorded with ``record-interim``; an
+    authority's request to narrow with ``record-narrowing-request``.
     """
     fields = {"outcome": outcome, "at": instant(at, "--at"), "refusal_basis": refusal_basis}
     record_event(request, "outcome", fields)
@@ -93,6 +95,25 @@ def record_interim(
     """
     promised = _day(promised_by, "--promised-by")
     fields: dict[str, object] = {"outcome": WITH_DATE, "promised_by": promised}
+    fields["at"] = instant(at, "--at")
+    record_event(request, "outcome", fields)
+
+
+@innsyn_app.command("record-narrowing-request")
+def record_narrowing_request(
+    request: Request,
+    at: _At,
+    narrow_by: Annotated[
+        str | None, typer.Option("--narrow-by", help="The Oslo day it asked for it by.")
+    ] = None,
+) -> None:
+    """Record that the authority asked the owner to narrow the request (§ 28, #700).
+
+    Not an answer: the request waits on the owner, off ``due``, until a
+    ``record-reply --kind narrowing`` later than it.
+    """
+    deadline = None if narrow_by is None else _day(narrow_by, "--narrow-by")
+    fields: dict[str, object] = {"outcome": NARROWING_REQUESTED, "narrow_by": deadline}
     fields["at"] = instant(at, "--at")
     record_event(request, "outcome", fields)
 
@@ -152,24 +173,35 @@ def _since_sent(state: RequestState) -> tuple[str, ...]:
     """The columns of what became of the letter beyond an answer (#644, #625, #686, #689)."""
     sent = state.sent
     since = (_text(state.undelivered), _text(state.reminded_at), _text(sent.follows))
-    replied = (_text(state.replied_at), _text(state.reply_kind))
-    return (*since, sent.channel, *replied, _text(state.promised_by))
+    replied = (_text(state.replied_at), _text(state.reply_kind), _text(state.promised_by))
+    asked = (_text(state.narrowing_requested_at), _text(state.narrow_by))
+    return (*since, sent.channel, *replied, *asked)
 
 
 @innsyn_app.command("requests")
-def list_requests() -> None:
+def list_requests(
+    waiting: Annotated[
+        bool, typer.Option("--waiting", help="Only the requests waiting on the owner.")
+    ] = False,
+) -> None:
     """List every request, tab-separated.
 
     Columns: request, authority, recipient, sent_at, LF ids, general clause,
     saksnummer, acknowledged_at, answered_at, outcome, § 32 mark, klage_sent_at,
     Message-ID, undelivered (bounced or mailbox_closed), last reminder sent, the request a
     follow-up follows, channel (email, webform or edialog), last reply sent and its kind
-    (narrowing, answer or other), the day the authority promised to answer by.
+    (narrowing, answer or other), the day the authority promised to answer by, when the
+    authority asked the owner to narrow, and the day it asked for the narrowing by.
+
+    ``--waiting`` lists only the requests the authority asked the owner to narrow and
+    the owner has not narrowed since (#700).
     """
     held = guarded(lambda: requests(workspace()))
-    for state in held.values():
+    chosen = [s for s in held.values() if s.awaits_narrowing or not waiting]
+    for state in chosen:
         typer.echo(_row(state))
-    typer.echo(f"{len(held)} requests", err=True)
+    tail = " waiting on the owner" if waiting else ""
+    typer.echo(f"{len(chosen)} requests{tail}", err=True)
 
 
 def _day(raw: str, option: str) -> date:
@@ -193,7 +225,9 @@ def due(
 
     Same columns as ``requests``. An interim reply is not an answer, but one that
     promised a day keeps the request off this list until that day has passed; a
-    letter recorded undelivered started no clock.
+    request the authority asked the owner to narrow waits on the owner, not the
+    authority, until the narrowing is recorded; a letter recorded undelivered started
+    no clock.
     """
     day = _today(today)
     chosen = [s for s in guarded(lambda: requests(workspace())).values() if s.is_due(day)]

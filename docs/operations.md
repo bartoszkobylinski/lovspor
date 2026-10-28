@@ -1812,6 +1812,7 @@ $I record-ack --request 4646-20261005T074425Z --at <UTC>
 $I record-case-number --request 4646-20261005T074425Z --number 2026/2348
 $I record-outcome --request 4646-20261005T074425Z --outcome partial --at <UTC> [--refusal-basis "…"]
 $I record-interim --request 1515-20261019T235216Z --at <UTC> --promised-by 2026-11-22
+$I record-narrowing-request --request 3825-20261019T064500Z --at <UTC> [--narrow-by 2026-11-10]
 $I record-klage --request 4646-20261005T074425Z --at <UTC>
 $I record-reminder --request 4646-20261005T074425Z --at <UTC> --letter <reminder.txt>
 $I record-reply --request 1520-20261019T064500Z --at <UTC> --kind narrowing --letter <reply.txt>
@@ -1819,6 +1820,7 @@ $I record-follow-up --parent 0301-20261005T074343Z --letter <follow-up.txt> --se
 $I record-bounce --request 4646-20261005T074425Z --at <UTC> --evidence <dsn.eml> --status 5.4.1
 $I record-mailbox-closed --request 4646-20261005T074425Z --at <UTC> --evidence <auto-reply.eml>
 $I requests                               # every request, with its § 32 mark
+$I requests --waiting                     # the requests the authority asked us to narrow
 $I due                                    # past the mark with no answer and no klage
 
 # 6. The documents an answer carried (#509 point 5).
@@ -1874,9 +1876,10 @@ $I received                               # every document; requested ids still 
   letter whose `Til:` line no longer matches, and records the SHA-256 of the letter as
   it stands. A transition on an unknown request, a second send of one request, and a
   time before the send are all refused. Outcome classes: `referred_to_lovdata`,
-  `interim_reply_no_date`, `interim_reply_with_date`, `partial`, `full`, `refused`,
-  `no_answer`. Only `referred_to_lovdata`, `partial`, `full` and `refused` are answers,
-  so an interim reply leaves the request open and, once the § 32 mark has passed, due.
+  `interim_reply_no_date`, `interim_reply_with_date`, `narrowing_requested`, `partial`,
+  `full`, `refused`, `no_answer`. Only `referred_to_lovdata`, `partial`, `full` and
+  `refused` are answers, so an interim reply leaves the request open and, once the § 32
+  mark has passed, due.
 - **Interim replies that name a date (#689).** An authority that says when it will
   answer ("innen 22.11.2026", "i løpet av uke 44") gets `record-interim` with `--at`
   and `--promised-by`, the Oslo day it promised, converted by the owner when it was
@@ -1887,8 +1890,23 @@ $I received                               # every document; requested ids still 
   is refused: the day is mandatory. A promised day before the reply's own day is
   refused. A later outcome on the request replaces the promise: a `full` answer drops
   it, a second `record-interim` moves it, an `interim_reply_no_date` drops it so the
-  § 32 mark alone decides. `requests` and `due` show the promised day as their last
-  column.
+  § 32 mark alone decides. `requests` and `due` show the promised day in the column
+  after the reply kind.
+- **The authority asks us to narrow (#700).** An authority that answers "presiser
+  kravet" under offentleglova § 28 andre ledd (Vinje, Råde, Stranda, Eidskog, 2026-10)
+  gets `record-narrowing-request` with `--at` and, when it set a day, `--narrow-by`.
+  The outcome class is `narrowing_requested`; `record-outcome` takes it too. It is not
+  an answer and does not close the request, but it puts the request in the owner's
+  hands: `due` leaves it out, whatever its § 32 mark, so a klage is never aimed at an
+  authority waiting for our narrowing. `requests --waiting` lists exactly those
+  requests, and the last two columns of `requests` and `due` show when the authority
+  asked and the day it asked for. A `record-reply --kind narrowing` later than the
+  request ends the wait and restarts the § 32 mark from the narrowing; a narrowing
+  recorded before it does not answer it. A closing outcome (`full`, `refused`) ends the
+  wait too; a `partial` answer does not, so an authority that answered point 1 and asked
+  us to narrow point 2 still waits on us. A second request to narrow replaces the first
+  by the later `--at`, whatever the order recorded. A deadline before the day the
+  request arrived is refused.
 - **Undelivered letters (#644).** `send` records every letter the SMTP server accepted,
   but acceptance is not delivery. A permanent bounce is recorded with `record-bounce`
   and its DSN status (`5.x.x` only: a transient `4.x.x` is not a failure yet). A mailbox
@@ -1917,7 +1935,7 @@ $I received                               # every document; requested ids still 
   --sent-at <UTC> --evidence <receipt>`. The ledger keeps the channel, the page, the
   letter's SHA-256 and the receipt's SHA-256, never the receipt itself, so keep the file
   with the wave. From then on the request is like any other: its § 32 mark runs from
-  `--sent-at`, `due` lists it (last column: the channel), and `record-reminder`,
+  `--sent-at`, `due` lists it (with `edialog` or `webform` in the channel column), and `record-reminder`,
   `record-outcome` and `record-klage` work on it. `record-sent` refuses a letter that
   goes by hand, and `record-sent-manual` refuses one that goes by e-mail.
 - **Reminders (#625).** `record-reminder` records a påminning (offentleglova § 29 første
@@ -1930,7 +1948,7 @@ $I received                               # every document; requested ids still 
   kind: `narrowing`, when the authority asked for a nærare avgrensing under offentleglova
   § 28 andre ledd (Ørsta, Hareid, Sande, Ørland, 2026-10) and the owner narrowed the
   request; `answer`, to a question the authority put; or `other`. `requests` and `due`
-  show the latest reply and its kind in the last two columns. A narrowing is the request
+  show the latest reply and its kind in the columns after the channel. A narrowing is the request
   as it now stands, so its § 32 mark runs from the latest narrowing, and a request
   narrowed today leaves `due` until five working days have passed. An answer or other
   reply moves nothing. The text is not kept: it can quote the case officer's mail.
