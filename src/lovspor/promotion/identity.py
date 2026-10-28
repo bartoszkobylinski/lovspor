@@ -45,6 +45,7 @@ _TITLE_LINE = re.compile(r"\s*forskrift\s+(?:av\s+)?" + _DATE_NUMBER, re.I)
 _KUNNGJORT_LINE = re.compile(r"\s*kunngjort\b", re.I)
 _DATE_NUMBER_ANYWHERE = re.compile(_DATE_NUMBER, re.I)
 _CENTRAL_REF_ID = re.compile(r"forskrift/(\d{4}-\d{2}-\d{2})-(\d{1,6})")
+_LF_DOC_ID = re.compile(r"lf-(\d{4})(\d{2})(\d{2})-(\d{4,6})")
 _INVISIBLE = dict.fromkeys(map(ord, "\u00ad\u200b\ufeff"))
 _UNIT_SEPARATOR = "\x1f"
 
@@ -211,6 +212,15 @@ def _central_id(ref_id: str) -> _LovdataId | None:
 def _lf_id(candidate: _LovdataId) -> str:
     day, number = candidate
     return f"lf-{day:%Y%m%d}-{number:04d}"
+
+
+def ledger_lf_id(doc_id: str) -> str | None:
+    """The LF-ledger form (``yyyy-mm-dd-n``) of a minted ``lf-`` id; ``None`` for any other id."""
+    match = _LF_DOC_ID.fullmatch(doc_id)
+    if match is None:
+        return None
+    year, month, day, number = match.groups()
+    return f"{year}-{month}-{day}-{int(number)}"
 
 
 def _ref_id(candidate: _LovdataId) -> str:

@@ -1779,6 +1779,7 @@ off the archive volume too (for example `~/lovspor-ops/innsyn`); its parent must
 
 ```bash
 export LOVSPOR_INNSYN_DIR=~/lovspor-ops/innsyn
+export LOVVERK_CORPUS_PATH=~/Programming/Python/lovverk   # `letters` holds what it publishes (#606)
 I="uv run lovspor observatory innsyn"
 
 # 1. The population: every kommune (KLASS 131) and fylkeskommune (KLASS 127) at a date.
@@ -1800,6 +1801,7 @@ $I import-pilot --register ~/lovspor-ops/innsyn-pilot-2026-10-03/sent.csv
 
 # 4. A wave of letters. Writes files only; sends nothing.
 $I letters --out ~/lovspor-ops/innsyn/wave-01 --wave-size 25 [--held held-ids.txt]
+#    (or `$I --corpus /path/to/lovverk letters …` instead of LOVVERK_CORPUS_PATH)
 
 # 5. Send it: a dry run first, then --send, a batch at a time (see "Sending a wave").
 $I send --manifest ~/lovspor-ops/innsyn/wave-01/manifest.json --limit 25
@@ -1864,8 +1866,17 @@ $I received                               # every document; requested ids still 
   manifest entry then says `general_clause: false`, and `record-sent` records it so.
   Authorities with known ids still to ask for come first, then the rest, each group in
   id order (owner decision 2026-10-12). Point 1 lists the `LF`/`LTII` ids the LF ledger saw on the authority's
-  pages, less the ids in `--held` (one per line, `#` comments) and the ids an earlier
-  request already asked for. The short `forskrift` link form is left out. The next
+  pages, less the ids whose text is held and the ids an earlier request already asked
+  for. An id is held when a current `lf-` regulation of the local dataset in the
+  `lovverk` checkout carries it (`--corpus` before the command, or
+  `LOVVERK_CORPUS_PATH`; read through the promotion reader, so a checkout that is
+  missing, not `lovverk`, this repository, or whose `lokale-forskrifter/manifest.json`
+  does not read refuses the wave instead of holding nothing, #606), or when the
+  operator's `--held` file names it (one per line, `#` comments; for texts held outside
+  the corpus). The manifest's `held_out` lists every known id left out this way with its
+  authority and `held: corpus` or `held: file` (the corpus wins when both hold it), so a
+  reviewer sees that nothing was dropped silently. A removed local record or an `lk-` id
+  holds nothing. The short `forskrift` link form is left out. The next
   point asks for all other local regulations in force, with their amendments and an
   overview, as cases of one kind (offentleglova § 28 andre ledd). An authority with no
   known ids gets that point alone. Every letter asks for the authority's archive

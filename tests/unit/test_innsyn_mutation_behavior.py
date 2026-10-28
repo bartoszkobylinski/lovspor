@@ -18,7 +18,7 @@ from lovspor.innsyn import app, ledger_commands, population_commands
 from lovspor.innsyn.app import instant
 from lovspor.innsyn.candidates import _Scan, mailbox_candidates
 from lovspor.innsyn.directory import Contact, Evidence, RecipientRecorded, directory_journal
-from lovspor.innsyn.letter_commands import _held_ids
+from lovspor.innsyn.held import HeldIds, file_held_ids
 from lovspor.innsyn.letters import LetterRequest, render
 from lovspor.innsyn.pilot_import import read_register
 from lovspor.innsyn.population import (
@@ -40,7 +40,7 @@ from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.sources.lovdata import DEFAULT_USER_AGENT
 from tests.unit.cli_output import said
-from tests.unit.innsyn_support import fetched, innsyn
+from tests.unit.innsyn_support import fetched, innsyn, lovverk_checkout
 
 MOMENT = datetime(2026, 10, 12, 22, 30, tzinfo=UTC)
 REQUEST = "4646-20261013T080000Z"
@@ -176,7 +176,7 @@ def test_known_ids_have_one_line_each() -> None:
 def test_held_comments_start_at_first_hash(tmp_path: Path) -> None:
     path = tmp_path / "held.txt"
     path.write_text("2009-02-16-306 # café # another comment\n\n# comment\n", encoding="utf-8")
-    assert _held_ids(path) == frozenset({"2009-02-16-306"})
+    assert file_held_ids(path) == frozenset({"2009-02-16-306"})
 
 
 @pytest.mark.parametrize("raw", ["bad", "2026-10-13T08:00:00"])
@@ -240,7 +240,9 @@ def test_missing_letter_names_manifest_and_authority(prepared: tuple[Path, Path]
 def test_malformed_lf_ledger_names_the_file(tmp_path: Path) -> None:
     path = tmp_path / "lf.jsonl"
     path.write_text("{bad}\n", encoding="utf-8")
-    result = innsyn(tmp_path, "letters", "--out", str(tmp_path / "wave"), "--lf-ledger", str(path))
+    corpus = ("--corpus", str(lovverk_checkout(tmp_path / "lovverk")))
+    args = ("letters", "--out", str(tmp_path / "wave"), "--lf-ledger", str(path))
+    result = innsyn(tmp_path, *corpus, *args)
     assert result.exit_code == 1
     assert str(path) in result.stderr
     assert "Refused: None" not in result.stderr
@@ -313,7 +315,7 @@ def test_unresolved_letter_refuses_with_authority() -> None:
         contacts={"4646": Contact()},
         requests={},
         lf_entries=(),
-        held=frozenset(),
+        held=HeldIds(),
         sender=Sender(name="Åse", email="ase@example.no", recorded_at=MOMENT),
     )
     with pytest.raises(InnsynRefusedError, match="4646 has no recorded recipient"):
@@ -462,7 +464,7 @@ def test_utf8_files_under_ascii_locale(tmp_path: Path) -> None:
     previous = locale.setlocale(locale.LC_CTYPE)
     try:
         locale.setlocale(locale.LC_CTYPE, "C")
-        assert _held_ids(held) == frozenset({"2009-02-16-306"})
+        assert file_held_ids(held) == frozenset({"2009-02-16-306"})
         (row,) = read_register(path, tmp_path, MOMENT)
         assert row.events[-1].saksnummer == "Åse"
         journal = directory_journal(InnsynWorkspace(tmp_path, []))
