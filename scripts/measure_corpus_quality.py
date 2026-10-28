@@ -175,7 +175,7 @@ def report(found: Measurement, classes: Counter[str] | None) -> str:
         f"current documents: {found.current}",
         f"1. last_change_in_force before date_in_force: {len(found.reversed_dates)}",
         *(
-            f"   {r['id']}  {r['date_in_force']} < {r['last_change']}  {r['path']}"
+            f"   {r['id']}  {r['last_change']} < {r['date_in_force']}  {r['path']}"
             for r in found.reversed_dates
         ),
         f"2. no date_in_force and no last_change_in_force: {len(found.undated)}",

@@ -155,6 +155,7 @@ class TestTheCommand:
         printed = capsys.readouterr().out
         assert "current documents: 3" in printed
         assert "1. last_change_in_force before date_in_force: 1" in printed
+        assert "   nl-20200101-001  2020-12-15 < 2021-01-01  lover/a.md" in printed
         assert "2. no date_in_force and no last_change_in_force: 1" in printed
         assert f"1  {quality.NO_FIELD}" in printed
         assert "3. [^n] markers: 2 (1 flush against a word)" in printed
