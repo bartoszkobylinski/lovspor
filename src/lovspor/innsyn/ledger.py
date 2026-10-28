@@ -106,11 +106,16 @@ DOCUMENT_KINDS: tuple[DocumentKind, ...] = (
 )
 #: A kind that can be the requested regulation, or the vedtak adopting it.
 _ANSWERING = frozenset({"regulation_text", "vedtak"})
-#: The formats the promotion extractor reads (:mod:`lovspor.promotion.source_text`).
+#: The formats the promotion extractor reads (:mod:`lovspor.promotion.source_text`),
+#: then the image formats scanned archive documents and maps arrive in (#691), held
+#: by content with no text read from them.
 ReceivedMediaType = Literal[
     "application/pdf",
     "text/html",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "image/tiff",
+    "image/jpeg",
+    "image/png",
 ]
 
 UndeliveredReason = Literal["bounced", "mailbox_closed"]

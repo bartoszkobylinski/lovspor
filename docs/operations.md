@@ -1987,8 +1987,9 @@ $I received                               # every document; requested ids still 
   these are the klage candidates.
 - **Received documents.** `record-received` holds the attachment in the workspace under
   `received/<sha256[:2]>/<sha256>` and records its SHA-256, media type and arrival time on
-  the request. Only PDF, HTML and DOCX are taken: the formats the promotion extractor
-  reads. The file name is not kept, because it can name a case officer or a party.
+  the request. PDF, HTML and DOCX are taken: the formats the promotion extractor
+  reads; TIFF, JPEG and PNG are taken too (#691), see the next bullet. The file name
+  is not kept, because it can name a case officer or a party.
   Documents never go into a repository: a received PDF also carries cover letters,
   minutes pages and names, so only text extracted from it, after review, is published.
   `classify-received` records what the operator read the document to be:
@@ -1998,6 +1999,16 @@ $I received                               # every document; requested ids still 
   classification replaces an earlier one. `received` lists every document and, per
   request, how many requested ids no received regulation text answers yet. A kommune
   that sent some texts and said nothing of the rest is not saying the rest do not exist.
+- **Scanned documents and maps (#691).** Authorities deliver archive scans as images:
+  Høyanger sent `Forskrift.TIF` and `Kunngjering.TIF`, the text as sent to Norsk
+  Lovtidend, and Kragerø sent its friluftsområde boundary maps as JPEG. `record-received`
+  and `record-received-link` hold TIFF, JPEG and PNG by content like any other document,
+  by suffix (`.tif`, `.tiff`, `.jpg`, `.jpeg`, `.png`) or Content-Type. No text is read
+  from an image: a scan classified `regulation_text` is held by the promotion extractor
+  as an unsupported format and does not reach the corpus until its text is obtained
+  another way (an OCR step is not built; a text copy asked from the authority is the
+  honest route). A map is `other`. A hearing statement from a private person is `other`
+  and is never published (personopplysningsloven); its bytes stay in the workspace only.
 - **Documents delivered as links (#688).** An authority that answers with links (Nordre
   Follo: 47 opengov links; Akershus: eInnsyn links) delivers all the same.
   `record-received-link --url <link> --at <UTC>` reads the link once, holds the bytes as
@@ -2005,9 +2016,10 @@ $I received                               # every document; requested ids still 
   was read (`fetched_at`), with `--at` still the arrival of the mail carrying the link.
   `received` shows the URL in its last column; an attachment's is empty. The format is
   the server's Content-Type, or the link's suffix when the server declares none or a
-  generic `application/octet-stream`; a declared type the extractor cannot read (a PNG
-  from a `.pdf` link) is believed, and the link refused; a link that is not answered 200, comes back empty, or is not PDF, HTML or DOCX
-  is refused and nothing is held. One command per link: a link the engine cannot read
+  generic `application/octet-stream`; a declared type the ledger does not hold (a GIF
+  from a `.pdf` link) is believed, and the link refused; a link that is not answered
+  200, comes back empty, or is in no format the ledger holds is refused and nothing is
+  held. One command per link: a link the engine cannot read
   (a login page, a viewer that needs a browser) is a finding to file, not a file to
   record by hand.
 - **Pilot import.** `import-pilot` reads `sent.csv` with the letters as sent

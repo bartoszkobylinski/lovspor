@@ -55,7 +55,8 @@ def record_received_command(
 ) -> None:
     """Hold a document the authority sent, by content, and record when it arrived.
 
-    The file name is not kept. Formats: PDF, HTML, DOCX.
+    The file name is not kept. Formats: PDF, HTML, DOCX; TIFF, JPEG and PNG scans
+    and maps are held with no text read from them (#691).
     """
     target = workspace()
     received_at = instant(at, "--at")
@@ -75,7 +76,7 @@ def record_received_link(
     """Read a document the authority delivered as a link, hold it, and record both.
 
     The bytes are held as an attachment's would be; the ledger keeps the URL and
-    when it was read. Formats: PDF, HTML, DOCX, by the server's Content-Type or the
+    when it was read. Formats: PDF, HTML, DOCX, TIFF, JPEG, PNG, by the server's Content-Type or the
     link's suffix.
     """
     target = workspace()

@@ -11,6 +11,11 @@ An authority that delivers documents as links (#688: Nordre Follo's 47
 opengov links, Akershus's eInnsyn links) delivers them all the same: the
 engine reads each link once, holds the bytes as it would an attachment, and
 the ledger line carries the URL as delivered and when it was read.
+
+Scanned archive documents come as images (#691: Høyanger's ``Forskrift.TIF``,
+the text as sent to Norsk Lovtidend; Kragerø's boundary maps as JPEG). They
+are held by content like any other document, with no text read from them:
+the promotion extractor holds an image as an unsupported format.
 """
 
 from pathlib import Path
@@ -29,7 +34,13 @@ MEDIA_TYPES: dict[str, ReceivedMediaType] = {
     ".html": "text/html",
     ".htm": "text/html",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
 }
+FORMATS = "PDF, HTML, DOCX, TIFF, JPEG, PNG"
 _BY_HEADER: dict[str, ReceivedMediaType] = {value: value for value in MEDIA_TYPES.values()}
 #: A Content-Type that says nothing about the document: the link's suffix is read instead.
 _GENERIC = frozenset({"", "application/octet-stream"})
@@ -38,13 +49,11 @@ _HTTP_OK = 200
 
 
 def media_type(path: Path) -> ReceivedMediaType:
-    """Raises: InnsynRefusedError: a suffix the promotion extractor cannot read."""
+    """Raises: InnsynRefusedError: a suffix of no format the ledger holds."""
     try:
         return MEDIA_TYPES[path.suffix.lower()]
     except KeyError as exc:
-        raise InnsynRefusedError(
-            f"{path.name}: not a format the extractor reads (PDF, HTML, DOCX)"
-        ) from exc
+        raise InnsynRefusedError(f"{path.name}: not a format the ledger holds ({FORMATS})") from exc
 
 
 def read_document(path: Path) -> bytes:
@@ -69,12 +78,12 @@ def link_client() -> httpx.Client:
 
 
 def _link_media_type(url: str, header: str) -> ReceivedMediaType:
-    """The header's type when the extractor reads it; the URL's suffix when it says nothing.
+    """The header's type when the ledger holds it; the URL's suffix when it says nothing.
 
-    A server that names a type the extractor cannot read is believed: a PNG
+    A server that names a type the ledger does not hold is believed: a GIF
     served from a ``.pdf`` link is not a PDF.
 
-    Raises: InnsynRefusedError: neither names PDF, HTML or DOCX.
+    Raises: InnsynRefusedError: neither names a format the ledger holds.
     """
     declared = header.partition(";")[0].strip().lower()
     if declared in _BY_HEADER:
@@ -83,8 +92,7 @@ def _link_media_type(url: str, header: str) -> ReceivedMediaType:
     if declared in _GENERIC and suffix in MEDIA_TYPES:
         return MEDIA_TYPES[suffix]
     raise InnsynRefusedError(
-        f"{url}: {declared or 'no content type'} is not a format the extractor reads "
-        "(PDF, HTML, DOCX)"
+        f"{url}: {declared or 'no content type'} is not a format the ledger holds ({FORMATS})"
     )
 
 
@@ -93,7 +101,7 @@ def fetch_document(client: httpx.Client, url: str) -> tuple[bytes, ReceivedMedia
 
     Raises:
         InnsynRefusedError: the read failed, was not answered 200, came back
-            empty, or in a format the extractor cannot read.
+            empty, or in a format the ledger does not hold.
     """
     try:
         response = client.get(url)
