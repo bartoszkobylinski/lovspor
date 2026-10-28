@@ -2093,6 +2093,17 @@ class TestShadowTreeCarriesRepoState:
         assert "mutation-equivalents" in found
         assert "pyproject.toml" in found
 
+    @pytest.mark.codex_proposal
+    @pytest.mark.xfail(strict=True, reason="Scanner does not follow indirect repository-root joins")
+    def test_the_scan_finds_the_indirect_agents_md_dependency(self) -> None:
+        """Advisory #707 follow-up: detect the consumer's indirect root join,
+        so the general guard can protect the newly configured copy entry too.
+        The PR promises the copy entry, not this extension of the scanner.
+        """
+        found = _repo_state_the_unit_suite_reads(Path(__file__).parent)
+
+        assert "AGENTS.md" in found
+
     def test_the_repos_config_copies_the_hook_config_into_the_shadow_tree(
         self, tmp_path: Path
     ) -> None:
