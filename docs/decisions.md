@@ -948,6 +948,33 @@ approval at the running extractor wins over an older one: nothing is carried.
   approval stamps `approval_carried` from that carry (PR #601 fix: backfill first wrote such a
   version as if reviewed at the running extractor).
 
+## 20. A received Lovdata print is split by its own structure (decided 2026-10-28)
+
+**Context.** Checking PR #635 against Røros's answer (43 documents at the time, 45
+now), 22 were held by the anchor rules of `promotion/anchors.py`: 16 `no_body` — older
+verneforskrifter and kgl.res. decisions set in sections `I`, `II` or points `1.`, with no
+`§ 1` or `Kapittel 1` at all — and 6 `no_title` — a title that does not open with
+"… forskrift om/for …" (`Renovasjonsforskrift, …`, `Verneplan for … Vedlegg 1. Forskrift
+om …`). About half of a typical answer could not be promoted (issue #636).
+
+**Decision.** The anchor rules are a filter for the observed channel, where a website page
+vouches for nothing: most captured pages hold no regulation (#332), and `§ 1` plus a
+`forskrift` title are what tells one from a listing. A Lovdata print or Lovtidend PDF the
+authority sent in answer to an innsynskrav is a regulation by provenance, and the print's
+own structure says where it starts: its first published line is the title Lovdata states,
+and the body opens at `§ 1` / `Kapittel 1`, else at the first bare roman numeral or `1.`
+point, else right after the enactment lines. So the received channel gets its own splitter
+(`fields.read_received_regulation`) for `lovdata_print` and `lovtidend` forms, and nothing
+changes for an `authority_original` file or the observed channel. The title is kept
+verbatim, `Verneplan … Vedlegg 1.` prefix included: observed, not normalised.
+`EXTRACTOR_VERSION` moves to 13; the 23 Røros texts already extracted are byte-identical
+under it, so their approvals carry (§19). Two stubs that name a phone number move from
+`no_body` to `personal_data`, which is the right hold for them.
+
+**Rejected.** Relaxing the shared anchors for both channels: that is a new decision about
+what the observatory accepts at all, with a corpus-wide re-render behind it, for texts
+whose provenance the website cannot vouch for.
+
 ## How to use this document
 
 - **Before starting a session**: read this + `CLAUDE.md`. Those two together are the full context.

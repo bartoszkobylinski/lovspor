@@ -13,6 +13,12 @@ dot-leader run, an optional page number), which names the section without
 opening it (#597); the **title line** is the first line before it that names
 a ``forskrift`` (``Forskrift om …``, ``Lokal forskrift for …``) and is short
 enough to be a title.
+
+A **numbered section** (#636) is a line that is a bare roman numeral (``I``,
+``II.``), or the first line opening point ``1.``: how older verneforskrifter
+and kgl.res. decisions are set, with no ``§`` at all. Only the received
+channel reads it (``fields.read_received_regulation``), where the print's
+own structure vouches for the text; the observed channel's anchors are above.
 """
 
 from __future__ import annotations
@@ -25,6 +31,8 @@ _TITLE = re.compile(
     r"(?:[^\W\d_]+\s+){0,2}[^\W\d_]*forskrift(?:er)?\s+(?:om|for|til|ved|av|\d)", re.I
 )
 _FIRST_SECTION = re.compile(r"(?:§\s*1(?!\d)|kap(?:ittel|\.)\s*(?:1|I)(?![\w]))", re.I)
+_ROMAN_LINE = re.compile(r"[IVXLC]+\.?")
+_FIRST_POINT = re.compile(r"1\.\s+\S")
 # Four dots: "..." closes an elided sentence, a leader is longer. An ellipsis
 # character stands for three.
 _LEADER_DOTS = 4
@@ -47,6 +55,19 @@ def first_section(lines: tuple[str, ...]) -> int | None:
             i
             for i, line in enumerate(lines)
             if _FIRST_SECTION.match(line) and not is_contents_entry(line)
+        ),
+        None,
+    )
+
+
+def first_numbered_section(lines: tuple[str, ...]) -> int | None:
+    """The index of the first bare roman numeral or first ``1.`` point, or ``None``."""
+    return next(
+        (
+            i
+            for i, line in enumerate(lines)
+            if (_ROMAN_LINE.fullmatch(line) or _FIRST_POINT.match(line))
+            and not is_contents_entry(line)
         ),
         None,
     )

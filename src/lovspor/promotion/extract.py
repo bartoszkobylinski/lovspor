@@ -20,7 +20,9 @@ A text that could mislead is held, never published, and the reason is typed
    keeps its metadata block (``lovdata_header.py``), whose editorial markup
    § 14 does not cover (ADR-0016 Risks);
 6. ``placeholder_date`` — a draft's blank date such as ``X.X.2016`` (§6.4);
-7. ``no_body`` / ``no_title`` — the text cannot be split safely;
+7. ``no_body`` / ``no_title`` — the text cannot be split safely (a Lovdata
+   print or Lovtidend text on the received channel is split by its own
+   structure, ``fields.read_received_regulation``, #636);
    ``title_truncated`` — the title ends on a function word (``title.py``);
 8. ``personal_data`` — the gate of ``personal_data.py`` found something.
 
@@ -46,7 +48,12 @@ from collections.abc import Callable
 
 from lovspor.errors import UnreadableSourceError
 from lovspor.promotion.dates import has_placeholder_date
-from lovspor.promotion.fields import instrument_issuer, read_regulation
+from lovspor.promotion.fields import (
+    ReadRegulation,
+    instrument_issuer,
+    read_received_regulation,
+    read_regulation,
+)
 from lovspor.promotion.identity import normalise_text
 from lovspor.promotion.lovdata_header import (
     LOVDATA_PRINT,
@@ -75,7 +82,7 @@ from lovspor.promotion.source_text import docx_lines, html_lines, pdf_lines, sou
 #: including a pypdf or fontTools bump (``source_text.PDF_LIBRARY_VERSION``,
 #: ``source_text.FONT_LIBRARY_VERSION``). A bump is a
 #: ``migration:`` commit across the dataset, never new versions (ADR-0016 4e).
-EXTRACTOR_VERSION = 12
+EXTRACTOR_VERSION = 13
 MIN_TEXT_CHARS = 200
 
 # Measured 2026-10-03 over the archive's extracted texts longer than 200
@@ -131,6 +138,14 @@ _SPLIT_DETAIL = {
     ExtractionHoldReason.NO_TITLE: "no title line before the first section",
     ExtractionHoldReason.TITLE_TRUNCATED: "the title ends on a function word: it is cut off",
 }
+_RECEIVED_SPLIT_DETAIL = {
+    **_SPLIT_DETAIL,
+    ExtractionHoldReason.NO_BODY: (
+        "no section, and nothing after the lines that state the enactment"
+    ),
+    ExtractionHoldReason.NO_TITLE: "the print's first line is too long to be a title",
+}
+_Reader = Callable[[tuple[str, ...]], ReadRegulation | ExtractionHoldReason]
 
 
 _UNBOUNDED = "Lovdata's metadata block cannot be bounded, so its markup cannot be removed"
@@ -166,7 +181,15 @@ def extract_received(payload: bytes, content_type: str) -> ExtractionResult:
     refused = _text_hold("\n".join(stripped.lines))
     if refused is not None:
         return _held(form, *refused)
-    return _as_received(_document(form, stripped.lines), received, stripped)
+    document = _document(form, stripped.lines, *_reader(received))
+    return _as_received(document, received, stripped)
+
+
+def _reader(received: ReceivedForm) -> tuple[_Reader, dict[ExtractionHoldReason, str]]:
+    """An authority's own file is split as the observed channel splits; a print by itself."""
+    if received is ReceivedForm.AUTHORITY_ORIGINAL:
+        return read_regulation, _SPLIT_DETAIL
+    return read_received_regulation, _RECEIVED_SPLIT_DETAIL
 
 
 def _read(payload: bytes, content_type: str) -> _Read | HeldExtraction:
@@ -222,10 +245,15 @@ def _is_garbled(text: str) -> bool:
     return unprintable / len(text) > _MAX_UNPRINTABLE_SHARE
 
 
-def _document(form: SourceForm, lines: tuple[str, ...]) -> ExtractionResult:
-    read = read_regulation(lines)
+def _document(
+    form: SourceForm,
+    lines: tuple[str, ...],
+    reader: _Reader = read_regulation,
+    details: dict[ExtractionHoldReason, str] = _SPLIT_DETAIL,
+) -> ExtractionResult:
+    read = reader(lines)
     if isinstance(read, ExtractionHoldReason):
-        return _held(form, read, _SPLIT_DETAIL[read])
+        return _held(form, read, details[read])
     regulation, fields = read
     hits = screen_personal_data(regulation.full_text)
     if hits:
