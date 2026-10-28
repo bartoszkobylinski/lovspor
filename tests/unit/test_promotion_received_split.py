@@ -11,6 +11,8 @@ the shared anchor rules. Every line is synthetic, shaped on Røros's answer.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from lovspor.promotion import ExtractedDocument, ExtractionHoldReason, HeldExtraction
@@ -198,6 +200,15 @@ class TestBodyAnchors:
 
 
 class TestTitle:
+    @pytest.mark.parametrize("header", [PRINT_HEAD[:-4], LOVTIDEND[:5]])
+    def test_received_split_still_holds_a_truncated_title(self, header: tuple[str, ...]) -> None:
+        # title.py's contract still applies through the new received reader.
+        lines = ("Forskrift om", *VERNEFORSKRIFT[1:])
+        result = extract_received(minimal_pdf((*header, *lines)), PDF)
+        assert isinstance(result, HeldExtraction), result
+        assert result.reason is ExtractionHoldReason.TITLE_TRUNCATED
+        assert "cut off" in result.detail
+
     @pytest.mark.parametrize("length", [MAX_TITLE_CHARS, MAX_TITLE_CHARS + 1])
     def test_first_line_title_length_boundary(self, length: int) -> None:
         title = "A" * length
@@ -226,6 +237,30 @@ class TestTitle:
 
 
 class TestUnchangedElsewhere:
+    @pytest.mark.parametrize("anchor", ["I", "1. Første punkt", None])
+    def test_new_body_shapes_preserve_enactment_fields_and_bound_hjemmel(
+        self, anchor: str | None
+    ) -> None:
+        # fields.py: only the identification block supplies hjemmel; the
+        # new splitter must keep that boundary for each newly accepted shape.
+        identification = (
+            "Renovasjonsforskrift, Eksempel kommune.",
+            "Hjemmel: LOV-1981-03-13-6.",
+            "Fastsatt av Eksempel kommunestyre 25. februar 1999.",
+        )
+        body = (
+            *((anchor,) if anchor is not None else ()),
+            FILLER,
+            "Hjemmel: LOV-2009-06-19-100.",
+        )
+        extracted = _received((*identification, *body))
+        assert extracted.regulation.identification_block == "\n".join(identification)
+        assert extracted.regulation.body == "\n".join(body)
+        assert extracted.regulation.vedtaksdato == date(1999, 2, 25)
+        assert extracted.fields.vedtatt == date(1999, 2, 25)
+        assert extracted.fields.vedtatt_av == "Eksempel kommunestyre"
+        assert extracted.fields.hjemmel == ("LOV-1981-03-13-6",)
+
     @pytest.mark.parametrize("lines", [VERNEFORSKRIFT, KGL_RES_POINTS, BOUNDARY, COMPOUND_TITLE])
     def test_lovtidend_uses_the_received_splitter(self, lines: tuple[str, ...]) -> None:
         # The same new rules apply to both forms named in decisions.md §20.
