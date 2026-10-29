@@ -31,6 +31,7 @@ FAST_CHECKS = {
     "equivalents": "uv run python scripts/ci/mutation_to_json.py --check-equivalents",
     "ratchets": "uv run python scripts/quality/check_ratchets.py",
     "boundaries": "uv run python scripts/quality/check_boundaries.py",
+    "dependency-policy": "uv run python scripts/quality/check_dependency_policy.py",
     "release-contracts": (
         "uv run pytest tests/unit/test_release_contracts.py -q -p no:cacheprovider"
     ),
@@ -167,6 +168,14 @@ class TestFastGate:
         run = _run_gate(FAST, tmp_path)
 
         assert FAST_CHECKS["boundaries"] in run.commands
+
+    def test_runs_the_dependency_policy_at_commit_time(self, tmp_path: Path) -> None:
+        """Issue #465: a direct import of a transitive dependency is one line
+        to declare while it is still the only one; a staged backup file is
+        cheapest to unstage before the commit that would carry it."""
+        run = _run_gate(FAST, tmp_path)
+
+        assert FAST_CHECKS["dependency-policy"] in run.commands
 
     def test_runs_the_equivalents_register_check_at_commit_time(self, tmp_path: Path) -> None:
         """Issue #558: fast-ci failed PR #554 on two stale entries every local

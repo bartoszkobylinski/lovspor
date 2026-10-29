@@ -70,6 +70,14 @@ jobs:
         # holds whether the register is one file or a directory (#516).
         run: uv run python scripts/ci/mutation_to_json.py --check-equivalents
 
+      - name: Dependency and tool policy
+        # A direct import of a transitive dependency (click, pydantic_core,
+        # markupsafe were three) is an ImportError on the first clean host whose
+        # parent package drops it, and a staged backup or mutant file is a
+        # commit nobody meant. Same script as the fast gate (issue #465,
+        # docs/decisions.md §9j).
+        run: uv run python scripts/quality/check_dependency_policy.py
+
       - name: Unit tests
         run: uv run pytest tests/unit/
 

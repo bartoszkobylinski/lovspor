@@ -75,6 +75,14 @@ dependencies = [
     # low-level server imports it); declared because we import it directly.
     # LLHB dataset validation (lovspor.llhb.schema) uses it too.
     "jsonschema>=4.23",
+    # Imported directly (#465): click by the innsyn group callback and the epoch
+    # CLI for the current context, pydantic-core for the error-detail type the
+    # innsyn refusals read, markupsafe by the site for escaping. Each is already
+    # a transitive dependency of typer, pydantic and jinja2; declared because a
+    # transitive pin vanishes with its parent's next release.
+    "click>=8.1",
+    "pydantic-core>=2.23",
+    "markupsafe>=2.1",
 ]
 
 [project.optional-dependencies]
