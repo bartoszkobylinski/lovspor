@@ -22,7 +22,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, NoReturn
 
-import httpx
 import typer
 
 from lovspor.observatory.commands import observatory_app
@@ -31,6 +30,7 @@ from lovspor.observatory.registry_io import _root
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.observatory.survey import SiteShape
 from lovspor.observatory.survey_probe import DEFAULT_DELAY_SECONDS, ProbeSettings, SiteProbe
+from lovspor.observatory.tls import observatory_client
 
 SURVEY_DIRNAME = "survey"
 
@@ -158,7 +158,7 @@ def survey(
     root = _root()
     run_name = _run_name(run_id)
     shapes: list[SiteShape] = []
-    with httpx.Client() as client:
+    with observatory_client() as client:
         probe = SiteProbe(client, ProbeSettings(delay_seconds=delay))
         for host in hosts:
             shape = probe.read(host)

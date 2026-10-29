@@ -72,6 +72,7 @@ from lovspor.observatory.sweeps import (
     read_sweep_runs,
     sweeps_path,
 )
+from lovspor.observatory.tls import observatory_client
 from lovspor.observatory.triggers import running_sweep
 
 # `observatory_app` is defined in `app` and re-exported here: `cli.py` imports it
@@ -254,16 +255,15 @@ def discover(
 ) -> None:
     """Read a source's sitemaps and feeds, and report the URLs worth observing.
 
-    Discovery proposes; it never captures a candidate. That separation is what
-    keeps a sitemap of 40,000 entries from turning one command into a mass
-    download — which candidates to observe is capture's choice (#348).
+    Discovery proposes; it never captures a candidate. That separation keeps a
+    sitemap of 40,000 entries from becoming a mass download: capture chooses (#348).
 
     The documents discovery reads are themselves fetched through every gate
     and recorded in the log, because what a source listed on a given day is
     exactly the evidence this archive exists to keep.
     """
     record = _activated_source(authority_id)
-    fetcher = Fetcher(_bound_register(), ObservationLog(_root()), httpx.Client())
+    fetcher = Fetcher(_bound_register(), ObservationLog(_root()), observatory_client())
     starts = _entry_points(fetcher, record, entry_point)
     result = Discoverer(fetcher, ObservationLog(_root())).discover(record, starts.urls)
     if not entry_point:
@@ -295,7 +295,7 @@ def capture(
     record = _activated_source(authority_id)
     log = ObservationLog(_root())
     state = _capture_state(log, record.authority_id)
-    fetcher = Fetcher(_bound_register(), log, httpx.Client())
+    fetcher = Fetcher(_bound_register(), log, observatory_client())
     try:
         starts = _entry_points(fetcher, record, None)
         result = Discoverer(fetcher, log).discover(record, starts.urls)
@@ -506,7 +506,7 @@ def _sweep(root: ObservatoryRoot, limit: int) -> SweepRun:
     started_at = datetime.now(UTC)
     active = [record.authority_id for record in _active_sources()]
     log, state = _sweep_inputs(root)
-    lane = _Lane(log, state, httpx.Client(), limit)
+    lane = _Lane(log, state, observatory_client(), limit)
     totals = SweepTotals()
     for authority_id in active:
         totals = totals.plus(_sweep_source(authority_id, lane, started_at))
