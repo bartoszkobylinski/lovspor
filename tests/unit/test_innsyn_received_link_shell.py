@@ -131,6 +131,10 @@ def test_other_formats_are_not_read_as_pages(
         (b"<p>a</p>\n<p>b</p>", "a b"),
         (b"<html><body>x<script>y</script>z</body></html>", "xz"),
         (b"   ", ""),
+        (b"<template>Not rendered</template>", ""),
+        (b"<noscript>Enable JavaScript</noscript>", ""),
+        (b"<script>render()</script>", ""),
+        (b"<style>p{}</style>X", "X"),
     ],
 )
 def test_html_text_is_what_a_reader_sees(content: bytes, text: str) -> None:

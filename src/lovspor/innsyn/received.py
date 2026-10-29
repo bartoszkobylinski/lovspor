@@ -136,7 +136,7 @@ def fetch_document(client: httpx.Client, url: str) -> tuple[bytes, ReceivedMedia
 def html_text(payload: bytes) -> str:
     """The text a reader of the page sees, whitespace collapsed; empty when there is none."""
     try:
-        root = html.fromstring(payload, parser=safe_html_parser())
+        root = html.document_fromstring(payload, parser=safe_html_parser())
     except etree.ParserError:
         return ""
     etree.strip_elements(root, *_UNSEEN, with_tail=False)
