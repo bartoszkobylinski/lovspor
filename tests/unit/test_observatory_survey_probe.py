@@ -423,3 +423,92 @@ class TestWhatTheEquivalentsRegisterAssumes:
 
         assert headers["User-Agent"] == "lovspor"
         assert headers["USER-AGENT"] == "lovspor"
+
+
+WWW_ROBOTS = "https://www.example.invalid/robots.txt"
+WWW_SITEMAP = "https://www.example.invalid/sitemap.xml"
+WWW_FRONT = "https://www.example.invalid/"
+WWW_SITEMAP_XML = SITEMAP_XML.replace(b"https://example.invalid/", b"https://www.example.invalid/")
+
+
+class TestABareHostThatRedirectsToItsOwnName:
+    """Issue #508: a bare domain whose root is a 301 to ``www.`` used to read as
+    ``no_machine_index``, because no request follows redirects."""
+
+    def _bare_redirects(self, httpx_mock: HTTPXMock, location: str) -> None:
+        httpx_mock.add_response(url=ROBOTS, status_code=301, headers={"Location": location})
+        httpx_mock.add_response(url=SITEMAP, status_code=301, headers={"Location": location})
+        httpx_mock.add_response(url=FRONT, status_code=301, headers={"Location": location})
+
+    def test_the_www_host_is_probed_robots_first_and_the_row_keeps_the_asked_name(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        self._bare_redirects(httpx_mock, WWW_FRONT)
+        httpx_mock.add_response(url=WWW_ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=WWW_SITEMAP, content=WWW_SITEMAP_XML)
+        httpx_mock.add_response(url=WWW_FRONT, content=b"<html><body>Kommune</body></html>")
+        probe = _probe(client)
+
+        shape = probe.read(DOMAIN)
+
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [
+            ROBOTS,
+            SITEMAP,
+            FRONT,
+            WWW_ROBOTS,
+            WWW_SITEMAP,
+            WWW_FRONT,
+        ]
+        assert (shape.domain, shape.entry) == (DOMAIN, "conventional_sitemap")
+        assert len(probe.slept) == 5  # type: ignore[attr-defined]
+
+    def test_the_www_hosts_own_refusal_is_the_finding(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        self._bare_redirects(httpx_mock, WWW_FRONT)
+        httpx_mock.add_response(url=WWW_ROBOTS, text="User-agent: *\nDisallow: /\n")
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert shape.entry == "robots_disallowed"
+        assert [str(r.url) for r in httpx_mock.get_requests()][-1] == WWW_ROBOTS
+
+    @pytest.mark.parametrize(
+        "location",
+        ["https://other.invalid/", "https://example.invalid/no/", "https://notexample.invalid/"],
+    )
+    def test_a_redirect_to_any_other_name_or_path_is_not_followed(
+        self, client: httpx.Client, httpx_mock: HTTPXMock, location: str
+    ) -> None:
+        self._bare_redirects(httpx_mock, location)
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS, SITEMAP, FRONT]
+        assert shape.entry == "no_machine_index"
+
+    def test_the_second_host_is_not_followed_again(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        self._bare_redirects(httpx_mock, WWW_FRONT)
+        onward = "https://www2.example.invalid/"
+        httpx_mock.add_response(url=WWW_ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=WWW_SITEMAP, status_code=301, headers={"Location": onward})
+        httpx_mock.add_response(url=WWW_FRONT, status_code=301, headers={"Location": onward})
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert len(httpx_mock.get_requests()) == 6
+        assert shape.entry == "no_machine_index"
+
+    def test_a_redirect_without_a_location_is_an_ordinary_non_answer(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP, status_code=404)
+        httpx_mock.add_response(url=FRONT, status_code=302)
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert len(httpx_mock.get_requests()) == 3
+        assert shape.entry == "no_machine_index"
