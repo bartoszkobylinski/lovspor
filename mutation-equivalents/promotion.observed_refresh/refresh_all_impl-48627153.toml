@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/promotion/observed_refresh.py"
+symbol = "refresh_all_impl"
+registered = "2026-10-28, PR #714, from the mutation run on 5c54c82b"
+mutation = """
+-    inputs = MigrationInputs(root, DecisionLog(root), corpus, now)
++    inputs = MigrationInputs(root, DecisionLog(root), corpus, None)
+"""
+justification = """
+The refresh builds a `MigrationInputs` only to reach its observatory root, log,
+decision log, corpus and per-authority fetches. `MigrationInputs.now` is read
+by `migrate.assemble` (through `_observations`, the audit stamp of a migration)
+and nowhere else; a refresh never calls `assemble`, writes Markdown only and
+records nothing, by its documented contract. So the value stored in `now` --
+the clock, or `None` -- reaches no computation and no output on this path.
+An argument from this repository's own code, not from a dependency.
+"""

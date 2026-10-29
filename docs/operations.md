@@ -1417,6 +1417,26 @@ uv run lovspor promote received refresh --corpus /absolute/path/to/lovverk
   `… re-render front matter of N received documents`), which the history
   derivation reads as no event: the law did not change, its rendering did.
 
+`promote refresh` (#595) is the same re-render for **every** current document of
+the checkout, observed or received: an observed document (`basis: "observed"`)
+is re-read from the archived capture its front matter names (`source_url`,
+`source_sha256`) and rendered with the provenance it was published with; a
+received one goes through the path above, so without `LOVSPOR_INNSYN_DIR` it is
+refused, not skipped, and the observed ones are still refreshed. The terms are
+the same: the running extractor must read the same id and text, the standing
+approval of exactly that text at the running extractor must exist (`promote
+approve` for an observed document), the body and every version or provenance
+field must be byte-identical, only the Markdown is written, nothing is recorded,
+and the commit it prints is the `re-render` subject the history derivation reads
+as no event. This is the step before `promote migrate` after an extractor bump
+that changed a front-matter field: `migrate` refuses a rendering that would
+change, `refresh` rewrites it, then `migrate` moves the version metadata.
+
+```bash
+uv run lovspor promote refresh --corpus /absolute/path/to/lovverk --dry-run
+uv run lovspor promote refresh --corpus /absolute/path/to/lovverk
+```
+
 ### Backfill — every observed version, one commit each (ADR-0016 S6)
 
 `promote local` writes the one version you approved. `promote backfill`
@@ -1576,7 +1596,10 @@ git -C /absolute/path/to/lovverk commit -m 'migration(lokal-forskrift): <n> docu
 
 Use the subject the run prints; for one document add `--authority <klass>
 --slug <slug>` (subject `migration(lokal-forskrift): <klass>/<slug> extractor
-v<old>→v<new>`). A document refused for a byte difference needs the owner's
+v<old>→v<new>`). A document refused because its *rendering* would change though its text
+does not (a front-matter field the bump resolves otherwise) is re-rendered
+first with `promote refresh` (#595, below under "Refreshing a received
+document"), then migrated. A document refused for a byte difference needs the owner's
 re-approval first (`<sha256>` is the `source_sha256` in its front matter; for
 a backfilled document, one blob of each refused version — a refusal names the
 version and its blobs), then the same two `migrate` runs:

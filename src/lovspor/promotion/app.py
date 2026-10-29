@@ -8,6 +8,7 @@ from lovspor.promotion import (
     backfill_commands,
     batch_commands,
     migrate_commands,
+    observed_refresh,
     received_commands,
     received_refresh,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "backfill_commands",
     "batch_commands",
     "migrate_commands",
+    "observed_refresh",
     "promote_app",
     "received_commands",
     "received_refresh",
