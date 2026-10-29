@@ -1336,6 +1336,25 @@ make; a rerun prints `Unchanged`. The rules:
   names (`Fastsatt ved kgl.res.`, `Fastsatt av Miljødirektoratet`), never
   assumed to be the kommunestyre (A1-4). The observed channel still holds
   every Lovdata copy.
+* A Lovdata print or Lovtidend text is split by the print's own structure
+  (owner decision 2026-10-28 on #636, `EXTRACTOR_VERSION` 13): its first
+  published line is the title Lovdata states, whatever it opens with
+  (`Renovasjonsforskrift, Røros kommune …`, `Verneplan for Skardsfjella og
+  Hyllingsdalen. Vedlegg 1. Forskrift om …`), kept verbatim; and the body
+  opens at `§ 1` / `Kapittel 1` as before, else at the first bare roman
+  numeral (`I`, `II.`) or the first `1.` point, as older verneforskrifter and
+  kgl.res. decisions are set, else right after the lines that state the
+  enactment (`Hjemmel:`, `Fastsatt …`, `Fremmet av …`, with a line a wrap
+  continues). A print whose text is those lines alone is still held as
+  `no_body`. The id of such a text is minted from Lovdata's own lines, so the
+  block needs no anchor to be safe. An `authority_original` file and the
+  observed channel keep the shared anchor rules (`§ 1` / `Kapittel 1`, a
+  title naming a `forskrift`): a website page vouches for nothing, a print
+  the authority sent in answer to an innsynskrav does. On Røros's 45
+  documents this moved 22 holds to extracted texts (16 `no_body`, 6
+  `no_title`) and left the 23 already extracted byte-identical; two stubs
+  that name a phone number are now held as `personal_data` instead. Run
+  `promote migrate` after deploying (the bump is a migration, ADR-0016 4e).
 * A repealed regulation is published, and says so (owner decision on #639):
   when a Lovdata print's block carries the `OPPHEVET` stamp the front matter
   adds `status: "repealed"` right after `ikraft_text`, and when its

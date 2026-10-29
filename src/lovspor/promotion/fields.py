@@ -9,6 +9,18 @@ first section or no title before it is held, because the identity rules read
 ids only from the block, and a block with no bound would let a citation in
 the body pass for the document's own number.
 
+A Lovdata print or Lovtidend text the authority sent is split by the print's
+own structure instead (``read_received_regulation``, #636): its first
+published line is the title Lovdata states, whatever it opens with
+(``Renovasjonsforskrift, …``, ``Verneplan for … Vedlegg 1. Forskrift om …``),
+and the body opens at the first section — ``§ 1`` or ``Kapittel 1``, else a
+bare roman numeral or the first ``1.`` point (``anchors.first_numbered_section``),
+else right after the lines that state the enactment (``Hjemmel:``,
+``Fastsatt …``, ``Fremmet av …``, with a line a wrap continues). The id of
+such a text is minted from Lovdata's own lines, not from the block, so the
+block needs no anchor to be safe. A text with nothing after those lines is
+still held as ``no_body``.
+
 Fields are pre-filled for a human to confirm, never promoted on trust (the
 classification study measured 65-85 % accuracy per field, its §4). Each is
 what the text states, verbatim or as a parsed date, or empty:
@@ -43,7 +55,12 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from lovspor.promotion.anchors import first_section, first_title
+from lovspor.promotion.anchors import (
+    MAX_TITLE_CHARS,
+    first_numbered_section,
+    first_section,
+    first_title,
+)
 from lovspor.promotion.dates import parse_stated_date
 from lovspor.promotion.models import (
     ExtractedRegulation,
@@ -71,6 +88,12 @@ _HJEMMEL_PHRASE = re.compile(
     re.I,
 )
 
+_IDENTIFICATION_LINE = re.compile(
+    r"(?:hjemmel|heimel)\s*:|(?:fastsatt|fastsett|vedtatt|vedteke|fremmet|fremja|kunngjort)\b",
+    re.IGNORECASE,
+)
+_SENTENCE_END = ".:;"
+
 _INSTRUMENT = re.compile(
     r"\bfastsatt\s+ved\s+(?P<instrument>(?:kgl|kronprinsreg)\.\s*res\b\.?"
     r"|kongelig\s+resolusjon|statsrådsbeslutning)",
@@ -94,6 +117,35 @@ def read_regulation(lines: tuple[str, ...]) -> ReadRegulation | ExtractionHoldRe
     title_index = first_title(lines[:body_start])
     if title_index is None:
         return ExtractionHoldReason.NO_TITLE
+    return _split(lines, title_index, body_start)
+
+
+def read_received_regulation(lines: tuple[str, ...]) -> ReadRegulation | ExtractionHoldReason:
+    """Split a Lovdata print or Lovtidend text by its own structure (#636)."""
+    if not lines or len(lines[0]) > MAX_TITLE_CHARS:
+        return ExtractionHoldReason.NO_TITLE
+    body_start = first_section(lines)
+    if body_start is None:
+        body_start = first_numbered_section(lines)
+    if body_start is None:
+        body_start = _after_identification(lines)
+    if body_start is None or body_start == 0:
+        return ExtractionHoldReason.NO_BODY
+    return _split(lines, 0, body_start)
+
+
+def _after_identification(lines: tuple[str, ...]) -> int | None:
+    """The first line after the title and the enactment lines, with their wraps."""
+    for i in range(1, len(lines)):
+        wrapped = lines[i - 1][-1:] not in _SENTENCE_END
+        if not wrapped and not _IDENTIFICATION_LINE.match(lines[i]):
+            return i
+    return None
+
+
+def _split(
+    lines: tuple[str, ...], title_index: int, body_start: int
+) -> ReadRegulation | ExtractionHoldReason:
     block, body = lines[title_index:body_start], lines[body_start:]
     title = read_title(block)
     if title is None:

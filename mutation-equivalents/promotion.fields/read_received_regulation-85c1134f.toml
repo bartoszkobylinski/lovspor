@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/promotion/fields.py"
+symbol = "read_received_regulation"
+registered = "2026-10-28, PR #705, from run 40765031742"
+mutation = """
+-    return _split(lines, 0, body_start)
++    return _split(lines, None, body_start)
+"""
+justification = """
+`_split` uses `title_index` only as the start of the slice
+`lines[title_index:body_start]`. A slice whose start is `None` begins at index
+0 by Python's own slice semantics (`slice(None, k)` and `slice(0, k)` select the
+same elements of any sequence), so the two calls select the same block and
+every later computation sees the same input. Python semantics, no dependency.
+"""

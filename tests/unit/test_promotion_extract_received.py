@@ -240,11 +240,12 @@ def test_received_unreadable_documents_preserve_the_observed_error(content_type:
 
 
 def test_print_metadata_cannot_supply_a_missing_regulation_body() -> None:
-    # Keep the retained preamble above the length gate to exercise the split gate.
+    # Keep the retained lines above the length gate to exercise the split gate:
+    # a print whose text is its title and enactment lines alone has no body (#636).
     preamble = (
         PREAMBLE,
-        "Forskriften gjelder for hele kommunen og fastsetter bestemmelser om orden, "
-        "ferdsel og bruk av kommunens offentlige områder til beste for innbyggerne.",
+        "Fremmet av Eksempeldepartementet, jf. lov 10. februar 1967 om behandlingsmåten "
+        "i forvaltningssaker § 37 og forskrift 15. desember 2006 nr. 1456 om forvaltning.",
     )
     held = _held(html_page((*PRINT_HEAD, *preamble)), HTML)
     assert held.reason is ExtractionHoldReason.NO_BODY
