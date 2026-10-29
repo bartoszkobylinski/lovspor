@@ -332,6 +332,35 @@ class TestAFreshApprovalWins:
             assert "approval_carried" not in promotion
             assert promotion["extractor_version"] == EXTRACTOR_VERSION
 
+    def test_the_audit_is_the_fresh_approvals_not_the_old_one(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        """#722: a fresh approval publishes its own time, reason and role, never the old one's."""
+        before = {v["version"]: v["promotion"] for v in _versions(corpus)}
+        fresh = Decision(reason="Re-approved at the running extractor.", reviewer_role="editor")
+        for sha256 in _blobs(corpus):
+            assert approve(sha256, fresh.write(tmp_path)).exit_code == 0
+        approvals = [
+            r
+            for r in (json.loads(line) for line in _log(root).decode().splitlines())
+            if r.get("kind") == "decision"
+        ]
+
+        assert _migrate(corpus).exit_code == 0
+
+        latest = approvals[-1]["decided_at"]
+        for version in _versions(corpus):
+            promotion = version["promotion"]
+            old = before[version["version"]]
+            assert isinstance(promotion, dict)
+            assert isinstance(old, dict)
+            assert promotion["reason"] == "Re-approved at the running extractor."
+            assert promotion["reviewed_by_role"] == "editor"
+            assert promotion["decided_at"] != old["decided_at"]
+            assert promotion["decided_at"] <= latest
+            assert promotion["observations_through"] == old["observations_through"]
+            assert promotion["observations"] == old["observations"]
+
 
 class TestTheCarriedStateIsReachableThroughSupportedInterfacesOnly:
     """Can a document migrated by carry be reached, and worked on, using only commands?"""

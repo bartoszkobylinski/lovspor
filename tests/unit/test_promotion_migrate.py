@@ -198,8 +198,17 @@ class TestMigratingAnUnchangedDocument:
         versions = observations_before["versions"]
         assert isinstance(versions, list)
         assert [v["promotion"]["extractor_version"] for v in versions] == [OLD, OLD, OLD]
-        for version in versions:
+        reapproved = {
+            record["decided_at"]
+            for record in (json.loads(line) for line in _log(root).splitlines())
+            if record.get("extractor_version") == EXTRACTOR_VERSION
+        }
+        after_versions = _observations(corpus)["versions"]
+        assert isinstance(after_versions, list)
+        for version, moved in zip(versions, after_versions, strict=True):
+            assert moved["promotion"]["decided_at"] in reapproved
             version["promotion"]["extractor_version"] = EXTRACTOR_VERSION
+            version["promotion"]["decided_at"] = moved["promotion"]["decided_at"]
         assert _observations(corpus) == observations_before
 
     def test_prints_the_migration_commit_and_never_commits(

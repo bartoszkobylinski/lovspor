@@ -126,13 +126,33 @@ def historical_markdown(
 def audit_at_running_extractor(
     audit: PromotionAudit, approval: VersionApproval, now: datetime
 ) -> PromotionAudit:
-    """``audit`` moved to the running extractor, saying whether its approval was carried."""
-    carried = None
-    if approval.carried:
-        carried = ApprovalCarried(
-            approved_at_extractor=ApprovalReference.of(approval.decision).extractor_version,
-            carried_to_extractor=EXTRACTOR_VERSION,
-            carried_at=utc_text(now),
-        )
-    update = {"extractor_version": EXTRACTOR_VERSION, "approval_carried": carried}
-    return audit.model_copy(update=update)
+    """``audit`` moved to the running extractor, on the approval that stands there.
+
+    A carried approval keeps the audit's decision and says where it was given.
+    A fresh one replaces the decision fields with its own (#722): stamping the
+    running extractor onto the old decision would publish that the old decision
+    was given here. The observations stay: they are evidence, not the decision.
+    """
+    if not approval.carried:
+        return audit.model_copy(update=_decided(approval.decision))
+    carried = ApprovalCarried(
+        approved_at_extractor=ApprovalReference.of(approval.decision).extractor_version,
+        carried_to_extractor=EXTRACTOR_VERSION,
+        carried_at=utc_text(now),
+    )
+    return audit.model_copy(
+        update={"extractor_version": EXTRACTOR_VERSION, "approval_carried": carried}
+    )
+
+
+def _decided(decision: HumanDecision) -> dict[str, object]:
+    """The audit fields a fresh approval at the running extractor writes."""
+    return {
+        "decision": decision.decision,
+        "reviewed_by_role": decision.reviewer_role,
+        "decided_at": utc_text(decision.decided_at),
+        "reason": decision.reason,
+        "classifier": decision.classifier,
+        "extractor_version": EXTRACTOR_VERSION,
+        "approval_carried": None,
+    }
