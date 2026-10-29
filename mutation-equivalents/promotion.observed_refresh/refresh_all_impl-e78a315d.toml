@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/promotion/observed_refresh.py"
+symbol = "refresh_all_impl"
+registered = "2026-10-29, PR #726, from the mutation artifact at commit 7ed010a9"
+mutation = """
+-    inputs = MigrationInputs(root, DecisionLog(root), corpus, now)
++    inputs = MigrationInputs(root, DecisionLog(root), corpus, None)
+"""
+justification = """
+`MigrationInputs.now` is read in exactly one place, `migrate._observations`
+(the `carried_at` of a carried approval), which only `promote migrate`
+reaches. The refresh path built from these inputs never reads it:
+`plan_observed_refresh` uses `inputs.decisions`, `inputs.log`,
+`inputs.fetches`, `inputs.root` and `inputs.corpus`, and the received branch
+builds `RefreshInputs` from `decisions` and `corpus` alone. Passing `None`
+instead of the run's instant therefore changes nothing a refresh reads or
+writes; `test_refresh_keeps_published_provenance_independent_of_run_time`
+pins the same fact from the outside (runs at 2000 and 2099 write identical
+trees). Argued from this repository's own code, not a dependency.
+"""
