@@ -36,9 +36,17 @@ _LAW_NAME = r"\S*(?:lov|lova|loven|forskrift|forskrifta|forskriften)\b"
 # The organ never runs into a hjemmel phrase, and a date right after a law's
 # name ("lov av 14. juni 2002") is that statute's date, not the adoption's.
 _HJEMMEL_START = r"\bmed\s+(?:hjemmel|heimel)\b|\bmed(?:hold|hald)\s+av\b"
+# A state instrument enacts "ved": "Fastsatt ved kgl.res. av 21. desember
+# 1990". Its date is the vedtaksdato and the instrument, as written, fills the
+# one ``organ`` group (#637) — the pattern keeps exactly two groups, organ and
+# date, which the equivalents register rests on. A case number may sit between
+# the organ and the date ("sak 78/24,").
+_INSTRUMENT = r"(?:kgl|kronprinsreg)\.\s*res\b\.?|kongelig\s+resolusjon|statsrådsbeslutning"
+_CASE_NUMBER = r"(?:\s*,?\s*sak\s+\d+/\d+\s*,?)?"
 _ENACTMENT = (
-    r"(?:fastsatt|fastsett|vedtatt|vedteke|vedteken)\s+(?:av|i)\s+"
-    rf"(?P<organ>(?:(?!{_HJEMMEL_START})[^\d.]){{1,90}}?)(?:\s+(?:i\s+møte|den))?[\s,]*" + DATE
+    r"(?:fastsatt|fastsett|vedtatt|vedteke|vedteken)\s+(?:av|i|ved)\s+"
+    rf"(?P<organ>{_INSTRUMENT}|(?:(?!{_HJEMMEL_START})[^\d.]){{1,90}}?){_CASE_NUMBER}"
+    r"(?:\s+av)?(?:\s+(?:i\s+møte|den))?[\s,]*" + DATE
 )
 _ENACTED = re.compile(r"\b" + _ENACTMENT, re.I)
 # In the body only the regulation's own adoption counts: "Forskriften er

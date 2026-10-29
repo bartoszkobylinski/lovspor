@@ -161,6 +161,27 @@ class TestBodyAnchors:
         lines = (BOUNDARY[0], "Fastsatt ved kgl.res. av 21. august 1987. Fremmet av", FILLER)
         assert _held(lines).reason is ExtractionHoldReason.NO_BODY
 
+    @pytest.mark.parametrize("lines", [VERNEFORSKRIFT, KGL_RES_POINTS, BOUNDARY, COMPOUND_TITLE])
+    def test_lovtidend_uses_the_received_splitter(self, lines: tuple[str, ...]) -> None:
+        result = extract_received(minimal_pdf((*LOVTIDEND[:5], *lines)), PDF)
+        assert isinstance(result, ExtractedDocument), result
+        assert result.received_form is ReceivedForm.LOVTIDEND
+        expected = _received(lines)
+        # The removed identification is provenance of each format, whereas
+        # the published title, block, body and enactment date must agree.
+        assert result.regulation.removed_identification == LOVTIDEND[4]
+        assert result.regulation == expected.regulation.model_copy(
+            update={"removed_identification": LOVTIDEND[4]}
+        )
+        assert result.fields == expected.fields
+
+    def test_wrapped_enactment_without_a_section_keeps_the_whole_block(self) -> None:
+        lines = (*WRAPPED_ISSUER[:3], BOUNDARY[2])
+        extracted = _received(lines)
+        assert extracted.regulation.identification_block == "\n".join(lines[:3])
+        assert extracted.regulation.body == BOUNDARY[2]
+        assert extracted.regulation.full_text == "\n".join(lines)
+
     def test_a_bare_roman_numeral_opens_the_body(self) -> None:
         extracted = _received(VERNEFORSKRIFT)
         assert extracted.regulation.title == VERNEFORSKRIFT[0]
@@ -200,6 +221,14 @@ class TestBodyAnchors:
 
 
 class TestTitle:
+    @pytest.mark.parametrize("banner", [PRINT_HEAD[:-4], LOVTIDEND[:5]])
+    def test_received_splitter_still_holds_a_truncated_title(self, banner: tuple[str, ...]) -> None:
+        # title.py: a title ending on a function word must never mint an id.
+        lines = ("Regulering av grensen mellom Eksempel og", *BOUNDARY[1:])
+        result = extract_received(minimal_pdf((*banner, *lines)), PDF)
+        assert isinstance(result, HeldExtraction), result
+        assert result.reason is ExtractionHoldReason.TITLE_TRUNCATED
+
     @pytest.mark.parametrize("header", [PRINT_HEAD[:-4], LOVTIDEND[:5]])
     def test_received_split_still_holds_a_truncated_title(self, header: tuple[str, ...]) -> None:
         # title.py's contract still applies through the new received reader.

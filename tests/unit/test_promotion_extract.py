@@ -59,8 +59,8 @@ def test_faq_page_content_hash_does_not_depend_on_the_page_tail() -> None:
     assert content_hash(with_tail) == content_hash(without)
 
 
-def test_extractor_version_is_thirteen_since_the_received_split_rules() -> None:
-    assert EXTRACTOR_VERSION == 13
+def test_extractor_version_is_fourteen_since_the_enactment_forms() -> None:
+    assert EXTRACTOR_VERSION == 14
 
 
 @pytest.mark.parametrize("extract", [extract_regulation, extract_received])
@@ -82,7 +82,7 @@ def test_pdf_holds_record_the_upgraded_extractor_version(
     assert isinstance(result, HeldExtraction), result
     assert result.reason is reason
     assert result.source_form is SourceForm.PDF
-    assert result.extractor_version == 13
+    assert result.extractor_version == 14
 
 
 @pytest.mark.parametrize(
@@ -95,7 +95,7 @@ def test_received_sources_record_the_upgraded_extractor_version(
     """The shared engine bump applies to the received channel in every form."""
     result = extract_received(payload, content_type)
     assert isinstance(result, ExtractedDocument), result
-    assert result.extractor_version == 13
+    assert result.extractor_version == 14
     assert result.regulation.full_text == "\n".join(REGULATION_LINES)
 
 
@@ -105,7 +105,7 @@ def test_received_sources_record_the_upgraded_extractor_version(
 )
 def test_binary_sources_record_extractor_version_eight(payload: bytes, content_type: str) -> None:
     """The library upgrade changes the engine version recorded on every source form."""
-    assert _extracted(payload, content_type).extractor_version == 13
+    assert _extracted(payload, content_type).extractor_version == 14
 
 
 def test_html_page_extracts_block_body_and_fields() -> None:
