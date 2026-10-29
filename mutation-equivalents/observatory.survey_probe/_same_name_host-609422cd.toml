@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_same_name_host"
+registered = "2026-10-29, PR #718, from run 40806199693"
+mutation = """
+-    host = target.host or ""
++    host = target.host or "XXXX"
+"""
+justification = """
+The fallback is used only when the parsed target has no host. Neither "" nor
+"XXXX" ends with `"." + domain` (a domain is at least one label, so the suffix is
+at least two characters and starts with a dot, which "XXXX" does not contain),
+so the function answers `None` for both. Python string semantics.
+"""

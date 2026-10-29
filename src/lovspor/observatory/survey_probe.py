@@ -33,6 +33,17 @@ The probe has no recorded access-policy check to take its politeness from, so it
 carries what all 201 cleared sources carry: the same user agent, and the same
 7-second spacing. A recon pass must never be more aggressive than the capture it
 is scouting for.
+
+**A bare domain whose root redirects to a host under its own name is probed
+there too.** No request here follows redirects, so a host answering
+``https://kommune.no/`` with a 301 to ``https://www.kommune.no/`` used to
+record ``no_machine_index``: its sitemap and front page both came back as the
+redirect's empty body (noted on issue #508). When the front page is such a
+redirect, the probe starts over on the host it names -- robots first, the same
+three requests, the same spacing -- and the row carries that host's findings
+under the name that was asked. A redirect to any other name, or from the
+second host onwards, is not followed: the row then says what was served,
+which is the finding a human reads.
 """
 
 import time
@@ -84,8 +95,12 @@ class SiteProbe:
         or that refuses the root makes the remaining requests both pointless and
         impolite.
         """
-        base = f"https://{domain}/"
         self._owes_delay = False
+        return self._probe_host(domain, domain, max_bytes, follow=True)
+
+    def _probe_host(self, domain: str, host: str, max_bytes: int, *, follow: bool) -> SiteShape:
+        """The row for ``domain`` as ``host`` serves it; ``follow`` one same-name redirect."""
+        base = f"https://{host}/"
         gate = RobotsGate(
             self._client, CaptureSettings(timeout_seconds=self._settings.timeout_seconds)
         )
@@ -94,12 +109,29 @@ class SiteProbe:
             return read_site_shape(
                 domain=domain, robots=robots, conventional_sitemap=False, front_page=b""
             )
+        sitemap = self._serves_discovery_document(gate, base, robots)
+        elsewhere, front_page = self._front_page(base, domain, max_bytes)
+        if follow and elsewhere is not None:
+            return self._probe_host(domain, elsewhere, max_bytes, follow=False)
         return read_site_shape(
-            domain=domain,
-            robots=robots,
-            conventional_sitemap=self._serves_discovery_document(gate, base, robots),
-            front_page=self._body(base, max_bytes),
+            domain=domain, robots=robots, conventional_sitemap=sitemap, front_page=front_page
         )
+
+    def _front_page(self, base: str, domain: str, max_bytes: int) -> tuple[str | None, bytes]:
+        """The front page's head, or the host under ``domain`` its redirect names."""
+        self._wait()
+        try:
+            with self._client.stream(
+                "GET",
+                base,
+                headers={"User-Agent": self._settings.user_agent},
+                timeout=self._settings.timeout_seconds,
+            ) as response:
+                if response.status_code == httpx.codes.OK:
+                    return None, _capped(response, max_bytes)
+                return _same_name_host(response, domain), b""
+        except httpx.HTTPError:
+            return None, b""
 
     def _robots(self, gate: RobotsGate, base: str) -> RobotsReadout:
         self._wait()
@@ -165,6 +197,15 @@ class SiteProbe:
         if self._owes_delay:
             self._settings.sleep(self._settings.delay_seconds)
         self._owes_delay = True
+
+
+def _same_name_host(response: httpx.Response, domain: str) -> str | None:
+    """The host a redirect names when it sits under ``domain``; else ``None``."""
+    if not response.is_redirect:
+        return None
+    target = httpx.URL(response.headers.get("location", ""))
+    host = target.host or ""
+    return host if host.endswith(f".{domain}") else None
 
 
 def _capped(response: httpx.Response, max_bytes: int) -> bytes:

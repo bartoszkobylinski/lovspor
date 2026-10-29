@@ -390,6 +390,12 @@ Six entries, and the distinctions carry weight:
 `--delay` defaults to 7 seconds, the spacing every registered source was cleared
 with. A survey does not take the sweep's archive lock, so it can run while a
 nightly sweep is in progress — different hosts do not share a politeness budget.
+A bare domain whose root answers with a redirect to a host under its own name
+(`kommune.no` → `www.kommune.no`) is probed there as well, robots first and with
+the same spacing, and the row carries that host's findings under the name that was
+asked; before #508 such a host read as `no_machine_index` because no probe request
+follows redirects. A redirect to any other name, or a second redirect, is not
+followed: the row says what was served.
 
 Every observatory client — the survey, the robots read at registration, capture
 and the sweep — connects under `observatory/tls.py` (#508): Python's default
