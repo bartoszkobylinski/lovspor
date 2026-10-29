@@ -1424,7 +1424,15 @@ uv run lovspor promote received refresh --corpus /absolute/path/to/lovverk
   promoted with `local`.
 * It needs the same standing approval as `local`: the approval of exactly
   this text at the running extractor. A held, rejected or withdrawn document
-  is refused. Read the `--dry-run` diff before approving again.
+  is refused. Read the `--dry-run` diff before approving again: when the
+  only thing missing is that approval — the owner approved exactly this text
+  at an earlier extractor and `migrate` could not carry it because the
+  rendering changes — the dry run prints
+  `<id>: needs re-approval at v<N>: …` and the diff the re-approval covers,
+  and exits 1 (#719). The write still refuses it until the approval is given
+  again; a document that would also move its body or a version or provenance
+  field, or whose standing decision is not an approval of this text, is
+  refused in the dry run as well, with no diff.
 * A document that re-renders byte-identically is reported as `unchanged` and
   not written. Only the Markdown is written: the manifest, the observations
   file and the evidence sidecar describe the same version and are left alone,
@@ -1442,7 +1450,8 @@ received one goes through the path above, so without `LOVSPOR_INNSYN_DIR` it is
 refused, not skipped, and the observed ones are still refreshed. The terms are
 the same: the running extractor must read the same id and text, the standing
 approval of exactly that text at the running extractor must exist (`promote
-approve` for an observed document), the body and every version or provenance
+approve` for an observed document; `--dry-run` shows the diff of one that awaits
+only its re-approval, as above), the body and every version or provenance
 field must be byte-identical, only the Markdown is written, nothing is recorded,
 and the commit it prints is the `re-render` subject the history derivation reads
 as no event. This is the step before `promote migrate` after an extractor bump

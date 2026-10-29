@@ -45,28 +45,28 @@ from lovspor.promotion.migrate import (
     Published,
     _published_source,
     _source_key,
-    planned_diff,
     published,
     published_klass_version,
     render_published,
     same_text,
 )
 from lovspor.promotion.migrate_commands import _optional_workspace
-from lovspor.promotion.plan import require_approval
 from lovspor.promotion.received_refresh import (
     Refresh,
     RefreshInputs,
     RefreshOutcome,
     is_received,
     plan_refresh,
-    refresh_files,
-    refuse_beyond_front_matter,
-    write_refreshes,
+    previewed_approval,
+    refresh_of,
+    report_outcome,
 )
 from lovspor.promotion.withdraw import refuse_withdrawn
 
 
-def plan_observed_refresh(inputs: MigrationInputs, document: Published) -> Refresh | None:
+def plan_observed_refresh(
+    inputs: MigrationInputs, document: Published, *, preview: bool = False
+) -> Refresh | None:
     """The observed document's re-rendering, ``None`` when byte-identical, or a refusal."""
     key = _source_key(document)
     refuse_withdrawn(inputs.decisions, key, document.doc_id)
@@ -75,33 +75,28 @@ def plan_observed_refresh(inputs: MigrationInputs, document: Published) -> Refre
     authority = _authority(inputs.root, document.record.authority_id, klass_version)
     extracted = extract_regulation(artifact.payload, artifact.content_type)
     prepared = same_text(inputs.corpus, document, extracted, authority)
-    require_approval(inputs.decisions.latest_decision(key), prepared, inputs.decisions.carried())
+    decision = inputs.decisions.latest_decision(key)
+    carried = inputs.decisions.carried()
+    reapproval = previewed_approval(decision, prepared, carried, preview=preview)
     markdown = render_published(prepared, _published_source(document))
-    if markdown == document.markdown:
-        return None
-    refuse_beyond_front_matter(document, markdown)
-    return Refresh(
-        doc_id=document.doc_id,
-        authority_id=document.record.authority_id,
-        slug=document.record.slug,
-        version=document.record.version,
-        markdown_path=document.record.markdown_path,
-        markdown=markdown,
-    )
+    return refresh_of(document, markdown, needs_reapproval=reapproval)
 
 
 @dataclass(frozen=True)
 class _Run:
     inputs: MigrationInputs
     workspace: InnsynWorkspace | None
+    preview: bool = False
 
     def plan(self, document: Published) -> Refresh | None:
         if not is_received(document):
-            return plan_observed_refresh(self.inputs, document)
+            return plan_observed_refresh(self.inputs, document, preview=self.preview)
         if self.workspace is None:
             msg = f"a received document is re-read from the innsyn workspace; set {ENV_INNSYN_DIR}"
             raise PromotionError(msg)
-        received = RefreshInputs(self.workspace, self.inputs.decisions, self.inputs.corpus)
+        received = RefreshInputs(
+            self.workspace, self.inputs.decisions, self.inputs.corpus, preview=self.preview
+        )
         return plan_refresh(received, document)
 
 
@@ -137,19 +132,8 @@ def refresh_all_impl(request: RefreshAllRequest, now: datetime) -> None:
     forbidden = [engine_root(), root.path, *([workspace.path] if workspace else [])]
     corpus = CorpusCheckout(request.corpus, forbidden)
     inputs = MigrationInputs(root, DecisionLog(root), corpus, now)
-    outcome = _plan_all(_Run(inputs, workspace))
-    for doc_id, reason in outcome.refusals.items():
-        typer.echo(f"Refused: {doc_id}: {reason}", err=True)
-    if not outcome.refreshes:
-        if not outcome.refusals:
-            typer.echo("Nothing to refresh; nothing written, nothing to commit.")
-    elif request.dry_run:
-        diff = planned_diff(corpus, refresh_files(outcome.refreshes))
-        typer.echo(diff + "Dry run: nothing written.")
-    else:
-        write_refreshes(corpus, outcome.refreshes)
-    if outcome.refusals:
-        raise typer.Exit(1)
+    outcome = _plan_all(_Run(inputs, workspace, preview=request.dry_run))
+    report_outcome(corpus, outcome, dry_run=request.dry_run)
 
 
 @promote_app.command("refresh")

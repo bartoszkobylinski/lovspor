@@ -20,7 +20,10 @@ the same version and stay as they are, and nothing is recorded in the
 decision log. It never commits; it prints the ``migration(lokal-forskrift):
 re-render …`` commit to make, which the history derivation reads as no event.
 
-``--dry-run`` prints the diff and writes nothing. A refused document is
+``--dry-run`` prints the diff and writes nothing. It also shows the diff of a
+document whose approval was given at an earlier extractor, named as needing
+re-approval and exiting 1, so the owner reads what approving again covers
+(#719); the write refuses it until then. A refused document is
 reported on its own line and the exit status is 1; the others are still
 refreshed. The decorated command only calls :func:`refresh_impl` (#292).
 """
@@ -41,7 +44,8 @@ from lovspor.observatory.registry_io import _root
 from lovspor.observatory.storage import engine_root
 from lovspor.promotion.commands import _Corpus, _echo_commit, _refusing, _standing
 from lovspor.promotion.corpus import CorpusCheckout
-from lovspor.promotion.decisions import DecisionLog
+from lovspor.promotion.decisions import Carried, DecisionLog, HumanDecision
+from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.innsyn_authority import received_authority
 from lovspor.promotion.innsyn_source import ReceivedArtifact, read_received
 from lovspor.promotion.migrate import (
@@ -51,7 +55,15 @@ from lovspor.promotion.migrate import (
     published,
     published_klass_version,
 )
-from lovspor.promotion.plan import Held, Prepared, prepare, render_prepared, require_approval
+from lovspor.promotion.plan import (
+    APPROVAL_ELSEWHERE,
+    Held,
+    Prepared,
+    awaits_reapproval,
+    prepare,
+    render_prepared,
+    require_approval,
+)
 from lovspor.promotion.received_commands import _workspace, received_app
 from lovspor.promotion.withdraw import refuse_withdrawn
 from lovspor.promotion.writer import apply_files, refuse_nlod
@@ -99,6 +111,8 @@ class Refresh(BaseModel):
     version: int
     markdown_path: str
     markdown: str
+    #: Shown by a dry run only: its approval stands at an earlier extractor (#719).
+    needs_reapproval: bool = False
 
     @property
     def commit_subject(self) -> str:
@@ -107,11 +121,16 @@ class Refresh(BaseModel):
 
 @dataclass(frozen=True)
 class RefreshInputs:
-    """The innsyn workspace, the decision log and the checkout one refresh run reads."""
+    """The innsyn workspace, the decision log and the checkout one refresh run reads.
+
+    ``preview`` is a dry run: it may show a rendering whose approval was given
+    at an earlier extractor (#719), which a write refuses.
+    """
 
     workspace: InnsynWorkspace
     decisions: DecisionLog
     corpus: CorpusCheckout
+    preview: bool = False
 
 
 @dataclass(frozen=True)
@@ -135,9 +154,30 @@ def plan_refresh(inputs: RefreshInputs, document: Published) -> Refresh | None:
     decision = _standing(inputs.decisions, artifact.key)
     refuse_withdrawn(inputs.decisions, None, document.doc_id)
     prepared = _same_version(document, prepare(artifact, authority, inputs.corpus))
-    require_approval(decision, prepared, inputs.decisions.carried())
-    markdown = render_prepared(prepared, artifact)
+    carried = inputs.decisions.carried()
+    reapproval = previewed_approval(decision, prepared, carried, preview=inputs.preview)
+    return refresh_of(document, render_prepared(prepared, artifact), needs_reapproval=reapproval)
+
+
+def previewed_approval(
+    decision: HumanDecision | None, prepared: Prepared, carried: Carried, *, preview: bool
+) -> bool:
+    """True when only a preview goes on, pending a re-approval; refuses anything else unapproved."""
+    if preview and awaits_reapproval(decision, prepared, carried):
+        return True
+    require_approval(decision, prepared, carried)
+    return False
+
+
+def refresh_of(document: Published, markdown: str, *, needs_reapproval: bool) -> Refresh | None:
+    """``markdown`` as the document's refresh, ``None`` when byte-identical, or a refusal.
+
+    A byte-identical rendering awaiting re-approval has no diff to show:
+    ``promote migrate`` carries its approval, so it keeps the approval refusal.
+    """
     if markdown == document.markdown:
+        if needs_reapproval:
+            raise PromotionRefusedError(APPROVAL_ELSEWHERE)
         return None
     refuse_beyond_front_matter(document, markdown)
     return Refresh(
@@ -147,6 +187,7 @@ def plan_refresh(inputs: RefreshInputs, document: Published) -> Refresh | None:
         version=document.record.version,
         markdown_path=document.record.markdown_path,
         markdown=markdown,
+        needs_reapproval=needs_reapproval,
     )
 
 
@@ -220,19 +261,40 @@ def refresh_impl(request: RefreshRequest) -> None:
     root = _root()
     workspace = _workspace()
     corpus = CorpusCheckout(request.corpus, [engine_root(), root.path, workspace.path])
-    outcome = _plan_all(RefreshInputs(workspace, DecisionLog(root), corpus))
+    inputs = RefreshInputs(workspace, DecisionLog(root), corpus, preview=request.dry_run)
+    report_outcome(corpus, _plan_all(inputs), dry_run=request.dry_run)
+
+
+def report_outcome(corpus: CorpusCheckout, outcome: RefreshOutcome, *, dry_run: bool) -> None:
+    """Print the refusals, then the diff (dry run) or the writes; exit 1 when one is held back."""
     for doc_id, reason in outcome.refusals.items():
         typer.echo(f"Refused: {doc_id}: {reason}", err=True)
     if not outcome.refreshes:
         if not outcome.refusals:
             typer.echo("Nothing to refresh; nothing written, nothing to commit.")
-    elif request.dry_run:
-        diff = planned_diff(corpus, refresh_files(outcome.refreshes))
-        typer.echo(diff + "Dry run: nothing written.")
+    elif dry_run:
+        preview_refreshes(corpus, outcome.refreshes)
     else:
         write_refreshes(corpus, outcome.refreshes)
-    if outcome.refusals:
+    if outcome.refusals or any(refresh.needs_reapproval for refresh in outcome.refreshes):
         raise typer.Exit(1)
+
+
+def preview_refreshes(corpus: CorpusCheckout, refreshes: list[Refresh]) -> None:
+    """The dry run: each re-approval it awaits, the diff, and how many wait (#719)."""
+    waiting = [refresh.doc_id for refresh in refreshes if refresh.needs_reapproval]
+    for doc_id in waiting:
+        typer.echo(
+            f"{doc_id}: needs re-approval at v{EXTRACTOR_VERSION}: its approval was given at an "
+            "earlier extractor; the diff below is what approving it again covers"
+        )
+    diff = planned_diff(corpus, refresh_files(refreshes))
+    typer.echo(diff + "Dry run: nothing written.", nl=not waiting)
+    if waiting:
+        typer.echo(
+            f" {len(waiting)} document(s) need re-approval at v{EXTRACTOR_VERSION} "
+            "before refresh writes them."
+        )
 
 
 def _plan_all(inputs: RefreshInputs) -> RefreshOutcome:
@@ -256,6 +318,8 @@ def _plan_all(inputs: RefreshInputs) -> RefreshOutcome:
 
 
 def write_refreshes(corpus: CorpusCheckout, refreshes: list[Refresh]) -> None:
+    if any(refresh.needs_reapproval for refresh in refreshes):
+        raise PromotionRefusedError(APPROVAL_ELSEWHERE)
     written = apply_files(corpus, refresh_files(refreshes))
     for refresh in refreshes:
         typer.echo(

@@ -23,7 +23,7 @@ Placement, for the one version this slice writes:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -144,6 +144,11 @@ def _extract(artifact: ArchivedArtifact | ReceivedArtifact) -> ExtractionResult:
     return extract_regulation(artifact.payload, artifact.content_type)
 
 
+APPROVAL_ELSEWHERE: Final = (
+    "the approval was given for another text or extractor; preview and approve again"
+)
+
+
 def require_approval(
     decision: HumanDecision | None, prepared: Prepared, carried: Carried
 ) -> HumanDecision:
@@ -163,9 +168,23 @@ def require_approval(
     if decision.content_hash != prepared.identity.content_hash or not stands_at_running_extractor(
         decision, carried
     ):
-        msg = "the approval was given for another text or extractor; preview and approve again"
-        raise PromotionRefusedError(msg)
+        raise PromotionRefusedError(APPROVAL_ELSEWHERE)
     return decision
+
+
+def awaits_reapproval(decision: HumanDecision | None, prepared: Prepared, carried: Carried) -> bool:
+    """True when all that is missing is an approval of this text at the running extractor (#719).
+
+    The owner approved exactly this text at an earlier extractor and it was not
+    carried here. A preview may show what approving it again covers; a write
+    still needs :func:`require_approval`.
+    """
+    return (
+        decision is not None
+        and decision.decision is Decision.APPROVE
+        and decision.content_hash == prepared.identity.content_hash
+        and not stands_at_running_extractor(decision, carried)
+    )
 
 
 def stands_at_running_extractor(decision: HumanDecision, carried: Carried) -> bool:

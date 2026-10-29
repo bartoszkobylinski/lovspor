@@ -20,11 +20,13 @@ from pytest_httpx import HTTPXMock
 from lovspor.errors import PromotionRefusedError
 from lovspor.innsyn.workspace import ENV_INNSYN_DIR
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
+from lovspor.promotion import received_commands
 from lovspor.promotion.corpus import CorpusCheckout
 from lovspor.promotion.decisions import DecisionLog
+from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.migrate import published
 from lovspor.promotion.plan import Held
-from lovspor.promotion.received_refresh import _body, _same_version
+from lovspor.promotion.received_refresh import Refresh, _body, _same_version, write_refreshes
 from tests.unit.innsyn_support import FIXTURES, fetched
 from tests.unit.promotion_cli_fixtures import AUTHORITY, git, invoke, make_corpus, register, tree
 from tests.unit.promotion_fixtures import minimal_pdf
@@ -425,3 +427,95 @@ def test_general_refresh_handles_both_channels_without_losing_observed_work(
     assert _log(root) == log
     assert tree(workspace) == held
     assert git(corpus, "rev-parse", "HEAD") == head
+
+
+class TestDryRunAwaitingReapproval:
+    """#719: the dry run shows the diff a re-approval at the running extractor covers."""
+
+    @pytest.fixture
+    def approved_earlier(
+        self, promoted: tuple[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> Path:
+        """The promoted print, its standing approval given at the previous extractor."""
+        sha256, path = promoted
+        with monkeypatch.context() as patched:
+            patched.setattr(received_commands, "EXTRACTOR_VERSION", EXTRACTOR_VERSION - 1)
+            assert _approve(sha256, tmp_path).exit_code == 0
+        return path
+
+    @pytest.fixture
+    def earlier(self, approved_earlier: Path) -> Path:
+        """That print, rendered as before #639."""
+        _stale(approved_earlier)
+        return approved_earlier
+
+    def test_the_dry_run_prints_the_diff_and_names_the_reapproval(
+        self, earlier: Path, corpus: Path, root: Path
+    ) -> None:
+        before, log = tree(corpus), _log(root)
+        result = _refresh(corpus, "--dry-run")
+        assert result.exit_code == 1, result.output
+        assert '\n+status: "repealed"\n' in result.stdout
+        assert (
+            f"lf-20010203-9001: needs re-approval at v{EXTRACTOR_VERSION}: its approval was "
+            "given at an earlier extractor; the diff below is what approving it again covers\n"
+        ) in result.stdout
+        assert result.stdout.endswith(
+            "Dry run: nothing written. 1 document(s) need re-approval at "
+            f"v{EXTRACTOR_VERSION} before refresh writes them.\n"
+        )
+        assert result.stderr == ""
+        assert (tree(corpus), _log(root)) == (before, log)
+
+    def test_the_write_still_refuses(self, earlier: Path, corpus: Path, root: Path) -> None:
+        before, log = tree(corpus), _log(root)
+        result = _refresh(corpus)
+        assert result.exit_code == 1, result.output
+        assert "approval was given for another text or extractor" in result.stderr
+        assert "needs re-approval" not in result.stdout
+        assert (tree(corpus), _log(root)) == (before, log)
+
+    def test_a_moved_provenance_field_is_still_refused(self, earlier: Path, corpus: Path) -> None:
+        received_at = re.search(r'\nreceived_at: "([^"]+)"\n', earlier.read_text(encoding="utf-8"))
+        assert received_at is not None
+        _edit(earlier, received_at.group(1), "2026-01-01T00:00:00Z")
+        before = tree(corpus)
+        result = _refresh(corpus, "--dry-run")
+        assert result.exit_code == 1, result.output
+        assert "would change received_at;" in result.stderr
+        assert "needs re-approval" not in result.stdout
+        assert tree(corpus) == before
+
+    def test_a_held_decision_shows_no_diff(
+        self, earlier: Path, corpus: Path, tmp_path: Path, promoted: tuple[str, Path]
+    ) -> None:
+        assert _approve(promoted[0], tmp_path, decision="hold").exit_code == 0
+        result = _refresh(corpus, "--dry-run")
+        assert result.exit_code == 1, result.output
+        assert "the standing decision is hold" in result.stderr
+        assert "+status" not in result.stdout
+
+    def test_a_current_rendering_keeps_the_approval_refusal(
+        self, approved_earlier: Path, corpus: Path
+    ) -> None:
+        result = _refresh(corpus, "--dry-run")
+        assert result.exit_code == 1, result.output
+        assert "approval was given for another text or extractor" in result.stderr
+        assert "needs re-approval" not in result.stdout
+
+
+def test_a_refresh_awaiting_reapproval_is_never_written(corpus: Path) -> None:
+    """#719: only a dry run builds one; a write that is handed one refuses it."""
+    waiting = Refresh(
+        doc_id="lf-20010203-9001",
+        authority_id="4646",
+        slug="s",
+        version=1,
+        markdown_path=f"{LOCAL}/4646/s.md",
+        markdown="---\nid: x\n---\nbody\n",
+        needs_reapproval=True,
+    )
+    before = tree(corpus)
+    with pytest.raises(PromotionRefusedError, match="another text or extractor"):
+        write_refreshes(CorpusCheckout(corpus, []), [waiting])
+    assert tree(corpus) == before

@@ -21,6 +21,7 @@ from lovspor.promotion.models import Authority, ExtractedDocument, MintedIdentit
 from lovspor.promotion.plan import (
     Prepared,
     _free_slug,
+    awaits_reapproval,
     received_form,
     require_approval,
     standing_on,
@@ -190,6 +191,37 @@ def test_an_old_approval_carried_to_the_running_extractor_stands() -> None:
     approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION - 1)
 
     assert require_approval(approval, prepared, {approval: EXTRACTOR_VERSION}) is approval
+
+
+def test_an_approval_of_this_text_at_an_earlier_extractor_awaits_reapproval() -> None:
+    """#719: all that is missing is the approval at the running extractor."""
+    prepared = _prepared()
+    approval = _decision(Decision.APPROVE, prepared.identity.content_hash, EXTRACTOR_VERSION - 1)
+
+    assert awaits_reapproval(approval, prepared, {}) is True
+
+
+@pytest.mark.parametrize(
+    ("decision", "content_hash", "extractor", "carried"),
+    [
+        (None, None, None, False),
+        (Decision.HOLD, None, None, False),
+        (Decision.REJECT, "same", EXTRACTOR_VERSION - 1, False),
+        (Decision.APPROVE, "other", EXTRACTOR_VERSION - 1, False),
+        (Decision.APPROVE, "same", EXTRACTOR_VERSION, False),
+        (Decision.APPROVE, "same", EXTRACTOR_VERSION - 1, True),
+    ],
+    ids=["none", "hold", "reject", "other-text", "standing", "carried"],
+)
+def test_anything_else_does_not_await_reapproval(
+    decision: Decision | None, content_hash: str | None, extractor: int | None, carried: bool
+) -> None:
+    prepared = _prepared()
+    text = {"same": prepared.identity.content_hash, "other": "0" * 64}.get(content_hash or "")
+    standing = None if decision is None else _decision(decision, text, extractor)
+    carries = {standing: EXTRACTOR_VERSION} if carried and standing else {}
+
+    assert awaits_reapproval(standing, prepared, carries) is False
 
 
 @pytest.mark.parametrize("destination", [EXTRACTOR_VERSION - 1, EXTRACTOR_VERSION + 1])
