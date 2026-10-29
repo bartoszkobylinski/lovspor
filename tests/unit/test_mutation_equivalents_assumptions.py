@@ -773,3 +773,17 @@ def test_assumption_a_sender_mailbox_holds_exactly_one_at(email: str) -> None:
     assert Sender(name="A", email="a@lovspor.no", recorded_at=recorded).email.count("@") == 1
     with pytest.raises(ValidationError):
         Sender(name="A", email=email, recorded_at=recorded)
+
+
+def test_assumption_lxml_strip_elements_reads_with_tail_as_a_truth_value() -> None:
+    """Pins the argument that waives ``with_tail=False`` -> ``with_tail=None`` in
+    ``innsyn/received.py`` ``html_text``: lxml declares the flag ``bint``, so
+    ``None`` converts to false and the stripped element's tail is kept, exactly
+    as with ``False``."""
+    from lxml import etree as lxml_etree  # noqa: PLC0415
+    from lxml import html as lxml_html  # noqa: PLC0415
+
+    for flag in (False, None):
+        root = lxml_html.document_fromstring(b"<p>x<script>y</script>z</p>")
+        lxml_etree.strip_elements(root, "script", with_tail=flag)
+        assert root.text_content() == "xz", flag
