@@ -418,6 +418,9 @@ class TestWhatTheEquivalentsRegisterAssumes:
     def test_httpx_upper_cases_the_request_method(self) -> None:
         assert httpx.Request("get", "https://example.invalid/").method == "GET"
 
+    def test_httpx_url_without_a_scheme_has_no_host(self) -> None:
+        assert (httpx.URL("").host, httpx.URL("XXXX").host) == ("", "")
+
     def test_httpx_header_names_are_case_insensitive(self) -> None:
         headers = httpx.Headers({"user-agent": "lovspor"})
 
@@ -460,6 +463,7 @@ class TestABareHostThatRedirectsToItsOwnName:
             WWW_FRONT,
         ]
         assert (shape.domain, shape.entry) == (DOMAIN, "conventional_sitemap")
+        assert {r.method for r in httpx_mock.get_requests()} == {"GET"}
         assert len(probe.slept) == 5  # type: ignore[attr-defined]
 
     def test_the_www_hosts_own_refusal_is_the_finding(

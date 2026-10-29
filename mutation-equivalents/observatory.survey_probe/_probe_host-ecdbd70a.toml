@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_probe_host"
+registered = "2026-10-29, PR #718, from run 40806199693"
+mutation = """
+-        return self._probe_host(domain, elsewhere, max_bytes, follow=False)
++        return self._probe_host(domain, elsewhere, max_bytes, follow=None)
+"""
+justification = """
+`follow` is only ever tested for truth (`if follow and elsewhere is not None`),
+and `None` and `False` are both false there, so the second host is probed
+without following a further redirect either way. Python truth semantics.
+"""

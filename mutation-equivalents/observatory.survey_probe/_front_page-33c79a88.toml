@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_front_page"
+registered = "2026-10-29, PR #718, from run 40806199693"
+mutation = """
+-        return None, b""
++        return None, b"XXXX"
+"""
+justification = """
+The bytes returned here stand in for a front page that was not delivered (a
+non-200 answer, or a transport error). They are only used to compute
+`front_page_markers`, and no API marker is a substring of b"XXXX", so the
+markers are the empty tuple either way; the redirect host returned beside them
+is computed from the response, not from these bytes.
+"""

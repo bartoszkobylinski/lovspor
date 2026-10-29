@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_same_name_host"
+registered = "2026-10-29, PR #718, from run 40806199693"
+mutation = """
+-    target = httpx.URL(response.headers.get("location", ""))
++    target = httpx.URL(response.headers.get("location", "XXXX"))
+"""
+justification = """
+The default is used only when the redirect carries no Location header. httpx
+parses both "" and "XXXX" as a relative reference with no host, so `target.host`
+is the empty string either way and the function answers `None` for both.
+Argued from the dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_url_without_a_scheme_has_no_host"
