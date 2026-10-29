@@ -8,6 +8,7 @@ staged or tracked backup artefact.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -221,5 +222,7 @@ class TestTheCommand:
         assert out[-1] == "dependency-policy: 2 violation(s), 2 rules"
 
     def test_this_repository_passes(self, capsys: pytest.CaptureFixture[str]) -> None:
+        if "MUTANT_UNDER_TEST" in os.environ:  # #724
+            pytest.skip("mutmut rewrites src/ into trampolines; normal runs check the real tree")
         assert policy.main(["--root", str(REPO)]) == 0
         assert capsys.readouterr().out.strip() == "dependency-policy: 0 violation(s), 2 rules"
