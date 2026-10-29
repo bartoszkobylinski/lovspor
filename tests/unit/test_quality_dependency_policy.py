@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import Mock
 
 import pytest
 
@@ -226,3 +227,30 @@ class TestTheCommand:
             pytest.skip("mutmut rewrites src/ into trampolines; normal runs check the real tree")
         assert policy.main(["--root", str(REPO)]) == 0
         assert capsys.readouterr().out.strip() == "dependency-policy: 0 violation(s), 2 rules"
+
+
+@pytest.mark.parametrize("mutant", ["", "lovspor.example.x_function__mutmut_1"])
+def test_repository_check_skips_before_inspecting_a_mutation_tree(
+    mutant: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("MUTANT_UNDER_TEST", mutant)
+    inspect_tree = Mock(side_effect=AssertionError("must not inspect the shadow tree"))
+    monkeypatch.setattr(policy, "main", inspect_tree)
+
+    with pytest.raises(pytest.skip.Exception, match="mutmut rewrites src/ into trampolines"):
+        TestTheCommand().test_this_repository_passes(capsys)
+
+    inspect_tree.assert_not_called()
+
+
+def test_repository_check_still_rejects_policy_violations_outside_mutation(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    inspect_tree = Mock(return_value=1)
+    monkeypatch.setattr(policy, "main", inspect_tree)
+
+    with pytest.raises(AssertionError):
+        TestTheCommand().test_this_repository_passes(capsys)
+
+    inspect_tree.assert_called_once_with(["--root", str(REPO)])
