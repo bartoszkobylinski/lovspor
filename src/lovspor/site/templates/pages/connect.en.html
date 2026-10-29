@@ -1,25 +1,103 @@
-{#- /en/connect/ (ADR-0014 Decision 2), the English twin of connect.nb.html —
-    a full translation, not a summary. The same rule holds: a client
-    without a procedure in this repository is named as untested rather
-    than given invented steps, and every identifier carrying a digit is
-    marked. Access to the hosted service is through a connector with OAuth
-    sign-in only (owner decision 2026-10-07). -#}
+{#- /connect/ (ADR-0014 Decision 2; #648, owner request 2026-10-20): one
+    guide for every client — jump links, a section per client, three first
+    questions, help. Every step is sourced, and nothing past the sources is
+    written:
+      claude.ai, ChatGPT .. docs/mcp.md "Connecting a chat app" (run against
+                            the hosted service; the day is CLIENT_REGISTRY's
+                            walked_on, rendered as a ledgered fact)
+      local copy .......... the Claude guide (connect-claude.*.html)
+      hosted Claude Code .. NOT run by us: shown as the generic command and
+                            marked not yet tested, until the owner walks it
+      other clients ....... no procedure in this repository; named untested
+      first questions ..... folketrygdloven § 8-18 (the guides' example) and
+                            byggteknisk forskrift § 12-7, both read from the
+                            corpus on 2026-10-29; the history question names
+                            the tool, not an answer
+      help ................ the guides' troubleshooting
+    The site runs no script (ADR:2409-2411), so there is no copy button: an
+    address or command selects whole on one click (.copyable). No plan or
+    tier is named, no menu path the sources do not state, and no one-click
+    link: none has been run. No number is typed here; every identifier that
+    carries a digit is marked. -#}
 {% extends "_base.html" %}
 {% block main %}
 {{ badge(status) }}
 <h1>{{ title }}</h1>
 <p class="lede">{{ description }}</p>
 
-<p>lovverk is an <a href="https://modelcontextprotocol.io">MCP</a> server. The hosted service lives at <code>https://lovspor.no/mcp</code>: you add it as a connector in your AI tool and sign in with <span data-literal>OAuth 2.1</span>. There is nothing to paste, and it costs nothing.</p>
+<p>lovverk is an <a href="https://modelcontextprotocol.io">MCP</a> server that lets your AI tool look up Norwegian statutes and regulations. The hosted service has one address:</p>
+<p class="address"><code class="copyable">https://lovspor.no/mcp</code></p>
+<p class="muted">One click selects the whole address or command; copy it with Ctrl+C (⌘C on a Mac). You sign in inside the client, there is nothing to paste beyond the address, and it costs nothing.</p>
 
-<h2>Choose your client</h2>
-<ul class="choices">
-  <li><a href="/en/connect/claude/">Claude</a><p>claude.ai as a connector with sign-in, and a local copy in Claude Code and Claude Desktop.</p></li>
-  <li><a href="/en/connect/chatgpt/">ChatGPT</a><p>As a connector with sign-in, in developer mode.</p></li>
+<nav class="jump" aria-label="On this page">
+  <ul>
+    <li><a href="#claude">Claude</a></li>
+    <li><a href="#chatgpt">ChatGPT</a></li>
+    <li><a href="#claude-code">Claude Code</a></li>
+    <li><a href="#other">Other clients</a></li>
+    <li><a href="#start">Start here</a></li>
+    <li><a href="#help">Help</a></li>
+  </ul>
+</nav>
+
+<h2 id="claude">Claude</h2>
+<p class="tested">Run from claude.ai against the hosted service on {{ fact("code.connect.claude.walked_on", kind="code") }}.</p>
+<ol class="steps">
+  <li>Add a custom connector.</li>
+  <li>Enter the address <code class="copyable">https://lovspor.no/mcp</code>.</li>
+  <li>Choose <strong>Sign in now</strong>.</li>
+  <li>Under client registration, choose <strong>Register automatically</strong>.</li>
+  <li>Sign in on the page that opens. Back in the conversation, the tools answer.</li>
+</ol>
+<p>In Claude Desktop the same choices are what count, but we have run the steps from claude.ai only. Signing in and troubleshooting are in <a href="/en/connect/claude/">the full Claude guide</a>.</p>
+
+<h2 id="chatgpt">ChatGPT</h2>
+<p class="tested">Run in ChatGPT against the hosted service on {{ fact("code.connect.chatgpt.walked_on", kind="code") }}.</p>
+<ol class="steps">
+  <li>Turn on <strong>developer mode</strong> in ChatGPT.</li>
+  <li>Create a connector with the address <code class="copyable">https://lovspor.no/mcp</code>.</li>
+  <li>Choose <strong>OAuth</strong> as the authentication.</li>
+  <li>Sign in on the page that opens. Back in the conversation, the tools answer.</li>
+</ol>
+<p>Which ChatGPT subscriptions have developer mode we have not checked, so it is not stated here. Signing in and troubleshooting are in <a href="/en/connect/chatgpt/">the full ChatGPT guide</a>.</p>
+
+<h2 id="claude-code">Claude Code</h2>
+<h3 id="claude-code-local">Local copy, no account</h3>
+<p>The server fetches the corpus to your machine and talks to Claude Code over stdio:</p>
+<pre class="copyable">uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+<p>Every tool except <code>semantic_search</code> then reads only files and git on your own machine. Claude Desktop as a local copy: see <a href="/en/connect/claude/">the Claude guide</a>.</p>
+<h3 id="claude-code-hosted">The hosted service <span class="tag" data-pending>not yet tested</span></h3>
+<p>We have not run this ourselves. The generic command to add an MCP server over HTTP in Claude Code is:</p>
+<pre class="copyable">claude mcp add --transport http lovverk https://lovspor.no/mcp</pre>
+<p>What signing in looks like there, we have not seen. If it works — or if it does not — tell us at <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, and it becomes a tested recipe here.</p>
+
+<h2 id="other">Other clients</h2>
+<p><strong>No tested procedure</strong> for Cursor, VS Code and Codex. We have not run the setup in these clients ourselves, so we do not make up the steps or the configuration files.</p>
+<p>What a client needs to use the hosted service:</p>
+<ul>
+  <li>the address <code class="copyable">https://lovspor.no/mcp</code>;</li>
+  <li>the Streamable HTTP transport;</li>
+  <li>sign-in with <span data-literal>OAuth</span>, which the client starts itself.</li>
 </ul>
+<p>Where this goes differs from client to client. If your client cannot sign in, you can run the server yourself, as in <a href="#claude-code-local">the local copy</a> above.</p>
 
-<h2>Other clients</h2>
-<p><strong>No tested procedure</strong> for Cursor and Codex. We have not run the setup in these clients ourselves, and we are not going to invent the steps.</p>
-<p>Use a client that supports a connector with <span data-literal>OAuth</span> sign-in, or run the server yourself, as in the <a href="/en/connect/claude/">Claude guide</a>. If you get one of these clients working against the hosted service — or if you cannot — tell us at <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, and it can stand here as a tested recipe with your name on it.</p>
-<p class="muted">What the tools answer is in the <a href="/en/docs/">documentation</a>; the state at the last release is on <a href="/en/status/">status</a>. The engine is open source under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+<h2 id="start">Start here</h2>
+<p>Three questions that exercise the tools. Ask them in a new conversation; the corpus is Norwegian, so ask in Norwegian.</p>
+<p class="panel"><strong lang="nb">«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»</strong> (How long must I have worked to get sick pay from my employer?)</p>
+<p>The answer should rest on <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span></a> (the National Insurance Act) and quote it. Then ask about <span data-literal>folketrygdloven § 8-99</span> — the tool should answer that the section does not exist.</p>
+<p class="panel"><strong lang="nb">«Hvor høyt må taket være i et rom for varig opphold i en bolig?»</strong> (How high must the ceiling be in a habitable room in a dwelling?)</p>
+<p>The answer should rest on <a href="/forskrift/byggteknisk-forskrift-tek17/paragraf/12-7/"><span data-literal>byggteknisk forskrift (TEK17) § 12-7</span></a>, a regulation rather than a statute.</p>
+<p class="panel"><strong lang="nb">«Når ble arbeidsmiljøloven sist endret, og hva ble endret?»</strong> (When was the Working Environment Act last changed, and what changed?)</p>
+<p>The answer should rest on the change history in the corpus, not on the model's memory.</p>
+
+<h2 id="help">Help</h2>
+<ul>
+  <li><strong>The model does not use lovverk.</strong> Ask for it in words: "Look it up in lovverk …". A model decides for itself when to call a tool.</li>
+  <li><strong>Authorization failed after you have signed in.</strong> Then the fault is in the setup on our side, not yours. Write to <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</li>
+  <li><strong>A label has moved.</strong> The labels inside the clients change more often than this page. What counts is the address and <span data-literal>OAuth</span> as the sign-in method.</li>
+  <li><strong>The tools do not answer.</strong> The state at the last release is on <a href="/en/status/">status</a>. The service always requires sign-in, so a call without it is refused.</li>
+  <li><strong>What can the tools answer?</strong> See <a href="/en/docs/">the documentation</a>.</li>
+</ul>
+<p class="muted">The engine is open source under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>. Questions: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
 {% endblock %}

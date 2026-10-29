@@ -57,7 +57,12 @@ from lovspor.site.not_found import render_not_found, write_not_found
 from lovspor.site.routes import emitted_pages
 from lovspor.site.scan import check_links, scan_page
 from lovspor.site.sitemap import sitemap_site_xml
-from lovspor.site.sources import BuildArtifacts, CorpusManifest, fact_registry
+from lovspor.site.sources import (
+    REGISTRY_ARTIFACT,
+    BuildArtifacts,
+    CorpusManifest,
+    fact_registry,
+)
 from lovspor.site.templates import page_globals, site_environment
 from lovspor.tool_surface import describe_tool_surface
 
@@ -287,14 +292,32 @@ def _write_tree(
     (out / FACTS_NAME).write_bytes(companion_json_bytes(facts))
 
 
+def _registry_bytes(checkout: Path) -> bytes:
+    """The checkout's client registry, the artifact behind each walk date (#648)."""
+    try:
+        return (checkout / REGISTRY_ARTIFACT).read_bytes()
+    except FileNotFoundError as exc:
+        raise SiteBuildError(f"the checkout has no client registry {REGISTRY_ARTIFACT}") from exc
+
+
+def _artifacts(
+    document: CapabilityDocument, lovspor_commit: str, inputs: SiteInputs
+) -> BuildArtifacts:
+    """Every input the build reads, the checkout's own files included."""
+    return _document_for_this_checkout(document, lovspor_commit, inputs).model_copy(
+        update={
+            "publication": load_publication(inputs.checkout),
+            "registry_bytes": _registry_bytes(inputs.checkout),
+        }
+    )
+
+
 def build_site(inputs: SiteInputs) -> SiteBuildReport:
     """Build the site tree into ``inputs.out``; refuse what the ledger could not stand behind."""
     lovspor_commit = require_clean_work_tree(inputs.checkout)
     _refuse_non_empty(inputs.out)
     document = load_capabilities(inputs.capabilities)
-    artifacts = _document_for_this_checkout(document, lovspor_commit, inputs).model_copy(
-        update={"publication": load_publication(inputs.checkout)}
-    )
+    artifacts = _artifacts(document, lovspor_commit, inputs)
     toolchain = toolchain_fingerprint(inputs.checkout)
     key = release_key(artifacts.manifest.corpus_commit, lovspor_commit, document.state, toolchain)
     pages, llms, ledger = _render_pages(artifacts)

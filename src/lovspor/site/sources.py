@@ -23,6 +23,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lovspor.site import routes
 from lovspor.site.benchmark import Publication
 from lovspor.site.capabilities import (
     AuthenticatedStep,
@@ -42,6 +43,8 @@ from lovspor.site.facts import (
 )
 from lovspor.tool_surface import ToolSurfaceDescriptor
 
+#: Where the client registry, and so each walk date, lives (#648).
+REGISTRY_ARTIFACT = "src/lovspor/site/routes.py"
 COMPARISONS = (
     "runtime_tree_match",
     "environment_match",
@@ -79,6 +82,9 @@ class BuildArtifacts(BaseModel):
     capability_bytes: bytes
     descriptor: ToolSurfaceDescriptor
     publication: Publication | None = None
+    #: ``src/lovspor/site/routes.py`` as the checkout holds it: the client
+    #: registry the walk dates on ``/connect/`` are read from (#648).
+    registry_bytes: bytes | None = None
 
     @property
     def manifest_sha256(self) -> str:
@@ -91,6 +97,11 @@ class BuildArtifacts(BaseModel):
     @property
     def descriptor_artifact(self) -> str:
         return f"{DESCRIPTOR_PREFIX}{self.lovspor_commit}"
+
+    def _registry_hash(self) -> tuple[tuple[str, str], ...]:
+        if self.registry_bytes is None:
+            return ()
+        return ((REGISTRY_ARTIFACT, hashlib.sha256(self.registry_bytes).hexdigest()),)
 
     def artifact_hashes(self) -> tuple[tuple[str, str], ...]:
         """``(id, sha256)`` per consumed artifact, sorted by id.
@@ -105,6 +116,7 @@ class BuildArtifacts(BaseModel):
                     (MANIFEST_ARTIFACT, self.manifest_sha256),
                     (CAPABILITIES_ARTIFACT, self.capability_sha256),
                     (self.descriptor_artifact, self.descriptor.schema_sha256),
+                    *self._registry_hash(),
                     *benchmark,
                 )
             )
@@ -244,6 +256,22 @@ def _transport_facts(record: TransportRecord) -> tuple[FactSource, ...]:
     )
 
 
+def _client_facts(artifacts: BuildArtifacts) -> tuple[FactSource, ...]:
+    """The day each registered client's procedure was run (#648); none without the registry."""
+    if artifacts.registry_bytes is None:
+        return ()
+    return tuple(
+        FactSource(
+            id=f"code.connect.{client.slug}.walked_on",
+            kind="code",
+            artifact=REGISTRY_ARTIFACT,
+            field=f"CLIENT_REGISTRY.{client.slug}.walked_on",
+            value=client.walked_on.isoformat(),
+        )
+        for client in routes.CLIENT_REGISTRY
+    )
+
+
 def fact_registry(artifacts: BuildArtifacts) -> FactRegistry:
     """Every fact this build may render, each bound to its artifact and kind."""
     observation = artifacts.document.observation
@@ -252,6 +280,7 @@ def fact_registry(artifacts: BuildArtifacts) -> FactRegistry:
         sources=(
             *_corpus_facts(artifacts),
             *_code_facts(artifacts),
+            *_client_facts(artifacts),
             *(() if publication is None else publication.facts),
             *_state_facts(artifacts.document),
             *_process_facts(observation.process),

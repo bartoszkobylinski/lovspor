@@ -216,7 +216,8 @@ def commit_all(repo: Path, message: str = "one") -> str:
 
 
 def throwaway_checkout(root: Path) -> tuple[Path, str]:
-    """A clean git work tree shaped like a lovspor checkout: ``uv.lock`` and ``src/lovspor``.
+    """A clean git work tree shaped like a lovspor checkout: ``uv.lock`` and ``src/lovspor``,
+    holding the repository's client registry, whose walk dates ``/connect/`` renders (#648).
 
     The library API takes the checkout explicitly (``build_site`` never
     discovers it), so a build in tests reads its ``lovspor_commit`` and its
@@ -227,6 +228,9 @@ def throwaway_checkout(root: Path) -> tuple[Path, str]:
     (root / "uv.lock").write_text('version = 1\nrequires-python = ">=3.12"\n', encoding="utf-8")
     (root / "src" / "lovspor").mkdir(parents=True)
     (root / "src" / "lovspor" / "__init__.py").write_text("", encoding="utf-8")
+    registry = "src/lovspor/site/routes.py"
+    (root / registry).parent.mkdir(parents=True)
+    (root / registry).write_bytes((Path(__file__).resolve().parents[2] / registry).read_bytes())
     return root, commit_all(root)
 
 

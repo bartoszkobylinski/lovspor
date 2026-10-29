@@ -1,6 +1,7 @@
 """The route tree of lovspor.no (ADR-0014 Decision 2)."""
 
 import re
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,21 @@ class TestSiteRoutes:
         2026-09-30 (docs/mcp.md); no other client has a recorded procedure."""
         assert [client.slug for client in CLIENT_REGISTRY] == ["claude", "chatgpt"]
 
+    def test_each_client_carries_the_day_its_procedure_was_run(self) -> None:
+        """docs/mcp.md: "both verified against the hosted instance on 2026-09-30"."""
+        mcp = (Path(__file__).resolve().parents[2] / "docs" / "mcp.md").read_text("utf-8")
+
+        assert "(both verified against the hosted instance on 2026-09-30)" in mcp
+        assert {client.slug: client.walked_on for client in CLIENT_REGISTRY} == {
+            "claude": date(2026, 9, 30),
+            "chatgpt": date(2026, 9, 30),
+        }
+
+    def test_a_client_without_a_walk_date_is_refused(self) -> None:
+        copy = Localised(nb="t", en="t", pl="t")
+        with pytest.raises(ValidationError, match="walked_on"):
+            ConnectClient(slug="cursor", title=copy, description=copy)  # type: ignore[call-arg]
+
     def test_client_routes_are_one_current_guide_per_registry_entry(self) -> None:
         routes = client_routes()
 
@@ -132,7 +148,7 @@ class TestSiteRoutes:
         copy = Localised(nb="t", en="t", pl="t")
         for slug in ("Claude", "a/b", "", "a b"):
             with pytest.raises(ValidationError):
-                ConnectClient(slug=slug, title=copy, description=copy)
+                ConnectClient(slug=slug, walked_on=date(2026, 9, 30), title=copy, description=copy)
 
 
 class TestSiteRoute:
@@ -234,6 +250,7 @@ class TestEmittedPages:
         registry = tuple(
             ConnectClient(
                 slug=slug,
+                walked_on=date(2026, 9, 30),
                 title=Localised(nb=f"nb {slug}", en=f"en {slug}", pl=f"pl {slug}"),
                 description=Localised(nb=f"nb d {slug}", en=f"en d {slug}", pl=f"pl d {slug}"),
             )
