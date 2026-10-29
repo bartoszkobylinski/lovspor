@@ -8,10 +8,18 @@ from pathlib import Path
 
 import pytest
 
+from lovspor.errors import PromotionRefusedError
 from lovspor.innsyn.workspace import ENV_INNSYN_DIR
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
+from lovspor.promotion.corpus import CorpusCheckout
 from lovspor.promotion.decisions import ArtifactKey, DecisionLog, WithdrawalRecord
-from lovspor.promotion.observed_refresh import RefreshAllRequest, refresh_all_impl
+from lovspor.promotion.extract import EXTRACTOR_VERSION
+from lovspor.promotion.migrate import MigrationInputs, published
+from lovspor.promotion.observed_refresh import (
+    RefreshAllRequest,
+    plan_observed_refresh,
+    refresh_all_impl,
+)
 from tests.unit.promotion_cli_fixtures import (
     AUTHORITY,
     FIRST_SEEN,
@@ -169,3 +177,43 @@ def test_refresh_has_no_timestamped_writes(checkout, capsys: pytest.CaptureFixtu
             "Nothing to refresh; nothing written, nothing to commit."
         )
         assert tree(corpus) == before
+
+
+def test_observed_plan_defaults_to_refusing_an_earlier_extractor_approval(checkout) -> None:
+    """Only an explicit preview may plan a changed rendering pending re-approval."""
+    root, corpus, _ = checkout
+    # Represent an archive whose owner approved the text at the previous extractor.
+    log_path = root / "promotions.jsonl"
+    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    for record in records:
+        if record["kind"] == "decision":
+            record["extractor_version"] = EXTRACTOR_VERSION - 1
+    log_path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+    checkout_root = ObservatoryRoot(root, [])
+    checkout_corpus = CorpusCheckout(corpus, [root])
+    [(doc_id, record)] = checkout_corpus.local_manifest().documents.items()
+    path = corpus / record.markdown_path
+    markdown = path.read_text(encoding="utf-8")
+    assert any(line.startswith("ikraft_text: ") for line in markdown.splitlines())
+    path.write_text(
+        "".join(
+            'ikraft_text: "straks"\n' if line.startswith("ikraft_text: ") else line
+            for line in markdown.splitlines(keepends=True)
+        ),
+        encoding="utf-8",
+    )
+    inputs = MigrationInputs(checkout_root, DecisionLog(checkout_root), checkout_corpus, FIRST_SEEN)
+    document = published(checkout_corpus, doc_id, record)
+    before, archive_before = tree(corpus), tree(root)
+
+    preview = plan_observed_refresh(inputs, document, preview=True)
+    assert preview is not None
+    assert preview.needs_reapproval is True
+    assert preview.markdown != document.markdown
+    with pytest.raises(
+        PromotionRefusedError, match="approval was given for another text or extractor"
+    ):
+        plan_observed_refresh(inputs, document)
+
+    assert tree(corpus) == before
+    assert tree(root) == archive_before
