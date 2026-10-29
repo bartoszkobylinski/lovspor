@@ -318,6 +318,57 @@ class TestOnlyAnApprovalIsCarried:
 
 
 class TestAFreshApprovalWins:
+    def test_fresh_approval_replaces_a_previous_carry_without_changing_evidence(
+        self, root: Path, corpus: Path
+    ) -> None:
+        """A fresh review is no longer a carry (operations.md, #722)."""
+        assert _migrate(corpus).exit_code == 0
+        audit = PromotionAudit.model_validate(_versions(corpus)[0]["promotion"])
+        assert audit.approval_carried is not None
+        before = audit.model_dump(mode="json")
+        old = next(
+            r
+            for r in DecisionLog(ObservatoryRoot(root, [])).records()
+            if isinstance(r, HumanDecision)
+        )
+        classifier = ClassifierEvidence(
+            classifier_version="fresh-review",
+            class_name="local_regulation",
+            evidence=("Re-read the operative provisions.",),
+        )
+        decision = old.model_copy(
+            update={
+                "extractor_version": EXTRACTOR_VERSION,
+                "reviewer_role": "editor",
+                "reason": "Reviewed again after the carry.",
+                "decided_at": datetime.fromisoformat("2026-10-09T12:34:56.123456+02:00"),
+                "classifier": classifier,
+            }
+        )
+        assert decision.content_hash is not None
+        approval = VersionApproval(
+            version=1, content_hash=decision.content_hash, decision=decision, carried=False
+        )
+        approval_before = approval.model_dump(mode="json")
+
+        moved = audit_at_running_extractor(audit, approval, datetime(2026, 10, 10, tzinfo=UTC))
+
+        expected = {
+            **before,
+            "decision": "approve",
+            "reviewed_by_role": "editor",
+            "reason": "Reviewed again after the carry.",
+            "decided_at": "2026-10-09T10:34:56.123456Z",
+            "classifier": classifier.model_dump(mode="json"),
+            "extractor_version": EXTRACTOR_VERSION,
+        }
+        del expected["approval_carried"]
+        assert moved.approval_carried is None
+        assert moved.model_dump(mode="json") == expected
+        assert PromotionAudit.model_validate_json(moved.model_dump_json()) == moved
+        assert audit.model_dump(mode="json") == before
+        assert approval.model_dump(mode="json") == approval_before
+
     def test_fresh_approval_without_classifier_clears_previous_evidence(
         self, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
