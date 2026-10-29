@@ -390,14 +390,22 @@ rather than followed.
 - ~~Size of Phase 0 — unknown until the corpus-wide audit runs.~~ **Answered
   2026-07-27:** three fusion classes in the renderer, one measurement error in
   the audit; 0 fabricated words, 217 documents re-rendered. See Phase 0.
-- Is a `sup.footnotereference` glued to the word it annotates (`amtskasserere1`,
-  ~4 800 word occurrences) acceptable in a corpus meant to be searched? The renderer
-  is faithful there and the audit no longer counts it, but a BM25 or embedding
-  index still sees a word that no query will spell. Not a fabrication — a
-  retrieval question, and untested.
-- The 9 documents where `last_change_in_force` precedes `date_in_force`:
-  source error or field-mapping error? Not investigated.
-- The 230 documents without dates: not classified.
+- ~~Is a `sup.footnotereference` glued to the word it annotates (`amtskasserere1`,
+  ~4 800 word occurrences) acceptable in a corpus meant to be searched?~~ **Answered
+  2026-10-28 (#624):** renderer 8 delimits every in-text marker as `[^n]`
+  (`96998d8e`); `search_body` and `verify_quote` tolerate the marker; the word+digit
+  tokens left are source text. See
+  `docs/evidence/corpus-quality-624-2026-10-28.md`.
+- ~~The 9 documents where `last_change_in_force` precedes `date_in_force`:
+  source error or field-mapping error?~~ **Answered 2026-10-28 (#624):** 32 on the
+  current corpus, every one stated so by Lovdata's own header; 5 of them because the
+  renderer keeps only the leading date of a multi-valued `dateInForce`. Same evidence
+  file.
+- ~~The 230 documents without dates: not classified.~~ **Classified 2026-10-28
+  (#624):** 228 — 77 have no `dateInForce` in the source, 141 carry a condition
+  (`Kongen bestemmer`, `Budsjettåret 2026`) the renderer cannot date, 10 amending acts
+  carry dates after the condition that the leading-date rule loses. Whether to carry
+  the list and the condition is an owner decision. Same evidence file.
 - `semantic_search` calls OpenAI per query. A public, free, open server means
   unbounded third-party spend. Existing quotas are a runaway-loop brake, not a
   budget control. Needs a hard cap, or degradation to `search_body` when
