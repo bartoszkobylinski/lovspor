@@ -204,3 +204,50 @@ def test_shell_refusal_preserves_an_existing_receipt_and_workspace(
         if path.is_file()
     }
     assert after == before
+
+
+@pytest.mark.parametrize("space", [b"&#32;", b"&#9;", b"&#10;", b"&#160;", b"&nbsp;"])
+def test_entity_encoded_whitespace_is_not_a_document(
+    workspace: Path, httpx_mock: HTTPXMock, space: bytes
+) -> None:
+    """The documented blank-body refusal also applies after HTML entity decoding."""
+    before = _lines(workspace)
+    content = b"<html><body><p>" + space + b"</p></body></html>"
+    code, output = _link(workspace, httpx_mock, content, "text/html")
+    assert code == 1, output
+    assert f"{URL}: the HTML page has no readable text" in output
+    assert _lines(workspace) == before
+    assert not (workspace / "received").exists()
+
+
+def test_html_text_does_not_expand_external_file_entities(tmp_path: Path) -> None:
+    """The new HTML read must preserve the project's entity-expansion safety rule."""
+    secret = tmp_path / "private.txt"
+    secret.write_text("PRIVATE_ENTITY_CONTENT", encoding="utf-8")
+    content = (
+        f'<!DOCTYPE html [<!ENTITY xxe SYSTEM "{secret.as_uri()}">]>'
+        "<html><body><p>Vedtak &xxe;</p></body></html>"
+    ).encode()
+    text = html_text(content)
+    assert "PRIVATE_ENTITY_CONTENT" not in text
+    assert "Vedtak" in text
+    assert "&xxe;" in text
+
+
+def test_accepted_html_records_the_original_bytes_and_resolved_type(
+    workspace: Path, httpx_mock: HTTPXMock
+) -> None:
+    """Text inspection must not replace the delivered page with extracted text."""
+    from lovspor.innsyn.ledger import DocumentReceived  # noqa: PLC0415
+
+    before = _lines(workspace)
+    code, output = _link(workspace, httpx_mock, PAGE, "Text/HTML; charset=utf-8")
+    assert code == 0, output
+    journal = ledger_journal(InnsynWorkspace(workspace, [])).records()
+    assert len(journal) == before + 1
+    event = journal[-1]
+    assert isinstance(event, DocumentReceived)
+    assert event.sha256 == hashlib.sha256(PAGE).hexdigest()
+    assert event.content_type == "text/html"
+    assert event.source_url == URL
+    assert blob_path(InnsynWorkspace(workspace, []), event.sha256).read_bytes() == PAGE
