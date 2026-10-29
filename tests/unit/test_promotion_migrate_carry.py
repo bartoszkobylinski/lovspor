@@ -27,13 +27,16 @@ from typer.testing import Result
 
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.promotion import extract
+from lovspor.promotion.carry import VersionApproval, audit_at_running_extractor
 from lovspor.promotion.decisions import (
     DECISIONS_FILENAME,
     ApprovalReference,
     ArtifactKey,
     CarriedRecord,
+    ClassifierEvidence,
     DecisionLog,
     HumanDecision,
+    PromotionAudit,
 )
 from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.fields import read_regulation
@@ -315,6 +318,84 @@ class TestOnlyAnApprovalIsCarried:
 
 
 class TestAFreshApprovalWins:
+    def test_fresh_approval_without_classifier_clears_previous_evidence(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        """#722: classifier belongs to the standing decision, including its absence."""
+        a, _ = _blobs(corpus)
+        result = approve(a, Decision().write(tmp_path))
+        assert result.exit_code == 0, result.output
+        decision = DecisionLog(ObservatoryRoot(root, [])).latest_decision(
+            ArtifactKey(authority_id=AUTHORITY, sha256=a, source_url=PAGE_URL)
+        )
+        assert decision is not None
+        assert decision.classifier is None
+        audit = PromotionAudit.model_validate(_versions(corpus)[0]["promotion"])
+        audit = audit.model_copy(
+            update={
+                "classifier": ClassifierEvidence(
+                    classifier_version="old-review", class_name="local_regulation"
+                )
+            }
+        )
+        before = audit.model_dump(mode="json")
+        approval = VersionApproval(
+            version=1, content_hash="b" * 64, decision=decision, carried=False
+        )
+
+        moved = audit_at_running_extractor(audit, approval, datetime.now(UTC))
+
+        assert moved.classifier is None
+        assert moved.model_dump(mode="json")["classifier"] is None
+        assert audit.model_dump(mode="json") == before
+
+    def test_mixed_fresh_and_carried_versions_publish_their_own_approval(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        """#722: only the re-approved text gets the new decision and classifier."""
+        before = _versions(corpus)
+        a, b = _blobs(corpus)
+        classifier = {
+            "classifier_version": "review-v2",
+            "class_name": "local_regulation",
+            "evidence": ["Operative provisions read."],
+        }
+        fresh = Decision(
+            reason="Text reviewed again.", reviewer_role="editor", classifier=classifier
+        )
+        result = approve(a, fresh.write(tmp_path))
+        assert result.exit_code == 0, result.output
+        [*_, latest] = [
+            r
+            for r in DecisionLog(ObservatoryRoot(root, [])).records()
+            if isinstance(r, HumanDecision)
+        ]
+        log_before = _log(root)
+
+        result = _migrate(corpus)
+
+        assert result.exit_code == 0, result.output
+        appended = _appended(root, log_before)
+        assert [r["kind"] for r in appended] == ["carried", "migrated"]
+        assert appended[0]["artifact"]["sha256"] == b  # type: ignore[index]
+        for old, new in zip(before, _versions(corpus), strict=True):
+            expected = {**old["promotion"], "extractor_version": EXTRACTOR_VERSION}  # type: ignore[dict-item]
+            promotion = new["promotion"]
+            assert isinstance(promotion, dict)
+            if new["version"] == 2:
+                carry = promotion["approval_carried"]
+                assert carry["approved_at_extractor"] == OLD
+                expected["approval_carried"] = carry
+            else:
+                expected.update(
+                    decision=latest.decision.value,
+                    reviewed_by_role=latest.reviewer_role,
+                    decided_at=latest.decided_at.isoformat().replace("+00:00", "Z"),
+                    reason=latest.reason,
+                    classifier=classifier,
+                )
+            assert promotion == expected
+
     def test_a_fresh_approval_is_used_and_nothing_is_carried(
         self, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
