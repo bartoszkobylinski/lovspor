@@ -141,6 +141,16 @@ def test_html_text_is_what_a_reader_sees(content: bytes, text: str) -> None:
     assert html_text(content) == text
 
 
+def test_html_comments_do_not_insert_spaces_inside_visible_words() -> None:
+    assert html_text(b"<p>Ved<!-- internal note -->tak</p>") == "Vedtak"
+
+
+@pytest.mark.parametrize("tag", ["script", "style", "noscript", "template"])
+def test_unseen_elements_preserve_adjacent_visible_text(tag: str) -> None:
+    page = f"<html><body>A<{tag}>hidden</{tag}>Vedtak</body></html>".encode()
+    assert html_text(page) == "AVedtak"
+
+
 @pytest.mark.parametrize("tag", ["script", "style", "noscript", "template"])
 def test_one_character_after_an_unseen_element_is_still_a_document(
     workspace: Path, httpx_mock: HTTPXMock, tag: str
