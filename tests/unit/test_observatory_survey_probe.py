@@ -512,3 +512,101 @@ class TestABareHostThatRedirectsToItsOwnName:
 
         assert len(httpx_mock.get_requests()) == 3
         assert shape.entry == "no_machine_index"
+
+    @pytest.mark.parametrize("status_code", [302, 303, 307, 308])
+    def test_other_redirect_statuses_also_probe_the_same_name_host(
+        self, client: httpx.Client, httpx_mock: HTTPXMock, status_code: int
+    ) -> None:
+        """The documented contract says redirect, rather than only 301."""
+        httpx_mock.add_response(url=ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP, status_code=404)
+        httpx_mock.add_response(url=FRONT, status_code=status_code, headers={"Location": WWW_FRONT})
+        httpx_mock.add_response(url=WWW_ROBOTS, text="User-agent: *\nDisallow: /\n")
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert (shape.domain, shape.entry) == (DOMAIN, "robots_disallowed")
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [
+            ROBOTS,
+            SITEMAP,
+            FRONT,
+            WWW_ROBOTS,
+        ]
+
+    @pytest.mark.parametrize("status_code", [200, 404, 503])
+    def test_a_location_header_on_a_non_redirect_does_not_start_another_probe(
+        self, client: httpx.Client, httpx_mock: HTTPXMock, status_code: int
+    ) -> None:
+        httpx_mock.add_response(url=ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP, status_code=404)
+        httpx_mock.add_response(url=FRONT, status_code=status_code, headers={"Location": WWW_FRONT})
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert shape.entry == "no_machine_index"
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS, SITEMAP, FRONT]
+
+    def test_the_target_robots_declaration_replaces_the_original_hosts_findings(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        """The row carries the target host's findings under the asked name."""
+        httpx_mock.add_response(url=ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP, content=SITEMAP_XML)
+        httpx_mock.add_response(url=FRONT, status_code=301, headers={"Location": WWW_FRONT})
+        declared = "https://www.example.invalid/custom-index.xml"
+        httpx_mock.add_response(
+            url=WWW_ROBOTS, text=f"User-agent: *\nAllow: /\nSitemap: {declared}\n"
+        )
+        httpx_mock.add_response(url=WWW_FRONT, content=b"/api/presentation/")
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert (shape.domain, shape.entry) == (DOMAIN, "declared_sitemap")
+        assert shape.declared_sitemaps == (declared,)
+        assert shape.front_page_markers == ("/api/presentation/",)
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [
+            ROBOTS,
+            SITEMAP,
+            FRONT,
+            WWW_ROBOTS,
+            WWW_FRONT,
+        ]
+
+    def test_unreadable_target_robots_stops_without_using_the_original_sitemap(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP, content=SITEMAP_XML)
+        httpx_mock.add_response(url=FRONT, status_code=301, headers={"Location": WWW_FRONT})
+        httpx_mock.add_exception(httpx.ConnectError("no route"), url=WWW_ROBOTS)
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert (shape.domain, shape.entry) == (DOMAIN, "robots_unreadable")
+        assert shape.robots_readable is False
+        assert shape.front_page_markers == ()
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [
+            ROBOTS,
+            SITEMAP,
+            FRONT,
+            WWW_ROBOTS,
+        ]
+
+    @pytest.mark.parametrize("max_bytes", [18, 19])
+    def test_the_front_page_byte_limit_is_preserved_on_the_target_host(
+        self, client: httpx.Client, httpx_mock: HTTPXMock, max_bytes: int
+    ) -> None:
+        self._bare_redirects(httpx_mock, WWW_FRONT)
+        httpx_mock.add_response(url=WWW_ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=WWW_SITEMAP, status_code=404)
+        httpx_mock.add_response(url=WWW_FRONT, content=b"x/api/presentation/")
+
+        shape = _probe(client).read(DOMAIN, max_bytes=max_bytes)
+
+        assert shape.domain == DOMAIN
+        if max_bytes == 19:
+            assert shape.entry == "browser_assembled"
+            assert shape.front_page_markers == ("/api/presentation/",)
+        else:
+            assert shape.entry == "no_machine_index"
+            assert shape.front_page_markers == ()
