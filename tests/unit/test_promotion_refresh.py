@@ -12,7 +12,8 @@ state is reached the way an operator reaches it, as in
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -23,8 +24,18 @@ from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
 from lovspor.promotion import observed_refresh
 from lovspor.promotion.fields import read_regulation
 from lovspor.promotion.migrate import front_matter
-from tests.unit.promotion_cli_fixtures import AUTHORITY, invoke, make_corpus, register, tree
+from tests.unit.promotion_cli_fixtures import (
+    AUTHORITY,
+    FIRST_SEEN,
+    invoke,
+    make_corpus,
+    register,
+    store,
+    tree,
+)
+from tests.unit.promotion_fixtures import html_page
 from tests.unit.test_promotion_migrate import (
+    CHANGED,
     _approve,
     _log,
     _migrate_one,
@@ -33,6 +44,56 @@ from tests.unit.test_promotion_migrate import (
 )
 
 LOCAL = "lokale-forskrifter"
+
+
+@pytest.mark.parametrize(
+    ("mismatch", "reason"),
+    [
+        ("identity", "names its text otherwise"),
+        ("content_hash", "reads another text"),
+    ],
+)
+def test_observed_refresh_refuses_a_different_published_identity_or_text(
+    mismatch: str, reason: str, stale: str, root: Path, corpus: Path, tmp_path: Path
+) -> None:
+    """Operations #595 requires the running extractor to read the same id and text."""
+    _approve(stale, tmp_path)
+    manifest_path = corpus / LOCAL / "manifest.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    [(doc_id, record)] = manifest["documents"].items()
+    if mismatch == "identity":
+        del manifest["documents"][doc_id]
+        manifest["documents"]["lf-20200101-0001"] = record
+    else:
+        record["content_hash"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    before, log = tree(corpus), _log(root)
+
+    result = _refresh(corpus)
+
+    assert result.exit_code == 1, result.output
+    assert reason in result.stderr
+    assert (tree(corpus), _log(root)) == (before, log)
+
+
+def test_observed_refresh_reads_the_published_capture_instead_of_the_latest_at_its_url(
+    stale: str, root: Path, corpus: Path, tmp_path: Path
+) -> None:
+    """Operations #595 names the source_url/source_sha256 pair as the refresh source."""
+    _approve(stale, tmp_path)
+    path, before = _markdown(corpus)
+    newer = store(root, html_page(CHANGED), observed_at=FIRST_SEEN + timedelta(days=1))
+    assert newer != stale
+    log = _log(root)
+
+    result = _refresh(corpus)
+
+    assert result.exit_code == 0, result.output
+    after = path.read_text(encoding="utf-8")
+    assert after != before
+    assert after.partition("\n---\n")[2] == before.partition("\n---\n")[2]
+    assert front_matter(after)["source_sha256"] == json.dumps(stale)
+    assert _log(root) == log
 
 
 def _straks(lines: tuple[str, ...]) -> object:
