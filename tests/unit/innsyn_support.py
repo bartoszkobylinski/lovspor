@@ -14,6 +14,7 @@ from lovspor.innsyn.population import (
     codes_url,
 )
 from lovspor.observatory.lf_ledger import LedgerEntry
+from tests.unit.local_dataset_fixtures import write_local_manifest
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "innsyn"
 KLASS_DAY = date(2026, 10, 12)
@@ -21,9 +22,31 @@ KLASS_DAY = date(2026, 10, 12)
 runner = CliRunner()
 
 
+LOVVERK_DIRNAME = "lovverk-held"
+
+
 def innsyn(workspace: Path, *args: str) -> Result:
-    """Run ``lovspor observatory innsyn --dir <workspace> <args>``."""
-    return runner.invoke(app, ["observatory", "innsyn", "--dir", str(workspace), *args])
+    """Run ``lovspor observatory innsyn --dir <workspace> <args>``.
+
+    The ``lovverk-held`` checkout beside the workspace (``fetched`` writes an
+    empty one) is passed as ``LOVVERK_CORPUS_PATH``, the way an operator's
+    ``.env`` does, so ``letters`` reads it unless the test names another
+    ``--corpus``. It is not ``lovverk``: the promotion fixtures build theirs there.
+    """
+    env: dict[str, str | None] = {}
+    corpus = workspace.parent / LOVVERK_DIRNAME
+    if (corpus / "manifest.json").is_file():
+        env["LOVVERK_CORPUS_PATH"] = str(corpus)
+    return runner.invoke(app, ["observatory", "innsyn", "--dir", str(workspace), *args], env=env)
+
+
+def lovverk_checkout(root: Path, *, local: bool = True) -> Path:
+    """A minimal ``lovverk`` checkout: ``.git``, the central manifest, an empty local dataset."""
+    (root / ".git").mkdir(parents=True, exist_ok=True)
+    (root / "manifest.json").write_text('{"documents": {}}\n', encoding="utf-8")
+    if local:
+        write_local_manifest(root, {})
+    return root
 
 
 def mock_klass(httpx_mock: HTTPXMock) -> None:
@@ -36,6 +59,7 @@ def mock_klass(httpx_mock: HTTPXMock) -> None:
 def fetched(workspace: Path, httpx_mock: HTTPXMock) -> Path:
     """A workspace holding the 2026-10-12 population, fetched by the command."""
     mock_klass(httpx_mock)
+    lovverk_checkout(workspace.parent / LOVVERK_DIRNAME)
     result = innsyn(workspace, "fetch-population", "--date", KLASS_DAY.isoformat())
     assert result.exit_code == 0, result.output
     return workspace

@@ -44,6 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from lovspor.atomic_io import atomic_replace_bytes
 from lovspor.errors import InnsynRefusedError
 from lovspor.innsyn.directory import Channel, Contact, Maalform
+from lovspor.innsyn.held import HeldIds, HeldSource
 from lovspor.innsyn.ledger import RequestState
 from lovspor.innsyn.letters import LetterRequest, render
 from lovspor.innsyn.population import Authority, AuthorityKind, PopulationSnapshot
@@ -72,6 +73,16 @@ class ManifestEntry(BaseModel):
     letter_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class HeldOut(BaseModel):
+    """A known id a wave left out, and which held source left it out (#606)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    authority_id: str
+    lf_id: str
+    held: HeldSource
+
+
 class Manifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -83,6 +94,7 @@ class Manifest(BaseModel):
     unresolved: tuple[str, ...]
     skipped_open: tuple[str, ...]
     skipped_closed: tuple[str, ...] = ()
+    held_out: tuple[HeldOut, ...] = ()
     remaining: int = Field(ge=0)
 
 
@@ -95,7 +107,7 @@ class WaveInputs(BaseModel):
     contacts: dict[str, Contact]
     requests: dict[str, RequestState]
     lf_entries: tuple[LedgerEntry, ...]
-    held: frozenset[str]
+    held: HeldIds
     sender: Sender
 
 
@@ -113,9 +125,20 @@ def known_ids(inputs: WaveInputs) -> dict[str, tuple[str, ...]]:
     asked = _asked(inputs.requests)
     found: dict[str, set[str]] = {}
     for entry in inputs.lf_entries:
-        if entry.kind in _REQUESTED_KINDS and entry.lf_id not in inputs.held:
+        if entry.kind in _REQUESTED_KINDS and entry.lf_id not in inputs.held.all:
             found.setdefault(entry.authority_id, set()).add(entry.lf_id)
     return {a: tuple(sorted(ids - asked.get(a, set()))) for a, ids in found.items()}
+
+
+def held_out(inputs: WaveInputs) -> tuple[HeldOut, ...]:
+    """Every known id left out because its text is held, with the source that holds it."""
+    found = {
+        (entry.authority_id, entry.lf_id, source)
+        for entry in inputs.lf_entries
+        if entry.kind in _REQUESTED_KINDS
+        and (source := inputs.held.source(entry.lf_id)) is not None
+    }
+    return tuple(HeldOut(authority_id=a, lf_id=i, held=h) for a, i, h in sorted(found))
 
 
 def _open(requests: dict[str, RequestState]) -> set[str]:
@@ -263,6 +286,7 @@ def write_wave(inputs: WaveInputs, out: Path, wave_size: int, generated_at: date
         unresolved=tuple(chosen.unresolved),
         skipped_open=tuple(chosen.skipped_open),
         skipped_closed=tuple(chosen.skipped_closed),
+        held_out=held_out(inputs),
         remaining=chosen.remaining,
     )
     atomic_replace_bytes(

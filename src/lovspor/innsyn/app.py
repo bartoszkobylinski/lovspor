@@ -4,7 +4,9 @@ Separate from the command modules for the reason :mod:`lovspor.observatory.app`
 is: several modules register commands on one app without importing each other.
 The workspace is the group's option (``--dir`` / ``LOVSPOR_INNSYN_DIR``), read
 by every command through :func:`workspace`, so no command spends one of its
-four parameters on it.
+four parameters on it. The ``lovverk`` checkout (``--corpus`` /
+``LOVVERK_CORPUS_PATH``) is the group's option for the same reason, read by
+the commands that need it through :func:`corpus_path` (#606).
 """
 
 from collections.abc import Callable
@@ -27,6 +29,8 @@ innsyn_app = typer.Typer(
 )
 
 _DIR_KEY = "lovspor.innsyn.dir"
+_CORPUS_KEY = "lovspor.innsyn.corpus"
+ENV_CORPUS_PATH = "LOVVERK_CORPUS_PATH"
 
 
 @innsyn_app.callback()
@@ -40,9 +44,31 @@ def _workspace_option(
             help="The innsyn workspace: population, directory and request ledger.",
         ),
     ] = None,
+    corpus: Annotated[
+        Path | None,
+        typer.Option(
+            "--corpus",
+            envvar=ENV_CORPUS_PATH,
+            help="A lovverk checkout; `letters` holds the LF ids it already publishes.",
+        ),
+    ] = None,
 ) -> None:
     # Resolved by each command, not here: a command's own --help must work unset.
     ctx.meta[_DIR_KEY] = directory
+    ctx.meta[_CORPUS_KEY] = corpus
+
+
+def corpus_path(command: str) -> Path:
+    """The ``lovverk`` checkout named for this run, or the operator's message and exit 1."""
+    raw: Path | None = click.get_current_context().meta.get(_CORPUS_KEY)
+    if raw is None:
+        typer.echo(
+            f"Refused: {command} needs the lovverk checkout whose promoted regulations are "
+            f"held: --corpus (before the command) or {ENV_CORPUS_PATH}",
+            err=True,
+        )
+        raise typer.Exit(1)
+    return raw
 
 
 def workspace() -> InnsynWorkspace:

@@ -7,8 +7,17 @@ from typing import Annotated
 import typer
 
 from lovspor.errors import InnsynRefusedError, LogIntegrityError
-from lovspor.innsyn.app import guarded, innsyn_app, instant, now, refuse, workspace
+from lovspor.innsyn.app import (
+    corpus_path,
+    guarded,
+    innsyn_app,
+    instant,
+    now,
+    refuse,
+    workspace,
+)
 from lovspor.innsyn.directory import contacts, directory_journal
+from lovspor.innsyn.held import HeldIds, corpus_held_ids, file_held_ids
 from lovspor.innsyn.ledger import record_events, requests
 from lovspor.innsyn.population import latest_snapshot
 from lovspor.innsyn.received import read_document
@@ -27,18 +36,11 @@ from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.registry_io import _root
 
 
-def _held_ids(path: Path | None) -> frozenset[str]:
-    """LF ids whose text is held: one per line, ``#`` starts a comment."""
-    if path is None:
-        return frozenset()
+def _held(corpus: Path, held: Path | None) -> HeldIds:
     try:
-        lines = path.read_bytes().decode().splitlines()
-    except FileNotFoundError as exc:
-        raise refuse(InnsynRefusedError(f"{path}: no such --held file")) from exc
-    except UnicodeDecodeError as exc:
-        raise refuse(InnsynRefusedError(f"{path}: not UTF-8 at byte {exc.start}")) from exc
-    ids = (line.partition("#")[0].strip() for line in lines)
-    return frozenset(lf_id for lf_id in ids if lf_id)
+        return HeldIds(corpus=corpus_held_ids(corpus), file=file_held_ids(held))
+    except InnsynRefusedError as exc:
+        raise refuse(exc) from exc
 
 
 def _lf_entries(path: Path | None) -> tuple[LedgerEntry, ...]:
@@ -54,7 +56,7 @@ def _lf_entries(path: Path | None) -> tuple[LedgerEntry, ...]:
 
 
 def _inputs(
-    target: InnsynWorkspace, lf_entries: tuple[LedgerEntry, ...], held: frozenset[str]
+    target: InnsynWorkspace, lf_entries: tuple[LedgerEntry, ...], held: HeldIds
 ) -> WaveInputs:
     return WaveInputs(
         population=latest_snapshot(target),
@@ -74,7 +76,7 @@ def letters(
     ] = 25,
     held: Annotated[
         Path | None,
-        typer.Option("--held", help="LF ids whose text is held, one per line; left out."),
+        typer.Option("--held", help="LF ids held outside the corpus, one per line; left out."),
     ] = None,
     lf_ledger: Annotated[
         Path | None,
@@ -82,8 +84,8 @@ def letters(
     ] = None,
 ) -> None:
     """Write the next wave of innsynskrav letters and a manifest. Sends nothing."""
-    target = workspace()
-    entries, held_ids = _lf_entries(lf_ledger), _held_ids(held)
+    target, corpus = workspace(), corpus_path("letters")
+    entries, held_ids = _lf_entries(lf_ledger), _held(corpus, held)
     inputs = guarded(lambda: _inputs(target, entries, held_ids))
     manifest = guarded(lambda: write_wave(inputs, out, wave_size, now()))
     with_ids = sum(1 for letter in manifest.letters if letter.lf_ids)
