@@ -139,3 +139,58 @@ def test_other_formats_are_not_read_as_pages(
 )
 def test_html_text_is_what_a_reader_sees(content: bytes, text: str) -> None:
     assert html_text(content) == text
+
+
+@pytest.mark.parametrize("tag", ["script", "style", "noscript", "template"])
+def test_one_character_after_an_unseen_element_is_still_a_document(
+    workspace: Path, httpx_mock: HTTPXMock, tag: str
+) -> None:
+    """Removing page code must preserve its tail: any text is held (#721)."""
+    content = f"<html><body><{tag}>ignored</{tag}>X</body></html>".encode()
+    assert html_text(content) == "X"
+    code, output = _link(workspace, httpx_mock, content, "text/html")
+    assert code == 0, output
+    sha = hashlib.sha256(content).hexdigest()
+    assert blob_path(InnsynWorkspace(workspace, []), sha).read_bytes() == content
+
+
+@pytest.mark.parametrize(
+    ("url", "header"),
+    [
+        ("https://example.no/document.pdf", "text/html; charset=utf-8"),
+        ("https://example.no/document.HTM?download=1", "application/octet-stream"),
+    ],
+)
+def test_shell_refusal_uses_the_resolved_media_type(
+    workspace: Path, httpx_mock: HTTPXMock, url: str, header: str
+) -> None:
+    httpx_mock.add_response(url=url, content=SHELL, headers={"content-type": header})
+    before = _lines(workspace)
+    result = innsyn(
+        workspace, "record-received-link", "--request", FJALER, "--url", url, "--at", ARRIVED
+    )
+    assert result.exit_code == 1, result.output
+    assert f"{url}: the HTML page has no readable text" in result.stdout + result.stderr
+    assert _lines(workspace) == before
+    assert not (workspace / "received").exists()
+
+
+def test_shell_refusal_preserves_an_existing_receipt_and_workspace(
+    workspace: Path, httpx_mock: HTTPXMock
+) -> None:
+    code, output = _link(workspace, httpx_mock, PAGE, "text/html")
+    assert code == 0, output
+    before = {
+        path.relative_to(workspace): path.read_bytes()
+        for path in workspace.rglob("*")
+        if path.is_file()
+    }
+    code, output = _link(workspace, httpx_mock, SHELL, "text/html")
+    assert code == 1, output
+    assert f"{URL}: the HTML page has no readable text" in output
+    after = {
+        path.relative_to(workspace): path.read_bytes()
+        for path in workspace.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
