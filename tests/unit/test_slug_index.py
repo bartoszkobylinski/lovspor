@@ -139,3 +139,69 @@ def test_citation_checks_adjacent_occurrences_of_manifest_slug(tmp_path: Path) -
     verdict = CorpusReader(tmp_path).validate_citation("a__")
     assert verdict["valid"] is True
     assert verdict["slug"] == "_"
+
+
+@pytest.mark.parametrize(
+    ("slug", "citation", "expected"),
+    [
+        ("", "", True),
+        ("", "x", False),
+        ("", "x y", False),
+        ("lov", "lov", True),
+        ("lov", "", False),
+        ("lov", "blov lovb lov-x xlov", False),
+        ("lov", "blov lovb lov-x xlov lov", True),
+        ("lov", "lovlovlov lov", True),
+        ("æøå-loven", "xæøå-loven, æøå-loven.", True),
+        ("æøå-loven", "xæøå-lovenå", False),
+        ("a.b", "a.b", True),
+        ("a.b", "axb", False),
+    ],
+)
+def test_slug_token_every_occurrence_is_tried_and_both_ends_are_boundaries(
+    slug: str,
+    citation: str,
+    expected: bool,
+) -> None:
+    # Guards #674: a bounded iteration must still visit every occurrence,
+    # including overlapping ones, and judge both boundaries of each.
+    assert _slug_token_in_citation(slug, citation) is expected
+
+
+def test_slug_token_search_is_bounded_by_the_citation_length() -> None:
+    # Guards #674: the search over a citation that repeats a non-token
+    # occurrence many times ends after a number of steps proportional to
+    # the citation, so a broken advance cannot loop forever.
+    citation = "x" + "presskatteloven-sktl " * 2_000
+    assert not _slug_token_in_citation("skatteloven-sktl", citation)
+    assert _slug_token_in_citation("skatteloven-sktl", citation + "skatteloven-sktl")
+
+
+@pytest.mark.parametrize("slug", ["a+b", "a*b", "a?b", "a[b", "a(b", r"a\b", "a|b", "^a$"])
+def test_slug_token_regex_metacharacters_remain_literal(slug: str) -> None:
+    # The former str.find contract accepts literal strings, including strings
+    # that would be invalid regex syntax or would match different text.
+    assert _slug_token_in_citation(slug, f"({slug})")
+    assert not _slug_token_in_citation(slug, "ab aab a b")
+
+
+@pytest.mark.parametrize(
+    ("adjacent", "expected"),
+    [
+        ("0", False),
+        ("-", False),
+        ("ä", False),
+        ("ö", False),
+        ("ü", False),
+        ("_", True),
+        (".", True),
+        ("\n", True),
+    ],
+)
+def test_slug_token_preserves_boundary_alphabet_on_each_side(
+    adjacent: str,
+    expected: bool,
+) -> None:
+    # Both boundaries use _SLUG_CHARACTER, rather than regex word boundaries.
+    assert _slug_token_in_citation("lov", adjacent + "lov") is expected
+    assert _slug_token_in_citation("lov", "lov" + adjacent) is expected

@@ -2097,12 +2097,13 @@ def _slug_token_in_citation(slug: str, citation_lower: str) -> bool:
     - ``citation_lower[N]`` is not a slug character (``_SLUG_CHARACTER``).
 
     Both ends of the occurrence must be boundaries: ``"skatteloven-sktl"``
-    is not a token of ``"skatteloven-sktlX"``. Every occurrence is tried,
-    because the first may sit inside a longer word (``"presskatteloven-
-    sktl notes about skatteloven-sktl"``) while a later one is a token.
+    is not a token of ``"skatteloven-sktlX"``. Every occurrence is tried
+    (the first may sit inside a longer word) by one bounded lookahead
+    ``finditer`` pass, overlapping ones included: a manual ``find`` loop
+    with a broken advance repeats forever, a mutation-gate timeout (#674).
     """
-    idx = citation_lower.find(slug)
-    while idx >= 0:
+    for match in re.finditer(f"(?={re.escape(slug)})", citation_lower):
+        idx = match.start()
         before_ok = idx == 0 or not _SLUG_CHARACTER.match(citation_lower[idx - 1])
         after_pos = idx + len(slug)
         after_ok = after_pos == len(citation_lower) or not _SLUG_CHARACTER.match(
@@ -2110,7 +2111,6 @@ def _slug_token_in_citation(slug: str, citation_lower: str) -> bool:
         )
         if before_ok and after_ok:
             return True
-        idx = citation_lower.find(slug, idx + 1)
     return False
 
 
