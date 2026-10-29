@@ -359,3 +359,52 @@ def test_a_byte_identical_rendering_keeps_the_approval_refusal_in_a_dry_run(
     assert result.exit_code == 1, result.output
     assert "approval was given for another text or extractor" in result.stderr
     assert "needs re-approval" not in result.stdout
+
+
+@pytest.mark.parametrize("key", ["observed_at_first", "source_url", "version"])
+def test_pending_reapproval_preview_refuses_protected_field_changes(
+    key: str,
+    stale: str,
+    root: Path,
+    corpus: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operations #719 permits a preview only if provenance and version stay fixed."""
+    rendered = observed_refresh.render_published
+
+    def moved(prepared, source):
+        markdown = rendered(prepared, source)
+        value = front_matter(markdown)[key]
+        replacement = "99" if key == "version" else '"changed"'
+        return markdown.replace(f"{key}: {value}", f"{key}: {replacement}", 1)
+
+    monkeypatch.setattr(observed_refresh, "render_published", moved)
+    before, archive = tree(corpus), tree(root)
+
+    result = _refresh(corpus, "--dry-run")
+
+    assert result.exit_code == 1, result.output
+    assert f"re-rendering would change {key};" in result.stderr
+    assert result.stdout == ""
+    assert (tree(corpus), tree(root)) == (before, archive)
+
+
+def test_pending_reapproval_preview_requires_the_approved_text(
+    stale: str, root: Path, corpus: Path
+) -> None:
+    """Operations #719 excludes a standing approval of a different text from previews."""
+    log_path = root / "promotions.jsonl"
+    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    decisions = [record for record in records if record["kind"] == "decision"]
+    assert decisions
+    assert decisions[-1]["extractor_version"] == EXTRACTOR_VERSION - 1
+    decisions[-1]["content_hash"] = "0" * 64
+    log_path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+    before, archive = tree(corpus), tree(root)
+
+    result = _refresh(corpus, "--dry-run")
+
+    assert result.exit_code == 1, result.output
+    assert "approval was given for another text or extractor" in result.stderr
+    assert result.stdout == ""
+    assert (tree(corpus), tree(root)) == (before, archive)
