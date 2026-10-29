@@ -10,6 +10,7 @@ every registered source was cleared with, which is the conservative direction:
 a recon pass must not be more aggressive than the capture it is scouting for.
 """
 
+from collections.abc import Iterator
 from unittest.mock import Mock, patch
 
 import httpx
@@ -442,6 +443,56 @@ class TestABareHostThatRedirectsToItsOwnName:
         httpx_mock.add_response(url=ROBOTS, status_code=301, headers={"Location": location})
         httpx_mock.add_response(url=SITEMAP, status_code=301, headers={"Location": location})
         httpx_mock.add_response(url=FRONT, status_code=301, headers={"Location": location})
+
+    def test_target_sitemap_refusal_still_allows_the_target_front_page(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        """Starting over robots-first includes checking the target's per-path rules."""
+        self._bare_redirects(httpx_mock, WWW_FRONT)
+        httpx_mock.add_response(
+            url=WWW_ROBOTS, text="User-agent: *\nDisallow: /sitemap.xml\nAllow: /\n"
+        )
+        httpx_mock.add_response(url=WWW_FRONT, content=b"/api/presentation/")
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert (shape.domain, shape.entry) == (DOMAIN, "browser_assembled")
+        assert shape.front_page_markers == ("/api/presentation/",)
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [
+            ROBOTS,
+            SITEMAP,
+            FRONT,
+            WWW_ROBOTS,
+            WWW_FRONT,
+        ]
+
+    def test_interrupted_target_front_page_discards_partial_markers(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        """The documented empty-on-HTTP-error behavior also covers streamed reads."""
+
+        class InterruptedPage(httpx.SyncByteStream):
+            def __iter__(self) -> Iterator[bytes]:
+                yield b"/api/presentation/"
+                raise httpx.ReadError("connection lost during target front page")
+
+        self._bare_redirects(httpx_mock, WWW_FRONT)
+        httpx_mock.add_response(url=WWW_ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=WWW_SITEMAP, status_code=404)
+        httpx_mock.add_response(url=WWW_FRONT, stream=InterruptedPage())
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert (shape.domain, shape.entry) == (DOMAIN, "no_machine_index")
+        assert shape.front_page_markers == ()
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [
+            ROBOTS,
+            SITEMAP,
+            FRONT,
+            WWW_ROBOTS,
+            WWW_SITEMAP,
+            WWW_FRONT,
+        ]
 
     def test_the_www_host_is_probed_robots_first_and_the_row_keeps_the_asked_name(
         self, client: httpx.Client, httpx_mock: HTTPXMock
