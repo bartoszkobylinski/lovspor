@@ -15,6 +15,7 @@ import typer
 
 from lovspor.errors import LogIntegrityError
 from lovspor.observatory.app import observatory_app
+from lovspor.observatory.lf_last_seen import LastSeen, LastSeenReport, last_seen_report
 from lovspor.observatory.lf_ledger import (
     LEDGER_DAY_ZONE,
     LedgerEntry,
@@ -120,3 +121,57 @@ def lf_first_seen(
     for entry in chosen:
         typer.echo(_row(entry))
     typer.echo(f"{len(chosen)} entries first seen {first} .. {last}", err=True)
+
+
+def _last_seen_row(seen: LastSeen) -> str:
+    since = "-" if seen.unlinked_since is None else seen.unlinked_since.isoformat()
+    fields = (
+        seen.authority_id,
+        seen.kind,
+        seen.lf_id,
+        seen.first_seen.isoformat(),
+        seen.last_seen_linked.isoformat(),
+        seen.status,
+        since,
+        seen.evidence_at.isoformat(),
+        str(seen.pages),
+        str(seen.pages_failing),
+        seen.last_url,
+    )
+    return "\t".join(fields)
+
+
+def _last_seen_summary(report: LastSeenReport) -> str:
+    unlinked = sum(1 for seen in report.entries if seen.status == "unlinked")
+    return (
+        f"{len(report.entries)} ids: {unlinked} unlinked (candidate repeals for review), "
+        f"{len(report.entries) - unlinked} linked; read {report.html_records} html records "
+        f"({report.blobs_read} blobs, {report.blobs_missing} missing)"
+    )
+
+
+@observatory_app.command("lf-last-seen")
+def lf_last_seen(
+    unlinked: Annotated[
+        bool,
+        typer.Option("--unlinked", help="Only the ids no page that linked them still links."),
+    ] = False,
+) -> None:
+    """List when each linked Lovdata local-regulation id was last seen, and whether it still is.
+
+    Columns: authority, kind, id, first seen, last seen linked, status
+    (``linked``/``unlinked``), unlinked since, latest readable capture, pages
+    that ever linked it, pages failing since their last readable capture, the
+    page of the latest sighting. ``unlinked`` is a candidate for human review,
+    not a repeal: a failed or unreadable fetch is never evidence. Reads the
+    whole log; the counts go to stderr.
+    """
+    try:
+        report = last_seen_report(ObservationLog(_root()))
+    except LogIntegrityError as exc:
+        typer.echo(f"Refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    for seen in report.entries:
+        if not unlinked or seen.status == "unlinked":
+            typer.echo(_last_seen_row(seen))
+    typer.echo(_last_seen_summary(report), err=True)
