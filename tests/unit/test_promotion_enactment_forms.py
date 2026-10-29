@@ -20,6 +20,7 @@ import pytest
 from lovspor.promotion import ExtractedDocument
 from lovspor.promotion.extract import extract_received, extract_regulation
 from lovspor.promotion.fields import read_regulation
+from lovspor.promotion.identity import content_hash
 from lovspor.promotion.lovdata_markup import strip_markup
 from lovspor.promotion.models import ReceivedForm
 from lovspor.promotion.stated_dates import stated_vedtatt
@@ -184,6 +185,38 @@ class TestCaseNumber:
 class TestGluedFootnote:
     GLUED = "Forskriften erstatter forskrift av 30. oktober 19841 med senere endringer."
     FOOTNOTE = "1 Ikke kunngjort i Norsk Lovtidend."
+
+    @pytest.mark.parametrize("marker", ["1", "12"])
+    def test_unglued_enactment_matches_clean_text_dates_evidence_and_hash(
+        self, marker: str
+    ) -> None:
+        # operations.md #637: removing the glued marker restores the stated
+        # year before enactment fields and the published version are read.
+        enactment = "Fastsatt ved kgl.res. av 30. oktober 1984."
+        clean = _received((TITLE, enactment, *SECTIONS))
+        glued = _received(
+            (
+                TITLE,
+                enactment.replace("1984", f"1984{marker}"),
+                *SECTIONS,
+                f"{marker} Ikke kunngjort i Norsk Lovtidend.",
+            )
+        )
+        assert glued.regulation == clean.regulation
+        assert glued.fields == clean.fields
+        assert glued.regulation.vedtaksdato == glued.fields.vedtatt == date(1984, 10, 30)
+        verdict = stated_vedtatt(glued.regulation)
+        assert verdict.status == "stated"
+        assert [statement.evidence for statement in verdict.statements] == [enactment[:-1]]
+        assert content_hash(glued.regulation.full_text) == content_hash(clean.regulation.full_text)
+
+    def test_authority_original_does_not_remove_a_footnote_or_unglue_its_year(self) -> None:
+        # lovdata_markup.py limits this editorial cleanup to Lovdata prints.
+        lines = (TITLE, self.GLUED, *SECTIONS, self.FOOTNOTE)
+        stripped = strip_markup(lines, ReceivedForm.AUTHORITY_ORIGINAL)
+        assert stripped is not None
+        assert stripped.lines == lines
+        assert stripped.identification == ()
 
     def test_multiple_removed_footnotes_are_unglued_and_stripping_is_idempotent(self) -> None:
         line = "Forskriftene fra 19841, 199012 og 20012 oppheves."
