@@ -503,6 +503,79 @@ class TestDryRunAwaitingReapproval:
         assert "approval was given for another text or extractor" in result.stderr
         assert "needs re-approval" not in result.stdout
 
+    @pytest.mark.parametrize("decision", ["reject", "withdrawn"])
+    def test_a_rejected_or_withdrawn_document_has_no_preview(
+        self,
+        decision: str,
+        earlier: Path,
+        promoted: tuple[str, Path],
+        corpus: Path,
+        root: Path,
+        workspace: Path,
+        tmp_path: Path,
+    ) -> None:
+        """Operations #719 excludes rejected and withdrawn documents from previews."""
+        if decision == "reject":
+            assert _approve(promoted[0], tmp_path, decision="reject").exit_code == 0
+            reason = "the standing decision is reject"
+        else:
+            withdrawal = _withdrawal().model_copy(update={"doc_id": "lf-20010203-9001"})
+            DecisionLog(ObservatoryRoot(root, [])).append(withdrawal)
+            reason = "was withdrawn"
+        before, log, held = tree(corpus), _log(root), tree(workspace)
+
+        result = _refresh(corpus, "--dry-run")
+
+        assert result.exit_code == 1, result.output
+        assert reason in result.stderr
+        assert result.stdout == ""
+        assert (tree(corpus), _log(root), tree(workspace)) == (before, log, held)
+
+    @pytest.mark.parametrize("general", [False, True], ids=["received", "general"])
+    @pytest.mark.parametrize("dry_run", [False, True], ids=["write", "dry-run"])
+    def test_pending_reapproval_does_not_hide_an_approved_batch_member(
+        self,
+        general: bool,
+        dry_run: bool,
+        earlier: Path,
+        workspace: Path,
+        corpus: Path,
+        root: Path,
+        tmp_path: Path,
+    ) -> None:
+        """#719 previews only pending approvals; other documents still refresh normally."""
+        lines = tuple(line.replace("2001-02-03-9001", "2001-02-03-9006") for line in REPEALED_PRINT)
+        sha256 = _receive(workspace, minimal_pdf(lines), name="second.pdf")
+        assert _approve(sha256, tmp_path).exit_code == 0
+        result = _received("local", sha256, corpus)
+        assert result.exit_code == 0, result.output
+        [second] = [path for path in earlier.parent.glob("*.md") if path != earlier]
+        current = _stale(second)
+        before, log, held = tree(corpus), _log(root), tree(workspace)
+        head = git(corpus, "rev-parse", "HEAD")
+        command = ("promote", "refresh") if general else ("promote", "received", "refresh")
+
+        result = invoke(*command, "--corpus", str(corpus), *(("--dry-run",) if dry_run else ()))
+
+        assert result.exit_code == 1, result.output
+        expected = before.copy()
+        if dry_run:
+            assert result.stderr == ""
+            assert result.stdout.count('+status: "repealed"') == 2
+            assert f"lf-20010203-9001: needs re-approval at v{EXTRACTOR_VERSION}:" in result.stdout
+            assert "lf-20010203-9006: needs re-approval" not in result.stdout
+            assert result.stdout.endswith(
+                f"1 document(s) need re-approval at v{EXTRACTOR_VERSION} "
+                "before refresh writes them.\n"
+            )
+        else:
+            assert "Refused: lf-20010203-9001:" in result.stderr
+            assert "approval was given for another text or extractor" in result.stderr
+            assert "lf-20010203-9006 v1: front matter re-rendered" in result.stdout
+            expected[second.relative_to(corpus).as_posix()] = current.encode("utf-8")
+        assert (tree(corpus), _log(root), tree(workspace)) == (expected, log, held)
+        assert git(corpus, "rev-parse", "HEAD") == head
+
 
 def test_a_refresh_awaiting_reapproval_is_never_written(corpus: Path) -> None:
     """#719: only a dry run builds one; a write that is handed one refuses it."""
