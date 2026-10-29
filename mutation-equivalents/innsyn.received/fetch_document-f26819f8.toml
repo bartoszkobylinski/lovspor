@@ -1,10 +1,10 @@
 [[equivalent]]
 file = "src/lovspor/innsyn/received.py"
 symbol = "fetch_document"
-registered = "2026-10-26, PR #692, from the mutation artifact at commit d1396a1f"
+registered = "2026-10-26, PR #692, from the mutation artifact at commit d1396a1f; re-keyed 2026-10-29 (#721) when the lookup moved into an assignment, same expression"
 mutation = """
--    return response.content, _link_media_type(url, response.headers.get("content-type", ""))
-+    return response.content, _link_media_type(url, response.headers.get("CONTENT-TYPE", ""))
+-    content_type = _link_media_type(url, response.headers.get("content-type", ""))
++    content_type = _link_media_type(url, response.headers.get("CONTENT-TYPE", ""))
 """
 justification = """
 An httpx `Headers` lookup lower-cases the requested name before reading, so
