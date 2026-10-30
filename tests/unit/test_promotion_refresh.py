@@ -22,11 +22,14 @@ from click.testing import Result
 from lovspor.innsyn.workspace import ENV_INNSYN_DIR
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
 from lovspor.promotion import observed_refresh
+from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.fields import read_regulation
 from lovspor.promotion.migrate import front_matter
 from tests.unit.promotion_cli_fixtures import (
     AUTHORITY,
     FIRST_SEEN,
+    Decision,
+    approve,
     invoke,
     make_corpus,
     register,
@@ -296,3 +299,112 @@ class TestRefusals:
         assert result.exit_code == 1, result.output
         assert f"set {ENV_INNSYN_DIR}" in result.output
         assert tree(corpus) == before
+
+
+class TestDryRunAwaitingReapproval:
+    """#719: an approval given only at the earlier extractor still shows the dry-run diff."""
+
+    def test_the_dry_run_prints_the_diff_and_names_the_reapproval(
+        self, stale: str, root: Path, corpus: Path
+    ) -> None:
+        before, log = tree(corpus), _log(root)
+
+        result = _refresh(corpus, "--dry-run")
+
+        assert result.exit_code == 1, result.output
+        assert '-ikraft_text: "straks"' in result.stdout
+        assert f": needs re-approval at v{EXTRACTOR_VERSION}: " in result.stdout
+        assert result.stdout.endswith(
+            "Dry run: nothing written. 1 document(s) need re-approval at "
+            f"v{EXTRACTOR_VERSION} before refresh writes them.\n"
+        )
+        assert result.stderr == ""
+        assert (tree(corpus), _log(root)) == (before, log)
+
+    def test_a_held_decision_shows_no_diff(self, stale: str, corpus: Path, tmp_path: Path) -> None:
+        assert approve(stale, Decision(decision="hold").write(tmp_path)).exit_code == 0
+
+        result = _refresh(corpus, "--dry-run")
+
+        assert result.exit_code == 1, result.output
+        assert "the standing decision is hold" in result.stderr
+        assert "ikraft_text" not in result.stdout
+
+    def test_a_body_that_would_change_is_still_refused(
+        self, stale: str, corpus: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rendered = observed_refresh.render_published
+        monkeypatch.setattr(
+            observed_refresh, "render_published", lambda p, s: rendered(p, s) + "\nmore\n"
+        )
+        before = tree(corpus)
+
+        result = _refresh(corpus, "--dry-run")
+
+        assert result.exit_code == 1, result.output
+        assert "its body would change though its text does not" in result.stderr
+        assert "needs re-approval" not in result.stdout
+        assert tree(corpus) == before
+
+
+def test_a_byte_identical_rendering_keeps_the_approval_refusal_in_a_dry_run(
+    root: Path, corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing to show: `promote migrate` carries that approval; refresh does not preview it."""
+    monkeypatch.delenv(ENV_INNSYN_DIR, raising=False)
+    _promoted_once(root, corpus, tmp_path, monkeypatch)
+
+    result = _refresh(corpus, "--dry-run")
+
+    assert result.exit_code == 1, result.output
+    assert "approval was given for another text or extractor" in result.stderr
+    assert "needs re-approval" not in result.stdout
+
+
+@pytest.mark.parametrize("key", ["observed_at_first", "source_url", "version"])
+def test_pending_reapproval_preview_refuses_protected_field_changes(
+    key: str,
+    stale: str,
+    root: Path,
+    corpus: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operations #719 permits a preview only if provenance and version stay fixed."""
+    rendered = observed_refresh.render_published
+
+    def moved(prepared, source):
+        markdown = rendered(prepared, source)
+        value = front_matter(markdown)[key]
+        replacement = "99" if key == "version" else '"changed"'
+        return markdown.replace(f"{key}: {value}", f"{key}: {replacement}", 1)
+
+    monkeypatch.setattr(observed_refresh, "render_published", moved)
+    before, archive = tree(corpus), tree(root)
+
+    result = _refresh(corpus, "--dry-run")
+
+    assert result.exit_code == 1, result.output
+    assert f"re-rendering would change {key};" in result.stderr
+    assert result.stdout == ""
+    assert (tree(corpus), tree(root)) == (before, archive)
+
+
+def test_pending_reapproval_preview_requires_the_approved_text(
+    stale: str, root: Path, corpus: Path
+) -> None:
+    """Operations #719 excludes a standing approval of a different text from previews."""
+    log_path = root / "promotions.jsonl"
+    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    decisions = [record for record in records if record["kind"] == "decision"]
+    assert decisions
+    assert decisions[-1]["extractor_version"] == EXTRACTOR_VERSION - 1
+    decisions[-1]["content_hash"] = "0" * 64
+    log_path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+    before, archive = tree(corpus), tree(root)
+
+    result = _refresh(corpus, "--dry-run")
+
+    assert result.exit_code == 1, result.output
+    assert "approval was given for another text or extractor" in result.stderr
+    assert result.stdout == ""
+    assert (tree(corpus), tree(root)) == (before, archive)
