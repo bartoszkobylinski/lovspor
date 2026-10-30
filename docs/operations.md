@@ -1589,6 +1589,11 @@ A carry never reads as a review:
   ```
 
   A block without `approval_carried` was approved at its `extractor_version`.
+  When the approval that stands is a fresh one (a re-approval at the running
+  extractor), `migrate` writes that approval's `decision`, `reviewed_by_role`,
+  `decided_at`, `reason` and `classifier` into the block, never the earlier
+  decision's (#722); `observations` and `observations_through` are evidence
+  and stay as published.
   `observe`, `backfill`, `local` and `batch` accept a carried approval exactly
   where they accept one given at the running extractor, and a version `backfill`,
   `local` or `batch` writes on a carried approval is published with

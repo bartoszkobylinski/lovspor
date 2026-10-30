@@ -28,7 +28,7 @@ from lovspor.innsyn.workspace import ENV_INNSYN_DIR
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
 from lovspor.promotion.extract import EXTRACTOR_VERSION
 from tests.unit.innsyn_support import FIXTURES, fetched
-from tests.unit.promotion_cli_fixtures import git, invoke, make_corpus, tree
+from tests.unit.promotion_cli_fixtures import Decision, git, invoke, make_corpus, tree
 from tests.unit.promotion_fixtures import REGULATION_LINES, html_page
 from tests.unit.test_promotion_received_commands import (
     FJALER,
@@ -164,6 +164,40 @@ class TestMigratesAReceivedDocument:
             "innsyn_request": FJALER,
             "sha256": promoted,
         }
+
+    def test_the_audit_is_the_fresh_approvals_not_the_old_one(
+        self, promoted: str, corpus: Path, root: Path, tmp_path: Path
+    ) -> None:
+        """#722: the re-approval's time, reason and role are published, not the first one's."""
+        [old] = _versions(corpus)
+        fresh = Decision(reason="Re-approved at the running extractor.", reviewer_role="editor")
+        result = invoke(
+            "promote",
+            "received",
+            "approve",
+            *(
+                "--request",
+                FJALER,
+                "--document",
+                promoted,
+                "--decision",
+                str(fresh.write(tmp_path)),
+            ),
+        )
+        assert result.exit_code == 0, result.output
+        [*_, latest] = [r for r in _log(root) if r.get("kind") == "decision"]
+
+        assert _migrate(corpus).exit_code == 0
+
+        [version] = _versions(corpus)
+        promotion, before = version["promotion"], old["promotion"]
+        assert isinstance(promotion, dict)
+        assert isinstance(before, dict)
+        assert promotion["decided_at"] == latest["decided_at"]
+        assert promotion["reason"] == "Re-approved at the running extractor."
+        assert promotion["reviewed_by_role"] == "editor"
+        assert promotion["observations_through"] == before["observations_through"]
+        assert promotion["innsyn"] == before["innsyn"]
 
     def test_it_moves_the_version_metadata_and_carries_the_approval(
         self, promoted: str, corpus: Path, root: Path

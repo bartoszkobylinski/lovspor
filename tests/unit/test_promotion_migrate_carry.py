@@ -27,13 +27,16 @@ from typer.testing import Result
 
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.promotion import extract
+from lovspor.promotion.carry import VersionApproval, audit_at_running_extractor
 from lovspor.promotion.decisions import (
     DECISIONS_FILENAME,
     ApprovalReference,
     ArtifactKey,
     CarriedRecord,
+    ClassifierEvidence,
     DecisionLog,
     HumanDecision,
+    PromotionAudit,
 )
 from lovspor.promotion.extract import EXTRACTOR_VERSION
 from lovspor.promotion.fields import read_regulation
@@ -315,6 +318,135 @@ class TestOnlyAnApprovalIsCarried:
 
 
 class TestAFreshApprovalWins:
+    def test_fresh_approval_replaces_a_previous_carry_without_changing_evidence(
+        self, root: Path, corpus: Path
+    ) -> None:
+        """A fresh review is no longer a carry (operations.md, #722)."""
+        assert _migrate(corpus).exit_code == 0
+        audit = PromotionAudit.model_validate(_versions(corpus)[0]["promotion"])
+        assert audit.approval_carried is not None
+        before = audit.model_dump(mode="json")
+        old = next(
+            r
+            for r in DecisionLog(ObservatoryRoot(root, [])).records()
+            if isinstance(r, HumanDecision)
+        )
+        classifier = ClassifierEvidence(
+            classifier_version="fresh-review",
+            class_name="local_regulation",
+            evidence=("Re-read the operative provisions.",),
+        )
+        decision = old.model_copy(
+            update={
+                "extractor_version": EXTRACTOR_VERSION,
+                "reviewer_role": "editor",
+                "reason": "Reviewed again after the carry.",
+                "decided_at": datetime.fromisoformat("2026-10-09T12:34:56.123456+02:00"),
+                "classifier": classifier,
+            }
+        )
+        assert decision.content_hash is not None
+        approval = VersionApproval(
+            version=1, content_hash=decision.content_hash, decision=decision, carried=False
+        )
+        approval_before = approval.model_dump(mode="json")
+
+        moved = audit_at_running_extractor(audit, approval, datetime(2026, 10, 10, tzinfo=UTC))
+
+        expected = {
+            **before,
+            "decision": "approve",
+            "reviewed_by_role": "editor",
+            "reason": "Reviewed again after the carry.",
+            "decided_at": "2026-10-09T10:34:56.123456Z",
+            "classifier": classifier.model_dump(mode="json"),
+            "extractor_version": EXTRACTOR_VERSION,
+        }
+        del expected["approval_carried"]
+        assert moved.approval_carried is None
+        assert moved.model_dump(mode="json") == expected
+        assert PromotionAudit.model_validate_json(moved.model_dump_json()) == moved
+        assert audit.model_dump(mode="json") == before
+        assert approval.model_dump(mode="json") == approval_before
+
+    def test_fresh_approval_without_classifier_clears_previous_evidence(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        """#722: classifier belongs to the standing decision, including its absence."""
+        a, _ = _blobs(corpus)
+        result = approve(a, Decision().write(tmp_path))
+        assert result.exit_code == 0, result.output
+        decision = DecisionLog(ObservatoryRoot(root, [])).latest_decision(
+            ArtifactKey(authority_id=AUTHORITY, sha256=a, source_url=PAGE_URL)
+        )
+        assert decision is not None
+        assert decision.classifier is None
+        audit = PromotionAudit.model_validate(_versions(corpus)[0]["promotion"])
+        audit = audit.model_copy(
+            update={
+                "classifier": ClassifierEvidence(
+                    classifier_version="old-review", class_name="local_regulation"
+                )
+            }
+        )
+        before = audit.model_dump(mode="json")
+        approval = VersionApproval(
+            version=1, content_hash="b" * 64, decision=decision, carried=False
+        )
+
+        moved = audit_at_running_extractor(audit, approval, datetime.now(UTC))
+
+        assert moved.classifier is None
+        assert moved.model_dump(mode="json")["classifier"] is None
+        assert audit.model_dump(mode="json") == before
+
+    def test_mixed_fresh_and_carried_versions_publish_their_own_approval(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        """#722: only the re-approved text gets the new decision and classifier."""
+        before = _versions(corpus)
+        a, b = _blobs(corpus)
+        classifier = {
+            "classifier_version": "review-v2",
+            "class_name": "local_regulation",
+            "evidence": ["Operative provisions read."],
+        }
+        fresh = Decision(
+            reason="Text reviewed again.", reviewer_role="editor", classifier=classifier
+        )
+        result = approve(a, fresh.write(tmp_path))
+        assert result.exit_code == 0, result.output
+        [*_, latest] = [
+            r
+            for r in DecisionLog(ObservatoryRoot(root, [])).records()
+            if isinstance(r, HumanDecision)
+        ]
+        log_before = _log(root)
+
+        result = _migrate(corpus)
+
+        assert result.exit_code == 0, result.output
+        appended = _appended(root, log_before)
+        assert [r["kind"] for r in appended] == ["carried", "migrated"]
+        assert appended[0]["artifact"]["sha256"] == b  # type: ignore[index]
+        for old, new in zip(before, _versions(corpus), strict=True):
+            expected = {**old["promotion"], "extractor_version": EXTRACTOR_VERSION}  # type: ignore[dict-item]
+            promotion = new["promotion"]
+            assert isinstance(promotion, dict)
+            if new["version"] == 2:
+                carry = promotion["approval_carried"]
+                assert carry["approved_at_extractor"] == OLD
+                expected["approval_carried"] = carry
+            else:
+                expected.update(
+                    decision=latest.decision.value,
+                    reviewed_by_role=latest.reviewer_role,
+                    decided_at=latest.decided_at.isoformat().replace("+00:00", "Z"),
+                    reason=latest.reason,
+                    classifier=classifier,
+                )
+            assert promotion == expected
+
     def test_a_fresh_approval_is_used_and_nothing_is_carried(
         self, root: Path, corpus: Path, tmp_path: Path
     ) -> None:
@@ -331,6 +463,35 @@ class TestAFreshApprovalWins:
             assert isinstance(promotion, dict)
             assert "approval_carried" not in promotion
             assert promotion["extractor_version"] == EXTRACTOR_VERSION
+
+    def test_the_audit_is_the_fresh_approvals_not_the_old_one(
+        self, root: Path, corpus: Path, tmp_path: Path
+    ) -> None:
+        """#722: a fresh approval publishes its own time, reason and role, never the old one's."""
+        before = {v["version"]: v["promotion"] for v in _versions(corpus)}
+        fresh = Decision(reason="Re-approved at the running extractor.", reviewer_role="editor")
+        for sha256 in _blobs(corpus):
+            assert approve(sha256, fresh.write(tmp_path)).exit_code == 0
+        approvals = [
+            r
+            for r in (json.loads(line) for line in _log(root).decode().splitlines())
+            if r.get("kind") == "decision"
+        ]
+
+        assert _migrate(corpus).exit_code == 0
+
+        latest = approvals[-1]["decided_at"]
+        for version in _versions(corpus):
+            promotion = version["promotion"]
+            old = before[version["version"]]
+            assert isinstance(promotion, dict)
+            assert isinstance(old, dict)
+            assert promotion["reason"] == "Re-approved at the running extractor."
+            assert promotion["reviewed_by_role"] == "editor"
+            assert promotion["decided_at"] != old["decided_at"]
+            assert promotion["decided_at"] <= latest
+            assert promotion["observations_through"] == old["observations_through"]
+            assert promotion["observations"] == old["observations"]
 
 
 class TestTheCarriedStateIsReachableThroughSupportedInterfacesOnly:
