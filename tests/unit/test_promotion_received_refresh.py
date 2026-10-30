@@ -603,6 +603,67 @@ class TestLateCaseNumber:
     def _record(self, workspace: Path, number: str = "2026/1347") -> None:
         _innsyn(workspace, "record-case-number", "--request", FJALER, "--number", number)
 
+    @pytest.mark.parametrize("general", [False, True], ids=["received", "general"])
+    def test_late_number_preview_write_and_repeat_keep_all_other_state(
+        self,
+        general: bool,
+        promoted: tuple[str, Path],
+        corpus: Path,
+        workspace: Path,
+        root: Path,
+    ) -> None:
+        """#720 fills only the Markdown field, including through general refresh."""
+        _, path = promoted
+        published_text = path.read_text(encoding="utf-8")
+        assert self._NULL in published_text
+        self._record(workspace)
+        before, log, held = tree(corpus), _log(root), tree(workspace)
+        head = git(corpus, "rev-parse", "HEAD")
+        command = ("promote", "refresh") if general else ("promote", "received", "refresh")
+
+        preview = invoke(*command, "--corpus", str(corpus), "--dry-run")
+        assert preview.exit_code == 0, preview.output
+        assert "\n-innsyn_saksnummer: null\n" in preview.stdout
+        assert '\n+innsyn_saksnummer: "2026/1347"\n' in preview.stdout
+        assert (tree(corpus), _log(root), tree(workspace)) == (before, log, held)
+
+        result = invoke(*command, "--corpus", str(corpus))
+        assert result.exit_code == 0, result.output
+        expected = before.copy()
+        expected[path.relative_to(corpus).as_posix()] = published_text.replace(
+            self._NULL, '\ninnsyn_saksnummer: "2026/1347"\n'
+        ).encode("utf-8")
+        assert (tree(corpus), _log(root), tree(workspace)) == (expected, log, held)
+
+        repeated = invoke(*command, "--corpus", str(corpus))
+        assert repeated.exit_code == 0, repeated.output
+        assert "unchanged; its rendering is current" in repeated.stdout
+        assert (tree(corpus), _log(root), tree(workspace)) == (expected, log, held)
+        assert git(corpus, "rev-parse", "HEAD") == head
+
+    @pytest.mark.parametrize("old_value", ["null", '"2026-01-01T00:00:00Z"'])
+    def test_filling_case_number_does_not_allow_other_provenance_to_move(
+        self,
+        old_value: str,
+        promoted: tuple[str, Path],
+        corpus: Path,
+        workspace: Path,
+    ) -> None:
+        """#720: every other kept key stays immovable, even when published null."""
+        _, path = promoted
+        text = path.read_text(encoding="utf-8")
+        changed, count = re.subn(r"(?m)^received_at: .*$", f"received_at: {old_value}", text)
+        assert count == 1
+        path.write_text(changed, encoding="utf-8")
+        self._record(workspace)
+        before = tree(corpus)
+
+        result = _refresh(corpus)
+
+        assert result.exit_code == 1, result.output
+        assert "would change received_at;" in result.stderr
+        assert tree(corpus) == before
+
     def test_refresh_fills_a_null_case_number(
         self, promoted: tuple[str, Path], corpus: Path, workspace: Path
     ) -> None:
