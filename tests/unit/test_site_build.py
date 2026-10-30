@@ -850,9 +850,9 @@ _GUIDES = (*_CLAUDE, *_CHATGPT)
 _QUESTION = "«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»"
 
 
-_CONNECT_SECTIONS = ("claude", "chatgpt", "claude-code", "other", "start", "help")
+_CONNECT_SECTIONS = ("claude", "chatgpt", "claude-code", "vscode", "other", "start", "help")
 _WALKED = {"claude": "2026-09-30", "chatgpt": "2026-09-30"}
-_CLAUDE_CODE_WALK = "CLAUDE_CODE_HOSTED_WALKED_ON"
+_SECTION_WALKS = ("CLAUDE_CODE_HOSTED_WALKED_ON", "VSCODE_HOSTED_WALKED_ON")
 
 
 def _section(markup: str, anchor: str) -> str:
@@ -939,6 +939,59 @@ class TestConnectPage:
         assert "claude mcp add lovverk -- uvx lovspor mcp" in section
 
     @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_the_vscode_section_carries_its_steps_walk_date_and_the_unreached_warning(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        section = _section(_page(built[0], path), "vscode")
+        steps = section.split('<ol class="steps">', 1)[1].split("</ol>", 1)[0]
+
+        assert "MCP: Add Server" in steps and "<strong>Agent</strong>" in steps
+        assert "https://lovspor.no/mcp</code>" in steps and steps.count("<li>") == 5
+        assert _fact_values(section, "code.connect.vscode.walked_on") == ["2026-10-30"]
+        assert "data-pending" not in section
+        assert section.rsplit("</ol>", 1)[1].count("lovverk") >= 2
+
+    @pytest.mark.parametrize(
+        ("path", "tool_check", "unreached", "retry"),
+        [
+            (
+                "/connect/",
+                "Sjekk at svaret viser et verktøysteg.",
+                "svarte likevel uten å kalle lovverk",
+                "logg inn på nytt og spør igjen",
+            ),
+            (
+                "/en/connect/",
+                "Check that the answer shows a tool step.",
+                "answered anyway, without calling lovverk",
+                "sign in again and ask again",
+            ),
+            (
+                "/pl/connect/",
+                "Sprawdź, czy odpowiedź pokazuje krok z narzędziem.",
+                "odpowiedział bez wywołania lovverk",
+                "zaloguj się ponownie i zapytaj jeszcze raz",
+            ),
+        ],
+    )
+    def test_vscode_warns_about_answers_without_tool_calls_and_gives_recovery(
+        self,
+        built: tuple[Path, SiteBuildReport],
+        path: str,
+        tool_check: str,
+        unreached: str,
+        retry: str,
+    ) -> None:
+        """docs/mcp.md records a plausible answer despite no CallToolRequest (#729)."""
+        markup = _page(built[0], path)
+        warning = _section(markup, "vscode").split("</ol>", 1)[1]
+
+        assert tool_check in warning
+        assert unreached in warning
+        assert retry in warning
+        assert "VS Code" not in _section(markup, "other")
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
     def test_offers_no_one_click_link_and_no_client_config_it_has_not_run(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
@@ -966,7 +1019,7 @@ class TestConnectPage:
     def test_an_unverified_client_is_named_untested_rather_than_given_steps(
         self, built: tuple[Path, SiteBuildReport]
     ) -> None:
-        """Cursor, VS Code and Codex have no procedure in this repository. The
+        """Cursor and Codex have no procedure in this repository. The
         page says so; it does not write one down (CLAUDE.md, a claim carries
         its evidence)."""
         out, _ = built
@@ -979,7 +1032,7 @@ class TestConnectPage:
 
             assert wording in section, path
             assert '<ol class="steps">' not in section, path
-            for client in ("Cursor", "VS Code", "Codex"):
+            for client in ("Cursor", "Codex"):
                 assert client in section, (path, client)
 
     @pytest.mark.parametrize("path", _CHOOSERS)
@@ -1969,7 +2022,7 @@ class TestSiteFacts:
             elif entry["artifact"].startswith("benchmarks/"):
                 assert entry["artifact"] in _publication_files(), entry
             elif entry["artifact"] == _REGISTRY:
-                assert entry["field"].startswith(("CLIENT_REGISTRY.", _CLAUDE_CODE_WALK)), entry
+                assert entry["field"].startswith(("CLIENT_REGISTRY.", *_SECTION_WALKS)), entry
             else:
                 assert entry["artifact"] == f"tool-surface@{world.lovspor_commit}", entry
 
@@ -2065,7 +2118,7 @@ def _assigned_date(tree: ast.Module, name: str) -> str:
 def _resolve_registry(field: str, checkout: Path) -> str:
     """A walk date read back from the checkout's registry source, not from the import."""
     tree = ast.parse((checkout / _REGISTRY).read_text(encoding="utf-8"))
-    if field == _CLAUDE_CODE_WALK:
+    if field in _SECTION_WALKS:
         return _assigned_date(tree, field)
     _, slug, name = field.split(".")
     for call in ast.walk(tree):

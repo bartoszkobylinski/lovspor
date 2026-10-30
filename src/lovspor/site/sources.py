@@ -280,6 +280,7 @@ def _client_facts(artifacts: BuildArtifacts) -> tuple[FactSource, ...]:
         _walk_fact(
             "claude-code", "CLAUDE_CODE_HOSTED_WALKED_ON", routes.CLAUDE_CODE_HOSTED_WALKED_ON
         ),
+        _walk_fact("vscode", "VSCODE_HOSTED_WALKED_ON", routes.VSCODE_HOSTED_WALKED_ON),
     )
 
 
