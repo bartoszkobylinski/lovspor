@@ -2154,7 +2154,12 @@ $I received                               # every document; requested ids still 
   generic `application/octet-stream`; a declared type the ledger does not hold (a GIF
   from a `.pdf` link) is believed, and the link refused; a link that is not answered
   200, comes back empty, or is in no format the ledger holds is refused and nothing is
-  held. One command per link: a link the engine cannot read
+  held. An HTML page a reader would see no text in — a JavaScript app shell whose only
+  text is its title and a "enable JavaScript" notice (Drammen's Digdem links, #721), a
+  blank body, page code alone — is refused the same way, naming the URL, before its
+  blob or ledger line is written; a page with any text is held, however short. Fetch
+  the document itself another way and hold that with `record-received`; never the
+  shell. One command per link: a link the engine cannot read
   (a login page, a viewer that needs a browser) is a finding to file, not a file to
   record by hand.
 - **Pilot import.** `import-pilot` reads `sent.csv` with the letters as sent

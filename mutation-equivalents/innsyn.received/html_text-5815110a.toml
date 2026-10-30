@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/innsyn/received.py"
+symbol = "html_text"
+registered = "2026-10-29, PR #727, from the mutation artifact at commit 978fef36"
+mutation = """
+-    etree.strip_elements(root, *_UNSEEN, with_tail=False)
++    etree.strip_elements(root, *_UNSEEN, with_tail=None)
+"""
+justification = """
+lxml declares `strip_elements(tree_or_element, *tag_names, bint with_tail=True)`:
+the flag is converted to a C boolean, so `None` is read as false, exactly like
+`False`. Both keep the tail of every stripped element, and the page text
+`html_text` returns is identical for every input. Argued from the dependency,
+hence pinned.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_lxml_strip_elements_reads_with_tail_as_a_truth_value"

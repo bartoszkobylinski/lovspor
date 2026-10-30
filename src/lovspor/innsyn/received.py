@@ -16,17 +16,24 @@ Scanned archive documents come as images (#691: Høyanger's ``Forskrift.TIF``,
 the text as sent to Norsk Lovtidend; Kragerø's boundary maps as JPEG). They
 are held by content like any other document, with no text read from them:
 the promotion extractor holds an image as an unsupported format.
+
+A linked HTML page a reader would see nothing in is refused before it is held
+(#721: Drammen's Digdem links all returned one JavaScript app shell, whose only
+text is the app's title and a ``noscript`` notice). The ledger is append-only,
+so a page with no document in it, once held, stays held.
 """
 
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
+from lxml import etree, html
 
 from lovspor.atomic_io import atomic_write_bytes
 from lovspor.errors import InnsynRefusedError
 from lovspor.innsyn.ledger import DocumentReceived, ReceivedMediaType, precheck, record_events
 from lovspor.innsyn.workspace import InnsynWorkspace
+from lovspor.observatory.listing import safe_html_parser
 from lovspor.sources.lovdata import DEFAULT_USER_AGENT
 
 MEDIA_TYPES: dict[str, ReceivedMediaType] = {
@@ -44,6 +51,11 @@ FORMATS = "PDF, HTML, DOCX, TIFF, JPEG, PNG"
 _BY_HEADER: dict[str, ReceivedMediaType] = {value: value for value in MEDIA_TYPES.values()}
 #: A Content-Type that says nothing about the document: the link's suffix is read instead.
 _GENERIC = frozenset({"", "application/octet-stream"})
+#: What a reader of a page never sees as its text: the head (the title names the
+#: site or the app), page code and styles, the notice for a browser without
+#: JavaScript, and templates not yet rendered.
+_UNSEEN = ("head", "script", "style", "noscript", "template")
+_HTML: ReceivedMediaType = "text/html"
 LINK_TIMEOUT_SECONDS = 60.0
 _HTTP_OK = 200
 
@@ -111,7 +123,25 @@ def fetch_document(client: httpx.Client, url: str) -> tuple[bytes, ReceivedMedia
         raise InnsynRefusedError(f"{url}: HTTP {response.status_code}")
     if not response.content:
         raise InnsynRefusedError(f"{url}: the document is empty")
-    return response.content, _link_media_type(url, response.headers.get("content-type", ""))
+    content_type = _link_media_type(url, response.headers.get("content-type", ""))
+    if content_type == _HTML and not html_text(response.content):
+        raise InnsynRefusedError(
+            f"{url}: the HTML page has no readable text (a page that needs JavaScript, such as "
+            "an app shell, holds no document); fetch the document itself another way and hold it "
+            "with record-received"
+        )
+    return response.content, content_type
+
+
+def html_text(payload: bytes) -> str:
+    """The text a reader of the page sees, whitespace collapsed; empty when there is none."""
+    try:
+        root = html.document_fromstring(payload, parser=safe_html_parser())
+    except etree.ParserError:
+        return ""
+    etree.strip_elements(root, *_UNSEEN, with_tail=False)
+    texts = (text for text in root.itertext() if isinstance(text, str))
+    return " ".join(" ".join(texts).split())
 
 
 def blob_path(workspace: InnsynWorkspace, sha256: str) -> Path:
