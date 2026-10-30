@@ -191,18 +191,18 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
         description=Localised(
             nb=(
                 "Én veiledning for alle klienter: Claude og ChatGPT med stegene vi har kjørt, "
-                "Claude Code, de klientene vi ikke har testet, tre spørsmål å begynne med og "
-                "hjelp når det ikke virker."
+                "Claude Code, VS Code, de klientene vi ikke har testet, tre spørsmål å begynne "
+                "med og hjelp når det ikke virker."
             ),
             en=(
                 "One guide for every client: Claude and ChatGPT with the steps we have run, "
-                "Claude Code, the clients we have not tested, three questions to start with "
-                "and help when it does not work."
+                "Claude Code, VS Code, the clients we have not tested, three questions to start "
+                "with and help when it does not work."
             ),
             pl=(
                 "Jedna instrukcja dla wszystkich klientów: Claude i ChatGPT z krokami, które "
-                "przeszliśmy, Claude Code, klienci, których nie sprawdziliśmy, trzy pytania na "
-                "start i pomoc, gdy coś nie działa."
+                "przeszliśmy, Claude Code, VS Code, klienci, których nie sprawdziliśmy, trzy "
+                "pytania na start i pomoc, gdy coś nie działa."
             ),
         ),
     ),
@@ -369,9 +369,10 @@ class ConnectClient(BaseModel):
         )
 
 
-# Claude Code keeps a section on /connect/, not a guide of its own, so its walk
-# is a date rather than a registry entry (#729).
+# Claude Code and VS Code keep a section on /connect/, not a guide of their own,
+# so each walk is a date rather than a registry entry (#729).
 CLAUDE_CODE_HOSTED_WALKED_ON = date(2026, 10, 30)  # docs/mcp.md "Connecting Claude Code"
+VSCODE_HOSTED_WALKED_ON = date(2026, 10, 30)  # docs/mcp.md "Connecting VS Code"
 
 CLIENT_REGISTRY: tuple[ConnectClient, ...] = (
     ConnectClient(

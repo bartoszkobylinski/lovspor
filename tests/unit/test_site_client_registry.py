@@ -59,6 +59,13 @@ def test_registry_adds_each_dated_code_fact_without_changing_existing_facts() ->
             field="CLAUDE_CODE_HOSTED_WALKED_ON",
             value="2026-10-30",
         ),
+        FactSource(
+            id="code.connect.vscode.walked_on",
+            kind="code",
+            artifact=REGISTRY_ARTIFACT,
+            field="VSCODE_HOSTED_WALKED_ON",
+            value="2026-10-30",
+        ),
     )
     assert tuple(source for source in sources if not source.id.startswith("code.connect.")) == (
         fact_registry(original).sources

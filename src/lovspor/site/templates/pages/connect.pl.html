@@ -8,6 +8,8 @@
       local copy .......... the Claude guide (connect-claude.*.html)
       hosted Claude Code .. docs/mcp.md "Connecting Claude Code" (the day is
                             CLAUDE_CODE_HOSTED_WALKED_ON, a ledgered fact)
+      VS Code ............. docs/mcp.md "Connecting VS Code" (the day is
+                            VSCODE_HOSTED_WALKED_ON, a ledgered fact)
       other clients ....... no procedure in this repository; named untested
       first questions ..... folketrygdloven § 8-18 (the guides' example) and
                             byggteknisk forskrift § 12-7, both read from the
@@ -34,6 +36,7 @@
     <li><a href="#claude">Claude</a></li>
     <li><a href="#chatgpt">ChatGPT</a></li>
     <li><a href="#claude-code">Claude Code</a></li>
+    <li><a href="#vscode">VS Code</a></li>
     <li><a href="#other">Inni klienci</a></li>
     <li><a href="#start">Na start</a></li>
     <li><a href="#help">Pomoc</a></li>
@@ -79,8 +82,19 @@ claude mcp add lovverk -- uvx lovspor mcp</pre>
 </ol>
 <p>Jeśli przeglądarka się nie otworzy, Claude Code pokaże link do skopiowania. Jeśli strona po <strong>Allow access</strong> pokaże błąd połączenia, wklej adres z przeglądarki tam, gdzie Claude Code o niego prosi. Jeśli masz już lokalną kopię, nadaj tej inną nazwę, na przykład <code>lovverk-hosted</code>.</p>
 
+<h2 id="vscode">VS Code</h2>
+<p class="tested">Przeszliśmy to w VS Code z usługą hostowaną {{ fact("code.connect.vscode.walked_on", kind="code") }}.</p>
+<ol class="steps">
+  <li>Naciśnij ⌘⇧P (Ctrl+Shift+P), uruchom <strong>MCP: Add Server</strong> i wybierz <strong>HTTP</strong>.</li>
+  <li>Wpisz adres <code class="copyable">https://lovspor.no/mcp</code> i identyfikator serwera <code>lovverk</code>.</li>
+  <li>Gdy VS Code zapyta, wybierz <strong>Allow</strong>, potem <strong>Open</strong>, żeby przejść do strony logowania.</li>
+  <li>Zaloguj się e-mailem albo przez Google i wybierz <strong>Allow access</strong>. Strona ostrzega, że przekierowanie prowadzi do niezweryfikowanej aplikacji na twoim komputerze; tą aplikacją jest VS Code.</li>
+  <li>Otwórz czat, użyj trybu <strong>Agent</strong> i zadaj pytanie. Gdy VS Code poprosi o uruchomienie narzędzia lovverk, zezwól.</li>
+</ol>
+<p>Sprawdź, czy odpowiedź pokazuje krok z narzędziem. Przy pierwszej próbie czat napisał, że lovverk wymaga logowania, po czym i tak odpowiedział bez wywołania lovverk, a odpowiedź wyglądała poprawnie. Jeśli zobaczysz ten komunikat, zaloguj się ponownie i zapytaj jeszcze raz.</p>
+
 <h2 id="other">Inni klienci</h2>
-<p><strong>Brak sprawdzonej procedury</strong> dla Cursor, VS Code i Codex. Nie przeszliśmy konfiguracji w tych klientach sami, więc nie wymyślamy kroków ani plików konfiguracyjnych.</p>
+<p><strong>Brak sprawdzonej procedury</strong> dla Cursor i Codex. Nie przeszliśmy konfiguracji w tych klientach sami, więc nie wymyślamy kroków ani plików konfiguracyjnych.</p>
 <p>Czego klient potrzebuje, żeby korzystać z usługi hostowanej:</p>
 <ul>
   <li>adresu <code class="copyable">https://lovspor.no/mcp</code>;</li>
