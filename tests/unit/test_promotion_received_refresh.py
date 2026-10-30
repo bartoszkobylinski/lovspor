@@ -34,6 +34,7 @@ from tests.unit.test_promotion_lovdata_validity import REPEALED_PRINT
 from tests.unit.test_promotion_migrate import _approve as approve_observed
 from tests.unit.test_promotion_migrate import _promoted_once
 from tests.unit.test_promotion_received_commands import (
+    FJALER,
     LOCAL,
     _approve,
     _innsyn,
@@ -592,3 +593,45 @@ def test_a_refresh_awaiting_reapproval_is_never_written(corpus: Path) -> None:
     with pytest.raises(PromotionRefusedError, match="another text or extractor"):
         write_refreshes(CorpusCheckout(corpus, []), [waiting])
     assert tree(corpus) == before
+
+
+class TestLateCaseNumber:
+    """A saksnummer recorded after publication fills the version's null (#720)."""
+
+    _NULL = "\ninnsyn_saksnummer: null\n"
+
+    def _record(self, workspace: Path, number: str = "2026/1347") -> None:
+        _innsyn(workspace, "record-case-number", "--request", FJALER, "--number", number)
+
+    def test_refresh_fills_a_null_case_number(
+        self, promoted: tuple[str, Path], corpus: Path, workspace: Path
+    ) -> None:
+        _, path = promoted
+        published = path.read_text(encoding="utf-8")
+        assert self._NULL in published
+        self._record(workspace)
+        result = _refresh(corpus)
+        assert result.exit_code == 0, result.output
+        filled = published.replace(self._NULL, '\ninnsyn_saksnummer: "2026/1347"\n')
+        assert path.read_text(encoding="utf-8") == filled
+
+    def test_refresh_never_changes_a_set_case_number(
+        self, promoted: tuple[str, Path], corpus: Path, workspace: Path
+    ) -> None:
+        _, path = promoted
+        _edit(path, self._NULL, '\ninnsyn_saksnummer: "2026/9999"\n')
+        self._record(workspace)
+        before = tree(corpus)
+        result = _refresh(corpus)
+        assert result.exit_code == 1, result.output
+        assert "would change innsyn_saksnummer;" in result.stderr
+        assert tree(corpus) == before
+
+    def test_refresh_never_empties_a_set_case_number(
+        self, promoted: tuple[str, Path], corpus: Path
+    ) -> None:
+        _, path = promoted
+        _edit(path, self._NULL, '\ninnsyn_saksnummer: "2026/9999"\n')
+        result = _refresh(corpus)
+        assert result.exit_code == 1, result.output
+        assert "would change innsyn_saksnummer;" in result.stderr

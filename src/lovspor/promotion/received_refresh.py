@@ -97,6 +97,10 @@ KEPT_KEYS: Final = frozenset(
         "language",
     }
 )
+#: Kept keys a refresh may fill when the version was published without them: a
+#: case number the authority gave after publication (#720). A set value never moves.
+FILLABLE_KEYS: Final = frozenset({"innsyn_saksnummer"})
+_NULL = json.dumps(None)
 _RECEIVED = json.dumps("received")
 
 
@@ -239,6 +243,7 @@ def refuse_beyond_front_matter(document: Published, markdown: str) -> None:
         raise PromotionRefusedError(msg)
     old, new = front_matter(document.markdown), front_matter(markdown)
     moved = sorted(key for key in KEPT_KEYS if old.get(key) != new.get(key))
+    moved = [key for key in moved if not (key in FILLABLE_KEYS and old.get(key) == _NULL)]
     if moved:
         msg = f"re-rendering would change {', '.join(moved)}; a refresh keeps the version as it is"
         raise PromotionRefusedError(msg)

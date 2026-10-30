@@ -1421,7 +1421,10 @@ uv run lovspor promote received refresh --corpus /absolute/path/to/lovverk
   `received_at`, the request, the source and its form stay as they are. A
   re-rendering whose body or any of those fields would change is refused
   (`Refused: <id>: …`, exit 1, the others still refreshed); a new text is
-  promoted with `local`.
+  promoted with `local`. One exception: a case number the authority gave
+  after publication (`innsyn record-case-number`) fills an
+  `innsyn_saksnummer: null`; a number already published is never changed or
+  emptied (#720).
 * It needs the same standing approval as `local`: the approval of exactly
   this text at the running extractor. A held, rejected or withdrawn document
   is refused. Read the `--dry-run` diff before approving again: when the
