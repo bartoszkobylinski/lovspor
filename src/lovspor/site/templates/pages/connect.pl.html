@@ -6,8 +6,8 @@
                             the hosted service; the day is CLIENT_REGISTRY's
                             walked_on, rendered as a ledgered fact)
       local copy .......... the Claude guide (connect-claude.*.html)
-      hosted Claude Code .. NOT run by us: shown as the generic command and
-                            marked not yet tested, until the owner walks it
+      hosted Claude Code .. docs/mcp.md "Connecting Claude Code" (the day is
+                            CLAUDE_CODE_HOSTED_WALKED_ON, a ledgered fact)
       other clients ....... no procedure in this repository; named untested
       first questions ..... folketrygdloven § 8-18 (the guides' example) and
                             byggteknisk forskrift § 12-7, both read from the
@@ -67,10 +67,17 @@
 <pre class="copyable">uvx lovspor fetch-corpus
 claude mcp add lovverk -- uvx lovspor mcp</pre>
 <p>Wszystkie narzędzia poza <code>semantic_search</code> czytają wtedy tylko pliki i git na twoim komputerze. Claude Desktop jako lokalna kopia: zobacz <a href="/pl/connect/claude/">instrukcję dla Claude</a>.</p>
-<h3 id="claude-code-hosted">Usługa hostowana <span class="tag" data-pending>jeszcze nie sprawdzone</span></h3>
-<p>Tego sami jeszcze nie przeszliśmy. Ogólne polecenie, które dodaje serwer MCP przez HTTP w Claude Code, to:</p>
+<h3 id="claude-code-hosted">Usługa hostowana</h3>
+<p class="tested">Przeszliśmy to w Claude Code z usługą hostowaną {{ fact("code.connect.claude-code.walked_on", kind="code") }}.</p>
+<p>Dodaj serwer:</p>
 <pre class="copyable">claude mcp add --transport http lovverk https://lovspor.no/mcp</pre>
-<p>Jak wygląda tam logowanie, jeszcze nie widzieliśmy. Jeśli zadziała — albo nie zadziała — napisz na <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, a trafi tu jako sprawdzony przepis.</p>
+<ol class="steps">
+  <li>Uruchom Claude Code w tym samym projekcie. W sesji wpisz <code>/mcp</code>, wybierz <code>lovverk</code>, potem <strong>Authenticate</strong>. Otworzy się przeglądarka.</li>
+  <li>Zaloguj się e-mailem albo przez Google.</li>
+  <li>Wybierz <strong>Allow access</strong>. Strona ostrzega, że przekierowanie prowadzi do niezweryfikowanej aplikacji na twoim komputerze; tą aplikacją jest Claude Code.</li>
+  <li>Strona pokaże <strong>Authentication successful</strong>. Po powrocie do sesji narzędzia odpowiadają.</li>
+</ol>
+<p>Jeśli przeglądarka się nie otworzy, Claude Code pokaże link do skopiowania. Jeśli strona po <strong>Allow access</strong> pokaże błąd połączenia, wklej adres z przeglądarki tam, gdzie Claude Code o niego prosi. Jeśli masz już lokalną kopię, nadaj tej inną nazwę, na przykład <code>lovverk-hosted</code>.</p>
 
 <h2 id="other">Inni klienci</h2>
 <p><strong>Brak sprawdzonej procedury</strong> dla Cursor, VS Code i Codex. Nie przeszliśmy konfiguracji w tych klientach sami, więc nie wymyślamy kroków ani plików konfiguracyjnych.</p>

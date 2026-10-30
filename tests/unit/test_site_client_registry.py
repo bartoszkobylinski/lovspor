@@ -1,10 +1,12 @@
 """The registry artifact behind the connect guide's dated claims (#648)."""
 
 import hashlib
+from datetime import date
 from pathlib import Path
 
 import pytest
 
+from lovspor.site import routes
 from lovspor.site.build import _registry_bytes
 from lovspor.site.errors import SiteBuildError
 from lovspor.site.facts import FactSource
@@ -39,18 +41,53 @@ def test_registry_adds_each_dated_code_fact_without_changing_existing_facts() ->
     artifacts = original.model_copy(update={"registry_bytes": b"registry"})
     sources = fact_registry(artifacts).sources
 
-    assert tuple(source for source in sources if source.id.startswith("code.connect.")) == tuple(
+    assert tuple(source for source in sources if source.id.startswith("code.connect.")) == (
+        *(
+            FactSource(
+                id=f"code.connect.{slug}.walked_on",
+                kind="code",
+                artifact=REGISTRY_ARTIFACT,
+                field=f"CLIENT_REGISTRY.{slug}.walked_on",
+                value="2026-09-30",
+            )
+            for slug in ("claude", "chatgpt")
+        ),
         FactSource(
-            id=f"code.connect.{slug}.walked_on",
+            id="code.connect.claude-code.walked_on",
             kind="code",
             artifact=REGISTRY_ARTIFACT,
-            field=f"CLIENT_REGISTRY.{slug}.walked_on",
-            value="2026-09-30",
-        )
-        for slug in ("claude", "chatgpt")
+            field="CLAUDE_CODE_HOSTED_WALKED_ON",
+            value="2026-10-30",
+        ),
     )
     assert tuple(source for source in sources if not source.id.startswith("code.connect.")) == (
         fact_registry(original).sources
+    )
+
+
+@pytest.mark.parametrize("walked_on", [date(2024, 2, 29), date(2027, 1, 2)])
+def test_claude_code_fact_follows_its_own_walk_date(
+    monkeypatch: pytest.MonkeyPatch, walked_on: date
+) -> None:
+    """#729 binds this section's date to its constant, outside CLIENT_REGISTRY."""
+    artifacts = _artifacts().model_copy(update={"registry_bytes": b"registry"})
+    original = fact_registry(artifacts).sources
+    monkeypatch.setattr(routes, "CLAUDE_CODE_HOSTED_WALKED_ON", walked_on)
+
+    sources = fact_registry(artifacts).sources
+    fact_id = "code.connect.claude-code.walked_on"
+
+    assert tuple(source for source in sources if source.id == fact_id) == (
+        FactSource(
+            id="code.connect.claude-code.walked_on",
+            kind="code",
+            artifact=REGISTRY_ARTIFACT,
+            field="CLAUDE_CODE_HOSTED_WALKED_ON",
+            value=walked_on.isoformat(),
+        ),
+    )
+    assert tuple(source for source in sources if source.id != fact_id) == (
+        tuple(source for source in original if source.id != fact_id)
     )
 
 

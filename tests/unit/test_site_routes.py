@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site import routes as routes_module
 from lovspor.site.routes import (
+    CLAUDE_CODE_HOSTED_WALKED_ON,
     CLIENT_REGISTRY,
     SITE_ROUTES,
     ConnectClient,
@@ -121,6 +122,12 @@ class TestSiteRoutes:
             "claude": date(2026, 9, 30),
             "chatgpt": date(2026, 9, 30),
         }
+
+    def test_the_claude_code_walk_date_is_the_one_docs_record(self) -> None:
+        mcp = (Path(__file__).resolve().parents[2] / "docs" / "mcp.md").read_text("utf-8")
+
+        assert "verified against the hosted instance on 2026-10-30, #729" in mcp
+        assert date(2026, 10, 30) == CLAUDE_CODE_HOSTED_WALKED_ON
 
     def test_a_client_without_a_walk_date_is_refused(self) -> None:
         copy = Localised(nb="t", en="t", pl="t")
