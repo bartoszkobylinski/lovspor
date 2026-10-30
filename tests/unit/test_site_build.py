@@ -951,6 +951,46 @@ class TestConnectPage:
         assert "data-pending" not in section
         assert section.rsplit("</ol>", 1)[1].count("lovverk") >= 2
 
+    @pytest.mark.parametrize(
+        ("path", "tool_check", "unreached", "retry"),
+        [
+            (
+                "/connect/",
+                "Sjekk at svaret viser et verktøysteg.",
+                "svarte likevel uten å kalle lovverk",
+                "logg inn på nytt og spør igjen",
+            ),
+            (
+                "/en/connect/",
+                "Check that the answer shows a tool step.",
+                "answered anyway, without calling lovverk",
+                "sign in again and ask again",
+            ),
+            (
+                "/pl/connect/",
+                "Sprawdź, czy odpowiedź pokazuje krok z narzędziem.",
+                "odpowiedział bez wywołania lovverk",
+                "zaloguj się ponownie i zapytaj jeszcze raz",
+            ),
+        ],
+    )
+    def test_vscode_warns_about_answers_without_tool_calls_and_gives_recovery(
+        self,
+        built: tuple[Path, SiteBuildReport],
+        path: str,
+        tool_check: str,
+        unreached: str,
+        retry: str,
+    ) -> None:
+        """docs/mcp.md records a plausible answer despite no CallToolRequest (#729)."""
+        markup = _page(built[0], path)
+        warning = _section(markup, "vscode").split("</ol>", 1)[1]
+
+        assert tool_check in warning
+        assert unreached in warning
+        assert retry in warning
+        assert "VS Code" not in _section(markup, "other")
+
     @pytest.mark.parametrize("path", _CHOOSERS)
     def test_offers_no_one_click_link_and_no_client_config_it_has_not_run(
         self, built: tuple[Path, SiteBuildReport], path: str
