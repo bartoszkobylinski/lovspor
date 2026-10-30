@@ -6,8 +6,8 @@
                             the hosted service; the day is CLIENT_REGISTRY's
                             walked_on, rendered as a ledgered fact)
       local copy .......... the Claude guide (connect-claude.*.html)
-      hosted Claude Code .. NOT run by us: shown as the generic command and
-                            marked not yet tested, until the owner walks it
+      hosted Claude Code .. docs/mcp.md "Connecting Claude Code" (the day is
+                            CLAUDE_CODE_HOSTED_WALKED_ON, a ledgered fact)
       other clients ....... no procedure in this repository; named untested
       first questions ..... folketrygdloven § 8-18 (the guides' example) and
                             byggteknisk forskrift § 12-7, both read from the
@@ -67,10 +67,17 @@
 <pre class="copyable">uvx lovspor fetch-corpus
 claude mcp add lovverk -- uvx lovspor mcp</pre>
 <p>Alle verktøyene unntatt <code>semantic_search</code> leser da bare filer og git på din egen maskin. Claude Desktop som lokal kopi: se <a href="/connect/claude/">veiledningen for Claude</a>.</p>
-<h3 id="claude-code-hosted">Den driftede tjenesten <span class="tag" data-pending>ikke testet ennå</span></h3>
-<p>Dette har vi ikke kjørt selv. Den generelle kommandoen for å legge til en MCP-server over HTTP i Claude Code er:</p>
+<h3 id="claude-code-hosted">Den driftede tjenesten</h3>
+<p class="tested">Kjørt i Claude Code mot den driftede tjenesten {{ fact("code.connect.claude-code.walked_on", kind="code") }}.</p>
+<p>Legg til serveren:</p>
 <pre class="copyable">claude mcp add --transport http lovverk https://lovspor.no/mcp</pre>
-<p>Hvordan innloggingen ser ut der, har vi ikke sett. Virker det — eller virker det ikke — så si fra på <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, så blir det en testet oppskrift her.</p>
+<ol class="steps">
+  <li>Start en Claude Code-økt og be den logge inn på <code>lovverk</code>. Du får en lenke.</li>
+  <li>Åpne lenken og logg inn med e-post eller Google.</li>
+  <li>Velg <strong>Allow access</strong>. Siden advarer om at omdirigeringen peker til et ubekreftet program på maskinen din; det programmet er Claude Code.</li>
+  <li>Siden sier <strong>Authentication successful</strong>. Tilbake i økten svarer verktøyene.</li>
+</ol>
+<p>Åpne lenken med en gang. En lenke vi åpnet to minutter senere endte på en side som sa at localhost nektet tilkobling, og en ny lenke åpnet med en gang virket. Har du allerede den lokale kopien, gi denne et annet navn, for eksempel <code>lovverk-hosted</code>.</p>
 
 <h2 id="other">Andre klienter</h2>
 <p><strong>Ingen testet framgangsmåte</strong> for Cursor, VS Code og Codex. Vi har ikke kjørt oppsettet i disse klientene selv, og da dikter vi ikke opp stegene eller oppsettsfilene.</p>

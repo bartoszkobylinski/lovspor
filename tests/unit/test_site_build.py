@@ -852,6 +852,7 @@ _QUESTION = "«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiv
 
 _CONNECT_SECTIONS = ("claude", "chatgpt", "claude-code", "other", "start", "help")
 _WALKED = {"claude": "2026-09-30", "chatgpt": "2026-09-30"}
+_CLAUDE_CODE_WALK = "CLAUDE_CODE_HOSTED_WALKED_ON"
 
 
 def _section(markup: str, anchor: str) -> str:
@@ -923,13 +924,16 @@ class TestConnectPage:
         assert artifacts["src/lovspor/site/routes.py"] == _sha(routes.read_bytes())
 
     @pytest.mark.parametrize("path", _CHOOSERS)
-    def test_the_hosted_claude_code_command_is_marked_not_yet_tested(
+    def test_the_hosted_claude_code_section_carries_its_steps_and_walk_date(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
         section = _section(_page(built[0], path), "claude-code")
         hosted = section.split('<h3 id="claude-code-hosted">', 1)[1]
+        steps = hosted.split('<ol class="steps">', 1)[1].split("</ol>", 1)[0]
 
-        assert '<span class="tag" data-pending>' in hosted.split("</h3>", 1)[0]
+        assert "data-pending" not in hosted
+        assert _fact_values(hosted, "code.connect.claude-code.walked_on") == ["2026-10-30"]
+        assert "Authentication successful" in steps and steps.count("<li>") == 4
         assert "claude mcp add --transport http lovverk https://lovspor.no/mcp" in hosted
         assert "claude mcp add lovverk -- uvx lovspor mcp" in section
 
@@ -1964,7 +1968,7 @@ class TestSiteFacts:
             elif entry["artifact"].startswith("benchmarks/"):
                 assert entry["artifact"] in _publication_files(), entry
             elif entry["artifact"] == _REGISTRY:
-                assert entry["field"].startswith("CLIENT_REGISTRY."), entry
+                assert entry["field"].startswith(("CLIENT_REGISTRY.", _CLAUDE_CODE_WALK)), entry
             else:
                 assert entry["artifact"] == f"tool-surface@{world.lovspor_commit}", entry
 
@@ -2048,10 +2052,21 @@ def _resolve_checkout_file(artifact: str, field: str, checkout: Path) -> object:
     return _resolve_benchmark(artifact, field, checkout)
 
 
+def _assigned_date(tree: ast.Module, name: str) -> str:
+    """The ``date(...)`` a module-level constant is assigned, read from its source."""
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == name:
+            assert isinstance(node.value, ast.Call)
+            return date(*(ast.literal_eval(arg) for arg in node.value.args)).isoformat()
+    raise AssertionError(f"no {name} in the registry")
+
+
 def _resolve_registry(field: str, checkout: Path) -> str:
     """A walk date read back from the checkout's registry source, not from the import."""
-    _, slug, name = field.split(".")
     tree = ast.parse((checkout / _REGISTRY).read_text(encoding="utf-8"))
+    if field == _CLAUDE_CODE_WALK:
+        return _assigned_date(tree, field)
+    _, slug, name = field.split(".")
     for call in ast.walk(tree):
         if not (isinstance(call, ast.Call) and getattr(call.func, "id", "") == "ConnectClient"):
             continue

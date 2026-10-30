@@ -6,8 +6,8 @@
                             the hosted service; the day is CLIENT_REGISTRY's
                             walked_on, rendered as a ledgered fact)
       local copy .......... the Claude guide (connect-claude.*.html)
-      hosted Claude Code .. NOT run by us: shown as the generic command and
-                            marked not yet tested, until the owner walks it
+      hosted Claude Code .. docs/mcp.md "Connecting Claude Code" (the day is
+                            CLAUDE_CODE_HOSTED_WALKED_ON, a ledgered fact)
       other clients ....... no procedure in this repository; named untested
       first questions ..... folketrygdloven § 8-18 (the guides' example) and
                             byggteknisk forskrift § 12-7, both read from the
@@ -67,10 +67,17 @@
 <pre class="copyable">uvx lovspor fetch-corpus
 claude mcp add lovverk -- uvx lovspor mcp</pre>
 <p>Every tool except <code>semantic_search</code> then reads only files and git on your own machine. Claude Desktop as a local copy: see <a href="/en/connect/claude/">the Claude guide</a>.</p>
-<h3 id="claude-code-hosted">The hosted service <span class="tag" data-pending>not yet tested</span></h3>
-<p>We have not run this ourselves. The generic command to add an MCP server over HTTP in Claude Code is:</p>
+<h3 id="claude-code-hosted">The hosted service</h3>
+<p class="tested">Run in Claude Code against the hosted service on {{ fact("code.connect.claude-code.walked_on", kind="code") }}.</p>
+<p>Add the server:</p>
 <pre class="copyable">claude mcp add --transport http lovverk https://lovspor.no/mcp</pre>
-<p>What signing in looks like there, we have not seen. If it works — or if it does not — tell us at <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, and it becomes a tested recipe here.</p>
+<ol class="steps">
+  <li>Start a Claude Code session and ask it to sign in to <code>lovverk</code>. It gives you a link.</li>
+  <li>Open the link and sign in with email or Google.</li>
+  <li>Choose <strong>Allow access</strong>. The page warns that the redirect points to an unverified application on your machine; that application is Claude Code.</li>
+  <li>The page says <strong>Authentication successful</strong>. Back in the session, the tools answer.</li>
+</ol>
+<p>Open the link straight away. A link we opened two minutes later ended in a page saying localhost refused to connect, and a new link opened at once worked. If you already have the local copy, give this one another name, such as <code>lovverk-hosted</code>.</p>
 
 <h2 id="other">Other clients</h2>
 <p><strong>No tested procedure</strong> for Cursor, VS Code and Codex. We have not run the setup in these clients ourselves, so we do not make up the steps or the configuration files.</p>

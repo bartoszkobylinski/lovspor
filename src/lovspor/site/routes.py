@@ -369,6 +369,10 @@ class ConnectClient(BaseModel):
         )
 
 
+# Claude Code keeps a section on /connect/, not a guide of its own, so its walk
+# is a date rather than a registry entry (#729).
+CLAUDE_CODE_HOSTED_WALKED_ON = date(2026, 10, 30)  # docs/mcp.md "Connecting Claude Code"
+
 CLIENT_REGISTRY: tuple[ConnectClient, ...] = (
     ConnectClient(
         slug="claude",

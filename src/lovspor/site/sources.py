@@ -19,6 +19,7 @@ rendering a previous value, a blank or a zero.
 """
 
 import hashlib
+from datetime import date
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -256,19 +257,29 @@ def _transport_facts(record: TransportRecord) -> tuple[FactSource, ...]:
     )
 
 
+def _walk_fact(slug: str, field: str, walked_on: date) -> FactSource:
+    """One day a connect procedure was run, bound to the registry source."""
+    return FactSource(
+        id=f"code.connect.{slug}.walked_on",
+        kind="code",
+        artifact=REGISTRY_ARTIFACT,
+        field=field,
+        value=walked_on.isoformat(),
+    )
+
+
 def _client_facts(artifacts: BuildArtifacts) -> tuple[FactSource, ...]:
     """The day each registered client's procedure was run (#648); none without the registry."""
     if artifacts.registry_bytes is None:
         return ()
-    return tuple(
-        FactSource(
-            id=f"code.connect.{client.slug}.walked_on",
-            kind="code",
-            artifact=REGISTRY_ARTIFACT,
-            field=f"CLIENT_REGISTRY.{client.slug}.walked_on",
-            value=client.walked_on.isoformat(),
-        )
-        for client in routes.CLIENT_REGISTRY
+    return (
+        *(
+            _walk_fact(client.slug, f"CLIENT_REGISTRY.{client.slug}.walked_on", client.walked_on)
+            for client in routes.CLIENT_REGISTRY
+        ),
+        _walk_fact(
+            "claude-code", "CLAUDE_CODE_HOSTED_WALKED_ON", routes.CLAUDE_CODE_HOSTED_WALKED_ON
+        ),
     )
 
 

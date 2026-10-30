@@ -39,15 +39,24 @@ def test_registry_adds_each_dated_code_fact_without_changing_existing_facts() ->
     artifacts = original.model_copy(update={"registry_bytes": b"registry"})
     sources = fact_registry(artifacts).sources
 
-    assert tuple(source for source in sources if source.id.startswith("code.connect.")) == tuple(
+    assert tuple(source for source in sources if source.id.startswith("code.connect.")) == (
+        *(
+            FactSource(
+                id=f"code.connect.{slug}.walked_on",
+                kind="code",
+                artifact=REGISTRY_ARTIFACT,
+                field=f"CLIENT_REGISTRY.{slug}.walked_on",
+                value="2026-09-30",
+            )
+            for slug in ("claude", "chatgpt")
+        ),
         FactSource(
-            id=f"code.connect.{slug}.walked_on",
+            id="code.connect.claude-code.walked_on",
             kind="code",
             artifact=REGISTRY_ARTIFACT,
-            field=f"CLIENT_REGISTRY.{slug}.walked_on",
-            value="2026-09-30",
-        )
-        for slug in ("claude", "chatgpt")
+            field="CLAUDE_CODE_HOSTED_WALKED_ON",
+            value="2026-10-30",
+        ),
     )
     assert tuple(source for source in sources if not source.id.startswith("code.connect.")) == (
         fact_registry(original).sources
