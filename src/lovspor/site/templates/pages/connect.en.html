@@ -72,12 +72,12 @@ claude mcp add lovverk -- uvx lovspor mcp</pre>
 <p>Add the server:</p>
 <pre class="copyable">claude mcp add --transport http lovverk https://lovspor.no/mcp</pre>
 <ol class="steps">
-  <li>Start a Claude Code session and ask it to sign in to <code>lovverk</code>. It gives you a link.</li>
-  <li>Open the link and sign in with email or Google.</li>
+  <li>Start Claude Code in the same project. In the session, type <code>/mcp</code>, choose <code>lovverk</code>, then <strong>Authenticate</strong>. The browser opens.</li>
+  <li>Sign in with email or Google.</li>
   <li>Choose <strong>Allow access</strong>. The page warns that the redirect points to an unverified application on your machine; that application is Claude Code.</li>
   <li>The page says <strong>Authentication successful</strong>. Back in the session, the tools answer.</li>
 </ol>
-<p>Open the link straight away. A link we opened two minutes later ended in a page saying localhost refused to connect, and a new link opened at once worked. If you already have the local copy, give this one another name, such as <code>lovverk-hosted</code>.</p>
+<p>If the browser does not open, Claude Code shows the link to copy. If the page after <strong>Allow access</strong> shows a connection error, paste the address from the browser where Claude Code asks for it. If you already have the local copy, give this one another name, such as <code>lovverk-hosted</code>.</p>
 
 <h2 id="other">Other clients</h2>
 <p><strong>No tested procedure</strong> for Cursor, VS Code and Codex. We have not run the setup in these clients ourselves, so we do not make up the steps or the configuration files.</p>

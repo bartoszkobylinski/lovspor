@@ -933,7 +933,8 @@ class TestConnectPage:
 
         assert "data-pending" not in hosted
         assert _fact_values(hosted, "code.connect.claude-code.walked_on") == ["2026-10-30"]
-        assert "Authentication successful" in steps and steps.count("<li>") == 4
+        assert "<code>/mcp</code>" in steps and "Authentication successful" in steps
+        assert steps.count("<li>") == 4
         assert "claude mcp add --transport http lovverk https://lovspor.no/mcp" in hosted
         assert "claude mcp add lovverk -- uvx lovspor mcp" in section
 
