@@ -1,25 +1,103 @@
-{#- /pl/connect/ (ADR-0014 Decision 2), the Polish twin of connect.nb.html —
-    a full translation, not a summary. The same rule holds: a client
-    without a procedure in this repository is named as untested rather
-    than given invented steps, and every identifier carrying a digit is
-    marked. Access to the hosted service is through a connector with OAuth
-    sign-in only (owner decision 2026-10-07). -#}
+{#- /connect/ (ADR-0014 Decision 2; #648, owner request 2026-10-20): one
+    guide for every client — jump links, a section per client, three first
+    questions, help. Every step is sourced, and nothing past the sources is
+    written:
+      claude.ai, ChatGPT .. docs/mcp.md "Connecting a chat app" (run against
+                            the hosted service; the day is CLIENT_REGISTRY's
+                            walked_on, rendered as a ledgered fact)
+      local copy .......... the Claude guide (connect-claude.*.html)
+      hosted Claude Code .. NOT run by us: shown as the generic command and
+                            marked not yet tested, until the owner walks it
+      other clients ....... no procedure in this repository; named untested
+      first questions ..... folketrygdloven § 8-18 (the guides' example) and
+                            byggteknisk forskrift § 12-7, both read from the
+                            corpus on 2026-10-29; the history question names
+                            the tool, not an answer
+      help ................ the guides' troubleshooting
+    The site runs no script (ADR:2409-2411), so there is no copy button: an
+    address or command selects whole on one click (.copyable). No plan or
+    tier is named, no menu path the sources do not state, and no one-click
+    link: none has been run. No number is typed here; every identifier that
+    carries a digit is marked. -#}
 {% extends "_base.html" %}
 {% block main %}
 {{ badge(status) }}
 <h1>{{ title }}</h1>
 <p class="lede">{{ description }}</p>
 
-<p>lovverk to serwer <a href="https://modelcontextprotocol.io">MCP</a>. Usługa hostowana działa pod adresem <code>https://lovspor.no/mcp</code>: dodajesz ją jako konektor w swoim narzędziu AI i logujesz się przez <span data-literal>OAuth 2.1</span>. Nie musisz niczego wklejać i nic nie płacisz.</p>
+<p>lovverk to serwer <a href="https://modelcontextprotocol.io">MCP</a>, dzięki któremu twoje narzędzie AI może sprawdzać norweskie ustawy (<em lang="nb">lover</em>) i rozporządzenia (<em lang="nb">forskrifter</em>). Usługa hostowana ma jeden adres:</p>
+<p class="address"><code class="copyable">https://lovspor.no/mcp</code></p>
+<p class="muted">Jedno kliknięcie zaznacza cały adres albo całe polecenie; skopiuj je przez Ctrl+C (⌘C na Macu). Logujesz się w kliencie, poza adresem nie ma nic do wklejania i nic nie płacisz.</p>
 
-<h2>Wybierz klienta</h2>
-<ul class="choices">
-  <li><a href="/pl/connect/claude/">Claude</a><p>claude.ai jako konektor z logowaniem oraz lokalna kopia w Claude Code i Claude Desktop.</p></li>
-  <li><a href="/pl/connect/chatgpt/">ChatGPT</a><p>Jako konektor z logowaniem, w trybie dewelopera.</p></li>
+<nav class="jump" aria-label="Na tej stronie">
+  <ul>
+    <li><a href="#claude">Claude</a></li>
+    <li><a href="#chatgpt">ChatGPT</a></li>
+    <li><a href="#claude-code">Claude Code</a></li>
+    <li><a href="#other">Inni klienci</a></li>
+    <li><a href="#start">Na start</a></li>
+    <li><a href="#help">Pomoc</a></li>
+  </ul>
+</nav>
+
+<h2 id="claude">Claude</h2>
+<p class="tested">Przeszliśmy to w claude.ai z usługą hostowaną {{ fact("code.connect.claude.walked_on", kind="code") }}.</p>
+<ol class="steps">
+  <li>Dodaj własny konektor (<span lang="en">custom connector</span>).</li>
+  <li>Podaj adres <code class="copyable">https://lovspor.no/mcp</code>.</li>
+  <li>Wybierz <strong lang="en">Sign in now</strong>.</li>
+  <li>Przy rejestracji klienta wybierz <strong lang="en">Register automatically</strong>.</li>
+  <li>Zaloguj się na stronie, która się otworzy. Gdy wrócisz do rozmowy, narzędzia zaczną odpowiadać.</li>
+</ol>
+<p>W Claude Desktop liczą się te same wybory, ale kroki przeszliśmy tylko w claude.ai. Logowanie i rozwiązywanie problemów opisuje <a href="/pl/connect/claude/">pełna instrukcja dla Claude</a>.</p>
+
+<h2 id="chatgpt">ChatGPT</h2>
+<p class="tested">Przeszliśmy to w ChatGPT z usługą hostowaną {{ fact("code.connect.chatgpt.walked_on", kind="code") }}.</p>
+<ol class="steps">
+  <li>Włącz w ChatGPT <strong>tryb dewelopera</strong> (<span lang="en">developer mode</span>).</li>
+  <li>Utwórz konektor z adresem <code class="copyable">https://lovspor.no/mcp</code>.</li>
+  <li>Jako uwierzytelnianie wybierz <strong>OAuth</strong>.</li>
+  <li>Zaloguj się na stronie, która się otworzy. Gdy wrócisz do rozmowy, narzędzia zaczną odpowiadać.</li>
+</ol>
+<p>Nie sprawdziliśmy, które subskrypcje ChatGPT mają tryb dewelopera, więc tego tu nie piszemy. Logowanie i rozwiązywanie problemów opisuje <a href="/pl/connect/chatgpt/">pełna instrukcja dla ChatGPT</a>.</p>
+
+<h2 id="claude-code">Claude Code</h2>
+<h3 id="claude-code-local">Lokalna kopia, bez konta</h3>
+<p>Serwer pobiera korpus na twój komputer i rozmawia z Claude Code przez stdio:</p>
+<pre class="copyable">uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+<p>Wszystkie narzędzia poza <code>semantic_search</code> czytają wtedy tylko pliki i git na twoim komputerze. Claude Desktop jako lokalna kopia: zobacz <a href="/pl/connect/claude/">instrukcję dla Claude</a>.</p>
+<h3 id="claude-code-hosted">Usługa hostowana <span class="tag" data-pending>jeszcze nie sprawdzone</span></h3>
+<p>Tego sami jeszcze nie przeszliśmy. Ogólne polecenie, które dodaje serwer MCP przez HTTP w Claude Code, to:</p>
+<pre class="copyable">claude mcp add --transport http lovverk https://lovspor.no/mcp</pre>
+<p>Jak wygląda tam logowanie, jeszcze nie widzieliśmy. Jeśli zadziała — albo nie zadziała — napisz na <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, a trafi tu jako sprawdzony przepis.</p>
+
+<h2 id="other">Inni klienci</h2>
+<p><strong>Brak sprawdzonej procedury</strong> dla Cursor, VS Code i Codex. Nie przeszliśmy konfiguracji w tych klientach sami, więc nie wymyślamy kroków ani plików konfiguracyjnych.</p>
+<p>Czego klient potrzebuje, żeby korzystać z usługi hostowanej:</p>
+<ul>
+  <li>adresu <code class="copyable">https://lovspor.no/mcp</code>;</li>
+  <li>transportu <span lang="en">Streamable HTTP</span>;</li>
+  <li>logowania przez <span data-literal>OAuth</span>, które klient uruchamia sam.</li>
 </ul>
+<p>Gdzie to się wpisuje, zależy od klienta. Jeśli twój klient nie obsługuje logowania, możesz uruchomić serwer sam, jak w <a href="#claude-code-local">lokalnej kopii</a> wyżej.</p>
 
-<h2>Inni klienci</h2>
-<p><strong>Brak sprawdzonej procedury</strong> dla Cursor i Codex. Nie przeszliśmy konfiguracji w tych klientach sami, więc nie wymyślamy kroków.</p>
-<p>Użyj klienta, który obsługuje konektor z logowaniem przez <span data-literal>OAuth</span>, albo uruchom serwer sam, jak w <a href="/pl/connect/claude/">instrukcji dla Claude</a>. Jeśli uda ci się podłączyć któregoś z tych klientów do usługi hostowanej — albo się nie uda — napisz na <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>, a opis może się tu pojawić jako sprawdzona instrukcja, podpisana twoim nazwiskiem.</p>
-<p class="muted">Na co odpowiadają narzędzia, opisuje <a href="/pl/docs/">dokumentacja</a>; stan przy ostatnim wydaniu podaje strona <a href="/pl/status/">status</a>. Silnik jest otwartym oprogramowaniem na licencji <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+<h2 id="start">Na start</h2>
+<p>Trzy pytania, które sprawdzają narzędzia. Zadaj je w nowej rozmowie; korpus jest po norwesku, więc pytaj po norwesku.</p>
+<p class="panel"><strong lang="nb">«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»</strong> (Jak długo muszę pracować, żeby dostać zasiłek chorobowy od pracodawcy?)</p>
+<p>Odpowiedź powinna opierać się na <a href="/lov/folketrygdloven-ftrl/paragraf/8-18/"><span data-literal>folketrygdloven § 8-18</span></a> (ustawa o ubezpieczeniu społecznym) i cytować ten przepis. Potem zapytaj o <span data-literal>folketrygdloven § 8-99</span> — narzędzie powinno odpowiedzieć, że taki przepis nie istnieje.</p>
+<p class="panel"><strong lang="nb">«Hvor høyt må taket være i et rom for varig opphold i en bolig?»</strong> (Jak wysoki musi być sufit w pomieszczeniu mieszkalnym?)</p>
+<p>Odpowiedź powinna opierać się na <a href="/forskrift/byggteknisk-forskrift-tek17/paragraf/12-7/"><span data-literal>byggteknisk forskrift (TEK17) § 12-7</span></a> — to rozporządzenie, a nie ustawa.</p>
+<p class="panel"><strong lang="nb">«Når ble arbeidsmiljøloven sist endret, og hva ble endret?»</strong> (Kiedy ostatnio zmieniono ustawę arbeidsmiljøloven i co się zmieniło?)</p>
+<p>Odpowiedź powinna opierać się na historii zmian w korpusie, a nie na pamięci modelu.</p>
+
+<h2 id="help">Pomoc</h2>
+<ul>
+  <li><strong>Model nie korzysta z lovverk.</strong> Poproś o to wprost: „Sprawdź w lovverk …”. Model sam decyduje, kiedy wywołać narzędzie.</li>
+  <li><strong><span lang="en">Authorization failed</span> po zalogowaniu.</strong> Wtedy błąd leży w konfiguracji po naszej stronie, nie po twojej. Napisz na <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</li>
+  <li><strong>Etykieta się przesunęła.</strong> Etykiety w klientach zmieniają się częściej niż ta strona. Liczą się adres i <span data-literal>OAuth</span> jako sposób logowania.</li>
+  <li><strong>Narzędzia nie odpowiadają.</strong> Stan przy ostatnim wydaniu podaje strona <a href="/pl/status/">status</a>. Usługa zawsze wymaga logowania, więc wywołanie bez niego jest odrzucane.</li>
+  <li><strong>Na co odpowiadają narzędzia?</strong> Zobacz <a href="/pl/docs/">dokumentację</a>.</li>
+</ul>
+<p class="muted">Silnik jest otwartym oprogramowaniem na licencji <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>. Pytania: <a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>.</p>
 {% endblock %}

@@ -12,6 +12,7 @@ import html.parser
 import json
 import re
 import shutil
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -69,6 +70,7 @@ from tests.unit.site_fixtures import (
 )
 
 _REPO = Path(__file__).resolve().parents[2]
+_REGISTRY = "src/lovspor/site/routes.py"
 # The hand-written pages the site generator replaced, kept as fixtures when
 # `deploy/digitalocean/site/` was retired in the first-migration PR: these
 # comparisons are the ADR-0014 guarantee that the migration changed no copy.
@@ -848,52 +850,164 @@ _GUIDES = (*_CLAUDE, *_CHATGPT)
 _QUESTION = "«Hvor lenge må jeg ha jobbet for å få sykepenger fra arbeidsgiveren?»"
 
 
+_CONNECT_SECTIONS = ("claude", "chatgpt", "claude-code", "other", "start", "help")
+_WALKED = {"claude": "2026-09-30", "chatgpt": "2026-09-30"}
+
+
+def _section(markup: str, anchor: str) -> str:
+    """The markup from ``<h2 id="anchor">`` up to the next ``<h2``."""
+    return markup.split(f'<h2 id="{anchor}">', 1)[1].split("<h2", 1)[0]
+
+
 class TestConnectPage:
-    """/connect/ is a short chooser since the owner's 2026-10-10 split: one
-    link per registered client, and the clients without a procedure in this
-    repository named as untested — never given a plausible-looking recipe."""
+    """/connect/ is one guide for every client (#648, owner request 2026-10-20):
+    jump links, a section per client, three first questions and help. A
+    section ships steps only for a procedure this repository records as run
+    against the hosted service, and names when it was run; every other path
+    is marked as not yet tested and offers no one-click link."""
 
     @pytest.mark.parametrize("path", _CHOOSERS)
-    def test_links_one_guide_per_registered_client_in_the_page_language(
+    def test_carries_one_section_per_client_and_jump_links_to_each(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        markup = _page(built[0], path)
+        jump = markup.split('<nav class="jump"', 1)[1].split("</nav>", 1)[0]
+
+        for anchor in _CONNECT_SECTIONS:
+            assert f'<h2 id="{anchor}">' in markup, (path, anchor)
+            assert f'href="#{anchor}"' in jump, (path, anchor)
+        assert markup.count("<h2") == len(_CONNECT_SECTIONS)
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_links_the_full_guide_of_each_registered_client(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
         markup = _page(built[0], path)
         prefix = path.removesuffix("connect/")
 
-        assert '<ul class="choices">' in markup
         for slug in ("claude", "chatgpt"):
-            assert f'href="{prefix}connect/{slug}/"' in markup, (path, slug)
-        assert "https://lovspor.no/mcp" in markup
+            assert f'href="{prefix}connect/{slug}/"' in _section(markup, slug), (path, slug)
 
     @pytest.mark.parametrize("path", _CHOOSERS)
-    def test_is_short_and_leaves_the_steps_to_the_guides(
+    @pytest.mark.parametrize("slug", ["claude", "chatgpt"])
+    def test_a_tested_section_carries_its_steps_and_its_walk_date_as_a_fact(
+        self, built: tuple[Path, SiteBuildReport], path: str, slug: str
+    ) -> None:
+        section = _section(_page(built[0], path), slug)
+        steps = section.split('<ol class="steps">', 1)[1].split("</ol>", 1)[0]
+
+        assert "<code" in steps and "https://lovspor.no/mcp</code>" in steps
+        assert steps.count("<li>") >= 3
+        assert _fact_values(section, f"code.connect.{slug}.walked_on") == [_WALKED[slug]]
+
+    def test_the_walk_dates_are_ledgered_against_the_hashed_client_registry(
+        self, fresh_build: tuple[Path, SiteBuildReport]
+    ) -> None:
+        facts = _facts(fresh_build[0])
+        entries = [
+            entry
+            for entry in facts["facts"]
+            if entry["page"] in _CHOOSERS and entry["field"].startswith("CLIENT_REGISTRY.")
+        ]
+
+        assert {(e["page"], e["field"], e["value"]) for e in entries} == {
+            (page, f"CLIENT_REGISTRY.{slug}.walked_on", walked)
+            for page in _CHOOSERS
+            for slug, walked in _WALKED.items()
+        }
+        assert {(e["kind"], e["artifact"]) for e in entries} == {
+            ("code", "src/lovspor/site/routes.py")
+        }
+        artifacts = {entry["id"]: entry["sha256"] for entry in facts["artifacts"]}
+        routes = _REPO / "src" / "lovspor" / "site" / "routes.py"
+        assert artifacts["src/lovspor/site/routes.py"] == _sha(routes.read_bytes())
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_the_hosted_claude_code_command_is_marked_not_yet_tested(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        section = _section(_page(built[0], path), "claude-code")
+        hosted = section.split('<h3 id="claude-code-hosted">', 1)[1]
+
+        assert '<span class="tag" data-pending>' in hosted.split("</h3>", 1)[0]
+        assert "claude mcp add --transport http lovverk https://lovspor.no/mcp" in hosted
+        assert "claude mcp add lovverk -- uvx lovspor mcp" in section
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_offers_no_one_click_link_and_no_client_config_it_has_not_run(
         self, built: tuple[Path, SiteBuildReport], path: str
     ) -> None:
         markup = _page(built[0], path)
+        hrefs = re.findall(r'href="([^"]*)"', markup)
 
-        assert "Register automatically" not in markup
-        assert "<pre>" not in markup
-        assert markup.count("<h2>") <= 3
+        for href in hrefs:
+            assert not href.startswith(("cursor:", "vscode:", "vscode-insiders:")), href
+            assert "claude.ai/" not in href and "chatgpt.com" not in href, href
+        for config in ("mcp.json", "settings.json", "config.toml"):
+            assert config not in markup, (path, config)
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_every_address_and_command_is_selectable_in_one_click(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        """The site runs no script (ADR-0014), so a copy button is not possible
+        here; a block that selects whole on one click is the no-script half."""
+        markup = _page(built[0], path)
+
+        assert markup.count("<pre") == markup.count('<pre class="copyable">')
+        assert markup.count('<pre class="copyable">') == 2
+        assert '<code class="copyable">https://lovspor.no/mcp</code>' in markup
 
     def test_an_unverified_client_is_named_untested_rather_than_given_steps(
         self, built: tuple[Path, SiteBuildReport]
     ) -> None:
-        """Cursor and Codex have no procedure in this repository. The page
-        says so; it does not write one down (CLAUDE.md, a claim carries its
-        evidence)."""
+        """Cursor, VS Code and Codex have no procedure in this repository. The
+        page says so; it does not write one down (CLAUDE.md, a claim carries
+        its evidence)."""
         out, _ = built
         for path, wording in (
             ("/connect/", "Ingen testet framgangsmåte"),
             ("/en/connect/", "No tested procedure"),
             ("/pl/connect/", "Brak sprawdzonej procedury"),
         ):
-            markup = _page(out, path)
+            section = _section(_page(out, path), "other")
 
-            assert wording in markup, path
-            untested = markup.split(wording, 1)[1].split("<h2>", 1)[0]
-            assert "ChatGPT" not in untested, path
-            for client in ("Cursor", "Codex"):
-                assert client in markup, (path, client)
+            assert wording in section, path
+            assert '<ol class="steps">' not in section, path
+            for client in ("Cursor", "VS Code", "Codex"):
+                assert client in section, (path, client)
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_starts_with_three_questions_that_link_the_text_they_rest_on(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        section = _section(_page(built[0], path), "start")
+
+        assert section.count('<p class="panel">') == 3
+        assert '<a href="/lov/folketrygdloven-ftrl/paragraf/8-18/">' in section
+        assert '<a href="/forskrift/byggteknisk-forskrift-tek17/paragraf/12-7/">' in section
+        assert "<span data-literal>folketrygdloven § 8-99</span>" in section
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_help_points_to_status_the_docs_and_the_contact(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        section = _section(_page(built[0], path), "help")
+        prefix = path.removesuffix("/connect/")
+
+        assert f'href="{prefix}/status/"' in section
+        assert f'href="{prefix}/docs/"' in section
+        assert "Authorization failed" in section
+        assert '<a href="mailto:kontakt@lovspor.no">kontakt@lovspor.no</a>' in section
+
+    @pytest.mark.parametrize("path", _CHOOSERS)
+    def test_states_no_plan_or_tier_the_sources_do_not_state(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        text = _text(_page(built[0], path))
+
+        for plan in ("Pro", "Plus", "Team", "Enterprise", "Max", "Free"):
+            assert not re.search(rf"\b{plan}\b", text), (path, plan)
 
     @pytest.mark.parametrize("path", (*_CHOOSERS, *_GUIDES))
     def test_makes_no_hosted_claim_and_names_the_contact_address(
@@ -913,9 +1027,12 @@ class TestConnectPage:
     ) -> None:
         """The English and Polish pages are full translations, not summaries."""
         out, _ = built
-        counts = {_page(out, f"{prefix}{stem}").count("<h2>") for prefix in ("", "/en", "/pl")}
+        shapes = {
+            tuple(re.findall(r"<h[23][^>]*>", _page(out, f"{prefix}{stem}")))
+            for prefix in ("", "/en", "/pl")
+        }
 
-        assert len(counts) == 1, stem
+        assert len(shapes) == 1, stem
 
 
 class TestConnectGuides:
@@ -1774,7 +1891,7 @@ class TestSiteFacts:
         assert facts["capability"]["observed_runtime_identity"] == identity
         assert document["observation"]["process"]["runtime_identity"] == identity
         assert all(set(entry) == {"id", "sha256"} for entry in facts["artifacts"])
-        assert len(facts["artifacts"]) == 3 + len(_publication_files())
+        assert len(facts["artifacts"]) == 4 + len(_publication_files())
         assert all(
             set(entry) == {"page", "artifact", "field", "kind", "value", "unobserved"}
             for entry in facts["facts"]
@@ -1794,6 +1911,7 @@ class TestSiteFacts:
                 (out / "deployment-capabilities.json").read_bytes()
             ),
             f"tool-surface@{world.lovspor_commit}": world.descriptor.schema_sha256,
+            _REGISTRY: _sha((world.checkout / _REGISTRY).read_bytes()),
         } | {
             relative: _sha((world.checkout / relative).read_bytes())
             for relative in _publication_files()
@@ -1845,6 +1963,8 @@ class TestSiteFacts:
                 assert entry["artifact"] == "corpus/site-manifest.json", entry
             elif entry["artifact"].startswith("benchmarks/"):
                 assert entry["artifact"] in _publication_files(), entry
+            elif entry["artifact"] == _REGISTRY:
+                assert entry["field"].startswith("CLIENT_REGISTRY."), entry
             else:
                 assert entry["artifact"] == f"tool-surface@{world.lovspor_commit}", entry
 
@@ -1857,6 +1977,7 @@ class TestSiteFacts:
         assert pages == {
             "/",
             "/en/",
+            *_CHOOSERS,
             "/docs/",
             "/en/docs/",
             "/status/",
@@ -1921,6 +2042,27 @@ def _resolve_benchmark(artifact: str, field: str, checkout: Path) -> object:
     return node
 
 
+def _resolve_checkout_file(artifact: str, field: str, checkout: Path) -> object:
+    if artifact == _REGISTRY:
+        return _resolve_registry(field, checkout)
+    return _resolve_benchmark(artifact, field, checkout)
+
+
+def _resolve_registry(field: str, checkout: Path) -> str:
+    """A walk date read back from the checkout's registry source, not from the import."""
+    _, slug, name = field.split(".")
+    tree = ast.parse((checkout / _REGISTRY).read_text(encoding="utf-8"))
+    for call in ast.walk(tree):
+        if not (isinstance(call, ast.Call) and getattr(call.func, "id", "") == "ConnectClient"):
+            continue
+        keywords = {keyword.arg: keyword.value for keyword in call.keywords}
+        if ast.literal_eval(keywords["slug"]) == slug:
+            when = keywords[name]
+            assert isinstance(when, ast.Call)
+            return date(*(ast.literal_eval(arg) for arg in when.args)).isoformat()
+    raise AssertionError(f"no {slug} in the registry")
+
+
 def _resolve(
     entry: dict[str, Any], world: World, document: dict[str, Any], manifest_bytes: bytes
 ) -> object:
@@ -1934,8 +2076,8 @@ def _resolve(
         for part in field.split("."):
             node = node[part]
         return node
-    if artifact.startswith("benchmarks/"):
-        return _resolve_benchmark(artifact, field, world.checkout)
+    if artifact.startswith("benchmarks/") or artifact == _REGISTRY:
+        return _resolve_checkout_file(artifact, field, world.checkout)
     commit = artifact.removeprefix("tool-surface@")
     assert commit == world.lovspor_commit
     if field == "lovspor_commit":

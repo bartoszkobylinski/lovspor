@@ -623,6 +623,53 @@
     color: var(--muted);
   }
 
+  /* The connect guide (#648). The site runs no script, so an address or a
+     command is copied by selecting it: one click selects the whole block. */
+  .copyable {
+    -webkit-user-select: all;
+    user-select: all;
+    cursor: text;
+  }
+
+  p.address code {
+    display: inline-block;
+    font-size: 1.05rem;
+    padding: 0.35rem 0.6rem;
+    overflow-wrap: anywhere;
+  }
+
+  /* Jump links: one wrapping row of plain words, each a full tap target. */
+  nav.jump ul {
+    list-style: none;
+    padding: 0;
+    margin: 1.2rem 0 1.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.6rem;
+  }
+
+  nav.jump li { margin: 0; }
+
+  nav.jump a {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    text-decoration: none;
+  }
+
+  nav.jump a:hover { text-decoration: underline; }
+
+  h2[id], h3[id] { scroll-margin-top: 1rem; }
+
+  p.tested { color: var(--muted); }
+
+  .tag[data-pending] {
+    margin-left: 0.4rem;
+    vertical-align: middle;
+    font-weight: 600;
+  }
+
   pre {
     background: var(--code-bg);
     color: var(--code-ink);

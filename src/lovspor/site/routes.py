@@ -19,7 +19,9 @@ client whose procedure this repository records as run against the hosted
 service (docs/mcp.md, 2026-09-30) — claude.ai and ChatGPT. A client with
 no recorded procedure gets no page; ``/connect/`` names it as untested
 instead (owner decision 2026-10-10 split the one page into a chooser and
-one guide per registered client).
+one guide per registered client). Since #648 (owner request 2026-10-20)
+``/connect/`` is again one guide with a section per client, dated by each
+entry's ``walked_on``; the per-client guides stay, so published links resolve.
 
 Copy: the landing and the observatory keep the titles and descriptions
 of the hand-written pages they replace; ``/connect/`` and ``/docs/`` carry
@@ -32,6 +34,7 @@ the remaining routes carry short, honest placeholders until their content
 lands.
 """
 
+from datetime import date
 from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
@@ -187,16 +190,19 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
         title=Localised(nb="Koble til", en="Connect", pl="Połącz"),
         description=Localised(
             nb=(
-                "Velg klienten din: en veiledning for Claude og en for ChatGPT, og et tydelig "
-                "forbehold for klientene vi ikke har testet."
+                "Én veiledning for alle klienter: Claude og ChatGPT med stegene vi har kjørt, "
+                "Claude Code, de klientene vi ikke har testet, tre spørsmål å begynne med og "
+                "hjelp når det ikke virker."
             ),
             en=(
-                "Choose your client: one guide for Claude and one for ChatGPT, and a plain "
-                "caveat for the clients we have not tested."
+                "One guide for every client: Claude and ChatGPT with the steps we have run, "
+                "Claude Code, the clients we have not tested, three questions to start with "
+                "and help when it does not work."
             ),
             pl=(
-                "Wybierz klienta: jedna instrukcja dla Claude, jedna dla ChatGPT i jasne "
-                "zastrzeżenie dla klientów, których nie sprawdziliśmy."
+                "Jedna instrukcja dla wszystkich klientów: Claude i ChatGPT z krokami, które "
+                "przeszliśmy, Claude Code, klienci, których nie sprawdziliśmy, trzy pytania na "
+                "start i pomoc, gdy coś nie działa."
             ),
         ),
     ),
@@ -338,11 +344,17 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
 
 
 class ConnectClient(BaseModel):
-    """One registry entry: a client whose connect procedure has been run."""
+    """One registry entry: a client whose connect procedure has been run.
+
+    ``walked_on`` is the day the procedure was run against the hosted service,
+    as the repository records it; ``/connect/`` renders it as a ledgered fact
+    (#648), so a section never claims a test it cannot date.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     slug: Annotated[str, StringConstraints(pattern=r"^[a-z0-9-]+$")]
+    walked_on: date
     title: Localised
     description: Localised
 
@@ -360,6 +372,7 @@ class ConnectClient(BaseModel):
 CLIENT_REGISTRY: tuple[ConnectClient, ...] = (
     ConnectClient(
         slug="claude",
+        walked_on=date(2026, 9, 30),  # docs/mcp.md "Connecting a chat app"
         title=Localised(nb="Koble til Claude", en="Connect Claude", pl="Połącz z Claude"),
         description=Localised(
             nb=(
@@ -378,6 +391,7 @@ CLIENT_REGISTRY: tuple[ConnectClient, ...] = (
     ),
     ConnectClient(
         slug="chatgpt",
+        walked_on=date(2026, 9, 30),  # docs/mcp.md "Connecting a chat app"
         title=Localised(nb="Koble til ChatGPT", en="Connect ChatGPT", pl="Połącz z ChatGPT"),
         description=Localised(
             nb=(
