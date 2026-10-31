@@ -1,6 +1,7 @@
 """Reading a saved regjeringen.no chapter page, and refusing the rest (#738)."""
 
 import hashlib
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -382,3 +383,12 @@ def test_saved_html_does_not_expand_dtd_entities(tmp_path: Path, external: bool)
     facts = read_proposition(payload.encode("utf-8"), f"{L_URL}?ch=1")
     assert facts.ministry == "&injected;"
     assert secret not in facts.model_dump_json()
+
+
+@pytest.mark.parametrize("blank", ["   ", "\u00a0\u00a0", "\u200b", " - "])
+def test_a_title_with_no_words_is_refused(blank: str) -> None:
+    html = re.sub(r'(name="DC.Title" content="[^"]*? - )[^"]*"', rf'\g<1>{blank}"', _l_html())
+    html = re.sub(r'<h2 class="subheader.*?</h2>', "", html, flags=re.DOTALL)
+    refusal = _refusal(html)
+    assert refusal.reason == "title_missing"
+    assert refusal.detail == "DC.Title"

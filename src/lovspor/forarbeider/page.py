@@ -180,7 +180,7 @@ def _title(root: html.HtmlElement, locator: SourceLocator) -> str:
     _require_same_reference(og_title, locator, "og:title")
     stated = _required_meta(root, ("name", "DC.Title"), RefusalReason.TITLE_MISSING)
     reference, _, title = stated.partition(" - ")
-    if not title:
+    if not any(character.isalnum() for character in title):
         raise ForarbeiderRefusedError(RefusalReason.TITLE_MISSING, "DC.Title")
     _require_same_reference(reference, locator, "DC.Title")
     _require_same_subheader(header, title)

@@ -186,3 +186,42 @@ def test_chapter_of_refuses_anything_else(href: str) -> None:
         chapter_of(href, parse_source_url(f"{CANONICAL}?ch=1"))
     assert caught.value.reason is RefusalReason.CHAPTER_FOREIGN
     assert caught.value.detail == href
+
+
+_HOSTILE_DIGITS = "1" * 4400
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        (f"{CANONICAL}?ch={_HOSTILE_DIGITS}", "unexpected_query"),
+        (
+            f"https://www.regjeringen.no/no/dokumenter/prop.-901-l-20992100/id{_HOSTILE_DIGITS}/",
+            "invalid_source_url",
+        ),
+        (
+            f"https://www.regjeringen.no/no/dokumenter/prop.-{_HOSTILE_DIGITS}-l-20992100/id1/",
+            "unsupported_document_type",
+        ),
+    ],
+    ids=["chapter", "document-id", "proposition-number"],
+)
+def test_a_hostile_number_in_a_url_is_a_typed_refusal(url: str, reason: str) -> None:
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        parse_source_url(url)
+    assert caught.value.reason == reason
+
+
+def test_a_hostile_number_in_a_reference_is_a_typed_refusal() -> None:
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        parse_reference(f"Prop. {_HOSTILE_DIGITS} L (2099\u20132100)")
+    assert caught.value.reason == "reference_missing"
+
+
+def test_the_longest_accepted_numbers_are_still_read() -> None:
+    url = "https://www.regjeringen.no/no/dokumenter/prop.-99999-l-20992100/id999999999999/?ch=99999"
+    locator = parse_source_url(url)
+    assert locator.document_id == 999999999999
+    assert locator.reference.proposition_number == 99999
+    assert locator.chapter == 99999
+    assert parse_reference("Prop. 99999 L (2099\u20132100)").proposition_number == 99999

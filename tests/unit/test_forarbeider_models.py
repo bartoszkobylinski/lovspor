@@ -208,3 +208,9 @@ def test_failed_atomic_replacement_preserves_previous_metadata(
     assert target.read_bytes() == original
     assert read_metadata(target) == previous
     assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.parametrize("field", ["title", "ministry"])
+def test_whitespace_is_not_text(field: str) -> None:
+    with pytest.raises(ValidationError):
+        ForarbeidRecord.model_validate({**_fields(), field: "   "})

@@ -31,7 +31,7 @@ from lovspor.forarbeider.identity import DocumentType, SourceLocator, parse_sour
 
 _JSON_LAYOUT: dict[str, Any] = {"sort_keys": True, "indent": 2, "ensure_ascii": False}
 
-_Text = Annotated[str, Field(min_length=1)]
+_Text = Annotated[str, Field(pattern=r"\S")]
 
 
 class Chapter(BaseModel):

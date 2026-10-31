@@ -16,14 +16,16 @@ from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 ALLOWED_HOST = "www.regjeringen.no"
 DocumentType = Literal["prop-l", "prop-ls"]
 
-_DOCUMENT_PATH = re.compile(r"/no/dokumenter/(?P<slug>[^/]+)/id(?P<id>[1-9]\d*)/")
+# Bounded here, before ``int()``: past 4,300 digits that raises an untyped ValueError.
+_DOCUMENT_PATH = re.compile(r"/no/dokumenter/(?P<slug>[^/]+)/id(?P<id>[1-9]\d{0,11})/")
 _SLUG = re.compile(
-    r"prop\.-(?P<number>[1-9]\d*)-(?P<letter>ls|l)-(?P<first>\d{4})(?P<second>\d{4})"
+    r"prop\.-(?P<number>[1-9]\d{0,4})-(?P<letter>ls|l)-(?P<first>\d{4})(?P<second>\d{4})"
 )
 _REFERENCE = re.compile(
-    r"Prop\. (?P<number>[1-9]\d*) (?P<letter>[A-Z]+) \((?P<first>\d{4})\u2013(?P<second>\d{4})\)"
+    r"Prop\. (?P<number>[1-9]\d{0,4}) (?P<letter>[A-Z]+) "
+    r"\((?P<first>\d{4})\u2013(?P<second>\d{4})\)"
 )
-_CHAPTER_QUERY = re.compile(r"ch=(?P<chapter>[1-9]\d*)")
+_CHAPTER_QUERY = re.compile(r"ch=(?P<chapter>[1-9]\d{0,4})")
 _DOCUMENT_TYPES: dict[str, DocumentType] = {"l": "prop-l", "ls": "prop-ls"}
 
 
