@@ -12,14 +12,11 @@ from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 
 _DOCUMENT_END = re.compile(r"</body\s*>\s*</html\s*>\s*\Z", re.IGNORECASE)
 _NAVIGATION = re.compile(r"<ul\b[^<>]*\bdata-longdoc-table-of-content\b[^<>]*>", re.IGNORECASE)
-_FOOTER = re.compile(r"<footer\b", re.IGNORECASE)
 _LIST_TAG = re.compile(r"<(/?)(ul|li)\b[^<>]*>", re.IGNORECASE)
 
 
 def require_whole_page(text: str) -> None:
     """Refuse a page that stops early, or whose chapter navigation is not closed.
-
-    The footer catches a cut list given well-formed closing tags afterwards.
 
     A missing navigation passes: :mod:`lovspor.forarbeider.page` names that.
 
@@ -31,8 +28,6 @@ def require_whole_page(text: str) -> None:
     for navigation in _NAVIGATION.finditer(text):
         if not _closes(text, navigation.start()):
             raise ForarbeiderRefusedError(RefusalReason.INCOMPLETE_PAGE, "chapter list")
-        if _FOOTER.search(text, navigation.end()) is None:
-            raise ForarbeiderRefusedError(RefusalReason.INCOMPLETE_PAGE, "page footer")
 
 
 def _closes(text: str, start: int) -> bool:

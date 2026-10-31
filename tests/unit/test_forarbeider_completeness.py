@@ -112,3 +112,16 @@ def test_a_closed_list_before_the_navigation_proves_nothing_about_it() -> None:
 
 def test_a_list_closed_in_another_case_is_still_closed() -> None:
     require_whole_page(WHOLE.replace("<li>Vedlegg</li>", "<LI>Vedlegg</li>"))
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        '<!-- <footer class="page-footer"></footer> -->',
+        "<script>const template = '<footer class=\"page-footer\"></footer>';</script>",
+    ],
+    ids=["comment", "script-text"],
+)
+def test_footer_text_is_not_a_footer(replacement: str) -> None:
+    page = WHOLE.replace('<footer class="page-footer"></footer>', replacement)
+    assert _detail_of(page) == "page footer"

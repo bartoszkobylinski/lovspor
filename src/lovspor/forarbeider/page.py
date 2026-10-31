@@ -107,6 +107,7 @@ def read_proposition(payload: bytes, source_url: str) -> PropositionFacts:
     root = _document(text)
     _require_proposition(root)
     require_whole_page(text)
+    _require_footer(root)
     _require_identity(root, locator)
     chapters = _chapters(root, locator)
     _require_page_chapter(root, locator, locator.chapter, chapters[-1].chapter_number)
@@ -132,6 +133,12 @@ def _document(text: str) -> html.HtmlElement:
         return html.document_fromstring(text)
     except (ValueError, etree.ParserError) as error:
         raise ForarbeiderRefusedError(RefusalReason.UNREADABLE_PAGE, "saved page") from error
+
+
+def _require_footer(root: html.HtmlElement) -> None:
+    """Catches a cut list given closing tags afterwards; only the tree tells text from a tag."""
+    if root.xpath(_NAVIGATION) and not root.xpath(f"{_NAVIGATION}/following::footer"):
+        raise ForarbeiderRefusedError(RefusalReason.INCOMPLETE_PAGE, "page footer")
 
 
 def _clean(text: str) -> str:

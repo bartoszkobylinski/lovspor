@@ -3,10 +3,12 @@
 from pathlib import Path
 
 import pytest
+from lxml import html
 
 from lovspor.forarbeider.commands import MAX_HTML_BYTES, _saved_page
 from lovspor.forarbeider.completeness import require_whole_page
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from lovspor.forarbeider.page import _require_footer
 
 
 def test_footer_before_navigation_does_not_prove_page_complete() -> None:
@@ -15,7 +17,7 @@ def test_footer_before_navigation_does_not_prove_page_complete() -> None:
         "<ul data-longdoc-table-of-content><li>Chapter</li></ul></body></html>"
     )
     with pytest.raises(ForarbeiderRefusedError) as caught:
-        require_whole_page(page)
+        _require_footer(html.document_fromstring(page))
     assert caught.value.reason is RefusalReason.INCOMPLETE_PAGE
     assert caught.value.detail == "page footer"
 
