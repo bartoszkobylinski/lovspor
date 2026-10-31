@@ -1,6 +1,6 @@
 # Forarbeider: PR1 metadata-only implementation contract
 
-**Status:** Proposed implementation contract; engineering work is gated by owner acceptance of [ADR-0018](https://github.com/bartoszkobylinski/lovspor-notebook/pull/150).  
+**Status:** Proposed implementation contract; Claude may develop and open the isolated offline metadata code PR in parallel with review of [ADR-0018](https://github.com/bartoszkobylinski/lovspor-notebook/pull/150). Merge, any live fetching and any public data publication remain gated by the owner's acceptance of the relevant ADR decisions.  
 **Date:** 2026-10-31  
 **Owner:** Lovspor project owner (architecture); Claude / coding agent (implementation), independent reviewer (architecture + review)  
 **Tracking:** [#738](https://github.com/bartoszkobylinski/lovspor/issues/738), [#737](https://github.com/bartoszkobylinski/lovspor/issues/737), [ADR-0017 public crosswalk contract](legislative-crosswalk-source-boundary.md).
@@ -94,7 +94,7 @@ The tests for parser/manifest/CLI are unit tests under `tests/unit/`, with repre
 * Run `scripts/quality/verify-fast.sh`, `/security-check`, `scripts/quality/verify-deep.sh` before push; preserve `CLAUDE.md` constraints. CI and the existing independent testing/mutation pipeline remain authoritative.
 * One focused PR against `main`, no unrelated refactor and no migration. GitHub Actions owns independent Codex testing; **do not bypass checks or merge**.
 * Coding agent writes code and fixes its own PR; architectural reviewer checks against accepted ADR-0018, this public contract, evidence, negatives, security and compatibility. Owner alone merges.
-* An implementation that requires changing a numbered ADR decision must stop and request a reviewer-led ADR amendment/successor first, not silently choose a different policy.
+* An implementation that requires changing a numbered ADR decision must stop and request a reviewer-led ADR amendment/successor first, not silently choose a different policy. The coding agent may open a draft or ordinary PR for this isolated offline-only work before ADR-0018 acceptance; it must not be merged until the decision is accepted and reviewed.
 
 ## Following slices (not authorised by PR1)
 
