@@ -287,3 +287,31 @@ def test_the_read_asks_for_one_byte_past_the_limit(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(Path, "open", lambda *_args, **_kwargs: Recording(b"page"))
     assert _saved_page(FIXTURE) == b"page"
     assert asked == [MAX_HTML_BYTES + 1]
+
+
+def test_failed_cli_replacement_preserves_record_and_removes_staging_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Operations promises a typed refusal and no write when output fails."""
+    output = tmp_path / "record.json"
+    runner = CliRunner()
+    initial = runner.invoke(app, _argv(FIXTURE, output))
+    assert initial.exit_code == 0, initial.output
+    previous = output.read_bytes()
+    replacement_attempts: list[Path] = []
+
+    def refuse_replace(staged: Path, destination: Path) -> Path:
+        assert destination == output
+        assert read_metadata(staged).retrieved_at.isoformat() == "2100-04-02T12:00:00+00:00"
+        assert output.read_bytes() == previous
+        replacement_attempts.append(staged)
+        raise OSError("simulated replacement failure")
+
+    monkeypatch.setattr(Path, "replace", refuse_replace)
+    result = runner.invoke(app, _argv(FIXTURE, output, when="2100-04-02T12:00:00Z"))
+
+    assert result.exit_code == 1
+    assert said(f"refused: output_write_failed: {output}", result.output)
+    assert len(replacement_attempts) == 1
+    assert output.read_bytes() == previous
+    assert list(tmp_path.iterdir()) == [output]
