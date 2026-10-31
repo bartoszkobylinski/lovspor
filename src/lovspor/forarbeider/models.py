@@ -134,5 +134,7 @@ def read_metadata(path: Path) -> ForarbeidRecord:
     """
     try:
         return ForarbeidRecord.model_validate_json(path.read_bytes())
+    except OSError as error:
+        raise ForarbeiderRefusedError(RefusalReason.INPUT_UNREADABLE, str(path)) from error
     except ValidationError as error:
         raise ForarbeiderRefusedError(RefusalReason.SCHEMA_INVALID, str(path)) from error

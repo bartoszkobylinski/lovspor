@@ -14,10 +14,13 @@ import typer
 
 from lovspor.corpus_fetch import default_corpus_path
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
-from lovspor.forarbeider.models import write_metadata
+from lovspor.forarbeider.models import ForarbeidRecord, write_metadata
 from lovspor.forarbeider.page import build_record
 from lovspor.forarbeider.staging import checked_output
 from lovspor.ops.commands import ops_app
+
+#: Far above the largest sampled chapter page (166 KB), below what memory would notice.
+MAX_HTML_BYTES = 16 * 1024 * 1024
 
 _ENGINE_ROOT = Path(__file__).resolve().parents[3]
 
@@ -32,6 +35,27 @@ def _aware(text: str) -> datetime:
     return moment
 
 
+def _saved_page(html: Path) -> bytes:
+    """The bytes of ``html``; one past the limit is read, so a larger file never loads whole."""
+    if not html.is_file():
+        raise ForarbeiderRefusedError(RefusalReason.INPUT_UNREADABLE, str(html))
+    try:
+        with html.open("rb") as stream:
+            payload = stream.read(MAX_HTML_BYTES + 1)
+    except OSError as error:
+        raise ForarbeiderRefusedError(RefusalReason.INPUT_UNREADABLE, str(html)) from error
+    if len(payload) > MAX_HTML_BYTES:
+        raise ForarbeiderRefusedError(RefusalReason.INPUT_TOO_LARGE, str(html))
+    return payload
+
+
+def _write(record: ForarbeidRecord, target: Path) -> None:
+    try:
+        write_metadata(record, target)
+    except OSError as error:
+        raise ForarbeiderRefusedError(RefusalReason.OUTPUT_WRITE_FAILED, str(target)) from error
+
+
 def metadata_impl(html: Path, source_url: str, retrieved_at: str, output: Path) -> str:
     """Write the record of a saved page and return the line that reports it.
 
@@ -40,8 +64,8 @@ def metadata_impl(html: Path, source_url: str, retrieved_at: str, output: Path) 
     """
     target = checked_output(output, (_ENGINE_ROOT, default_corpus_path()))
     moment = _aware(retrieved_at)
-    record = build_record(html.read_bytes(), source_url, moment)
-    write_metadata(record, target)
+    record = build_record(_saved_page(html), source_url, moment)
+    _write(record, target)
     return f"wrote {record.id}: {len(record.chapters)} chapters to {target}"
 
 
@@ -49,7 +73,7 @@ def metadata_impl(html: Path, source_url: str, retrieved_at: str, output: Path) 
 def forarbeider_metadata(
     html: Annotated[
         Path,
-        typer.Option("--html", help="A saved ?ch=N page.", exists=True, dir_okay=False),
+        typer.Option("--html", help="A saved ?ch=N page.", readable=False),
     ],
     source_url: Annotated[
         str, typer.Option("--source-url", help="The exact URL that page was saved from.")

@@ -214,3 +214,11 @@ def test_failed_atomic_replacement_preserves_previous_metadata(
 def test_whitespace_is_not_text(field: str) -> None:
     with pytest.raises(ValidationError):
         ForarbeidRecord.model_validate({**_fields(), field: "   "})
+
+
+def test_a_record_that_cannot_be_read_is_a_typed_refusal(tmp_path: Path) -> None:
+    missing = tmp_path / "gone.json"
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        read_metadata(missing)
+    assert caught.value.reason is RefusalReason.INPUT_UNREADABLE
+    assert caught.value.detail == str(missing)

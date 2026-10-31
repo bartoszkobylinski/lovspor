@@ -22,10 +22,13 @@ def checked_output(raw: Path, forbidden: Sequence[Path]) -> Path:
         ForarbeiderRefusedError: ``unsafe_output_path``, before anything is written.
     """
     refused = ForarbeiderRefusedError(RefusalReason.UNSAFE_OUTPUT_PATH, str(raw))
-    path = raw.expanduser()
-    if not path.is_absolute() or path.suffix != ".json":
-        raise refused
-    path = path.resolve()
+    try:
+        path = raw.expanduser()
+        if not path.is_absolute() or path.suffix != ".json":
+            raise refused
+        path = path.resolve()
+    except (OSError, RuntimeError) as error:
+        raise refused from error
     if path.is_dir() or _inside_a_repository(path) or _inside_any(path, forbidden):
         raise refused
     return path

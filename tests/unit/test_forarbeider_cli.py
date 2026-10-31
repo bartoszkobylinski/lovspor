@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from lovspor.forarbeider.commands import MAX_HTML_BYTES
 from lovspor.forarbeider.models import read_metadata
 from tests.unit.cli_output import said
 
@@ -163,9 +164,8 @@ def test_html_must_be_an_existing_file_without_creating_output(tmp_path: Path, k
         saved.mkdir()
     before = set(tmp_path.iterdir())
     result = CliRunner().invoke(app, _argv(saved, tmp_path / "staging" / "record.json"))
-    assert result.exit_code == 2
-    assert said("Invalid value for '--html'", result.output)
-    assert said("does not exist" if kind == "missing" else "is a directory", result.output)
+    assert result.exit_code == 1
+    assert said(f"refused: input_unreadable: {saved}", result.output)
     assert set(tmp_path.iterdir()) == before
 
 
@@ -187,3 +187,63 @@ def test_metadata_bytes_are_stable_across_process_environments(tmp_path: Path) -
     assert outputs[0] == outputs[1]
     record = read_metadata(tmp_path / "0.json")
     assert record.retrieved_at.isoformat() == "2100-04-01T12:00:00+00:00"
+
+
+def _refused(argv: list[str]) -> str:
+    result = CliRunner().invoke(app, argv)
+    assert result.exit_code == 1, result.output
+    assert isinstance(result.exception, SystemExit)
+    return result.output
+
+
+def test_a_missing_page_is_a_typed_refusal(tmp_path: Path) -> None:
+    missing = tmp_path / "gone.html"
+    output = tmp_path / "record.json"
+    assert f"refused: input_unreadable: {missing}" in _refused(_argv(missing, output))
+    assert not output.exists()
+
+
+def test_a_directory_is_not_a_page(tmp_path: Path) -> None:
+    output = tmp_path / "record.json"
+    assert f"refused: input_unreadable: {tmp_path}" in _refused(_argv(tmp_path, output))
+    assert not output.exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads through file modes")
+def test_an_unreadable_page_is_a_typed_refusal(tmp_path: Path) -> None:
+    page = tmp_path / "locked.html"
+    page.write_bytes(FIXTURE.read_bytes())
+    page.chmod(0)
+    output = tmp_path / "record.json"
+    assert f"refused: input_unreadable: {page}" in _refused(_argv(page, output))
+    assert not output.exists()
+
+
+def test_an_oversized_page_is_refused_without_reading_it_whole(tmp_path: Path) -> None:
+    page = tmp_path / "huge.html"
+    with page.open("wb") as stream:
+        stream.truncate(MAX_HTML_BYTES + 1)
+    output = tmp_path / "record.json"
+    assert f"refused: input_too_large: {page}" in _refused(_argv(page, output))
+    assert not output.exists()
+
+
+def test_a_page_of_exactly_the_limit_is_not_too_large(tmp_path: Path) -> None:
+    page = tmp_path / "limit.html"
+    with page.open("wb") as stream:
+        stream.truncate(MAX_HTML_BYTES)
+    output = tmp_path / "record.json"
+    assert "input_too_large" not in _refused(_argv(page, output))
+
+
+def test_a_failed_write_is_a_typed_refusal_and_leaves_nothing(tmp_path: Path) -> None:
+    blocker = tmp_path / "a-file"
+    blocker.write_text("x", encoding="utf-8")
+    output = blocker / "record.json"
+    assert f"refused: output_write_failed: {output}" in _refused(_argv(FIXTURE, output))
+    assert blocker.read_text(encoding="utf-8") == "x"
+
+
+def test_an_output_path_that_cannot_be_resolved_is_refused(tmp_path: Path) -> None:
+    output = Path("~no-such-user-738/record.json")
+    assert "refused: unsafe_output_path: " in _refused(_argv(FIXTURE, output))
