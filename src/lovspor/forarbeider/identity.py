@@ -108,14 +108,30 @@ def chapter_of(href: str, parent: SourceLocator) -> tuple[int, str]:
     Raises:
         ForarbeiderRefusedError: the link is anything else, ``chapter_foreign``.
     """
+    locator = _page_of(href, parent)
+    if locator.chapter is None:
+        raise ForarbeiderRefusedError(RefusalReason.CHAPTER_FOREIGN, href)
+    return locator.chapter, locator.page_url
+
+
+def paging_target(href: str, parent: SourceLocator) -> int:
+    """The chapter a paging link of ``parent`` leads to, 0 for the landing page.
+
+    Raises:
+        ForarbeiderRefusedError: the link leaves the document, ``chapter_foreign``.
+    """
+    return _page_of(href, parent).chapter or 0
+
+
+def _page_of(href: str, parent: SourceLocator) -> SourceLocator:
     foreign = ForarbeiderRefusedError(RefusalReason.CHAPTER_FOREIGN, href)
     try:
         locator = parse_source_url(urljoin(parent.canonical_url, href))
     except ForarbeiderRefusedError as error:
         raise foreign from error
-    if locator.canonical_url != parent.canonical_url or locator.chapter is None:
+    if locator.canonical_url != parent.canonical_url:
         raise foreign
-    return locator.chapter, locator.page_url
+    return locator
 
 
 def _allowlisted_parts(url: str) -> tuple[str, str]:

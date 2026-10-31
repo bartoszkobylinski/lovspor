@@ -30,6 +30,7 @@ class RefusalReason(StrEnum):
     CHAPTER_DUPLICATE = "chapter_duplicate"
     CHAPTER_FOREIGN = "chapter_foreign"
     CHAPTER_SEQUENCE = "chapter_sequence"
+    PAGE_CHAPTER_UNPROVED = "page_chapter_unproved"
     SCHEMA_INVALID = "schema_invalid"
     INVALID_TIMESTAMP = "invalid_timestamp"
     UNSAFE_OUTPUT_PATH = "unsafe_output_path"

@@ -45,7 +45,13 @@ class Chapter(BaseModel):
 
 
 class ForarbeidRecord(BaseModel):
-    """Metadata of one Prop. L / LS: staging output, not a published record."""
+    """Metadata of one Prop. L / LS: staging output, not a published record.
+
+    ``source_page_url`` is the page ``source_sha256`` covers, as that page's own
+    markup states it; it was not fetched here, so ``retrieved_at`` and the bytes
+    themselves stay the operator's word. ``chapters`` is the navigation of that
+    one saved page, not a proof of what the proposition contains.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

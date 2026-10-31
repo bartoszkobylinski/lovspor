@@ -3,8 +3,9 @@
 A chapter page (``?ch=N``) is the only input: the landing page carries the
 same identity but no chapter navigation (read on Prop. 54 LS and Prop. 112 L,
 2026-10-31). Each identity fact must be stated by the markup this module knows
-and must agree with every other statement of it. There are no fallbacks: an
-unfamiliar page is refused, not approximated.
+and must agree with every other statement of it, and ``N`` must be what the
+page's paging links say it is. There are no fallbacks: an unfamiliar page is
+refused, not approximated.
 
 ``published_at`` stays ``None``. ``DC.Date`` equals the date of the tilråding
 in the samples, the page states no publication date, and a date is not
@@ -23,6 +24,7 @@ from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.identity import (
     SourceLocator,
     chapter_of,
+    paging_target,
     parse_reference,
     parse_source_url,
 )
@@ -106,11 +108,13 @@ def read_proposition(payload: bytes, source_url: str) -> PropositionFacts:
     _require_proposition(root)
     require_whole_page(text)
     _require_identity(root, locator)
+    chapters = _chapters(root, locator)
+    _require_page_chapter(root, locator, locator.chapter, chapters[-1].chapter_number)
     return PropositionFacts(
         locator=locator,
         title=_title(root, locator),
         ministry=_ministry(root),
-        chapters=_chapters(root, locator),
+        chapters=chapters,
     )
 
 
@@ -233,6 +237,29 @@ def _chapter(link: html.HtmlElement, parent: SourceLocator) -> Chapter:
         raise ForarbeiderRefusedError(RefusalReason.CHAPTER_NAVIGATION_MISSING, "chapter title")
     number, url = chapter_of(href, parent)
     return Chapter(chapter_number=number, title=title, url=url)
+
+
+def _require_page_chapter(
+    root: html.HtmlElement, locator: SourceLocator, chapter: int, last: int
+) -> None:
+    """``chapter`` is the page's own: its paging links sit either side of it.
+
+    The identity tags and the navigation are the same on every chapter of a
+    document, and the URL is the operator's claim, so only these links can
+    tell two chapters apart. Chapter 1 links back to the landing page.
+    """
+    following = None if chapter == last else chapter + 1
+    stated = (_paging(root, "prev", locator), _paging(root, "next", locator))
+    if chapter > last or stated != (chapter - 1, following):
+        raise ForarbeiderRefusedError(RefusalReason.PAGE_CHAPTER_UNPROVED, locator.page_url)
+
+
+def _paging(root: html.HtmlElement, kind: str, locator: SourceLocator) -> int | None:
+    hrefs = root.xpath(f"//a[@data-longdoc-{kind}]/@href")
+    targets = {paging_target(href, locator) for href in hrefs}
+    if len(targets) > 1:
+        raise ForarbeiderRefusedError(RefusalReason.PAGE_CHAPTER_UNPROVED, locator.page_url)
+    return targets.pop() if targets else None
 
 
 def _require_sequence(chapters: tuple[Chapter, ...]) -> None:

@@ -295,7 +295,7 @@ def test_foreign_chapter_link_is_refused(href: str) -> None:
 
 
 def test_nested_section_links_are_not_chapters() -> None:
-    facts = read_proposition(_l_html().encode(), f"{L_URL}?ch=2")
+    facts = read_proposition(_l_html().encode(), f"{L_URL}?ch=1")
     assert [chapter.title for chapter in facts.chapters if chapter.title.startswith("2.")] == []
 
 
