@@ -102,7 +102,7 @@ def test_retrieval_time_must_be_explicit_and_aware(tmp_path: Path, when: str) ->
     output = tmp_path / "record.json"
     result = CliRunner().invoke(app, _argv(FIXTURE, output, when=when))
     assert result.exit_code == 1
-    assert said("invalid_timestamp", result.output)
+    assert said(f"invalid_timestamp: {when}", result.output)
     assert not output.exists()
 
 

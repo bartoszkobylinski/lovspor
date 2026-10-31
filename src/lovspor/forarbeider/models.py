@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     AwareDatetime,
@@ -28,6 +28,8 @@ from pydantic import (
 from lovspor.atomic_io import atomic_write_text
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.identity import DocumentType, SourceLocator, parse_source_url
+
+_JSON_LAYOUT: dict[str, Any] = {"sort_keys": True, "indent": 2, "ensure_ascii": False}
 
 _Text = Annotated[str, Field(min_length=1)]
 
@@ -116,7 +118,7 @@ def _proved_identity(page: SourceLocator) -> tuple[object, ...]:
 def metadata_text(record: ForarbeidRecord) -> str:
     """The record as written: sorted keys, two-space indent, UTF-8, one final newline."""
     payload = record.model_dump(mode="json")
-    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+    return json.dumps(payload, **_JSON_LAYOUT) + "\n"
 
 
 def write_metadata(record: ForarbeidRecord, path: Path) -> None:

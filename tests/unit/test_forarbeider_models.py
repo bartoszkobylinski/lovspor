@@ -135,6 +135,25 @@ def test_text_is_deterministic_sorted_utf8_with_one_newline() -> None:
     assert text.index('"chapters"') < text.index('"id"') < text.index('"title": "Oppdiktet')
 
 
+def test_text_layout_is_exact() -> None:
+    text = metadata_text(ForarbeidRecord.model_validate(_fields()))
+    assert text.startswith('{\n  "chapters": [\n    {\n      "chapter_number": 1,\n')
+    assert '  "rights_basis": "åndsverkloven § 14",\n' in text
+
+
+def test_foreign_page_url_is_named_in_the_failure() -> None:
+    url = "https://evil.test/no/dokumenter/prop.-901-l-20992100/id9000001/?ch=1"
+    with pytest.raises(ValidationError, match="host_not_allowed: evil.test"):
+        ForarbeidRecord.model_validate(_fields() | {"source_page_url": url})
+
+
+def test_chapter_failure_says_what_is_wrong() -> None:
+    chapters = [{"chapter_number": 2, "title": "t", "url": f"{PAGE}?ch=2"}]
+    with pytest.raises(ValidationError) as caught:
+        ForarbeidRecord.model_validate(_fields() | {"chapters": chapters})
+    assert "Value error, chapters are not this document's, in source order " in str(caught.value)
+
+
 def test_write_and_read_round_trip(tmp_path: Path) -> None:
     record = ForarbeidRecord.model_validate(_fields())
     target = tmp_path / "new" / "record.json"

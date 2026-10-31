@@ -90,6 +90,24 @@ def test_url_refusals(url: str, reason: str) -> None:
     assert caught.value.reason == RefusalReason(reason)
 
 
+@pytest.mark.parametrize(
+    ("url", "detail"),
+    [
+        ("http://www.regjeringen.no/no/dokumenter/prop.-1-l-20252026/id1/", None),
+        (f"{CANONICAL}#kap1", None),
+        ("https://[bad/no/dokumenter/prop.-1-l-20252026/id1/", None),
+        ("https://www.regjeringen.no/no/tema/x/id1/", None),
+        ("https://www.regjeringen.no/no/dokumenter/prop.-1-l-20252027/id1/", None),
+        (f"{CANONICAL}?ch=x", "ch=x"),
+        ("https://www.regjeringen.no/no/dokumenter/nou-2024-14/id1/", "nou-2024-14"),
+    ],
+)
+def test_url_refusal_details(url: str, detail: str | None) -> None:
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        parse_source_url(url)
+    assert caught.value.detail == (url if detail is None else detail)
+
+
 def test_refusal_message_names_reason_and_detail() -> None:
     with pytest.raises(ForarbeiderRefusedError) as caught:
         parse_source_url("https://example.org/x")
@@ -130,6 +148,20 @@ def test_reference_refusals(text: str, reason: str) -> None:
     with pytest.raises(ForarbeiderRefusedError) as caught:
         parse_reference(text)
     assert caught.value.reason == RefusalReason(reason)
+
+
+@pytest.mark.parametrize(
+    ("text", "detail"),
+    [
+        ("Prop. 1 S (2025\u20132026)", "S"),
+        ("NOU 2024: 14", "official reference"),
+        ("Prop. 1 L (2025\u20132027)", "2025-2027"),
+    ],
+)
+def test_reference_refusal_details(text: str, detail: str) -> None:
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        parse_reference(text)
+    assert caught.value.detail == detail
 
 
 def test_chapter_of_accepts_a_relative_link_of_the_same_document() -> None:

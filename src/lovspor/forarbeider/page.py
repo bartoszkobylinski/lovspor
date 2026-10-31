@@ -112,10 +112,9 @@ def read_proposition(payload: bytes, source_url: str) -> PropositionFacts:
 
 
 def _document(payload: bytes) -> html.HtmlElement:
+    """Strict UTF-8; lxml's default HTML parser already has ``no_network`` on."""
     try:
-        return html.document_fromstring(
-            payload.decode("utf-8"), parser=html.HTMLParser(no_network=True)
-        )
+        return html.document_fromstring(payload.decode())
     except (UnicodeDecodeError, ValueError, etree.ParserError) as error:
         raise ForarbeiderRefusedError(RefusalReason.UNREADABLE_PAGE, "saved page") from error
 

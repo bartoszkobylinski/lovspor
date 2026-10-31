@@ -26,6 +26,34 @@ def _refusal(html: str) -> ForarbeiderRefusedError:
     return caught.value
 
 
+_CONTRADICTED = {
+    "og-url": "og:url",
+    "dc-url": "DC.Identifier.URL",
+    "h1": "h1",
+    "og-title": "og:title",
+    "dc-title": "DC.Title",
+    "creator": "ministry",
+    "owners": "content-owner",
+    "subheader": "subheader",
+    "meta": "DC.Type",
+}
+_STRUCTURE_DETAIL = {
+    "type": "DC.Type",
+    "no-type": "DC.Type",
+    "og-title": "og:title",
+    "og-url": "og:url",
+    "dc-url": "DC.Identifier.URL",
+    "dc-title": "DC.Title",
+    "bare-title": "DC.Title",
+    "header": "content-header",
+    "no-h1": "h1",
+    "two-h1": "h1",
+    "nav-text-h1": "official reference",
+    "prop-s": "S",
+    "no-nav": "chapter list",
+}
+
+
 def test_prop_l_fixture_reads_exactly() -> None:
     facts = read_proposition((FIXTURES / "prop-l.html").read_bytes(), f"{L_URL}?ch=1")
     assert facts.locator.reference.document_type == "prop-l"
@@ -159,9 +187,11 @@ def test_landing_url_is_refused_because_it_has_no_navigation() -> None:
         "meta",
     ],
 )
-def test_contradiction_is_refused(old_new: tuple[str, str]) -> None:
+def test_contradiction_is_refused(old_new: tuple[str, str], request: pytest.FixtureRequest) -> None:
     assert old_new[0] in _l_html()
-    assert _refusal(_l_html().replace(*old_new)).reason is RefusalReason.CONFLICTING_IDENTITY
+    refusal = _refusal(_l_html().replace(*old_new))
+    assert refusal.reason is RefusalReason.CONFLICTING_IDENTITY
+    assert refusal.detail == _CONTRADICTED[request.node.callspec.id]
 
 
 @pytest.mark.parametrize(
@@ -210,9 +240,13 @@ def test_contradiction_is_refused(old_new: tuple[str, str]) -> None:
         "no-nav",
     ],
 )
-def test_structure_refusals(old: str, new: str, reason: str) -> None:
+def test_structure_refusals(
+    old: str, new: str, reason: str, request: pytest.FixtureRequest
+) -> None:
     assert old in _l_html()
-    assert _refusal(_l_html().replace(old, new)).reason == RefusalReason(reason)
+    refusal = _refusal(_l_html().replace(old, new))
+    assert refusal.reason == RefusalReason(reason)
+    assert refusal.detail == _STRUCTURE_DETAIL[request.node.callspec.id]
 
 
 def _nav(*items: str) -> str:
@@ -267,7 +301,24 @@ def test_nested_section_links_are_not_chapters() -> None:
 def test_two_chapter_lists_are_refused() -> None:
     marker = '<nav class="longdoc-nav">'
     extra = "<ul data-longdoc-table-of-content></ul>"
-    assert _refusal(_l_html().replace(marker, extra + marker)).reason is RefusalReason.DOM_CHANGED
+    refusal = _refusal(_l_html().replace(marker, extra + marker))
+    assert refusal.reason is RefusalReason.DOM_CHANGED
+    assert refusal.detail == "chapter list"
+
+
+def test_undecodable_page_is_named_without_its_bytes() -> None:
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        read_proposition(b"\xff\xfe", f"{L_URL}?ch=1")
+    assert caught.value.reason is RefusalReason.UNREADABLE_PAGE
+    assert caught.value.detail == "saved page"
+
+
+def test_naive_retrieval_time_fails_the_schema() -> None:
+    url = f"{L_URL}?ch=1"
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        build_record(_l_html().encode(), url, datetime(2100, 4, 1))
+    assert caught.value.reason is RefusalReason.SCHEMA_INVALID
+    assert caught.value.detail == url
 
 
 @pytest.mark.parametrize("payload", [b"", b"   ", b"\xff\xfe", b"<?xml version='1.0'?><html/>"])
