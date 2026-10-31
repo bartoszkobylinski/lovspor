@@ -303,3 +303,31 @@ def test_source_hash_covers_saved_bytes_without_normalizing_line_endings() -> No
     assert original.model_dump(exclude={"source_sha256"}) == crlf.model_dump(
         exclude={"source_sha256"}
     )
+
+
+def test_utf8_page_preserves_non_ascii_metadata() -> None:
+    title = "ÆØÅ æøå e\u0301 日本語 🧑\u200d⚖️"
+    payload = (
+        _l_html()
+        .replace("Strukturell testproposisjon om et oppdiktet lovforslag", title)
+        .encode("utf-8")
+    )
+    assert read_proposition(payload, f"{L_URL}?ch=1").title == title
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["internal-entity", "external-dtd"])
+def test_saved_html_does_not_expand_dtd_entities(tmp_path: Path, external: bool) -> None:
+    secret = "EXTERNAL_ENTITY_MUST_NOT_BECOME_METADATA"
+    dtd = tmp_path / "untrusted.dtd"
+    dtd.write_text(f'<!ENTITY injected "{secret}">', encoding="utf-8")
+    declaration = (
+        f'<!DOCTYPE html SYSTEM "{dtd.as_uri()}">'
+        if external
+        else f'<!DOCTYPE html [<!ENTITY injected "{secret}">]>'
+    )
+    payload = _l_html().replace("<!DOCTYPE html>", declaration)
+    assert declaration in payload
+    payload = payload.replace("Testdepartementet", "&injected;")
+    facts = read_proposition(payload.encode("utf-8"), f"{L_URL}?ch=1")
+    assert facts.ministry == "&injected;"
+    assert secret not in facts.model_dump_json()

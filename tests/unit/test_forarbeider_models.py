@@ -154,3 +154,14 @@ def test_read_refuses_what_is_not_the_schema(tmp_path: Path, payload: bytes) -> 
         read_metadata(target)
     assert caught.value.reason is RefusalReason.SCHEMA_INVALID
     assert caught.value.detail == str(target)
+
+
+def test_metadata_preserves_unicode_codepoints_on_disk(tmp_path: Path) -> None:
+    title = "ÆØÅ æøå e\u0301 日本語 🧑\u200d⚖️"
+    record = ForarbeidRecord.model_validate(_fields() | {"title": title})
+    target = tmp_path / "metadata.json"
+    write_metadata(record, target)
+    payload = target.read_bytes()
+    assert title.encode("utf-8") in payload
+    assert b"\\u" not in payload
+    assert read_metadata(target) == record
