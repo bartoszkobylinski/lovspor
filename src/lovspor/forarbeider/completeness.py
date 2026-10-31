@@ -39,7 +39,7 @@ def _closes(text: str, start: int) -> bool:
     """Every list and item from ``start`` is closed in the source, in order."""
     opened: list[str] = []
     for tag in _LIST_TAG.finditer(text, start):
-        name = tag[2].lower()
+        name = tag[2].casefold()
         if not tag[1]:
             opened.append(name)
         elif not opened or opened.pop() != name:

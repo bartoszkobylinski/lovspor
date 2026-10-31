@@ -96,3 +96,19 @@ def test_a_refusal_quotes_nothing_from_the_page() -> None:
     with pytest.raises(ForarbeiderRefusedError) as caught:
         require_whole_page(AFTER_FIRST_ITEM)
     assert str(caught.value) == "incomplete_page: document end"
+
+
+def test_a_footer_before_the_navigation_does_not_count() -> None:
+    moved = WHOLE.replace('<footer class="page-footer"></footer>\n', "")
+    moved = moved.replace("<main ", '<footer class="page-footer"></footer><main ')
+    assert _detail_of(moved) == "page footer"
+
+
+def test_a_closed_list_before_the_navigation_proves_nothing_about_it() -> None:
+    earlier = "<ul><li>Meny</li></ul>"
+    page = WHOLE.replace("<main ", earlier + "<main ").replace("<li>Vedlegg</li>", "<li>Vedlegg")
+    assert _detail_of(page) == "chapter list"
+
+
+def test_a_list_closed_in_another_case_is_still_closed() -> None:
+    require_whole_page(WHOLE.replace("<li>Vedlegg</li>", "<LI>Vedlegg</li>"))

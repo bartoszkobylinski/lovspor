@@ -1,5 +1,6 @@
 """``lovspor ops forarbeider-metadata``: the operator's one route to a record (#738)."""
 
+import io
 import json
 import os
 import subprocess
@@ -10,7 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lovspor.cli import app
-from lovspor.forarbeider.commands import MAX_HTML_BYTES
+from lovspor.forarbeider.commands import MAX_HTML_BYTES, _saved_page
 from lovspor.forarbeider.models import read_metadata
 from tests.unit.cli_output import said
 
@@ -273,3 +274,16 @@ def test_unproved_saved_page_preserves_existing_record(tmp_path: Path, failure: 
     assert output.read_bytes() == previous
     assert saved.read_bytes() == payload
     assert set(tmp_path.iterdir()) == {saved, output}
+
+
+def test_the_read_asks_for_one_byte_past_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[int | None] = []
+
+    class Recording(io.BytesIO):
+        def read(self, size: int | None = -1, /) -> bytes:
+            asked.append(size)
+            return super().read(size)
+
+    monkeypatch.setattr(Path, "open", lambda *_args, **_kwargs: Recording(b"page"))
+    assert _saved_page(FIXTURE) == b"page"
+    assert asked == [MAX_HTML_BYTES + 1]
