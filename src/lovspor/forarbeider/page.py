@@ -18,6 +18,7 @@ from datetime import datetime
 from lxml import etree, html
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from lovspor.forarbeider.completeness import require_whole_page
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.identity import (
     SourceLocator,
@@ -100,8 +101,10 @@ def read_proposition(payload: bytes, source_url: str) -> PropositionFacts:
     locator = parse_source_url(source_url)
     if locator.chapter is None:
         raise ForarbeiderRefusedError(RefusalReason.CHAPTER_PAGE_REQUIRED, source_url)
-    root = _document(payload)
+    text = _text(payload)
+    root = _document(text)
     _require_proposition(root)
+    require_whole_page(text)
     _require_identity(root, locator)
     return PropositionFacts(
         locator=locator,
@@ -111,11 +114,19 @@ def read_proposition(payload: bytes, source_url: str) -> PropositionFacts:
     )
 
 
-def _document(payload: bytes) -> html.HtmlElement:
-    """Strict UTF-8; lxml's default HTML parser already has ``no_network`` on."""
+def _text(payload: bytes) -> str:
+    """Strict UTF-8."""
     try:
-        return html.document_fromstring(payload.decode())
-    except (UnicodeDecodeError, ValueError, etree.ParserError) as error:
+        return payload.decode()
+    except UnicodeDecodeError as error:
+        raise ForarbeiderRefusedError(RefusalReason.UNREADABLE_PAGE, "saved page") from error
+
+
+def _document(text: str) -> html.HtmlElement:
+    """lxml's default HTML parser already has ``no_network`` on."""
+    try:
+        return html.document_fromstring(text)
+    except (ValueError, etree.ParserError) as error:
         raise ForarbeiderRefusedError(RefusalReason.UNREADABLE_PAGE, "saved page") from error
 
 

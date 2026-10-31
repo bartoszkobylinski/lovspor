@@ -20,6 +20,7 @@ class RefusalReason(StrEnum):
     INPUT_TOO_LARGE = "input_too_large"
     OUTPUT_WRITE_FAILED = "output_write_failed"
     UNREADABLE_PAGE = "unreadable_page"
+    INCOMPLETE_PAGE = "incomplete_page"
     DOM_CHANGED = "dom_changed"
     SOURCE_IDENTITY_MISSING = "source_identity_missing"
     CONFLICTING_IDENTITY = "conflicting_identity"
