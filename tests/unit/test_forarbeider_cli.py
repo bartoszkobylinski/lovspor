@@ -109,3 +109,33 @@ def test_retrieval_time_must_be_explicit_and_aware(tmp_path: Path, when: str) ->
 def test_missing_required_option_is_a_usage_error(tmp_path: Path) -> None:
     argv = _argv(FIXTURE, tmp_path / "a.json")[:-4]
     assert CliRunner().invoke(app, argv).exit_code == 2
+
+
+@pytest.mark.parametrize("failure", ["timestamp", "identity", "navigation", "encoding"])
+def test_refusal_preserves_existing_output(tmp_path: Path, failure: str) -> None:
+    """Exit 1 writes nothing, including when the target already contains a record."""
+    output = tmp_path / "record.json"
+    previous = b'{"existing": "must survive"}\n'
+    output.write_bytes(previous)
+    payload = FIXTURE.read_bytes()
+    when = WHEN
+    if failure == "timestamp":
+        when = "2100-04-01T12:00:00"
+        reason = "invalid_timestamp"
+    elif failure == "identity":
+        payload = payload.replace(b'id9000001/"', b'id9000009/"')
+        reason = "conflicting_identity"
+    elif failure == "navigation":
+        payload = payload.replace(b"data-longdoc-table-of-content", b"data-other")
+        reason = "chapter_navigation_missing"
+    else:
+        payload = b"\xff"
+        reason = "unreadable_page"
+    saved = tmp_path / "saved.html"
+    saved.write_bytes(payload)
+    result = CliRunner().invoke(app, _argv(saved, output, when=when))
+    assert result.exit_code == 1
+    assert said(f"refused: {reason}", result.output)
+    assert output.read_bytes() == previous
+    assert saved.read_bytes() == payload
+    assert {path.name for path in tmp_path.iterdir()} == {"record.json", "saved.html"}

@@ -288,3 +288,18 @@ def test_same_input_gives_equal_records() -> None:
     assert build_record(payload, f"{L_URL}?ch=1", RETRIEVED) == build_record(
         payload, f"{L_URL}?ch=1", RETRIEVED
     )
+
+
+def test_source_hash_covers_saved_bytes_without_normalizing_line_endings() -> None:
+    """The operations contract says source_page_url names the page the hash covers."""
+    payload = (FIXTURES / "prop-l.html").read_bytes()
+    crlf_payload = payload.replace(b"\n", b"\r\n")
+    assert crlf_payload != payload
+    original = build_record(payload, f"{L_URL}?ch=1", RETRIEVED)
+    crlf = build_record(crlf_payload, f"{L_URL}?ch=1", RETRIEVED)
+    assert original.source_sha256 == hashlib.sha256(payload).hexdigest()
+    assert crlf.source_sha256 == hashlib.sha256(crlf_payload).hexdigest()
+    assert original.source_sha256 != crlf.source_sha256
+    assert original.model_dump(exclude={"source_sha256"}) == crlf.model_dump(
+        exclude={"source_sha256"}
+    )

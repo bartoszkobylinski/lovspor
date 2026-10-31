@@ -64,3 +64,20 @@ def test_sibling_of_a_forbidden_tree_is_allowed(tmp_path: Path) -> None:
     tree = tmp_path / "corpus"
     target = tmp_path / "corpus-staging" / "a.json"
     assert checked_output(target, (tree,)) == target.resolve()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_file_symlink_into_checkout_is_refused(tmp_path: Path, existing: bool) -> None:
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    target = checkout / "record.json"
+    if existing:
+        target.write_bytes(b"existing metadata\n")
+    link = tmp_path / "staging.json"
+    link.symlink_to(target)
+    _refused(link)
+    assert link.is_symlink()
+    if existing:
+        assert target.read_bytes() == b"existing metadata\n"
+    else:
+        assert not target.exists()
