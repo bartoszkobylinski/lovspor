@@ -25,3 +25,24 @@ def test_entry_version_is_the_package_version() -> None:
 
 def test_description_fits_the_registry_limit() -> None:
     assert len(str(_entry()["description"])) <= MAX_DESCRIPTION
+
+
+def test_entry_lists_no_installable_packages() -> None:
+    """Operations documents this as a hosted-endpoint-only listing."""
+    assert not _entry().get("packages")
+
+
+def test_entry_keeps_the_publishing_identity_and_repository_together() -> None:
+    """The documented GitHub login publishes under this repository owner's name."""
+    entry = _entry()
+    assert entry["name"] == "io.github.bartoszkobylinski/lovspor"
+    assert entry["repository"] == {
+        "url": "https://github.com/bartoszkobylinski/lovspor",
+        "source": "github",
+    }
+
+
+def test_registry_entry_is_available_in_the_mutation_shadow_tree() -> None:
+    """These file-backed tests also run from mutmut's copied project tree."""
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "server.json" in config["tool"]["mutmut"]["also_copy"]
