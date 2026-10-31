@@ -2687,6 +2687,20 @@ are UTC. `lovspor ops usage` also takes a saved file (`lovspor ops usage
 journal.txt`) and `--since today|all|YYYY-MM-DD` to filter by UTC day. Metrics
 are recorded only by the hosted server; `lovspor mcp` (stdio) records none.
 
+## Hosted MCP: the official registry entry
+
+`server.json` is the entry for the [official MCP registry](https://registry.modelcontextprotocol.io). It lists the hosted endpoint only, because a registry version is immutable: bump `version` with the package, or the publish is refused. `tests/unit/test_mcp_registry_entry.py` pins the endpoint and the version.
+
+Publishing is the owner's step: `io.github.*` names need a GitHub login. Run it from the repository root:
+
+```bash
+brew install mcp-publisher
+mcp-publisher validate
+mcp-publisher login github
+mcp-publisher publish
+curl -s 'https://registry.modelcontextprotocol.io/v0/servers?search=lovspor' | jq '.servers[].server | {name, version}'
+```
+
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.

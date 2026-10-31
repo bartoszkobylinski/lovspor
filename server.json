@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.bartoszkobylinski/lovspor",
+  "title": "Lovspor: Norwegian law",
+  "description": "Norwegian acts and central regulations as exact, citable text, with quote and citation checks.",
+  "repository": {
+    "url": "https://github.com/bartoszkobylinski/lovspor",
+    "source": "github"
+  },
+  "websiteUrl": "https://lovspor.no",
+  "version": "0.6.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://lovspor.no/mcp"
+    }
+  ]
+}
