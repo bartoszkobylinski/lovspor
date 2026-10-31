@@ -13,6 +13,7 @@ from lovspor.site.routes import (
     CLAUDE_CODE_HOSTED_WALKED_ON,
     CLIENT_REGISTRY,
     SITE_ROUTES,
+    VSCODE_HOSTED_WALKED_ON,
     ConnectClient,
     Localised,
     SiteRoute,
@@ -128,6 +129,12 @@ class TestSiteRoutes:
 
         assert "verified against the hosted instance on 2026-10-30, #729" in mcp
         assert date(2026, 10, 30) == CLAUDE_CODE_HOSTED_WALKED_ON
+
+    def test_the_vscode_walk_date_is_the_one_docs_record(self) -> None:
+        mcp = (Path(__file__).resolve().parents[2] / "docs" / "mcp.md").read_text("utf-8")
+
+        assert "**Connecting VS Code** (verified against the hosted instance on 2026-10-30" in mcp
+        assert date(2026, 10, 30) == VSCODE_HOSTED_WALKED_ON
 
     def test_a_client_without_a_walk_date_is_refused(self) -> None:
         copy = Localised(nb="t", en="t", pl="t")

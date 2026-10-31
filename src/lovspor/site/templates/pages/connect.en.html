@@ -8,6 +8,8 @@
       local copy .......... the Claude guide (connect-claude.*.html)
       hosted Claude Code .. docs/mcp.md "Connecting Claude Code" (the day is
                             CLAUDE_CODE_HOSTED_WALKED_ON, a ledgered fact)
+      VS Code ............. docs/mcp.md "Connecting VS Code" (the day is
+                            VSCODE_HOSTED_WALKED_ON, a ledgered fact)
       other clients ....... no procedure in this repository; named untested
       first questions ..... folketrygdloven § 8-18 (the guides' example) and
                             byggteknisk forskrift § 12-7, both read from the
@@ -34,6 +36,7 @@
     <li><a href="#claude">Claude</a></li>
     <li><a href="#chatgpt">ChatGPT</a></li>
     <li><a href="#claude-code">Claude Code</a></li>
+    <li><a href="#vscode">VS Code</a></li>
     <li><a href="#other">Other clients</a></li>
     <li><a href="#start">Start here</a></li>
     <li><a href="#help">Help</a></li>
@@ -79,8 +82,19 @@ claude mcp add lovverk -- uvx lovspor mcp</pre>
 </ol>
 <p>If the browser does not open, Claude Code shows the link to copy. If the page after <strong>Allow access</strong> shows a connection error, paste the address from the browser where Claude Code asks for it. If you already have the local copy, give this one another name, such as <code>lovverk-hosted</code>.</p>
 
+<h2 id="vscode">VS Code</h2>
+<p class="tested">Run in VS Code against the hosted service on {{ fact("code.connect.vscode.walked_on", kind="code") }}.</p>
+<ol class="steps">
+  <li>Press ⌘⇧P (Ctrl+Shift+P), run <strong>MCP: Add Server</strong> and choose <strong>HTTP</strong>.</li>
+  <li>Enter the address <code class="copyable">https://lovspor.no/mcp</code> and the server ID <code>lovverk</code>.</li>
+  <li>When VS Code asks, choose <strong>Allow</strong>, then <strong>Open</strong> to go to the sign-in page.</li>
+  <li>Sign in with email or Google and choose <strong>Allow access</strong>. The page warns that the redirect points to an unverified application on your machine; that application is VS Code.</li>
+  <li>Open the chat, use <strong>Agent</strong> mode and ask your question. When VS Code asks to run a lovverk tool, allow it.</li>
+</ol>
+<p>Check that the answer shows a tool step. In our first attempt the chat said lovverk needed authentication and then answered anyway, without calling lovverk, and the answer looked right. If you see that message, sign in again and ask again.</p>
+
 <h2 id="other">Other clients</h2>
-<p><strong>No tested procedure</strong> for Cursor, VS Code and Codex. We have not run the setup in these clients ourselves, so we do not make up the steps or the configuration files.</p>
+<p><strong>No tested procedure</strong> for Cursor and Codex. We have not run the setup in these clients ourselves, so we do not make up the steps or the configuration files.</p>
 <p>What a client needs to use the hosted service:</p>
 <ul>
   <li>the address <code class="copyable">https://lovspor.no/mcp</code>;</li>

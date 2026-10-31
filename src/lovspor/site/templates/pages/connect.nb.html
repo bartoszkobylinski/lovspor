@@ -8,6 +8,8 @@
       local copy .......... the Claude guide (connect-claude.*.html)
       hosted Claude Code .. docs/mcp.md "Connecting Claude Code" (the day is
                             CLAUDE_CODE_HOSTED_WALKED_ON, a ledgered fact)
+      VS Code ............. docs/mcp.md "Connecting VS Code" (the day is
+                            VSCODE_HOSTED_WALKED_ON, a ledgered fact)
       other clients ....... no procedure in this repository; named untested
       first questions ..... folketrygdloven § 8-18 (the guides' example) and
                             byggteknisk forskrift § 12-7, both read from the
@@ -34,6 +36,7 @@
     <li><a href="#claude">Claude</a></li>
     <li><a href="#chatgpt">ChatGPT</a></li>
     <li><a href="#claude-code">Claude Code</a></li>
+    <li><a href="#vscode">VS Code</a></li>
     <li><a href="#other">Andre klienter</a></li>
     <li><a href="#start">Kom i gang</a></li>
     <li><a href="#help">Hjelp</a></li>
@@ -79,8 +82,19 @@ claude mcp add lovverk -- uvx lovspor mcp</pre>
 </ol>
 <p>Åpnes ikke nettleseren, viser Claude Code lenken du kan kopiere. Viser siden etter <strong>Allow access</strong> en tilkoblingsfeil, limer du inn adressen fra nettleseren der Claude Code ber om den. Har du allerede den lokale kopien, gi denne et annet navn, for eksempel <code>lovverk-hosted</code>.</p>
 
+<h2 id="vscode">VS Code</h2>
+<p class="tested">Kjørt i VS Code mot den driftede tjenesten {{ fact("code.connect.vscode.walked_on", kind="code") }}.</p>
+<ol class="steps">
+  <li>Trykk ⌘⇧P (Ctrl+Shift+P), kjør <strong>MCP: Add Server</strong> og velg <strong>HTTP</strong>.</li>
+  <li>Skriv inn adressen <code class="copyable">https://lovspor.no/mcp</code> og server-ID-en <code>lovverk</code>.</li>
+  <li>Når VS Code spør, velg <strong>Allow</strong> og deretter <strong>Open</strong> for å gå til innloggingssiden.</li>
+  <li>Logg inn med e-post eller Google og velg <strong>Allow access</strong>. Siden advarer om at omdirigeringen peker til et ubekreftet program på maskinen din; det programmet er VS Code.</li>
+  <li>Åpne chatten, bruk <strong>Agent</strong>-modus og still spørsmålet. Når VS Code ber om å kjøre et lovverk-verktøy, tillat det.</li>
+</ol>
+<p>Sjekk at svaret viser et verktøysteg. I vårt første forsøk sa chatten at lovverk krevde innlogging, og svarte likevel uten å kalle lovverk, og svaret så riktig ut. Ser du den meldingen, logg inn på nytt og spør igjen.</p>
+
 <h2 id="other">Andre klienter</h2>
-<p><strong>Ingen testet framgangsmåte</strong> for Cursor, VS Code og Codex. Vi har ikke kjørt oppsettet i disse klientene selv, og da dikter vi ikke opp stegene eller oppsettsfilene.</p>
+<p><strong>Ingen testet framgangsmåte</strong> for Cursor og Codex. Vi har ikke kjørt oppsettet i disse klientene selv, og da dikter vi ikke opp stegene eller oppsettsfilene.</p>
 <p>Det en klient trenger for å bruke den driftede tjenesten:</p>
 <ul>
   <li>adressen <code class="copyable">https://lovspor.no/mcp</code>;</li>

@@ -59,6 +59,13 @@ def test_registry_adds_each_dated_code_fact_without_changing_existing_facts() ->
             field="CLAUDE_CODE_HOSTED_WALKED_ON",
             value="2026-10-30",
         ),
+        FactSource(
+            id="code.connect.vscode.walked_on",
+            kind="code",
+            artifact=REGISTRY_ARTIFACT,
+            field="VSCODE_HOSTED_WALKED_ON",
+            value="2026-10-30",
+        ),
     )
     assert tuple(source for source in sources if not source.id.startswith("code.connect.")) == (
         fact_registry(original).sources
@@ -98,6 +105,31 @@ def test_registry_bytes_are_read_from_the_selected_checkout(tmp_path: Path) -> N
     registry.write_bytes(payload)
 
     assert _registry_bytes(tmp_path) == payload
+
+
+@pytest.mark.parametrize("walked_on", [date(2024, 2, 29), date(2027, 1, 2)])
+def test_vscode_fact_follows_its_own_walk_date(
+    monkeypatch: pytest.MonkeyPatch, walked_on: date
+) -> None:
+    """The VS Code walk has its own source, even when other walks share its date."""
+    artifacts = _artifacts().model_copy(update={"registry_bytes": b"registry"})
+    original = fact_registry(artifacts).sources
+    monkeypatch.setattr(routes, "VSCODE_HOSTED_WALKED_ON", walked_on)
+
+    sources = fact_registry(artifacts).sources
+    fact_id = "code.connect.vscode.walked_on"
+    assert tuple(source for source in sources if source.id == fact_id) == (
+        FactSource(
+            id=fact_id,
+            kind="code",
+            artifact=REGISTRY_ARTIFACT,
+            field="VSCODE_HOSTED_WALKED_ON",
+            value=walked_on.isoformat(),
+        ),
+    )
+    assert tuple(source for source in sources if source.id != fact_id) == tuple(
+        source for source in original if source.id != fact_id
+    )
 
 
 def test_missing_checkout_registry_is_a_useful_build_error(tmp_path: Path) -> None:
