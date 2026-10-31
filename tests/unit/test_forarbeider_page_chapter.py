@@ -112,3 +112,31 @@ def test_a_paging_link_to_another_document_is_refused() -> None:
 def test_a_paging_link_with_no_href_proves_nothing() -> None:
     bare = PAGE.replace(f'href="{PATH}" data-longdoc-prev', "data-longdoc-prev").encode()
     assert _refusal(bare, 1).reason is RefusalReason.PAGE_CHAPTER_UNPROVED
+
+
+def test_repeated_previous_links_must_agree() -> None:
+    payload = _paged(f"{PATH}?ch=1", f"{PATH}?ch=3")
+    repeated = payload.replace(b"</main>", _link("prev", f"{PATH}?ch=1").encode() + b"</main>")
+    assert read_proposition(repeated, f"{L_URL}?ch=2").locator.chapter == 2
+    conflicting = payload.replace(b"</main>", _link("prev", PATH).encode() + b"</main>")
+    refusal = _refusal(conflicting, 2)
+    assert refusal.reason is RefusalReason.PAGE_CHAPTER_UNPROVED
+    assert refusal.detail == f"{L_URL}?ch=2"
+
+
+def test_only_chapter_links_back_to_landing_and_has_no_next() -> None:
+    """The documented first/last paging rules also apply when both are chapter 1."""
+    payload = _paged(PATH, None)
+    start = payload.index(b'<ul class="longdoc-table-of-content"')
+    end = payload.index(b"</nav>", start)
+    navigation = (
+        "<ul data-longdoc-table-of-content><li>"
+        f'<a href="{PATH}?ch=1">Eneste kapittel</a></li></ul>\n'
+    ).encode()
+    payload = payload[:start] + navigation + payload[end:]
+    record = build_record(payload, f"{L_URL}?ch=1", RETRIEVED)
+    assert record.source_page_url == f"{L_URL}?ch=1"
+    assert [(c.chapter_number, c.title, c.url) for c in record.chapters] == [
+        (1, "Eneste kapittel", f"{L_URL}?ch=1")
+    ]
+    assert _refusal(payload, 2).reason is RefusalReason.PAGE_CHAPTER_UNPROVED

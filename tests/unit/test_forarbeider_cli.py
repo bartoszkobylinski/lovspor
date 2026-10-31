@@ -247,3 +247,29 @@ def test_a_failed_write_is_a_typed_refusal_and_leaves_nothing(tmp_path: Path) ->
 def test_an_output_path_that_cannot_be_resolved_is_refused(tmp_path: Path) -> None:
     output = Path("~no-such-user-738/record.json")
     assert "refused: unsafe_output_path: " in _refused(_argv(FIXTURE, output))
+
+
+@pytest.mark.parametrize("failure", ["wrong-chapter", "cut-off"])
+def test_unproved_saved_page_preserves_existing_record(tmp_path: Path, failure: str) -> None:
+    """Operations contract: a cut capture or mislabelled chapter writes nothing."""
+    payload = FIXTURE.read_bytes()
+    url = URL
+    if failure == "wrong-chapter":
+        url = URL.removesuffix("1") + "2"
+        reason = "page_chapter_unproved"
+    else:
+        payload = payload[: payload.index(b"</main>")]
+        reason = "incomplete_page"
+    saved = tmp_path / "saved.html"
+    saved.write_bytes(payload)
+    output = tmp_path / "record.json"
+    previous = b'{"existing": "must survive"}\n'
+    output.write_bytes(previous)
+
+    result = CliRunner().invoke(app, _argv(saved, output, url=url))
+
+    assert result.exit_code == 1
+    assert said(f"refused: {reason}:", result.output)
+    assert output.read_bytes() == previous
+    assert saved.read_bytes() == payload
+    assert set(tmp_path.iterdir()) == {saved, output}
