@@ -2687,6 +2687,27 @@ are UTC. `lovspor ops usage` also takes a saved file (`lovspor ops usage
 journal.txt`) and `--since today|all|YYYY-MM-DD` to filter by UTC day. Metrics
 are recorded only by the hosted server; `lovspor mcp` (stdio) records none.
 
+## Forarbeider: offline staging metadata (issue #738)
+
+`lovspor ops forarbeider-metadata` reads one regjeringen.no Prop. L / Prop. LS chapter page the operator already saved, and writes one validated metadata record. It makes no HTTP request and publishes nothing. ADR-0018 is Proposed: live fetching, a `lovverk/forarbeider/` dataset and any publication stay gated on the owner's acceptance.
+
+```bash
+uv run lovspor ops forarbeider-metadata \
+  --html ~/forarbeider-staging/raw/prop-54-ls.html \
+  --source-url 'https://www.regjeringen.no/no/dokumenter/prop.-54-ls-20252026/id3154578/?ch=1' \
+  --retrieved-at 2026-10-31T09:00:00+01:00 \
+  --output ~/forarbeider-staging/regjeringen-3154578.json
+```
+
+- **Input is a `?ch=N` page.** The landing page has no chapter navigation, so a landing URL is refused with `chapter_page_required`. `source_url` in the record is the canonical document URL and `source_page_url` is the page the hash covers.
+- **Output** must be an absolute `.json` path outside every Git repository: an ancestor holding `.git`, the engine repository and the default corpus path are refused with `unsafe_output_path` before anything is written.
+- **`--retrieved-at`** is required, with an offset, and stored in UTC. The command has no clock.
+- **`published_at` is `null`.** The page states no publication date, and `DC.Date` matched the tilråding date in the samples, so it is not treated as one.
+- **Rights:** `source_license` is always `null` and `rights_basis` records `åndsverkloven § 14`. That is a statutory qualification, not a licence, and never NLOD. The record is not legal clearance.
+- **Chapters** are the source's own navigation, in order. Annexes (`Vedlegg`) are listed there too; `chapter_number` is the `ch` value, not the printed label.
+
+Exit 1 prints `refused: <reason>: <detail>` and writes nothing. The reasons are in `src/lovspor/forarbeider/errors.py`. Keep saved pages out of Git: raw source HTML is never committed.
+
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.
