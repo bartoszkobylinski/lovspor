@@ -184,3 +184,27 @@ def test_metadata_preserves_unicode_codepoints_on_disk(tmp_path: Path) -> None:
     assert title.encode("utf-8") in payload
     assert b"\\u" not in payload
     assert read_metadata(target) == record
+
+
+def test_failed_atomic_replacement_preserves_previous_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """write_metadata promises an atomic write, even when replacing an old record."""
+    previous = ForarbeidRecord.model_validate(_fields())
+    target = tmp_path / "record.json"
+    write_metadata(previous, target)
+    original = target.read_bytes()
+    replacement = ForarbeidRecord.model_validate(_fields() | {"title": "Ny tittel"})
+
+    def refuse_replace(staged: Path, destination: Path) -> Path:
+        assert destination == target
+        assert staged.read_bytes() == metadata_text(replacement).encode("utf-8")
+        assert target.read_bytes() == original
+        raise OSError("simulated replacement failure")
+
+    monkeypatch.setattr(Path, "replace", refuse_replace)
+    with pytest.raises(OSError, match="simulated replacement failure"):
+        write_metadata(replacement, target)
+    assert target.read_bytes() == original
+    assert read_metadata(target) == previous
+    assert list(tmp_path.iterdir()) == [target]

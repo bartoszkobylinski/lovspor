@@ -1,6 +1,7 @@
 """``lovspor ops forarbeider-metadata``: the operator's one route to a record (#738)."""
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -139,3 +140,50 @@ def test_refusal_preserves_existing_output(tmp_path: Path, failure: str) -> None
     assert output.read_bytes() == previous
     assert saved.read_bytes() == payload
     assert {path.name for path in tmp_path.iterdir()} == {"record.json", "saved.html"}
+
+
+@pytest.mark.parametrize("option", ["--html", "--source-url", "--retrieved-at", "--output"])
+def test_each_required_option_names_itself_and_leaves_no_output(
+    tmp_path: Path, option: str
+) -> None:
+    output = tmp_path / "staging" / "record.json"
+    argv = _argv(FIXTURE, output)
+    position = argv.index(option)
+    del argv[position : position + 2]
+    result = CliRunner().invoke(app, argv)
+    assert result.exit_code == 2
+    assert said(f"Missing option '{option}'", result.output)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory"])
+def test_html_must_be_an_existing_file_without_creating_output(tmp_path: Path, kind: str) -> None:
+    saved = tmp_path / "saved.html"
+    if kind == "directory":
+        saved.mkdir()
+    before = set(tmp_path.iterdir())
+    result = CliRunner().invoke(app, _argv(saved, tmp_path / "staging" / "record.json"))
+    assert result.exit_code == 2
+    assert said("Invalid value for '--html'", result.output)
+    assert said("does not exist" if kind == "missing" else "is a directory", result.output)
+    assert set(tmp_path.iterdir()) == before
+
+
+def test_metadata_bytes_are_stable_across_process_environments(tmp_path: Path) -> None:
+    """Operator inputs alone determine the record, including its supplied timestamp."""
+    outputs = []
+    for index, (seed, zone, encoding) in enumerate(
+        [("1", "UTC", "ascii"), ("42", "Pacific/Honolulu", "utf-8")]
+    ):
+        output = tmp_path / f"{index}.json"
+        completed = subprocess.run(
+            [sys.executable, "-c", "from lovspor.cli import app; app()", *_argv(FIXTURE, output)],
+            env=os.environ | {"PYTHONHASHSEED": seed, "TZ": zone, "PYTHONIOENCODING": encoding},
+            capture_output=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        outputs.append(output.read_bytes())
+    assert outputs[0] == outputs[1]
+    record = read_metadata(tmp_path / "0.json")
+    assert record.retrieved_at.isoformat() == "2100-04-01T12:00:00+00:00"
