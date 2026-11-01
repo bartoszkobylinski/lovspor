@@ -19,6 +19,7 @@ class RefusalReason(StrEnum):
     INPUT_UNREADABLE = "input_unreadable"
     INPUT_TOO_LARGE = "input_too_large"
     OUTPUT_WRITE_FAILED = "output_write_failed"
+    OBSERVATION_EXISTS = "observation_exists"
     UNREADABLE_PAGE = "unreadable_page"
     INCOMPLETE_PAGE = "incomplete_page"
     DOM_CHANGED = "dom_changed"
