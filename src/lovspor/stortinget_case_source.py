@@ -24,6 +24,7 @@ _ENDPOINT = "https://data.stortinget.no/eksport/sak"
 _LIMIT = 2_000_000
 _REF = re.compile(r"^Lovvedtak\s+(\d{1,4})\s*\((\d{4})-(\d{4})\)$", re.I)
 _SESSION = re.compile(r"^\d{4}-\d{4}$")
+SAK_PARSER_VERSION = "sak-xml-2"
 Status = Literal["attested", "ambiguous", "unresolved", "contradicted"]
 
 
@@ -99,16 +100,24 @@ def _field(element: etree._Element, name: str) -> str:
     return (element.findtext(f"{{{_NS}}}{name}") or "").strip()
 
 
+def _export_id_agrees(ref: etree._Element, first: int, number: int) -> bool:
+    export_id = _field(ref, "eksport_id")
+    return export_id in {"", f"vedtak-{first:04d}{(first + 1) % 100:02d}-{number:03d}"}
+
+
 def _law_decision(ref: etree._Element, case_session: str) -> LawDecision | None:
+    """The reference owns its session: a case can be decided after its opening session."""
     if _field(ref, "type") != "lovvedtak":
         return None
     match = _REF.fullmatch(_field(ref, "lenke_tekst"))
     if match is None:
         return None
     number, first, last = (int(group) for group in match.groups())
-    if last != first + 1 or f"{first:04d}-{last:04d}" != case_session:
+    if last != first + 1 or first < int(case_session[:4]):
         return None
-    return LawDecision(case_session, number)
+    if not _export_id_agrees(ref, first, number):
+        return None
+    return LawDecision(f"{first:04d}-{last:04d}", number)
 
 
 def _decisions(root: etree._Element, session: str) -> tuple[LawDecision, ...]:
