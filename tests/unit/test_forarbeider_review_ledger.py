@@ -174,6 +174,53 @@ def test_a_decision_racing_to_the_same_revision_is_a_conflict(
     assert history(ledger)[0].decision.reviewer == "reviewer-2"
 
 
+def test_identical_decisions_racing_to_the_same_revision_write_once(
+    ledger: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An identical winner is an idempotent retry, not a conflicting reviewer."""
+    real = review_ledger.write_observation
+    winners = []
+
+    def competing(path: Path, text: str) -> bool:
+        monkeypatch.setattr(review_ledger, "write_observation", real)
+        winners.append(record_decision(ledger, request()))
+        return real(path, text)
+
+    monkeypatch.setattr(review_ledger, "write_observation", competing)
+    outcome = record_decision(ledger, request())
+    assert winners[0].written is True
+    assert outcome.written is False
+    assert outcome.stored == winners[0].stored
+    assert history(ledger) == (outcome.stored,)
+    assert sorted(path.name for path in chapter_directory(ledger).iterdir()) == ["000001.json"]
+
+
+def test_a_record_with_invalid_utf8_is_corrupt(ledger: Path) -> None:
+    record_decision(ledger, request())
+    path = chapter_directory(ledger) / "000001.json"
+    path.write_bytes(path.read_bytes().replace(b"reviewer-1", b"reviewer-\xff"))
+    before = path.read_bytes()
+    assert refusal(ledger, later(1)) is RefusalReason.REVIEW_LEDGER_CORRUPT
+    assert path.read_bytes() == before
+    assert sorted(item.name for item in path.parent.iterdir()) == ["000001.json"]
+
+
+@pytest.mark.parametrize("extra", [0, 1])
+def test_record_size_limit_is_inclusive_and_never_extends_on_refusal(
+    ledger: Path, monkeypatch: pytest.MonkeyPatch, extra: int
+) -> None:
+    original = record_decision(ledger, request())
+    path = chapter_directory(ledger) / "000001.json"
+    before = path.read_bytes()
+    monkeypatch.setattr(review_ledger, "MAX_RECORD_BYTES", len(before) - extra)
+    if extra:
+        assert refusal(ledger, later(1)) is RefusalReason.INPUT_TOO_LARGE
+        assert path.read_bytes() == before
+        assert sorted(item.name for item in path.parent.iterdir()) == ["000001.json"]
+    else:
+        assert history(ledger) == (original.stored,)
+
+
 def test_a_forbidden_transition_is_refused(ledger: Path) -> None:
     record_decision(ledger, request(status=ReviewStatus.REJECTED))
     assert refusal(ledger, approval(expected_revision=1)) is RefusalReason.REVIEW_TRANSITION
