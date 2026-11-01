@@ -11,10 +11,56 @@ from unittest.mock import Mock
 
 import pytest
 
-from lovspor.forarbeider.chapter_models import result_text
+from lovspor.forarbeider.chapter_models import TextBlock, result_text
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.staging import write_observation
 from tests.unit.test_forarbeider_chapter import URL, page, result, section
+
+
+@pytest.mark.parametrize("spelling", ["&nbsp;", "&#160;", "&#xA0;"])
+def test_entity_spelling_changes_only_the_source_hash(spelling: str) -> None:
+    """The text hash covers decoded published characters, the source hash raw bytes."""
+    literal = result(section("<p>§\u00a03 &amp; æ</p>"))
+    escaped = result(section(f"<p>§{spelling}3 &#38; &#230;</p>"))
+
+    assert escaped.blocks is not None
+    assert escaped.blocks[-1] == TextBlock(kind="paragraph", text="§\u00a03 & æ")
+    assert escaped.blocks == literal.blocks
+    assert escaped.text_sha256 == literal.text_sha256
+    assert escaped.source_sha256 != literal.source_sha256
+
+
+def test_failed_staging_close_preserves_existing_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Buffered I/O can fail at close: never publish it or touch an earlier observation."""
+    target = tmp_path / "chapter.json"
+    assert write_observation(target, "earlier observation") is True
+    before = target.stat()
+    real_fdopen = os.fdopen
+
+    @contextmanager
+    def failing_close(descriptor: int, mode: str) -> Iterator[BinaryIO]:
+        with real_fdopen(descriptor, mode) as stream:
+            yield stream
+        raise OSError("simulated buffered close failure")
+
+    publish = Mock()
+    monkeypatch.setattr(os, "fdopen", failing_close)
+    monkeypatch.setattr(os, "link", publish)
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        write_observation(target, "later observation")
+
+    assert caught.value.reason is RefusalReason.OUTPUT_WRITE_FAILED
+    publish.assert_not_called()
+    assert target.read_bytes() == b"earlier observation"
+    after = target.stat()
+    assert (after.st_ino, after.st_mode, after.st_mtime_ns) == (
+        before.st_ino,
+        before.st_mode,
+        before.st_mtime_ns,
+    )
+    assert list(tmp_path.iterdir()) == [target]
 
 
 @pytest.mark.parametrize(("seed", "encoding"), [("1", "ascii"), ("98765", "latin-1")])
