@@ -15,6 +15,7 @@ from typing import Annotated
 import typer
 
 from lovspor.forarbeider import commands as _forarbeider_commands  # noqa: F401
+from lovspor.forarbeider import review_commands as _forarbeider_review  # noqa: F401
 from lovspor.ops.commands import ops_app
 from lovspor.usage_report import (
     UsageReportError,

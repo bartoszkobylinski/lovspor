@@ -27,7 +27,7 @@ MAX_HTML_BYTES = 16 * 1024 * 1024
 _ENGINE_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _aware(text: str) -> datetime:
+def aware_moment(text: str) -> datetime:
     try:
         moment = datetime.fromisoformat(text)
     except ValueError as error:
@@ -65,7 +65,7 @@ def metadata_impl(html: Path, source_url: str, retrieved_at: str, output: Path) 
         ForarbeiderRefusedError: any check failed; nothing was written.
     """
     target = checked_output(output, (_ENGINE_ROOT, default_corpus_path()))
-    moment = _aware(retrieved_at)
+    moment = aware_moment(retrieved_at)
     record = build_record(_saved_page(html), source_url, moment)
     _write(record, target)
     return f"wrote {record.id}: {len(record.chapters)} chapters to {target}"
@@ -80,7 +80,7 @@ def chapter_impl(html: Path, source_url: str, retrieved_at: str, output: Path) -
         ForarbeiderRefusedError: any check failed; nothing was written.
     """
     target = checked_output(output, (_ENGINE_ROOT, default_corpus_path()))
-    moment = _aware(retrieved_at)
+    moment = aware_moment(retrieved_at)
     result = build_chapter_result(_saved_page(html), source_url, moment)
     written = write_observation(target, result_text(result))
     return f"{'held' if written else 'unchanged'} {result.id}: {_summary(result)} at {target}"

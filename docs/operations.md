@@ -2712,7 +2712,7 @@ Exit 1 prints `refused: <reason>: <detail>` and writes nothing. The reasons are 
 
 ## Forarbeider: one held chapter in private staging (issue #738)
 
-`lovspor ops forarbeider-chapter` extracts the one chapter a saved `?ch=N` page holds into a held staging result. It makes no HTTP request, publishes nothing and clears nothing: ADR-0018 PR2, with release decisions left to PR3.
+`lovspor ops forarbeider-chapter` extracts the one chapter a saved `?ch=N` page holds into a held staging result. It makes no HTTP request, publishes nothing and clears nothing: ADR-0018 PR2. Reviewer decisions are recorded separately, by `ops forarbeider-review` below.
 
 ```bash
 uv run lovspor ops forarbeider-chapter \
@@ -2733,6 +2733,79 @@ uv run lovspor ops forarbeider-chapter \
 - **An observation is never replaced.** The file is created owner-only (0600). Rerunning identical inputs reports `unchanged`. Different content at the same path is refused with `observation_exists`: give each observation its own path, such as one ending in the retrieval date. An existing file is only ever read. If it is not a private regular file with one name, owned by you, the run stops with `observation_unsafe` and changes nothing, even when the bytes match: its chapter text may already have been readable, so check who could reach it before running `chmod 600` on it.
 - **Chapter text is sensitive staging data.** The result holds chapter text in clear, so keep it out of Git, logs, CI artifacts and issue or PR comments. The command prints only the id, counts, reasons and path.
 - **Limits:** `source_license` is `null`, `rights_basis` records `åndsverkloven § 14`, `normative` is `false`, never NLOD. Markup was read on nine pages of two propositions of session 2025-2026. A chapter of an older shape is withheld, not approximated. `retrieved_at` and the bytes stay the operator's word.
+
+## Forarbeider: private review decisions (issue #738)
+
+`lovspor ops forarbeider-review` records what a reviewer decided about one staged chapter. It is ADR-0018 PR3A: offline, and it permits nothing. **An approval is not permission to publish or crawl.** No command here fetches, indexes, publishes or moves a chapter, the observation stays `release_state: held`, and every record says `grants_publication: false` and `grants_crawling: false` by type. Public release is PR3B, which needs its own architecture, privacy and legal gates and the owner's approval. § 14 is not NLOD, and the § 24 and personal-data questions for bulk or public use stay open.
+
+```bash
+install -d -m 700 ~/forarbeider-staging ~/forarbeider-staging/chapters
+LEDGER=~/forarbeider-staging/review-ledger
+REVIEW="uv run lovspor ops forarbeider-review --ledger $LEDGER"
+
+# What is waiting, and the pin each decision needs
+$REVIEW candidates --staging ~/forarbeider-staging/chapters
+
+# One observation: what it binds, its status, every revision
+$REVIEW show --observation ~/forarbeider-staging/chapters/regjeringen-3154578-ch9-20261031.json
+
+# Hold it; --expect is copied from the line above
+uv run lovspor ops forarbeider-review --ledger $LEDGER \
+  --reviewer reviewer-1 --decided-at 2026-11-01T12:00:00+01:00 \
+  hold --observation ~/forarbeider-staging/chapters/regjeringen-3154578-ch9-20261031.json \
+  --expect <subject>@0 \
+  --because awaiting_evidence=issue:738
+
+# Approve, at a terminal only: needs all four attestations and a typed phrase
+uv run lovspor ops forarbeider-review --ledger $LEDGER \
+  --reviewer reviewer-1 --decided-at 2026-11-02T12:00:00+01:00 \
+  approve --observation ~/forarbeider-staging/chapters/regjeringen-3154578-ch9-20261031.json \
+  --expect <subject>@1 \
+  --attest source_rights_policy=adr:0018 \
+  --attest privacy_basis=sha256:<digest of a private note> \
+  --attest third_party_checks=sha256:<digest of a private note> \
+  --attest source_completeness=sha256:<digest of a private note>
+
+# Check every chain and print each head digest
+$REVIEW verify
+```
+
+The ledger must be an absolute path to an owner-only directory outside every Git repository and outside the engine and corpus. Its parent must already exist.
+
+**Status transitions.** A chapter with no decisions is `pending`.
+
+| From | May become | Command |
+| --- | --- | --- |
+| `pending` | `held`, `rejected`, `approved` | `hold`, `reject`, `approve` |
+| `held` | `pending`, `held`, `rejected`, `approved` | `reopen`, `hold`, `reject`, `approve` |
+| `rejected` | `pending` | `reopen` |
+| `approved` | `pending`, `held`, `rejected` | `reopen`, `hold`, `reject` |
+
+A rejection cannot be approved in one step, and an approval is never refreshed in place: withdraw it, then decide again.
+
+- **A decision binds one exact observation:** `source_page_url`, `source_sha256`, `chapter_number`, `text_sha256`, extractor and normalizer versions. Their digest is the subject in `--expect <subject>@<revision>`. Changed bytes or text are another subject, with no decisions, so an approval never carries over: the new observation is `pending`. Earlier subjects of a chapter stay in `verify`, listed by chapter id.
+- **`--expect` is what the reviewer saw.** A different observation gives `review_subject_mismatch`. A revision that has moved on gives `review_conflict`: somebody else decided, so read `show` again. Rerunning the same decision with the same time prints `unchanged` and writes nothing.
+- **An approval needs a person.** All four `--attest` kinds with evidence, a chapter that has a body, a real terminal on stdin, and the printed phrase typed back. Otherwise the run is refused (`review_attestation_missing`, `review_not_eligible`, `review_not_interactive`), nothing is written and the status stays what it was. A held result with a prompt or without one is treated alike: the detectors in `hold_reasons` are prompts, never clearance, and the attestations are the reviewer's own.
+- **Records hold no free text.** Reasons are codes (`ReviewReason` in `src/lovspor/forarbeider/review_models.py`). Evidence is `adr:NNNN`, `issue:N`, `pr:N` or `sha256:<64 hex>`: keep a note in private storage and record its digest. `--reviewer` is a lowercase handle of at most 39 characters, so a name with a space or an email address is refused; use a role handle, not a personal name. A refused value is named by its field and never printed.
+- **The ledger is append-only.** `<ledger>/<subject>/<revision>.json`, owner-only (0600 in 0700 directories), byte-identical for the same decisions. Each record states the digest of the one before it. Commands read the chain first and stop with `review_ledger_corrupt` on an edited, moved or missing earlier record, and with `observation_unsafe` or `review_ledger_unsafe` on a file or directory others can reach. Nothing here repairs a ledger or changes its modes.
+
+**Retention and access for saved text.** Staged chapters hold source text in clear and may hold personal data, so:
+
+- Keep them in owner-only directories on this machine, outside Git, shared drives, cloud-synchronised folders and CI. Encrypted disk is expected; the commands do not encrypt.
+- Only the reviewer reads them. Do not paste chapter text into issues, PRs, logs or chat, and do not quote it in an evidence note kept outside private storage.
+- Delete a staged chapter and its saved page when review ends, and at the latest 90 days after `retrieved_at`, unless an open review still needs it. A rejected chapter is deleted at once. Deleting them is a manual step: nothing here does it, and a later review needs a fresh observation.
+- The ledger holds no chapter text and stays after the chapter is deleted, since it is the audit trail. It does hold reviewer handles and timestamps, so keep it private too and delete it with the pilot.
+- Before any wider use, the owner reviews this period; it is an engineering default, not a legal assessment.
+
+**Limits, unresolved.**
+
+- The digests sit beside what they protect. Someone who can write as this user can cut a chain at its end, rebuild one whole, or edit the newest record until a later revision points at it. Copy the head digests from `verify` somewhere else to notice that; nothing here anchors them.
+- `--decided-at`, `--reviewer` and the attestations are the operator's word. Times must not go backwards within a chain and are not checked against a clock. A handle is not an authenticated identity.
+- The terminal check keeps cron, CI and pipes out. It cannot prove a person is there: a pseudo-terminal can pass it.
+- `source_sha256` is copied from the observation, not recomputed: the saved page may be gone. `text_sha256` is recomputed from the blocks when the file is read.
+- Owner-only modes protect against other local users, not against this user's own processes, root, backups or a stolen unencrypted disk.
+- Retention is a written rule, not an enforced one.
+- Nothing was reviewed for real here: the workflow is tested on synthetic chapters only.
 
 ## Idempotency
 

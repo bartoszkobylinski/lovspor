@@ -152,9 +152,13 @@ def _decision(request: DecisionRequest, history: tuple[StoredDecision, ...]) -> 
             }
         )
     except ValidationError as error:
-        # Field names only: the input may be the very name the grammar refused.
-        fields = sorted({str(entry["loc"][0]) for entry in error.errors() if entry["loc"]})
-        raise ForarbeiderRefusedError(RefusalReason.REVIEW_INVALID, ",".join(fields)) from error
+        raise ForarbeiderRefusedError(RefusalReason.REVIEW_INVALID, _fields(error)) from error
+
+
+def _fields(error: ValidationError) -> str:
+    """Field names only: the input may be the very name the grammar refused."""
+    fields = sorted({str(entry["loc"][0]) for entry in error.errors() if entry["loc"]})
+    return ",".join(fields) or "decision"
 
 
 def _append(ledger: Path, decision: ReviewDecision) -> RecordOutcome:
