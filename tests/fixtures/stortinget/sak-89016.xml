@@ -1,0 +1,334 @@
+<?xml version="1.0" encoding="utf-8"?>
+<detaljert_sak xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://data.stortinget.no">
+  <respons_dato_tid>2026-11-01T18:26:31.8369978+01:00</respons_dato_tid>
+  <versjon>1.6</versjon>
+  <dokumentgruppe>proposisjon</dokumentgruppe>
+  <emne_liste>
+    <emne>
+      <respons_dato_tid>2026-11-01T17:53:17.1460051+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>false</er_hovedemne>
+      <hovedemne_id>151</hovedemne_id>
+      <id>25</id>
+      <navn>Regjeringen</navn>
+      <underemne_liste />
+    </emne>
+    <emne>
+      <respons_dato_tid>2026-11-01T17:53:17.1460051+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>true</er_hovedemne>
+      <hovedemne_id>155</hovedemne_id>
+      <id>155</id>
+      <navn>Statsforvaltning</navn>
+      <underemne_liste />
+    </emne>
+  </emne_liste>
+  <ferdigbehandlet>true</ferdigbehandlet>
+  <henvisning>Prop. 81 L (2021-2022), Innst. 386 L (2021-2022), Lovvedtak 85 (2021-2022)</henvisning>
+  <id>89016</id>
+  <innstillingstekst>Innstilling fra justiskomiteen om Endringer i forvaltningsloven (skyldkrav ved administrativ foretakssanksjon og habilitetsreglenes anvendelse for statsråder)</innstillingstekst>
+  <komite>
+    <respons_dato_tid>2026-11-01T17:02:04.5668884+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <id>JUSTIS</id>
+    <navn>Justiskomiteen</navn>
+  </komite>
+  <korttittel>Endringer i forvaltningsloven</korttittel>
+  <kortvedtak>Stortinget har enstemmig vedtatt endringer i forvaltningsloven som innebærer at skyldkravet for administrativ foretakssanksjon skal være uaktsomhet med mindre noe annet er bestemt i særlovgivningen. 
+
+I tillegg er virkeområdet til forvaltningslovens habilitetsregler utvidet slik at reglene også kommer til anvendelse for statsråder i egenskap av regjeringsmedlemmer, det vil si når de opptrer i statsråd, forberedende statsråd og regjeringskonferanse. Endringen er gjort ved å oppheve unntaket i forvaltningsloven § 10 annet punktum.</kortvedtak>
+  <parentestekst i:nil="true" />
+  <publikasjon_referanse_liste>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id i:nil="true" />
+      <lenke_tekst>Prop. 81 L (2021-2022)</lenke_tekst>
+      <lenke_url>http://www.regjeringen.no/id/PRP202120220081000DDDEPIS</lenke_url>
+      <type>regjering</type>
+      <undertype>proposisjon</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>refs-202122-04-21</eksport_id>
+      <lenke_tekst>Stortingsreferat 21.04.2022</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2021-2022/refs-202122-04-21/referatsaker/</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:26:32.2120139+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>inns-202122-386l</eksport_id>
+      <lenke_tekst>Innst. 386 L (2021-2022)</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Innstillinger/Stortinget/2021-2022/inns-202122-386l/</lenke_url>
+      <type>innstilling</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:26:32.9151645+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>refs-202122-06-02</eksport_id>
+      <lenke_tekst>Stortingsreferat 02.06.2022</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2021-2022/refs-202122-06-02/14</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:26:32.9151645+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>vedtak-202122-085</eksport_id>
+      <lenke_tekst>Lovvedtak 85 (2021-2022)</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Vedtak/Beslutninger/Lovvedtak/2021-2022/vedtak-202122-085/</lenke_url>
+      <type>lovvedtak</type>
+      <undertype i:nil="true" />
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:26:33.0714857+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>refs-202122-06-03</eksport_id>
+      <lenke_tekst>Stortingsreferat 03.06.2022</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2021-2022/refs-202122-06-03/voteringer#020622-14</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:26:33.0714857+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>refs-202122-06-07</eksport_id>
+      <lenke_tekst>Stortingsreferat 07.06.2022</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2021-2022/refs-202122-06-07/9</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+  </publikasjon_referanse_liste>
+  <sak_nummer>81</sak_nummer>
+  <sak_opphav>
+    <respons_dato_tid>2026-11-01T18:26:31.8369978+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <forslagstiller_liste />
+  </sak_opphav>
+  <sak_relasjon_liste />
+  <sak_sesjon>2021-2022</sak_sesjon>
+  <saksgang>
+    <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <id>KPRPLOV</id>
+    <navn>KLovforslag fra Regjeringen</navn>
+    <saksgang_steg_liste>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>SAK</id>
+        <navn>Lovforslag</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>FRADEP</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>10000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>SAK</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>20000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>08.04.2022 00:00:00</dato>
+            <id>FREMMET</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>30000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>21.04.2022 00:00:00</dato>
+            <id>REFS</id>
+            <publikasjonsReferanse>http://www.stortinget.no/stid/2021/si220421.html</publikasjonsReferanse>
+            <sorterings_nummer>40010</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>1</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>KOMBEH</id>
+        <navn>Komitebehandling</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>21.04.2022 00:00:00</dato>
+            <id>SENDT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>50000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>KOMITE</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>60000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>ORDFORER</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>90000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>24.05.2022 00:00:00</dato>
+            <id>AVGITT</id>
+            <publikasjonsReferanse>http://www.stortinget.no/inns/2021/inns-202122-386.html</publikasjonsReferanse>
+            <sorterings_nummer>110000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>2</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>DEBATT</id>
+        <navn>Første behandling</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>02.06.2022 00:00:00</dato>
+            <id>BEH1LOV</id>
+            <publikasjonsReferanse>http://www.stortinget.no/otid/2021/oi220602-14.html</publikasjonsReferanse>
+            <sorterings_nummer>130000</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>LOVLENKE1</id>
+            <publikasjonsReferanse>http://www.stortinget.no/bess/bess-202122-085.html</publikasjonsReferanse>
+            <sorterings_nummer>135085</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>03.06.2022 00:00:00</dato>
+            <id>VOTLOV1</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>135500</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>3</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>VEDTAK</id>
+        <navn>Andre behandling</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>07.06.2022 00:00:00</dato>
+            <id>BEH2LOV</id>
+            <publikasjonsReferanse>http://www.stortinget.no/ltid/2021/li220607-09.html</publikasjonsReferanse>
+            <sorterings_nummer>136009</sorterings_nummer>
+            <stegnummer>4</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>4</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>LOV</id>
+        <navn>Lov</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>17.06.2022 00:00:00</dato>
+            <id>LOVVEDT</id>
+            <publikasjonsReferanse>http://www.stortinget.no/bess/bess-202122-085.html</publikasjonsReferanse>
+            <sorterings_nummer>150085</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:26:32.0401378+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.07.2022 00:00:00</dato>
+            <id>LOVIKRAFT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>160085</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>5</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+    </saksgang_steg_liste>
+  </saksgang>
+  <saksordfoerer_liste>
+    <representant>
+      <respons_dato_tid>2026-11-01T17:53:17.1460051+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <doedsdato i:nil="true" />
+      <etternavn>Foss</etternavn>
+      <foedselsdato>1960-02-07T00:00:00</foedselsdato>
+      <fornavn>Ingunn</fornavn>
+      <id>IAF</id>
+      <kjoenn>kvinne</kjoenn>
+      <fylke>
+        <respons_dato_tid>2026-11-01T06:00:59.3435195+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <historisk_fylke>false</historisk_fylke>
+        <id>VA</id>
+        <navn>Vest-Agder</navn>
+      </fylke>
+      <parti>
+        <respons_dato_tid>2026-11-01T01:00:20.0373936+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>H</id>
+        <navn>Høyre</navn>
+        <representert_parti>true</representert_parti>
+      </parti>
+      <vara_representant>false</vara_representant>
+    </representant>
+  </saksordfoerer_liste>
+  <status>behandlet</status>
+  <stikkord_liste xmlns:d2p1="http://schemas.microsoft.com/2003/10/Serialization/Arrays">
+    <d2p1:string>Forvaltningsloven</d2p1:string>
+    <d2p1:string>Habilitet</d2p1:string>
+    <d2p1:string>Statsråder</d2p1:string>
+  </stikkord_liste>
+  <tittel>Endringer i forvaltningsloven (skyldkrav ved administrativ foretakssanksjon og habilitetsreglenes anvendelse for statsråder)</tittel>
+  <type>lovsak</type>
+  <vedtakstekst i:nil="true" />
+</detaljert_sak>

@@ -1,0 +1,326 @@
+{
+  "claims": [
+    {
+      "case_edge": "attested",
+      "decision": {
+        "number": 85,
+        "session_id": "2021-2022"
+      },
+      "label": "primary",
+      "law_edge": "attested",
+      "law_id": "LOV-2022-06-17-63",
+      "lovdata_cited_decisions": [
+        {
+          "number": 85,
+          "session_id": "2021-2022"
+        }
+      ],
+      "lovdata_member": "lti/2022/nl-20220617-063.xml",
+      "lovdata_member_sha256": "91f38f7f8913deefd65b406edb7e2b81f34b31056008571af1c387ee1736b682",
+      "other_case_decisions": [],
+      "sak_id": 89016,
+      "status": "attested",
+      "stortinget_sak_sha256": "3022cfaa229204fb3b0c1b20b811b3054c7360fe3cb95310d5b1c9a2ff5cefc1"
+    },
+    {
+      "case_edge": "attested",
+      "decision": {
+        "number": 13,
+        "session_id": "2015-2016"
+      },
+      "label": "one_case_two_acts",
+      "law_edge": "attested",
+      "law_id": "LOV-2015-12-18-122",
+      "lovdata_cited_decisions": [
+        {
+          "number": 13,
+          "session_id": "2015-2016"
+        }
+      ],
+      "lovdata_member": "lti/2015/nl-20151218-122.xml",
+      "lovdata_member_sha256": "1c4393509219610e0e83e39b9d0f776b1f61775deef01ed0fcf4aead73fa23b1",
+      "other_case_decisions": [
+        {
+          "number": 14,
+          "session_id": "2015-2016"
+        }
+      ],
+      "sak_id": 63056,
+      "status": "attested",
+      "stortinget_sak_sha256": "c3896c17198a024c007f8cc0694018a2791cc59e0409fc7096aff58093724ac0"
+    },
+    {
+      "case_edge": "attested",
+      "decision": {
+        "number": 14,
+        "session_id": "2015-2016"
+      },
+      "label": "one_case_two_acts",
+      "law_edge": "attested",
+      "law_id": "LOV-2015-12-18-123",
+      "lovdata_cited_decisions": [
+        {
+          "number": 14,
+          "session_id": "2015-2016"
+        }
+      ],
+      "lovdata_member": "lti/2015/nl-20151218-123.xml",
+      "lovdata_member_sha256": "6662e40b3ed08342c6f1f1dde8c926d45de51d9cf30b751ef3fc2679a8eeba49",
+      "other_case_decisions": [
+        {
+          "number": 13,
+          "session_id": "2015-2016"
+        }
+      ],
+      "sak_id": 63056,
+      "status": "attested",
+      "stortinget_sak_sha256": "c3896c17198a024c007f8cc0694018a2791cc59e0409fc7096aff58093724ac0"
+    },
+    {
+      "case_edge": "attested",
+      "decision": {
+        "number": 41,
+        "session_id": "2024-2025"
+      },
+      "label": "one_decision_two_acts",
+      "law_edge": "attested",
+      "law_id": "LOV-2025-04-25-13",
+      "lovdata_cited_decisions": [
+        {
+          "number": 41,
+          "session_id": "2024-2025"
+        }
+      ],
+      "lovdata_member": "lti/2025/nl-20250425-013.xml",
+      "lovdata_member_sha256": "7f7f74f269905b1935af257a237dd36d196f228c897b83fb151a0b05c2e23a3e",
+      "other_case_decisions": [],
+      "sak_id": 101001,
+      "status": "attested",
+      "stortinget_sak_sha256": "70263e6666165bd1a5707d1c989fb42b4cbe7832d85e8f24e18e3cbdf06aefdf"
+    },
+    {
+      "case_edge": "attested",
+      "decision": {
+        "number": 41,
+        "session_id": "2024-2025"
+      },
+      "label": "one_decision_two_acts",
+      "law_edge": "attested",
+      "law_id": "LOV-2025-06-20-67",
+      "lovdata_cited_decisions": [
+        {
+          "number": 41,
+          "session_id": "2024-2025"
+        }
+      ],
+      "lovdata_member": "lti/2025/nl-20250620-067.xml",
+      "lovdata_member_sha256": "336b0bda5cd160e6a1617ab9a40fae933489393bb45fcfac155d02cff1b826e3",
+      "other_case_decisions": [],
+      "sak_id": 101001,
+      "status": "attested",
+      "stortinget_sak_sha256": "70263e6666165bd1a5707d1c989fb42b4cbe7832d85e8f24e18e3cbdf06aefdf"
+    },
+    {
+      "case_edge": "unresolved",
+      "decision": {
+        "number": 87,
+        "session_id": "2008-2009"
+      },
+      "label": "no_lovvedtak_kind",
+      "law_edge": "unresolved",
+      "law_id": "LOV-2009-06-19-107",
+      "lovdata_cited_decisions": [],
+      "lovdata_member": "lti/2009/nl-20090619-107.xml",
+      "lovdata_member_sha256": "296a89a56c696dea3ddcb1014ebb65bd5356dcdb8387d8aeea5cebc14c741db9",
+      "other_case_decisions": [],
+      "sak_id": 43206,
+      "status": "unresolved",
+      "stortinget_sak_sha256": "5ba91fbaf2a22e942e32b400207356339cf6358d3e350ec0d4dbfe85bf690391"
+    },
+    {
+      "case_edge": "contradicted",
+      "decision": {
+        "number": 85,
+        "session_id": "2021-2022"
+      },
+      "label": "wrong_case",
+      "law_edge": "attested",
+      "law_id": "LOV-2022-06-17-63",
+      "lovdata_cited_decisions": [
+        {
+          "number": 85,
+          "session_id": "2021-2022"
+        }
+      ],
+      "lovdata_member": "lti/2022/nl-20220617-063.xml",
+      "lovdata_member_sha256": "91f38f7f8913deefd65b406edb7e2b81f34b31056008571af1c387ee1736b682",
+      "other_case_decisions": [
+        {
+          "number": 41,
+          "session_id": "2024-2025"
+        }
+      ],
+      "sak_id": 101001,
+      "status": "contradicted",
+      "stortinget_sak_sha256": "70263e6666165bd1a5707d1c989fb42b4cbe7832d85e8f24e18e3cbdf06aefdf"
+    },
+    {
+      "case_edge": "ambiguous",
+      "decision": {
+        "number": 85,
+        "session_id": "2021-2022"
+      },
+      "label": "absent_from_multi_decision_case",
+      "law_edge": "attested",
+      "law_id": "LOV-2022-06-17-63",
+      "lovdata_cited_decisions": [
+        {
+          "number": 85,
+          "session_id": "2021-2022"
+        }
+      ],
+      "lovdata_member": "lti/2022/nl-20220617-063.xml",
+      "lovdata_member_sha256": "91f38f7f8913deefd65b406edb7e2b81f34b31056008571af1c387ee1736b682",
+      "other_case_decisions": [
+        {
+          "number": 13,
+          "session_id": "2015-2016"
+        },
+        {
+          "number": 14,
+          "session_id": "2015-2016"
+        }
+      ],
+      "sak_id": 63056,
+      "status": "ambiguous",
+      "stortinget_sak_sha256": "c3896c17198a024c007f8cc0694018a2791cc59e0409fc7096aff58093724ac0"
+    }
+  ],
+  "contract_v0_record": {
+    "amending_lov_id": "LOV-2022-06-17-63",
+    "decision": {
+      "kind": "lovvedtak",
+      "number": 85,
+      "session_id": "2021-2022"
+    },
+    "evidence": [
+      {
+        "body_sha256": "91f38f7f8913deefd65b406edb7e2b81f34b31056008571af1c387ee1736b682",
+        "capture_level": "raw_body_captured",
+        "observed_on": "2026-11-01",
+        "parser_version": "lovtidend-identity-1",
+        "retrieved_at": "2026-11-01T17:38:16.909702+00:00",
+        "role": "law_identity",
+        "source_url": "https://api.lovdata.no/v1/publicData/get/lovtidend-avd1-2001-2025.tar.bz2",
+        "upstream_id": "lovtidend-avd1-2001-2025.tar.bz2!lti/2022/nl-20220617-063.xml"
+      },
+      {
+        "body_sha256": "91f38f7f8913deefd65b406edb7e2b81f34b31056008571af1c387ee1736b682",
+        "capture_level": "raw_body_captured",
+        "observed_on": "2026-11-01",
+        "parser_version": "lovtidend-identity-1",
+        "retrieved_at": "2026-11-01T17:38:16.909702+00:00",
+        "role": "law_decision_pair",
+        "source_url": "https://api.lovdata.no/v1/publicData/get/lovtidend-avd1-2001-2025.tar.bz2",
+        "upstream_id": "lovtidend-avd1-2001-2025.tar.bz2!lti/2022/nl-20220617-063.xml"
+      },
+      {
+        "body_sha256": "3022cfaa229204fb3b0c1b20b811b3054c7360fe3cb95310d5b1c9a2ff5cefc1",
+        "capture_level": "raw_body_captured",
+        "observed_on": "2026-11-01",
+        "parser_version": "sak-xml-2",
+        "retrieved_at": "2026-11-01T17:38:15.415014+00:00",
+        "role": "decision_case",
+        "source_url": "https://data.stortinget.no/eksport/sak?sakid=89016",
+        "upstream_id": "sak/89016"
+      }
+    ],
+    "observed_on": "2026-11-01",
+    "origin_lovverk_commit": "a185a1dc84accf7714f5c09ebb879efa445f5b0c",
+    "origin_research_commit": "4d53095a1994c84ec13acc8ef3f6ef7e601e0367",
+    "release_state": "research_only",
+    "sak_id": 89016,
+    "sanction_events": [
+      {
+        "kind": "initial_sanction",
+        "law_id": "LOV-2022-06-17-63",
+        "source_url": "https://api.lovdata.no/v1/publicData/get/lovtidend-avd1-2001-2025.tar.bz2"
+      }
+    ],
+    "schema_version": "0.1.0-research",
+    "status": "attested"
+  },
+  "lovdata_archive": {
+    "last_modified": "2026-10-29T02:31:00+00:00",
+    "parser_version": "lovtidend-identity-1",
+    "retrieved_at": "2026-11-01T17:38:16.909702+00:00",
+    "sha256": "18303f93dae1db4e19d08d2a2e8bb0467f85b11d6a3cf67fb796e6069ba2aed4",
+    "size_bytes": 69324445,
+    "source_url": "https://api.lovdata.no/v1/publicData/get/lovtidend-avd1-2001-2025.tar.bz2"
+  },
+  "stortinget": [
+    {
+      "content_type": "text/xml",
+      "parser_version": "sak-xml-2",
+      "retrieved_at": "2026-11-01T17:38:13.927018+00:00",
+      "sak_id": 43206,
+      "sak_sesjon": "2008-2009",
+      "sha256": "5ba91fbaf2a22e942e32b400207356339cf6358d3e350ec0d4dbfe85bf690391",
+      "size_bytes": 15515,
+      "source_url": "https://data.stortinget.no/eksport/sak?sakid=43206",
+      "typed_lovvedtak": []
+    },
+    {
+      "content_type": "text/xml",
+      "parser_version": "sak-xml-2",
+      "retrieved_at": "2026-11-01T17:38:14.687520+00:00",
+      "sak_id": 63056,
+      "sak_sesjon": "2014-2015",
+      "sha256": "c3896c17198a024c007f8cc0694018a2791cc59e0409fc7096aff58093724ac0",
+      "size_bytes": 17618,
+      "source_url": "https://data.stortinget.no/eksport/sak?sakid=63056",
+      "typed_lovvedtak": [
+        {
+          "number": 13,
+          "session_id": "2015-2016"
+        },
+        {
+          "number": 14,
+          "session_id": "2015-2016"
+        }
+      ]
+    },
+    {
+      "content_type": "text/xml",
+      "parser_version": "sak-xml-2",
+      "retrieved_at": "2026-11-01T17:38:15.415014+00:00",
+      "sak_id": 89016,
+      "sak_sesjon": "2021-2022",
+      "sha256": "3022cfaa229204fb3b0c1b20b811b3054c7360fe3cb95310d5b1c9a2ff5cefc1",
+      "size_bytes": 15430,
+      "source_url": "https://data.stortinget.no/eksport/sak?sakid=89016",
+      "typed_lovvedtak": [
+        {
+          "number": 85,
+          "session_id": "2021-2022"
+        }
+      ]
+    },
+    {
+      "content_type": "text/xml",
+      "parser_version": "sak-xml-2",
+      "retrieved_at": "2026-11-01T17:38:16.142709+00:00",
+      "sak_id": 101001,
+      "sak_sesjon": "2024-2025",
+      "sha256": "70263e6666165bd1a5707d1c989fb42b4cbe7832d85e8f24e18e3cbdf06aefdf",
+      "size_bytes": 17802,
+      "source_url": "https://data.stortinget.no/eksport/sak?sakid=101001",
+      "typed_lovvedtak": [
+        {
+          "number": 41,
+          "session_id": "2024-2025"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,379 @@
+<?xml version="1.0" encoding="utf-8"?>
+<detaljert_sak xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://data.stortinget.no">
+  <respons_dato_tid>2026-11-01T18:29:00.4305164+01:00</respons_dato_tid>
+  <versjon>1.6</versjon>
+  <dokumentgruppe>proposisjon</dokumentgruppe>
+  <emne_liste>
+    <emne>
+      <respons_dato_tid>2026-11-01T18:29:01.9618032+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>false</er_hovedemne>
+      <hovedemne_id>184</hovedemne_id>
+      <id>52</id>
+      <navn>Kommuner</navn>
+      <underemne_liste />
+    </emne>
+    <emne>
+      <respons_dato_tid>2026-11-01T18:29:01.9618032+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>false</er_hovedemne>
+      <hovedemne_id>61</hovedemne_id>
+      <id>188</id>
+      <navn>Folkehelse</navn>
+      <underemne_liste />
+    </emne>
+    <emne>
+      <respons_dato_tid>2026-11-01T18:29:01.9618032+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>false</er_hovedemne>
+      <hovedemne_id>61</hovedemne_id>
+      <id>211</id>
+      <navn>Rusmidler</navn>
+      <underemne_liste />
+    </emne>
+  </emne_liste>
+  <ferdigbehandlet>true</ferdigbehandlet>
+  <henvisning>Prop. 141 L (2014-2015), Innst. 59 L (2015-2016), Lovvedtak 13-14 (2015-2016)</henvisning>
+  <id>63056</id>
+  <innstillingstekst>Innstilling fra helse- og omsorgskomiteen om endringer i alkoholloven og strålevernloven (varigheten på bevillinger mv. og laserpekere)</innstillingstekst>
+  <komite>
+    <respons_dato_tid>2026-11-01T18:02:05.8239183+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <id>HELSEOMS</id>
+    <navn>Helse- og omsorgskomiteen</navn>
+  </komite>
+  <korttittel>Endringer i alkoholloven og strålevernloven (varigheten på bevillinger mv. og laserpekere)</korttittel>
+  <kortvedtak>Stortinget har vedtatt endringer i alkoholloven som blant annet innebærer at kommunale salgs- og skjenkebevillinger ikke må løpe ut etter fire år. Endringene innebærer også at det kan selges alkoholholdig drikk engros til bevillingshaver med salgs- eller skjenkebevilling for én bestemt anledning. Kristelig Folkeparti og Senterpartiet støttet ikke endringene. Et enstemmig Storting vedtok endringer i strålevernloven som gir hjemmel for Toll- og avgiftsetaten til å beslaglegge og destruere ulovlig importerte laserpekere.  </kortvedtak>
+  <parentestekst i:nil="true" />
+  <publikasjon_referanse_liste>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:02.8524631+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id i:nil="true" />
+      <lenke_tekst>Prop. 141 L (2014-2015)</lenke_tekst>
+      <lenke_url>http://www.regjeringen.no/id/PRP201420150141000DDDEPIS</lenke_url>
+      <type>regjering</type>
+      <undertype>proposisjon</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:02.8524631+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>s150619</eksport_id>
+      <lenke_tekst>Stortingsreferat 19.06.2015</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2014-2015/150619/referatsaker/</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:02.8680875+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>inns-201516-059</eksport_id>
+      <lenke_tekst>Innst. 59 L (2015-2016)</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Innstillinger/Stortinget/2015-2016/inns-201516-059/</lenke_url>
+      <type>innstilling</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:02.9305935+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>s151204</eksport_id>
+      <lenke_tekst>Stortingsreferat 04.12.2015</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2015-2016/151204/1</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:02.946216+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>vedtak-201516-013</eksport_id>
+      <lenke_tekst>Lovvedtak 13 (2015-2016)</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Vedtak/Beslutninger/Lovvedtak/2015-2016/vedtak-201516-013/</lenke_url>
+      <type>lovvedtak</type>
+      <undertype i:nil="true" />
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:02.9774701+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>vedtak-201516-014</eksport_id>
+      <lenke_tekst>Lovvedtak 14 (2015-2016)</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Vedtak/Beslutninger/Lovvedtak/2015-2016/vedtak-201516-014/</lenke_url>
+      <type>lovvedtak</type>
+      <undertype i:nil="true" />
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:02.9774701+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>s151211</eksport_id>
+      <lenke_tekst>Stortingsreferat 11.12.2015</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2015-2016/151211/9</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:02.9774701+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>s151211</eksport_id>
+      <lenke_tekst>Stortingsreferat 11.12.2015</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2015-2016/151211/10</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+  </publikasjon_referanse_liste>
+  <sak_nummer>141</sak_nummer>
+  <sak_opphav>
+    <respons_dato_tid>2026-11-01T18:29:00.4305164+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <forslagstiller_liste />
+  </sak_opphav>
+  <sak_relasjon_liste />
+  <sak_sesjon>2014-2015</sak_sesjon>
+  <saksgang>
+    <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <id>KPRPLOV</id>
+    <navn>KLovforslag fra Regjeringen</navn>
+    <saksgang_steg_liste>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>SAK</id>
+        <navn>Lovforslag</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>FRADEP</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>10000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>SAK</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>20000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>19.06.2015 00:00:00</dato>
+            <id>FREMMET</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>30000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>19.06.2015 00:00:00</dato>
+            <id>REFS</id>
+            <publikasjonsReferanse>http://www.stortinget.no/stid/2014/si150619.html</publikasjonsReferanse>
+            <sorterings_nummer>40010</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>1</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>KOMBEH</id>
+        <navn>Komitebehandling</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>19.06.2015 00:00:00</dato>
+            <id>SENDT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>50000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>KOMITE</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>60000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>ORDFORER</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>90000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>19.11.2015 00:00:00</dato>
+            <id>AVGITT</id>
+            <publikasjonsReferanse>http://www.stortinget.no/inns/2015/inns-201516-059.html</publikasjonsReferanse>
+            <sorterings_nummer>110000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>2</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>DEBATT</id>
+        <navn>Første behandling</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>04.12.2015 00:00:00</dato>
+            <id>BEH1LOV</id>
+            <publikasjonsReferanse>http://www.stortinget.no/otid/2015/oi151204-01.html</publikasjonsReferanse>
+            <sorterings_nummer>130000</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>LOVLENKE1</id>
+            <publikasjonsReferanse>http://www.stortinget.no/bess/bess-201516-013.html</publikasjonsReferanse>
+            <sorterings_nummer>135013</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>LOVLENKE1</id>
+            <publikasjonsReferanse>http://www.stortinget.no/bess/bess-201516-014.html</publikasjonsReferanse>
+            <sorterings_nummer>135014</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>3</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>VEDTAK</id>
+        <navn>Andre behandling</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>11.12.2015 00:00:00</dato>
+            <id>BEH2LOV</id>
+            <publikasjonsReferanse>http://www.stortinget.no/ltid/2015/li151211-09.html</publikasjonsReferanse>
+            <sorterings_nummer>136009</sorterings_nummer>
+            <stegnummer>4</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>11.12.2015 00:00:00</dato>
+            <id>BEH2LOV</id>
+            <publikasjonsReferanse>http://www.stortinget.no/ltid/2015/li151211-10.html</publikasjonsReferanse>
+            <sorterings_nummer>136010</sorterings_nummer>
+            <stegnummer>4</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>4</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>LOV</id>
+        <navn>Lov</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>18.12.2015 00:00:00</dato>
+            <id>LOVVEDT</id>
+            <publikasjonsReferanse>http://www.stortinget.no/bess/bess-201516-013.html</publikasjonsReferanse>
+            <sorterings_nummer>150013</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>18.12.2015 00:00:00</dato>
+            <id>LOVVEDT</id>
+            <publikasjonsReferanse>http://www.stortinget.no/bess/bess-201516-014.html</publikasjonsReferanse>
+            <sorterings_nummer>150014</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.2016 00:00:00</dato>
+            <id>LOVIKRAFT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>160013</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:02.8368507+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.2016 00:00:00</dato>
+            <id>LOVIKRAFT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>160014</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>5</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+    </saksgang_steg_liste>
+  </saksgang>
+  <saksordfoerer_liste>
+    <representant>
+      <respons_dato_tid>2026-11-01T18:29:01.9618032+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <doedsdato i:nil="true" />
+      <etternavn>Wold</etternavn>
+      <foedselsdato>1967-06-22T00:00:00</foedselsdato>
+      <fornavn>Morten</fornavn>
+      <id>MOW</id>
+      <kjoenn>mann</kjoenn>
+      <fylke>
+        <respons_dato_tid>2026-11-01T18:00:59.8917798+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <historisk_fylke>false</historisk_fylke>
+        <id>Bu</id>
+        <navn>Buskerud</navn>
+      </fylke>
+      <parti>
+        <respons_dato_tid>2026-11-01T01:00:20.0373936+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>FrP</id>
+        <navn>Fremskrittspartiet</navn>
+        <representert_parti>true</representert_parti>
+      </parti>
+      <vara_representant>false</vara_representant>
+    </representant>
+  </saksordfoerer_liste>
+  <status>behandlet</status>
+  <stikkord_liste xmlns:d2p1="http://schemas.microsoft.com/2003/10/Serialization/Arrays">
+    <d2p1:string>Alkoholloven</d2p1:string>
+    <d2p1:string>Laserpekere</d2p1:string>
+    <d2p1:string>Salgsbevillinger</d2p1:string>
+    <d2p1:string>Skjenkebevillinger</d2p1:string>
+    <d2p1:string>Strålevernloven</d2p1:string>
+  </stikkord_liste>
+  <tittel>Endringer i alkoholloven og strålevernloven (varigheten på bevillinger mv. og laserpekere)</tittel>
+  <type>lovsak</type>
+  <vedtakstekst i:nil="true" />
+</detaljert_sak>

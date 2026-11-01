@@ -1,0 +1,390 @@
+<?xml version="1.0" encoding="utf-8"?>
+<detaljert_sak xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://data.stortinget.no">
+  <respons_dato_tid>2026-11-01T18:29:08.8225433+01:00</respons_dato_tid>
+  <versjon>1.6</versjon>
+  <dokumentgruppe>proposisjon</dokumentgruppe>
+  <emne_liste>
+    <emne>
+      <respons_dato_tid>2026-11-01T18:29:05.6192379+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>false</er_hovedemne>
+      <hovedemne_id>61</hovedemne_id>
+      <id>48</id>
+      <navn>Omsorgstjenester</navn>
+      <underemne_liste />
+    </emne>
+    <emne>
+      <respons_dato_tid>2026-11-01T18:29:05.6192379+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>true</er_hovedemne>
+      <hovedemne_id>61</hovedemne_id>
+      <id>61</id>
+      <navn>Helsevesen</navn>
+      <underemne_liste />
+    </emne>
+    <emne>
+      <respons_dato_tid>2026-11-01T18:29:05.6192379+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>false</er_hovedemne>
+      <hovedemne_id>61</hovedemne_id>
+      <id>224</id>
+      <navn>Psykisk helse</navn>
+      <underemne_liste />
+    </emne>
+  </emne_liste>
+  <ferdigbehandlet>true</ferdigbehandlet>
+  <henvisning>Prop. 31 L (2024-2025), Innst. 168 L (2024-2025), Lovvedtak 41 (2024-2025)</henvisning>
+  <id>101001</id>
+  <innstillingstekst>Innstilling fra helse- og omsorgskomiteen om Endringer i psykisk helsevernloven og pasient- og brukerrettighetsloven mv. (bedre beslutningsgrunnlag og behandling)</innstillingstekst>
+  <komite>
+    <respons_dato_tid>2026-11-01T18:02:05.8239183+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <id>HELSEOMS</id>
+    <navn>Helse- og omsorgskomiteen</navn>
+  </komite>
+  <korttittel>Endringer i psykisk helsevernloven og pasient- og brukerrettighetsloven mv. (bedre beslutningsgrunnlag og behandling)</korttittel>
+  <kortvedtak>Stortinget har behandlet et lovforslag fra regjeringen om endringer i flere helselover. De viktigste endringene gjøres i psykisk helsevernloven og pasient- og brukerrettighetsloven. 
+Lovforslaget fikk flertall i Stortinget. 
+I tillegg fattet Stortinget følgende vedtak:
+Regjeringen skal evaluere 
+
+-bruken av tvang i helse- og omsorgstjenesten innen tre år etter lovendringene.
+
+-lovendringene om elektrokonvulsiv behandling (ECT) innen to år 
+</kortvedtak>
+  <parentestekst i:nil="true" />
+  <publikasjon_referanse_liste>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id i:nil="true" />
+      <lenke_tekst>Prop. 31 L (2024-2025)</lenke_tekst>
+      <lenke_url>http://www.regjeringen.no/id/PRP202420250031000DDDEPIS</lenke_url>
+      <type>regjering</type>
+      <undertype>proposisjon</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>refs-202425-12-03</eksport_id>
+      <lenke_tekst>Stortingsreferat 03.12.2024</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2024-2025/refs-202425-12-03/referatsaker/</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>inns-202425-168l</eksport_id>
+      <lenke_tekst>Innst. 168 L (2024-2025)</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Innstillinger/Stortinget/2024-2025/inns-202425-168l/</lenke_url>
+      <type>innstilling</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>refs-202425-03-31</eksport_id>
+      <lenke_tekst>Stortingsreferat 31.03.2025</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2024-2025/refs-202425-03-31/1</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>vedtak-202425-041</eksport_id>
+      <lenke_tekst>Lovvedtak 41 (2024-2025)</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Vedtak/Beslutninger/Lovvedtak/2024-2025/vedtak-202425-041/</lenke_url>
+      <type>lovvedtak</type>
+      <undertype i:nil="true" />
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>refs-202425-04-01</eksport_id>
+      <lenke_tekst>Stortingsreferat 01.04.2025</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2024-2025/refs-202425-04-01/voteringer#310325-1</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>refs-202425-04-08</eksport_id>
+      <lenke_tekst>Stortingsreferat 08.04.2025</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Stortinget/2024-2025/refs-202425-04-08/2</lenke_url>
+      <type>referat</type>
+      <undertype>storting</undertype>
+    </publikasjon_referanse>
+  </publikasjon_referanse_liste>
+  <sak_nummer>31</sak_nummer>
+  <sak_opphav>
+    <respons_dato_tid>2026-11-01T18:29:08.8225433+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <forslagstiller_liste />
+  </sak_opphav>
+  <sak_relasjon_liste />
+  <sak_sesjon>2024-2025</sak_sesjon>
+  <saksgang>
+    <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <id>KPRPLOV</id>
+    <navn>KLovforslag fra Regjeringen</navn>
+    <saksgang_steg_liste>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>SAK</id>
+        <navn>Lovforslag</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>FRADEP</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>10000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>SAK</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>20000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>29.11.2024 00:00:00</dato>
+            <id>FREMMET</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>30000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>03.12.2024 00:00:00</dato>
+            <id>REFS</id>
+            <publikasjonsReferanse>http://www.stortinget.no/stid/2024/si241203.html</publikasjonsReferanse>
+            <sorterings_nummer>40010</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>1</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>KOMBEH</id>
+        <navn>Komitebehandling</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>03.12.2024 00:00:00</dato>
+            <id>SENDT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>50000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>KOMITE</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>60000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>16.01.2025 00:00:00</dato>
+            <id>HOERFRIST</id>
+            <publikasjonsReferanse>http://epos.stortinget.no/HenvPrMail.aspx?HenvGrup</publikasjonsReferanse>
+            <sorterings_nummer>80000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>28.01.2025 00:00:00</dato>
+            <id>HOER</id>
+            <publikasjonsReferanse>http://epos.stortinget.no/HoeringsProgram.aspx?Hoe</publikasjonsReferanse>
+            <sorterings_nummer>80589</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>ORDFORER</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>90000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>18.03.2025 00:00:00</dato>
+            <id>AVGITT</id>
+            <publikasjonsReferanse>http://www.stortinget.no/inns/2024/inns-202425-168.html</publikasjonsReferanse>
+            <sorterings_nummer>110000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>2</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>DEBATT</id>
+        <navn>Første behandling</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>LOSEFORS</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>126000</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>31.03.2025 00:00:00</dato>
+            <id>BEH1LOV</id>
+            <publikasjonsReferanse>http://www.stortinget.no/otid/2024/oi250331-01.html</publikasjonsReferanse>
+            <sorterings_nummer>130000</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>LOVLENKE1</id>
+            <publikasjonsReferanse>http://www.stortinget.no/bess/bess-202425-041.html</publikasjonsReferanse>
+            <sorterings_nummer>135041</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.04.2025 00:00:00</dato>
+            <id>VOTLOV1</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>135500</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>VEDTAK</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>135600</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>3</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>VEDTAK</id>
+        <navn>Andre behandling</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>08.04.2025 00:00:00</dato>
+            <id>BEH2LOV</id>
+            <publikasjonsReferanse>http://www.stortinget.no/ltid/2024/li250408-02.html</publikasjonsReferanse>
+            <sorterings_nummer>136002</sorterings_nummer>
+            <stegnummer>4</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>4</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>LOV</id>
+        <navn>Lov</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>20.06.2025 00:00:00</dato>
+            <id>LOVVEDT</id>
+            <publikasjonsReferanse>http://www.stortinget.no/bess/bess-202425-041.html</publikasjonsReferanse>
+            <sorterings_nummer>150041</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.09.2025 00:00:00</dato>
+            <id>LOVIKRAFT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>160041</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:09.1990091+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.06.2026 00:00:00</dato>
+            <id>LOVIKRAFT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>160041</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>5</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+    </saksgang_steg_liste>
+  </saksgang>
+  <saksordfoerer_liste>
+    <representant>
+      <respons_dato_tid>2026-11-01T18:29:05.6192379+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <doedsdato i:nil="true" />
+      <etternavn>Hoksrud</etternavn>
+      <foedselsdato>1973-03-26T00:00:00</foedselsdato>
+      <fornavn>Bård</fornavn>
+      <id>BÅH</id>
+      <kjoenn>mann</kjoenn>
+      <fylke>
+        <respons_dato_tid>2026-11-01T18:00:59.8917798+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <historisk_fylke>false</historisk_fylke>
+        <id>Te</id>
+        <navn>Telemark</navn>
+      </fylke>
+      <parti>
+        <respons_dato_tid>2026-11-01T01:00:20.0373936+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>FrP</id>
+        <navn>Fremskrittspartiet</navn>
+        <representert_parti>true</representert_parti>
+      </parti>
+      <vara_representant>false</vara_representant>
+    </representant>
+  </saksordfoerer_liste>
+  <status>behandlet</status>
+  <stikkord_liste xmlns:d2p1="http://schemas.microsoft.com/2003/10/Serialization/Arrays" />
+  <tittel>Endringer i psykisk helsevernloven og pasient- og brukerrettighetsloven mv. (bedre beslutningsgrunnlag og behandling)</tittel>
+  <type>lovsak</type>
+  <vedtakstekst>Vedtak i samsvar med innstillingen med avvik/tillegg</vedtakstekst>
+</detaljert_sak>
