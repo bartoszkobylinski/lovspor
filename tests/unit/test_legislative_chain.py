@@ -30,6 +30,7 @@ from lovspor.legislative_chain import (
 )
 from lovspor.stortinget_case_source import (
     SAK_PARSER_VERSION,
+    CaseMetadata,
     CaseSnapshot,
     LawDecision,
     parse_sak,
@@ -195,6 +196,52 @@ def test_ambiguity_outranks_unresolved_across_edges() -> None:
         "ambiguous",
         "ambiguous",
     )
+
+
+@pytest.mark.parametrize(
+    ("law_decisions", "law_status"),
+    [
+        ((), "unresolved"),
+        ((DECISION,), "attested"),
+        ((LawDecision("2020-2021", 85),), "contradicted"),
+        ((DECISION, LawDecision("2021-2022", 86)), "ambiguous"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("case_decisions", "case_status", "outcomes"),
+    [
+        ((), "unresolved", ("unresolved", "unresolved", "contradicted", "ambiguous")),
+        ((DECISION,), "attested", ("unresolved", "attested", "contradicted", "ambiguous")),
+        (
+            (LawDecision("2020-2021", 85),),
+            "contradicted",
+            ("contradicted", "contradicted", "contradicted", "contradicted"),
+        ),
+        (
+            (LawDecision("2020-2021", 85), LawDecision("2021-2022", 86)),
+            "ambiguous",
+            ("ambiguous", "ambiguous", "contradicted", "ambiguous"),
+        ),
+    ],
+)
+def test_chain_preserves_both_edges_and_the_worst_verdict(
+    law_decisions: tuple[LawDecision, ...],
+    law_status: str,
+    case_decisions: tuple[LawDecision, ...],
+    case_status: str,
+    outcomes: tuple[str, ...],
+) -> None:
+    """The chain's weakest-edge contract holds in either edge direction."""
+    case = CaseMetadata(89016, "2021-2022", case_decisions, "0" * 64)
+    verdict = resolve_chain(_publication(*law_decisions), case, DECISION)
+    expected = outcomes[("unresolved", "attested", "contradicted", "ambiguous").index(law_status)]
+    assert (verdict.law_edge, verdict.case_edge, verdict.status) == (
+        law_status,
+        case_status,
+        expected,
+    )
+    assert (verdict.law_id, verdict.sak_id, verdict.decision) == (LAW, 89016, DECISION)
+    assert verdict.other_case_decisions == tuple(d for d in case_decisions if d != DECISION)
 
 
 def test_case_edge_on_empty_and_single_other_case() -> None:
@@ -370,6 +417,64 @@ def test_corrupt_archive_is_refused_with_its_name(tmp_path: Path) -> None:
     archive.write_bytes(b"not an archive")
     with pytest.raises(ExtractionError, match="^Unreadable Lovtidend archive: broken.tar.bz2$"):
         read_lovtidend_member(archive, LAW)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "../lti/2022/nl-20220617-063.xml",
+        "/lti/2022/nl-20220617-063.xml",
+        "lti/2022/../2022/nl-20220617-063.xml",
+        "lti/2022/nl-20220617-063.xml/extra",
+    ],
+)
+def test_unsafe_or_inexact_member_names_cannot_supply_an_act(tmp_path: Path, name: str) -> None:
+    archive = _archive(tmp_path / "a.tar.bz2", {name: _document()})
+    assert read_lovtidend_member(archive, LAW) is None
+    assert list(tmp_path.iterdir()) == [archive]
+
+
+@pytest.mark.parametrize("kind", [tarfile.SYMTYPE, tarfile.LNKTYPE])
+def test_link_named_like_an_act_is_not_followed(tmp_path: Path, kind: bytes) -> None:
+    archive = tmp_path / "a.tar.bz2"
+    with tarfile.open(archive, "w:bz2") as tar:
+        target = tarfile.TarInfo("payload.xml")
+        body = _document()
+        target.size = len(body)
+        tar.addfile(target, io.BytesIO(body))
+        link = tarfile.TarInfo("lti/2022/nl-20220617-063.xml")
+        link.type = kind
+        link.linkname = "payload.xml"
+        tar.addfile(link)
+    assert read_lovtidend_member(archive, LAW) is None
+    assert list(tmp_path.iterdir()) == [archive]
+
+
+def test_empty_archive_has_no_act(tmp_path: Path) -> None:
+    archive = _archive(tmp_path / "empty.tar.bz2", {})
+    assert read_lovtidend_member(archive, LAW) is None
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["internal", "external"])
+def test_xml_entities_cannot_supply_a_law_decision(tmp_path: Path, external: bool) -> None:
+    """AGENTS.md XML safety: entity content must never become source evidence."""
+    if external:
+        payload = tmp_path / "citation.txt"
+        payload.write_text("Lovvedtak 85 (2021-2022)", encoding="utf-8")
+        declaration = f'SYSTEM "{payload.as_uri()}"'
+    else:
+        declaration = '"Lovvedtak 85 (2021-2022)"'
+    doctype = f"<!DOCTYPE html [<!ENTITY citation {declaration}>]>"
+    body = _document(misc="&citation;").replace(b"<!DOCTYPE html>", doctype.encode())
+    publication = parse_law_publication(_member(body))
+    assert publication.lovvedtak == ()
+    assert resolve_law_decision(publication, DECISION) == "unresolved"
+
+
+def test_invalid_utf8_document_fails_with_member_context() -> None:
+    body = _document().replace(b"<title>T</title>", b"<title>\xff</title>")
+    with pytest.raises(ParseError, match="^Invalid Lovtidend document: lti/x.xml$"):
+        parse_law_publication(_member(body))
 
 
 def test_recorded_evidence_validates_against_contract_v0_and_stays_research_only() -> None:
