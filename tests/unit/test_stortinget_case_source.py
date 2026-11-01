@@ -122,6 +122,40 @@ def test_agreeing_export_id_attests() -> None:
 
 
 @pytest.mark.parametrize(
+    ("export_id", "expected"),
+    [(b"vedtak-202122-085", (DECISION,)), (b"vedtak-202021-085", ())],
+)
+def test_later_decision_export_id_is_checked_against_decision_session(
+    export_id: bytes, expected: tuple[LawDecision, ...]
+) -> None:
+    """E4: the reference owns its session, including its export identity."""
+    body = _with_export_id(export_id).replace(b"<sak_sesjon>2021-2022", b"<sak_sesjon>2020-2021")
+    case = parse_sak(_snapshot(body))
+    assert case.session_id == "2020-2021"
+    assert case.lovvedtak == expected
+    assert resolve_publication(case, DECISION) == ("attested" if expected else "unresolved")
+
+
+@pytest.mark.parametrize("invalid_first", [False, True])
+def test_conflicting_export_reference_does_not_discard_valid_reference(
+    invalid_first: bool,
+) -> None:
+    invalid = (
+        b"<publikasjon_referanse><type>lovvedtak</type>"
+        b"<lenke_tekst>Lovvedtak 86 (2021-2022)</lenke_tekst>"
+        b"<eksport_id>vedtak-202122-085</eksport_id></publikasjon_referanse>"
+    )
+    body = _with_export_id(b"vedtak-202122-085")
+    anchor = (
+        b"<publikasjon_referanse_liste>" if invalid_first else b"</publikasjon_referanse_liste>"
+    )
+    replacement = anchor + invalid if invalid_first else invalid + anchor
+    case = parse_sak(_snapshot(body.replace(anchor, replacement)))
+    assert case.lovvedtak == (DECISION,)
+    assert resolve_publication(case, DECISION) == "attested"
+
+
+@pytest.mark.parametrize(
     "export_id", [b"vedtak-202122-086", b"vedtak-202021-085", b"inns-202122-386l"]
 )
 def test_export_id_contradicting_the_link_text_does_not_attest(export_id: bytes) -> None:

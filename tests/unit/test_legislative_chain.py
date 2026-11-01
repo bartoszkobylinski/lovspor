@@ -411,6 +411,19 @@ def test_malformed_document_is_refused() -> None:
         parse_law_publication(_member(b"<html><body>"))
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("legacyID", LAW), ("dokid", "LTI/lov/2022-06-17-63"), ("refid", "lov/2022-06-17-63")],
+)
+@pytest.mark.parametrize("conflicting", [False, True])
+def test_duplicate_law_identity_field_is_refused(field: str, value: str, conflicting: bool) -> None:
+    """The three header identities must each identify the requested act uniquely."""
+    duplicate = f'<dd class="{field}">{value + "0" if conflicting else value}</dd>'
+    body = _document().replace(b"</dl>", duplicate.encode() + b"</dl>")
+    with pytest.raises(ParseError, match="^Lovdata law identity mismatch: lti/x.xml$"):
+        parse_law_publication(_member(body))
+
+
 @pytest.mark.parametrize("law_id", ["lov/2022-06-17-63", "LOV-2022-06-17-063", "LOV-2022-6-17-63"])
 def test_invalid_law_identity_is_refused_before_reading(tmp_path: Path, law_id: str) -> None:
     with pytest.raises(ParseError, match="Not a Lovdata law identity"):
