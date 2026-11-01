@@ -201,7 +201,8 @@ def test_incomplete_approval_explains_the_failed_requirement(
     assert caught.value.errors()[0]["msg"] == "Value error, " + message
 
 
-def test_terminal_confirmation_prints_the_phrase() -> None:
+@pytest.mark.parametrize("answer", ["wrong", "approve synthetic"])
+def test_terminal_confirmation_prints_the_phrase(answer: str) -> None:
 
     master, slave = pty.openpty()
     try:
@@ -216,11 +217,15 @@ def test_terminal_confirmation_prints_the_phrase() -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        os.write(master, b"wrong\n")
+        os.write(master, (answer + "\n").encode())
         stdout, stderr = process.communicate(timeout=15)
-        assert process.returncode != 0
         assert b"Type to confirm: approve synthetic" in stdout
-        assert b"review_not_interactive: approval" in stderr
+        if answer == "wrong":
+            assert process.returncode != 0
+            assert b"review_not_interactive: approval" in stderr
+        else:
+            assert process.returncode == 0
+            assert stderr == b""
     finally:
         os.close(master)
         os.close(slave)
@@ -329,3 +334,19 @@ def test_concurrent_ledger_writer_conflict_names_the_record(tmp_path: Path) -> N
         str(path),
     )
     assert path.read_bytes() == b"competing writer"
+
+
+def test_existing_observation_comparison_caps_a_file_that_grows_after_stat(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "observation.json"
+    assert staging.write_observation(path, "abc") is True
+    result = during_line(
+        lambda: staging.write_observation(path, "abc"),
+        "staging.py",
+        "if status.st_size != len(payload) or stream.read(",
+        lambda: path.write_bytes(b"abcdef"),
+    )
+    assert result is False
+    assert path.read_bytes() == b"abcdef"
+    assert list(tmp_path.iterdir()) == [path]
