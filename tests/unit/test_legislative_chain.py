@@ -15,12 +15,14 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
+from lxml import etree
 
 from lovspor.errors import ExtractionError, ParseError
 from lovspor.legislative_chain import (
     CHAIN_PARSER_VERSION,
     LawPublication,
     LovtidendMember,
+    _header_value,
     _read_member,
     parse_law_publication,
     read_lovtidend_member,
@@ -47,6 +49,50 @@ SCHEMA = json.loads(
 LAW = "LOV-2022-06-17-63"
 DECISION = LawDecision("2021-2022", 85)
 MISC = "Prop.81 L (2021\u20132022), Lovvedtak 85 (2021\u20132022). Fremmet av JD."
+
+
+@pytest.mark.parametrize("mode", ["w", "w:gz", "w:xz"])
+def test_lovtidend_archive_requires_bzip2(tmp_path: Path, mode: str) -> None:
+    archive = tmp_path / "wrong-compression.tar.bz2"
+    body = _document()
+    with tarfile.open(archive, mode) as tar:
+        info = tarfile.TarInfo("lti/2022/nl-20220617-063.xml")
+        info.size = len(body)
+        tar.addfile(info, io.BytesIO(body))
+    with pytest.raises(ExtractionError, match="^Unreadable Lovtidend archive:"):
+        read_lovtidend_member(archive, LAW)
+    assert list(tmp_path.iterdir()) == [archive]
+
+
+def test_inline_markup_preserves_header_identity_and_citation() -> None:
+    body = _document(misc="Lovvedtak <b>85</b> (2021-2022)").replace(
+        LAW.encode(), b"LOV-<span>2022</span>-06-17-63"
+    )
+    publication = parse_law_publication(_member(body))
+    assert publication.law_id == LAW
+    assert publication.lovvedtak == (DECISION,)
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_absent_or_duplicate_header_value_is_empty(count: int) -> None:
+    fields = '<dd class="miscInformation">Lovvedtak 85 (2021-2022)</dd>' * count
+    root = etree.fromstring(f"<html><body><header><dl>{fields}</dl></header></body></html>")
+    assert _header_value(root, "miscInformation") == ""
+
+
+@pytest.mark.parametrize(
+    ("decisions", "status"),
+    [
+        ((), "unresolved"),
+        ((LawDecision("2021-2022", 86),), "contradicted"),
+        ((LawDecision("2021-2022", 86), LawDecision("2021-2022", 87)), "ambiguous"),
+    ],
+)
+def test_missing_expected_case_decision_preserves_fallback_status(
+    decisions: tuple[LawDecision, ...], status: str
+) -> None:
+    case = CaseMetadata(89016, "2021-2022", decisions, "0" * 64)
+    assert resolve_case_decision(case, DECISION) == status
 
 
 def _document(
