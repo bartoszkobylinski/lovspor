@@ -1,5 +1,6 @@
 """Chapter determinism and all-or-nothing staging contracts of ADR-0018 PR2."""
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -11,10 +12,51 @@ from unittest.mock import Mock
 
 import pytest
 
-from lovspor.forarbeider.chapter_models import TextBlock, result_text
+from lovspor.forarbeider.chapter import build_chapter_result
+from lovspor.forarbeider.chapter_models import HoldReason, TextBlock, result_text
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.staging import write_observation
-from tests.unit.test_forarbeider_chapter import URL, page, result, section
+from tests.unit.test_forarbeider_chapter import URL, WHEN, page, result, section
+
+
+@pytest.mark.parametrize("newline", [b"\r\n", b"\r"])
+def test_chapter_line_endings_change_source_hash_but_not_text(newline: bytes) -> None:
+    """operations.md: raw bytes are hashed separately from normalized HTML text."""
+    payload = page(section("<p>Første\n linje\t og\n neste §&nbsp;3.</p>"))
+    changed = payload.replace(b"\n", newline)
+    original = build_chapter_result(payload, URL, WHEN)
+    held = build_chapter_result(changed, URL, WHEN)
+
+    assert held.blocks is not None
+    assert held.blocks[-1].text == "Første linje og neste §\u00a03."
+    assert held.blocks == original.blocks
+    assert held.text_sha256 == original.text_sha256
+    assert held.source_sha256 == hashlib.sha256(changed).hexdigest()
+    assert held.source_sha256 != original.source_sha256
+
+
+def test_unrecognized_body_keeps_all_review_candidates_without_leaking_text() -> None:
+    """The allowlist withholds text, but must not stop the chapter's reason scan."""
+    held = result(
+        section(
+            "<aside>Høring: © diagnose kontakt@example.org</aside>"
+            "<p>Høring: © diagnose kontakt@example.org</p>"
+        )
+    )
+
+    assert held.hold_reasons == (
+        HoldReason.REVIEW_REQUIRED,
+        HoldReason.DAMAGED_DOM,
+        HoldReason.THIRD_PARTY_WORK,
+        HoldReason.HEARING_PARTICIPANTS,
+        HoldReason.PERSONAL_DATA,
+        HoldReason.SENSITIVE_DATA,
+    )
+    assert held.blocks is None
+    assert held.text_sha256 is None
+    serialized = result_text(held)
+    for source_text in ("Høring", "©", "diagnose", "kontakt@example.org"):
+        assert source_text not in serialized
 
 
 @pytest.mark.parametrize("spelling", ["&nbsp;", "&#160;", "&#xA0;"])
