@@ -219,3 +219,59 @@ def test_a_file_of_another_owner_is_refused(
     with pytest.raises(ForarbeiderRefusedError) as refused:
         write_observation(target, "x")
     assert refused.value.reason is RefusalReason.OBSERVATION_UNSAFE
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<p hidden>skjult</p>",
+        '<p hidden="hidden">skjult</p>',
+        '<p hidden="">skjult</p>',
+        '<p aria-hidden="true">skjult</p>',
+        '<p aria-hidden=" TRUE ">skjult</p>',
+        '<p style="display:none">skjult</p>',
+        '<p style="DISPLAY : NONE !important">skjult</p>',
+        '<p style="color: red; display: none;">skjult</p>',
+        '<p style="visibility:hidden">skjult</p>',
+        '<p>synlig <span hidden="">skjult</span></p>',
+        '<p>synlig <i style="display:none">skjult</i></p>',
+        '<div class="K-DEL-LEDD" hidden><p>skjult</p></div>',
+        '<ul aria-hidden="true"><li>skjult</li></ul>',
+        '<ul><li style="display:none">skjult</li></ul>',
+    ],
+)
+def test_hidden_content_is_withheld(markup: str) -> None:
+    assert withheld_for(result(f"<p>synlig</p>{markup}"), HoldReason.HIDDEN_CONTENT)
+
+
+def test_a_hidden_section_is_withheld() -> None:
+    held = build_chapter_result(
+        page(f'{HEAD}<div id="kap2-1" data-longdoc-section hidden><p>skjult</p></div>'), URL, WHEN
+    )
+    assert withheld_for(held, HoldReason.HIDDEN_CONTENT)
+
+
+@pytest.mark.parametrize("wrapper", ["<main hidden", '<main style="display:none"'])
+def test_a_hidden_ancestor_of_the_region_is_withheld(wrapper: str) -> None:
+    text = page(section("<p>synlig</p>")).decode().replace("<main", wrapper, 1)
+    held = build_chapter_result(text.encode(), URL, WHEN)
+    assert withheld_for(held, HoldReason.HIDDEN_CONTENT)
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        '<p aria-hidden="false">synlig</p>',
+        '<p class="hidden">synlig</p>',
+        '<p data-hidden="true">synlig</p>',
+        '<p style="color: red">synlig</p>',
+        '<p style="display: block">synlig</p>',
+        '<p style="visibility: visible">synlig</p>',
+        '<p style="background: url(display:none)">synlig</p>',
+    ],
+)
+def test_visible_markup_is_read(markup: str) -> None:
+    held = result(markup)
+    assert held.blocks is not None
+    assert held.blocks[-1].text == "synlig"
+    assert HoldReason.HIDDEN_CONTENT not in held.hold_reasons

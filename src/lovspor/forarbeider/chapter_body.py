@@ -13,6 +13,7 @@ anything, and missing one says nothing about the chapter.
 A list item is one block, optionally followed by one deeper list, and neighbouring
 lists or quotations are not told apart by blocks: valid markup outside that shape
 would flatten into another structure with the same hash, so it withholds the body.
+Hidden means an explicit statement of it on an element, never a class or a style sheet.
 """
 
 import re
@@ -40,6 +41,9 @@ _ANNEX_TITLES = (
     "/following-sibling::li/a"
 )
 _ANNEX_HEADING = re.compile(r"vedlegg\b", re.IGNORECASE)
+_HIDING_STYLE = re.compile(
+    r"(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\b", re.IGNORECASE
+)
 
 _MEDIA = {
     "img": HoldReason.IMAGE,
@@ -191,6 +195,8 @@ def _section_reasons(region: html.HtmlElement) -> set[HoldReason]:
 
 def _source_reasons(region: html.HtmlElement) -> set[HoldReason]:
     reasons = {_MEDIA[node.tag] for node in region.iter(*_MEDIA)}
+    if any(_is_hidden(node) for node in (*region.iterancestors(), *region.iter("*"))):
+        reasons.add(HoldReason.HIDDEN_CONTENT)
     if region.xpath(_FOOTNOTES):
         reasons.add(HoldReason.FOOTNOTES)
     if _is_annex(region):
@@ -199,6 +205,12 @@ def _source_reasons(region: html.HtmlElement) -> set[HoldReason]:
         reasons.add(HoldReason.QUOTATION)
     text = region.text_content()
     return reasons | {reason for reason, pattern in _CANDIDATES if pattern.search(text)}
+
+
+def _is_hidden(element: html.HtmlElement) -> bool:
+    stated = (element.get("aria-hidden") or "").strip().lower() == "true"
+    styled = _HIDING_STYLE.search(element.get("style") or "") is not None
+    return stated or styled or element.get("hidden") is not None
 
 
 def _navigation_reasons(root: html.HtmlElement, title: str) -> set[HoldReason]:
