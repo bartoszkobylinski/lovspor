@@ -73,6 +73,18 @@ def test_same_observation_again_changes_nothing(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == [output]
 
 
+def test_identical_output_others_can_read_is_refused_and_left(tmp_path: Path) -> None:
+    output = tmp_path / "chapter.json"
+    run(FIXTURE, output)
+    output.chmod(0o644)
+    before = output.read_bytes()
+    code, printed = run(FIXTURE, output)
+    assert code == 1
+    assert said("refused: observation_unsafe", printed)
+    assert output.read_bytes() == before
+    assert stat.S_IMODE(output.stat().st_mode) == 0o644
+
+
 def test_another_observation_never_overwrites(tmp_path: Path) -> None:
     output = tmp_path / "chapter.json"
     run(FIXTURE, output)
