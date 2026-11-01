@@ -29,7 +29,7 @@ from lovspor.atomic_io import atomic_write_text
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.identity import DocumentType, SourceLocator, parse_source_url
 
-_JSON_LAYOUT: dict[str, Any] = {"sort_keys": True, "indent": 2, "ensure_ascii": False}
+JSON_LAYOUT: dict[str, Any] = {"sort_keys": True, "indent": 2, "ensure_ascii": False}
 
 _Text = Annotated[str, Field(pattern=r"\S")]
 
@@ -88,7 +88,7 @@ class ForarbeidRecord(BaseModel):
             page = parse_source_url(self.source_page_url)
         except ForarbeiderRefusedError as error:
             raise ValueError(str(error)) from error
-        if self._stated_identity() != _proved_identity(page) or page.chapter is None:
+        if self._stated_identity() != proved_identity(page) or page.chapter is None:
             raise ValueError("identity fields do not state one document")
         return self._with_chapters_of(page.canonical_url)
 
@@ -110,7 +110,7 @@ class ForarbeidRecord(BaseModel):
         return self
 
 
-def _proved_identity(page: SourceLocator) -> tuple[object, ...]:
+def proved_identity(page: SourceLocator) -> tuple[object, ...]:
     return (
         page.reference.document_type,
         page.reference.session,
@@ -124,7 +124,7 @@ def _proved_identity(page: SourceLocator) -> tuple[object, ...]:
 def metadata_text(record: ForarbeidRecord) -> str:
     """The record as written: sorted keys, two-space indent, UTF-8, one final newline."""
     payload = record.model_dump(mode="json")
-    return json.dumps(payload, **_JSON_LAYOUT) + "\n"
+    return json.dumps(payload, **JSON_LAYOUT) + "\n"
 
 
 def write_metadata(record: ForarbeidRecord, path: Path) -> None:

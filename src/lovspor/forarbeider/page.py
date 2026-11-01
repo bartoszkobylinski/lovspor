@@ -69,7 +69,7 @@ def build_record(payload: bytes, source_url: str, retrieved_at: datetime) -> For
     facts = read_proposition(payload, source_url)
     fields = {
         **_FIXED_FIELDS,
-        **_identity_fields(facts.locator),
+        **identity_fields(facts.locator),
         "title": facts.title,
         "ministry": facts.ministry,
         "retrieved_at": retrieved_at,
@@ -82,7 +82,7 @@ def build_record(payload: bytes, source_url: str, retrieved_at: datetime) -> For
         raise ForarbeiderRefusedError(RefusalReason.SCHEMA_INVALID, source_url) from error
 
 
-def _identity_fields(locator: SourceLocator) -> dict[str, object]:
+def identity_fields(locator: SourceLocator) -> dict[str, object]:
     return {
         "id": f"regjeringen-{locator.document_id}",
         "document_type": locator.reference.document_type,
@@ -117,6 +117,11 @@ def read_proposition(payload: bytes, source_url: str) -> PropositionFacts:
         ministry=_ministry(root),
         chapters=chapters,
     )
+
+
+def page_document(payload: bytes) -> html.HtmlElement:
+    """The parsed tree of a page :func:`read_proposition` already passed."""
+    return _document(_text(payload))
 
 
 def _text(payload: bytes) -> str:
