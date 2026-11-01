@@ -10,7 +10,7 @@ import pytest
 from lxml import html
 
 from lovspor.forarbeider.chapter import build_chapter_result
-from lovspor.forarbeider.chapter_body import ChapterBody, accounted_for
+from lovspor.forarbeider.chapter_body import ChapterBody, accounted_for, read_body
 from lovspor.forarbeider.chapter_models import (
     ChapterResult,
     HoldReason,
@@ -436,3 +436,15 @@ def test_a_body_the_schema_refuses_is_a_typed_refusal(monkeypatch: pytest.Monkey
         result()
     assert refused.value.reason is RefusalReason.SCHEMA_INVALID
     assert refused.value.detail == URL
+
+
+def test_the_navigation_names_an_annex_the_body_does_not_mark() -> None:
+    text = page().decode().replace("2 Bakgrunn</h1>", "1 Oppdiktet vedlegg</h1>")
+    body = read_body(html.document_fromstring(text), "1 Oppdiktet vedlegg")
+    assert HoldReason.ANNEX in body.reasons
+    assert body.blocks is None
+
+
+def test_a_chapter_before_the_annex_divider_is_not_an_annex() -> None:
+    body = read_body(html.document_fromstring(page().decode()), "2 Bakgrunn")
+    assert HoldReason.ANNEX not in body.reasons

@@ -31,6 +31,10 @@ _FOOTNOTES = (
     " or @data-footnote]"
 )
 _ANNEX_MARK = ".//*[contains(@class, 'K-DEL-VEDLEGG') or starts-with(@id, 'ved')]"
+_ANNEX_TITLES = (
+    "//ul[@data-longdoc-table-of-content]/li[not(a)][starts-with(normalize-space(), 'Vedlegg')]"
+    "/following-sibling::li/a"
+)
 _ANNEX_HEADING = re.compile(r"vedlegg\b", re.IGNORECASE)
 
 _MEDIA = {
@@ -112,6 +116,7 @@ def read_body(root: html.HtmlElement, chapter_title: str) -> ChapterBody:
         walker.reasons
         | _boundary_reasons(region, chapter_title, walker.blocks)
         | _source_reasons(region)
+        | _navigation_reasons(root, chapter_title)
     )
     return _body(tuple(walker.blocks), reasons, region)
 
@@ -190,6 +195,12 @@ def _source_reasons(region: html.HtmlElement) -> set[HoldReason]:
         reasons.add(HoldReason.QUOTATION)
     text = region.text_content()
     return reasons | {reason for reason, pattern in _CANDIDATES if pattern.search(text)}
+
+
+def _navigation_reasons(root: html.HtmlElement, title: str) -> set[HoldReason]:
+    """The source's own divider: every chapter listed after it is an annex."""
+    listed = {" ".join(link.text_content().split()) for link in root.xpath(_ANNEX_TITLES)}
+    return {HoldReason.ANNEX} if title in listed else set()
 
 
 def _is_annex(region: html.HtmlElement) -> bool:
