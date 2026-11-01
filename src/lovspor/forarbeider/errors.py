@@ -36,6 +36,15 @@ class RefusalReason(StrEnum):
     SCHEMA_INVALID = "schema_invalid"
     INVALID_TIMESTAMP = "invalid_timestamp"
     UNSAFE_OUTPUT_PATH = "unsafe_output_path"
+    REVIEW_INVALID = "review_invalid"
+    REVIEW_SUBJECT_MISMATCH = "review_subject_mismatch"
+    REVIEW_CONFLICT = "review_conflict"
+    REVIEW_TRANSITION = "review_transition"
+    REVIEW_ATTESTATION_MISSING = "review_attestation_missing"
+    REVIEW_NOT_ELIGIBLE = "review_not_eligible"
+    REVIEW_NOT_INTERACTIVE = "review_not_interactive"
+    REVIEW_LEDGER_CORRUPT = "review_ledger_corrupt"
+    REVIEW_LEDGER_UNSAFE = "review_ledger_unsafe"
 
 
 class ForarbeiderRefusedError(LovsporError):
