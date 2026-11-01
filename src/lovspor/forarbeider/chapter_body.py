@@ -9,6 +9,10 @@ recovered with ``text_content()``.
 What cannot be reproduced is found first and named, whatever else the chapter
 holds. Text candidates are only prompts for a human reviewer: they never clear
 anything, and missing one says nothing about the chapter.
+
+A list item is one block, optionally followed by one deeper list, and neighbouring
+lists or quotations are not told apart by blocks: valid markup outside that shape
+would flatten into another structure with the same hash, so it withholds the body.
 """
 
 import re
@@ -215,6 +219,7 @@ class _Walker:
     def __init__(self) -> None:
         self.blocks: list[TextBlock] = []
         self.reasons: set[HoldReason] = set()
+        self._closed: tuple[BlockKind, int] | None = None
 
     def flow(self, container: html.HtmlElement, style: _Style) -> None:
         """Blocks inside ``container``, which may hold no text of its own."""
@@ -231,7 +236,7 @@ class _Walker:
         elif tag == "p":
             self._emit(style, element)
         elif tag == "blockquote":
-            self._leaf_or_flow(element, ("quote", 0))
+            self._quote(element)
         elif tag == "ul" and style[0] != "quote":
             self._list(element, style)
         elif tag == "div" and _wrapper_classes(element) <= _WRAPPERS and element.get("class"):
@@ -239,15 +244,40 @@ class _Walker:
         elif tag not in _MEDIA and not _wrapper_classes(element) & _EXCLUDED:
             self.reasons.add(HoldReason.DAMAGED_DOM)
 
+    def _quote(self, element: html.HtmlElement) -> None:
+        self._open("quote")
+        self._leaf_or_flow(element, ("quote", 0))
+        self._closed = ("quote", len(self.blocks))
+
     def _list(self, element: html.HtmlElement, style: _Style) -> None:
+        self._open("list_item")
         depth = style[1] + 1
         if _bare_text(element):
             self.reasons.add(HoldReason.DAMAGED_DOM)
         for item in element:
             if item.tag == "li":
-                self._leaf_or_flow(item, ("list_item", depth))
+                self._item(item, ("list_item", depth))
             elif isinstance(item.tag, str):
                 self.reasons.add(HoldReason.DAMAGED_DOM)
+        self._closed = ("list_item", len(self.blocks))
+
+    def _open(self, kind: BlockKind) -> None:
+        """A group starting where the last of its kind ended would merge into it."""
+        if self._closed == (kind, len(self.blocks)):
+            self.reasons.add(HoldReason.UNSUPPORTED_STRUCTURE)
+
+    def _item(self, item: html.HtmlElement, style: _Style) -> None:
+        before = len(self.blocks)
+        lead, sublist = _item_shape(item)
+        if lead is not None:
+            self._emit(style, lead)
+        else:
+            self.reasons.add(HoldReason.UNSUPPORTED_STRUCTURE)
+            self.flow(item, style)
+        if len(self.blocks) == before:
+            self.reasons.add(HoldReason.UNSUPPORTED_STRUCTURE)
+        if sublist is not None:
+            self._list(sublist, style)
 
     def _leaf_or_flow(self, element: html.HtmlElement, style: _Style) -> None:
         if all(_is_inline(child) for child in element):
@@ -274,6 +304,17 @@ class _Walker:
         if isinstance(child.tag, str) and child.tag not in _MEDIA:
             self.reasons.add(HoldReason.DAMAGED_DOM)
         return ""
+
+
+def _item_shape(item: html.HtmlElement) -> tuple[html.HtmlElement | None, html.HtmlElement | None]:
+    """The element holding the text of ``item`` and its one deeper list, if it has that shape."""
+    if all(_is_inline(child) for child in item):
+        return item, None
+    elements = [child for child in item if isinstance(child.tag, str)]
+    tags = [child.tag for child in elements]
+    if _bare_text(item) or tags not in (["p"], ["p", "ul"]):
+        return None, None
+    return elements[0], elements[1] if len(elements) > 1 else None
 
 
 def _is_inline(child: html.HtmlElement) -> bool:

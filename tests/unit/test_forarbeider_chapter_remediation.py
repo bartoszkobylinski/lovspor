@@ -288,7 +288,7 @@ def test_list_depth_starts_at_one_and_increases_only_for_nested_lists() -> None:
     held = result(
         section(
             '<div class="K-DEL-LEDD"><ul><li><p>outer</p>'
-            "<ul><li>inner</li></ul></li></ul></div><ul><li>next</li></ul>"
+            "<ul><li>inner</li></ul></li></ul></div><p>between</p><ul><li>next</li></ul>"
         )
     )
     assert held.blocks is not None

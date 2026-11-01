@@ -49,6 +49,7 @@ class HoldReason(StrEnum):
     FOOTNOTES = "footnotes"
     AMBIGUOUS_BOUNDARY = "ambiguous_boundary"
     DAMAGED_DOM = "damaged_dom"
+    UNSUPPORTED_STRUCTURE = "unsupported_structure"
     INCOMPLETE_EXTRACTION = "incomplete_extraction"
     QUOTATION = "quotation"
     THIRD_PARTY_WORK = "third_party_work"
@@ -67,6 +68,7 @@ WITHHOLDING = frozenset(
         HoldReason.FOOTNOTES,
         HoldReason.AMBIGUOUS_BOUNDARY,
         HoldReason.DAMAGED_DOM,
+        HoldReason.UNSUPPORTED_STRUCTURE,
         HoldReason.INCOMPLETE_EXTRACTION,
     }
 )
