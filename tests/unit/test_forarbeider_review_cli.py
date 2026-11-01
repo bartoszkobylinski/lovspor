@@ -514,6 +514,19 @@ def test_an_observation_of_another_schema_is_refused(desk: Desk) -> None:
     assert caught.value.reason is RefusalReason.SCHEMA_INVALID
 
 
+@pytest.mark.parametrize("field", ["extractor_version", "normalizer_version"])
+def test_unsupported_observation_version_cannot_receive_a_decision(desk: Desk, field: str) -> None:
+    payload = json.loads(desk.observation.read_bytes())
+    payload[field] = 2
+    altered = json.dumps(payload).encode()
+    desk.observation.write_bytes(altered)
+    result = desk.hold()
+    assert result.exit_code == 1
+    assert said("refused: schema_invalid", result.output)
+    assert desk.observation.read_bytes() == altered
+    assert not desk.ledger.exists()
+
+
 @pytest.mark.usefixtures("at_a_terminal")
 def test_no_chapter_text_reaches_output_or_ledger(tmp_path: Path) -> None:
     desk = Desk(tmp_path, with_changed_text(chapter()))

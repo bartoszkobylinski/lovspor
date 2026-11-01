@@ -242,6 +242,34 @@ def test_a_decision_at_the_same_moment_is_kept(ledger: Path) -> None:
     assert record_decision(ledger, later(1, "2100-04-02T12:00:00Z")).written is True
 
 
+@pytest.mark.parametrize(
+    ("moment", "allowed"),
+    [
+        ("2100-04-02T13:00:00+01:00", True),
+        ("2100-04-02T11:30:00-01:00", True),
+        ("2100-04-02T13:00:00+02:00", False),
+    ],
+)
+def test_chronology_compares_instants_across_offsets(
+    ledger: Path, moment: str, allowed: bool
+) -> None:
+    first = record_decision(ledger, request()).stored
+    path = chapter_directory(ledger) / "000001.json"
+    before = path.read_bytes()
+    following = later(1, moment)
+    if allowed:
+        second = record_decision(ledger, following).stored
+        assert second.decision.revision == 2
+        assert second.decision.previous_decision_sha256 == first.sha256
+        assert load_history(ledger, following.subject) == (first, second)
+        assert verify_ledger(ledger) == ((first, second),)
+    else:
+        assert refusal(ledger, following) is RefusalReason.REVIEW_TRANSITION
+        assert history(ledger) == (first,)
+        assert sorted(item.name for item in path.parent.iterdir()) == ["000001.json"]
+    assert path.read_bytes() == before
+
+
 def test_invalid_fields_are_named_never_echoed(ledger: Path) -> None:
     with pytest.raises(ForarbeiderRefusedError) as caught:
         record_decision(ledger, request(reviewer="Ola Nordmann", evidence=("note:Ola",)))
