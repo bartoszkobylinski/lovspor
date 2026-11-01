@@ -150,10 +150,16 @@ def test_checked_directory_refuses_a_forbidden_tree_and_its_root(tmp_path: Path)
         assert _refusal(checked_directory, path, (corpus,)) is RefusalReason.UNSAFE_OUTPUT_PATH
 
 
-def test_checked_directory_refuses_a_loop(tmp_path: Path) -> None:
+def test_a_symlink_loop_never_becomes_a_ledger(tmp_path: Path) -> None:
+    """``Path.resolve`` raises on a loop before 3.13 and returns it after: both are refused."""
     loop = tmp_path / "loop"
     loop.symlink_to(loop)
-    assert _refusal(checked_directory, loop, ()) is RefusalReason.UNSAFE_OUTPUT_PATH
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        private_directory_exists(checked_directory(loop, ()))
+    assert caught.value.reason in {
+        RefusalReason.UNSAFE_OUTPUT_PATH,
+        RefusalReason.REVIEW_LEDGER_UNSAFE,
+    }
 
 
 def test_ensure_creates_an_owner_only_directory(tmp_path: Path) -> None:

@@ -116,9 +116,13 @@ def _pinned_revision(result: ChapterResult, expect: str) -> int:
 
 def entry_of(status: ReviewStatus, because: Sequence[str]) -> Entry:
     """A reason with no reference gets an empty one, which the evidence grammar refuses."""
-    pairs = [value.partition("=") for value in because]
-    reasons = tuple(reason for reason, _, _ in pairs)
-    return Entry(status, reasons, tuple(reference for _, _, reference in pairs))
+    pairs = _pairs(because)
+    return Entry(status, tuple(name for name, _ in pairs), tuple(ref for _, ref in pairs))
+
+
+def _pairs(values: Sequence[str]) -> list[tuple[str, str]]:
+    split = [value.partition("=") for value in values]
+    return [(name, reference) for name, _, reference in split]
 
 
 def _reasons(values: tuple[str, ...]) -> tuple[ReviewReason, ...]:
@@ -130,8 +134,7 @@ def _reasons(values: tuple[str, ...]) -> tuple[ReviewReason, ...]:
 
 def _attestations(values: tuple[str, ...]) -> tuple[Attestation, ...]:
     grouped: dict[AttestationKind, set[str]] = {}
-    for value in values:
-        name, _, reference = value.partition("=")
+    for name, reference in _pairs(values):
         try:
             grouped.setdefault(AttestationKind(name), set()).add(reference)
         except ValueError as error:

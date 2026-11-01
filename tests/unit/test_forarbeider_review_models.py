@@ -1,5 +1,6 @@
 """What a review decision can state (#738, ADR-0018 PR3A)."""
 
+import hashlib
 import json
 from typing import Any
 
@@ -266,7 +267,18 @@ def test_a_change_of_text_or_source_is_another_subject() -> None:
 
 def test_the_subject_key_is_stable_and_pinned() -> None:
     assert subject_key(subject_of(chapter())) == subject_key(subject_of(chapter()))
-    assert len(subject_key(subject_of(chapter()))) == 64
+    subject = subject_of(chapter())
+    canonical = (
+        "{\n"
+        '  "chapter_number": 2,\n'
+        '  "extractor_version": 1,\n'
+        '  "normalizer_version": 1,\n'
+        f'  "source_page_url": "{subject.source_page_url}",\n'
+        f'  "source_sha256": "{subject.source_sha256}",\n'
+        f'  "text_sha256": "{subject.text_sha256}"\n'
+        "}"
+    )
+    assert subject_key(subject) == hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def test_text_is_deterministic_canonical_and_holds_no_chapter_text() -> None:

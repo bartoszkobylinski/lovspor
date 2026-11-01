@@ -128,7 +128,7 @@ def subject_of(result: ChapterResult) -> ReviewSubject:
 
 def subject_key(subject: ReviewSubject) -> str:
     """The digest that names a subject's chain and that a reviewer pins."""
-    canonical = json.dumps(subject.model_dump(mode="json"), **JSON_LAYOUT)
+    canonical = json.dumps(subject.model_dump(), **JSON_LAYOUT)
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 

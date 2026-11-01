@@ -57,8 +57,10 @@ def checked_directory(raw: Path, forbidden: Sequence[Path]) -> Path:
         path = path.resolve()
     except (OSError, RuntimeError) as error:
         raise refused from error
-    child = path / "child"
-    if _inside_a_repository(child) or _inside_any(child, forbidden):
+    trees = (path, *path.parents)
+    if any((tree / ".git").exists() for tree in trees):
+        raise refused
+    if any(tree.resolve() in trees for tree in forbidden):
         raise refused
     return path
 
