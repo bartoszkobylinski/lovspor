@@ -51,6 +51,7 @@ class HoldReason(StrEnum):
     DAMAGED_DOM = "damaged_dom"
     UNSUPPORTED_STRUCTURE = "unsupported_structure"
     HIDDEN_CONTENT = "hidden_content"
+    MALFORMED_BODY = "malformed_body"
     INCOMPLETE_EXTRACTION = "incomplete_extraction"
     QUOTATION = "quotation"
     THIRD_PARTY_WORK = "third_party_work"
@@ -71,6 +72,7 @@ WITHHOLDING = frozenset(
         HoldReason.DAMAGED_DOM,
         HoldReason.UNSUPPORTED_STRUCTURE,
         HoldReason.HIDDEN_CONTENT,
+        HoldReason.MALFORMED_BODY,
         HoldReason.INCOMPLETE_EXTRACTION,
     }
 )

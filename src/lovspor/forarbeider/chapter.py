@@ -12,6 +12,7 @@ from datetime import datetime
 from pydantic import ValidationError
 
 from lovspor.forarbeider.chapter_body import ChapterBody, read_body
+from lovspor.forarbeider.chapter_markup import withhold_if_repaired
 from lovspor.forarbeider.chapter_models import (
     ChapterResult,
     HoldReason,
@@ -42,7 +43,8 @@ def build_chapter_result(payload: bytes, source_url: str, retrieved_at: datetime
     """
     facts = read_proposition(payload, source_url)
     chapter = next(item for item in facts.chapters if item.url == facts.locator.page_url)
-    body = read_body(page_document(payload), chapter.title)
+    root = page_document(payload)
+    body = withhold_if_repaired(read_body(root, chapter.title), root, payload.decode())
     fields = {
         **_FIXED_FIELDS,
         **identity_fields(facts.locator),

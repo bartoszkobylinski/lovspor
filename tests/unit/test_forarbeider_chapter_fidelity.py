@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from lovspor.forarbeider.chapter import build_chapter_result
-from lovspor.forarbeider.chapter_models import ChapterResult, HoldReason
+from lovspor.forarbeider.chapter_models import ChapterResult, HoldReason, TextBlock
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.staging import write_observation
 
@@ -275,3 +275,63 @@ def test_visible_markup_is_read(markup: str) -> None:
     assert held.blocks is not None
     assert held.blocks[-1].text == "synlig"
     assert HoldReason.HIDDEN_CONTENT not in held.hold_reasons
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<p>Første<p>Andre</p>",
+        "<p>Første",
+        "<p>en <b>to</p></b>",
+        "<p>en <b>to <i>tre</b></i></p>",
+        "<ul><li><p>A</p></ul>",
+        "<ul><li>A<li>B</ul>",
+        "<p>en</div></p>",
+        "<p>en</p></p>",
+        '<p><div class="K-DEL-LEDD">en</div></p>',
+        "<p/>en",
+        '<div class="K-DEL-LEDD"/><p>en</p>',
+    ],
+)
+def test_a_body_the_parser_repaired_is_withheld(markup: str) -> None:
+    held = result(markup)
+    assert withheld_for(held, HoldReason.MALFORMED_BODY)
+
+
+def test_a_repaired_page_keeps_no_text() -> None:
+    held = result("<p>Første<p>Andre</p>")
+    assert held.blocks is None
+    assert "Andre" not in held.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    ("markup", "text"),
+    [
+        ("<p>en<br>to</p>", "en to"),
+        ("<p>en<br/>to</p>", "en to"),
+        ("<p>en<br />to</p>", "en to"),
+        ("<P>en</P>", "en"),
+        ("<p>en</p ><!-- <p> -->", "en"),
+        ("<p>a &amp; b &lt;c&gt;</p>", "a & b <c>"),
+        ("<p>a < b</p>", "a < b"),
+        ('<p title="a>b">en</p>', "en"),
+        ("<p>\n  en\n  </p>\n", "en"),
+    ],
+)
+def test_well_formed_markup_is_read(markup: str, text: str) -> None:
+    held = result(markup)
+    assert held.blocks is not None
+    assert held.blocks[-1] == TextBlock(kind="paragraph", text=text)
+    assert HoldReason.MALFORMED_BODY not in held.hold_reasons
+
+
+def test_a_void_element_does_not_read_as_malformed() -> None:
+    held = result('<p>tekst</p><img src="x"><hr>')
+    assert HoldReason.MALFORMED_BODY not in held.hold_reasons
+
+
+def test_markup_after_the_region_is_not_the_body() -> None:
+    text = page(section("<p>en</p>")).decode()
+    trailing = text.replace("</main>", "<div><span></main>", 1)
+    held = build_chapter_result(trailing.encode(), URL, WHEN)
+    assert HoldReason.MALFORMED_BODY not in held.hold_reasons
