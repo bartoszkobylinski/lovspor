@@ -195,7 +195,7 @@ def _section_reasons(region: html.HtmlElement) -> set[HoldReason]:
 
 def _source_reasons(region: html.HtmlElement) -> set[HoldReason]:
     reasons = {_MEDIA[node.tag] for node in region.iter(*_MEDIA)}
-    if any(_is_hidden(node) for node in (*region.iterancestors(), *region.iter("*"))):
+    if any(_is_hidden(node) for node in (*region.iterancestors(), *region.iter())):
         reasons.add(HoldReason.HIDDEN_CONTENT)
     if region.xpath(_FOOTNOTES):
         reasons.add(HoldReason.FOOTNOTES)
@@ -208,8 +208,8 @@ def _source_reasons(region: html.HtmlElement) -> set[HoldReason]:
 
 
 def _is_hidden(element: html.HtmlElement) -> bool:
-    stated = (element.get("aria-hidden") or "").strip().lower() == "true"
-    styled = _HIDING_STYLE.search(element.get("style") or "") is not None
+    stated = str(element.get("aria-hidden")).strip().lower() == "true"
+    styled = _HIDING_STYLE.search(str(element.get("style"))) is not None
     return stated or styled or element.get("hidden") is not None
 
 
@@ -231,7 +231,7 @@ class _Walker:
     def __init__(self) -> None:
         self.blocks: list[TextBlock] = []
         self.reasons: set[HoldReason] = set()
-        self._closed: tuple[BlockKind, int] | None = None
+        self._closed: set[tuple[BlockKind, int]] = set()
 
     def flow(self, container: html.HtmlElement, style: _Style) -> None:
         """Blocks inside ``container``, which may hold no text of its own."""
@@ -259,7 +259,7 @@ class _Walker:
     def _quote(self, element: html.HtmlElement) -> None:
         self._open("quote")
         self._leaf_or_flow(element, ("quote", 0))
-        self._closed = ("quote", len(self.blocks))
+        self._closed.add(("quote", len(self.blocks)))
 
     def _list(self, element: html.HtmlElement, style: _Style) -> None:
         self._open("list_item")
@@ -271,11 +271,11 @@ class _Walker:
                 self._item(item, ("list_item", depth))
             elif isinstance(item.tag, str):
                 self.reasons.add(HoldReason.DAMAGED_DOM)
-        self._closed = ("list_item", len(self.blocks))
+        self._closed.add(("list_item", len(self.blocks)))
 
     def _open(self, kind: BlockKind) -> None:
         """A group starting where the last of its kind ended would merge into it."""
-        if self._closed == (kind, len(self.blocks)):
+        if (kind, len(self.blocks)) in self._closed:
             self.reasons.add(HoldReason.UNSUPPORTED_STRUCTURE)
 
     def _item(self, item: html.HtmlElement, style: _Style) -> None:

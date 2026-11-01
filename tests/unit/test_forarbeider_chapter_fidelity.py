@@ -2,9 +2,11 @@
 
 import os
 import re
+import signal
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
+from types import FrameType
 
 import pytest
 
@@ -200,10 +202,21 @@ def test_a_second_name_for_the_file_is_refused(tmp_path: Path) -> None:
 
 @posix_owner_only
 def test_a_fifo_at_the_output_neither_blocks_nor_passes(tmp_path: Path) -> None:
+    """The alarm turns a blocking open into a failure, not a run that never ends."""
     target = tmp_path / "chapter.json"
     os.mkfifo(target, 0o600)
-    with pytest.raises(ForarbeiderRefusedError) as refused:
-        write_observation(target, "x")
+
+    def blocked(_signal: int, _frame: FrameType | None) -> None:
+        pytest.fail("write_observation blocked on the FIFO")
+
+    previous = signal.signal(signal.SIGALRM, blocked)
+    signal.setitimer(signal.ITIMER_REAL, 5)
+    try:
+        with pytest.raises(ForarbeiderRefusedError) as refused:
+            write_observation(target, "x")
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
     assert refused.value.reason is RefusalReason.OBSERVATION_UNSAFE
 
 

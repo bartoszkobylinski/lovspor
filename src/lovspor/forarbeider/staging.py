@@ -93,7 +93,7 @@ def _require_same_private_file(path: Path, payload: bytes) -> None:
         status = os.fstat(stream.fileno())
         if not _ours_alone(status):
             raise ForarbeiderRefusedError(RefusalReason.OBSERVATION_UNSAFE, str(path))
-        if stream.read(len(payload) + 1) != payload:
+        if stream.read() != payload:
             raise ForarbeiderRefusedError(RefusalReason.OBSERVATION_EXISTS, str(path))
     if stat.S_IMODE(status.st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
         raise ForarbeiderRefusedError(RefusalReason.OBSERVATION_UNSAFE, str(path))
