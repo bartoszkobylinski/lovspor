@@ -41,7 +41,7 @@ def build_chapter_result(payload: bytes, source_url: str, retrieved_at: datetime
         ForarbeiderRefusedError: the page fails a check of :func:`read_proposition`.
     """
     facts = read_proposition(payload, source_url)
-    chapter = facts.chapters[(facts.locator.chapter or 0) - 1]
+    chapter = next(item for item in facts.chapters if item.url == facts.locator.page_url)
     body = read_body(page_document(payload), chapter.title)
     fields = {
         **_FIXED_FIELDS,

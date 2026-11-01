@@ -239,3 +239,35 @@ def test_competing_observation_at_publication_is_never_replaced(
         assert refused.value.reason is RefusalReason.OBSERVATION_EXISTS
     assert target.read_bytes() == competing_text.encode("utf-8")
     assert list(tmp_path.iterdir()) == [target]
+
+
+def test_the_staged_file_is_a_hidden_neighbour_of_the_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    linked: list[Path] = []
+    real_link = os.link
+
+    def spy(source: Path, target: Path) -> None:
+        linked.append(Path(source))
+        real_link(source, target)
+
+    monkeypatch.setattr(os, "link", spy)
+    target = tmp_path / "chapter.json"
+    write_observation(target, "x")
+    assert linked[0].parent == tmp_path
+    assert linked[0].name.startswith(".chapter.json.")
+
+
+def test_a_staged_file_already_gone_does_not_fail_a_finished_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_link = os.link
+
+    def link_and_lose(source: Path, target: Path) -> None:
+        real_link(source, target)
+        Path(source).unlink()
+
+    monkeypatch.setattr(os, "link", link_and_lose)
+    target = tmp_path / "chapter.json"
+    assert write_observation(target, "x") is True
+    assert list(tmp_path.iterdir()) == [target]

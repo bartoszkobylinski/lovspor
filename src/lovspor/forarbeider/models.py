@@ -29,7 +29,7 @@ from lovspor.atomic_io import atomic_write_text
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.identity import DocumentType, SourceLocator, parse_source_url
 
-_JSON_LAYOUT: dict[str, Any] = {"sort_keys": True, "indent": 2, "ensure_ascii": False}
+JSON_LAYOUT: dict[str, Any] = {"sort_keys": True, "indent": 2, "ensure_ascii": False}
 
 _Text = Annotated[str, Field(pattern=r"\S")]
 
@@ -124,7 +124,7 @@ def proved_identity(page: SourceLocator) -> tuple[object, ...]:
 def metadata_text(record: ForarbeidRecord) -> str:
     """The record as written: sorted keys, two-space indent, UTF-8, one final newline."""
     payload = record.model_dump(mode="json")
-    return json.dumps(payload, **_JSON_LAYOUT) + "\n"
+    return json.dumps(payload, **JSON_LAYOUT) + "\n"
 
 
 def write_metadata(record: ForarbeidRecord, path: Path) -> None:

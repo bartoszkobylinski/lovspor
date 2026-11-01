@@ -29,7 +29,7 @@ from pydantic import (
 
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.identity import DocumentType, parse_source_url
-from lovspor.forarbeider.models import proved_identity
+from lovspor.forarbeider.models import JSON_LAYOUT, proved_identity
 
 BlockKind = Literal["heading", "paragraph", "list_item", "quote"]
 
@@ -210,7 +210,7 @@ def ordered_reasons(reasons: tuple[HoldReason, ...]) -> tuple[HoldReason, ...]:
 def result_text(result: ChapterResult) -> str:
     """The result as written: sorted keys, two-space indent, UTF-8, one final newline."""
     payload = result.model_dump(mode="json")
-    return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+    return json.dumps(payload, **JSON_LAYOUT) + "\n"
 
 
 def read_chapter(path: Path) -> ChapterResult:

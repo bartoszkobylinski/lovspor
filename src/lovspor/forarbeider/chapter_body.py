@@ -240,7 +240,7 @@ class _Walker:
             self.reasons.add(HoldReason.DAMAGED_DOM)
 
     def _list(self, element: html.HtmlElement, style: _Style) -> None:
-        depth = style[1] + 1 if style[0] == "list_item" else 1
+        depth = style[1] + 1
         if _bare_text(element):
             self.reasons.add(HoldReason.DAMAGED_DOM)
         for item in element:
