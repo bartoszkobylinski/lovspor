@@ -1,0 +1,113 @@
+# Forarbeider PR3B: evidence-backed release and opt-in corpus contract
+
+**Status:** Proposed implementation contract — owner review required; **not** publication clearance  
+**Date:** 2026-11-01  
+**Authority:** Accepted [ADR-0018](https://github.com/bartoszkobylinski/lovspor-notebook/blob/main/docs/adr/ADR-0018-government-forarbeider-corpus.md), [ADR-0017](https://github.com/bartoszkobylinski/lovspor-notebook/blob/main/docs/adr/ADR-0017-source-backed-legislative-crosswalk.md)  
+**Tracking:** [#738](https://github.com/bartoszkobylinski/lovspor/issues/738); [PR1 #741](https://github.com/bartoszkobylinski/lovspor/pull/741), [PR2 #752](https://github.com/bartoszkobylinski/lovspor/pull/752), [PR3A #754](https://github.com/bartoszkobylinski/lovspor/pull/754)  
+**Division of responsibility:** Owner chooses release policy, authorizes each live pilot and merges. Architecture reviewer owns this contract and independent code review. Coding agent implements bounded PRs.
+
+## Decision to preserve
+
+Forarbeider are official **preparatory material, not enacted law**. Use an isolated, explicitly opt-in dataset within Lovverk:
+
+\`\`\`text
+lovverk/
+  manifest.json                       # Lovdata: NEVER add forarbeider here
+  forarbeider/
+    manifest.json                     # first created by a separately authorized release
+    INDEX.md
+    <session>/<prop-l|prop-ls>/<government-document-id>.md
+\`\`\`
+
+Only an explicit dataset reader may see the new manifest. The older law readers, MCP tools, law search, embeddings and static default indexes must remain byte/behavior-compatible. The source's immutable numeric document ID and session/type define identity; no synthetic law ID, no \`valid_at\`, and never classify a proposition as current law.
+
+\`source_document_type=forarbeid\`, \`normative=false\`, \`source_provider=regjeringen.no\`, \`rights_basis=åndsverkloven § 14\`, and \`source_license=null\` are mandatory. **§14 is a statutory qualification, not NLOD, CC0, or a content licence.** Keep \`published_at\` nullable when not explicitly evidenced; distinguish upstream publication time, source retrieval time, owner release decision time and Git recording time.
+
+## Critical PR3A limitation
+
+PR3A records \`approved\` when a reviewer declares four attestations. Its \`EvidenceReference\` permits e.g. \`adr:0018\` as the sole evidence for **all four**. That ADR establishes policy but does not prove a GDPR processing basis, rights, third-party screening or completeness for any *individual* chapter. PR3A's self-reported reviewer handle, time, terminal confirmation and locally linked hash chain are also not authenticated or externally anchored. A hash reference establishes identity of bytes, **not** their legal adequacy.
+
+**Therefore \`review.status=approved\` is a necessary but NEVER a sufficient release condition.** No publisher may implement \`if approved: publish\`.
+
+## Boundary: three separately reviewed slices
+
+### PR3B-1 — PRIVATE preflight and publication candidate (first code PR)
+
+Implement an offline, read-only-to-corpus preflight using PR1/PR2 staged observations and PR3A audit chains. All inputs, reports, rendered previews and evidence remain in private owner-only storage **outside every Git checkout and CI artifact**. The operator invokes a supported Typer CLI. The preflight does not stage, create or write any \`lovverk\` file and has NO \`--force\`, \`--publish\`, hidden environment override or automatic approval.
+
+Preflight must:
+1. Validate the exact source document type, government ID, session, official reference, chapter URL and ordering; forbid collisions and cross-document chapter mixing.
+2. Recompute or verify the source/text hashes from actual private staged artifacts, not merely copied strings; match extractor/normalizer versions, observation to review subject and the latest unbroken PR3A review chain. Require an externally kept chain-head reference when release evidence is evaluated; a standalone local ledger cannot prove its tail was not removed.
+3. Evaluate **every candidate chapter** separately. Any missing body, annex, footnote/table/image/ambiguous or malformed content, withheld/rejected/pending or stale/superseded decision prevents publication of that chapter. A previous approval may not survive source/text changes or a later \`held\`/\`rejected\` decision.
+4. Require a **chapter-specific, independently inspectable private release dossier** with actual evidence artifacts and checked SHA-256, not just an \`adr:\`/\`issue:\`/\`pr:\` pointer or an unattested digest. The dossier must include the identified publication purpose, applicable personal-data processing basis (or a reasoned no-personal-data assessment), minimization/classification decision, third-party rights screening, exact original-page/source integrity proof and reviewer/date. \`adr:0018\` alone cannot satisfy any case-specific gate. A machine can validate existence, binding, format and hashes; legal sufficiency requires an owner/human decision, not keyword detection.
+5. Require a separate **owner release decision**, scoped to exact document/chapter IDs, source/text hashes, intended publication destination, rights/privacy review version, purpose and expiry/revocation conditions. The operator's PR3A \`approved\` flag cannot substitute for this. The contract for ownership/authenticity must be explicit; a typed handle/TTY is not cryptographic identity verification.
+6. Produce a deterministic, structured report with eligibility outcomes/reasons and proposed (not published) manifest/rendering shape. Never print body text, private names, evidence-note contents or unsafe absolute paths to public logs. Default \`DENY\` on absent or ambiguous evidence.
+
+**A successful PR3B-1 report still has \`publication_authorized=false\` and performs zero public writes.** No real-world text from source pages or private dossiers in code fixtures, issue/PR comments or CI.
+
+### PR3B-2 — optional manual promotion, separate approval and code PR
+
+Only after the owner approves the **PR3B-2 implementation scope** and independently establishes pre-publication legal/privacy/source-terms gates, implement a dedicated command able to promote a narrowly scoped, already-authorized, fully preflighted candidate. It remains disabled by default. No scheduler, crawler, CI deployment or unreviewed batch operation may trigger it.
+
+Required release semantics:
+- Re-validate against the current private dossier, latest review status, owner decision and immutable content hashes **at the moment of promotion**. Detect revocation or a changed source, and fail closed.
+- Verify a clean, correct Lovverk checkout and an explicit scoped destination. Prepare a bounded, human-inspectable plan before writing. Never silently push, merge or make a release commit.
+- Write only the dedicated \`forarbeider/\` tree; never touch root \`manifest.json\`, \`lover/\`, \`forskrifter/\`, \`lokale-forskrifter/\`, law histories, generic renderer defaults or public indexes. No raw HTML/PDF, complete private review notes, private reviewer IDs, third-party media or unapproved chapters in Git.
+- The **independent versioned** \`forarbeider/manifest.json\` is the authoritative membership list, not an implicit directory glob. Schema must fail closed on duplicates, mismatched paths/hashes, dangling members, incompatible version or non-allowlisted document type. Empty/uninitialized dataset remains invisible to old readers.
+- A document rendering includes only specifically released chapters in explicit source order. If any chapter is not released, clearly mark the result a **partial, curated excerpt**, list accurate source locators and do not assert proposition-wide completeness. Do not imply that a proposition was adopted.
+- Rendering bytes are deterministic for identical source snapshot + released chapter set + renderer version + owner decision; hash normalized chapter text separately from Markdown. Encode links defensively; prevent Markdown/front-matter injection or navigation outside the dataset.
+- Separate \`release_status\` (e.g. released/withdrawn) from a proposition's parliamentary or legal status. Preserve source and Git time axes; never invent \`valid_at\` or a publication date.
+- Include a supported owner-only **withdraw/takedown workflow**: block future serving/indexing, identify affected manifest entries and generated artifacts, make a forward-only Git correction, and provide a documented escalation path for history exposure. **Git revert does not erase old public commits or clones**; if the exposure is unacceptable, the correct pre-publication decision is to withhold it.
+- Source rights/website terms/§24 assessment, GDPR processing basis, privacy notice/contact channel, response ownership, retention/deindexing plan and independent human approval must be recorded **before the first real public bytes enter any Git branch or PR**, not merely before merging them.
+- First tests use only synthetic fixtures, isolated disposable Git repos and mocked/stubbed private authorization records. No live government fetch or public dataset migration.
+
+### PR3B-3 — explicit opt-in read path, separately approved
+
+Only after PR3B-2 is reviewed and a limited release is individually approved: a dedicated, opt-in reader with dataset-specific labels and source citations. Default MCP, website search, \`get_law\`, law identity, default indexes, benchmark behavior and embeddings stay unchanged. No crosswalk or enacted-law linkage in this slice; that is governed later by ADR-0017. A missing, withdrawn or corrupt forarbeider manifest is not allowed to disrupt existing law service.
+
+## Release controls not delegated to automated code
+
+Before any real publication or crawl scale-up the owner must record:
+- Specific source/website terms and §24 database-rights assessment for intended method/volume; robots access does **not** grant reuse rights.
+- A documented lawful basis and purpose for any personal-data processing; third-party and special-category content addressed in a human-reviewed dossier. Unresolved high-risk cases stay private or receive metadata-and-official-link only.
+- A public correction/takedown contact, deindexing/retention policy and a realistic plan for harmful Git-history disclosure (including inability to retract third-party clones).
+- A bounded pilot population and **separate written release authorization**. Review of a code PR, green tests, ADR acceptance or a PR3A decision is NOT that authorization.
+
+A no-personal-data pilot still requires an explicit written case-specific review of that conclusion and rights/terms. No agent may invent one.
+
+## Acceptance matrix (red-first, negative tests mandatory)
+
+| Scenario | Required result |
+| --- | --- |
+| Missing PR3A decision, latest held/rejected/pending | DENY; no candidate cleared |
+| \`approved\` with four \`adr:0018\` references only | DENY; policy citation is not case evidence |
+| Dossier hash points to missing/different private bytes | DENY |
+| Dossier lacks explicit GDPR/purpose/third-party/source review | DENY |
+| No scoped owner release decision, or expired/revoked/different target | DENY |
+| Changed page bytes, chapter text or extractor version since approval | DENY |
+| Ledger modified, truncated/empty without external checkpoint | DENY |
+| Missing/inconsistent chapter inventory, duplicate source ID, invalid URL | DENY |
+| Annex/media/footnote/table, malformed/partial body, suspect private citation | Hold relevant chapter; never partial-text-as-complete |
+| One approved chapter, another held | Only exact approved subset may be eligible; document marked partial |
+| Invalid/ambiguous public corpus path or symlink escape | DENY before writing |
+| Root manifest, \`get_law\`, MCP, site/index absent/disabled | Byte/behavior identical |
+| Non-Lovdata document with NLOD or implied effective date | Validation failure |
+| Same frozen candidate and release inputs twice | Byte-identical plan/render; no unexpected new commit |
+| Withdrawal after release | No future read/index; explicit public-history warning and recovery procedure |
+| PR3B-1 against any real checkout | **Zero corpus writes**, even with all decisions \`approved\` |
+| CI/tests/docs include real page body or private note | Gate failure |
+
+Test both \`Prop. L\` and \`Prop. LS\`; chapter-by-chapter selectivity, repeated and conflicting decisions, source/version drift, missing evidence, malicious Markdown/URLs, crash partial-write cleanup, symlink and unsafe paths, and idempotent retries. A configured session/review/release option that the operator cannot reach via supported CLI is not shipped (CLAUDE.md). PR3B-2 must have separate integration tests for public corpus validation and withdrawal, **before** any real data.
+
+## Deliberately deferred
+
+No automated harvesting, sitemap walk, PDF/OCR, background cron, auto-approval, default MCP publishing, embeddings, crosswalk by title/year, Stortinget Innstillinger, Rundskriv/NAV, NOU or Ot.prp. No general refactor of \`promotion/\` solely to reuse its licence or renderer. No weakening existing CI/mutation/security checks or ratchets. Existing pypdf vulnerabilities [#740](https://github.com/bartoszkobylinski/lovspor/issues/740) stay tracked separately.
+
+## Handoff and review
+
+1. Owner reviews and merges this **documentation-only** contract PR; it grants no publication.
+2. Claude implements **PR3B-1 only**, in one code PR from latest \`main\`, TDD and no real public writes. Run \`verify-fast\`, \`verify-deep\`, \`/security-check\`, existing integration + CI Codex/mutation. Owner alone merges.
+3. Independent reviewer checks candidate/dossier/proof threat model, release denial tests, code, outputs and compatibility.
+4. Owner then decides whether to authorize the **PR3B-2 code scope**. This decision is distinct from authorization to release any specific real chapter; that remains explicitly gated.
+
+This contract translates ADR-0018 into reviewable implementation boundaries. It is not legal advice, a licence, evidence of GDPR compliance, or permission to publish.
