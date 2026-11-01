@@ -95,6 +95,31 @@ def test_missing_expected_case_decision_preserves_fallback_status(
     assert resolve_case_decision(case, DECISION) == status
 
 
+@pytest.mark.parametrize(
+    ("decisions", "status"),
+    [
+        ((), "unresolved"),
+        ((LawDecision("2020-2021", 85),), "contradicted"),
+        (
+            (LawDecision("2020-2021", 85), LawDecision("2021-2022", 86)),
+            "ambiguous",
+        ),
+    ],
+)
+def test_chain_with_absent_case_decision_keeps_law_attestation_separate(
+    decisions: tuple[LawDecision, ...], status: str
+) -> None:
+    case = CaseMetadata(89016, "2020-2021", decisions, "0" * 64)
+
+    verdict = resolve_chain(_publication(DECISION), case, DECISION)
+
+    assert verdict.law_edge == "attested"
+    assert verdict.case_edge == status
+    assert verdict.status == status
+    assert verdict.decision == DECISION
+    assert verdict.other_case_decisions == decisions
+
+
 def _document(
     law_id: str = LAW, misc: str = MISC, *, body: str = "", refid: str | None = None
 ) -> bytes:
