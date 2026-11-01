@@ -448,3 +448,28 @@ def test_the_navigation_names_an_annex_the_body_does_not_mark() -> None:
 def test_a_chapter_before_the_annex_divider_is_not_an_annex() -> None:
     body = read_body(html.document_fromstring(page().decode()), "2 Bakgrunn")
     assert HoldReason.ANNEX not in body.reasons
+
+
+@pytest.mark.parametrize("newline", [b"\r\n", b"\r"])
+def test_saved_page_line_endings_leave_text_hash_stable(newline: bytes) -> None:
+    original = page()
+    changed = original.replace(b"\n", newline)
+    first = build_chapter_result(original, URL, WHEN)
+    second = build_chapter_result(changed, URL, WHEN)
+    assert first.blocks is not None
+    assert second.blocks == first.blocks
+    assert second.text_sha256 == first.text_sha256
+    assert second.source_sha256 == hashlib.sha256(changed).hexdigest()
+    assert second.source_sha256 != first.source_sha256
+
+
+@pytest.mark.parametrize("character", ["\u00a0", "\u202f", "\u2003", "\u200b"])
+def test_non_html_whitespace_is_preserved_in_text_and_hash(character: str) -> None:
+    """Operations promises only HTML source whitespace is collapsed."""
+    text = f"Før{character}etter"
+    held = result(section(f"<p>{text}</p>"))
+    ordinary = result(section("<p>Før etter</p>"))
+    assert held.blocks is not None
+    assert held.blocks[-1].text == text
+    assert held.text_sha256 is not None
+    assert held.text_sha256 != ordinary.text_sha256

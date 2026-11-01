@@ -211,3 +211,31 @@ def test_write_observation_reports_what_it_did(tmp_path: Path) -> None:
     assert target.read_bytes() == "æ\n".encode()
     assert write_observation(target, "æ\n") is False
     assert list(target.parent.iterdir()) == [target]
+
+
+@pytest.mark.parametrize("competing_text", ["same æ\n", "another observation\n"])
+def test_competing_observation_at_publication_is_never_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, competing_text: str
+) -> None:
+    """Enforce operations.md: an observation is never replaced, even at publication."""
+    target = tmp_path / "chapter.json"
+    original_link = os.link
+    payload = "same æ\n"
+
+    def competing_link(source: Path, destination: Path) -> None:
+        assert destination == target
+        assert not destination.exists()
+        assert source.read_bytes() == payload.encode("utf-8")
+        assert stat.S_IMODE(source.stat().st_mode) == 0o600
+        destination.write_text(competing_text, encoding="utf-8")
+        original_link(source, destination)
+
+    monkeypatch.setattr(os, "link", competing_link)
+    if competing_text == payload:
+        assert write_observation(target, payload) is False
+    else:
+        with pytest.raises(ForarbeiderRefusedError) as refused:
+            write_observation(target, payload)
+        assert refused.value.reason is RefusalReason.OBSERVATION_EXISTS
+    assert target.read_bytes() == competing_text.encode("utf-8")
+    assert list(tmp_path.iterdir()) == [target]
