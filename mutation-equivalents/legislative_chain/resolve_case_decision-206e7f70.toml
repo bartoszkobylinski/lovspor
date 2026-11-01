@@ -1,0 +1,22 @@
+[[equivalent]]
+file = "src/lovspor/legislative_chain.py"
+symbol = "resolve_case_decision"
+registered = "2026-11-01, PR #756, from the mutation artifact at commit 4703197"
+mutation = """
+-    return "attested" if expected in case.lovvedtak else resolve_publication(case, expected)
++    return "attested" if expected in case.lovvedtak else resolve_publication(case, None)
+"""
+justification = """
+The mutated argument is evaluated only on the else arm, so `expected` is not
+in `case.lovvedtak`, a `tuple[LawDecision, ...]`. `resolve_publication` in
+stortinget_case_source.py then has three reachable outcomes. More than one
+reference returns "ambiguous" and zero references returns "unresolved"; both
+return before the argument is read. With exactly one reference the only use is
+`case.lovvedtak[0] != expected`. The tuple `in` test found no element identical
+or equal to `expected`, so that comparison is True for the original, and a
+frozen dataclass compared with None is True for the mutant, because dataclass
+`__eq__` returns NotImplemented for another class and Python falls back to
+identity. Both return "contradicted", and the final "attested" is unreachable
+on this arm in either version. Every input yields the same status. The argument
+rests on Python's semantics and on code in this repository, not on a dependency.
+"""
