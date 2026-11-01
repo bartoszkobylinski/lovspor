@@ -2,6 +2,7 @@
 
 import os
 import re
+import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,6 +10,8 @@ import pytest
 
 from lovspor.forarbeider.chapter import build_chapter_result
 from lovspor.forarbeider.chapter_models import ChapterResult, HoldReason
+from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from lovspor.forarbeider.staging import write_observation
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "forarbeider" / "chapter-l.html"
 URL = "https://www.regjeringen.no/no/dokumenter/prop.-901-l-20992100/id9000001/?ch=2"
@@ -104,3 +107,115 @@ def test_quotes_apart_stay_readable() -> None:
     held = result("<blockquote>A</blockquote><p>skille</p><blockquote>B</blockquote>")
     assert held.blocks is not None
     assert [block.text for block in held.blocks if block.kind == "quote"] == ["A", "B"]
+
+
+@posix_owner_only
+def test_same_bytes_at_0600_are_unchanged(tmp_path: Path) -> None:
+    target = tmp_path / "chapter.json"
+    assert write_observation(target, "x") is True
+    assert write_observation(target, "x") is False
+    assert list(tmp_path.iterdir()) == [target]
+
+
+@posix_owner_only
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o604, 0o620, 0o602, 0o601, 0o610])
+def test_same_bytes_others_can_reach_are_refused_and_left_alone(tmp_path: Path, mode: int) -> None:
+    target = tmp_path / "chapter.json"
+    target.write_text("x", encoding="utf-8")
+    target.chmod(mode)
+    with pytest.raises(ForarbeiderRefusedError) as refused:
+        write_observation(target, "x")
+    assert refused.value.reason is RefusalReason.OBSERVATION_UNSAFE
+    assert str(refused.value) == f"observation_unsafe: {target}"
+    assert stat.S_IMODE(target.stat().st_mode) == mode
+    assert target.read_bytes() == b"x"
+    assert list(tmp_path.iterdir()) == [target]
+
+
+@posix_owner_only
+def test_owner_read_only_same_bytes_are_unchanged(tmp_path: Path) -> None:
+    target = tmp_path / "chapter.json"
+    target.write_text("x", encoding="utf-8")
+    target.chmod(0o400)
+    assert write_observation(target, "x") is False
+
+
+@posix_owner_only
+@pytest.mark.parametrize("mode", [0o600, 0o644])
+def test_different_bytes_are_a_collision_at_any_mode(tmp_path: Path, mode: int) -> None:
+    target = tmp_path / "chapter.json"
+    target.write_text("old", encoding="utf-8")
+    target.chmod(mode)
+    with pytest.raises(ForarbeiderRefusedError) as refused:
+        write_observation(target, "new")
+    assert refused.value.reason is RefusalReason.OBSERVATION_EXISTS
+    assert target.read_bytes() == b"old"
+    assert list(tmp_path.iterdir()) == [target]
+
+
+@posix_owner_only
+def test_a_longer_existing_file_is_a_collision(tmp_path: Path) -> None:
+    target = tmp_path / "chapter.json"
+    target.write_text("xy", encoding="utf-8")
+    target.chmod(0o600)
+    with pytest.raises(ForarbeiderRefusedError) as refused:
+        write_observation(target, "x")
+    assert refused.value.reason is RefusalReason.OBSERVATION_EXISTS
+
+
+@posix_owner_only
+def test_a_symlink_at_the_output_is_not_followed(tmp_path: Path) -> None:
+    private = tmp_path / "elsewhere.txt"
+    private.write_text("x", encoding="utf-8")
+    private.chmod(0o600)
+    target = tmp_path / "chapter.json"
+    target.symlink_to(private)
+    with pytest.raises(ForarbeiderRefusedError) as refused:
+        write_observation(target, "x")
+    assert refused.value.reason is RefusalReason.OBSERVATION_UNSAFE
+    assert target.is_symlink()
+    assert sorted(tmp_path.iterdir()) == sorted([private, target])
+
+
+@posix_owner_only
+def test_a_dangling_symlink_at_the_output_is_refused(tmp_path: Path) -> None:
+    target = tmp_path / "chapter.json"
+    target.symlink_to(tmp_path / "missing")
+    with pytest.raises(ForarbeiderRefusedError) as refused:
+        write_observation(target, "x")
+    assert refused.value.reason is RefusalReason.OBSERVATION_UNSAFE
+    assert not (tmp_path / "missing").exists()
+
+
+@posix_owner_only
+def test_a_second_name_for_the_file_is_refused(tmp_path: Path) -> None:
+    target = tmp_path / "chapter.json"
+    target.write_text("x", encoding="utf-8")
+    target.chmod(0o600)
+    os.link(target, tmp_path / "other.json")
+    with pytest.raises(ForarbeiderRefusedError) as refused:
+        write_observation(target, "x")
+    assert refused.value.reason is RefusalReason.OBSERVATION_UNSAFE
+
+
+@posix_owner_only
+def test_a_fifo_at_the_output_neither_blocks_nor_passes(tmp_path: Path) -> None:
+    target = tmp_path / "chapter.json"
+    os.mkfifo(target, 0o600)
+    with pytest.raises(ForarbeiderRefusedError) as refused:
+        write_observation(target, "x")
+    assert refused.value.reason is RefusalReason.OBSERVATION_UNSAFE
+
+
+@posix_owner_only
+def test_a_file_of_another_owner_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "chapter.json"
+    target.write_text("x", encoding="utf-8")
+    target.chmod(0o600)
+    owner = target.stat().st_uid
+    monkeypatch.setattr(os, "geteuid", lambda: owner + 1)
+    with pytest.raises(ForarbeiderRefusedError) as refused:
+        write_observation(target, "x")
+    assert refused.value.reason is RefusalReason.OBSERVATION_UNSAFE

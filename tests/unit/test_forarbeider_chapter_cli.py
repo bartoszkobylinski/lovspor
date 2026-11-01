@@ -228,6 +228,7 @@ def test_competing_observation_at_publication_is_never_replaced(
         assert source.read_bytes() == payload.encode("utf-8")
         assert stat.S_IMODE(source.stat().st_mode) == 0o600
         destination.write_text(competing_text, encoding="utf-8")
+        destination.chmod(0o600)
         original_link(source, destination)
 
     monkeypatch.setattr(os, "link", competing_link)
