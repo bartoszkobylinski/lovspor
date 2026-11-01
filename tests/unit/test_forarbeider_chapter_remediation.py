@@ -220,14 +220,14 @@ from lovspor.forarbeider.staging import write_observation
 
 cached_default = Path(tempfile.gettempdir())
 assert cached_default == Path(sys.argv[1])
-cached_default.chmod(0o500)
+cached_default.rmdir()
 try:
     target = Path(sys.argv[2]) / "chapter.json"
     assert write_observation(target, "complete") is True
     assert target.read_text() == "complete"
     assert list(target.parent.iterdir()) == [target]
 finally:
-    cached_default.chmod(0o700)
+    cached_default.mkdir(mode=0o700)
 """
 
     completed = subprocess.run(
@@ -238,3 +238,62 @@ finally:
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_unpublished_observation_is_hidden_until_complete(tmp_path: Path) -> None:
+    """Directory consumers must not see an unfinished observation as a normal file."""
+    script = """
+import sys
+from pathlib import Path
+from lovspor.forarbeider.staging import write_observation
+
+folder = Path(sys.argv[1])
+observed = []
+def inspect_before_publication(event, args):
+    if event == "os.link":
+        entries = list(folder.iterdir())
+        assert len(entries) == 1
+        staged = entries[0]
+        assert staged.name.startswith(".")
+        assert staged.read_bytes() == b"complete"
+        observed.append(True)
+
+sys.addaudithook(inspect_before_publication)
+target = folder / "chapter.json"
+assert write_observation(target, "complete") is True
+assert observed == [True]
+assert list(folder.iterdir()) == [target]
+assert target.read_bytes() == b"complete"
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize("query", ["", "?ch=0", "?ch=-1", "?ch=1", "?ch=2"])
+def test_chapter_selection_never_falls_back(query: str) -> None:
+    url = URL.split("?")[0] + query
+    if query == "?ch=2":
+        assert result(url=url).chapter_number == 2
+    else:
+        with pytest.raises(ForarbeiderRefusedError):
+            result(url=url)
+
+
+def test_list_depth_starts_at_one_and_increases_only_for_nested_lists() -> None:
+    held = result(
+        section(
+            '<div class="K-DEL-LEDD"><ul><li><p>outer</p>'
+            "<ul><li>inner</li></ul></li></ul></div><ul><li>next</li></ul>"
+        )
+    )
+    assert held.blocks is not None
+    assert [(block.level, block.text) for block in held.blocks if block.kind == "list_item"] == [
+        (1, "outer"),
+        (2, "inner"),
+        (1, "next"),
+    ]
