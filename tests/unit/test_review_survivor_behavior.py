@@ -201,6 +201,25 @@ def test_incomplete_approval_explains_the_failed_requirement(
     assert caught.value.errors()[0]["msg"] == "Value error, " + message
 
 
+def test_confirmation_displays_the_required_phrase_in_process(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Exercise the active implementation with real terminal input, without a child import."""
+    phrase = "approve synthetic"
+    master, slave = pty.openpty()
+    try:
+        with os.fdopen(slave, "r", encoding="utf-8", closefd=False) as terminal:
+            monkeypatch.setattr(sys, "stdin", terminal)
+            os.write(master, (phrase + "\n").encode())
+            commands._require_a_person(phrase)
+            output = capsys.readouterr()
+            assert output.out == f"Type to confirm: {phrase}: "
+            assert output.err == ""
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
 @pytest.mark.parametrize("answer", ["wrong", "approve synthetic"])
 def test_terminal_confirmation_prints_the_phrase(answer: str) -> None:
 
