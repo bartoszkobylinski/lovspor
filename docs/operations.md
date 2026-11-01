@@ -2740,25 +2740,22 @@ uv run lovspor ops forarbeider-chapter \
 
 ```bash
 install -d -m 700 ~/forarbeider-staging ~/forarbeider-staging/chapters
-LEDGER=~/forarbeider-staging/review-ledger
-REVIEW="uv run lovspor ops forarbeider-review --ledger $LEDGER"
+review() { uv run lovspor ops forarbeider-review --ledger ~/forarbeider-staging/review-ledger "$@"; }
 
 # What is waiting, and the pin each decision needs
-$REVIEW candidates --staging ~/forarbeider-staging/chapters
+review candidates --staging ~/forarbeider-staging/chapters
 
 # One observation: what it binds, its status, every revision
-$REVIEW show --observation ~/forarbeider-staging/chapters/regjeringen-3154578-ch9-20261031.json
+review show --observation ~/forarbeider-staging/chapters/regjeringen-3154578-ch9-20261031.json
 
 # Hold it; --expect is copied from the line above
-uv run lovspor ops forarbeider-review --ledger $LEDGER \
-  --reviewer reviewer-1 --decided-at 2026-11-01T12:00:00+01:00 \
+review --reviewer reviewer-1 --decided-at 2026-11-01T12:00:00+01:00 \
   hold --observation ~/forarbeider-staging/chapters/regjeringen-3154578-ch9-20261031.json \
   --expect <subject>@0 \
   --because awaiting_evidence=issue:738
 
 # Approve, at a terminal only: needs all four attestations and a typed phrase
-uv run lovspor ops forarbeider-review --ledger $LEDGER \
-  --reviewer reviewer-1 --decided-at 2026-11-02T12:00:00+01:00 \
+review --reviewer reviewer-1 --decided-at 2026-11-02T12:00:00+01:00 \
   approve --observation ~/forarbeider-staging/chapters/regjeringen-3154578-ch9-20261031.json \
   --expect <subject>@1 \
   --attest source_rights_policy=adr:0018 \
@@ -2767,7 +2764,7 @@ uv run lovspor ops forarbeider-review --ledger $LEDGER \
   --attest source_completeness=sha256:<digest of a private note>
 
 # Check every chain and print each head digest
-$REVIEW verify
+review verify
 ```
 
 The ledger must be an absolute path to an owner-only directory outside every Git repository and outside the engine and corpus. Its parent must already exist.
