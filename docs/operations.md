@@ -2689,7 +2689,7 @@ are recorded only by the hosted server; `lovspor mcp` (stdio) records none.
 
 ## Forarbeider: offline staging metadata (issue #738)
 
-`lovspor ops forarbeider-metadata` reads one regjeringen.no Prop. L / Prop. LS chapter page the operator already saved, and writes one validated metadata record. It makes no HTTP request and publishes nothing. ADR-0018 is Proposed: live fetching, a `lovverk/forarbeider/` dataset and any publication stay gated on the owner's acceptance.
+`lovspor ops forarbeider-metadata` reads one regjeringen.no Prop. L / Prop. LS chapter page the operator already saved, and writes one validated metadata record. It makes no HTTP request and publishes nothing. ADR-0018 is Accepted as architecture, not as clearance: live fetching, a `lovverk/forarbeider/` dataset and any publication stay gated (PR3).
 
 ```bash
 uv run lovspor ops forarbeider-metadata \
@@ -2700,7 +2700,7 @@ uv run lovspor ops forarbeider-metadata \
 ```
 
 - **Input is a whole saved `?ch=N` page, at most 16 MiB.** The landing page has no chapter navigation, so a landing URL is refused with `chapter_page_required`. A missing, unreadable or larger file is refused with `input_unreadable` or `input_too_large`, a failed write with `output_write_failed`.
-- **`N` must be the page's own.** Its `data-longdoc-prev` and `data-longdoc-next` links must point to the chapters either side of `N` (chapter 1 links back to the landing page, the last chapter has no next link), or it is refused with `page_chapter_unproved`: the same bytes never pass for two chapters. The check reads what the saved page says. It cannot prove who saved the file or when, so `--retrieved-at` and the bytes stay the operator's word, and a record is not a chapter citation. The last-chapter markup is unobserved on real pages (samples: first and middle chapters); if it differs, that page is refused, and any other chapter of the document gives the same metadata.
+- **`N` must be the page's own.** Its `data-longdoc-prev` and `data-longdoc-next` links must point to the chapters either side of `N` (chapter 1 links back to the landing page, the last chapter has no next link), or it is refused with `page_chapter_unproved`: the same bytes never pass for two chapters. The check reads what the saved page says. It cannot prove who saved the file or when, so `--retrieved-at` and the bytes stay the operator's word, and a record is not a chapter citation. The last-chapter markup was read on Prop. 54 LS and Prop. 112 L: no next link, as checked here.
 - **A cut-off capture is refused** with `incomplete_page`: the source must reach `</body></html>`, close every list and item of the chapter navigation, and have the page footer after it. `chapters` is then the navigation of one complete saved page. It is not a claim about every chapter the proposition has. `source_url` in the record is the canonical document URL and `source_page_url` is the page the hash covers.
 - **Output** must be an absolute `.json` path outside every Git repository: an ancestor holding `.git`, the engine repository and the default corpus path are refused with `unsafe_output_path` before anything is written.
 - **`--retrieved-at`** is required, with an offset, and stored in UTC. The command has no clock.
@@ -2709,6 +2709,27 @@ uv run lovspor ops forarbeider-metadata \
 - **Chapters** are the source's own navigation, in order. Annexes (`Vedlegg`) are listed there too; `chapter_number` is the `ch` value, not the printed label.
 
 Exit 1 prints `refused: <reason>: <detail>` and writes nothing. The reasons are in `src/lovspor/forarbeider/errors.py`. Keep saved pages out of Git: raw source HTML is never committed.
+
+## Forarbeider: one held chapter in private staging (issue #738)
+
+`lovspor ops forarbeider-chapter` extracts the one chapter a saved `?ch=N` page holds into a held staging result. It makes no HTTP request, publishes nothing and clears nothing: ADR-0018 PR2, with release decisions left to PR3.
+
+```bash
+uv run lovspor ops forarbeider-chapter \
+  --html ~/forarbeider-staging/raw/prop-54-ls-ch9.html \
+  --source-url 'https://www.regjeringen.no/no/dokumenter/prop.-54-ls-20252026/id3154578/?ch=9' \
+  --retrieved-at 2026-10-31T09:00:00+01:00 \
+  --output ~/forarbeider-staging/chapters/regjeringen-3154578-ch9-20261031.json
+```
+
+- **The page checks of `forarbeider-metadata` come first**, with the same refusals and 16 MiB limit. A wrong chapter, a cut-off file or a foreign URL gives exit 1 and no file.
+- **Every result is `release_state: held`** and lists `review_required`. That is the only state schema version 1 can express; nothing in this command approves a chapter.
+- **The body is all or nothing.** `blocks` holds headings, paragraphs, list items and quotations in source order, read from `div[data-longdoc-content]` only. The result has `blocks: null` and `text_sha256: null` when the chapter has an annex, image, table, figure or footnotes, an ambiguous boundary, unfamiliar markup (`damaged_dom`) or text that was not all read (`incomplete_extraction`). A proved page always gives a result, so a withheld chapter is recorded rather than lost; exit 0 does not mean text was extracted. Read the printed reasons.
+- **Quotations and text candidates keep the body** for the reviewer: `quotation`, `third_party_work`, `hearing_participants`, `personal_data`, `sensitive_data`. The candidates are simple text patterns. Finding none does **not** mean a chapter is free of personal data or third-party work, and finding one is not a legal assessment.
+- **`text_sha256`** covers the normalized text, one `kind level<TAB>text` line per block, so a wrapper change leaves it alone and a text or structure change moves it. Only HTML source whitespace is collapsed; no-break spaces and every other character stay as published.
+- **An observation is never replaced.** The file is created owner-only (0600). Rerunning identical inputs reports `unchanged`. Different content at the same path is refused with `observation_exists`: give each observation its own path, such as one ending in the retrieval date.
+- **Chapter text is sensitive staging data.** The result holds chapter text in clear, so keep it out of Git, logs, CI artifacts and issue or PR comments. The command prints only the id, counts, reasons and path.
+- **Limits:** `source_license` is `null`, `rights_basis` records `åndsverkloven § 14`, `normative` is `false`, never NLOD. Markup was read on nine pages of two propositions of session 2025-2026. A chapter of an older shape is withheld, not approximated. `retrieved_at` and the bytes stay the operator's word.
 
 ## Idempotency
 
