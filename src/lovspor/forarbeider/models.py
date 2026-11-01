@@ -88,7 +88,7 @@ class ForarbeidRecord(BaseModel):
             page = parse_source_url(self.source_page_url)
         except ForarbeiderRefusedError as error:
             raise ValueError(str(error)) from error
-        if self._stated_identity() != _proved_identity(page) or page.chapter is None:
+        if self._stated_identity() != proved_identity(page) or page.chapter is None:
             raise ValueError("identity fields do not state one document")
         return self._with_chapters_of(page.canonical_url)
 
@@ -110,7 +110,7 @@ class ForarbeidRecord(BaseModel):
         return self
 
 
-def _proved_identity(page: SourceLocator) -> tuple[object, ...]:
+def proved_identity(page: SourceLocator) -> tuple[object, ...]:
     return (
         page.reference.document_type,
         page.reference.session,
