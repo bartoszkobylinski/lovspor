@@ -50,7 +50,10 @@ def test_preflight_rechecks_evidence_safety_after_authorization(
     result = desk.preflight(authorization, desk.all_checkpoints())
 
     assert result.exit_code == 1, result.output
-    assert said(f"refused: {reason}: evidence", result.output)
+    # A checkout makes the shared evidence directory unsafe for every artifact;
+    # the dossier's first artifact is encountered before source_rights.
+    kind = "privacy_processing_basis" if change == "checkout" else "source_rights"
+    assert said(f"refused: {reason}: evidence {kind}", result.output)
     assert str(tmp_path) not in result.output
     assert original.decode() not in result.output
     assert rights.read_bytes() == original
