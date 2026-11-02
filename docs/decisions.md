@@ -58,6 +58,17 @@ Build a versioned Markdown corpus of current Norwegian law, auto-updated from Lo
 > This note preserves the original decision and records its limited later
 > exception; it does not rewrite the historical policy.
 
+> **Roadmap reconciliation, ADR-0017 gate 5 (proposed 2026-11-02; approval
+> pending owner ruling D10, [lovspor-notebook #162](https://github.com/bartoszkobylinski/lovspor-notebook/pull/162);
+> not in force until that ruling is recorded):**
+> `docs/roadmap.md` D-DIRECT-4 ("which parties voted how on a given act") is not a
+> Lovspor deliverable: ADR-0017 assigns divisions, votes and speeches to Politik,
+> and Lovspor publishes only the source-backed crosswalk
+> `LOV ↔ (session, decision kind, number) ↔ sak_id`. D-DIRECT-3 (forarbeider) is
+> governed by ADR-0018 as a separate opt-in dataset; any forarbeid → act link follows
+> ADR-0017's evidence rules. "Full parliamentary enrichment" above remains out of
+> scope. This note records the reconciliation; it does not rewrite the original entry.
+
 ## 3. Data sources
 
 Single ingestion channel: **Lovdata public-data API** (`https://api.lovdata.no/v1/publicData/`), announced 2025-11-03 under NLOD 2.0.
@@ -75,6 +86,20 @@ Optional later:
 - `lovtidend-avd1-{year}.tar.bz2` — change announcements (if we want a per-act changelog)
 
 **Stortinget open data** (`data.stortinget.no`) — **NOT used as a primary source**. It publishes parliamentary metadata (saker, voteringer, publikasjoner), not consolidated law text. Possible enrichment in a later phase. Rate limit: 100 req/min.
+
+> **Crosswalk evidence sources (proposed 2026-11-02; approval pending owner ruling
+> D10, [lovspor-notebook #162](https://github.com/bartoszkobylinski/lovspor-notebook/pull/162);
+> not in force until that ruling is recorded):** For the ADR-0017 crosswalk only,
+> `lovtidend-avd1-{2001-2025,2026}.tar.bz2` from the same publicData API is read as
+> **evidence** for the law → decision edge. It is not ingested into `lovverk` and raw
+> XML stays out of every repository. Stortinget `eksport/sak` (and
+> `eksport/publikasjoner`/`eksport/saker` for discovery) is read as evidence for the
+> decision → case edge, under Stortinget's NLOD terms, naming Stortinget as source,
+> at ≤100 calls per minute. Neither is a primary source of law text. Rights status
+> per archive is recorded in each release (see
+> `docs/proposals/legislative-crosswalk-decisions-proposal-2026-11-02.md`, items a
+> and k). The "Optional later" and "NOT used as a primary source" lines above stand
+> as written.
 
 ## 4. Legal posture — Option A (conservative)
 
