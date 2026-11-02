@@ -417,13 +417,15 @@ def test_symlinked_evidence_is_refused(desk: Desk, tmp_path: Path) -> None:
     link = tmp_path / "evidence" / "linked.txt"
     link.symlink_to(desk.evidence["source_rights"])
     result = desk.dossier(["--evidence", f"source_rights@2,3={link}"])
-    assert said("refused: unsafe_input_path", result.output)
+    assert said("refused: unsafe_input_path: evidence source_rights", result.output)
+    assert str(tmp_path) not in result.output
 
 
 def test_evidence_others_can_read_is_refused(desk: Desk) -> None:
     desk.evidence["source_rights"].chmod(0o644)
     result = desk.dossier()
-    assert said("refused: observation_unsafe", result.output)
+    assert said("refused: observation_unsafe: evidence source_rights", result.output)
+    assert str(desk.root) not in result.output
 
 
 def test_oversized_evidence_is_refused_unread(desk: Desk, tmp_path: Path) -> None:
@@ -432,7 +434,8 @@ def test_oversized_evidence_is_refused_unread(desk: Desk, tmp_path: Path) -> Non
         stream.truncate(16 * 1024 * 1024 + 1)
     large.chmod(0o600)
     result = desk.dossier(["--evidence", f"source_rights@2,3={large}"])
-    assert said("refused: input_too_large", result.output)
+    assert said("refused: input_too_large: evidence source_rights", result.output)
+    assert str(tmp_path) not in result.output
 
 
 def test_an_edited_stored_record_is_refused(desk: Desk) -> None:

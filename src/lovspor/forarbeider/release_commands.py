@@ -198,7 +198,7 @@ def _artifact(text: str) -> EvidenceArtifact:
     match = _EVIDENCE.fullmatch(text)
     if match is None or match["kind"] not in set(EvidenceKind):
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_INVALID, "evidence")
-    payload = read_file(Path(match["path"]), _forbidden(), MAX_EVIDENCE_BYTES)
+    payload = _evidence_bytes(Path(match["path"]), match["kind"])
     if not payload:
         raise ForarbeiderRefusedError(RefusalReason.INPUT_UNREADABLE, "evidence")
     chapters = sorted({int(number) for number in match["chapters"].split(",")})
@@ -245,8 +245,20 @@ def _artifact_key(artifact: EvidenceArtifact) -> tuple[str, str, str]:
     return (artifact.kind.value, artifact.sha256, artifact.path)
 
 
+def _evidence_bytes(path: Path, kind: str) -> bytes | None:
+    """An evidence path is never printed, so a refusal to read one names its gate instead.
+
+    Raises:
+        ForarbeiderRefusedError: the refusal ``read_file`` gave, with the kind as detail.
+    """
+    try:
+        return read_file(path, _forbidden(), MAX_EVIDENCE_BYTES)
+    except ForarbeiderRefusedError as error:
+        raise ForarbeiderRefusedError(error.reason, f"evidence {kind}") from None
+
+
 def _evidence_digest(artifact: EvidenceArtifact) -> str | None:
-    payload = read_file(Path(artifact.path), _forbidden(), MAX_EVIDENCE_BYTES)
+    payload = _evidence_bytes(Path(artifact.path), artifact.kind.value)
     return None if payload is None else digest(payload)
 
 
