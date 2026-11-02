@@ -96,10 +96,79 @@ def test_wrong_document_identity_is_rejected() -> None:
         parse_sak(_snapshot(XML.replace(b"<id>89016</id>", b"<id>89017</id>")))
 
 
-def test_session_mismatch_between_case_and_publication_is_unresolved() -> None:
-    case = parse_sak(_snapshot(XML.replace(b"<sak_sesjon>2021-2022", b"<sak_sesjon>2020-2021")))
+def test_decision_predating_its_case_is_unresolved() -> None:
+    case = parse_sak(_snapshot(XML.replace(b"<sak_sesjon>2021-2022", b"<sak_sesjon>2022-2023")))
     assert case.lovvedtak == ()
     assert resolve_publication(case, DECISION) == "unresolved"
+
+
+def test_decision_in_a_later_session_keeps_its_own_session() -> None:
+    """Real shape: sak 63056 opened in 2014-2015, Lovvedtak 13 is 2015-2016 (#755)."""
+    case = parse_sak(_snapshot(XML.replace(b"<sak_sesjon>2021-2022", b"<sak_sesjon>2020-2021")))
+    assert case.session_id == "2020-2021"
+    assert case.lovvedtak == (DECISION,)
+    assert resolve_publication(case, DECISION) == "attested"
+
+
+def _with_export_id(value: bytes) -> bytes:
+    return XML.replace(
+        b"<type>lovvedtak</type>", b"<type>lovvedtak</type><eksport_id>" + value + b"</eksport_id>"
+    )
+
+
+def test_agreeing_export_id_attests() -> None:
+    case = parse_sak(_snapshot(_with_export_id(b"vedtak-202122-085")))
+    assert case.lovvedtak == (DECISION,)
+
+
+@pytest.mark.parametrize(
+    ("export_id", "expected"),
+    [(b"vedtak-202122-085", (DECISION,)), (b"vedtak-202021-085", ())],
+)
+def test_later_decision_export_id_is_checked_against_decision_session(
+    export_id: bytes, expected: tuple[LawDecision, ...]
+) -> None:
+    """E4: the reference owns its session, including its export identity."""
+    body = _with_export_id(export_id).replace(b"<sak_sesjon>2021-2022", b"<sak_sesjon>2020-2021")
+    case = parse_sak(_snapshot(body))
+    assert case.session_id == "2020-2021"
+    assert case.lovvedtak == expected
+    assert resolve_publication(case, DECISION) == ("attested" if expected else "unresolved")
+
+
+@pytest.mark.parametrize("invalid_first", [False, True])
+def test_conflicting_export_reference_does_not_discard_valid_reference(
+    invalid_first: bool,
+) -> None:
+    invalid = (
+        b"<publikasjon_referanse><type>lovvedtak</type>"
+        b"<lenke_tekst>Lovvedtak 86 (2021-2022)</lenke_tekst>"
+        b"<eksport_id>vedtak-202122-085</eksport_id></publikasjon_referanse>"
+    )
+    body = _with_export_id(b"vedtak-202122-085")
+    anchor = (
+        b"<publikasjon_referanse_liste>" if invalid_first else b"</publikasjon_referanse_liste>"
+    )
+    replacement = anchor + invalid if invalid_first else invalid + anchor
+    case = parse_sak(_snapshot(body.replace(anchor, replacement)))
+    assert case.lovvedtak == (DECISION,)
+    assert resolve_publication(case, DECISION) == "attested"
+
+
+@pytest.mark.parametrize(
+    "export_id", [b"vedtak-202122-086", b"vedtak-202021-085", b"inns-202122-386l"]
+)
+def test_export_id_contradicting_the_link_text_does_not_attest(export_id: bytes) -> None:
+    assert parse_sak(_snapshot(_with_export_id(export_id))).lovvedtak == ()
+
+
+def test_century_rollover_export_id_is_two_digit() -> None:
+    body = XML.replace(b"2021-2022", b"1999-2000").replace(b"Lovvedtak 85", b"Lovvedtak 5")
+    body = body.replace(
+        b"<type>lovvedtak</type>",
+        b"<type>lovvedtak</type><eksport_id>vedtak-199900-005</eksport_id>",
+    )
+    assert parse_sak(_snapshot(body)).lovvedtak == (LawDecision("1999-2000", 5),)
 
 
 def test_dtd_is_rejected_without_external_resolution() -> None:

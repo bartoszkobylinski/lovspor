@@ -1,0 +1,341 @@
+<?xml version="1.0" encoding="utf-8"?>
+<detaljert_sak xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://data.stortinget.no">
+  <respons_dato_tid>2026-11-01T18:29:09.9323422+01:00</respons_dato_tid>
+  <versjon>1.6</versjon>
+  <dokumentgruppe>proposisjon</dokumentgruppe>
+  <emne_liste>
+    <emne>
+      <respons_dato_tid>2026-11-01T18:29:14.0419839+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>false</er_hovedemne>
+      <hovedemne_id>113</hovedemne_id>
+      <id>98</id>
+      <navn>Forbrukersaker</navn>
+      <underemne_liste />
+    </emne>
+    <emne>
+      <respons_dato_tid>2026-11-01T18:29:14.0419839+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>false</er_hovedemne>
+      <hovedemne_id>2</hovedemne_id>
+      <id>107</id>
+      <navn>Jernbaner</navn>
+      <underemne_liste />
+    </emne>
+    <emne>
+      <respons_dato_tid>2026-11-01T18:29:14.0419839+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <er_hovedemne>false</er_hovedemne>
+      <hovedemne_id>163</hovedemne_id>
+      <id>173</id>
+      <navn>Eu/eøs</navn>
+      <underemne_liste />
+    </emne>
+  </emne_liste>
+  <ferdigbehandlet>true</ferdigbehandlet>
+  <henvisning>Ot.prp. nr. 63 (2008-2009), Innst. O. nr. 71 (2008-2009), beslutning. O. nr. 87 (2008-2009)</henvisning>
+  <id>43206</id>
+  <innstillingstekst>Innstilling fra transport- og kommunikasjonskomiteen om lov om endringer i jernbaneloven, jernbaneansvarsloven og COTIF-loven</innstillingstekst>
+  <komite>
+    <respons_dato_tid>2026-11-01T18:02:05.8239183+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <id>TRANSKOM</id>
+    <navn>Transport- og kommunikasjonskomiteen</navn>
+  </komite>
+  <korttittel>Endringer i jernbaneloven, jernbaneansvarsloven og COTIF-loven</korttittel>
+  <kortvedtak>Odelstinget har enstemmig vedtatt endringer i jernbaneloven, jernbaneansvarsloven og COTIF-loven.
+ Med lovendringene innarbeides EUs politikk når det gjelder "Passasjerrettighetsforordningen" (om togpassasjeres rettigheter) som trer i kraft fra 1. desember 2009. Videre innarbeides lokomotivførerdirektivet som gjelder endringer i sertifisering av lokomotivførere som fører lokomotiver og  tog på jernbanenettet i Fellesskapet. Direktivet ble tatt inn i EØS-avtalen 5. februar 2009.
+</kortvedtak>
+  <parentestekst i:nil="true" />
+  <publikasjon_referanse_liste>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id i:nil="true" />
+      <lenke_tekst>Ot.prp. nr. 63 (2008-2009)</lenke_tekst>
+      <lenke_url>http://www.regjeringen.no/id/OTP200820090063000DDDEPIS</lenke_url>
+      <type>regjering</type>
+      <undertype>odelstingsproposisjon</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>o090423</eksport_id>
+      <lenke_tekst>Odelstingsreferat 23.04.2009</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Odelstinget/2008-2009/090423/referatsaker/</lenke_url>
+      <type>referat</type>
+      <undertype>odelsting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:14.776378+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>inno-200809-071</eksport_id>
+      <lenke_tekst>Innst. O. nr. 71 (2008-2009)</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Innstillinger/Odelstinget/2008-2009/inno-200809-071/</lenke_url>
+      <type>innstilling</type>
+      <undertype>oldelsting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:14.870119+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>o090526</eksport_id>
+      <lenke_tekst>Odelstingsreferat 26.05.2009</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Odelstinget/2008-2009/090526/4</lenke_url>
+      <type>referat</type>
+      <undertype>odelsting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:14.870119+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id i:nil="true" />
+      <lenke_tekst>Besl. O. nr. 87 (2008-2009)</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Vedtak/Beslutninger/Odelstinget/2008-2009/beso-200809-087/</lenke_url>
+      <type>vedtak</type>
+      <undertype>odelsting</undertype>
+    </publikasjon_referanse>
+    <publikasjon_referanse>
+      <respons_dato_tid>2026-11-01T18:29:14.870119+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <eksport_id>l090604</eksport_id>
+      <lenke_tekst>Lagtingsreferat 04.06.2009</lenke_tekst>
+      <lenke_url>//www.stortinget.no/no/Saker-og-publikasjoner/Publikasjoner/Referater/Lagtinget/2008-2009/090604/5</lenke_url>
+      <type>referat</type>
+      <undertype>lagting</undertype>
+    </publikasjon_referanse>
+  </publikasjon_referanse_liste>
+  <sak_nummer>63</sak_nummer>
+  <sak_opphav>
+    <respons_dato_tid>2026-11-01T18:29:09.9323422+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <forslagstiller_liste />
+  </sak_opphav>
+  <sak_relasjon_liste />
+  <sak_sesjon>2008-2009</sak_sesjon>
+  <saksgang>
+    <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+    <versjon>1.6</versjon>
+    <id>PRPLOV</id>
+    <navn>Lovforslag fra Regjeringen</navn>
+    <saksgang_steg_liste>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>SAK</id>
+        <navn>Lovforslag</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>FRADEP</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>10000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>SAK</id>
+            <publikasjonsReferanse>http://odin.dep.no/repub/08-09/otprp/63/</publikasjonsReferanse>
+            <sorterings_nummer>20000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>03.04.2009 00:00:00</dato>
+            <id>FREMMET</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>30000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>23.04.2009 00:00:00</dato>
+            <id>REFO</id>
+            <publikasjonsReferanse>http://www.stortinget.no/otid/2008/oi090423.html</publikasjonsReferanse>
+            <sorterings_nummer>40000</sorterings_nummer>
+            <stegnummer>1</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>1</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>KOMBEH</id>
+        <navn>Komitebehandling</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>23.04.2009 00:00:00</dato>
+            <id>SENDT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>50000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>KOMITE</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>60000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>ORDFORER</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>90000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>12.05.2009 00:00:00</dato>
+            <id>AVGITT</id>
+            <publikasjonsReferanse>http://www.stortinget.no/inno/2008/inno-200809-071.html</publikasjonsReferanse>
+            <sorterings_nummer>110000</sorterings_nummer>
+            <stegnummer>2</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>2</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>DEBATT</id>
+        <navn>Debatt og vedtak i Odelstinget</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>26.05.2009 00:00:00</dato>
+            <id>BEHO</id>
+            <publikasjonsReferanse>http://www.stortinget.no/otid/2008/oi090526-04.html</publikasjonsReferanse>
+            <sorterings_nummer>130000</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>01.01.0001 00:00:00</dato>
+            <id>LOVLENKEO</id>
+            <publikasjonsReferanse>http://www.stortinget.no/beso/beso-200809-087.html</publikasjonsReferanse>
+            <sorterings_nummer>135087</sorterings_nummer>
+            <stegnummer>3</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>3</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>VEDTAK</id>
+        <navn>Debatt og vedtak i Lagtinget</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>04.06.2009 00:00:00</dato>
+            <id>BEHL</id>
+            <publikasjonsReferanse>http://www.stortinget.no/ltid/2008/li090604-05.html</publikasjonsReferanse>
+            <sorterings_nummer>136005</sorterings_nummer>
+            <stegnummer>4</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>4</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+      <saksgang_steg>
+        <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>LOV</id>
+        <navn>Lov</navn>
+        <saksgang_hendelse_liste>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>19.06.2009 00:00:00</dato>
+            <id>LOVVEDT</id>
+            <publikasjonsReferanse>http://www.stortinget.no/beso/beso-200809-087.html</publikasjonsReferanse>
+            <sorterings_nummer>150087</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>19.06.2009 00:00:00</dato>
+            <id>LOVIKRAFT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>160087</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+          <saksgang_hendelse>
+            <respons_dato_tid>2026-11-01T18:29:14.7451345+01:00</respons_dato_tid>
+            <versjon>1.6</versjon>
+            <dato>03.09.2010 00:00:00</dato>
+            <id>LOVIKRAFT</id>
+            <publikasjonsReferanse i:nil="true" />
+            <sorterings_nummer>160087</sorterings_nummer>
+            <stegnummer>5</stegnummer>
+          </saksgang_hendelse>
+        </saksgang_hendelse_liste>
+        <steg_nummer>5</steg_nummer>
+        <uaktuell>false</uaktuell>
+      </saksgang_steg>
+    </saksgang_steg_liste>
+  </saksgang>
+  <saksordfoerer_liste>
+    <representant>
+      <respons_dato_tid>2026-11-01T18:29:14.0419839+01:00</respons_dato_tid>
+      <versjon>1.6</versjon>
+      <doedsdato i:nil="true" />
+      <etternavn>Helleland</etternavn>
+      <foedselsdato>1962-07-10T00:00:00</foedselsdato>
+      <fornavn>Trond</fornavn>
+      <id>TROH</id>
+      <kjoenn>mann</kjoenn>
+      <fylke>
+        <respons_dato_tid>2026-11-01T18:00:59.8917798+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <historisk_fylke>false</historisk_fylke>
+        <id>Bu</id>
+        <navn>Buskerud</navn>
+      </fylke>
+      <parti>
+        <respons_dato_tid>2026-11-01T01:00:20.0373936+01:00</respons_dato_tid>
+        <versjon>1.6</versjon>
+        <id>H</id>
+        <navn>Høyre</navn>
+        <representert_parti>true</representert_parti>
+      </parti>
+      <vara_representant>false</vara_representant>
+    </representant>
+  </saksordfoerer_liste>
+  <status>behandlet</status>
+  <stikkord_liste xmlns:d2p1="http://schemas.microsoft.com/2003/10/Serialization/Arrays">
+    <d2p1:string>COTIF-loven</d2p1:string>
+    <d2p1:string>Erstatninger</d2p1:string>
+    <d2p1:string>EU-direktiver</d2p1:string>
+    <d2p1:string>EØS-avtalen</d2p1:string>
+    <d2p1:string>Jernbaneansvarsloven</d2p1:string>
+    <d2p1:string>Jernbaneloven</d2p1:string>
+    <d2p1:string>Lokomotivførerdirektivet</d2p1:string>
+    <d2p1:string>Passasjerrettighetsforordningen</d2p1:string>
+    <d2p1:string>Sertifikater</d2p1:string>
+    <d2p1:string>Statens jernbanetilsyn</d2p1:string>
+  </stikkord_liste>
+  <tittel>Lov om endringer i jernbaneloven, jernbaneansvarsloven og COTIF-loven</tittel>
+  <type>lovsak</type>
+  <vedtakstekst i:nil="true" />
+</detaljert_sak>
