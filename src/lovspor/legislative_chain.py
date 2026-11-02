@@ -73,6 +73,11 @@ def _member_pattern(law_id: str) -> re.Pattern[str]:
     return re.compile(rf"lti/\d{{4}}/(?:nl|sf)-{year}{month}{day}-0*{number}\.xml")
 
 
+def member_names_law(member_name: str, law_id: str) -> bool:
+    """True when an archive member path is the Lovtidend document of this act."""
+    return _member_pattern(law_id).fullmatch(member_name) is not None
+
+
 def _read_member(tar: tarfile.TarFile, member: tarfile.TarInfo) -> bytes:
     if member.size > _MEMBER_LIMIT:
         raise ExtractionError(f"Lovtidend member exceeds byte limit: {member.name}")
