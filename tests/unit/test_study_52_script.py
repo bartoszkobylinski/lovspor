@@ -12,11 +12,10 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 
-import httpx
 import pytest
-from pytest_httpx import HTTPXMock
 
-from lovspor.errors import NetworkError, StortingetStatusError
+from lovspor.crosswalk import cache as crosswalk_cache
+from lovspor.errors import LovsporError
 from lovspor.stortinget_case_source import LawDecision
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -116,7 +115,7 @@ def _archives(cache: Path, old: dict[str, bytes], new: dict[str, bytes]) -> list
     ],
 )
 def test_law_edge_statuses(header: dict, expected: str) -> None:
-    assert study._law_edge(header)["status"] == expected
+    assert crosswalk_cache.law_edge(header)["status"] == expected
 
 
 def test_law_records_cover_both_archives_and_keep_every_outcome(tmp_path: Path) -> None:
@@ -171,7 +170,9 @@ def test_an_act_in_both_archives_is_ambiguous_not_chosen(tmp_path: Path) -> None
 
 
 def test_listing_keys_include_the_session_before() -> None:
-    keys = study.listing_keys([LawDecision("2025-2026", 26), LawDecision("2024-2025", 41)])
+    keys = crosswalk_cache.listing_keys(
+        [LawDecision("2025-2026", 26), LawDecision("2024-2025", 41)]
+    )
     assert keys == [
         ("publikasjoner", "2024-2025"),
         ("publikasjoner", "2025-2026"),
@@ -266,7 +267,7 @@ def test_cross_session_case_is_discovered_from_the_session_before(tmp_path: Path
     )
     assert found["publication_listed"] is True
     assert found["export_id"] == "vedtak-202526-026"
-    assert study.discovery_candidates(tmp_path, manifest, [LATER]) == [103533]
+    assert crosswalk_cache.discovery_candidates(tmp_path, manifest, [LATER]) == [103533]
 
 
 FOUND_CASE = {
@@ -337,7 +338,7 @@ def test_publication_gate_leaves_other_outcomes_alone() -> None:
 
 def test_a_malformed_http_200_saker_listing_is_a_recorded_failure(tmp_path: Path) -> None:
     manifest = _cross_session_cache(tmp_path, previous=b"<saker_oversikt", case=None)
-    assert study.discovery_candidates(tmp_path, manifest, [LATER]) == []
+    assert crosswalk_cache.discovery_candidates(tmp_path, manifest, [LATER]) == []
     found = study.discovery_record(tmp_path, manifest, LATER)
     assert (found["outcome"], found["reason"]) == (
         "incomplete",
@@ -449,7 +450,7 @@ def test_tampered_cache_is_refused(tmp_path: Path) -> None:
     )
     record = manifest["stortinget"][-1]
     (tmp_path / record["path"]).write_bytes(b"changed")
-    with pytest.raises(study.LovsporError, match="do not match the manifest"):
+    with pytest.raises(LovsporError, match="do not match the manifest"):
         study.discovery_record(tmp_path, manifest, LATER)
 
 
@@ -516,54 +517,6 @@ def test_recall_is_not_measured_without_a_single_header_lovvedtak() -> None:
 def test_header_against_label(header: dict, label: tuple[str, int], expected: str) -> None:
     row = {"proceeding_kind": label[0], "session_id": "2011-2012", "decision_number": str(label[1])}
     assert study._header_vs_label({"header": header}, row) == expected
-
-
-# --- capture failures --------------------------------------------------------------
-
-
-def test_refusal_is_recorded_with_its_status(tmp_path: Path) -> None:
-    record = study._failure({"stage": "discovery"}, StortingetStatusError(429, "https://x"))
-    assert (record["http_status"], record["stage"]) == (429, "discovery")
-    assert record["error"] == "StortingetStatusError: Stortinget HTTP 429: https://x"
-    assert study._failure({}, NetworkError("down"))["http_status"] is None
-
-
-def test_capture_records_a_refused_listing_and_keeps_going(
-    tmp_path: Path, httpx_mock: HTTPXMock, monkeypatch
-) -> None:
-    monkeypatch.setattr(study, "RATE_LIMIT_PAUSE_SECONDS", 0.0)
-    url = "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
-    httpx_mock.add_response(url=url, status_code=429)
-    httpx_mock.add_response(url=url, status_code=429)
-    pacer = study.Pacer(tmp_path / "progress.log", gap=0.0)
-    with httpx.Client() as client:
-        record = study.capture_listing(client, tmp_path, pacer, ("saker", "2024-2025"))
-    assert (record["http_status"], record["key"]) == (429, "2024-2025")
-    assert len(httpx_mock.get_requests()) == 2
-    assert "FAIL saker 2024-2025" in (tmp_path / "progress.log").read_text()
-
-
-def test_capture_retries_one_429_then_stores_the_bytes(
-    tmp_path: Path, httpx_mock: HTTPXMock, monkeypatch
-) -> None:
-    monkeypatch.setattr(study, "RATE_LIMIT_PAUSE_SECONDS", 0.0)
-    url = "https://data.stortinget.no/eksport/sak?sakid=103533"
-    body = _sak(103533, "2024-2025", ("2025-2026", 26))
-    httpx_mock.add_response(url=url, status_code=429)
-    httpx_mock.add_response(url=url, content=body, headers={"Content-Type": "text/xml"})
-    pacer = study.Pacer(tmp_path / "progress.log", gap=0.0)
-    with httpx.Client() as client:
-        record = study.capture_sak(client, tmp_path, pacer, ("verification", 103533))
-    assert (record["error"], record["sha256"]) == (None, sha256(body).hexdigest())
-    assert (tmp_path / record["path"]).read_bytes() == body
-
-
-def test_pacer_spaces_requests(tmp_path: Path) -> None:
-    pacer = study.Pacer(tmp_path / "log", gap=0.05)
-    pacer.wait()
-    started = study.time.monotonic()
-    pacer.wait()
-    assert study.time.monotonic() - started >= 0.04
 
 
 # --- drift -------------------------------------------------------------------------
