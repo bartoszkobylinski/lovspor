@@ -67,6 +67,13 @@ def test_an_interval_has_two_aware_ends() -> None:
     assert _refusal(interval, "2100-04-04T12:00:00Z/later") is RefusalReason.INVALID_TIMESTAMP
 
 
+def test_interval_end_accepts_an_iso_date_time_slash_separator() -> None:
+    """The interval delimiter is the first slash; ISO timestamps allow one too."""
+    start, end = interval("2100-04-04T12:00:00Z/2100-05-01/00:00:00Z")
+    assert start == datetime.fromisoformat("2100-04-04T12:00:00+00:00")
+    assert end == datetime.fromisoformat("2100-05-01T00:00:00+00:00")
+
+
 def test_checkpoints_are_pins_once_each() -> None:
     assert checkpoints([f"{KEY}@12:{HEAD}"]) == {KEY: (12, HEAD)}
     assert checkpoints([]) == {}

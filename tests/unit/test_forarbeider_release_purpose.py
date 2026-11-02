@@ -78,6 +78,19 @@ def test_one_purpose_alone_is_authorized(tmp_path: Path) -> None:
     assert record.purpose_sha256 == digest(desk.evidence["publication_purpose"].read_bytes())
 
 
+def test_a_purpose_outside_the_dossier_chapters_is_refused(tmp_path: Path) -> None:
+    """Unrelated evidence cannot enter the dossier consumed by authorization."""
+    desk = Desk(tmp_path)
+    desk.approve_all()
+    result = desk.dossier(_overlapping(desk, "4"))
+
+    assert result.exit_code == 1, result.output
+    assert said("refused: release_invalid: ReleaseDossier", result.output)
+    assert _authorizations(desk) == []
+    folder = desk.workspace / "dossiers"
+    assert not folder.exists() or list(folder.iterdir()) == []
+
+
 def test_a_stored_authorization_over_an_overlapping_dossier_denies_that_chapter(
     tmp_path: Path,
 ) -> None:
