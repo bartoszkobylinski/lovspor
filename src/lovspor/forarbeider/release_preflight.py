@@ -371,18 +371,17 @@ def _binding_reasons(
 
 
 def _purpose_reasons(inputs: PreflightInputs, result: ChapterResult) -> set[DenyReason]:
-    """The purpose the owner authorized must itself be intact evidence bound to this chapter."""
+    """The purpose the owner authorized, intact and bound to this chapter, and no other."""
     if inputs.authorization is None or inputs.dossier is None:
         return set()
     sha = inputs.authorization.record.purpose_sha256
-    bound = any(
-        item.kind is EvidenceKind.PUBLICATION_PURPOSE
-        and item.sha256 == sha
-        and result.chapter_number in item.chapters
-        and _intact(inputs, item)
+    declared = [
+        item
         for item in inputs.dossier.record.evidence
-    )
-    return set() if bound else {DenyReason.PURPOSE_NOT_AUTHORIZED}
+        if item.kind is EvidenceKind.PUBLICATION_PURPOSE and result.chapter_number in item.chapters
+    ]
+    sole = bool(declared) and all(item.sha256 == sha and _intact(inputs, item) for item in declared)
+    return set() if sole else {DenyReason.PURPOSE_NOT_AUTHORIZED}
 
 
 def _evidence(

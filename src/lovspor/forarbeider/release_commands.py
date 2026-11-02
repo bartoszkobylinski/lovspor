@@ -303,25 +303,26 @@ def _current_dossier(scope: ChapterScope, staged: Staged, sha: str) -> ReleaseDo
 
 
 def _purpose(dossier: ReleaseDossier) -> str:
-    """The one purpose statement bound to every chapter of the dossier, its bytes intact.
+    """The one purpose declared for the dossier's chapters: bound to all of them, intact.
 
-    Version 1 authorizes a single purpose, so two candidates are as refused as none:
-    the owner is never handed whichever came first.
+    Version 1 authorizes a single purpose, so a second one declared for any of the
+    chapters is as refused as none: the owner is never handed whichever came first.
 
     Raises:
         ForarbeiderRefusedError: ``release_not_eligible``: no such purpose, or two.
     """
     numbers = {item.chapter_number for item in dossier.chapters}
-    candidates = {
-        artifact.sha256
+    declared = [
+        artifact
         for artifact in dossier.evidence
-        if artifact.kind is EvidenceKind.PUBLICATION_PURPOSE
-        and numbers <= set(artifact.chapters)
-        and _evidence_digest(artifact) == artifact.sha256
-    }
-    if len(candidates) != 1:
+        if artifact.kind is EvidenceKind.PUBLICATION_PURPOSE and numbers & set(artifact.chapters)
+    ]
+    if len({artifact.sha256 for artifact in declared}) != 1 or not all(
+        numbers <= set(artifact.chapters) and _evidence_digest(artifact) == artifact.sha256
+        for artifact in declared
+    ):
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_NOT_ELIGIBLE, "publication_purpose")
-    return candidates.pop()
+    return declared[0].sha256
 
 
 class Grant(BaseModel):

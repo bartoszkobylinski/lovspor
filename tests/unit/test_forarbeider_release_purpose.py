@@ -21,7 +21,6 @@ from tests.unit.forarbeider_release_support import (
 )
 
 pytestmark = pytest.mark.usefixtures("at_a_terminal")
-RED = pytest.mark.xfail(strict=True, reason="final review on PR #765")
 
 
 def _overlapping(desk: Desk, extra: str) -> list[str]:
@@ -35,7 +34,6 @@ def _authorizations(desk: Desk) -> list[Path]:
     return sorted(folder.iterdir()) if folder.exists() else []
 
 
-@RED
 @pytest.mark.parametrize("extra", ["3", "2"])
 def test_a_second_purpose_on_one_chapter_is_ambiguous(tmp_path: Path, extra: str) -> None:
     """A covers 2 and 3 and B only one of them: neither is chosen for the owner."""
@@ -50,7 +48,6 @@ def test_a_second_purpose_on_one_chapter_is_ambiguous(tmp_path: Path, extra: str
     assert _authorizations(desk) == []
 
 
-@RED
 def test_a_second_purpose_counts_even_once_its_file_changed(tmp_path: Path) -> None:
     """Ambiguity is in what was declared; an edited B does not leave A as the only one."""
     desk = Desk(tmp_path)
@@ -81,7 +78,6 @@ def test_one_purpose_alone_is_authorized(tmp_path: Path) -> None:
     assert record.purpose_sha256 == digest(desk.evidence["publication_purpose"].read_bytes())
 
 
-@RED
 def test_a_stored_authorization_over_an_overlapping_dossier_denies_that_chapter(
     tmp_path: Path,
 ) -> None:
