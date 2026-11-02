@@ -53,6 +53,16 @@ class RefusalReason(StrEnum):
     RELEASE_RECORD_CORRUPT = "release_record_corrupt"
     RELEASE_ALREADY_REVOKED = "release_already_revoked"
     RELEASE_OUT_OF_ORDER = "release_out_of_order"
+    MANIFEST_INVALID = "manifest_invalid"
+    MANIFEST_INCOMPATIBLE = "manifest_incompatible"
+    CORPUS_TREE_MISMATCH = "corpus_tree_mismatch"
+    CORPUS_NOT_SANDBOX = "corpus_not_sandbox"
+    CORPUS_LOCKED = "corpus_locked"
+    INPUT_NOT_SYNTHETIC = "input_not_synthetic"
+    PROMOTION_DENIED = "promotion_denied"
+    PLAN_STALE = "plan_stale"
+    RENDER_UNSAFE = "render_unsafe"
+    DOCUMENT_NOT_RELEASED = "document_not_released"
 
 
 class ForarbeiderRefusedError(LovsporError):
