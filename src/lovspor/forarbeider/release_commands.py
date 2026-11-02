@@ -307,6 +307,8 @@ def _purpose(dossier: ReleaseDossier) -> str:
 
     Version 1 authorizes a single purpose, so a second one declared for any of the
     chapters is as refused as none: the owner is never handed whichever came first.
+    ``ReleaseDossier`` binds every artifact to some of its own chapters, so each
+    purpose in it is declared for at least one of them.
 
     Raises:
         ForarbeiderRefusedError: ``release_not_eligible``: no such purpose, or two.
@@ -315,7 +317,7 @@ def _purpose(dossier: ReleaseDossier) -> str:
     declared = [
         artifact
         for artifact in dossier.evidence
-        if artifact.kind is EvidenceKind.PUBLICATION_PURPOSE and numbers & set(artifact.chapters)
+        if artifact.kind is EvidenceKind.PUBLICATION_PURPOSE
     ]
     if len({artifact.sha256 for artifact in declared}) != 1 or not all(
         numbers <= set(artifact.chapters) and _evidence_digest(artifact) == artifact.sha256
