@@ -17,6 +17,50 @@ from tests.unit.forarbeider_release_support import (
 pytestmark = pytest.mark.usefixtures("at_a_terminal")
 
 
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ("symlink", "unsafe_input_path"),
+        ("permissions", "observation_unsafe"),
+        ("checkout", "unsafe_output_path"),
+    ],
+)
+def test_preflight_rechecks_evidence_safety_after_authorization(
+    tmp_path: Path, change: str, reason: str
+) -> None:
+    """The private-storage contract applies when evidence is read again, too."""
+    desk = Desk(tmp_path)
+    desk.approve_all()
+    _, authorization = desk.released()
+    before = {
+        item.relative_to(desk.workspace): item.read_bytes()
+        for item in desk.workspace.rglob("*.json")
+    }
+    rights = desk.evidence["source_rights"]
+    original = rights.read_bytes()
+    if change == "symlink":
+        target = rights.with_name("replacement.txt")
+        rights.rename(target)
+        rights.symlink_to(target)
+    elif change == "permissions":
+        rights.chmod(0o644)
+    else:
+        (rights.parent / ".git").mkdir()
+
+    result = desk.preflight(authorization, desk.all_checkpoints())
+
+    assert result.exit_code == 1, result.output
+    assert said(f"refused: {reason}: evidence", result.output)
+    assert str(tmp_path) not in result.output
+    assert original.decode() not in result.output
+    assert rights.read_bytes() == original
+    assert not (desk.workspace / "reports").exists()
+    assert {
+        item.relative_to(desk.workspace): item.read_bytes()
+        for item in desk.workspace.rglob("*.json")
+    } == before
+
+
 @pytest.mark.parametrize("target", ["metadata", "observation"])
 @pytest.mark.parametrize(
     "payload", [b"\xff", b'{"schema_version":'], ids=["invalid-utf8", "truncated-json"]
