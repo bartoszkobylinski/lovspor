@@ -45,6 +45,13 @@ class RefusalReason(StrEnum):
     REVIEW_NOT_INTERACTIVE = "review_not_interactive"
     REVIEW_LEDGER_CORRUPT = "review_ledger_corrupt"
     REVIEW_LEDGER_UNSAFE = "review_ledger_unsafe"
+    UNSAFE_INPUT_PATH = "unsafe_input_path"
+    RELEASE_INVALID = "release_invalid"
+    RELEASE_NOT_ELIGIBLE = "release_not_eligible"
+    RELEASE_STALE = "release_stale"
+    RELEASE_RECORD_MISSING = "release_record_missing"
+    RELEASE_RECORD_CORRUPT = "release_record_corrupt"
+    RELEASE_ALREADY_REVOKED = "release_already_revoked"
 
 
 class ForarbeiderRefusedError(LovsporError):
