@@ -2804,6 +2804,69 @@ A rejection cannot be approved in one step, and an approval is never refreshed i
 - Retention is a written rule, not an enforced one.
 - Nothing was reviewed for real here: the workflow is tested on synthetic chapters only.
 
+## Forarbeider: private release preflight (issue #738)
+
+`lovspor ops forarbeider-release` is ADR-0018 PR3B-1, the first slice of [the PR3B contract](proposals/forarbeider-pr3b-release-contract.md). It checks whether exact staged chapters *could* be released and writes a private report. **It publishes nothing.** No command here fetches, stages, renders or writes a `lovverk` file or any Git checkout, there is no `--force` or `--publish`, and every report says `publication_authorized: false`, `writes_corpus: false` and `asserts_complete_proposition: false`, whatever it found. A PR3A `approved` is one input among many: never sufficient alone.
+
+```bash
+install -d -m 700 ~/forarbeider-staging/release ~/forarbeider-staging/evidence
+release() {
+  uv run lovspor ops forarbeider-release \
+    --workspace ~/forarbeider-staging/release \
+    --ledger ~/forarbeider-staging/review-ledger "$@"
+}
+chapters() {
+  release chapters \
+    --metadata ~/forarbeider-staging/regjeringen-3154578.json \
+    --observation ~/forarbeider-staging/chapters/regjeringen-3154578-ch9-20261031.json \
+    --page ~/forarbeider-staging/raw/prop-54-ls-ch9.html "$@"
+}
+
+# 1. The case-specific dossier: one private file per gate, bound to chapters
+chapters dossier --reviewed reviewer-1@2026-11-02T12:00:00+01:00 \
+  --evidence publication_purpose@9=$HOME/forarbeider-staging/evidence/purpose.md \
+  --evidence privacy_processing_basis@9=$HOME/forarbeider-staging/evidence/privacy.md \
+  --evidence third_party_screening@9=$HOME/forarbeider-staging/evidence/third-party.md \
+  --evidence source_rights@9=$HOME/forarbeider-staging/evidence/rights.md \
+  --evidence source_completeness@9=$HOME/forarbeider-staging/evidence/completeness.md
+
+# 2. The owner's authorization candidate, at a terminal; --dossier is the digest printed above
+chapters authorize --dossier <dossier sha256> \
+  --decided owner-1@2026-11-03T12:00:00+01:00 \
+  --valid 2026-11-03T12:00:00+01:00/2026-12-01T00:00:00+01:00
+
+# 3. The preflight; each --checkpoint is a `review verify` line kept OUTSIDE the ledger
+chapters preflight --at 2026-11-04T12:00:00+01:00 \
+  --authorization <authorization sha256> \
+  --checkpoint <subject>@<revision>:<head>
+
+# Inspect or withdraw
+release show report <report sha256>
+release revoke --authorization <authorization sha256> --decided owner-1@2026-11-05T12:00:00+01:00
+```
+
+Exit 0 is an `eligible_preview` report, exit 2 a `deny` report, exit 1 a typed refusal with nothing written. Records live in `<workspace>/{dossiers,authorizations,revocations,reports}/<sha256>.json`, owner-only, named by the digest of their bytes and never replaced: rerunning the same preflight prints the same lines and writes nothing new.
+
+**What each chapter needs, or it is denied.**
+
+- **A body proved by its page.** The saved page is parsed again and must reproduce the PR2 result byte for byte, so `source_sha256`, `text_sha256` and the extractor version are proved, not copied. The PR1 metadata must be reproduced by its own page too, list the chapter at its URL and title, and name the same document as every other input. A withheld body (annex, table, image, footnotes and the rest of `WITHHOLDING`) is denied, with its hold reasons in the report.
+- **A current PR3A approval with an external anchor.** The chain must verify, end in `approved`, and match a `--checkpoint` you copied from `review verify` and kept elsewhere: a cut or rewritten tail otherwise passes. A later decision of any kind, even a new approval, makes the authorization's pin stale (`review_superseded`).
+- **Evidence files for every gate.** `publication_purpose`, privacy (`privacy_processing_basis`, or a reviewed `privacy_no_personal_data` finding), `third_party_screening`, `source_rights` and `source_completeness`, each a private file bound to that chapter. Its bytes are read again and must match the digest recorded in the dossier. `adr:0018`, `issue:N`, `pr:N` and a bare `sha256:` are not files and are refused. A no-personal-data finding cannot stand alone on a chapter whose extractor flagged personal-data candidates.
+- **The owner's authorization.** Scoped to exactly these chapter identities and review pins, this dossier, its purpose file and the one path `forarbeider/<session>/<prop-l|prop-ls>/<document id>.md`. It holds from `valid_from` up to, not including, `valid_until`, and not once revoked.
+
+Only the chapters that pass are planned. The report is then a `partial_curated_excerpt`, or `every_listed_chapter` when the page's navigation lists nothing more; neither asserts that the proposition is complete.
+
+**Printed and stored.** Ids, digests, reason codes and counts. Never chapter text, evidence content, evidence paths or handles, in output or in reports. The dossier itself keeps evidence paths and the reviewer handle: keep the workspace private, under the retention rules above.
+
+**Limits, unresolved.**
+
+- Code checks that evidence exists, is bound to a chapter and has its declared bytes. Whether it is legally sufficient is the owner's judgement: `legal_sufficiency_decided_by_code: false`. §§ 14 and 24, personopplysningsloven and the source terms are not resolved by any test.
+- The authorization is a private declaration. A handle, a typed phrase and a terminal are not authenticated identity (`identity_authenticated: false`), and a pseudo-terminal passes the terminal check.
+- `--at` and every decision time are the operator's word; there is no clock. A promotion step (PR3B-2) must check validity against a trusted clock at the moment it writes.
+- Checkpoints are `operator_supplied_unauthenticated`: they detect a cut or rewritten chain only if they were kept where this user's processes cannot rewrite them too.
+- A revocation is found by the authorization's digest in the same workspace; someone who can write there can delete it.
+- Nothing was released for real: the workflow is tested on synthetic Prop. L and Prop. LS chapters only. PR3B-2 (promotion) and PR3B-3 (an opt-in reader) need separate approval.
+
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.
