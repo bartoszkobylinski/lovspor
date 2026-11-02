@@ -114,10 +114,10 @@ def test_record_layout_is_canonical_utf8():
         (
             commands.actor,
             "owner@extra@2100-04-04T12:00:00Z",
-            "invalid_timestamp: extra@2100-04-04T12:00:00Z",
+            "invalid_timestamp: actor",
         ),
         (commands.interval, "today", "release_invalid: valid"),
-        (commands.interval, "2100-04-04T12:00:00Z/bad/other", "invalid_timestamp: bad/other"),
+        (commands.interval, "2100-04-04T12:00:00Z/bad/other", "invalid_timestamp: valid"),
         (commands.checkpoints, ["bad"], "release_invalid: checkpoint"),
     ],
 )
@@ -193,7 +193,7 @@ def test_missing_records_and_invalid_options_have_specific_diagnostics(tmp_path)
     run = commands.Run(authorization="bad", checkpoints=(), at=AT)
     refused(commands.preflight_inputs, (chapter_scope, run), "release_invalid: authorization")
     desk.pages[2].unlink()
-    refused(commands.preflight_inputs, (chapter_scope, run), f"input_unreadable: {desk.pages[2]}")
+    refused(commands.preflight_inputs, (chapter_scope, run), "input_unreadable: page")
 
 
 def test_cli_refusals_go_to_stderr(tmp_path):
@@ -202,7 +202,7 @@ def test_cli_refusals_go_to_stderr(tmp_path):
     for result in (desk.dossier(), desk.preflight(None)):
         assert result.exit_code == 1
         assert result.stdout == ""
-        assert result.stderr == f"refused: input_unreadable: {desk.metadata}\n"
+        assert result.stderr == "refused: input_unreadable: metadata\n"
     assert not (desk.workspace / "reports").exists()
 
 

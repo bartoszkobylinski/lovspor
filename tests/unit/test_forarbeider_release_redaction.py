@@ -12,6 +12,8 @@ from typing import Any
 import pytest
 
 from lovspor.forarbeider import release_commands, release_store
+from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from lovspor.forarbeider.release_cli import refusal_line
 from tests.unit.cli_output import said, unwrapped
 from tests.unit.forarbeider_release_support import (
     PRIVATE_MARKER,
@@ -21,7 +23,6 @@ from tests.unit.forarbeider_release_support import (
 )
 
 pytestmark = pytest.mark.usefixtures("at_a_terminal")
-RED = pytest.mark.xfail(strict=True, reason="final review on PR #765")
 
 Breaker = Callable[[Path], None]
 
@@ -90,7 +91,6 @@ def _staged_path(desk: Desk, role: str) -> Path:
     return desk.observations[3] if role == "observation" else desk.pages[3]
 
 
-@RED
 @pytest.mark.parametrize(("role", "breaker", "reason"), _STAGED_CASES)
 def test_a_broken_staged_input_is_refused_by_role_at_preflight(
     tmp_path: Path, role: str, breaker: Breaker, reason: str
@@ -104,7 +104,6 @@ def test_a_broken_staged_input_is_refused_by_role_at_preflight(
     assert not (desk.workspace / "reports").exists()
 
 
-@RED
 @pytest.mark.parametrize(("role", "breaker", "reason"), _STAGED_CASES[:8])
 def test_a_broken_staged_input_is_refused_by_role_at_dossier(
     tmp_path: Path, role: str, breaker: Breaker, reason: str
@@ -117,7 +116,6 @@ def test_a_broken_staged_input_is_refused_by_role_at_dossier(
     assert not (desk.workspace / "dossiers").exists()
 
 
-@RED
 @pytest.mark.parametrize("role", ["metadata", "observation", "page"])
 def test_an_oversized_staged_input_is_refused_by_role(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: str
@@ -138,7 +136,6 @@ def _shared_directory(path: Path) -> None:
     path.chmod(0o755)
 
 
-@RED
 @pytest.mark.parametrize("role", ["ledger", "workspace"])
 def test_a_shared_ledger_or_workspace_is_refused_by_role(tmp_path: Path, role: str) -> None:
     desk, authorization, checkpoints = _ready(tmp_path)
@@ -149,7 +146,6 @@ def test_a_shared_ledger_or_workspace_is_refused_by_role(tmp_path: Path, role: s
     _assert_redacted(desk, result, f"refused: review_ledger_unsafe: {role}")
 
 
-@RED
 @pytest.mark.parametrize("role", ["ledger", "workspace"])
 def test_a_ledger_or_workspace_inside_a_checkout_is_refused_by_role(
     tmp_path: Path, role: str
@@ -164,7 +160,6 @@ def test_a_ledger_or_workspace_inside_a_checkout_is_refused_by_role(
     _assert_redacted(desk, result, f"refused: unsafe_output_path: {role}")
 
 
-@RED
 def test_an_unsafe_ledger_chapter_is_refused_by_role(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.approve_all()
@@ -177,7 +172,6 @@ def test_an_unsafe_ledger_chapter_is_refused_by_role(tmp_path: Path) -> None:
     _assert_redacted(desk, result, "refused: review_ledger_unsafe: ledger")
 
 
-@RED
 def test_a_corrupt_ledger_record_is_refused_by_role_at_authorization(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.approve_all()
@@ -190,7 +184,6 @@ def test_a_corrupt_ledger_record_is_refused_by_role_at_authorization(tmp_path: P
     _assert_redacted(desk, result, "refused: review_ledger_corrupt: ledger")
 
 
-@RED
 @pytest.mark.parametrize("breaker", [_shared, _symlinked], ids=["shared", "symlinked"])
 def test_an_unsafe_stored_record_names_its_digest_not_its_path(
     tmp_path: Path, breaker: Breaker
@@ -203,7 +196,6 @@ def test_an_unsafe_stored_record_names_its_digest_not_its_path(
     _assert_redacted(desk, result, f"refused: observation_unsafe: {authorization}")
 
 
-@RED
 def test_an_oversized_stored_record_names_its_digest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -215,7 +207,6 @@ def test_an_oversized_stored_record_names_its_digest(
     _assert_redacted(desk, result, f"refused: input_too_large: {authorization}")
 
 
-@RED
 def test_a_report_that_cannot_be_written_names_its_folder(tmp_path: Path) -> None:
     desk, authorization, checkpoints = _ready(tmp_path)
     reports = desk.workspace / "reports"
@@ -229,7 +220,6 @@ def test_a_report_that_cannot_be_written_names_its_folder(tmp_path: Path) -> Non
     _assert_redacted(desk, result, "refused: output_write_failed: reports")
 
 
-@RED
 def test_a_path_given_as_a_timestamp_is_not_echoed(tmp_path: Path) -> None:
     desk, authorization, checkpoints = _ready(tmp_path)
 
@@ -238,7 +228,6 @@ def test_a_path_given_as_a_timestamp_is_not_echoed(tmp_path: Path) -> None:
     _assert_redacted(desk, result, "refused: invalid_timestamp: at")
 
 
-@RED
 def test_a_path_given_as_a_decision_time_is_not_echoed(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.approve_all()
@@ -247,7 +236,6 @@ def test_a_path_given_as_a_decision_time_is_not_echoed(tmp_path: Path) -> None:
     _assert_redacted(desk, desk.dossier(), "refused: invalid_timestamp: actor")
 
 
-@RED
 def test_a_path_given_as_a_validity_bound_is_not_echoed(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.approve_all()
@@ -269,3 +257,24 @@ def test_a_malformed_page_is_denied_without_a_path_in_the_report(tmp_path: Path)
     for text in [result.output, *(path.read_text() for path in reports)]:
         for private in [PRIVATE_MARKER, *_private_names(desk)]:
             assert private not in text, private
+
+
+@pytest.mark.parametrize(
+    ("detail", "printed"),
+    [
+        ("/home/someone/private/metadata.json", "input"),
+        ("C:\\Users\\someone\\page.html", "input"),
+        ("~someone", "input"),
+        ("metadata", "metadata"),
+        ("evidence source_rights", "evidence source_rights"),
+        ("regjeringen-9000001-ch3", "regjeringen-9000001-ch3"),
+        ("authorization_sha256,owner", "authorization_sha256,owner"),
+        ("ReleaseDossier", "ReleaseDossier"),
+        ("", ""),
+    ],
+)
+def test_the_cli_never_prints_a_detail_that_could_be_a_path(detail: str, printed: str) -> None:
+    """The boundary guard behind the role labels: a separator means the detail is withheld."""
+    error = ForarbeiderRefusedError(RefusalReason.INPUT_UNREADABLE, detail)
+
+    assert refusal_line(error) == f"refused: input_unreadable: {printed}"

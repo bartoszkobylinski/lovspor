@@ -12,7 +12,8 @@ ancestor is a Git checkout.
 """
 
 import os
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -36,6 +37,19 @@ MAX_EVIDENCE_BYTES = 16 * 1024 * 1024
 MAX_STAGED_BYTES = 64 * 1024 * 1024
 
 Folder = Literal["dossiers", "authorizations", "revocations", "reports"]
+
+
+@contextmanager
+def refused_as(label: str) -> Iterator[None]:
+    """A refusal keeps its reason but names the input's role: a path can carry a name.
+
+    Raises:
+        ForarbeiderRefusedError: the reason raised inside, with ``label`` as its detail.
+    """
+    try:
+        yield
+    except ForarbeiderRefusedError as error:
+        raise ForarbeiderRefusedError(error.reason, label) from None
 
 
 def checked_file(raw: Path, forbidden: Sequence[Path]) -> Path:
@@ -106,8 +120,9 @@ def write_record(workspace: Path, folder: Folder, record: BaseModel, name: str =
     text = record_text(record)
     sha = digest(text.encode())
     directory = workspace / folder
-    ensure_private_directory(directory)
-    write_observation(directory / f"{name or sha}.json", text)
+    with refused_as(folder):
+        ensure_private_directory(directory)
+        write_observation(directory / f"{name or sha}.json", text)
     return sha
 
 
@@ -121,9 +136,10 @@ def read_named[T: BaseModel](
     """
     directory = workspace / folder
     path = directory / f"{name}.json"
-    if not private_directory_exists(directory) or not os.path.lexists(path):
-        return None
-    raw = read_private(path, MAX_RECORD_BYTES)
+    with refused_as(name):
+        if not private_directory_exists(directory) or not os.path.lexists(path):
+            return None
+        raw = read_private(path, MAX_RECORD_BYTES)
     try:
         record = model.model_validate_json(raw)
     except ValidationError as error:

@@ -55,6 +55,7 @@ from lovspor.forarbeider.release_store import (
     read_model,
     read_named,
     read_record,
+    refused_as,
     write_record,
 )
 from lovspor.forarbeider.review_ledger import StoredDecision, load_history
@@ -108,7 +109,13 @@ def _interactive() -> bool:
 
 
 def _workspace(scope: ReleaseScope) -> Path:
-    return open_workspace(scope.workspace, _forbidden())
+    with refused_as("workspace"):
+        return open_workspace(scope.workspace, _forbidden())
+
+
+def _ledger(scope: ReleaseScope) -> Path:
+    with refused_as("ledger"):
+        return checked_directory(scope.ledger, _forbidden())
 
 
 def _read_staged(scope: ChapterScope) -> Staged:
@@ -117,8 +124,10 @@ def _read_staged(scope: ChapterScope) -> Staged:
     Raises:
         ForarbeiderRefusedError: an unsafe or unreadable file, or not its schema.
     """
-    metadata = read_model(scope.metadata, _forbidden(), ForarbeidRecord)
-    results = [read_model(path, _forbidden(), ChapterResult) for path in scope.observations]
+    with refused_as("metadata"):
+        metadata = read_model(scope.metadata, _forbidden(), ForarbeidRecord)
+    with refused_as("observation"):
+        results = [read_model(path, _forbidden(), ChapterResult) for path in scope.observations]
     ordered = tuple(sorted(results, key=lambda result: result.chapter_number))
     return Staged(metadata=metadata, results=ordered)
 
@@ -158,7 +167,8 @@ def actor(text: str) -> tuple[str, datetime]:
     handle, separator, moment = text.partition("@")
     if not separator or not handle:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_INVALID, "actor")
-    return handle, aware_moment(moment)
+    with refused_as("actor"):
+        return handle, aware_moment(moment)
 
 
 def interval(text: str) -> tuple[datetime, datetime]:
@@ -170,7 +180,8 @@ def interval(text: str) -> tuple[datetime, datetime]:
     start, separator, end = text.partition("/")
     if not separator:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_INVALID, "valid")
-    return aware_moment(start), aware_moment(end)
+    with refused_as("valid"):
+        return aware_moment(start), aware_moment(end)
 
 
 def _validated[T: BaseModel](model: type[T], fields: dict[str, object]) -> T:
@@ -251,10 +262,8 @@ def _evidence_bytes(path: Path, kind: str) -> bytes | None:
     Raises:
         ForarbeiderRefusedError: the refusal ``read_file`` gave, with the kind as detail.
     """
-    try:
+    with refused_as(f"evidence {kind}"):
         return read_file(path, _forbidden(), MAX_EVIDENCE_BYTES)
-    except ForarbeiderRefusedError as error:
-        raise ForarbeiderRefusedError(error.reason, f"evidence {kind}") from None
 
 
 def _evidence_digest(artifact: EvidenceArtifact) -> str | None:
@@ -271,10 +280,11 @@ def _approved_pins(
         ForarbeiderRefusedError: ``review_not_eligible``, ``release_out_of_order``
             for an approval after the owner's decision, or a broken chain.
     """
-    ledger = checked_directory(scope.release.ledger, _forbidden())
+    ledger = _ledger(scope.release)
     pinned = []
     for result, identity in zip(staged.results, _identities(staged), strict=True):
-        history = load_history(ledger, subject_of(result))
+        with refused_as("ledger"):
+            history = load_history(ledger, subject_of(result))
         if not history or history[-1].decision.status is not ReviewStatus.APPROVED:
             raise ForarbeiderRefusedError(RefusalReason.REVIEW_NOT_ELIGIBLE, result.id)
         if history[-1].decision.decided_at > decided:
@@ -436,16 +446,18 @@ def checkpoints(values: Sequence[str]) -> dict[str, tuple[int, str]]:
 def _pages(scope: ChapterScope) -> dict[str, bytes]:
     pages = {}
     for path in scope.pages:
-        payload = read_file(path, _forbidden(), MAX_HTML_BYTES)
+        with refused_as("page"):
+            payload = read_file(path, _forbidden(), MAX_HTML_BYTES)
         if payload is None:
-            raise ForarbeiderRefusedError(RefusalReason.INPUT_UNREADABLE, str(path))
+            raise ForarbeiderRefusedError(RefusalReason.INPUT_UNREADABLE, "page")
         pages[digest(payload)] = payload
     return pages
 
 
 def _history(ledger: Path, result: ChapterResult) -> tuple[StoredDecision, ...] | None:
     try:
-        return load_history(ledger, subject_of(result))
+        with refused_as("ledger"):
+            return load_history(ledger, subject_of(result))
     except ForarbeiderRefusedError as error:
         if error.reason is RefusalReason.REVIEW_LEDGER_CORRUPT:
             return None
@@ -487,7 +499,7 @@ def preflight_inputs(scope: ChapterScope, run: Run) -> PreflightInputs:
         ForarbeiderRefusedError: an unsafe or unreadable file, or a malformed option.
     """
     workspace = _workspace(scope.release)
-    ledger = checked_directory(scope.release.ledger, _forbidden())
+    ledger = _ledger(scope.release)
     staged, pages = _read_staged(scope), _pages(scope)
     authorization = _authorization(workspace, run)
     dossier = _dossier(workspace, authorization)
@@ -504,8 +516,13 @@ def preflight_inputs(scope: ChapterScope, run: Run) -> PreflightInputs:
         authorization=authorization,
         revoked=authorization is not None and _revoked(workspace, authorization.sha256),
         checkpoints=checkpoints(run.checkpoints),
-        at=aware_moment(run.at),
+        at=_moment(run.at),
     )
+
+
+def _moment(text: str) -> datetime:
+    with refused_as("at"):
+        return aware_moment(text)
 
 
 def preflight_impl(scope: ChapterScope, run: Run) -> tuple[str, bool]:

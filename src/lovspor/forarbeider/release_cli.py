@@ -10,6 +10,7 @@ report. Exit 0 is an ``eligible_preview`` report, which still authorizes no
 publication: no command here writes to ``lovverk`` or any Git checkout.
 """
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
@@ -31,6 +32,8 @@ from lovspor.forarbeider.release_commands import (
 from lovspor.ops.commands import ops_app
 
 DENY_EXIT = 2
+#: Reason codes, roles, chapter ids and digests. A path has a separator and is never printed.
+_SAFE_DETAIL = re.compile(r"[A-Za-z0-9_.,: -]*")
 
 release_app = typer.Typer(help="Private, offline release preflight. Publishes nothing.")
 chapters_app = typer.Typer(help="Commands on the staged chapters of one proposition.")
@@ -38,11 +41,17 @@ ops_app.add_typer(release_app, name="forarbeider-release")
 release_app.add_typer(chapters_app, name="chapters")
 
 
+def refusal_line(error: ForarbeiderRefusedError) -> str:
+    """The refusal as printed; a detail that could be a path or a name is shown as ``input``."""
+    detail = error.detail if _SAFE_DETAIL.fullmatch(error.detail) else "input"
+    return f"refused: {error.reason.value}: {detail}"
+
+
 def _echo(action: Callable[[], str]) -> None:
     try:
         typer.echo(action())
     except ForarbeiderRefusedError as error:
-        typer.echo(f"refused: {error}", err=True)
+        typer.echo(refusal_line(error), err=True)
         raise typer.Exit(code=1) from error
 
 
@@ -51,7 +60,7 @@ def run_preflight(scope: ChapterScope, run: Run) -> None:
     try:
         lines, preview = preflight_impl(scope, run)
     except ForarbeiderRefusedError as error:
-        typer.echo(f"refused: {error}", err=True)
+        typer.echo(refusal_line(error), err=True)
         raise typer.Exit(code=1) from error
     typer.echo(lines)
     if not preview:
