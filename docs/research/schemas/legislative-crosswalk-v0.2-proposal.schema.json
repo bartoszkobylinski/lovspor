@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Lovspor legislative crosswalk record — PROPOSED v0.2 draft (owner approval required)",
-  "description": "PROPOSED, not accepted. A draft that makes the decisions proposed in docs/proposals/legislative-crosswalk-decisions-proposal-2026-11-02.md concrete: source pins, parsed identity, per-edge status, record revisions and withdrawal, typed correction evidence. It does not replace legislative-crosswalk-v0.schema.json, which Politik PR #178 reads. Structure is not verification of primary-source bytes, origin or rights.",
+  "description": "PROPOSED, not accepted. A draft that makes the decisions proposed in docs/proposals/legislative-crosswalk-decisions-proposal-2026-11-02.md concrete: source pins, parsed identity, per-edge status, append-only record revisions and withdrawal, typed correction evidence. It does not replace legislative-crosswalk-v0.schema.json, which Politik PR #178 reads. This schema is the structural contract only: the cross-field invariants listed in the proposal, item l, are enforced by the producer, not here. Structure is not verification of primary-source bytes, origin or rights.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -34,19 +34,15 @@
       "$ref": "#/$defs/law_id"
     },
     "record_revision": {
+      "description": "Revisions of one amending_lov_id are 1..n without gaps; the highest is current. A revision is never edited after release: supersession is derived, not written back.",
       "type": "integer",
       "minimum": 1
     },
     "record_state": {
       "enum": [
         "active",
-        "superseded",
         "withdrawn"
       ]
-    },
-    "supersedes_revision": {
-      "type": "integer",
-      "minimum": 1
     },
     "withdrawal": {
       "type": "object",
@@ -58,7 +54,8 @@
       "properties": {
         "withdrawn_on": {
           "type": "string",
-          "format": "date"
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
         },
         "reason": {
           "type": "string",
@@ -68,19 +65,25 @@
     },
     "observed_on": {
       "type": "string",
-      "format": "date"
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
     },
     "status": {
+      "description": "Derived: attested exactly when every edge is attested.",
       "$ref": "#/$defs/status"
     },
     "edge_status": {
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "law_identity",
         "law_decision",
         "decision_case"
       ],
       "properties": {
+        "law_identity": {
+          "$ref": "#/$defs/status"
+        },
         "law_decision": {
           "$ref": "#/$defs/status"
         },
@@ -98,10 +101,13 @@
         "decision_kind_not_supported",
         "no_decision_citation_in_source",
         "law_not_in_pinned_archives",
+        "decision_not_in_publication_list",
+        "case_not_found",
         "multiple_candidates",
+        "source_unreadable",
         "source_disagreement",
         "rights_not_established",
-        "other"
+        "withdrawn_by_producer"
       ]
     },
     "decision": {
@@ -123,12 +129,14 @@
     },
     "sanction_events": {
       "type": "array",
+      "uniqueItems": true,
       "items": {
         "$ref": "#/$defs/sanction_event"
       }
     },
     "evidence": {
       "type": "array",
+      "uniqueItems": true,
       "items": {
         "$ref": "#/$defs/evidence"
       }
@@ -146,13 +154,17 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "utc_timestamp": {
+      "description": "UTC only, checked by pattern: jsonschema skips format date-time unless an optional validator package is installed.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?(?:Z|\\+00:00)$"
+    },
     "law_id": {
       "type": "string",
       "pattern": "^LOV-[0-9]{4}-[0-9]{2}-[0-9]{2}-[1-9][0-9]*$"
     },
     "status": {
       "enum": [
-        "reviewed_web_only",
         "attested",
         "unresolved",
         "ambiguous",
@@ -162,7 +174,6 @@
     },
     "official_url": {
       "type": "string",
-      "format": "uri",
       "pattern": "^https://(?:www\\.)?(?:stortinget\\.no|data\\.stortinget\\.no|regjeringen\\.no|lovdata\\.no|api\\.lovdata\\.no)/"
     },
     "decision": {
@@ -203,11 +214,10 @@
           "$ref": "#/$defs/law_id"
         },
         "kind": {
-          "description": "unclassified_sanction: a source-backed sanction whose initial/corrective role no permitted source states (the #618 case as read from Lovtidend headers).",
+          "description": "unclassified_sanction: a source-backed sanction whose initial/corrective role no permitted source states (the default, and the #618 case as read from Lovtidend headers). corrective_resanction only with correction evidence. There is no initial_sanction: no permitted source states that role.",
           "enum": [
-            "initial_sanction",
-            "corrective_resanction",
-            "unclassified_sanction"
+            "unclassified_sanction",
+            "corrective_resanction"
           ]
         },
         "source_url": {
@@ -248,9 +258,11 @@
       ],
       "properties": {
         "role": {
+          "description": "decision_publication: the session's Lovvedtak publication list (data.stortinget.no eksport/publikasjoner) that lists the decision; the 52-act study treats it as mandatory, requiring it here is open (proposal item l).",
           "enum": [
             "law_identity",
             "law_decision_pair",
+            "decision_publication",
             "decision_case",
             "correction"
           ]
@@ -266,27 +278,28 @@
         },
         "observed_on": {
           "type": "string",
-          "format": "date"
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
         },
         "upstream_id": {
+          "description": "<archive>!<member> for a Lovdata archive member, sak/<id> for a Stortinget case, publikasjoner/<session> for a Lovvedtak publication list.",
           "type": "string",
-          "minLength": 1
+          "pattern": "^(?:lovtidend-avd1-(?:2001-2025|[0-9]{4})\\.tar\\.bz2![a-z0-9/._-]+\\.xml|sak/[1-9][0-9]*|publikasjoner/[0-9]{4}-[0-9]{4})$"
         },
         "body_sha256": {
           "description": "Provenance: which bytes this run read. Not the comparison key across captures.",
           "$ref": "#/$defs/sha256"
         },
         "parsed_identity_sha256": {
-          "description": "Comparison key: SHA-256 of the canonical JSON of the identity the named parser extracted.",
+          "description": "Comparison key: SHA-256 of the canonical JSON of the identity the named parser extracted (fields per parser_version, proposal item g).",
           "$ref": "#/$defs/sha256"
         },
         "retrieved_at": {
-          "type": "string",
-          "format": "date-time"
+          "$ref": "#/$defs/utc_timestamp"
         },
         "parser_version": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*-[1-9][0-9]*$"
         }
       },
       "allOf": [
@@ -296,7 +309,10 @@
               "capture_level": {
                 "const": "raw_body_captured"
               }
-            }
+            },
+            "required": [
+              "capture_level"
+            ]
           },
           "then": {
             "required": [
@@ -305,7 +321,13 @@
               "parsed_identity_sha256",
               "retrieved_at",
               "parser_version"
-            ]
+            ],
+            "properties": {
+              "source_url": {
+                "description": "Raw bytes come only from the two permitted machine sources; never lovdata.no HTML.",
+                "pattern": "^https://(?:api\\.lovdata\\.no/v1/publicData/|data\\.stortinget\\.no/eksport/)"
+              }
+            }
           },
           "else": {
             "not": {
@@ -338,7 +360,10 @@
           "if": {
             "properties": {
               "role": {
-                "const": "law_identity"
+                "enum": [
+                  "law_identity",
+                  "law_decision_pair"
+                ]
               }
             },
             "required": [
@@ -349,6 +374,25 @@
             "properties": {
               "source_url": {
                 "pattern": "^https://api\\.lovdata\\.no/v1/publicData/"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "decision_publication"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_url": {
+                "pattern": "^https://data\\.stortinget\\.no/eksport/publikasjoner\\?"
               }
             }
           }
@@ -375,6 +419,26 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "correction"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_url": {
+                "description": "Only a source that can state a correction: an official government record or a Lovdata publicData document. A Stortinget page shows the current pairing, not a correction.",
+                "pattern": "^https://(?:(?:www\\.)?regjeringen\\.no/|api\\.lovdata\\.no/v1/publicData/)"
+              }
+            }
+          }
         }
       ]
     },
@@ -382,7 +446,6 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "filename",
         "source_url",
         "sha256",
         "size_bytes",
@@ -392,13 +455,9 @@
         "licence_basis"
       ],
       "properties": {
-        "filename": {
-          "type": "string",
-          "pattern": "^lovtidend-avd1-(?:2001-2025|[0-9]{4})\\.tar\\.bz2$"
-        },
         "source_url": {
           "type": "string",
-          "pattern": "^https://api\\.lovdata\\.no/v1/publicData/get/lovtidend-avd1-"
+          "pattern": "^https://api\\.lovdata\\.no/v1/publicData/get/lovtidend-avd1-(?:2001-2025|[0-9]{4})\\.tar\\.bz2$"
         },
         "sha256": {
           "$ref": "#/$defs/sha256"
@@ -408,32 +467,31 @@
           "minimum": 1
         },
         "last_modified": {
-          "type": "string",
-          "format": "date-time"
+          "$ref": "#/$defs/utc_timestamp"
         },
         "retrieved_at": {
-          "type": "string",
-          "format": "date-time"
+          "$ref": "#/$defs/utc_timestamp"
         },
         "licence": {
           "const": "NLOD-2.0"
         },
         "licence_basis": {
-          "description": "stated_for_file: a Lovdata or data.norge.no statement names this file under NLOD 2.0. inferred_same_dataset: only the dataset description matches; not sufficient for a release candidate.",
+          "description": "stated_for_file: a Lovdata or data.norge.no statement names this file under NLOD 2.0. stated_for_endpoint: Lovdata's OpenAPI document (https://api.lovdata.no/swagger/api.json) states NLOD 2.0 for the 'Public data' tag, which covers /v1/publicData/get/{filename} for every file it serves. inferred_same_dataset: only the dataset description matches; not sufficient for a release candidate.",
           "enum": [
             "stated_for_file",
+            "stated_for_endpoint",
             "inferred_same_dataset"
           ]
         }
       }
     },
     "source_pins": {
+      "description": "Parser versions are pinned per evidence item (parser_version), not here.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "lovverk_commit",
         "producer_commit",
-        "parsers",
         "lovdata_archives"
       ],
       "properties": {
@@ -443,29 +501,23 @@
         "producer_commit": {
           "$ref": "#/$defs/git_sha"
         },
-        "parsers": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "lovtidend",
-            "stortinget_sak"
-          ],
-          "properties": {
-            "lovtidend": {
-              "type": "string",
-              "minLength": 1
-            },
-            "stortinget_sak": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        },
         "lovdata_archives": {
           "type": "array",
+          "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/lovdata_archive_pin"
           }
+        }
+      }
+    },
+    "raw_role": {
+      "required": [
+        "role",
+        "capture_level"
+      ],
+      "properties": {
+        "capture_level": {
+          "const": "raw_body_captured"
         }
       }
     }
@@ -474,36 +526,33 @@
     {
       "if": {
         "properties": {
-          "record_revision": {
-            "minimum": 2
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "supersedes_revision"
-        ]
-      },
-      "else": {
-        "not": {
-          "required": [
-            "supersedes_revision"
-          ]
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
           "record_state": {
             "const": "withdrawn"
           }
-        }
+        },
+        "required": [
+          "record_state"
+        ]
       },
       "then": {
         "required": [
-          "withdrawal"
-        ]
+          "withdrawal",
+          "reason",
+          "reason_code"
+        ],
+        "properties": {
+          "record_revision": {
+            "minimum": 2
+          },
+          "status": {
+            "not": {
+              "const": "attested"
+            }
+          },
+          "reason_code": {
+            "const": "withdrawn_by_producer"
+          }
+        }
       },
       "else": {
         "not": {
@@ -616,7 +665,10 @@
                 "items": {
                   "properties": {
                     "licence_basis": {
-                      "const": "stated_for_file"
+                      "enum": [
+                        "stated_for_file",
+                        "stated_for_endpoint"
+                      ]
                     }
                   }
                 }
@@ -629,32 +681,32 @@
     {
       "if": {
         "properties": {
-          "status": {
-            "const": "attested"
+          "edge_status": {
+            "properties": {
+              "law_identity": {
+                "const": "attested"
+              }
+            }
           }
         }
       },
       "then": {
         "properties": {
-          "edge_status": {
-            "properties": {
-              "law_decision": {
-                "const": "attested"
-              },
-              "decision_case": {
-                "const": "attested"
-              }
+          "evidence": {
+            "contains": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/raw_role"
+                },
+                {
+                  "properties": {
+                    "role": {
+                      "const": "law_identity"
+                    }
+                  }
+                }
+              ]
             }
-          },
-          "decision": {
-            "$ref": "#/$defs/decision"
-          },
-          "sak_id": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "sanction_events": {
-            "minItems": 1
           },
           "source_pins": {
             "properties": {
@@ -662,59 +714,130 @@
                 "minItems": 1
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "edge_status": {
+            "properties": {
+              "law_decision": {
+                "const": "attested"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "decision": {
+            "$ref": "#/$defs/decision"
+          },
+          "sanction_events": {
+            "minItems": 1
           },
           "evidence": {
-            "minItems": 3,
-            "allOf": [
-              {
-                "contains": {
-                  "required": [
-                    "role",
-                    "capture_level"
-                  ],
-                  "properties": {
-                    "role": {
-                      "const": "law_identity"
-                    },
-                    "capture_level": {
-                      "const": "raw_body_captured"
-                    }
-                  }
-                }
-              },
-              {
-                "contains": {
-                  "required": [
-                    "role",
-                    "capture_level"
-                  ],
+            "contains": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/raw_role"
+                },
+                {
                   "properties": {
                     "role": {
                       "const": "law_decision_pair"
-                    },
-                    "capture_level": {
-                      "const": "raw_body_captured"
                     }
                   }
                 }
-              },
-              {
-                "contains": {
-                  "required": [
-                    "role",
-                    "capture_level"
-                  ],
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "edge_status": {
+            "properties": {
+              "decision_case": {
+                "const": "attested"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "sak_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "evidence": {
+            "contains": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/raw_role"
+                },
+                {
                   "properties": {
                     "role": {
                       "const": "decision_case"
-                    },
-                    "capture_level": {
-                      "const": "raw_body_captured"
                     }
                   }
                 }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "attested"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "edge_status": {
+            "properties": {
+              "law_identity": {
+                "const": "attested"
+              },
+              "law_decision": {
+                "const": "attested"
+              },
+              "decision_case": {
+                "const": "attested"
               }
-            ]
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "edge_status": {
+            "not": {
+              "properties": {
+                "law_identity": {
+                  "const": "attested"
+                },
+                "law_decision": {
+                  "const": "attested"
+                },
+                "decision_case": {
+                  "const": "attested"
+                }
+              }
+            }
           }
         }
       }
