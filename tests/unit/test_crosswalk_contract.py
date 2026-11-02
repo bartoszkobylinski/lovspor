@@ -294,3 +294,48 @@ def test_validate_records_checks_history_once_records_are_valid() -> None:
     with pytest.raises(CrosswalkContractError, match="without repeats"):
         validate_records([attested(), attested()])
     validate_records([attested(), besl_o()])
+
+
+@pytest.mark.parametrize("capture", ["evidence", "archive_pin"])
+def test_latest_capture_can_come_from_evidence_or_an_archive_pin(capture: str) -> None:
+    record = attested()
+    item = (
+        _role(record, "decision_case")
+        if capture == "evidence"
+        else record["source_pins"]["lovdata_archives"][0]
+    )
+    item["retrieved_at"] = "2026-11-03T00:00:00Z"
+    assert record_problems(record) == [
+        "observed_on 2026-11-02 is not the latest capture date 2026-11-03"
+    ]
+    record["observed_on"] = "2026-11-03"
+    assert record_problems(record) == []
+
+
+@pytest.mark.parametrize("record", [None, [], {}, {"evidence": [None]}])
+def test_schema_errors_are_returned_before_invariants_run(record: object) -> None:
+    problems = schema_problems(record)
+    assert problems
+    assert record_problems(record) == problems
+
+
+@pytest.mark.parametrize("role", ["decision_case", "decision_publication"])
+def test_evidence_url_must_match_even_when_upstream_id_is_correct(role: str) -> None:
+    record = attested()
+    item = _role(record, role)
+    item["source_url"] = (
+        item["source_url"].replace("89016", "89017").replace("2021-2022", "2022-2023")
+    )
+    assert schema_problems(record) == []
+    assert len(record_problems(record)) == 1
+    assert role in record_problems(record)[0]
+
+
+def test_history_is_grouped_per_law_and_independent_of_input_order() -> None:
+    first, second, other = attested(), attested(), besl_o()
+    second["record_revision"] = 2
+    assert history_problems(iter([second, other, first])) == []
+    other["record_revision"] = 2
+    assert history_problems([second, other, first]) == [
+        "LOV-2009-06-19-107: revisions [2] are not 1..1 without repeats"
+    ]
