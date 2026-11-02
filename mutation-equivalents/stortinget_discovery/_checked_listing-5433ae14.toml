@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/stortinget_discovery.py"
+symbol = "_checked_listing"
+registered = "2026-11-02, PR #768, owner-approved; survived run 41474301331 at commit 2134acf7"
+mutation = """
+-    header: str = response.headers.get("content-type", "")
++    header: str = response.headers.get("content-type", "XXXX")
+"""
+justification = """
+The default is read only when the response has no Content-Type. Then the
+original gives "" and the mutant "XXXX", lower-cased to "xxxx" two lines later.
+Neither is in {"application/xml", "text/xml"}, so both raise the same
+ParseError("Expected an XML listing from Stortinget") from the same line. When
+the header is present the default is never read. Every input yields the same
+outcome. The argument rests on this function's own code, not on a dependency's
+behaviour.
+"""

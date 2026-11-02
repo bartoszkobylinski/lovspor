@@ -13,6 +13,19 @@ class NetworkError(LovsporError):
     """Network-related failure: timeout, connection error, or HTTP 5xx."""
 
 
+class StortingetStatusError(NetworkError):
+    """data.stortinget.no answered with a status other than 200 (#610).
+
+    Carries the status, so a study can record a 429 refusal or a missing case
+    as that failure instead of reading it as an empty listing or crashing.
+    """
+
+    def __init__(self, status_code: int, url: str) -> None:
+        super().__init__(f"Stortinget HTTP {status_code}: {url}")
+        self.status_code = status_code
+        self.url = url
+
+
 class ParseError(LovsporError):
     """Failed to parse upstream data (XML, JSON, or manifest)."""
 

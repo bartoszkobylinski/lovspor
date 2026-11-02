@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/stortinget_discovery.py"
+symbol = "fetch_listing"
+registered = "2026-11-02, PR #768, owner-approved; survived run 41474301331 at commit 2134acf7"
+mutation = """
+-        with client.stream("GET", endpoint, params=params, follow_redirects=False) as response:
++        with client.stream("get", endpoint, params=params, follow_redirects=False) as response:
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_httpx_still_normalises_the_request_method"
+justification = """
+httpx normalises the method before the request exists: Request.__init__ does
+`self.method = method.upper()`. So "get" and "GET" build the same request and
+put the same bytes on the wire, and a test asserting request.method only ever
+sees the normalised value. The same mutant is registered for
+observatory/fetch.py. Argued from the dependency, hence pinned.
+"""
