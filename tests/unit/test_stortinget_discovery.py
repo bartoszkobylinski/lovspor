@@ -472,7 +472,7 @@ def test_discovery_parser_is_versioned() -> None:
     assert DISCOVERY_PARSER_VERSION == "lovvedtak-discovery-2"
 
 
-@pytest.mark.parametrize("headers", [{}, {"Content-Type": "text/html"}])
+@pytest.mark.parametrize("headers", [{}, {"Content-Type": "text/html"}, {"Content-Type": "XXXX"}])
 def test_listing_missing_or_wrong_media_type_has_useful_error(
     httpx_mock: HTTPXMock, headers: dict[str, str]
 ) -> None:
@@ -506,14 +506,36 @@ def test_listing_stream_preserves_chunks_and_counts_total_bytes(
             assert snapshot.source_sha256 == sha256(b"".join(chunks)).hexdigest()
 
 
+@pytest.mark.parametrize("follow_redirects", [False, True])
 def test_listing_redirect_is_refused_even_when_client_follows_redirects(
     httpx_mock: HTTPXMock,
+    follow_redirects: bool,
 ) -> None:
     httpx_mock.add_response(url=SAKER_URL, status_code=302, headers={"Location": "/elsewhere"})
-    with httpx.Client(follow_redirects=True) as client, pytest.raises(StortingetStatusError) as exc:
+    with (
+        httpx.Client(follow_redirects=follow_redirects) as client,
+        pytest.raises(StortingetStatusError) as exc,
+    ):
         fetch_listing(client, "saker", "2021-2022")
     assert (exc.value.status_code, exc.value.url) == (302, SAKER_URL)
     assert len(httpx_mock.get_requests()) == 1
+
+
+@pytest.mark.parametrize("header_name", ["content-type", "CONTENT-TYPE", "Content-Type"])
+def test_listing_accepts_header_casing_and_sends_get(
+    httpx_mock: HTTPXMock, header_name: str
+) -> None:
+    body = _saker(("89016", "Lovvedtak 85 (2021-2022)"))
+    httpx_mock.add_response(
+        url=SAKER_URL, method="GET", headers={header_name: "application/xml"}, content=body
+    )
+    with httpx.Client() as client:
+        snapshot = fetch_listing(client, "saker", "2021-2022")
+    assert snapshot.content_type == "application/xml"
+    assert snapshot.body == body
+    assert snapshot.source_sha256 == sha256(body).hexdigest()
+    assert parse_sak_listing(snapshot) == (SakHint(89016, "Lovvedtak 85 (2021-2022)"),)
+    assert [request.method for request in httpx_mock.get_requests()] == ["GET"]
 
 
 @pytest.mark.parametrize(
