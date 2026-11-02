@@ -15,7 +15,7 @@ import pytest
 
 from lovspor.forarbeider import corpus_commands, corpus_transaction
 from lovspor.forarbeider.corpus_models import parse_manifest
-from lovspor.forarbeider.corpus_transaction import JOURNAL, LOCK
+from lovspor.forarbeider.corpus_transaction import JOURNAL, LOCK, STAGING
 from lovspor.forarbeider.corpus_tree import BASELINE, read_dataset
 from lovspor.forarbeider.review_models import ReviewStatus
 from tests.unit.cli_output import said, unwrapped
@@ -384,6 +384,65 @@ def test_a_journal_that_was_tampered_with_is_refused(desk: Desk, box: Path) -> N
 
     assert result.exit_code == 1
     assert said("refused: corpus_tree_mismatch: journal", result.output)
+
+
+@pytest.mark.parametrize("action", ["release", "withdraw"])
+@pytest.mark.parametrize(
+    "stop_after", [DOCUMENT, "forarbeider/INDEX.md", "forarbeider/manifest.json"]
+)
+def test_recovery_finishes_each_completed_operation_without_rewriting_it(
+    desk: Desk, box: Path, monkeypatch: pytest.MonkeyPatch, action: str, stop_after: str
+) -> None:
+    """The journal survives even a failure after the manifest commit point (#738)."""
+    sha = planned(desk, box)
+    if action == "withdraw":
+        assert simulate(desk, sha, box).exit_code == 0
+    outside = _outside_dataset(box)
+    real_perform = corpus_transaction._perform
+
+    def interrupt_after_operation(root: Path, operation: corpus_transaction.Operation) -> None:
+        real_perform(root, operation)
+        if operation.path == stop_after:
+            raise OSError("interrupted after completing an operation")
+
+    monkeypatch.setattr(corpus_transaction, "_perform", interrupt_after_operation)
+    result = (
+        simulate(desk, sha, box)
+        if action == "release"
+        else withdraw(desk, box, "regjeringen-9000001")
+    )
+    assert result.exit_code == 1, result.output
+    assert said("refused: output_write_failed: forarbeider", result.output)
+    assert (box / JOURNAL).exists()
+    assert not (box / LOCK).exists()
+    journal = corpus_transaction.Journal.model_validate_json((box / JOURNAL).read_bytes())
+    completed = {
+        operation.path: (box / operation.path).stat().st_mtime_ns
+        for operation in journal.operations[
+            : next(
+                i for i, operation in enumerate(journal.operations) if operation.path == stop_after
+            )
+            + 1
+        ]
+        if operation.sha256 is not None
+    }
+    monkeypatch.setattr(corpus_transaction, "_perform", real_perform)
+
+    with corpus_transaction.locked(box):
+        assert corpus_transaction.recover(box) is True
+        assert corpus_transaction.recover(box) is False
+
+    assert {path: (box / path).stat().st_mtime_ns for path in completed} == completed
+    dataset = read_dataset(box)
+    assert dataset.manifest_sha256 == journal.target_manifest_sha256
+    assert dataset.manifest.documents[0].release_status == (
+        "released" if action == "release" else "withdrawn"
+    )
+    assert (box / DOCUMENT).exists() == (action == "release")
+    assert _outside_dataset(box) == outside
+    assert not (box / JOURNAL).exists()
+    assert not (box / STAGING).exists()
+    assert not (box / LOCK).exists()
 
 
 def test_withdrawal_removes_the_member_and_keeps_its_record(desk: Desk, box: Path) -> None:
