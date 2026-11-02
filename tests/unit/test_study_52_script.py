@@ -61,6 +61,19 @@ def test_inputs_never_read_the_labels() -> None:
     assert "sak_id" not in json.dumps(study.load_inputs())
 
 
+def test_committed_study_keeps_all_input_acts_and_csv_matches_json() -> None:
+    data = ROOT / "docs/research/data"
+    results = json.loads((data / "study-52-2026-11-02.json").read_text(encoding="utf-8"))
+    inputs = study.load_inputs()
+    law_ids = [law["amending_lov_id"] for law in results["laws"]]
+    assert len(law_ids) == len(set(law_ids)) == 52
+    assert set(law_ids) == set(inputs["mentions"])
+    assert results["release_state"] == "research_only"
+    assert study.render_csv(results) == (data / "study-52-2026-11-02.csv").read_text(
+        encoding="utf-8"
+    )
+
+
 # --- law edge ----------------------------------------------------------------------
 
 

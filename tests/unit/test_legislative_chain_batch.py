@@ -8,6 +8,7 @@ import io
 import tarfile
 from hashlib import sha256
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -226,3 +227,34 @@ def test_batch_refuses_archives_without_bzip2_compression(tmp_path: Path, mode: 
         pass
     with pytest.raises(ExtractionError, match="^Unreadable Lovtidend archive: wrong.tar.bz2$"):
         read_lovtidend_members(archive, ["LOV-2026-02-06-3"])
+
+
+def test_batch_opens_archive_once_and_reads_only_requested_members(tmp_path: Path) -> None:
+    first = "LOV-2026-02-06-3"
+    second = "LOV-2026-06-23-74"
+    names = ["lti/2026/nl-20260206-003.xml", "lti/2026/nl-20260623-074.xml"]
+    archive = _archive(
+        tmp_path / "batch.tar.bz2",
+        {
+            names[0]: b"first",
+            "lti/2026/nl-20260206-004.xml": b"x" * 2_000_001,
+            names[1]: b"second",
+        },
+    )
+    with tarfile.open(archive, "r:bz2") as tar:  # noqa: SIM117
+        with (
+            patch("lovspor.legislative_chain.tarfile.open", return_value=tar) as opened,
+            patch.object(tar, "extractfile", wraps=tar.extractfile) as read,
+            patch.object(tar, "extract") as extract,
+            patch.object(tar, "extractall") as extractall,
+        ):
+            found = read_lovtidend_members(archive, iter([first, second, first]))
+            opened.assert_called_once_with(archive, "r:bz2")
+            assert [call.args[0].name for call in read.call_args_list] == names
+            extract.assert_not_called()
+            extractall.assert_not_called()
+    assert {law: tuple(m.body for m in members) for law, members in found.items()} == {
+        first: (b"first",),
+        second: (b"second",),
+    }
+    assert list(tmp_path.iterdir()) == [archive]
