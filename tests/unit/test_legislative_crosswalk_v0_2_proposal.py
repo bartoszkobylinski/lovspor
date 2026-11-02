@@ -487,3 +487,45 @@ def test_release_candidate_checks_licence_of_every_archive(inferred_index: int) 
     _invalid(record)
     record["release_state"] = "research_only"
     VALIDATOR.validate(record)
+
+
+@pytest.mark.parametrize("revision", [0, -1, 1.5, True, "1"])
+def test_revision_is_a_positive_integer(revision: object) -> None:
+    """Section e: revisions run 1..n, starting at one."""
+    _invalid({**_pilot_record(), "record_revision": revision})
+
+
+@pytest.mark.parametrize("size", [0, -1, 1.5, True, "1"])
+def test_archive_pin_size_is_a_positive_integer(size: object) -> None:
+    record = _pilot_record()
+    record["source_pins"]["lovdata_archives"][0]["size_bytes"] = size
+    _invalid(record)
+
+
+@pytest.mark.parametrize("field", ["body_sha256", "parsed_identity_sha256"])
+@pytest.mark.parametrize("digest", ["a" * 63, "a" * 65, "A" * 64, "g" * 64])
+def test_raw_capture_digests_are_exact_lowercase_sha256(field: str, digest: str) -> None:
+    record = _pilot_record()
+    _evidence(record, "law_identity")[field] = digest
+    _invalid(record)
+
+
+@pytest.mark.parametrize(
+    "field", ["body_sha256", "parsed_identity_sha256", "retrieved_at", "parser_version"]
+)
+def test_web_review_cannot_claim_raw_capture_metadata(field: str) -> None:
+    """The evidence schema keeps review-only evidence distinct from captured bytes."""
+    record = _corrective(_pilot_record(), SYNTHETIC_NOTICE)
+    VALIDATOR.validate(record)
+    review = _evidence(record, "correction")
+    review[field] = _evidence(record, "law_identity")[field]
+    _invalid(record)
+
+
+@pytest.mark.parametrize("timestamp", ["2026-11-01T17:38:16Z", "2026-11-01T17:38:16.123456+00:00"])
+def test_utc_capture_accepts_both_utc_suffixes_and_fractional_seconds(timestamp: str) -> None:
+    record = _pilot_record()
+    _evidence(record, "law_identity")["retrieved_at"] = timestamp
+    archive = record["source_pins"]["lovdata_archives"][0]
+    archive.update(retrieved_at=timestamp, last_modified=timestamp)
+    VALIDATOR.validate(record)
