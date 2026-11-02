@@ -197,3 +197,93 @@ def test_partial_status_requires_reason_and_reason_code(status: str) -> None:
     _invalid(record)
     record["reason_code"] = "no_decision_citation_in_source"
     VALIDATOR.validate(record)
+
+
+@pytest.mark.parametrize(
+    "field", ["lovverk_commit", "producer_commit", "parsers", "lovdata_archives"]
+)
+def test_source_pin_set_is_required(field: str) -> None:
+    """Proposal section d requires corpus, producer, archive and parser pins."""
+    record = _pilot_record()
+    del record["source_pins"][field]
+    _invalid(record)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "filename",
+        "source_url",
+        "sha256",
+        "size_bytes",
+        "last_modified",
+        "retrieved_at",
+        "licence",
+        "licence_basis",
+    ],
+)
+def test_archive_pin_requires_every_provenance_field(field: str) -> None:
+    record = _pilot_record()
+    del record["source_pins"]["lovdata_archives"][0][field]
+    _invalid(record)
+
+
+@pytest.mark.parametrize("field", ["upstream_id", "retrieved_at", "parser_version"])
+def test_raw_capture_requires_identity_time_and_parser(field: str) -> None:
+    record = _pilot_record()
+    del record["evidence"][0][field]
+    _invalid(record)
+
+
+@pytest.mark.parametrize("role", ["law_identity", "law_decision_pair", "decision_case"])
+def test_attested_requires_raw_capture_for_each_evidence_role(role: str) -> None:
+    record = _pilot_record()
+    evidence = next(item for item in record["evidence"] if item["role"] == role)
+    # Keep the item and its role, but downgrade it to a valid web review.
+    evidence["capture_level"] = "web_page_review"
+    for field in ("body_sha256", "parsed_identity_sha256", "retrieved_at", "parser_version"):
+        del evidence[field]
+    assert VALIDATOR.evolve(schema=PROPOSAL["$defs"]["evidence"]).is_valid(evidence)
+    _invalid(record)
+
+
+@pytest.mark.parametrize("field", ["decision", "sak_id", "sanction_events"])
+def test_attested_requires_discovered_identities_and_sanction(field: str) -> None:
+    record = _pilot_record()
+    record[field] = [] if field == "sanction_events" else None
+    _invalid(record)
+
+
+def test_no_citation_can_be_recorded_without_inventing_a_decision_or_case() -> None:
+    """Section h retains acts with no header citation as unresolved."""
+    record = _pilot_record()
+    record.update(
+        status="unresolved",
+        reason="No decision citation in the source header",
+        reason_code="no_decision_citation_in_source",
+        decision=None,
+        sak_id=None,
+        sanction_events=[],
+        edge_status={"law_decision": "unresolved", "decision_case": "unresolved"},
+        evidence=[item for item in record["evidence"] if item["role"] == "law_identity"],
+    )
+    VALIDATOR.validate(record)
+
+
+@pytest.mark.parametrize("inferred_index", [0, 1])
+def test_release_candidate_checks_licence_of_every_archive(inferred_index: int) -> None:
+    record = _pilot_record()
+    second = copy.deepcopy(record["source_pins"]["lovdata_archives"][0])
+    second.update(
+        filename="lovtidend-avd1-2026.tar.bz2",
+        source_url="https://api.lovdata.no/v1/publicData/get/lovtidend-avd1-2026.tar.bz2",
+    )
+    record["source_pins"]["lovdata_archives"].append(second)
+    record["release_state"] = "release_candidate"
+    VALIDATOR.validate(record)
+    record["source_pins"]["lovdata_archives"][inferred_index]["licence_basis"] = (
+        "inferred_same_dataset"
+    )
+    _invalid(record)
+    record["release_state"] = "research_only"
+    VALIDATOR.validate(record)
