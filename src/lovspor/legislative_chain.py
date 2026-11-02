@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import tarfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -23,6 +24,10 @@ CHAIN_PARSER_VERSION = "lovtidend-identity-1"
 _MEMBER_LIMIT = 2_000_000
 _LAW_ID = re.compile(r"LOV-(\d{4})-(\d{2})-(\d{2})-([1-9]\d*)")
 _CITATION = re.compile(r"\bLovvedtak\s+(\d{1,4})\s*\(\s*(\d{4})\s*[-\u2013]\s*(\d{4})\s*\)", re.I)
+_BESL_O = re.compile(
+    r"\bBesl\.\s*O\.\s*nr\.?\s*(\d{1,4})\s*\(\s*(\d{4})\s*[-\u2013]\s*(\d{4})\s*\)", re.I
+)
+ODELSTING_PARSER_VERSION = "besl-o-header-1"
 _WORST_FIRST: tuple[Status, ...] = ("contradicted", "ambiguous", "unresolved", "attested")
 
 
@@ -93,16 +98,51 @@ def read_lovtidend_member(archive: Path, law_id: str) -> LovtidendMember | None:
     return LovtidendMember(law_id, found[0].name, body, sha256(body).hexdigest())
 
 
+def _claimants(member: tarfile.TarInfo, patterns: dict[str, re.Pattern[str]]) -> list[str]:
+    if not member.isfile():
+        return []
+    return [law_id for law_id, pattern in patterns.items() if pattern.fullmatch(member.name)]
+
+
+def _scan_members(
+    archive: Path, patterns: dict[str, re.Pattern[str]]
+) -> dict[str, list[tuple[str, bytes]]]:
+    found: dict[str, list[tuple[str, bytes]]] = {law_id: [] for law_id in patterns}
+    with tarfile.open(archive, "r:bz2") as tar:
+        for member in tar:
+            for law_id in _claimants(member, patterns):
+                found[law_id].append((member.name, _read_member(tar, member)))
+    return found
+
+
+def read_lovtidend_members(
+    archive: Path, law_ids: Iterable[str]
+) -> dict[str, tuple[LovtidendMember, ...]]:
+    """One pass over the archive for many acts; every match is kept and none is chosen."""
+    patterns = {law_id: _member_pattern(law_id) for law_id in law_ids}
+    try:
+        found = _scan_members(archive, patterns)
+    except tarfile.TarError as exc:
+        raise ExtractionError(f"Unreadable Lovtidend archive: {archive.name}") from exc
+    return {
+        law_id: tuple(
+            LovtidendMember(law_id, name, body, sha256(body).hexdigest())
+            for name, body in found[law_id]
+        )
+        for law_id in patterns
+    }
+
+
 def _header_value(root: etree._Element, name: str) -> str:
     """Only the document's key-info header counts; statute text can cite anything."""
     found = root.findall(f"./body/header/dl/dd[@class='{name}']")
     return "".join(str(text) for text in found[0].itertext()).strip() if len(found) == 1 else ""
 
 
-def _cited_decisions(text: str) -> tuple[LawDecision, ...]:
+def _cited_decisions(text: str, citation: re.Pattern[str] = _CITATION) -> tuple[LawDecision, ...]:
     cited = {
         LawDecision(f"{int(first):04d}-{int(last):04d}", int(number))
-        for number, first, last in _CITATION.findall(text)
+        for number, first, last in citation.findall(text)
         if int(last) == int(first) + 1
     }
     return tuple(sorted(cited, key=lambda decision: (decision.session_id, decision.number)))
@@ -110,6 +150,16 @@ def _cited_decisions(text: str) -> tuple[LawDecision, ...]:
 
 def parse_law_publication(member: LovtidendMember) -> LawPublication:
     """Refuse a document whose three header identities are not the requested act."""
+    decisions = _cited_decisions(_checked_misc_information(member))
+    return LawPublication(member.law_id, decisions, member.sha256)
+
+
+def cited_odelsting_decisions(member: LovtidendMember) -> tuple[LawDecision, ...]:
+    """`Besl. O.` citations of the header, read for reporting; no chain resolves them."""
+    return _cited_decisions(_checked_misc_information(member), _BESL_O)
+
+
+def _checked_misc_information(member: LovtidendMember) -> str:
     try:
         root = etree.fromstring(member.body, parser=safe_parser())
     except etree.XMLSyntaxError as exc:
@@ -123,8 +173,7 @@ def parse_law_publication(member: LovtidendMember) -> LawPublication:
     )
     if identities != (member.law_id, f"LTI/{ref_id}", ref_id):
         raise ParseError(f"Lovdata law identity mismatch: {member.name}")
-    decisions = _cited_decisions(_header_value(root, "miscInformation"))
-    return LawPublication(member.law_id, decisions, member.sha256)
+    return _header_value(root, "miscInformation")
 
 
 def resolve_law_decision(publication: LawPublication, expected: LawDecision) -> Status:
