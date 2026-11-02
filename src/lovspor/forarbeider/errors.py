@@ -52,6 +52,7 @@ class RefusalReason(StrEnum):
     RELEASE_RECORD_MISSING = "release_record_missing"
     RELEASE_RECORD_CORRUPT = "release_record_corrupt"
     RELEASE_ALREADY_REVOKED = "release_already_revoked"
+    RELEASE_OUT_OF_ORDER = "release_out_of_order"
 
 
 class ForarbeiderRefusedError(LovsporError):

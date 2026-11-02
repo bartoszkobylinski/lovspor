@@ -36,6 +36,7 @@ from tests.unit.forarbeider_release_support import (
     RETRIEVED,
     Desk,
     at_a_terminal,  # noqa: F401
+    moment,
     page,
     said_digest,
 )
@@ -154,7 +155,7 @@ def test_approval_pins_preserve_every_staged_result(
     staged = release_commands._staged(scope)
     staged = staged.model_copy(update={"results": tuple(desk.results[n] for n in numbers)})
 
-    pins = release_commands._approved_pins(scope, staged)
+    pins = release_commands._approved_pins(scope, staged, moment(DECIDED))
 
     assert tuple(pin.chapter.chapter_number for pin in pins) == numbers
     assert tuple(pin.chapter.text_sha256 for pin in pins) == tuple(
@@ -169,7 +170,7 @@ def test_approval_pins_refuse_a_bodyless_result_instead_of_omitting_it(tmp_path:
     assert staged.results[1].text_sha256 is None
 
     with pytest.raises(ForarbeiderRefusedError) as caught:
-        release_commands._approved_pins(scope, staged)
+        release_commands._approved_pins(scope, staged, moment(DECIDED))
 
     assert caught.value.reason is RefusalReason.RELEASE_NOT_ELIGIBLE
 

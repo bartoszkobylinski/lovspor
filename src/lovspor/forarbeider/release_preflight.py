@@ -194,6 +194,8 @@ def _authorization_reasons(inputs: PreflightInputs, document: DocumentIdentity) 
     dossier = inputs.dossier
     if dossier is not None and dossier.sha256 != authorization.dossier_sha256:
         reasons.add(DenyReason.DOSSIER_MISSING)
+    if dossier is not None and authorization.decided_at < dossier.record.reviewed_at:
+        reasons.add(DenyReason.AUTHORIZED_BEFORE_DOSSIER)
     if not _purpose_verified(inputs, authorization.purpose_sha256):
         reasons.add(DenyReason.PURPOSE_EVIDENCE_MISSING)
     return reasons
@@ -227,14 +229,8 @@ def _intact(inputs: PreflightInputs, artifact: EvidenceArtifact) -> bool:
 
 def _outcome(inputs: PreflightInputs, observed: Observed, blocked: bool) -> ChapterOutcome:
     number = observed.result.chapter_number
-    authorized = _authorized_chapter(inputs, number)
     missing, evidence_reasons = _evidence(inputs, observed.result)
-    reasons = (
-        _source_reasons(inputs.metadata, observed)
-        | _review_reasons(inputs, observed, authorized)
-        | _binding_reasons(inputs, observed.result, authorized)
-        | evidence_reasons
-    )
+    reasons = _chapter_reasons(inputs, observed) | evidence_reasons
     result = observed.result
     return ChapterOutcome(
         chapter_number=number,
@@ -245,6 +241,17 @@ def _outcome(inputs: PreflightInputs, observed: Observed, blocked: bool) -> Chap
         missing_evidence=missing,
         reasons=tuple(sorted(reasons)),
         eligible=not (reasons or missing or blocked),
+    )
+
+
+def _chapter_reasons(inputs: PreflightInputs, observed: Observed) -> set[DenyReason]:
+    authorized = _authorized_chapter(inputs, observed.result.chapter_number)
+    return (
+        _source_reasons(inputs.metadata, observed)
+        | _review_reasons(inputs, observed, authorized)
+        | _order_reasons(inputs, observed)
+        | _binding_reasons(inputs, observed.result, authorized)
+        | _purpose_reasons(inputs, observed.result)
     )
 
 
@@ -314,6 +321,23 @@ def _review_reasons(
     return reasons
 
 
+def _order_reasons(inputs: PreflightInputs, observed: Observed) -> set[DenyReason]:
+    """An approval comes before the owner's decision and before the preflight that uses it.
+
+    Only an approval is ordered: a later hold or rejection already denies. The
+    instants are compared, never their text, so an offset does not change the order.
+    """
+    history = observed.history
+    if not history or history[-1].decision.status is not ReviewStatus.APPROVED:
+        return set()
+    approved_at = history[-1].decision.decided_at
+    reasons = set() if inputs.at >= approved_at else {DenyReason.EVALUATED_BEFORE_APPROVAL}
+    authorization = inputs.authorization
+    if authorization is not None and authorization.record.decided_at < approved_at:
+        reasons.add(DenyReason.AUTHORIZED_BEFORE_APPROVAL)
+    return reasons
+
+
 def current_pin(result: ChapterResult, history: tuple[StoredDecision, ...]) -> ReviewPin:
     """The chain head of ``result`` as it stands; ``history`` must not be empty."""
     return ReviewPin(
@@ -344,6 +368,21 @@ def _binding_reasons(
     elif held[0] != identity:
         reasons.add(DenyReason.DOSSIER_CHAPTER_MISMATCH)
     return reasons
+
+
+def _purpose_reasons(inputs: PreflightInputs, result: ChapterResult) -> set[DenyReason]:
+    """The purpose the owner authorized must itself be intact evidence bound to this chapter."""
+    if inputs.authorization is None or inputs.dossier is None:
+        return set()
+    sha = inputs.authorization.record.purpose_sha256
+    bound = any(
+        item.kind is EvidenceKind.PUBLICATION_PURPOSE
+        and item.sha256 == sha
+        and result.chapter_number in item.chapters
+        and _intact(inputs, item)
+        for item in inputs.dossier.record.evidence
+    )
+    return set() if bound else {DenyReason.PURPOSE_NOT_AUTHORIZED}
 
 
 def _evidence(

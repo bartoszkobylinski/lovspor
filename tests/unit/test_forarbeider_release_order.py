@@ -31,8 +31,6 @@ from tests.unit.forarbeider_release_support import (
 )
 
 pytestmark = pytest.mark.usefixtures("at_a_terminal")
-#: Removed by the fix: each case below fails on the code review #5738285220 read.
-RED = pytest.mark.xfail(strict=True, reason="review #5738285220 on PR #765")
 
 
 def _stored(desk: Desk, sha: str) -> ReleaseAuthorization:
@@ -54,7 +52,6 @@ def _authorizations(desk: Desk) -> list[Path]:
 # P1: recording an authorization
 
 
-@RED
 def test_an_owner_decision_before_the_dossier_review_is_refused(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.approve_all()
@@ -68,7 +65,6 @@ def test_an_owner_decision_before_the_dossier_review_is_refused(tmp_path: Path) 
     assert _authorizations(desk) == []
 
 
-@RED
 def test_an_owner_decision_before_an_approval_is_refused(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.decide(2, ReviewStatus.APPROVED)
@@ -111,7 +107,6 @@ def test_equal_instants_in_other_offsets_are_in_order(tmp_path: Path) -> None:
     assert report["planned_chapters"] == [2, 3]
 
 
-@RED
 def test_order_is_by_instant_not_by_the_text_of_the_timestamp(tmp_path: Path) -> None:
     """``12:00+02:00`` sorts after ``11:00Z`` as text but is an hour earlier."""
     desk = Desk(tmp_path)
@@ -129,7 +124,6 @@ def test_order_is_by_instant_not_by_the_text_of_the_timestamp(tmp_path: Path) ->
 # P1: an authorization already stored out of order
 
 
-@RED
 def test_a_stored_owner_decision_before_the_dossier_is_denied(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.approve_all()
@@ -145,7 +139,6 @@ def test_a_stored_owner_decision_before_the_dossier_is_denied(tmp_path: Path) ->
     assert report["planned_chapters"] == []
 
 
-@RED
 def test_a_stored_owner_decision_before_an_approval_is_denied(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.decide(2, ReviewStatus.APPROVED, "2100-04-01T13:00:00Z")
@@ -162,7 +155,6 @@ def test_a_stored_owner_decision_before_an_approval_is_denied(tmp_path: Path) ->
     assert report["planned_chapters"] == [2]
 
 
-@RED
 def test_a_preflight_before_the_approval_it_relies_on_is_denied(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.decide(2, ReviewStatus.APPROVED, "2100-04-01T13:00:00Z")
@@ -187,7 +179,6 @@ def test_a_preflight_before_the_approval_it_relies_on_is_denied(tmp_path: Path) 
     assert report["planned_chapters"] == [2]
 
 
-@RED
 def test_a_stale_reapproval_is_out_of_order_as_well_as_superseded(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.approve_all()
@@ -229,7 +220,6 @@ def _split_purposes(desk: Desk) -> tuple[list[str], Path, Path]:
     return options, first, second
 
 
-@RED
 def test_two_chapters_with_different_purposes_cannot_be_authorized_together(
     tmp_path: Path,
 ) -> None:
@@ -245,7 +235,6 @@ def test_two_chapters_with_different_purposes_cannot_be_authorized_together(
     assert _authorizations(desk) == []
 
 
-@RED
 def test_two_purposes_each_covering_every_chapter_are_ambiguous(tmp_path: Path) -> None:
     """v1 holds one purpose; the first of two is not chosen for the owner."""
     desk = Desk(tmp_path)
@@ -260,7 +249,6 @@ def test_two_purposes_each_covering_every_chapter_are_ambiguous(tmp_path: Path) 
     assert said("refused: release_not_eligible: publication_purpose", result.output)
 
 
-@RED
 def test_a_purpose_bound_to_only_one_chapter_cannot_authorize_both(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     desk.approve_all()
@@ -289,7 +277,6 @@ def test_one_purpose_bound_to_both_chapters_is_the_one_authorized(tmp_path: Path
     assert report["planned_chapters"] == [2, 3]
 
 
-@RED
 def test_a_stored_purpose_for_chapter_2_does_not_clear_chapter_3(tmp_path: Path) -> None:
     """The review's repro: the owner authorized A, chapter 3 holds only B."""
     desk = Desk(tmp_path)
@@ -310,7 +297,6 @@ def test_a_stored_purpose_for_chapter_2_does_not_clear_chapter_3(tmp_path: Path)
     assert report["publication_authorized"] is False
 
 
-@RED
 @pytest.mark.parametrize("deleted", [False, True], ids=["changed", "deleted"])
 def test_a_changed_or_deleted_authorized_purpose_denies_every_chapter(
     tmp_path: Path, deleted: bool

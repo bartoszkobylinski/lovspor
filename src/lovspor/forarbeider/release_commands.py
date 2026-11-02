@@ -250,11 +250,14 @@ def _evidence_digest(artifact: EvidenceArtifact) -> str | None:
     return None if payload is None else digest(payload)
 
 
-def _approved_pins(scope: ChapterScope, staged: Staged) -> tuple[AuthorizedChapter, ...]:
-    """Each chapter with the head of its verified PR3A chain, which must be an approval.
+def _approved_pins(
+    scope: ChapterScope, staged: Staged, decided: datetime
+) -> tuple[AuthorizedChapter, ...]:
+    """Each chapter with the head of its verified PR3A chain, an approval made by ``decided``.
 
     Raises:
-        ForarbeiderRefusedError: ``review_not_eligible``, or a broken chain.
+        ForarbeiderRefusedError: ``review_not_eligible``, ``release_out_of_order``
+            for an approval after the owner's decision, or a broken chain.
     """
     ledger = checked_directory(scope.release.ledger, _forbidden())
     pinned = []
@@ -262,6 +265,8 @@ def _approved_pins(scope: ChapterScope, staged: Staged) -> tuple[AuthorizedChapt
         history = load_history(ledger, subject_of(result))
         if not history or history[-1].decision.status is not ReviewStatus.APPROVED:
             raise ForarbeiderRefusedError(RefusalReason.REVIEW_NOT_ELIGIBLE, result.id)
+        if history[-1].decision.decided_at > decided:
+            raise ForarbeiderRefusedError(RefusalReason.RELEASE_OUT_OF_ORDER, result.id)
         pinned.append(AuthorizedChapter(chapter=identity, review=current_pin(result, history)))
     return tuple(pinned)
 
@@ -276,16 +281,25 @@ def _current_dossier(scope: ChapterScope, staged: Staged, sha: str) -> ReleaseDo
 
 
 def _purpose(dossier: ReleaseDossier) -> str:
-    """The digest of the dossier's purpose statement, whose bytes must still be there.
+    """The one purpose statement bound to every chapter of the dossier, its bytes intact.
+
+    Version 1 authorizes a single purpose, so two candidates are as refused as none:
+    the owner is never handed whichever came first.
 
     Raises:
-        ForarbeiderRefusedError: ``release_not_eligible``: no intact purpose evidence.
+        ForarbeiderRefusedError: ``release_not_eligible``: no such purpose, or two.
     """
-    for artifact in dossier.evidence:
-        purpose = artifact.kind is EvidenceKind.PUBLICATION_PURPOSE
-        if purpose and _evidence_digest(artifact) == artifact.sha256:
-            return artifact.sha256
-    raise ForarbeiderRefusedError(RefusalReason.RELEASE_NOT_ELIGIBLE, "publication_purpose")
+    numbers = {item.chapter_number for item in dossier.chapters}
+    candidates = {
+        artifact.sha256
+        for artifact in dossier.evidence
+        if artifact.kind is EvidenceKind.PUBLICATION_PURPOSE
+        and numbers <= set(artifact.chapters)
+        and _evidence_digest(artifact) == artifact.sha256
+    }
+    if len(candidates) != 1:
+        raise ForarbeiderRefusedError(RefusalReason.RELEASE_NOT_ELIGIBLE, "publication_purpose")
+    return candidates.pop()
 
 
 class Grant(BaseModel):
@@ -316,7 +330,10 @@ def authorize_impl(scope: ChapterScope, grant: Grant) -> str:
     staged = _staged(scope)
     sha = _digest_option(grant.dossier, "dossier")
     dossier = _current_dossier(scope, staged, sha)
-    chapters = _approved_pins(scope, staged)
+    _, decided = actor(grant.decided)
+    if decided < dossier.reviewed_at:
+        raise ForarbeiderRefusedError(RefusalReason.RELEASE_OUT_OF_ORDER, "dossier")
+    chapters = _approved_pins(scope, staged, decided)
     declared = _declared(dossier, sha, chapters, grant)
     authorization = _validated(ReleaseAuthorization, {**_FIXED_AUTHORIZATION, **declared})
     document = dossier.document

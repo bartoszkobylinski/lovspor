@@ -163,7 +163,7 @@ def test_a_reapproval_after_authorization_is_still_superseded(desk: Desk) -> Non
     desk.decide(2, ReviewStatus.HELD, "2100-04-05T12:00:00Z")
     desk.decide(2, ReviewStatus.APPROVED, "2100-04-06T12:00:00Z")
     report = desk.report(desk.preflight(authorization, desk.all_checkpoints()).output)
-    assert chapter_reasons(report, 2) == ["review_superseded"]
+    assert chapter_reasons(report, 2) == ["authorized_before_approval", "review_superseded"]
 
 
 def test_changed_chapter_text_has_no_approval_and_no_binding(desk: Desk) -> None:
@@ -222,6 +222,7 @@ def test_a_chapter_outside_the_authorization_is_denied(desk: Desk) -> None:
         "dossier_chapter_missing",
         "evidence_incomplete",
         "not_authorized",
+        "purpose_not_authorized",
     ]
     assert report["planned_chapters"] == [2]
 
@@ -315,9 +316,10 @@ def test_a_changed_evidence_file_denies_its_chapters(desk: Desk) -> None:
 
 
 def test_evidence_must_be_bound_to_the_chapter(desk: Desk) -> None:
-    options = desk.evidence_options("2")
-    purpose = desk.write_evidence("publication_purpose", "-3")
-    options += ["--evidence", f"publication_purpose@3={purpose}"]
+    options: list[str] = []
+    for kind, path in desk.evidence.items():
+        chapters = "2,3" if kind == "publication_purpose" else "2"
+        options += ["--evidence", f"{kind}@{chapters}={path}"]
     dossier = said_digest(desk.dossier(options).output, "dossier")
     authorization = said_digest(desk.authorize(dossier).output, "authorization")
     report = desk.report(desk.preflight(authorization, desk.all_checkpoints()).output)
