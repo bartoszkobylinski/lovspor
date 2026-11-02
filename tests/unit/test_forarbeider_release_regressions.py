@@ -17,6 +17,54 @@ from tests.unit.forarbeider_release_support import (
 pytestmark = pytest.mark.usefixtures("at_a_terminal")
 
 
+@pytest.mark.parametrize("target", ["metadata", "observation"])
+def test_missing_staged_input_is_a_refusal_without_a_report(tmp_path: Path, target: str) -> None:
+    """Unreadable inputs give exit 1 with nothing written (operations.md)."""
+    desk = Desk(tmp_path)
+    desk.approve_all()
+    _, authorization = desk.released()
+    checkpoints = desk.all_checkpoints()
+    path = desk.metadata if target == "metadata" else desk.observations[3]
+    path.unlink()
+    before = {item: item.read_bytes() for item in desk.workspace.rglob("*") if item.is_file()}
+
+    result = desk.preflight(authorization, checkpoints)
+
+    assert result.exit_code == 1, result.output
+    assert said(f"refused: input_unreadable: {target}", result.output)
+    assert str(path) not in result.output
+    assert not (desk.workspace / "reports").exists()
+    assert {
+        item: item.read_bytes() for item in desk.workspace.rglob("*") if item.is_file()
+    } == before
+
+
+def test_preflight_retry_never_replaces_conflicting_report_bytes(tmp_path: Path) -> None:
+    """Digest-named records are never replaced, even by an otherwise valid retry."""
+    desk = Desk(tmp_path)
+    desk.approve_all()
+    _, authorization = desk.released()
+    checkpoints = desk.all_checkpoints()
+    first = desk.preflight(authorization, checkpoints)
+    assert first.exit_code == 0, first.output
+    sha = said_digest(first.output, "report")
+    path = desk.workspace / "reports" / f"{sha}.json"
+    path.write_bytes(b"conflicting private report bytes")
+    before = {item: item.read_bytes() for item in desk.workspace.rglob("*") if item.is_file()}
+    inode = path.stat().st_ino
+
+    result = desk.preflight(authorization, checkpoints)
+
+    assert result.exit_code == 1, result.output
+    assert said("refused: observation_exists: reports", result.output)
+    assert str(path) not in result.output
+    assert "conflicting private report bytes" not in result.output
+    assert path.stat().st_ino == inode
+    assert {
+        item: item.read_bytes() for item in desk.workspace.rglob("*") if item.is_file()
+    } == before
+
+
 @pytest.mark.parametrize(
     ("change", "reason"),
     [
