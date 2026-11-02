@@ -385,3 +385,19 @@ def test_a_yaml_reader_sees_exactly_the_title_and_the_fixed_labels(
     assert (front["normative"], front["source_license"]) == (False, None)
     assert front["rights_basis"] == "åndsverkloven § 14"
     assert front["source_document_type"] == "forarbeid"
+
+
+def test_a_quotation_stays_a_quotation_and_a_chapter_without_a_heading_gets_its_title(
+    tmp_path: Path,
+) -> None:
+    desk = Desk(tmp_path)
+    quoted = _with_blocks(
+        desk.results[2],
+        TextBlock(kind="paragraph", text="Innledende avsnitt."),
+        TextBlock(kind="quote", text="> sitert *tekst*"),
+    )
+
+    lines = render_document(_rendering(desk, (2,), ch2=quoted)).splitlines()
+
+    assert f"## {desk.results[2].chapter_title}" in lines
+    assert "> \\> sitert \\*tekst\\*" in lines

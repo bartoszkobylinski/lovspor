@@ -36,7 +36,9 @@ MAX_EVIDENCE_BYTES = 16 * 1024 * 1024
 #: The bound PR3A puts on a staged chapter result, whose page is at most 16 MiB.
 MAX_STAGED_BYTES = 64 * 1024 * 1024
 
-Folder = Literal["dossiers", "authorizations", "revocations", "reports"]
+Folder = Literal[
+    "dossiers", "authorizations", "revocations", "reports", "plans", "previews", "withdrawals"
+]
 
 
 @contextmanager
@@ -161,3 +163,17 @@ def read_record[T: BaseModel](
     if record is not None and digest(record_text(record).encode()) != sha:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_RECORD_CORRUPT, sha)
     return record
+
+
+def write_preview(workspace: Path, text: str) -> str:
+    """Keep a planned file's bytes, owner-only and named by their digest, for the owner to read.
+
+    Raises:
+        ForarbeiderRefusedError: an unsafe workspace, or the name holding other bytes.
+    """
+    sha = digest(text.encode())
+    directory = workspace / "previews"
+    with refused_as("previews"):
+        ensure_private_directory(directory)
+        write_observation(directory / f"{sha}.preview", text)
+    return sha

@@ -6,8 +6,11 @@ parameters and a release needs more. Each command only calls its ``_impl`` in
 :mod:`lovspor.forarbeider.release_commands`.
 
 Exit 1 is a typed refusal, with nothing written. Exit 2 is a written ``deny``
-report. Exit 0 is an ``eligible_preview`` report, which still authorizes no
-publication: no command here writes to ``lovverk`` or any Git checkout.
+report, or a plan or simulation refused because the preflight now denies.
+Exit 0 is an ``eligible_preview`` report or a plan, which still authorize no
+publication: no command here writes to ``lovverk`` or any real Git checkout.
+The simulator writes only a disposable sandbox this package made, from the
+bundled synthetic propositions (PR3B-2).
 """
 
 import re
@@ -17,7 +20,17 @@ from typing import Annotated
 
 import typer
 
-from lovspor.forarbeider.errors import ForarbeiderRefusedError
+from lovspor.forarbeider.corpus_commands import (
+    PlanRequest,
+    SimulateRequest,
+    WithdrawRequest,
+    fixtures_impl,
+    plan_impl,
+    sandbox_create_impl,
+    sandbox_withdraw_impl,
+    simulate_impl,
+)
+from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.release_commands import (
     ChapterScope,
     Grant,
@@ -52,7 +65,8 @@ def _echo(action: Callable[[], str]) -> None:
         typer.echo(action())
     except ForarbeiderRefusedError as error:
         typer.echo(refusal_line(error), err=True)
-        raise typer.Exit(code=1) from error
+        code = DENY_EXIT if error.reason is RefusalReason.PROMOTION_DENIED else 1
+        raise typer.Exit(code=code) from error
 
 
 def run_preflight(scope: ChapterScope, run: Run) -> None:
@@ -159,3 +173,62 @@ def show(
 ) -> None:
     """Show a stored record's ids, digests and codes, never paths or names."""
     _echo(lambda: show_impl(ctx.obj, kind, sha))
+
+
+@chapters_app.command("plan")
+def plan(
+    ctx: typer.Context,
+    report: Annotated[str, typer.Option(help="The eligible preflight report's sha256.")],
+    corpus: Annotated[Path, typer.Option(help="A corpus checkout, read and never written.")],
+    checkpoint: Annotated[
+        list[str] | None,
+        typer.Option(help="SUBJECT@REVISION:HEAD, as at the preflight; may be repeated."),
+    ] = None,
+) -> None:
+    """Re-verify an eligible preflight and keep the files a release would write, privately.
+
+    Writes no checkout. A plan is not permission to publish.
+    """
+    request = PlanRequest(report=report, checkpoints=tuple(checkpoint or ()), corpus=corpus)
+    _echo(lambda: plan_impl(ctx.obj, request))
+
+
+@chapters_app.command("simulate")
+def simulate(
+    ctx: typer.Context,
+    plan: Annotated[str, typer.Option(help="The plan's sha256.")],
+    sandbox: Annotated[Path, typer.Option(help="A sandbox made by sandbox-create.")],
+) -> None:
+    """Apply a plan of synthetic inputs to a synthetic sandbox, re-validated now. Never lovverk."""
+    request = SimulateRequest(plan=plan, sandbox=sandbox)
+    _echo(lambda: simulate_impl(ctx.obj, request))
+
+
+@release_app.command("sandbox-create")
+def sandbox_create(
+    ctx: typer.Context,
+    path: Annotated[Path, typer.Option(help="A new absolute path outside every repository.")],
+) -> None:
+    """Make a disposable, empty Git checkout for the simulator: no remote, no commit."""
+    _echo(lambda: sandbox_create_impl(ctx.obj, path))
+
+
+@release_app.command("sandbox-withdraw")
+def sandbox_withdraw(
+    ctx: typer.Context,
+    sandbox: Annotated[Path, typer.Option(help="A sandbox made by sandbox-create.")],
+    document: Annotated[str, typer.Option(help="The released document's id.")],
+    decided: _Actor,
+) -> None:
+    """Withdraw one document from the sandbox, forward only, at a terminal."""
+    request = WithdrawRequest(sandbox=sandbox, document=document, decided=decided)
+    _echo(lambda: sandbox_withdraw_impl(ctx.obj, request))
+
+
+@release_app.command("synthetic-fixtures")
+def synthetic_fixtures(
+    ctx: typer.Context,
+    out: Annotated[Path, typer.Option(help="An owner-only directory outside every repository.")],
+) -> None:
+    """Write the bundled synthetic Prop. L and Prop. LS staged files: invented text only."""
+    _echo(lambda: fixtures_impl(ctx.obj, out))
