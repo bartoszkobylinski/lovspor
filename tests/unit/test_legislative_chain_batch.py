@@ -204,3 +204,12 @@ def test_batch_accepts_member_at_the_byte_limit(tmp_path: Path) -> None:
 def test_batch_empty_archive_keeps_requested_acts(tmp_path: Path) -> None:
     archive = _archive(tmp_path / "empty.tar.bz2", {})
     assert read_lovtidend_members(archive, ["LOV-2026-02-06-3"]) == {"LOV-2026-02-06-3": ()}
+
+
+@pytest.mark.parametrize("mode", ["w", "w:gz"])
+def test_batch_refuses_archives_without_bzip2_compression(tmp_path: Path, mode: str) -> None:
+    archive = tmp_path / "wrong.tar.bz2"
+    with tarfile.open(archive, mode):
+        pass
+    with pytest.raises(ExtractionError, match="^Unreadable Lovtidend archive: wrong.tar.bz2$"):
+        read_lovtidend_members(archive, ["LOV-2026-02-06-3"])

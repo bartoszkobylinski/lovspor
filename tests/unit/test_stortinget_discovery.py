@@ -10,7 +10,7 @@ from hashlib import sha256
 
 import httpx
 import pytest
-from pytest_httpx import HTTPXMock
+from pytest_httpx import HTTPXMock, IteratorStream
 
 from lovspor.errors import LovsporError, NetworkError, ParseError, StortingetStatusError
 from lovspor.stortinget_case_source import CaseMetadata, CaseSnapshot, LawDecision
@@ -19,6 +19,7 @@ from lovspor.stortinget_discovery import (
     ListingSnapshot,
     Observation,
     SakHint,
+    _checked_listing,
     candidate_saks,
     case_identity,
     classify_drift,
@@ -311,7 +312,7 @@ def test_sak_listing_refuses_a_non_numeric_id(sak_id: str) -> None:
     ],
 )
 def test_listing_refusals(body: bytes, message: str) -> None:
-    with pytest.raises(ParseError, match=message):
+    with pytest.raises(ParseError, match=f"^{message}$"):
         parse_sak_listing(_listing(body))
 
 
@@ -333,7 +334,7 @@ def test_lovvedtak_listing_keeps_only_lovvedtak_ids() -> None:
 
 def test_fetch_listing_records_exact_bytes(httpx_mock: HTTPXMock) -> None:
     body = _saker(("89016", "Lovvedtak 85 (2021-2022)"))
-    httpx_mock.add_response(url=SAKER_URL, content=body, headers=XML)
+    httpx_mock.add_response(url=SAKER_URL, method="GET", content=body, headers=XML)
     with httpx.Client() as client:
         snapshot = fetch_listing(client, "saker", "2021-2022")
     assert (snapshot.kind, snapshot.session_id, snapshot.source_url) == (
@@ -420,6 +421,7 @@ def test_case_http_refusal_is_recorded_with_its_status(httpx_mock: HTTPXMock, st
     with httpx.Client() as client, pytest.raises(StortingetStatusError) as raised:
         fetch_case(client, 89016)
     assert raised.value.status_code == status
+    assert raised.value.url == CASE_URL
 
 
 def test_case_transport_and_shape_failures_stay_in_the_family(httpx_mock: HTTPXMock) -> None:
@@ -468,3 +470,65 @@ def test_case_identity_is_canonical() -> None:
 
 def test_discovery_parser_is_versioned() -> None:
     assert DISCOVERY_PARSER_VERSION == "lovvedtak-discovery-2"
+
+
+@pytest.mark.parametrize("headers", [{}, {"Content-Type": "text/html"}])
+def test_listing_missing_or_wrong_media_type_has_useful_error(
+    httpx_mock: HTTPXMock, headers: dict[str, str]
+) -> None:
+    httpx_mock.add_response(url=SAKER_URL, headers=headers, content=b"<x/>")
+    with (
+        httpx.Client() as client,
+        pytest.raises(ParseError, match="^Expected an XML listing from Stortinget$"),
+    ):
+        fetch_listing(client, "saker", "2021-2022")
+
+
+def test_checked_listing_reports_unexpected_endpoint() -> None:
+    response = httpx.Response(200, request=httpx.Request("GET", "https://example.org/"))
+    with pytest.raises(ParseError, match="^Unexpected Stortinget endpoint$"):
+        _checked_listing(response, "https://data.stortinget.no/eksport/saker")
+
+
+@pytest.mark.parametrize("over_limit", [False, True])
+def test_listing_stream_preserves_chunks_and_counts_total_bytes(
+    httpx_mock: HTTPXMock, over_limit: bool
+) -> None:
+    chunks = [b"a" * 10_000_000, b"b" * (10_000_001 if over_limit else 3)]
+    httpx_mock.add_response(url=SAKER_URL, headers=XML, stream=IteratorStream(chunks))
+    with httpx.Client() as client:
+        if over_limit:
+            with pytest.raises(ParseError, match="^Stortinget listing exceeds byte limit$"):
+                fetch_listing(client, "saker", "2021-2022")
+        else:
+            snapshot = fetch_listing(client, "saker", "2021-2022")
+            assert snapshot.body == b"".join(chunks)
+            assert snapshot.source_sha256 == sha256(b"".join(chunks)).hexdigest()
+
+
+def test_listing_redirect_is_refused_even_when_client_follows_redirects(
+    httpx_mock: HTTPXMock,
+) -> None:
+    httpx_mock.add_response(url=SAKER_URL, status_code=302, headers={"Location": "/elsewhere"})
+    with httpx.Client(follow_redirects=True) as client, pytest.raises(StortingetStatusError) as exc:
+        fetch_listing(client, "saker", "2021-2022")
+    assert (exc.value.status_code, exc.value.url) == (302, SAKER_URL)
+    assert len(httpx_mock.get_requests()) == 1
+
+
+@pytest.mark.parametrize(
+    "body", [b"<!DOCTYPE", f"<!DOCTYPE saker_oversikt><saker_oversikt {NS}/>".encode()]
+)
+def test_listing_ascii_dtd_is_rejected_before_parsing(body: bytes) -> None:
+    with pytest.raises(ParseError, match="^Forbidden XML DTD$"):
+        parse_sak_listing(_listing(body))
+
+
+def test_listing_comments_do_not_hide_sak_id() -> None:
+    body = _saker(("<!-- source comment -->89016", ""))
+    assert parse_sak_listing(_listing(body)) == (SakHint(89016, ""),)
+
+
+def test_typed_reference_comments_do_not_hide_type() -> None:
+    reference = GOOD.replace("<type>lovvedtak", "<type><!-- source comment -->lovvedtak")
+    assert typed_export_ids(_case(1, reference)) == frozenset({"vedtak-202122-085"})
