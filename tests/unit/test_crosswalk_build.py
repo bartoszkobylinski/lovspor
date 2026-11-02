@@ -20,6 +20,7 @@ from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.crosswalk import capture as cap
+from lovspor.crosswalk import commands
 from lovspor.crosswalk.build import BuildOptions, append_revisions, archive_pins, build, substance
 from lovspor.crosswalk.cache import MANIFEST, load_manifest, write_manifest
 from lovspor.crosswalk.canonical import is_canonical, parse_records, serialize_records
@@ -235,6 +236,34 @@ def test_replay_over_the_previous_release_appends_nothing(capture_dir: Path) -> 
     assert build(capture_dir, again) == first
 
 
+def test_build_appends_changed_discovery_and_replay_adds_nothing(capture_dir: Path) -> None:
+    first = build(capture_dir, OPTIONS)
+    manifest = load_manifest(capture_dir)
+    # The latest discovery attempt fails; an older success must not mask it.
+    case = next(e for e in manifest["stortinget"] if e["kind"] == "sak" and e["key"] == 90003)
+    manifest["stortinget"].append({**case, "error": "network timeout", "http_status": None})
+    write_manifest(capture_dir, manifest)
+
+    data = build(capture_dir, BuildOptions(PRODUCER, previous=first))
+    history = parse_records(data)
+    assert set(first.splitlines()) <= set(data.splitlines())
+    assert len(history) == len(parse_records(first)) + 1
+    changed = next(r for r in history if r["record_revision"] == 2)
+    assert changed["amending_lov_id"] == "LOV-2023-01-01-6"
+    assert (changed["status"], changed["reason_code"]) == ("unresolved", "source_unreadable")
+    assert changed["sak_id"] is None
+    assert "decision_case" not in {e["role"] for e in changed["evidence"]}
+    assert build(capture_dir, BuildOptions(PRODUCER, previous=data)) == data
+
+
+def test_new_law_gets_revision_one_without_rewriting_previous_history(capture_dir: Path) -> None:
+    first = build(capture_dir, OPTIONS)
+    previous = parse_records(first)
+    law = "LOV-2022-06-17-63"
+    kept = serialize_records(r for r in previous if r["amending_lov_id"] != law)
+    assert build(capture_dir, BuildOptions(PRODUCER, previous=kept)) == first
+
+
 def test_a_changed_record_is_appended_and_the_old_bytes_stay(capture_dir: Path) -> None:
     first = build(capture_dir, OPTIONS)
     previous = parse_records(first)
@@ -328,6 +357,35 @@ def test_previous_release_is_read_bounded(tmp_path: Path) -> None:
     assert read_previous(path) == b"{}\n"
     with pytest.raises(CrosswalkError, match="unreadable"):
         read_previous(tmp_path / "absent")
+
+
+def test_previous_release_size_limit_is_inclusive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(commands, "MAX_PREVIOUS_BYTES", 3)
+    path = tmp_path / "prev.jsonl"
+    path.write_bytes(b"{}\n")
+    assert read_previous(path) == b"{}\n"
+    path.write_bytes(b"{}\n\n")
+    with pytest.raises(CrosswalkError, match="previous release too large"):
+        read_previous(path)
+
+
+def test_write_once_cleans_staging_when_publication_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "out.jsonl"
+
+    def refuse_link(source: Path, destination: Path) -> None:
+        assert source.read_bytes() == b"complete\n"
+        assert destination == output
+        raise OSError("link refused")
+
+    monkeypatch.setattr(commands.os, "link", refuse_link)
+    with pytest.raises(CrosswalkError, match="could not write.*link refused"):
+        write_once(output, b"complete\n")
+    assert not output.exists()
+    assert not output.with_name(".out.jsonl.partial").exists()
 
 
 def test_engine_commit_is_head_or_a_refusal(tmp_path: Path) -> None:
