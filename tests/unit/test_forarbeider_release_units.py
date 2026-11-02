@@ -144,6 +144,36 @@ def _scope(desk: Desk) -> ChapterScope:
     )
 
 
+@pytest.mark.parametrize("numbers", [(), (2,), (2, 3), (3, 2), (2, 2)])
+def test_approval_pins_preserve_every_staged_result(
+    tmp_path: Path, numbers: tuple[int, ...]
+) -> None:
+    desk = Desk(tmp_path)
+    desk.approve_all()
+    scope = _scope(desk)
+    staged = release_commands._staged(scope)
+    staged = staged.model_copy(update={"results": tuple(desk.results[n] for n in numbers)})
+
+    pins = release_commands._approved_pins(scope, staged)
+
+    assert tuple(pin.chapter.chapter_number for pin in pins) == numbers
+    assert tuple(pin.chapter.text_sha256 for pin in pins) == tuple(
+        desk.results[n].text_sha256 for n in numbers
+    )
+
+
+def test_approval_pins_refuse_a_bodyless_result_instead_of_omitting_it(tmp_path: Path) -> None:
+    desk = Desk(tmp_path, extras={3: '<img src="bilde.png">'})
+    scope = _scope(desk)
+    staged = release_commands._staged(scope)
+    assert staged.results[1].text_sha256 is None
+
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        release_commands._approved_pins(scope, staged)
+
+    assert caught.value.reason is RefusalReason.RELEASE_NOT_ELIGIBLE
+
+
 @pytest.mark.usefixtures("at_a_terminal")
 @pytest.mark.parametrize(
     ("at", "reasons"),
