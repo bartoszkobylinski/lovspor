@@ -149,3 +149,58 @@ def test_besl_o_reader_keeps_the_identity_check() -> None:
     wrong = LovtidendMember("LOV-2009-06-19-108", member.name, member.body, member.sha256)
     with pytest.raises(ParseError, match="identity mismatch"):
         cited_odelsting_decisions(wrong)
+
+
+def test_batch_keeps_duplicate_member_names_as_separate_claims(tmp_path: Path) -> None:
+    archive = tmp_path / "duplicates.tar.bz2"
+    name = "lti/2026/nl-20260206-003.xml"
+    bodies = [b"first capture", b"second capture"]
+    with tarfile.open(archive, "w:bz2") as tar:
+        for body in bodies:
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
+
+    found = read_lovtidend_members(archive, iter(["LOV-2026-02-06-3"]))
+
+    assert found == {
+        "LOV-2026-02-06-3": tuple(
+            LovtidendMember("LOV-2026-02-06-3", name, body, sha256(body).hexdigest())
+            for body in bodies
+        )
+    }
+
+
+def test_batch_ignores_links_and_traversal_members(tmp_path: Path) -> None:
+    archive = tmp_path / "unsafe.tar.bz2"
+    name = "lti/2026/nl-20260206-003.xml"
+    with tarfile.open(archive, "w:bz2") as tar:
+        for kind in (tarfile.SYMTYPE, tarfile.LNKTYPE):
+            info = tarfile.TarInfo(name)
+            info.type = kind
+            info.linkname = "../../outside.xml"
+            tar.addfile(info)
+        for unsafe in (f"../{name}", f"/{name}", "lti/2026/../../nl-20260206-003.xml"):
+            info = tarfile.TarInfo(unsafe)
+            info.size = 1
+            tar.addfile(info, io.BytesIO(b"x"))
+
+    assert read_lovtidend_members(archive, ["LOV-2026-02-06-3"]) == {"LOV-2026-02-06-3": ()}
+    assert list(tmp_path.iterdir()) == [archive]
+
+
+def test_batch_accepts_member_at_the_byte_limit(tmp_path: Path) -> None:
+    body = b"x" * 2_000_000
+    name = "lti/2026/nl-20260206-003.xml"
+    archive = _archive(tmp_path / "boundary.tar.bz2", {name: body})
+
+    assert read_lovtidend_members(archive, ["LOV-2026-02-06-3"]) == {
+        "LOV-2026-02-06-3": (
+            LovtidendMember("LOV-2026-02-06-3", name, body, sha256(body).hexdigest()),
+        )
+    }
+
+
+def test_batch_empty_archive_keeps_requested_acts(tmp_path: Path) -> None:
+    archive = _archive(tmp_path / "empty.tar.bz2", {})
+    assert read_lovtidend_members(archive, ["LOV-2026-02-06-3"]) == {"LOV-2026-02-06-3": ()}
