@@ -151,6 +151,19 @@ def test_besl_o_reader_keeps_the_identity_check() -> None:
         cited_odelsting_decisions(wrong)
 
 
+def test_besl_o_reader_ignores_statute_text_and_deduplicates_header_citations() -> None:
+    member = _member(
+        "LOV-2009-06-19-107",
+        "Besl.O.nr.87 (2008-2009), Besl. O. nr. 87 (2008–2009)",  # noqa: RUF001
+    )
+    body = member.body.replace(
+        b"<main>Lovvedtak 99 (2021-2022)</main>",
+        b"<main>Besl.O.nr.12 (2007-2008)</main>",
+    )
+    member = LovtidendMember(member.law_id, member.name, body, sha256(body).hexdigest())
+    assert cited_odelsting_decisions(member) == (LawDecision("2008-2009", 87),)
+
+
 def test_batch_keeps_duplicate_member_names_as_separate_claims(tmp_path: Path) -> None:
     archive = tmp_path / "duplicates.tar.bz2"
     name = "lti/2026/nl-20260206-003.xml"

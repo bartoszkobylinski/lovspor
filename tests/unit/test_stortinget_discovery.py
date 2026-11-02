@@ -5,8 +5,10 @@ responses (`saker_oversikt`, `publikasjoner_oversikt`, `detaljert_sak`). HTTP is
 mocked with pytest-httpx only; the discovery rules run for real.
 """
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from hashlib import sha256
+from pathlib import Path
 
 import httpx
 import pytest
@@ -554,3 +556,35 @@ def test_listing_comments_do_not_hide_sak_id() -> None:
 def test_typed_reference_comments_do_not_hide_type() -> None:
     reference = GOOD.replace("<type>lovvedtak", "<type><!-- source comment -->lovvedtak")
     assert typed_export_ids(_case(1, reference)) == frozenset({"vedtak-202122-085"})
+
+
+def test_listing_partial_download_is_not_returned_as_a_snapshot() -> None:
+    class InterruptedStream(httpx.SyncByteStream):
+        def __iter__(self) -> Iterator[bytes]:
+            yield _saker(("89016", "Lovvedtak 85 (2021-2022)"))
+            raise httpx.ReadError("connection lost after the first chunk")
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers=XML, stream=InterruptedStream())
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(respond)) as client,
+        pytest.raises(NetworkError, match="^Stortinget saker 2021-2022: ReadError$") as error,
+    ):
+        fetch_listing(client, "saker", "2021-2022")
+    assert isinstance(error.value.__cause__, httpx.ReadError)
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16"])
+def test_publication_listing_rejects_external_entities(tmp_path: Path, encoding: str) -> None:
+    secret = tmp_path / "secret.txt"
+    secret.write_text("vedtak-202122-085", encoding="utf-8")
+    body = (
+        f'<?xml version="1.0" encoding="{encoding}"?>'
+        f'<!DOCTYPE publikasjoner_oversikt [<!ENTITY secret SYSTEM "{secret.as_uri()}">]>'
+        f"<publikasjoner_oversikt {NS}><publikasjoner_liste><publikasjon>"
+        "<id>&secret;</id><type>lovvedtak</type></publikasjon>"
+        "</publikasjoner_liste></publikasjoner_oversikt>"
+    ).encode(encoding)
+    with pytest.raises(ParseError, match="^Forbidden XML DTD$"):
+        parse_lovvedtak_listing(_listing(body, "publikasjoner"))
