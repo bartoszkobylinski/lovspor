@@ -99,8 +99,9 @@ def _tar(path: Path, members: dict[str, bytes]) -> Path:
 def _archives(cache: Path, old: dict[str, bytes], new: dict[str, bytes]) -> list[dict]:
     records = []
     for name, members in zip(study.ARCHIVES, (old, new), strict=True):
-        _tar(cache / "lovdata" / name, members)
-        records.append({"filename": name, "path": f"lovdata/{name}"})
+        path = _tar(cache / "lovdata" / name, members)
+        digest = sha256(path.read_bytes()).hexdigest()
+        records.append({"filename": name, "path": f"lovdata/{name}", "sha256": digest})
     return records
 
 
