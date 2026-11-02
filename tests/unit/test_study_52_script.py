@@ -220,11 +220,14 @@ def _put(cache: Path, manifest: dict, role: tuple[str, str, object], body: bytes
 LATER = LawDecision("2025-2026", 26)
 
 
-def _cross_session_cache(tmp_path: Path, *, previous: bytes | None, case: bytes | None):
+LISTED = _pubs("vedtak-202526-026")
+
+
+def _cross_session_cache(
+    tmp_path: Path, *, previous: bytes | None, case: bytes | None, pubs: bytes | None = LISTED
+):
     manifest: dict = {"stortinget": []}
-    _put(
-        tmp_path, manifest, ("discovery", "publikasjoner", "2025-2026"), _pubs("vedtak-202526-026")
-    )
+    _put(tmp_path, manifest, ("discovery", "publikasjoner", "2025-2026"), pubs)
     _put(
         tmp_path,
         manifest,
@@ -251,6 +254,116 @@ def test_cross_session_case_is_discovered_from_the_session_before(tmp_path: Path
     assert found["publication_listed"] is True
     assert found["export_id"] == "vedtak-202526-026"
     assert study.discovery_candidates(tmp_path, manifest, [LATER]) == [103533]
+
+
+FOUND_CASE = {
+    "previous": _saker((103533, "Lovvedtak 26 (2025-2026)")),
+    "case": _sak(103533, "2024-2025", ("2025-2026", 26)),
+}
+ATTESTED_LAW = {
+    "law_decision": {"status": "attested", "decision": {"session_id": "2025-2026", "number": 26}}
+}
+
+
+def test_a_case_whose_decision_is_not_on_the_publication_list_is_contradicted(
+    tmp_path: Path,
+) -> None:
+    manifest = _cross_session_cache(tmp_path, **FOUND_CASE, pubs=_pubs("vedtak-202526-025"))
+    found = study.discovery_record(tmp_path, manifest, LATER)
+    assert (found["publication_listed"], found["outcome"], found["sak_ids"]) == (
+        False,
+        "unlisted",
+        [103533],
+    )
+    assert "absent from the session's Lovvedtak publication list" in found["reason"]
+    chain = study._chain(ATTESTED_LAW, found)
+    assert chain["status"] == "contradicted"
+    assert chain["reason"].startswith("discovery unlisted: the decision is absent")
+
+
+@pytest.mark.parametrize("pubs", [None, b"<html><body>maintenance</body></html>"])
+def test_an_unread_or_unparseable_publication_list_never_attests(
+    tmp_path: Path, pubs: bytes | None
+) -> None:
+    manifest = _cross_session_cache(tmp_path, **FOUND_CASE, pubs=pubs)
+    found = study.discovery_record(tmp_path, manifest, LATER)
+    assert (found["publication_listed"], found["outcome"], found["sak_ids"]) == (
+        None,
+        "incomplete",
+        [103533],
+    )
+    assert found["reason"] == "the session's Lovvedtak publication list was not read or parsed"
+    chain = study._chain(ATTESTED_LAW, found)
+    assert chain == {
+        "status": "unresolved",
+        "reason": "discovery incomplete: the session's Lovvedtak publication list "
+        "was not read or parsed",
+    }
+
+
+def test_a_listed_decision_with_a_confirmed_case_still_attests(tmp_path: Path) -> None:
+    manifest = _cross_session_cache(tmp_path, **FOUND_CASE)
+    found = study.discovery_record(tmp_path, manifest, LATER)
+    assert (found["publication_listed"], found["outcome"], found["reason"]) == (
+        True,
+        "discovered",
+        None,
+    )
+    assert study._chain(ATTESTED_LAW, found) == {
+        "status": "attested",
+        "reason": None,
+        "sak_id": 103533,
+    }
+
+
+def test_publication_gate_leaves_other_outcomes_alone() -> None:
+    for outcome in ("not_found", "ambiguous", "incomplete"):
+        for listed in (True, False, None):
+            assert study._confirmed(outcome, listed) == (outcome, None)
+
+
+def test_a_malformed_http_200_saker_listing_is_a_recorded_failure(tmp_path: Path) -> None:
+    manifest = _cross_session_cache(tmp_path, previous=b"<saker_oversikt", case=None)
+    assert study.discovery_candidates(tmp_path, manifest, [LATER]) == []
+    found = study.discovery_record(tmp_path, manifest, LATER)
+    assert (found["outcome"], found["reason"]) == (
+        "incomplete",
+        "a saker listing was not read or did not parse",
+    )
+    by_key = {(item["kind"], item["key"]): item for item in found["listings"]}
+    broken = by_key[("saker", "2024-2025")]
+    assert broken["http_status"] == 200
+    assert broken["sha256"] == sha256(b"<saker_oversikt").hexdigest()
+    assert broken["parse_error"] == "ParseError: Invalid Stortinget listing XML"
+    assert by_key[("saker", "2025-2026")]["parse_error"] is None
+    assert by_key[("publikasjoner", "2025-2026")]["parse_error"] is None
+
+
+def test_a_wrong_root_listing_records_its_parse_error(tmp_path: Path) -> None:
+    manifest = _cross_session_cache(tmp_path, **FOUND_CASE, pubs=_saker((1, "x")))
+    found = study.discovery_record(tmp_path, manifest, LATER)
+    listing = next(item for item in found["listings"] if item["kind"] == "publikasjoner")
+    assert listing["parse_error"] == "ParseError: Unexpected Stortinget listing root"
+    assert found["outcome"] == "incomplete"
+
+
+def test_an_incomplete_discovery_keeps_the_law_with_an_unresolved_chain() -> None:
+    law = {**ATTESTED_LAW}
+    decision = {
+        "decision": {"session_id": "2025-2026", "number": 26},
+        "outcome": "incomplete",
+        "reason": "a saker listing was not read or did not parse",
+    }
+    study.attach_discovery([law], [decision])
+    assert law["discovery"] == {
+        "outcome": "incomplete",
+        "reason": "a saker listing was not read or did not parse",
+        "sak_ids": None,
+        "candidates": None,
+        "failed": None,
+    }
+    assert law["chain"]["status"] == "unresolved"
+    assert law["chain"]["other_case_decisions"] == []
 
 
 def test_unread_listing_or_case_is_incomplete_never_not_found(tmp_path: Path) -> None:

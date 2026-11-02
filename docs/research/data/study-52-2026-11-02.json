@@ -1656,6 +1656,7 @@
           "http_status": 200,
           "key": "2011-2012",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:26:12.221885+00:00",
           "sha256": "982cd0923303cea69ea236fab316b5b12a628b2be151499a73325ac2c861743d",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2011-2012"
@@ -1665,6 +1666,7 @@
           "http_status": 200,
           "key": "2011-2012",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:35.861806+00:00",
           "sha256": "3a8855d537ef6d34a394e8788d4ce861d502ce4ec5c84bd08c6b16276d666d4d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2011-2012"
@@ -1674,6 +1676,7 @@
           "http_status": 200,
           "key": "2010-2011",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:35.156777+00:00",
           "sha256": "e58485395aab1fdd4407d93e8a29ab15eee6eec27864301d3031e76fbc64123a",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2010-2011"
@@ -1685,6 +1688,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         50431
       ]
@@ -1725,6 +1729,7 @@
           "http_status": 200,
           "key": "2011-2012",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:26:12.221885+00:00",
           "sha256": "982cd0923303cea69ea236fab316b5b12a628b2be151499a73325ac2c861743d",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2011-2012"
@@ -1734,6 +1739,7 @@
           "http_status": 200,
           "key": "2011-2012",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:35.861806+00:00",
           "sha256": "3a8855d537ef6d34a394e8788d4ce861d502ce4ec5c84bd08c6b16276d666d4d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2011-2012"
@@ -1743,6 +1749,7 @@
           "http_status": 200,
           "key": "2010-2011",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:35.156777+00:00",
           "sha256": "e58485395aab1fdd4407d93e8a29ab15eee6eec27864301d3031e76fbc64123a",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2010-2011"
@@ -1754,6 +1761,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         50936
       ]
@@ -1790,6 +1798,7 @@
           "http_status": 200,
           "key": "2012-2013",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:26:32.865742+00:00",
           "sha256": "990cac895d59f77a77291413b1d5a653f0e10281ba6dfe16d7427702c9e1fc80",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2012-2013"
@@ -1799,6 +1808,7 @@
           "http_status": 200,
           "key": "2012-2013",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:36.566925+00:00",
           "sha256": "a12fa9e8337c45bdeb0a46805b88c47fe1ab9f31523d4f61bbb6e6fcc77714a7",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2012-2013"
@@ -1808,6 +1818,7 @@
           "http_status": 200,
           "key": "2011-2012",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:35.861806+00:00",
           "sha256": "3a8855d537ef6d34a394e8788d4ce861d502ce4ec5c84bd08c6b16276d666d4d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2011-2012"
@@ -1819,6 +1830,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         55789
       ]
@@ -1855,6 +1867,7 @@
           "http_status": 200,
           "key": "2014-2015",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:26:40.036348+00:00",
           "sha256": "5fb4aeb71c8c38f43220511ebb8dd8c294c800c3da8955bd9622133d13ca9ad8",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2014-2015"
@@ -1864,6 +1877,7 @@
           "http_status": 200,
           "key": "2014-2015",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:37.976940+00:00",
           "sha256": "1956b57d9e60c3fcab6fa289545e3c643a240ca9e484e1850cc41bf0ea9576fa",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2014-2015"
@@ -1873,6 +1887,7 @@
           "http_status": 200,
           "key": "2013-2014",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:37.271915+00:00",
           "sha256": "6e56ec9544c826c1a7ce068a07003d7866338a225f5db13abe90bacdf530927d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2013-2014"
@@ -1884,6 +1899,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         61801
       ]
@@ -1920,6 +1936,7 @@
           "http_status": 200,
           "key": "2015-2016",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:26:48.317630+00:00",
           "sha256": "4cd158f6a0b777d84a9fd611cc788b00609443a7d51900104cf1c76573dad734",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2015-2016"
@@ -1929,6 +1946,7 @@
           "http_status": 200,
           "key": "2015-2016",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:38.677056+00:00",
           "sha256": "41ceb49f56b8277a9d2a44085b9b60fd967ff9ea027b47e27386e3a473a647cf",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2015-2016"
@@ -1938,6 +1956,7 @@
           "http_status": 200,
           "key": "2014-2015",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:37.976940+00:00",
           "sha256": "1956b57d9e60c3fcab6fa289545e3c643a240ca9e484e1850cc41bf0ea9576fa",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2014-2015"
@@ -1949,6 +1968,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         63564
       ]
@@ -1985,6 +2005,7 @@
           "http_status": 200,
           "key": "2017-2018",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:26:55.148935+00:00",
           "sha256": "b7b82e7c0f3be6fb37f319ebfb484fd1624c70efd53e47c83873dd3d88d41767",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2017-2018"
@@ -1994,6 +2015,7 @@
           "http_status": 200,
           "key": "2017-2018",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:40.087175+00:00",
           "sha256": "f65e2112eabfd511c9759f1861e29a992409dd2c1ed15b592e844b677d1ca897",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2017-2018"
@@ -2003,6 +2025,7 @@
           "http_status": 200,
           "key": "2016-2017",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:39.382084+00:00",
           "sha256": "bae20b4a8e2b35404c5486c8028a946e05930d9efdbb409e9e5fae71b21d8308",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2016-2017"
@@ -2014,6 +2037,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         67749
       ]
@@ -2050,6 +2074,7 @@
           "http_status": 200,
           "key": "2018-2019",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:01.098717+00:00",
           "sha256": "fb12fc679c224f8e328c58a80f6049cc3a52b9bd538626031c3dbcdc55e1d5b1",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2018-2019"
@@ -2059,6 +2084,7 @@
           "http_status": 200,
           "key": "2018-2019",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:40.792256+00:00",
           "sha256": "55914fadf1465f3169146a033030c964860922c12ef01b217bc131bf4a412380",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2018-2019"
@@ -2068,6 +2094,7 @@
           "http_status": 200,
           "key": "2017-2018",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:40.087175+00:00",
           "sha256": "f65e2112eabfd511c9759f1861e29a992409dd2c1ed15b592e844b677d1ca897",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2017-2018"
@@ -2079,6 +2106,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         73953
       ]
@@ -2115,6 +2143,7 @@
           "http_status": 200,
           "key": "2018-2019",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:01.098717+00:00",
           "sha256": "fb12fc679c224f8e328c58a80f6049cc3a52b9bd538626031c3dbcdc55e1d5b1",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2018-2019"
@@ -2124,6 +2153,7 @@
           "http_status": 200,
           "key": "2018-2019",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:40.792256+00:00",
           "sha256": "55914fadf1465f3169146a033030c964860922c12ef01b217bc131bf4a412380",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2018-2019"
@@ -2133,6 +2163,7 @@
           "http_status": 200,
           "key": "2017-2018",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:40.087175+00:00",
           "sha256": "f65e2112eabfd511c9759f1861e29a992409dd2c1ed15b592e844b677d1ca897",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2017-2018"
@@ -2144,6 +2175,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         74445
       ]
@@ -2180,6 +2212,7 @@
           "http_status": 200,
           "key": "2018-2019",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:01.098717+00:00",
           "sha256": "fb12fc679c224f8e328c58a80f6049cc3a52b9bd538626031c3dbcdc55e1d5b1",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2018-2019"
@@ -2189,6 +2222,7 @@
           "http_status": 200,
           "key": "2018-2019",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:40.792256+00:00",
           "sha256": "55914fadf1465f3169146a033030c964860922c12ef01b217bc131bf4a412380",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2018-2019"
@@ -2198,6 +2232,7 @@
           "http_status": 200,
           "key": "2017-2018",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:40.087175+00:00",
           "sha256": "f65e2112eabfd511c9759f1861e29a992409dd2c1ed15b592e844b677d1ca897",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2017-2018"
@@ -2209,6 +2244,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         75802
       ]
@@ -2245,6 +2281,7 @@
           "http_status": 200,
           "key": "2020-2021",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:04.807612+00:00",
           "sha256": "1154cdfc292905af62a2bb4b15c1a5c42e544a4135ba217e9b615a62707b0759",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2020-2021"
@@ -2254,6 +2291,7 @@
           "http_status": 200,
           "key": "2020-2021",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:42.202258+00:00",
           "sha256": "0629c41b46cf7dc47907a5bb4f5d6f7652d818fa587828ff71c475411d100dc1",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2020-2021"
@@ -2263,6 +2301,7 @@
           "http_status": 200,
           "key": "2019-2020",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:41.497230+00:00",
           "sha256": "cd5ebb99f5de5d1cd9aa99aa01acf961432a04a73105f4523a37ea138298d532",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2019-2020"
@@ -2274,6 +2313,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         79685
       ]
@@ -2310,6 +2350,7 @@
           "http_status": 200,
           "key": "2020-2021",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:04.807612+00:00",
           "sha256": "1154cdfc292905af62a2bb4b15c1a5c42e544a4135ba217e9b615a62707b0759",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2020-2021"
@@ -2319,6 +2360,7 @@
           "http_status": 200,
           "key": "2020-2021",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:42.202258+00:00",
           "sha256": "0629c41b46cf7dc47907a5bb4f5d6f7652d818fa587828ff71c475411d100dc1",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2020-2021"
@@ -2328,6 +2370,7 @@
           "http_status": 200,
           "key": "2019-2020",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:41.497230+00:00",
           "sha256": "cd5ebb99f5de5d1cd9aa99aa01acf961432a04a73105f4523a37ea138298d532",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2019-2020"
@@ -2339,6 +2382,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         83212
       ]
@@ -2375,6 +2419,7 @@
           "http_status": 200,
           "key": "2021-2022",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:12.583770+00:00",
           "sha256": "c0beda332066ec06b2c5d7129225b1c420a2ab3046e60c8b92b62029688dbe85",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2021-2022"
@@ -2384,6 +2429,7 @@
           "http_status": 200,
           "key": "2021-2022",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:42.907281+00:00",
           "sha256": "9f0785f5b27c4c68813106144c6cfd0a2162cabf2d45f728265d4455317a4bbc",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2021-2022"
@@ -2393,6 +2439,7 @@
           "http_status": 200,
           "key": "2020-2021",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:42.202258+00:00",
           "sha256": "0629c41b46cf7dc47907a5bb4f5d6f7652d818fa587828ff71c475411d100dc1",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2020-2021"
@@ -2404,6 +2451,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         85359
       ]
@@ -2440,6 +2488,7 @@
           "http_status": 200,
           "key": "2022-2023",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:18.094579+00:00",
           "sha256": "b2ff26ec490105ce4606fd031e0991f7b425457c7883883d4330743c83b113e8",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2022-2023"
@@ -2449,6 +2498,7 @@
           "http_status": 200,
           "key": "2022-2023",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:43.612313+00:00",
           "sha256": "44570af6dcc4bfb9782f51fdfd479e1661e871dea60d0ec7b3a45f5f9dc91383",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2022-2023"
@@ -2458,6 +2508,7 @@
           "http_status": 200,
           "key": "2021-2022",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:42.907281+00:00",
           "sha256": "9f0785f5b27c4c68813106144c6cfd0a2162cabf2d45f728265d4455317a4bbc",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2021-2022"
@@ -2469,6 +2520,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         93718
       ]
@@ -2505,6 +2557,7 @@
           "http_status": 200,
           "key": "2022-2023",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:18.094579+00:00",
           "sha256": "b2ff26ec490105ce4606fd031e0991f7b425457c7883883d4330743c83b113e8",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2022-2023"
@@ -2514,6 +2567,7 @@
           "http_status": 200,
           "key": "2022-2023",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:43.612313+00:00",
           "sha256": "44570af6dcc4bfb9782f51fdfd479e1661e871dea60d0ec7b3a45f5f9dc91383",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2022-2023"
@@ -2523,6 +2577,7 @@
           "http_status": 200,
           "key": "2021-2022",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:42.907281+00:00",
           "sha256": "9f0785f5b27c4c68813106144c6cfd0a2162cabf2d45f728265d4455317a4bbc",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2021-2022"
@@ -2534,6 +2589,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         93692
       ]
@@ -2570,6 +2626,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:22.016606+00:00",
           "sha256": "05105ff713df00d4d6121c5f56f1fe2a0e9c4e5bfe23506901d3615ddadbbe3d",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2023-2024"
@@ -2579,6 +2636,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -2588,6 +2646,7 @@
           "http_status": 200,
           "key": "2022-2023",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:43.612313+00:00",
           "sha256": "44570af6dcc4bfb9782f51fdfd479e1661e871dea60d0ec7b3a45f5f9dc91383",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2022-2023"
@@ -2599,6 +2658,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         97337
       ]
@@ -2635,6 +2695,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:22.016606+00:00",
           "sha256": "05105ff713df00d4d6121c5f56f1fe2a0e9c4e5bfe23506901d3615ddadbbe3d",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2023-2024"
@@ -2644,6 +2705,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -2653,6 +2715,7 @@
           "http_status": 200,
           "key": "2022-2023",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:43.612313+00:00",
           "sha256": "44570af6dcc4bfb9782f51fdfd479e1661e871dea60d0ec7b3a45f5f9dc91383",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2022-2023"
@@ -2664,6 +2727,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         98355
       ]
@@ -2700,6 +2764,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -2709,6 +2774,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -2718,6 +2784,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -2729,6 +2796,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         98490
       ]
@@ -2765,6 +2833,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -2774,6 +2843,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -2783,6 +2853,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -2794,6 +2865,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         97340
       ]
@@ -2830,6 +2902,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -2839,6 +2912,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -2848,6 +2922,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -2859,6 +2934,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         101838
       ]
@@ -2895,6 +2971,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -2904,6 +2981,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -2913,6 +2991,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -2924,6 +3003,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         101001
       ]
@@ -2960,6 +3040,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -2969,6 +3050,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -2978,6 +3060,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -2989,6 +3072,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         100677
       ]
@@ -3025,6 +3109,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3034,6 +3119,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3043,6 +3129,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3054,6 +3141,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         101166
       ]
@@ -3090,6 +3178,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3099,6 +3188,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3108,6 +3198,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3119,6 +3210,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         101837
       ]
@@ -3155,6 +3247,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3164,6 +3257,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3173,6 +3267,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3184,6 +3279,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         102774
       ]
@@ -3220,6 +3316,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3229,6 +3326,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3238,6 +3336,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3249,6 +3348,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         103101
       ]
@@ -3285,6 +3385,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3294,6 +3395,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3303,6 +3405,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3314,6 +3417,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         102221
       ]
@@ -3350,6 +3454,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3359,6 +3464,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3368,6 +3474,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3379,6 +3486,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         102930
       ]
@@ -3419,6 +3527,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3428,6 +3537,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3437,6 +3547,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3448,6 +3559,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         101772
       ]
@@ -3484,6 +3596,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3493,6 +3606,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3502,6 +3616,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3513,6 +3628,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         102925
       ]
@@ -3549,6 +3665,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3558,6 +3675,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3567,6 +3685,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3578,6 +3697,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         102921
       ]
@@ -3650,6 +3770,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3659,6 +3780,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3668,6 +3790,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3679,6 +3802,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         102903
       ]
@@ -3717,6 +3841,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3726,6 +3851,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3735,6 +3861,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3746,6 +3873,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         103123
       ]
@@ -3782,6 +3910,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3791,6 +3920,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3800,6 +3930,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3811,6 +3942,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         103107
       ]
@@ -3863,6 +3995,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:26.342446+00:00",
           "sha256": "f9b5f247df2286901dede83e239d57a255173378d555286e1ca1a60975af43fe",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2024-2025"
@@ -3872,6 +4005,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3881,6 +4015,7 @@
           "http_status": 200,
           "key": "2023-2024",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:45.776042+00:00",
           "sha256": "82aa0e5de9677dd9168d4ec178aa0b94bc5bb68e2fe3875c0460d3afbee3228b",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2023-2024"
@@ -3892,6 +4027,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         103527
       ]
@@ -3928,6 +4064,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -3937,6 +4074,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -3946,6 +4084,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -3957,6 +4096,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         105211
       ]
@@ -4017,6 +4157,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4026,6 +4167,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4035,6 +4177,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4046,6 +4189,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         104897
       ]
@@ -4082,6 +4226,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4091,6 +4236,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4100,6 +4246,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4111,6 +4258,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         103997
       ]
@@ -4147,6 +4295,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4156,6 +4305,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4165,6 +4315,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4176,6 +4327,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         103533
       ]
@@ -4212,6 +4364,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4221,6 +4374,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4230,6 +4384,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4241,6 +4396,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         105848
       ]
@@ -4277,6 +4433,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4286,6 +4443,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4295,6 +4453,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4306,6 +4465,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         104479
       ]
@@ -4342,6 +4502,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4351,6 +4512,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4360,6 +4522,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4371,6 +4534,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         200262
       ]
@@ -4407,6 +4571,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4416,6 +4581,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4425,6 +4591,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4436,6 +4603,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         200136
       ]
@@ -4472,6 +4640,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4481,6 +4650,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4490,6 +4660,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4501,6 +4672,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         200047
       ]
@@ -4537,6 +4709,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4546,6 +4719,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4555,6 +4729,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4566,6 +4741,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         107721
       ]
@@ -4602,6 +4778,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4611,6 +4788,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4620,6 +4798,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4631,6 +4810,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         200231
       ]
@@ -4667,6 +4847,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4676,6 +4857,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4685,6 +4867,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4696,6 +4879,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         200228
       ]
@@ -4732,6 +4916,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4741,6 +4926,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4750,6 +4936,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4761,6 +4948,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         200250
       ]
@@ -4797,6 +4985,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4806,6 +4995,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4815,6 +5005,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4826,6 +5017,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         200127
       ]
@@ -4862,6 +5054,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4871,6 +5064,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4880,6 +5074,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4891,6 +5086,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         200246
       ]
@@ -4927,6 +5123,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -4936,6 +5133,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -4945,6 +5143,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -4956,6 +5155,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         200245
       ]
@@ -4992,6 +5192,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "publikasjoner",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:31.869783+00:00",
           "sha256": "017650d75e7549eac2f81bbaa4cdd7b435f5c06ff274ffc4762d19db017a2339",
           "source_url": "https://data.stortinget.no/eksport/publikasjoner?publikasjontype=lovvedtak&sesjonid=2025-2026"
@@ -5001,6 +5202,7 @@
           "http_status": 200,
           "key": "2025-2026",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.963992+00:00",
           "sha256": "7b0360858dc75df4fac00f0a64974f579e73815645c189db2b2415a46a7c880d",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2025-2026"
@@ -5010,6 +5212,7 @@
           "http_status": 200,
           "key": "2024-2025",
           "kind": "saker",
+          "parse_error": null,
           "retrieved_at": "2026-11-02T09:27:47.258956+00:00",
           "sha256": "ea9de348c2ef965224e2a5e2fc2d9d2a83d06430acf2d89e6b04b01251f8e519",
           "source_url": "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
@@ -5021,6 +5224,7 @@
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
+      "reason": null,
       "sak_ids": [
         107976
       ]
@@ -7306,6 +7510,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           103533
         ]
@@ -7383,6 +7588,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           50431
         ]
@@ -7445,6 +7651,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           50936
         ]
@@ -7502,6 +7709,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           55789
         ]
@@ -7559,6 +7767,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           61801
         ]
@@ -7616,6 +7825,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           63564
         ]
@@ -7673,6 +7883,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           67749
         ]
@@ -7730,6 +7941,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           73953
         ]
@@ -7787,6 +7999,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           74445
         ]
@@ -7844,6 +8057,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           75802
         ]
@@ -7901,6 +8115,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           79685
         ]
@@ -7958,6 +8173,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           83212
         ]
@@ -8015,6 +8231,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           85359
         ]
@@ -8072,6 +8289,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           93718
         ]
@@ -8129,6 +8347,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           93692
         ]
@@ -8186,6 +8405,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           97337
         ]
@@ -8243,6 +8463,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           98355
         ]
@@ -8300,6 +8521,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           98490
         ]
@@ -8357,6 +8579,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           97340
         ]
@@ -8414,6 +8637,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           101837
         ]
@@ -8471,6 +8695,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           100677
         ]
@@ -8528,6 +8753,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           101166
         ]
@@ -8585,6 +8811,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           102774
         ]
@@ -8642,6 +8869,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           101838
         ]
@@ -8699,6 +8927,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           103101
         ]
@@ -8761,6 +8990,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           101772
         ]
@@ -8818,6 +9048,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           103107
         ]
@@ -8912,6 +9143,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           102903
         ]
@@ -8986,6 +9218,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           103527
         ]
@@ -9043,6 +9276,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           101001
         ]
@@ -9100,6 +9334,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           102930
         ]
@@ -9159,6 +9394,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           103123
         ]
@@ -9216,6 +9452,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           102925
         ]
@@ -9273,6 +9510,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           102921
         ]
@@ -9330,6 +9568,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           102221
         ]
@@ -9387,6 +9626,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           105211
         ]
@@ -9469,6 +9709,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           104897
         ]
@@ -9526,6 +9767,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           103997
         ]
@@ -9583,6 +9825,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           103533
         ]
@@ -9640,6 +9883,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           105848
         ]
@@ -9697,6 +9941,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           104479
         ]
@@ -9754,6 +9999,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           200262
         ]
@@ -9811,6 +10057,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           107721
         ]
@@ -9868,6 +10115,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           107976
         ]
@@ -9925,6 +10173,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           200136
         ]
@@ -9982,6 +10231,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           200127
         ]
@@ -10039,6 +10289,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           200231
         ]
@@ -10096,6 +10347,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           200228
         ]
@@ -10153,6 +10405,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           200047
         ]
@@ -10210,6 +10463,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           200246
         ]
@@ -10267,6 +10521,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           200250
         ]
@@ -10324,6 +10579,7 @@
         ],
         "failed": [],
         "outcome": "discovered",
+        "reason": null,
         "sak_ids": [
           200245
         ]
