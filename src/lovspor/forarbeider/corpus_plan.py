@@ -32,7 +32,7 @@ from lovspor.forarbeider.release_models import SHA256, DocumentIdentity, digest
 _Digest = Annotated[str, Field(pattern=SHA256)]
 
 
-def _dataset_path(path: str) -> bool:
+def dataset_path(path: str) -> bool:
     return path in {MANIFEST_PATH, INDEX_PATH} or DOCUMENT_PATH.fullmatch(path) is not None
 
 
@@ -47,7 +47,7 @@ class PlannedFile(BaseModel):
 
     @model_validator(mode="after")
     def _in_the_dataset(self) -> Self:
-        if not _dataset_path(self.path):
+        if not dataset_path(self.path):
             raise ValueError("a plan writes only the dataset's own files")
         return self
 

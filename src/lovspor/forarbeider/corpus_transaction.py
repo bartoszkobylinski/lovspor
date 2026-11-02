@@ -22,12 +22,12 @@ import shutil
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from lovspor.forarbeider.corpus_models import DATASET_ROOT, INDEX_PATH, MANIFEST_PATH
-from lovspor.forarbeider.corpus_plan import Draft
+from lovspor.forarbeider.corpus_plan import Draft, dataset_path
 from lovspor.forarbeider.corpus_tree import read_dataset, require_sandbox
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.models import JSON_LAYOUT
@@ -40,12 +40,22 @@ _Digest = Annotated[str, Field(pattern=SHA256)]
 
 
 class Operation(BaseModel):
-    """Make ``path`` hold the staged bytes of ``sha256``, or remove it when ``None``."""
+    """Make ``path`` hold the staged bytes of ``sha256``, or remove it when ``None``.
+
+    The path has the dataset's grammar: a journal is read back from disk, and
+    one edited there must not steer a write anywhere else in the sandbox.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     path: str
     sha256: _Digest | None
+
+    @model_validator(mode="after")
+    def _in_the_dataset(self) -> Self:
+        if not dataset_path(self.path):
+            raise ValueError("an operation names a dataset file only")
+        return self
 
 
 class Journal(BaseModel):

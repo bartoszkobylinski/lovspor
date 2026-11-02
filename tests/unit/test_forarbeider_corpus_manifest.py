@@ -330,3 +330,16 @@ def test_two_documents_are_sorted_by_path_and_distinct(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         ForarbeiderManifest.model_validate({**manifest(), "documents": [second, first]})
     assert DIGEST not in manifest_text(EMPTY_MANIFEST)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("session", "2098-2099"), ("source_document_id", 9000002), ("id", "regjeringen-9000002")],
+)
+def test_a_member_whose_identity_disagrees_with_its_path_or_chapters_is_refused(
+    desk: Desk, field: str, value: Any
+) -> None:
+    built = member(desk)
+    built["document"] = {**built["document"], field: value}
+
+    _refused(_raw(manifest(built)), RefusalReason.MANIFEST_INVALID)

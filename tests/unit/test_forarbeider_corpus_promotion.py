@@ -500,3 +500,22 @@ def test_the_synthetic_fixtures_are_never_written_into_a_repository(
 
     assert result.exit_code == 1
     assert said("refused: unsafe_output_path: fixtures", result.output)
+
+
+def test_a_held_chapter_is_left_out_and_the_document_marked_partial(desk: Desk, box: Path) -> None:
+    desk.decide(2, ReviewStatus.APPROVED)
+    desk.decide(3, ReviewStatus.HELD)
+    _, authorization = desk.released(chapters=(2,))
+    checkpoints = [desk.checkpoint(2)]
+    preflight = desk.preflight(authorization, checkpoints, chapters=(2, 3))
+    assert preflight.exit_code == 0, preflight.output
+    report = said_digest(preflight.output, "report")
+
+    planned_sha = said_digest(plan(desk, report, checkpoints, box).output, "plan")
+    assert simulate(desk, planned_sha, box).exit_code == 0
+
+    member = read_dataset(box).manifest.documents[0]
+    assert [item.chapter_number for item in member.chapters] == [2]
+    markdown = (box / DOCUMENT).read_text()
+    assert "Partial curated excerpt" in markdown
+    assert desk.results[3].source_page_url not in markdown

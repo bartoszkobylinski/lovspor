@@ -4,6 +4,7 @@ The CLI tests drive the whole path; these pin what each part refuses on its
 own, including the states only a damaged or forged workspace could reach.
 """
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -261,3 +262,36 @@ def test_a_plan_forged_to_say_synthetic_is_refused(
     assert result.exit_code == 1
     assert said("refused: input_not_synthetic: observation", result.output)
     assert not (path / "forarbeider").exists()
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["../outside.md", "lover/README.md", "manifest.json", "forarbeider/../manifest.json", "/etc/x"],
+)
+def test_a_journal_naming_a_path_outside_the_dataset_is_refused(
+    box: Path, tmp_path: Path, path: str
+) -> None:
+    payload = b"overwritten\n"
+    (box / STAGING).mkdir()
+    (box / STAGING / digest(payload)).write_bytes(payload)
+    raw = {
+        "schema_version": 1,
+        "record_type": "forarbeider_corpus_journal",
+        "target_manifest_sha256": DIGEST,
+        "operations": [
+            {"path": path, "sha256": digest(payload)},
+            {"path": INDEX_PATH, "sha256": None},
+        ],
+    }
+    (box / JOURNAL).write_text(json.dumps(raw))
+    before = {name: (box / name).read_bytes() for name in ("manifest.json", "lover/README.md")}
+
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        recover(box)
+
+    assert (caught.value.reason, caught.value.detail) == (
+        RefusalReason.CORPUS_TREE_MISMATCH,
+        "journal",
+    )
+    assert {name: (box / name).read_bytes() for name in before} == before
+    assert not (tmp_path / "outside.md").exists()
