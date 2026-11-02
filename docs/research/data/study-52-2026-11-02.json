@@ -1681,7 +1681,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -1750,7 +1750,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -1815,7 +1815,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -1880,7 +1880,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -1945,7 +1945,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2010,7 +2010,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2075,7 +2075,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2140,7 +2140,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2205,7 +2205,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2270,7 +2270,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2335,7 +2335,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2400,7 +2400,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2465,7 +2465,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2530,7 +2530,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2595,7 +2595,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2660,7 +2660,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2725,7 +2725,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2790,7 +2790,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2855,7 +2855,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2920,7 +2920,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -2985,7 +2985,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3050,7 +3050,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3115,7 +3115,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3180,7 +3180,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3245,7 +3245,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3310,7 +3310,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3375,7 +3375,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3444,7 +3444,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3509,7 +3509,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3574,7 +3574,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3675,7 +3675,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3742,7 +3742,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3807,7 +3807,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3888,7 +3888,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -3953,7 +3953,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4042,7 +4042,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4107,7 +4107,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4172,7 +4172,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4237,7 +4237,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4302,7 +4302,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4367,7 +4367,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4432,7 +4432,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4497,7 +4497,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4562,7 +4562,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4627,7 +4627,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4692,7 +4692,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4757,7 +4757,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4822,7 +4822,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4887,7 +4887,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -4952,7 +4952,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -5017,7 +5017,7 @@
       ],
       "outcome": "discovered",
       "parser_versions": {
-        "stortinget_discovery": "lovvedtak-discovery-1",
+        "stortinget_discovery": "lovvedtak-discovery-2",
         "stortinget_sak": "sak-xml-2"
       },
       "publication_listed": true,
@@ -10376,7 +10376,7 @@
   "parser_versions": {
     "lovtidend_besl_o": "besl-o-header-1",
     "lovtidend_identity": "lovtidend-identity-1",
-    "stortinget_discovery": "lovvedtak-discovery-1",
+    "stortinget_discovery": "lovvedtak-discovery-2",
     "stortinget_sak": "sak-xml-2"
   },
   "release_state": "research_only",

@@ -221,6 +221,37 @@ def test_an_untyped_export_id_does_not_confirm_through_another_reference() -> No
     assert not confirms(case, DECISION)
 
 
+def test_confirmation_cannot_combine_two_inconsistent_typed_references() -> None:
+    case = _case(
+        1,
+        _ref("Lovvedtak 85 (2021-2022)", None),
+        _ref("Lovvedtak 86 (2021-2022)", "vedtak-202122-085"),
+    )
+    assert not confirms(case, DECISION)
+    assert discover(DECISION, [case]).outcome == "not_found"
+
+
+@pytest.mark.parametrize(
+    ("link", "confirmed"),
+    [
+        ("Lovvedtak 85 (2021-2022)", True),
+        ("lovvedtak  85(2021-2022)", True),
+        ("Lovvedtak 85 (2021-2022) og 86", False),
+        ("Lovvedtak 85 (2020-2021)", False),
+        ("Lovvedtak 85 (2021-2023)", False),
+    ],
+)
+def test_the_reference_with_the_export_id_must_itself_name_the_decision(
+    link: str, confirmed: bool
+) -> None:
+    case = _case(
+        1,
+        _ref("Lovvedtak 85 (2021-2022)", None),
+        _ref(link, "vedtak-202122-085"),
+    )
+    assert confirms(case, DECISION) is confirmed
+
+
 def test_cross_session_case_is_discovered_from_its_own_typed_reference() -> None:
     later = LawDecision("2025-2026", 26)
     case = _case(103533, _ref("Lovvedtak 26 (2025-2026)", "vedtak-202526-026"), session="2024-2025")
@@ -436,4 +467,4 @@ def test_case_identity_is_canonical() -> None:
 
 
 def test_discovery_parser_is_versioned() -> None:
-    assert DISCOVERY_PARSER_VERSION == "lovvedtak-discovery-1"
+    assert DISCOVERY_PARSER_VERSION == "lovvedtak-discovery-2"

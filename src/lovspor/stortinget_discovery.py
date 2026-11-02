@@ -23,8 +23,9 @@ from lovspor.parsing.xml_normalizer import safe_parser
 from lovspor.stortinget_case_source import CaseMetadata, CaseSnapshot, LawDecision, fetch_sak
 from lovspor.stortinget_case_source import parse_sak as _parse_sak
 
-DISCOVERY_PARSER_VERSION = "lovvedtak-discovery-1"
+DISCOVERY_PARSER_VERSION = "lovvedtak-discovery-2"
 _NS = "http://data.stortinget.no"
+_LINK = re.compile(r"^Lovvedtak\s+(\d{1,4})\s*\((\d{4})-(\d{4})\)$", re.I)
 _ENDPOINTS = {
     "saker": "https://data.stortinget.no/eksport/saker",
     "publikasjoner": "https://data.stortinget.no/eksport/publikasjoner",
@@ -226,19 +227,35 @@ def parse_lovvedtak_listing(snapshot: ListingSnapshot) -> frozenset[str]:
     return frozenset(_text(pub, "id") for pub in found if _text(pub, "type") == "lovvedtak")
 
 
-def typed_export_ids(snapshot: CaseSnapshot) -> frozenset[str]:
-    """Export ids of the case's direct, typed lovvedtak references."""
+def _typed_references(snapshot: CaseSnapshot) -> frozenset[tuple[str, str]]:
+    """(link text, export id) of each direct, typed lovvedtak reference, kept together."""
     parse_case(snapshot)
     root = etree.fromstring(snapshot.body, parser=safe_parser())
     path = f"{{{_NS}}}publikasjon_referanse_liste/{{{_NS}}}publikasjon_referanse"
-    refs = root.findall(path)
-    return frozenset(_text(ref, "eksport_id") for ref in refs if _text(ref, "type") == "lovvedtak")
+    refs = (ref for ref in root.findall(path) if _text(ref, "type") == "lovvedtak")
+    return frozenset((_text(ref, "lenke_tekst"), _text(ref, "eksport_id")) for ref in refs)
+
+
+def typed_export_ids(snapshot: CaseSnapshot) -> frozenset[str]:
+    """Export ids of the case's direct, typed lovvedtak references."""
+    return frozenset(export for _, export in _typed_references(snapshot))
+
+
+def _link_names(link: str, decision: LawDecision) -> bool:
+    match = _LINK.fullmatch(link)
+    if match is None:
+        return False
+    number, first, last = (int(group) for group in match.groups())
+    return (f"{first:04d}-{last:04d}", number) == (decision.session_id, decision.number)
 
 
 def confirms(snapshot: CaseSnapshot, decision: LawDecision) -> bool:
-    """Both the typed link text and the typed export id must name this exact decision."""
-    named = decision in parse_case(snapshot).lovvedtak
-    return named and export_id(decision) in typed_export_ids(snapshot)
+    """One typed reference must name this exact decision by link text AND export id."""
+    if decision not in parse_case(snapshot).lovvedtak:
+        return False
+    wanted = export_id(decision)
+    pairs = _typed_references(snapshot)
+    return any(export == wanted and _link_names(link, decision) for link, export in pairs)
 
 
 def discover(
