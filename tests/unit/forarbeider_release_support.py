@@ -103,6 +103,8 @@ class Desk:
         record = build_record(payload, url, moment(RETRIEVED))
         self.metadata = private(root / "staged" / "metadata.json", metadata_text(record).encode())
         self.evidence = {kind: self.write_evidence(kind) for kind in _EVIDENCE_KINDS}
+        self.dossier_at = DOSSIER_AT
+        self.decided = DECIDED
 
     def stage(self, chapter: int, extra: str = "", name: str = "") -> ChapterResult:
         payload, url = page(self.kind, chapter, extra)
@@ -170,11 +172,11 @@ class Desk:
     def dossier(self, options: list[str] | None = None, chapters: Sequence[int] = (2, 3)) -> Any:
         bound = ",".join(str(chapter) for chapter in chapters)
         given = self.evidence_options(bound) if options is None else options
-        reviewed = ["--reviewed", f"{REVIEWER}@{DOSSIER_AT}"]
+        reviewed = ["--reviewed", f"{REVIEWER}@{self.dossier_at}"]
         return self.invoke([*self.scope(chapters), "dossier", *given, *reviewed])
 
     def authorize(self, dossier: str, valid: str = VALID, chapters: Sequence[int] = (2, 3)) -> Any:
-        options = ["--dossier", dossier, "--decided", f"{OWNER}@{DECIDED}", "--valid", valid]
+        options = ["--dossier", dossier, "--decided", f"{OWNER}@{self.decided}", "--valid", valid]
         document = self.results[chapters[0]].id.split("-ch")[0]
         return self.invoke(
             [*self.scope(chapters), "authorize", *options], f"authorize {document} {dossier[:12]}\n"
