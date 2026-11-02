@@ -1,0 +1,265 @@
+"""Fail-closed check and the explicit release-candidate gate (#610, P4)."""
+
+import json
+from hashlib import sha256
+from pathlib import Path
+
+import pytest
+from pytest_httpx import HTTPXMock
+from typer.testing import CliRunner
+
+from lovspor.cli import app
+from lovspor.crosswalk.build import BuildOptions, build
+from lovspor.crosswalk.cache import load_manifest
+from lovspor.crosswalk.canonical import parse_records, serialize_records
+from lovspor.crosswalk.check import append_only_problems, check, current_records
+from lovspor.crosswalk.commands import check_impl, read_approval, release_candidate_impl
+from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
+from lovspor.crosswalk.release import Approval, cited_archives, ineligibility, promote
+from tests.unit.crosswalk_support import PRODUCER, make_capture
+
+OPTIONS = BuildOptions(producer_commit=PRODUCER)
+ATTESTED = {"LOV-2022-06-17-63", "LOV-2025-04-25-13", "LOV-2025-06-20-67"}
+
+
+@pytest.fixture
+def capture_dir(tmp_path: Path, httpx_mock: HTTPXMock) -> Path:
+    return make_capture(tmp_path, httpx_mock)
+
+
+@pytest.fixture
+def built(capture_dir: Path) -> bytes:
+    return build(capture_dir, OPTIONS)
+
+
+def _approval(data: bytes, r2: str = "approved") -> Approval:
+    return Approval.model_validate(
+        {
+            "input_sha256": sha256(data).hexdigest(),
+            "approved_by": "synthetic test approval",
+            "approved_on": "2026-11-03",
+            "R1": "approved",
+            "R2": r2,
+        }
+    )
+
+
+# --- check ---------------------------------------------------------------------------
+
+
+def test_a_fresh_build_passes_and_is_reproduced(built: bytes, capture_dir: Path) -> None:
+    report = check(built, cache=capture_dir)
+    assert report.passed, report.problems
+    assert report.unverified == []
+    assert len(report.records) == 8
+
+
+def test_non_canonical_bytes_fail(built: bytes) -> None:
+    spaced = built.replace(b'":', b'": ', 1)
+    assert "file is not in canonical form" in check(spaced).problems
+
+
+def test_malformed_file_fails_without_reading_further(built: bytes) -> None:
+    report = check(built + b"{oops\n")
+    assert not report.passed
+    assert report.records == []
+
+
+def test_contract_problems_fail(built: bytes) -> None:
+    records = parse_records(built)
+    records[0]["release_state"] = "released"
+    assert not check(serialize_records(records)).passed
+
+
+def test_previous_revisions_must_stay_byte_identical(built: bytes) -> None:
+    records = parse_records(built)
+    assert check(built, previous=built).passed
+    changed = [dict(r) for r in records]
+    changed[0] = {**changed[0], "reason": "rewritten after release"}
+    problems = check(serialize_records(changed), previous=built).problems
+    assert any("was rewritten" in p for p in problems)
+    assert any(
+        "was removed" in p for p in check(serialize_records(records[1:]), previous=built).problems
+    )
+
+
+def test_append_only_compares_canonical_lines() -> None:
+    one = {"amending_lov_id": "LOV-1", "record_revision": 1, "evidence": [], "a": 1}
+    assert append_only_problems([one, {**one, "record_revision": 2}], [one]) == []
+    assert append_only_problems([{**one, "a": 2}], [one]) == [
+        "LOV-1@1: revision of the previous release was rewritten"
+    ]
+
+
+def test_current_record_is_the_highest_revision() -> None:
+    one = {"amending_lov_id": "LOV-1", "record_revision": 1}
+    three = {"amending_lov_id": "LOV-1", "record_revision": 3}
+    assert current_records([three, one]) == {"LOV-1": three}
+
+
+def test_evidence_not_reproduced_from_the_capture_fails(built: bytes, capture_dir: Path) -> None:
+    records = parse_records(built)
+    record = next(r for r in records if r["amending_lov_id"] == "LOV-2022-06-17-63")
+    case = next(item for item in record["evidence"] if item["role"] == "decision_case")
+    case["parsed_identity_sha256"] = "f" * 64
+    problems = check(serialize_records(records), cache=capture_dir).problems
+    assert problems == [
+        "LOV-2022-06-17-63: evidence identities are not reproduced from the capture"
+    ]
+
+
+def test_a_law_outside_the_capture_is_unverified_not_failed(
+    built: bytes, capture_dir: Path
+) -> None:
+    manifest = load_manifest(capture_dir)
+    manifest["scope"]["law_ids"] = sorted(set(manifest["scope"]["law_ids"]) - {"LOV-2010-01-01-1"})
+    (capture_dir / "capture-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    report = check(built, cache=capture_dir)
+    assert report.passed
+    assert report.unverified == ["LOV-2010-01-01-1"]
+
+
+def test_check_impl_and_cli(built: bytes, capture_dir: Path, tmp_path: Path) -> None:
+    path = tmp_path / "x.jsonl"
+    path.write_bytes(built)
+    assert check_impl(path, None, capture_dir) == "ok: 8 records, 0 not reproduced from a capture"
+    assert check_impl(path, None, None) == "ok: 8 records"
+    path.write_bytes(built.replace(b'":', b'": ', 1))
+    with pytest.raises(CrosswalkContractError):
+        check_impl(path, None, None)
+    result = CliRunner().invoke(app, ["ops", "crosswalk", "check", "--input", str(path)])
+    assert result.exit_code == 1
+    assert "problem: file is not in canonical form" in result.output
+
+
+# --- release-candidate gate --------------------------------------------------------
+
+
+def test_only_attested_records_on_accepted_rights_are_promoted(
+    built: bytes, capture_dir: Path
+) -> None:
+    promoted, counts = promote(built, _approval(built), capture_dir)
+    records = parse_records(promoted)
+    candidates = {
+        r["amending_lov_id"] for r in records if r["release_state"] == "release_candidate"
+    }
+    assert candidates == ATTESTED
+    assert counts == {"promoted": 3, "not an active attested record": 5}
+    assert set(built.splitlines()) <= set(promoted.splitlines())
+    assert all(
+        r["record_revision"] == 2 for r in records if r["release_state"] == "release_candidate"
+    )
+    assert check(promoted, previous=built, cache=capture_dir).passed
+
+
+def test_promotion_is_idempotent_by_appending_nothing_new(built: bytes, capture_dir: Path) -> None:
+    once, _ = promote(built, _approval(built), capture_dir)
+    twice, counts = promote(once, _approval(once), capture_dir)
+    assert twice == once
+    assert counts["promoted"] == 0
+
+
+def test_r2_rejected_keeps_records_on_the_2026_archive(built: bytes) -> None:
+    record = next(r for r in parse_records(built) if r["amending_lov_id"] == "LOV-2022-06-17-63")
+    url = "https://api.lovdata.no/v1/publicData/get/lovtidend-avd1-2001-2025.tar.bz2"
+    on_2026 = json.loads(json.dumps(record).replace("2001-2025", "2026"))
+    on_2026["source_pins"]["lovdata_archives"] = record["source_pins"]["lovdata_archives"]
+    assert cited_archives(record) == {url}
+    rejected = _approval(built, "rejected")
+    approved = _approval(built)
+    assert ineligibility(record, frozenset({"stated_for_file"})) is None
+    reason = "rests on an archive whose licence basis is not accepted"
+    assert ineligibility(on_2026, frozenset({"stated_for_file"})) == reason
+    assert rejected.r2 == "rejected" and approved.r2 == "approved"
+
+
+def test_inferred_rights_and_corrections_are_never_promoted(built: bytes) -> None:
+    record = next(r for r in parse_records(built) if r["amending_lov_id"] == "LOV-2022-06-17-63")
+    pins = record["source_pins"]["lovdata_archives"]
+    inferred = {
+        **record,
+        "source_pins": {
+            **record["source_pins"],
+            "lovdata_archives": [{**pin, "licence_basis": "inferred_same_dataset"} for pin in pins],
+        },
+    }
+    every = frozenset({"stated_for_file", "stated_for_endpoint"})
+    assert (
+        ineligibility(inferred, every) == "rests on an archive whose licence basis is not accepted"
+    )
+    corrected = {
+        **record,
+        "evidence": [*record["evidence"], {"role": "correction", "upstream_id": "x"}],
+    }
+    assert ineligibility(corrected, every) == "carries a correction (R4 is blocked)"
+    assert ineligibility({**record, "release_state": "release_candidate"}, every) == (
+        "already a release candidate"
+    )
+
+
+def test_approval_must_name_these_bytes(built: bytes, capture_dir: Path) -> None:
+    other = _approval(built + b" ")
+    with pytest.raises(CrosswalkError, match="other bytes"):
+        promote(built, other, capture_dir)
+
+
+def test_a_failing_check_blocks_promotion(built: bytes, capture_dir: Path) -> None:
+    spaced = built.replace(b'":', b'": ', 1)
+    with pytest.raises(CrosswalkContractError):
+        promote(spaced, _approval(spaced), capture_dir)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"R1": "rejected"}, {"R2": "maybe"}, {"input_sha256": "x"}, {"approved_by": ""}, {"extra": 1}],
+)
+def test_an_approval_file_is_strict(tmp_path: Path, change: dict) -> None:
+    body = {
+        "input_sha256": "0" * 64,
+        "approved_by": "owner",
+        "approved_on": "2026-11-03",
+        "R1": "approved",
+        "R2": "approved",
+    }
+    path = tmp_path / "approval.json"
+    path.write_text(json.dumps({**body, **change}), encoding="utf-8")
+    with pytest.raises(CrosswalkError, match="approval refused"):
+        read_approval(path)
+    path.write_text(json.dumps(body), encoding="utf-8")
+    assert read_approval(path).r1 == "approved"
+
+
+def test_release_candidate_impl_writes_a_new_file(
+    built: bytes, capture_dir: Path, tmp_path: Path
+) -> None:
+    data, approval, output = tmp_path / "in.jsonl", tmp_path / "ok.json", tmp_path / "rc.jsonl"
+    data.write_bytes(built)
+    approval.write_text(_approval(built).model_dump_json(by_alias=True), encoding="utf-8")
+    line = release_candidate_impl(data, approval, capture_dir, output)
+    assert line == "not an active attested record: 5; promoted: 3"
+    assert output.read_bytes() == promote(built, _approval(built), capture_dir)[0]
+    with pytest.raises(CrosswalkError, match="overwrite"):
+        release_candidate_impl(data, approval, capture_dir, output)
+    assert data.read_bytes() == built
+
+
+def test_cli_gate_refuses_without_an_approval(
+    built: bytes, capture_dir: Path, tmp_path: Path
+) -> None:
+    data = tmp_path / "in.jsonl"
+    data.write_bytes(built)
+    args = [
+        "ops",
+        "crosswalk",
+        "release-candidate",
+        "--input",
+        str(data),
+        "--cache",
+        str(capture_dir),
+    ]
+    result = CliRunner().invoke(
+        app, [*args, "--approval", str(tmp_path / "none.json"), "--output", str(tmp_path / "o")]
+    )
+    assert result.exit_code == 1
+    assert "refused: approval unreadable" in result.output
+    assert not (tmp_path / "o").exists()

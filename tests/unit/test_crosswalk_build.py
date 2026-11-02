@@ -19,7 +19,6 @@ from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from lovspor.cli import app
-from lovspor.crosswalk import capture as cap
 from lovspor.crosswalk import commands
 from lovspor.crosswalk.build import BuildOptions, append_revisions, archive_pins, build, substance
 from lovspor.crosswalk.cache import MANIFEST, load_manifest, write_manifest
@@ -33,31 +32,15 @@ from tests.unit.crosswalk_support import (
     EXPECTED,
     PRODUCER,
     SCENARIO_LAWS,
-    mock_scenario,
+    make_capture,
 )
 
 OPTIONS = BuildOptions(producer_commit=PRODUCER)
 
 
-class _Clock:
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-    def sleep(self, seconds: float) -> None:
-        self.now += seconds
-
-
 @pytest.fixture
 def capture_dir(tmp_path: Path, httpx_mock: HTTPXMock) -> Path:
-    mock_scenario(httpx_mock)
-    clock = _Clock()
-    pacer = cap.Pacer(tmp_path / "progress.log", clock=clock, sleep=clock.sleep)
-    cache = tmp_path / "capture"
-    cap.capture(cache, SCENARIO_LAWS, COMMIT, cap.Sources(pacer=pacer))
-    return cache
+    return make_capture(tmp_path, httpx_mock)
 
 
 @pytest.fixture
