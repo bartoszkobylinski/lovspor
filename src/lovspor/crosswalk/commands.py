@@ -18,6 +18,7 @@ from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.capture import REAL_SOURCES, Sources, capture
 from lovspor.crosswalk.check import check
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
+from lovspor.crosswalk.manifest import build_manifest, render_manifest
 from lovspor.crosswalk.release import Approval, promote
 from lovspor.errors import LovsporError
 from lovspor.ops.commands import ops_app
@@ -219,6 +220,30 @@ def release_candidate_command(
     """Explicit gate: promote eligible records under the owner's approval of these bytes."""
     try:
         typer.echo(release_candidate_impl(data, approval, cache, output))
+    except LovsporError as error:
+        typer.echo(f"refused: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+
+def manifest_impl(data_path: Path, output: Path) -> str:
+    data = _read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
+    manifest = build_manifest(data, data_path.name)
+    write_once(output, render_manifest(manifest))
+    return f"wrote the manifest of {data_path.name} ({manifest['release_state']}) to {output}"
+
+
+@crosswalk_app.command("manifest")
+def manifest_command(
+    data: _Input,
+    output: Annotated[Path, typer.Option("--output", help="New manifest file; never overwritten.")],
+) -> None:
+    """The manifest of a checked crosswalk file, derived only from its bytes."""
+    try:
+        typer.echo(manifest_impl(data, output))
+    except CrosswalkContractError as error:
+        for problem in error.problems:
+            typer.echo(f"problem: {problem}", err=True)
+        raise typer.Exit(code=1) from error
     except LovsporError as error:
         typer.echo(f"refused: {error}", err=True)
         raise typer.Exit(code=1) from error
