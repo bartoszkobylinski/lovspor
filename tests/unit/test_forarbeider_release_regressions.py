@@ -1,9 +1,12 @@
 """Regression checks for the private release contract in docs/operations.md."""
 
+import errno
+import json
 from pathlib import Path
 
 import pytest
 
+from lovspor.forarbeider import staging
 from lovspor.forarbeider.release_commands import ReleaseScope, revoke_impl
 from lovspor.forarbeider.release_models import ReleaseRevocation, record_text
 from tests.unit.cli_output import said
@@ -15,6 +18,67 @@ from tests.unit.forarbeider_release_support import (
 )
 
 pytestmark = pytest.mark.usefixtures("at_a_terminal")
+
+
+@pytest.mark.parametrize("field", ["extractor_version", "normalizer_version"])
+def test_unsupported_observation_version_is_refused_before_reporting(
+    tmp_path: Path, field: str
+) -> None:
+    """PR3B-1 contract §2 requires matching extractor/normalizer versions."""
+    desk = Desk(tmp_path)
+    desk.approve_all()
+    _, authorization = desk.released()
+    checkpoints = desk.all_checkpoints()
+    before = {path: path.read_bytes() for path in desk.workspace.rglob("*") if path.is_file()}
+    path = desk.observations[3]
+    payload = json.loads(path.read_bytes())
+    payload[field] += 1
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = desk.preflight(authorization, checkpoints)
+
+    assert result.exit_code == 1, result.output
+    assert said("refused: schema_invalid: observation", result.output)
+    assert not (desk.workspace / "reports").exists()
+    assert {
+        path: path.read_bytes() for path in desk.workspace.rglob("*") if path.is_file()
+    } == before
+
+
+@pytest.mark.parametrize("operation", ["fsync", "link"])
+def test_interrupted_report_write_cleans_up_and_can_be_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    """The release contract explicitly requires crash cleanup and idempotent retries."""
+    desk = Desk(tmp_path)
+    desk.approve_all()
+    _, authorization = desk.released()
+    checkpoints = desk.all_checkpoints()
+    first = desk.preflight(authorization, checkpoints)
+    assert first.exit_code == 0, first.output
+    report_path = desk.workspace / "reports" / f"{said_digest(first.output, 'report')}.json"
+    expected = report_path.read_bytes()
+    report_path.unlink()
+    before = {path: path.read_bytes() for path in desk.workspace.rglob("*") if path.is_file()}
+
+    def disk_full(*args: object, **kwargs: object) -> None:
+        raise OSError(errno.ENOSPC, "synthetic disk full")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(staging.os, operation, disk_full)
+        failed = desk.preflight(authorization, checkpoints)
+
+    assert failed.exit_code == 1, failed.output
+    assert said("refused: output_write_failed: reports", failed.output)
+    assert list(report_path.parent.iterdir()) == []
+    assert {
+        path: path.read_bytes() for path in desk.workspace.rglob("*") if path.is_file()
+    } == before
+    retried = desk.preflight(authorization, checkpoints)
+    assert retried.exit_code == 0, retried.output
+    assert retried.output == first.output
+    assert report_path.read_bytes() == expected
+    assert list(report_path.parent.iterdir()) == [report_path]
 
 
 @pytest.mark.parametrize("target", ["metadata", "observation"])
