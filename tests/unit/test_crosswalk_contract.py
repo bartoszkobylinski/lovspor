@@ -1,6 +1,8 @@
 """The 1.0.0-rc crosswalk contract: schema and producer invariants (#610, proposal item l)."""
 
 import json
+import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -180,6 +182,7 @@ def test_duplicate_sanction_events_are_refused() -> None:
         )
     )
     assert any("share a law_id" in p for p in record_problems(record))
+    assert "two sanction events share a law_id" in record_problems(record)
 
 
 def test_amending_law_must_be_a_sanction_event_when_its_edge_is_attested() -> None:
@@ -339,3 +342,94 @@ def test_history_is_grouped_per_law_and_independent_of_input_order() -> None:
     assert history_problems([second, other, first]) == [
         "LOV-2009-06-19-107: revisions [2] are not 1..1 without repeats"
     ]
+
+
+def test_schema_diagnostics_name_nested_property_and_array_index() -> None:
+    record = attested()
+    record["evidence"][0]["body_sha256"] = 42
+    assert "/evidence/0/body_sha256: 42 is not of type 'string'" in schema_problems(record)
+
+
+@pytest.mark.parametrize("role", ["decision_case", "decision_publication"])
+def test_blank_extra_query_parameter_is_not_ignored(role: str) -> None:
+    record = attested()
+    _role(record, role)["source_url"] += "&extra="
+    assert schema_problems(record) == []
+    assert len(record_problems(record)) == 1
+    assert record_problems(record)[0].startswith(role)
+
+
+def test_unpinned_evidence_is_reported_even_without_sanction_events() -> None:
+    record = besl_o()
+    record["source_pins"]["lovdata_archives"] = [archive_pin("lovtidend-avd1-2026.tar.bz2")]
+    assert schema_problems(record) == []
+    upstream = record["evidence"][0]["upstream_id"]
+    assert record_problems(record) == [f"evidence {upstream} cites an archive that is not pinned"]
+
+
+def test_pair_evidence_must_name_the_amending_act_independently_of_identity() -> None:
+    record = attested()
+    item = _role(record, "law_decision_pair")
+    item["upstream_id"] = "lovtidend-avd1-2001-2025.tar.bz2!lti/2022/nl-20220617-064.xml"
+    assert schema_problems(record) == []
+    assert record_problems(record) == [
+        f"evidence {item['upstream_id']} is not the document of LOV-2022-06-17-63"
+    ]
+
+
+def test_publication_evidence_without_a_decision_is_a_diagnostic() -> None:
+    record = attested()
+    record.update(
+        decision=None,
+        status="unresolved",
+        edge_status=dict.fromkeys(record["edge_status"], "unresolved"),
+        reason="no decision citation",
+        reason_code="no_decision_citation_in_source",
+    )
+    assert schema_problems(record) == []
+    assert record_problems(record) == [
+        "decision_publication publikasjoner/2021-2022 is not session None"
+    ]
+
+
+def test_no_captures_does_not_require_a_latest_capture_date() -> None:
+    record = attested()
+    record.update(
+        decision=None,
+        status="unresolved",
+        edge_status=dict.fromkeys(record["edge_status"], "unresolved"),
+        reason="no decision citation",
+        reason_code="no_decision_citation_in_source",
+        evidence=[],
+        sanction_events=[],
+    )
+    record["source_pins"]["lovdata_archives"] = []
+    assert schema_problems(record) == []
+    assert record_problems(record) == []
+
+
+def test_observed_date_uses_utc_in_a_non_utc_process_timezone(monkeypatch) -> None:
+    previous = os.environ.get("TZ")
+    monkeypatch.setenv("TZ", "EST5")
+    time.tzset()
+    try:
+        record = attested()
+        for item in record["evidence"] + record["source_pins"]["lovdata_archives"]:
+            item["retrieved_at"] = "2026-11-02T00:30:00Z"
+        assert record_problems(record) == []
+    finally:
+        if previous is None:
+            monkeypatch.delenv("TZ")
+        else:
+            monkeypatch.setenv("TZ", previous)
+        time.tzset()
+
+
+@pytest.mark.parametrize("role", ["law_identity", "law_decision_pair"])
+def test_multiple_archive_separators_are_rejected_before_invariants(role: str) -> None:
+    record = attested()
+    item = _role(record, role)
+    item["upstream_id"] = item["upstream_id"].replace("!", "!extra!")
+    problems = schema_problems(record)
+    assert problems
+    assert record_problems(record) == problems

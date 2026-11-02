@@ -129,3 +129,23 @@ def test_nested_lists_sort_by_all_documented_keys_without_changing_input() -> No
 def test_parse_reports_the_line_of_a_later_json_error() -> None:
     with pytest.raises(CrosswalkContractError, match="line 2: not JSON"):
         parse_records(b'{}\n{"broken":}\n')
+
+
+def test_missing_upstream_id_sorts_as_empty_string() -> None:
+    missing = {"role": "law_identity", "source_url": "z"}
+    named = {"role": "law_identity", "source_url": "a", "upstream_id": "A"}
+    assert canonical_record({"evidence": [named, missing]})["evidence"] == [missing, named]
+
+
+@pytest.mark.parametrize(
+    ("data", "problem"),
+    [
+        (b"\xff\n", "file is not UTF-8"),
+        (b"{}", "file does not end with a newline"),
+        (b"{}\n\n", "file has a blank line"),
+    ],
+)
+def test_file_diagnostics_are_exact(data: bytes, problem: str) -> None:
+    with pytest.raises(CrosswalkContractError) as caught:
+        parse_records(data)
+    assert caught.value.problems == (problem,)
