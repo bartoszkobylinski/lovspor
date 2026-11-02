@@ -182,7 +182,7 @@ def verified_archive(cache: Path, record: Entry) -> Path:
         for chunk in iter(lambda: stream.read(1 << 20), b""):
             digest.update(chunk)
     if digest.hexdigest() != record.get("sha256"):
-        raise CrosswalkError(f"cached archive does not match its pin: {record['path']}")
+        raise CrosswalkError(f"cached archive bytes do not match the manifest: {record['path']}")
     return path
 
 

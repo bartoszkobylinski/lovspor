@@ -111,7 +111,7 @@ def test_an_archive_that_no_longer_matches_its_pin_is_refused(tmp_path: Path) ->
     archive.write_bytes(tar_bytes({}))
     pin = {"filename": "a", "path": "a.tar.bz2", "sha256": sha256(archive.read_bytes()).hexdigest()}
     assert cache.verified_archive(tmp_path, pin) == archive.resolve()
-    with pytest.raises(CrosswalkError, match="does not match its pin"):
+    with pytest.raises(CrosswalkError, match="do not match the manifest"):
         cache.verified_archive(tmp_path, {**pin, "sha256": "0" * 64})
-    with pytest.raises(CrosswalkError, match="does not match its pin"):
+    with pytest.raises(CrosswalkError, match="do not match the manifest"):
         cache.verified_archive(tmp_path, {"filename": "a", "path": "a.tar.bz2"})

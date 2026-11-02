@@ -199,7 +199,7 @@ def test_tampered_archive_is_refused(capture_dir: Path) -> None:
     manifest = load_manifest(capture_dir)
     archive = capture_dir / manifest["lovdata"][0]["path"]
     archive.write_bytes(b"not a tar")
-    with pytest.raises(CrosswalkError, match="does not match its pin"):
+    with pytest.raises(CrosswalkError, match="do not match the manifest"):
         build(capture_dir, OPTIONS)
 
 
