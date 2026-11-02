@@ -588,3 +588,49 @@ def test_publication_listing_rejects_external_entities(tmp_path: Path, encoding:
     ).encode(encoding)
     with pytest.raises(ParseError, match="^Forbidden XML DTD$"):
         parse_lovvedtak_listing(_listing(body, "publikasjoner"))
+
+
+def test_nested_reference_cannot_confirm_a_case() -> None:
+    nested = (
+        f"<related_case><publikasjon_referanse_liste>{GOOD}"
+        "</publikasjon_referanse_liste></related_case>"
+    )
+    case = _case(1, nested)
+    assert typed_export_ids(case) == frozenset()
+    assert not confirms(case, DECISION)
+    found = discover(DECISION, [case])
+    assert (found.outcome, found.sak_ids, found.candidates, found.failed) == (
+        "not_found",
+        (),
+        (1,),
+        (),
+    )
+
+
+@pytest.mark.parametrize("kind", ["saker", "publikasjoner"])
+def test_listing_rejects_malformed_utf8(kind: str) -> None:
+    root = f"{kind}_oversikt"
+    body = (
+        f'<?xml version="1.0" encoding="utf-8"?><{root} {NS}>'.encode()
+        + b"\xff"
+        + f"</{root}>".encode()
+    )
+    parse = parse_sak_listing if kind == "saker" else parse_lovvedtak_listing
+    with pytest.raises(ParseError, match="^Invalid Stortinget listing XML$"):
+        parse(_listing(body, kind))
+
+
+@pytest.mark.parametrize("kind", ["saker", "publikasjoner"])
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16"])
+def test_listing_rejects_entity_expansion(kind: str, encoding: str) -> None:
+    root = f"{kind}_oversikt"
+    body = (
+        f'<?xml version="1.0" encoding="{encoding}"?>'
+        f'<!DOCTYPE {root} [<!ENTITY a "payload">'
+        '<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">'
+        '<!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">]>'
+        f"<{root} {NS}>&c;</{root}>"
+    ).encode(encoding)
+    parse = parse_sak_listing if kind == "saker" else parse_lovvedtak_listing
+    with pytest.raises(ParseError, match="^Forbidden XML DTD$"):
+        parse(_listing(body, kind))
