@@ -577,13 +577,13 @@ def test_listing_partial_download_is_not_returned_as_a_snapshot() -> None:
 
 @pytest.mark.parametrize("encoding", ["utf-8", "utf-16"])
 def test_publication_listing_rejects_external_entities(tmp_path: Path, encoding: str) -> None:
-    secret = tmp_path / "secret.txt"
-    secret.write_text("vedtak-202122-085", encoding="utf-8")
+    entity_target = tmp_path / "entity-target.txt"
+    entity_target.write_text("vedtak-202122-085", encoding="utf-8")
     body = (
         f'<?xml version="1.0" encoding="{encoding}"?>'
-        f'<!DOCTYPE publikasjoner_oversikt [<!ENTITY secret SYSTEM "{secret.as_uri()}">]>'
+        f'<!DOCTYPE publikasjoner_oversikt [<!ENTITY target SYSTEM "{entity_target.as_uri()}">]>'
         f"<publikasjoner_oversikt {NS}><publikasjoner_liste><publikasjon>"
-        "<id>&secret;</id><type>lovvedtak</type></publikasjon>"
+        "<id>&target;</id><type>lovvedtak</type></publikasjon>"
         "</publikasjoner_liste></publikasjoner_oversikt>"
     ).encode(encoding)
     with pytest.raises(ParseError, match="^Forbidden XML DTD$"):
