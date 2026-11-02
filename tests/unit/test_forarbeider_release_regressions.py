@@ -17,6 +17,36 @@ from tests.unit.forarbeider_release_support import (
 pytestmark = pytest.mark.usefixtures("at_a_terminal")
 
 
+@pytest.mark.parametrize("target", ["metadata", "observation"])
+@pytest.mark.parametrize(
+    "payload", [b"\xff", b'{"schema_version":'], ids=["invalid-utf8", "truncated-json"]
+)
+def test_malformed_staged_input_is_refused_without_changing_release_records(
+    tmp_path: Path, target: str, payload: bytes
+) -> None:
+    """Malformed inputs are typed refusals, not written deny reports (operations.md)."""
+    desk = Desk(tmp_path)
+    desk.approve_all()
+    _, authorization = desk.released()
+    checkpoints = desk.all_checkpoints()
+    before = {
+        item.relative_to(desk.workspace): item.read_bytes()
+        for item in desk.workspace.rglob("*.json")
+    }
+    path = desk.metadata if target == "metadata" else desk.observations[3]
+    path.write_bytes(payload)
+
+    result = desk.preflight(authorization, checkpoints)
+
+    assert result.exit_code == 1, result.output
+    assert said("refused: schema_invalid", result.output)
+    assert not (desk.workspace / "reports").exists()
+    assert {
+        item.relative_to(desk.workspace): item.read_bytes()
+        for item in desk.workspace.rglob("*.json")
+    } == before
+
+
 @pytest.mark.parametrize("missing", [False, True], ids=["changed", "removed"])
 def test_only_chapters_with_intact_bound_evidence_are_planned(
     tmp_path: Path, missing: bool
