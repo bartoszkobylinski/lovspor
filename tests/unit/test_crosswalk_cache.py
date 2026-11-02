@@ -87,7 +87,13 @@ def test_law_records_read_each_pinned_archive_once(tmp_path: Path) -> None:
     archive = tmp_path / "lovdata/x/lovtidend-avd1-2001-2025.tar.bz2"
     archive.parent.mkdir(parents=True)
     archive.write_bytes(tar_bytes({member: document(LAW, "Lovvedtak 85 (2021-2022)")}))
-    pins = [{"filename": archive.name, "path": "lovdata/x/lovtidend-avd1-2001-2025.tar.bz2"}]
+    pins = [
+        {
+            "filename": archive.name,
+            "path": "lovdata/x/lovtidend-avd1-2001-2025.tar.bz2",
+            "sha256": sha256(archive.read_bytes()).hexdigest(),
+        }
+    ]
     records = cache.law_records(tmp_path, pins, [LAW, "LOV-2022-06-17-64", LAW])
     assert [r["amending_lov_id"] for r in records] == [LAW, "LOV-2022-06-17-64"]
     assert records[0]["law_decision"]["decision"] == {"session_id": "2021-2022", "number": 85}
@@ -98,3 +104,14 @@ def test_law_records_read_each_pinned_archive_once(tmp_path: Path) -> None:
     }
     with pytest.raises(CrosswalkError, match="leaves the cache"):
         cache.law_records(tmp_path, [{**pins[0], "path": "../../etc/x"}], [LAW])
+
+
+def test_an_archive_that_no_longer_matches_its_pin_is_refused(tmp_path: Path) -> None:
+    archive = tmp_path / "a.tar.bz2"
+    archive.write_bytes(tar_bytes({}))
+    pin = {"filename": "a", "path": "a.tar.bz2", "sha256": sha256(archive.read_bytes()).hexdigest()}
+    assert cache.verified_archive(tmp_path, pin) == archive.resolve()
+    with pytest.raises(CrosswalkError, match="do not match the manifest"):
+        cache.verified_archive(tmp_path, {**pin, "sha256": "0" * 64})
+    with pytest.raises(CrosswalkError, match="do not match the manifest"):
+        cache.verified_archive(tmp_path, {"filename": "a", "path": "a.tar.bz2"})

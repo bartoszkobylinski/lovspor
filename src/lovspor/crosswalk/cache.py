@@ -174,13 +174,25 @@ def discovery_candidates(
 # --- law edge (Lovdata) ------------------------------------------------------------
 
 
+def verified_archive(cache: Path, record: Entry) -> Path:
+    """The cached archive, only if it still hashes to its pin; read in chunks, never whole."""
+    path = _inside(cache, record["path"])
+    digest = sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != record.get("sha256"):
+        raise CrosswalkError(f"cached archive bytes do not match the manifest: {record['path']}")
+    return path
+
+
 def read_archives(
     cache: Path, archives: list[Entry], law_ids: list[str]
 ) -> dict[str, list[tuple[Entry, LovtidendMember]]]:
     """Every member of every pinned archive that claims each act; none is chosen here."""
     found: dict[str, list[tuple[Entry, LovtidendMember]]] = {i: [] for i in law_ids}
     for record in archives:
-        path = _inside(cache, record["path"])
+        path = verified_archive(cache, record)
         members = read_lovtidend_members(path, law_ids)
         for law_id, matches in members.items():
             found[law_id].extend((record, member) for member in matches)
