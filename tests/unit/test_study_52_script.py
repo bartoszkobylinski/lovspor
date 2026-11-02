@@ -425,7 +425,7 @@ def test_latest_refusal_does_not_reuse_an_older_success(tmp_path: Path, kind: st
     if kind == "sak":
         assert (found["sak_ids"], found["failed"], found["cases"]) == ([], [103533], [])
     else:
-        assert found["reason"] == "a saker listing was not read"
+        assert found["reason"] == "a saker listing was not read or did not parse"
 
 
 def test_tampered_cache_is_refused(tmp_path: Path) -> None:
