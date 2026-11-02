@@ -271,6 +271,50 @@ def test_unparseable_candidate_is_failed_not_absent(tmp_path: Path) -> None:
     assert (found["outcome"], found["failed"]) == ("incomplete", [103533])
 
 
+def test_confirmed_case_with_an_unread_candidate_keeps_chain_unresolved(tmp_path: Path) -> None:
+    manifest = _cross_session_cache(
+        tmp_path,
+        previous=_saker((103533, "Lovvedtak 26 (2025-2026)"), (7, "Lovvedtak 26 (2025-2026)")),
+        case=_sak(103533, "2024-2025", ("2025-2026", 26)),
+    )
+    _put(tmp_path, manifest, ("discovery", "sak", 7), None)
+
+    found = study.discovery_record(tmp_path, manifest, LATER)
+
+    assert (found["outcome"], found["sak_ids"], found["candidates"], found["failed"]) == (
+        "incomplete",
+        [103533],
+        [7, 103533],
+        [7],
+    )
+    assert [case["sak_id"] for case in found["cases"]] == [103533]
+    law = {"law_decision": {"status": "attested", "decision": found["decision"]}}
+    assert study._chain(law, found) == {
+        "status": "unresolved",
+        "reason": "discovery incomplete",
+    }
+
+
+@pytest.mark.parametrize("kind", ["sak", "saker"])
+def test_latest_refusal_does_not_reuse_an_older_success(tmp_path: Path, kind: str) -> None:
+    manifest = _cross_session_cache(
+        tmp_path,
+        previous=_saker((103533, "Lovvedtak 26 (2025-2026)")),
+        case=_sak(103533, "2024-2025", ("2025-2026", 26)),
+    )
+    assert study.discovery_record(tmp_path, manifest, LATER)["outcome"] == "discovered"
+    key = 103533 if kind == "sak" else "2024-2025"
+    _put(tmp_path, manifest, ("discovery", kind, key), None)
+
+    found = study.discovery_record(tmp_path, manifest, LATER)
+
+    assert found["outcome"] == "incomplete"
+    if kind == "sak":
+        assert (found["sak_ids"], found["failed"], found["cases"]) == ([], [103533], [])
+    else:
+        assert found["reason"] == "a saker listing was not read"
+
+
 def test_tampered_cache_is_refused(tmp_path: Path) -> None:
     manifest = _cross_session_cache(
         tmp_path,
