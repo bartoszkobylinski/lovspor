@@ -455,7 +455,8 @@ def test_bounded_read_equal_limit_and_oversize(tmp_path: Path) -> None:
     assert str(caught.value) == f"input too large: {path}"
 
 
-def test_bounded_read_rejects_fifo_without_waiting_for_eof(tmp_path: Path) -> None:
+@pytest.mark.parametrize("limit", [0, 4])
+def test_bounded_read_rejects_fifo_without_waiting_for_eof(tmp_path: Path, limit: int) -> None:
     regular = tmp_path / "regular"
     regular.write_bytes(b"abcd")
     assert read_bounded(regular, 4, "input") == b"abcd"
@@ -463,12 +464,12 @@ def test_bounded_read_rejects_fifo_without_waiting_for_eof(tmp_path: Path) -> No
     os.mkfifo(fifo)
     descriptor = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
     try:
-        os.write(descriptor, b"abcde")
+        os.write(descriptor, b"x" * (limit + 1))
         code = (
             "from pathlib import Path; from lovspor.crosswalk.commands import read_bounded; "
             "from lovspor.crosswalk.errors import CrosswalkError; "
             "import sys\n"
-            "try: read_bounded(Path(sys.argv[1]), 4, 'input')\n"
+            f"try: read_bounded(Path(sys.argv[1]), {limit}, 'input')\n"
             "except CrosswalkError as e: print(e)\n"
         )
         result = subprocess.run(
@@ -533,3 +534,44 @@ def test_release_command_does_not_promote_unverified_law(
     assert [r for r in parse_records(output.read_bytes()) if r["amending_lov_id"] == law_id] == [
         r for r in parse_records(built) if r["amending_lov_id"] == law_id
     ]
+
+
+@pytest.mark.parametrize("scoped", [True, False])
+@pytest.mark.parametrize("tampered", [True, False])
+def test_capture_rebuild_verdict_depends_on_evidence_identity(
+    built: bytes, capture_dir: Path, scoped: bool, tampered: bool
+) -> None:
+    """Both capture formats reproduce identities, independently of producer pins."""
+    if not scoped:
+        manifest = load_manifest(capture_dir)
+        del manifest["scope"]
+        (capture_dir / "capture-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    records = parse_records(built)
+    for record in records:
+        record["source_pins"]["producer_commit"] = "c" * 40
+    law_id = "LOV-2022-06-17-63"
+    if tampered:
+        record = next(r for r in records if r["amending_lov_id"] == law_id)
+        record["evidence"][0]["parsed_identity_sha256"] = "f" * 64
+    report = check(serialize_records(records), cache=capture_dir)
+    assert report.problems == (
+        [f"{law_id}: evidence identities are not reproduced from the capture"] if tampered else []
+    )
+    assert report.passed is not tampered
+    assert report.unverified == []
+
+
+def test_approval_nested_values_report_the_scalar_field_names(tmp_path: Path) -> None:
+    """Objects cannot turn scalar approval fields into nested validation paths."""
+    path = tmp_path / "approval.json"
+    path.write_text(
+        json.dumps(
+            {key: {"x": []} for key in ["input_sha256", "approved_by", "approved_on", "R1", "R2"]}
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CrosswalkError) as caught:
+        read_approval(path)
+    assert str(caught.value) == (
+        "approval refused: invalid R1, R2, approved_by, approved_on, input_sha256"
+    )
