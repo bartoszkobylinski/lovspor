@@ -33,7 +33,6 @@ from lovspor.crosswalk.cache import (
     verified_archive,
     write_manifest,
 )
-from lovspor.crosswalk.canonical import UTF8
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.errors import LovsporError, NetworkError, StortingetStatusError
 from lovspor.sources.lovdata import LovdataArchive, LovdataClient
@@ -47,6 +46,7 @@ REQUEST_GAP_SECONDS = 0.7  # Stortinget allows 100 calls a minute.
 RATE_LIMIT_PAUSE_SECONDS = 61.0
 ATTEMPTS = 3
 _TOO_MANY = 429
+_NEW_DIRECTORY = {"parents": True, "exist_ok": True}
 _SERVER_ERROR = 500
 
 
@@ -76,8 +76,8 @@ class Pacer:
         self._last = self._clock()
 
     def note(self, line: str) -> None:
-        with self._log.open("a", encoding=UTF8) as stream:
-            stream.write(f"{datetime.now(UTC).isoformat()} {line}\n")
+        with self._log.open("ab") as stream:
+            stream.write(f"{datetime.now(UTC).isoformat()} {line}\n".encode())
 
 
 def _retryable(exc: LovsporError) -> float | None:
@@ -91,17 +91,18 @@ def _retryable(exc: LovsporError) -> float | None:
 
 def attempt[T](pacer: Pacer, request: Callable[[], T]) -> T:
     """At most ATTEMPTS paced tries; a 429, a 5xx or a transport failure may be retried."""
-    for number in range(1, ATTEMPTS + 1):
+    for _ in range(1, ATTEMPTS):
         pacer.wait()
         try:
             return request()
         except LovsporError as exc:
             pause = _retryable(exc)
-            if pause is None or number == ATTEMPTS:
+            if pause is None:
                 raise
             pacer.note(f"retry after {type(exc).__name__}: {exc}; pausing {pause}s")
             pacer.sleep(pause)
-    raise AssertionError("unreachable")
+    pacer.wait()
+    return request()
 
 
 def store_once(directory: Path, name: str, body: bytes) -> Path:
@@ -209,7 +210,7 @@ def capture_archive(client: LovdataClient, entry: LovdataArchive, cache: Path) -
         pin = {"path": str(target.relative_to(cache)), "sha256": result.sha256}
         verified_archive(cache, pin)
     else:
-        target.parent.mkdir(parents=True, exist_ok=True)
+        target.parent.mkdir(**_NEW_DIRECTORY)
         shutil.move(result.path, target)
     record = _archive_record(entry, retrieved_at, target, cache)
     return {**record, "sha256": result.sha256, "size_bytes": result.size_bytes}
@@ -276,7 +277,7 @@ def capture(
     with sources.lovdata or LovdataClient() as lovdata:
         manifest["lovdata"] = capture_lovdata(lovdata, cache)
     write_manifest(cache, manifest)
-    client = sources.stortinget or httpx.Client(timeout=60, follow_redirects=False)
+    client = sources.stortinget or httpx.Client(timeout=60)
     with client as stortinget:
         capture_stortinget(stortinget, cache, manifest, pacer)
     manifest["finished_at"] = _now()

@@ -283,7 +283,10 @@ write_manifest(path, manifest)
 assert (path / MANIFEST).read_bytes().decode("utf-8").find(manifest["title"]) >= 0
 assert load_manifest(path) == manifest
 Pacer(path / "log").note(manifest["title"])
+Pacer(path / "log").note(manifest["title"])
 assert (path / "log").read_bytes().decode("utf-8").endswith(manifest["title"] + "\\n")
+lines = (path / "log").read_bytes().decode("utf-8").splitlines()
+assert [line.split(" ", 1)[1] for line in lines] == [manifest["title"]] * 2
 """
     result = subprocess.run(
         [sys.executable, "-X", "utf8=0", "-c", script, str(tmp_path)],
@@ -382,6 +385,8 @@ def test_default_capture_client_refuses_redirects(tmp_path: Path, httpx_mock: HT
     )
     manifest = cap.capture(tmp_path, [LAW], COMMIT, cap.Sources(pacer=_pacer(tmp_path)))
     assert [entry["http_status"] for entry in manifest["stortinget"]] == [301, 301, 301]
+    assert all("path" not in entry for entry in manifest["stortinget"])
+    assert cache.load_manifest(tmp_path) == manifest
     assert all(request.url.host != "unexpected.example" for request in httpx_mock.get_requests())
 
 
@@ -411,3 +416,55 @@ def test_default_capture_client_network_timeout(
     assert all(
         (entry["error"] is None) == (expected_status == 200) for entry in manifest["stortinget"]
     )
+
+
+@pytest.mark.parametrize("size", [999_999, 1_000_000, 1_000_001, 1_000_002])
+def test_law_list_read_bound_preserves_acceptance(tmp_path: Path, size: int) -> None:
+    path = tmp_path / "laws-boundary"
+    path.write_bytes((LAW + "\n#").encode() + b"x" * (size - len(LAW) - 2))
+    if size > 1_000_000:
+        with pytest.raises(CrosswalkError, match="law list too large"):
+            read_law_ids(path)
+    else:
+        assert read_law_ids(path) == [LAW]
+
+
+@pytest.mark.parametrize("header", [{}, {"lovvedtak": []}, {"besl_o": []}])
+def test_missing_optional_decision_lists_mean_no_decision(header: dict) -> None:
+    assert cache.law_edge(header) == {
+        "status": "unresolved",
+        "kind": "none",
+        "reason": "header cites no decision",
+    }
+
+
+def test_archive_capture_creates_fresh_nested_cache(tmp_path: Path, httpx_mock: HTTPXMock) -> None:
+    root = tmp_path / "missing" / "nested" / "cache"
+    body = tar_bytes({})
+    name = "lovtidend-avd1-2026.tar.bz2"
+    httpx_mock.add_response(url=f"{API}/get/{name}", content=body)
+    with cap.LovdataClient() as client:
+        record = cap.capture_archive(client, _entry(name, len(body)), root)
+    assert (root / record["path"]).read_bytes() == body
+    assert list((root / "lovdata" / ".staging").iterdir()) == []
+
+
+@pytest.mark.parametrize("failures", [0, 1, 2, 3])
+def test_retry_budget_on_real_http_responses(
+    tmp_path: Path, httpx_mock: HTTPXMock, failures: int
+) -> None:
+    url = f"{EKSPORT}/sak?sakid=7"
+    for _ in range(failures):
+        httpx_mock.add_response(url=url, status_code=503)
+    if failures < 3:
+        httpx_mock.add_response(
+            url=url, content=sak(7, "2021-2022"), headers={"Content-Type": "text/xml"}
+        )
+    with httpx.Client() as client:
+        record = cap.capture_sak(client, tmp_path, _pacer(tmp_path), ("discovery", 7))
+    assert record["http_status"] == (503 if failures == 3 else 200)
+    assert len(httpx_mock.get_requests()) == min(failures + 1, 3)
+    if failures == 3:
+        assert "path" not in record
+    else:
+        assert (tmp_path / record["path"]).read_bytes() == sak(7, "2021-2022")

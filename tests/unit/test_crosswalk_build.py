@@ -384,3 +384,77 @@ def test_cli_build_refuses_a_missing_capture(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert "refused:" in result.output
     assert not (tmp_path / MANIFEST).exists()
+
+
+def test_build_is_unchanged_by_archive_and_scope_order(capture_dir: Path, offline: None) -> None:
+    expected = build(capture_dir, OPTIONS)
+    manifest = load_manifest(capture_dir)
+    manifest["lovdata"].reverse()
+    manifest["scope"]["law_ids"].reverse()
+    write_manifest(capture_dir, manifest)
+
+    assert build(capture_dir, OPTIONS) == expected
+
+
+def test_cli_build_publishes_and_replays_previous_bytes(
+    capture_dir: Path, tmp_path: Path, offline: None
+) -> None:
+    runner = CliRunner()
+    output = tmp_path / "first.jsonl"
+    replay = tmp_path / "replay.jsonl"
+    args = ["ops", "crosswalk", "build", "--cache", str(capture_dir)]
+    result = runner.invoke(app, [*args, "--output", str(output), "--producer-commit", PRODUCER])
+    assert result.exit_code == 0, result.output
+    assert f"wrote 8 records to {output}" in result.output
+    assert output.read_bytes() == build(capture_dir, OPTIONS)
+
+    result = runner.invoke(
+        app,
+        [
+            *args,
+            "--output",
+            str(replay),
+            "--previous",
+            str(output),
+            "--producer-commit",
+            "c" * 40,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert f"wrote 8 records to {replay}" in result.output
+    assert replay.read_bytes() == output.read_bytes()
+    assert not list(tmp_path.glob(".*.partial"))
+
+
+@pytest.mark.parametrize("revisions", [(2,), (1, 1), (1, 3)], ids=["start", "repeat", "gap"])
+def test_cli_build_refuses_invalid_previous_history_without_publication(
+    capture_dir: Path, tmp_path: Path, revisions: tuple[int, ...]
+) -> None:
+    record = _by_law(build(capture_dir, OPTIONS))["LOV-2022-06-17-63"]
+    previous = tmp_path / "previous.jsonl"
+    data = serialize_records({**record, "record_revision": revision} for revision in revisions)
+    previous.write_bytes(data)
+    output = tmp_path / "out.jsonl"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "crosswalk",
+            "build",
+            "--cache",
+            str(capture_dir),
+            "--output",
+            str(output),
+            "--previous",
+            str(previous),
+            "--producer-commit",
+            PRODUCER,
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "without repeats" in result.output
+    assert previous.read_bytes() == data
+    assert not output.exists()
+    assert not list(tmp_path.glob(".*.partial"))
