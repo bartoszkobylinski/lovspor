@@ -66,7 +66,10 @@ def capture_impl(
     return f"captured {archives} archives and {responses} Stortinget responses ({failed} failed)"
 
 
-_Cache = Annotated[Path, typer.Option("--cache", help="A new, gitignored capture directory.")]
+_Cache = Annotated[
+    Path,
+    typer.Option("--cache", help="A new, empty directory outside every Git checkout and Lovverk."),
+]
 
 
 @crosswalk_app.command("capture")
