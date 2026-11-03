@@ -1,0 +1,120 @@
+{
+  "dataset": "forarbeider",
+  "documents": [
+    {
+      "asserts_complete_proposition": false,
+      "chapters": [
+        {
+          "chapter_id": "regjeringen-9000001-ch1",
+          "chapter_number": 1,
+          "chapter_title": "2 Bakgrunn",
+          "extractor_version": 1,
+          "normalizer_version": 1,
+          "retrieved_at": "2100-04-01T12:00:00Z",
+          "review_decided_at": "2100-04-02T12:00:00Z",
+          "source_page_url": "https://www.regjeringen.no/no/dokumenter/prop.-901-l-20992100/id9000001/?ch=1",
+          "source_sha256": "71515b722ea78ca4cc326143313c355102b352e30928c308aa4d29d2675e5766",
+          "text_sha256": "1a4b456a1fa6b33a7b8003b97d90228897fd6c251040af22729e9bd8fd718c70"
+        },
+        {
+          "chapter_id": "regjeringen-9000001-ch2",
+          "chapter_number": 2,
+          "chapter_title": "2 Bakgrunn",
+          "extractor_version": 1,
+          "normalizer_version": 1,
+          "retrieved_at": "2100-04-01T12:00:00Z",
+          "review_decided_at": "2100-04-02T12:00:00Z",
+          "source_page_url": "https://www.regjeringen.no/no/dokumenter/prop.-901-l-20992100/id9000001/?ch=2",
+          "source_sha256": "71515b722ea78ca4cc326143313c355102b352e30928c308aa4d29d2675e5766",
+          "text_sha256": "1a4b456a1fa6b33a7b8003b97d90228897fd6c251040af22729e9bd8fd718c70"
+        }
+      ],
+      "coverage": "every_listed_chapter",
+      "document": {
+        "document_type": "prop-l",
+        "id": "regjeringen-9000001",
+        "proposition_number": 901,
+        "session": "2099-2100",
+        "source_document_id": 9000001,
+        "source_url": "https://www.regjeringen.no/no/dokumenter/prop.-901-l-20992100/id9000001/"
+      },
+      "listed_chapters": [
+        1,
+        2
+      ],
+      "markdown_sha256": "2c9230d06f88b9b4ad76ce2b7654c7aa75fa3db63d2cca07eb23d2162a5abae0",
+      "ministry": "Testdepartementet",
+      "normative": false,
+      "path": "forarbeider/2099-2100/prop-l/9000001.md",
+      "release_status": "released",
+      "rights_basis": "åndsverkloven § 14",
+      "source_document_type": "forarbeid",
+      "source_license": null,
+      "source_provider": "regjeringen.no",
+      "times": {
+        "owner_decided_at": "2100-04-04T12:00:00Z",
+        "recorded_at": "git_commit_time",
+        "released_at": "2100-04-10T12:00:00Z",
+        "reviewed_at": "2100-04-03T12:00:00Z",
+        "source_published_at": null,
+        "time_basis": "operator_supplied_unauthenticated",
+        "withdrawn_at": null
+      },
+      "title": "Strukturell testproposisjon om et oppdiktet lovforslag"
+    },
+    {
+      "asserts_complete_proposition": false,
+      "chapters": [
+        {
+          "chapter_id": "regjeringen-9000003-ch3",
+          "chapter_number": 3,
+          "chapter_title": "Tilråding",
+          "extractor_version": 1,
+          "normalizer_version": 1,
+          "retrieved_at": "2100-04-01T12:00:00Z",
+          "review_decided_at": "2100-04-02T12:00:00Z",
+          "source_page_url": "https://www.regjeringen.no/no/dokumenter/prop.-902-ls-20992100/id9000003/?ch=3",
+          "source_sha256": "30728643a8506624ebd053359e51b0ef1f384fc40076b4243f67a42e8d20f290",
+          "text_sha256": "1929e420a10580d717374d860035278e8e29aa815e2a6c6e588f9fbf3ed8dbbd"
+        }
+      ],
+      "coverage": "partial_curated_excerpt",
+      "document": {
+        "document_type": "prop-ls",
+        "id": "regjeringen-9000003",
+        "proposition_number": 902,
+        "session": "2099-2100",
+        "source_document_id": 9000003,
+        "source_url": "https://www.regjeringen.no/no/dokumenter/prop.-902-ls-20992100/id9000003/"
+      },
+      "listed_chapters": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "markdown_sha256": "739fb66e92d69ec25155d45ddaf3543e1b51c9d4924db065f500366505e262ca",
+      "ministry": null,
+      "normative": false,
+      "path": "forarbeider/2099-2100/prop-ls/9000003.md",
+      "release_status": "released",
+      "rights_basis": "åndsverkloven § 14",
+      "source_document_type": "forarbeid",
+      "source_license": null,
+      "source_provider": "regjeringen.no",
+      "times": {
+        "owner_decided_at": "2100-04-04T12:00:00Z",
+        "recorded_at": "git_commit_time",
+        "released_at": "2100-04-10T12:00:00Z",
+        "reviewed_at": "2100-04-03T12:00:00Z",
+        "source_published_at": null,
+        "time_basis": "operator_supplied_unauthenticated",
+        "withdrawn_at": null
+      },
+      "title": "Strukturell testproposisjon om et oppdiktet lovforslag"
+    }
+  ],
+  "record_type": "forarbeider_corpus_manifest",
+  "renderer_version": 1,
+  "schema_version": 1
+}

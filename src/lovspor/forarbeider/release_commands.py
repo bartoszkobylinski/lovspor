@@ -100,7 +100,7 @@ class Staged(BaseModel):
     results: tuple[ChapterResult, ...]
 
 
-def _forbidden() -> tuple[Path, ...]:
+def forbidden_trees() -> tuple[Path, ...]:
     return (_ENGINE_ROOT, default_corpus_path())
 
 
@@ -108,14 +108,14 @@ def _interactive() -> bool:
     return sys.stdin.isatty()
 
 
-def _workspace(scope: ReleaseScope) -> Path:
+def open_release_workspace(scope: ReleaseScope) -> Path:
     with refused_as("workspace"):
-        return open_workspace(scope.workspace, _forbidden())
+        return open_workspace(scope.workspace, forbidden_trees())
 
 
 def _ledger(scope: ReleaseScope) -> Path:
     with refused_as("ledger"):
-        return checked_directory(scope.ledger, _forbidden())
+        return checked_directory(scope.ledger, forbidden_trees())
 
 
 def _read_staged(scope: ChapterScope) -> Staged:
@@ -125,9 +125,11 @@ def _read_staged(scope: ChapterScope) -> Staged:
         ForarbeiderRefusedError: an unsafe or unreadable file, or not its schema.
     """
     with refused_as("metadata"):
-        metadata = read_model(scope.metadata, _forbidden(), ForarbeidRecord)
+        metadata = read_model(scope.metadata, forbidden_trees(), ForarbeidRecord)
     with refused_as("observation"):
-        results = [read_model(path, _forbidden(), ChapterResult) for path in scope.observations]
+        results = [
+            read_model(path, forbidden_trees(), ChapterResult) for path in scope.observations
+        ]
     ordered = tuple(sorted(results, key=lambda result: result.chapter_number))
     return Staged(metadata=metadata, results=ordered)
 
@@ -194,7 +196,7 @@ def _validated[T: BaseModel](model: type[T], fields: dict[str, object]) -> T:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_INVALID, detail) from error
 
 
-def _digest_option(text: str, name: str) -> str:
+def digest_option(text: str, name: str) -> str:
     if _DIGEST.fullmatch(text) is None:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_INVALID, name)
     return text
@@ -247,7 +249,7 @@ def dossier_impl(scope: ChapterScope, evidence: Sequence[str], reviewed: str) ->
             "legal_sufficiency_decided_by_code": False,
         },
     )
-    sha = write_record(_workspace(scope.release), "dossiers", dossier)
+    sha = write_record(open_release_workspace(scope.release), "dossiers", dossier)
     kinds = ",".join(sorted({item.kind.value for item in artifacts}))
     return f"dossier {sha} {dossier.document.id}: evidence {kinds} ({_NOT_PERMISSION})"
 
@@ -263,7 +265,7 @@ def _evidence_bytes(path: Path, kind: str) -> bytes | None:
         ForarbeiderRefusedError: the refusal ``read_file`` gave, with the kind as detail.
     """
     with refused_as(f"evidence {kind}"):
-        return read_file(path, _forbidden(), MAX_EVIDENCE_BYTES)
+        return read_file(path, forbidden_trees(), MAX_EVIDENCE_BYTES)
 
 
 def _evidence_digest(artifact: EvidenceArtifact) -> str | None:
@@ -294,7 +296,7 @@ def _approved_pins(
 
 
 def _current_dossier(scope: ChapterScope, staged: Staged, sha: str) -> ReleaseDossier:
-    dossier = read_record(_workspace(scope.release), "dossiers", sha, ReleaseDossier)
+    dossier = read_record(open_release_workspace(scope.release), "dossiers", sha, ReleaseDossier)
     if dossier is None:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_RECORD_MISSING, sha)
     if dossier.chapters != _identities(staged) or dossier.document != document_of(staged.metadata):
@@ -353,7 +355,7 @@ def authorize_impl(scope: ChapterScope, grant: Grant) -> str:
         ForarbeiderRefusedError: any check failed; nothing was written.
     """
     staged = _staged(scope)
-    sha = _digest_option(grant.dossier, "dossier")
+    sha = digest_option(grant.dossier, "dossier")
     dossier = _current_dossier(scope, staged, sha)
     _, decided = actor(grant.decided)
     if decided < dossier.reviewed_at:
@@ -362,8 +364,8 @@ def authorize_impl(scope: ChapterScope, grant: Grant) -> str:
     declared = _declared(dossier, sha, chapters, grant)
     authorization = _validated(ReleaseAuthorization, {**_FIXED_AUTHORIZATION, **declared})
     document = dossier.document
-    _require_a_person(f"authorize {document.id} {sha[:12]}")
-    stored = write_record(_workspace(scope.release), "authorizations", authorization)
+    require_a_person(f"authorize {document.id} {sha[:12]}")
+    stored = write_record(open_release_workspace(scope.release), "authorizations", authorization)
     return (
         f"authorization {stored} {document.id}: chapters {_numbers(chapters)} ({_NOT_PERMISSION})"
     )
@@ -391,7 +393,7 @@ def _numbers(chapters: tuple[AuthorizedChapter, ...]) -> str:
     return ",".join(str(item.chapter.chapter_number) for item in chapters)
 
 
-def _require_a_person(phrase: str) -> None:
+def require_a_person(phrase: str) -> None:
     """Keeps cron, CI and a pipe out. A pseudo-terminal can still get past it."""
     if not _interactive() or typer.prompt(f"Type to confirm: {phrase}") != phrase:
         raise ForarbeiderRefusedError(RefusalReason.REVIEW_NOT_INTERACTIVE, "authorization")
@@ -403,8 +405,8 @@ def revoke_impl(scope: ReleaseScope, authorization: str, decided: str) -> str:
     Raises:
         ForarbeiderRefusedError: an unknown authorization, or one already revoked.
     """
-    workspace = _workspace(scope)
-    sha = _digest_option(authorization, "authorization")
+    workspace = open_release_workspace(scope)
+    sha = digest_option(authorization, "authorization")
     if read_record(workspace, "authorizations", sha, ReleaseAuthorization) is None:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_RECORD_MISSING, sha)
     if read_named(workspace, "revocations", sha, ReleaseRevocation) is not None:
@@ -450,7 +452,7 @@ def _pages(scope: ChapterScope) -> dict[str, bytes]:
     pages = {}
     for path in scope.pages:
         with refused_as("page"):
-            payload = read_file(path, _forbidden(), MAX_HTML_BYTES)
+            payload = read_file(path, forbidden_trees(), MAX_HTML_BYTES)
         if payload is None:
             raise ForarbeiderRefusedError(RefusalReason.INPUT_UNREADABLE, "page")
         pages[digest(payload)] = payload
@@ -480,7 +482,7 @@ class Run(BaseModel):
 def _authorization(workspace: Path, run: Run) -> Stored[ReleaseAuthorization] | None:
     if run.authorization is None:
         return None
-    sha = _digest_option(run.authorization, "authorization")
+    sha = digest_option(run.authorization, "authorization")
     record = read_record(workspace, "authorizations", sha, ReleaseAuthorization)
     return None if record is None else Stored(record, sha)
 
@@ -501,7 +503,7 @@ def preflight_inputs(scope: ChapterScope, run: Run) -> PreflightInputs:
     Raises:
         ForarbeiderRefusedError: an unsafe or unreadable file, or a malformed option.
     """
-    workspace = _workspace(scope.release)
+    workspace = open_release_workspace(scope.release)
     ledger = _ledger(scope.release)
     staged, pages = _read_staged(scope), _pages(scope)
     authorization = _authorization(workspace, run)
@@ -535,7 +537,7 @@ def preflight_impl(scope: ChapterScope, run: Run) -> tuple[str, bool]:
         ForarbeiderRefusedError: an input could not be read safely; nothing was written.
     """
     report = evaluate(preflight_inputs(scope, run))
-    sha = write_record(_workspace(scope.release), "reports", report)
+    sha = write_record(open_release_workspace(scope.release), "reports", report)
     return report_lines(report, sha), report.outcome == "eligible_preview"
 
 
@@ -559,19 +561,19 @@ def show_impl(scope: ReleaseScope, kind: str, sha: str) -> str:
     Raises:
         ForarbeiderRefusedError: an unknown kind or record, or an edited one.
     """
-    workspace = _workspace(scope)
-    sha = _digest_option(sha, "digest")
+    workspace = open_release_workspace(scope)
+    sha = digest_option(sha, "digest")
     if kind == "dossier":
-        return _show_dossier(_stored(workspace, "dossiers", sha, ReleaseDossier), sha)
+        return _show_dossier(stored_record(workspace, "dossiers", sha, ReleaseDossier), sha)
     if kind == "authorization":
-        record = _stored(workspace, "authorizations", sha, ReleaseAuthorization)
+        record = stored_record(workspace, "authorizations", sha, ReleaseAuthorization)
         return _show_authorization(record, sha, _revoked(workspace, sha))
     if kind == "report":
-        return report_lines(_stored(workspace, "reports", sha, PreflightReport), sha)
+        return report_lines(stored_record(workspace, "reports", sha, PreflightReport), sha)
     raise ForarbeiderRefusedError(RefusalReason.RELEASE_INVALID, "kind")
 
 
-def _stored[T: BaseModel](workspace: Path, folder: Folder, sha: str, model: type[T]) -> T:
+def stored_record[T: BaseModel](workspace: Path, folder: Folder, sha: str, model: type[T]) -> T:
     record = read_record(workspace, folder, sha, model)
     if record is None:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_RECORD_MISSING, sha)
