@@ -148,6 +148,15 @@ def test_check_impl_and_cli(built: bytes, capture_dir: Path, tmp_path: Path) -> 
     assert "problem: file is not in canonical form" in result.output
 
 
+def test_check_cli_refuses_a_missing_input_file(tmp_path: Path) -> None:
+    """Exercises ``check_command``'s generic ``except LovsporError`` branch, not its contract one."""  # noqa: E501
+    missing = tmp_path / "missing.jsonl"
+    result = CliRunner().invoke(app, ["ops", "crosswalk", "check", "--input", str(missing)])
+    assert result.exit_code == 1
+    assert f"refused: crosswalk file unreadable: {missing}" in result.output
+    assert not missing.exists()
+
+
 # --- release-candidate gate --------------------------------------------------------
 
 
