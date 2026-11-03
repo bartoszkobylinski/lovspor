@@ -1,6 +1,9 @@
 """Fail-closed check and the explicit release-candidate gate (#610, P4)."""
 
 import json
+import os
+import subprocess
+import sys
 from hashlib import sha256
 from pathlib import Path
 
@@ -13,9 +16,20 @@ from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.cache import load_manifest
 from lovspor.crosswalk.canonical import parse_records, serialize_records
 from lovspor.crosswalk.check import append_only_problems, check, current_records
-from lovspor.crosswalk.commands import check_impl, read_approval, release_candidate_impl
+from lovspor.crosswalk.commands import (
+    _read_bounded,
+    check_impl,
+    read_approval,
+    release_candidate_impl,
+)
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
-from lovspor.crosswalk.release import Approval, cited_archives, ineligibility, promote
+from lovspor.crosswalk.release import (
+    Approval,
+    accepted_bases,
+    cited_archives,
+    ineligibility,
+    promote,
+)
 from tests.unit.crosswalk_support import PRODUCER, make_capture
 
 OPTIONS = BuildOptions(producer_commit=PRODUCER)
@@ -341,3 +355,144 @@ def test_sanction_only_archive_must_have_accepted_rights(built: bytes) -> None:
         "rests on an archive whose licence basis is not accepted"
     )
     assert ineligibility(record, frozenset({"stated_for_file", "stated_for_endpoint"})) is None
+
+
+def test_equal_revisions_keep_first_record() -> None:
+    first = {"amending_lov_id": "LOV-1", "record_revision": 1, "reason": "first"}
+    second = {**first, "reason": "second"}
+    assert current_records([first, second]) == {"LOV-1": first}
+
+
+def test_removed_revision_diagnostic_names_law() -> None:
+    record = {"amending_lov_id": "LOV-1", "record_revision": 2}
+    assert append_only_problems([], [record]) == [
+        "LOV-1@2: revision of the previous release was removed"
+    ]
+
+
+def test_previous_does_not_erase_canonical_failure(built: bytes) -> None:
+    report = check(built.replace(b'":', b'": ', 1), previous=built)
+    assert report.problems == ["file is not in canonical form"]
+
+
+def test_capture_without_scope_rebuilds_input_laws(built: bytes, capture_dir: Path) -> None:
+    manifest = load_manifest(capture_dir)
+    del manifest["scope"]
+    (capture_dir / "capture-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    report = check(built, cache=capture_dir)
+    assert report.passed, report.problems
+    assert report.unverified == []
+
+
+def test_check_impl_checks_previous_and_capture(
+    built: bytes, capture_dir: Path, tmp_path: Path
+) -> None:
+    data, previous = tmp_path / "input", tmp_path / "previous"
+    previous.write_bytes(built)
+    data.write_bytes(serialize_records(parse_records(built)[1:]))
+    with pytest.raises(CrosswalkContractError, match="was removed"):
+        check_impl(data, previous, None)
+    records = parse_records(built)
+    record = next(r for r in records if r["amending_lov_id"] == "LOV-2022-06-17-63")
+    record["evidence"][0]["parsed_identity_sha256"] = "f" * 64
+    data.write_bytes(serialize_records(records))
+    with pytest.raises(CrosswalkContractError, match="not reproduced"):
+        check_impl(data, None, capture_dir)
+
+
+@pytest.mark.parametrize("command", ["check", "release"])
+def test_input_read_error_names_crosswalk_file(tmp_path: Path, command: str) -> None:
+    missing = tmp_path / "missing"
+    with pytest.raises(CrosswalkError) as caught:
+        if command == "check":
+            check_impl(missing, None, None)
+        else:
+            release_candidate_impl(missing, missing, missing, tmp_path / "output")
+    assert str(caught.value) == f"crosswalk file unreadable: {missing}"
+    assert not (tmp_path / "output").exists()
+
+
+def test_bounded_read_equal_limit_and_oversize(tmp_path: Path) -> None:
+    path = tmp_path / "bytes"
+    path.write_bytes(b"abcd")
+    assert _read_bounded(path, 4, "input") == b"abcd"
+    path.write_bytes(b"abcde")
+    with pytest.raises(CrosswalkError) as caught:
+        _read_bounded(path, 4, "input")
+    assert str(caught.value) == f"input too large: {path}"
+
+
+def test_bounded_read_rejects_fifo_without_waiting_for_eof(tmp_path: Path) -> None:
+    regular = tmp_path / "regular"
+    regular.write_bytes(b"abcd")
+    assert _read_bounded(regular, 4, "input") == b"abcd"
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    descriptor = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+    try:
+        os.write(descriptor, b"abcde")
+        code = (
+            "from pathlib import Path; from lovspor.crosswalk.commands import _read_bounded; "
+            "from lovspor.crosswalk.errors import CrosswalkError; "
+            "import sys\n"
+            "try: _read_bounded(Path(sys.argv[1]), 4, 'input')\n"
+            "except CrosswalkError as e: print(e)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(fifo)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        assert result.stdout == f"input too large: {fifo}\n"
+    finally:
+        os.close(descriptor)
+
+
+def test_approval_lists_exact_invalid_fields(tmp_path: Path) -> None:
+    path = tmp_path / "approval"
+    path.write_text("{}", encoding="utf-8")
+    with pytest.raises(CrosswalkError) as caught:
+        read_approval(path)
+    assert str(caught.value) == (
+        "approval refused: invalid R1, R2, approved_by, approved_on, input_sha256"
+    )
+
+
+@pytest.mark.parametrize("r2", ["approved", "rejected"])
+def test_approval_controls_accepted_licence_bases(r2: str) -> None:
+    expected = {"stated_for_file"}
+    if r2 == "approved":
+        expected.add("stated_for_endpoint")
+    assert accepted_bases(_approval(b"", r2)) == frozenset(expected)
+
+
+def test_archive_citation_splits_before_member_exclamation() -> None:
+    record = {"sanction_events": [], "evidence": [{"upstream_id": "archive.tar.bz2!dir/a!b.xml"}]}
+    assert cited_archives(record) == {"https://api.lovdata.no/v1/publicData/get/archive.tar.bz2"}
+
+
+def test_approval_digest_mismatch_diagnostic_is_exact(tmp_path: Path) -> None:
+    with pytest.raises(CrosswalkError) as caught:
+        promote(b"", _approval(b"other"), tmp_path)
+    assert str(caught.value) == "the approval names other bytes than this input"
+
+
+def test_release_command_does_not_promote_unverified_law(
+    built: bytes, capture_dir: Path, tmp_path: Path
+) -> None:
+    manifest = load_manifest(capture_dir)
+    law_id = "LOV-2022-06-17-63"
+    manifest["scope"]["law_ids"].remove(law_id)
+    (capture_dir / "capture-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    data, approval, output = tmp_path / "input", tmp_path / "approval", tmp_path / "output"
+    data.write_bytes(built)
+    approval.write_text(_approval(built).model_dump_json(by_alias=True), encoding="utf-8")
+    line = release_candidate_impl(data, approval, capture_dir, output)
+    assert line == (
+        "not an active attested record: 5; not reproduced from the capture: 1; promoted: 2"
+    )
+    assert [r for r in parse_records(output.read_bytes()) if r["amending_lov_id"] == law_id] == [
+        r for r in parse_records(built) if r["amending_lov_id"] == law_id
+    ]
