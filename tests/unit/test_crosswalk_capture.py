@@ -216,6 +216,13 @@ def test_only_avd1_archives_are_captured() -> None:
     ]
 
 
+def test_a_name_with_trailing_bytes_past_the_pattern_is_not_an_avd1_archive() -> None:
+    # fullmatch, not match: a filename the pattern only matches a prefix of
+    # (a stray rename or suffix in the catalogue) must not be treated as avd1.
+    with pytest.raises(CrosswalkError, match="no Lovtidend"):
+        cap.avd1_archives([_entry("lovtidend-avd1-2026.tar.bz2.orig")])
+
+
 @pytest.mark.parametrize("size", [0, cap.ARCHIVE_BYTE_LIMIT + 1])
 def test_archive_size_outside_bounds_is_refused(size: int) -> None:
     with pytest.raises(CrosswalkError, match="catalogue size"):
@@ -380,6 +387,35 @@ def test_cli_exposes_capture_and_refuses_with_exit_1(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert "refused:" in result.output
     assert not (tmp_path / "run").exists()
+
+
+def test_cli_capture_succeeds_and_writes_the_manifest(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    name = "lovtidend-avd1-2026.tar.bz2"
+    _catalogue(httpx_mock, {name: tar_bytes({})})
+    laws = tmp_path / "laws.txt"
+    laws.write_text(LAW + "\n", encoding="utf-8")
+    cache_dir = tmp_path / "run"
+    runner = CliRunner()
+    args = [
+        "ops",
+        "crosswalk",
+        "capture",
+        "--cache",
+        str(cache_dir),
+        "--laws",
+        str(laws),
+        "--lovverk-commit",
+        COMMIT,
+    ]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0
+    assert result.output.strip() == "captured 1 archives and 0 Stortinget responses (0 failed)"
+    manifest = json.loads((cache_dir / MANIFEST).read_text())
+    assert manifest["scope"] == {"law_ids": [LAW], "lovverk_commit": COMMIT}
+    assert [a["filename"] for a in manifest["lovdata"]] == [name]
+    assert manifest["stortinget"] == []
 
 
 def test_an_existing_digest_object_with_other_bytes_is_refused(
