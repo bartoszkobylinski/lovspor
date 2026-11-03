@@ -149,3 +149,31 @@ def test_file_diagnostics_are_exact(data: bytes, problem: str) -> None:
     with pytest.raises(CrosswalkContractError) as caught:
         parse_records(data)
     assert caught.value.problems == (problem,)
+
+
+def test_unicode_record_has_literal_utf8_bytes_and_round_trips() -> None:
+    record = {"amending_lov_id": "LOV-2022-06-17-63", "record_revision": 1, "reason": "ø😀"}
+    expected = (
+        b'{"amending_lov_id":"LOV-2022-06-17-63","reason":"\xc3\xb8\xf0\x9f\x98\x80",'
+        b'"record_revision":1}\n'
+    )
+    assert canonical_json("ø😀") == '"ø😀"'
+    assert serialize_records([record]) == expected
+    assert parse_records(expected) == [record]
+    assert is_canonical(expected)
+
+
+@pytest.mark.parametrize("data", [b"\xc3\n", b"\xc0\xaf\n", b"\xed\xa0\x80\n"])
+def test_parse_refuses_truncated_overlong_and_surrogate_utf8(data: bytes) -> None:
+    with pytest.raises(CrosswalkContractError) as caught:
+        parse_records(data)
+    assert caught.value.problems == ("file is not UTF-8",)
+
+
+def test_empty_jsonl_is_canonical_but_a_blank_line_is_not_a_record() -> None:
+    assert parse_records(b"") == []
+    assert serialize_records(parse_records(b"")) == b""
+    assert is_canonical(b"")
+    with pytest.raises(CrosswalkContractError) as caught:
+        parse_records(b"\n")
+    assert caught.value.problems == ("file has a blank line",)
