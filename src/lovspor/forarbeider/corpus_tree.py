@@ -85,7 +85,7 @@ def checked_checkout(raw: Path) -> Path:
     return raw
 
 
-def _read_public(path: Path, shown: str) -> bytes:
+def _read_public(path: Path, shown: str = DATASET_ROOT) -> bytes:
     """A regular file's bytes through one no-follow descriptor, size-bounded.
 
     Raises:
@@ -116,7 +116,7 @@ def _walk(directory: Path, prefix: str) -> dict[str, bytes]:
     with os.scandir(directory) as entries:
         for entry in sorted(entries, key=lambda item: item.name):
             relative = f"{prefix}/{entry.name}"
-            mode = entry.stat(follow_symlinks=False).st_mode
+            mode = os.lstat(entry.path).st_mode
             if stat.S_ISLNK(mode):
                 raise _unsafe(DATASET_ROOT)
             if stat.S_ISDIR(mode):
@@ -221,7 +221,7 @@ def require_sandbox(raw: Path, forbidden: Sequence[Path]) -> Path:
 
 def _ours(path: Path, expected: bytes) -> bool:
     try:
-        return _read_public(path, SANDBOX) == expected
+        return _read_public(path) == expected
     except ForarbeiderRefusedError:
         return False
 
@@ -229,7 +229,7 @@ def _ours(path: Path, expected: bytes) -> bool:
 def _has_remote(config: Path) -> bool:
     """A remote, or any URL, means the checkout can reach somewhere: not a sandbox."""
     try:
-        text = _read_public(config, SANDBOX)
+        text = _read_public(config)
     except ForarbeiderRefusedError:
         return True
     return b"[remote" in text or b"url" in text
@@ -251,7 +251,7 @@ def _require_baseline(path: Path) -> None:
         for entry in entries:
             if entry.name in {".git", DATASET_ROOT}:
                 continue
-            mode = entry.stat(follow_symlinks=False).st_mode
+            mode = os.lstat(entry.path).st_mode
             if stat.S_ISLNK(mode):
                 raise _unsafe("sandbox")
             if stat.S_ISDIR(mode):

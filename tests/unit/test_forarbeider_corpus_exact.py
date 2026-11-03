@@ -7,6 +7,7 @@ edges of each bound, so a quieter or wrong-labelled refusal fails here.
 
 import os
 import re
+import threading
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -445,3 +446,24 @@ def test_bytes_staged_for_a_change_are_owner_only(
 
     assert _mode(box / STAGING) == 0o700
     assert (box / JOURNAL).exists()
+
+
+def test_a_fifo_in_the_dataset_is_refused_without_waiting_for_a_writer(tmp_path: Path) -> None:
+    """Opening a FIFO without O_NONBLOCK waits for a writer forever: the read must not."""
+    path = create_sandbox(tmp_path / "sandbox", ())
+    (path / "forarbeider").mkdir()
+    os.mkfifo(path / "forarbeider" / "manifest.json")
+    outcome: list[RefusalReason] = []
+
+    def read() -> None:
+        try:
+            read_dataset(path)
+        except ForarbeiderRefusedError as error:
+            outcome.append(error.reason)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    reader.join(timeout=5)
+
+    assert not reader.is_alive(), "the reader blocked on a FIFO"
+    assert outcome == [RefusalReason.UNSAFE_INPUT_PATH]
