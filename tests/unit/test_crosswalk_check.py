@@ -257,6 +257,39 @@ def test_release_candidate_impl_writes_a_new_file(
     assert data.read_bytes() == built
 
 
+@pytest.mark.parametrize("source", ["archive", "case", "publication"])
+def test_release_refuses_tampered_capture_without_writing_output(
+    built: bytes, capture_dir: Path, tmp_path: Path, source: str
+) -> None:
+    """Approval cannot bypass cache digest verification (cache module contract)."""
+    manifest = load_manifest(capture_dir)
+    if source == "archive":
+        entry = manifest["lovdata"][0]
+    else:
+        kind, key = ("sak", 89016) if source == "case" else ("publikasjoner", "2021-2022")
+        entry = next(
+            e
+            for e in manifest["stortinget"]
+            if (e["stage"], e["kind"], e["key"]) == ("discovery", kind, key)
+        )
+    cached = capture_dir / entry["path"]
+    # Keep XML parseable and the archive decompressible: appended bytes alone
+    # must invalidate the pin, even if the parsed identity would stay the same.
+    cached.write_bytes(cached.read_bytes() + b"\n")
+    data, approval, output = tmp_path / "input", tmp_path / "approval", tmp_path / "output"
+    data.write_bytes(built)
+    approval_bytes = _approval(built).model_dump_json(by_alias=True).encode()
+    approval.write_bytes(approval_bytes)
+
+    with pytest.raises(CrosswalkError, match="do not match the manifest"):
+        release_candidate_impl(data, approval, capture_dir, output)
+
+    assert not output.exists()
+    assert not output.with_name(f".{output.name}.partial").exists()
+    assert data.read_bytes() == built
+    assert approval.read_bytes() == approval_bytes
+
+
 def test_cli_gate_refuses_without_an_approval(
     built: bytes, capture_dir: Path, tmp_path: Path
 ) -> None:
