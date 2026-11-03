@@ -312,6 +312,47 @@ def test_a_law_absent_from_the_new_capture_keeps_its_history() -> None:
     assert append_revisions([], [old]) == [old]
 
 
+def test_narrowed_capture_keeps_history_and_restored_scope_adds_nothing(
+    capture_dir: Path, offline: None
+) -> None:
+    # build.py's append-only contract applies even when the capture scope changes.
+    first = build(capture_dir, OPTIONS)
+    manifest = load_manifest(capture_dir)
+    original_scope = list(manifest["scope"]["law_ids"])
+    manifest["scope"]["law_ids"] = ["LOV-2022-06-17-63"]
+    write_manifest(capture_dir, manifest)
+
+    narrowed = build(capture_dir, BuildOptions(PRODUCER, previous=first))
+    assert narrowed == first
+
+    manifest["scope"]["law_ids"] = original_scope
+    write_manifest(capture_dir, manifest)
+    assert build(capture_dir, BuildOptions(PRODUCER, previous=narrowed)) == first
+
+
+@pytest.mark.parametrize("kind", ["archive", "case"])
+def test_corrupt_capture_is_refused_before_output_is_published(
+    capture_dir: Path, tmp_path: Path, offline: None, kind: str
+) -> None:
+    manifest = load_manifest(capture_dir)
+    entry = (
+        manifest["lovdata"][0]
+        if kind == "archive"
+        else next(e for e in manifest["stortinget"] if e["kind"] == "sak")
+    )
+    cached = capture_dir / entry["path"]
+    cached.write_bytes(b"corrupted capture bytes")
+    output = tmp_path / "release.jsonl"
+
+    with pytest.raises(CrosswalkError, match="do not match"):
+        build_impl(capture_dir, output, OPTIONS)
+
+    assert not output.exists()
+    assert not output.with_name(f".{output.name}.partial").exists()
+    assert cached.read_bytes() == b"corrupted capture bytes"
+    assert load_manifest(capture_dir) == manifest
+
+
 def test_appending_continues_from_the_highest_revision() -> None:
     one = {"amending_lov_id": "LOV-1", "record_revision": 1, "evidence": [], "status": "a"}
     two = {**one, "record_revision": 2, "status": "b"}
