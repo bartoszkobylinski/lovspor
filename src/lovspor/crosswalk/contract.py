@@ -39,12 +39,18 @@ def schema() -> dict[str, Any]:
 
 # The patterns fix the shape; these checkers refuse a shape that names no real
 # instant (2026-02-30, 24:00), so a bad date is a contract problem, never a ValueError.
+# Python 3.14 reads 24:00 as the next midnight, so the parsed instant must print
+# back to the stamp's own date and time.
 _FORMATS = FormatChecker(formats=())
 
 
 @_FORMATS.checks("date-time", raises=ValueError)
 def _instant(value: object) -> bool:
-    return not isinstance(value, str) or bool(datetime.fromisoformat(value))
+    return not isinstance(value, str) or _names_itself(value)
+
+
+def _names_itself(stamp: str) -> bool:
+    return datetime.fromisoformat(stamp).strftime("%Y-%m-%dT%H:%M:%S") == stamp[:19]
 
 
 @_FORMATS.checks("date", raises=ValueError)
