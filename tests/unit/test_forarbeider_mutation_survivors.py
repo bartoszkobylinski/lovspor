@@ -222,10 +222,12 @@ def test_staging_is_private_reusable_and_canonical(tmp_path: Path) -> None:
     journal = transaction.Journal(
         schema_version=1,
         record_type="forarbeider_corpus_journal",
+        action="release",
+        decision_sha256="a" * 64,
         target_manifest_sha256="a" * 64,
         operations=(
-            transaction.Operation(path=models.INDEX_PATH, sha256="a" * 64),
-            transaction.Operation(path=models.MANIFEST_PATH, sha256="a" * 64),
+            transaction.Operation(path=models.INDEX_PATH, sha256="a" * 64, previous_sha256=None),
+            transaction.Operation(path=models.MANIFEST_PATH, sha256="a" * 64, previous_sha256=None),
         ),
     )
     previous = os.umask(0)
@@ -472,10 +474,12 @@ def test_verification_names_target_manifest(tmp_path: Path) -> None:
     journal = transaction.Journal(
         schema_version=1,
         record_type="forarbeider_corpus_journal",
+        action="release",
+        decision_sha256="a" * 64,
         target_manifest_sha256="a" * 64,
         operations=(
-            transaction.Operation(path=models.INDEX_PATH, sha256="a" * 64),
-            transaction.Operation(path=models.MANIFEST_PATH, sha256="a" * 64),
+            transaction.Operation(path=models.INDEX_PATH, sha256="a" * 64, previous_sha256=None),
+            transaction.Operation(path=models.MANIFEST_PATH, sha256="a" * 64, previous_sha256=None),
         ),
     )
     with pytest.raises(ForarbeiderRefusedError) as caught:
@@ -597,9 +601,10 @@ box.mkdir()
 # Unicode decimal digits are accepted by the operation's dataset-path grammar.
 path = 'forarbeider/\\u0662\\u0660\\u0669\\u0669-2100/prop-l/1.md'
 journal = Journal(schema_version=1, record_type='forarbeider_corpus_journal',
+    action='release', decision_sha256='a' * 64,
     target_manifest_sha256='a' * 64,
-    operations=(Operation(path=path, sha256='a' * 64),
-                Operation(path='forarbeider/manifest.json', sha256='a' * 64)))
+    operations=(Operation(path=path, sha256='a' * 64, previous_sha256=None),
+                Operation(path='forarbeider/manifest.json', sha256='a' * 64, previous_sha256=None)))
 _stage(box, {}, journal)
 assert path in (box / JOURNAL).read_bytes().decode('utf-8')
 """,

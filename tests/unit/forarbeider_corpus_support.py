@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from lovspor.forarbeider.chapter_models import ChapterResult
+from lovspor.forarbeider.corpus_transaction import finish, pending
 from lovspor.forarbeider.corpus_tree import read_dataset
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.models import ForarbeidRecord
@@ -139,3 +140,15 @@ def refusal_of(action: Callable[[], object], fifo: Path | None = None) -> Forarb
     assert not blocked, "blocked on a FIFO"
     assert len(refusals) == 1, refusals
     return refusals[0]
+
+
+def finish_pending(sandbox: Path) -> bool:
+    """Replay whatever change is journaled, whatever decision it names: whether there was one.
+
+    Only for transaction-level tests; the commands check the decision first.
+    """
+    journal = pending(sandbox)
+    if journal is None:
+        return False
+    finish(sandbox, journal)
+    return True

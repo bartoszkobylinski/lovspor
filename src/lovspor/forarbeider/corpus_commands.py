@@ -27,7 +27,15 @@ from lovspor.forarbeider.corpus_plan import (
     withdraw_draft,
 )
 from lovspor.forarbeider.corpus_render import ReleasedChapter, Rendering
-from lovspor.forarbeider.corpus_transaction import apply, holds, locked, recover
+from lovspor.forarbeider.corpus_transaction import (
+    Binding,
+    apply,
+    finish,
+    holds,
+    locked,
+    pending,
+    roll_back,
+)
 from lovspor.forarbeider.corpus_tree import create_sandbox, read_dataset, require_sandbox
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.release_commands import (
@@ -200,11 +208,11 @@ def _require_unexpired(verified: Verified) -> None:
         raise ForarbeiderRefusedError(RefusalReason.PROMOTION_DENIED, "authorization_expired")
 
 
-def _simulated_draft(scope: ChapterScope, plan: PromotionPlan, sandbox: Path) -> Draft:
-    """The plan's change, re-derived from the private inputs and the sandbox as they are now.
+def _authorized(scope: ChapterScope, plan: PromotionPlan) -> Verified:
+    """The plan's preflight re-run from the private inputs as they are now, synthetic, unexpired.
 
     Raises:
-        ForarbeiderRefusedError: not synthetic, denied, or ``plan_stale``.
+        ForarbeiderRefusedError: denied, expired or not synthetic.
     """
     run = Run(
         authorization=plan.authorization_sha256,
@@ -216,6 +224,15 @@ def _simulated_draft(scope: ChapterScope, plan: PromotionPlan, sandbox: Path) ->
     if not is_synthetic(verified.inputs.metadata, results):
         raise ForarbeiderRefusedError(RefusalReason.INPUT_NOT_SYNTHETIC, "observation")
     _require_unexpired(verified)
+    return verified
+
+
+def _simulated_draft(verified: Verified, plan: PromotionPlan, sandbox: Path) -> Draft:
+    """The plan's change, re-derived from its verified preflight and the sandbox as it is now.
+
+    Raises:
+        ForarbeiderRefusedError: ``plan_stale``, or an unsafe or inconsistent sandbox.
+    """
     dataset = read_dataset(sandbox)
     draft = release_draft(dataset, rendering_of(verified))
     if dataset.manifest_sha256 != plan.base_manifest_sha256 or planned_files(draft) != plan.writes:
@@ -223,12 +240,42 @@ def _simulated_draft(scope: ChapterScope, plan: PromotionPlan, sandbox: Path) ->
     return draft
 
 
+def _settled(
+    scope: ChapterScope, plan: PromotionPlan, sha: str, sandbox: Path
+) -> tuple[Verified, bool]:
+    """The plan authorized now, with an interrupted change of its own finished or rolled back.
+
+    The authorization is checked before any journaled operation runs: a release
+    whose plan no longer holds is put back, never completed.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_tree_mismatch: journal`` for another
+            decision's journal, left as it is; denied, expired or not synthetic.
+    """
+    journal = pending(sandbox)
+    if journal is not None and journal.binding != Binding("release", sha):
+        raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "journal")
+    try:
+        verified = _authorized(scope, plan)
+    except ForarbeiderRefusedError:
+        if journal is not None:
+            roll_back(sandbox, journal)
+        raise
+    if journal is not None:
+        finish(sandbox, journal)
+    return verified, journal is not None
+
+
 def simulate_impl(scope: ChapterScope, request: SimulateRequest) -> str:
     """Apply a release plan to the synthetic sandbox, re-validated at this moment.
 
+    Every run, a retry of an applied plan included, re-checks the plan before
+    it reports anything.
+
     Raises:
         ForarbeiderRefusedError: not a sandbox, not synthetic, denied, stale,
-            locked, or a write that failed with its journal kept.
+            locked, another decision's journal, or a write that failed with its
+            journal kept.
     """
     workspace = open_release_workspace(scope.release)
     sha = digest_option(request.plan, "plan")
@@ -237,10 +284,10 @@ def simulate_impl(scope: ChapterScope, request: SimulateRequest) -> str:
         raise ForarbeiderRefusedError(RefusalReason.INPUT_NOT_SYNTHETIC, "plan")
     sandbox = require_sandbox(request.sandbox, forbidden_trees())
     with locked(sandbox):
-        recovered = recover(sandbox)
+        verified, recovered = _settled(scope, plan, sha, sandbox)
         if _applied(sandbox, plan):
             return _result_line("UNCHANGED", plan, sha, recovered)
-        apply(sandbox, _simulated_draft(scope, plan, sandbox))
+        apply(sandbox, _simulated_draft(verified, plan, sandbox), Binding("release", sha))
     return _result_line("APPLIED", plan, sha, recovered)
 
 
@@ -368,12 +415,38 @@ def _unrecorded_intent(workspace: Path, sandbox: Path, document: str) -> Withdra
     return intent
 
 
+def _bound_journal(workspace: Path, sandbox: Path) -> None:
+    """Settle an interrupted change before a withdrawal; no grant is needed to take down.
+
+    A release is rolled back, whether or not its plan still holds; a withdrawal
+    is finished. Either must name a decision the workspace holds.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_tree_mismatch: journal`` for one
+            naming no stored plan or intent.
+    """
+    journal = pending(sandbox)
+    if journal is None:
+        return
+    if journal.action == "release":
+        if read_named(workspace, "plans", journal.decision_sha256, PromotionPlan) is None:
+            raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "journal")
+        roll_back(sandbox, journal)
+        return
+    intent = read_named(
+        workspace, "withdrawal_intents", journal.target_manifest_sha256, WithdrawalIntent
+    )
+    if intent is None or _receipt(intent).intent_sha256 != journal.decision_sha256:
+        raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "journal")
+    finish(sandbox, journal)
+
+
 def _withdraw(
     workspace: Path, sandbox: Path, request: WithdrawRequest, decided: _Decided
 ) -> WithdrawalIntent:
     """The intent carried out: an earlier one this state records, or a new one, stored first."""
     with locked(sandbox):
-        recover(sandbox)
+        _bound_journal(workspace, sandbox)
         intent = _unrecorded_intent(workspace, sandbox, request.document)
         release_commands.require_a_person(f"withdraw {request.document}")
         if intent is not None:
@@ -381,8 +454,8 @@ def _withdraw(
         dataset = read_dataset(sandbox)
         draft = withdraw_draft(dataset, request.document, decided.at)
         intent = _intent(request, decided, dataset.manifest_sha256, draft)
-        write_record(workspace, "withdrawal_intents", intent, intent.result_manifest_sha256)
-        apply(sandbox, draft)
+        sha = write_record(workspace, "withdrawal_intents", intent, intent.result_manifest_sha256)
+        apply(sandbox, draft, Binding("withdraw", sha))
     return intent
 
 

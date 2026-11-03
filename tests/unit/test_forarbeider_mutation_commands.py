@@ -115,8 +115,12 @@ def test_recovered_simulation_receipt(tmp_path: Path) -> None:
     journal = {
         "schema_version": 1,
         "record_type": "forarbeider_corpus_journal",
+        "action": "release",
+        "decision_sha256": sha,
         "target_manifest_sha256": manifest_sha,
-        "operations": [{"path": i["path"], "sha256": i["sha256"]} for i in writes],
+        "operations": [
+            {"path": i["path"], "sha256": i["sha256"], "previous_sha256": None} for i in writes
+        ],
     }
     (box / transaction.JOURNAL).write_text(json.dumps(journal))
     result = simulate(desk, sha, box)
@@ -221,7 +225,7 @@ def test_plan_stale_when_only_base_digest_changes(tmp_path: Path) -> None:
     )
     record = record.model_copy(update={"base_manifest_sha256": "a" * 64})
     with pytest.raises(ForarbeiderRefusedError) as caught:
-        commands._simulated_draft(scope(desk), record, box)
+        commands._simulated_draft(commands._authorized(scope(desk), record), record, box)
     assert (caught.value.reason, caught.value.detail) == (RefusalReason.PLAN_STALE, "plan")
 
 
@@ -241,9 +245,16 @@ def test_recovery_can_precede_a_new_applied_change(tmp_path: Path) -> None:
     journal = {
         "schema_version": 1,
         "record_type": "forarbeider_corpus_journal",
+        "action": "release",
+        "decision_sha256": sha,
         "target_manifest_sha256": digest(files["forarbeider/manifest.json"].encode()),
         "operations": [
-            {"path": name, "sha256": digest(text.encode())} for name, text in files.items()
+            {
+                "path": name,
+                "sha256": digest(text.encode()),
+                "previous_sha256": digest(text.encode()),
+            }
+            for name, text in files.items()
         ],
     }
     (box / transaction.JOURNAL).write_text(json.dumps(journal))

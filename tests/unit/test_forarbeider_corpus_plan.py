@@ -20,14 +20,14 @@ from lovspor.forarbeider.corpus_models import (
     ForarbeiderManifest,
 )
 from lovspor.forarbeider.corpus_plan import PromotionPlan, withdraw_draft
-from lovspor.forarbeider.corpus_transaction import JOURNAL, STAGING, Journal, Operation, recover
+from lovspor.forarbeider.corpus_transaction import JOURNAL, STAGING, Journal, Operation
 from lovspor.forarbeider.corpus_tree import Dataset, create_sandbox
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.release_models import PreflightReport, digest
 from lovspor.forarbeider.release_preflight import Observed, PreflightInputs
 from lovspor.forarbeider.release_store import write_record
 from tests.unit.cli_output import said
-from tests.unit.forarbeider_corpus_support import manifest, member, metadata_of
+from tests.unit.forarbeider_corpus_support import finish_pending, manifest, member, metadata_of
 from tests.unit.forarbeider_promotion_support import planned, sandbox, simulate
 from tests.unit.forarbeider_release_support import Desk
 
@@ -168,6 +168,8 @@ def _journal(box: Path, *operations: Operation) -> None:
     journal = Journal(
         schema_version=1,
         record_type="forarbeider_corpus_journal",
+        action="release",
+        decision_sha256=DIGEST,
         target_manifest_sha256=DIGEST,
         operations=operations,
     )
@@ -178,11 +180,13 @@ def test_recovery_refuses_staged_bytes_that_are_not_their_digest(box: Path) -> N
     (box / STAGING).mkdir()
     (box / STAGING / DIGEST).write_bytes(b"not those bytes")
     _journal(
-        box, Operation(path=DOCUMENT, sha256=DIGEST), Operation(path=INDEX_PATH, sha256=DIGEST)
+        box,
+        Operation(path=DOCUMENT, sha256=DIGEST, previous_sha256=None),
+        Operation(path=INDEX_PATH, sha256=DIGEST, previous_sha256=None),
     )
 
     with pytest.raises(ForarbeiderRefusedError) as caught:
-        recover(box)
+        finish_pending(box)
 
     assert (caught.value.reason, caught.value.detail) == (
         RefusalReason.CORPUS_TREE_MISMATCH,
@@ -197,11 +201,13 @@ def test_recovery_never_writes_through_a_symlinked_directory(box: Path, tmp_path
     (box / STAGING / digest(payload)).write_bytes(payload)
     (tmp_path / "elsewhere").mkdir()
     (box / "forarbeider").symlink_to(tmp_path / "elsewhere")
-    operation = Operation(path=DOCUMENT, sha256=digest(payload))
-    _journal(box, operation, Operation(path=INDEX_PATH, sha256=digest(payload)))
+    operation = Operation(path=DOCUMENT, sha256=digest(payload), previous_sha256=None)
+    _journal(
+        box, operation, Operation(path=INDEX_PATH, sha256=digest(payload), previous_sha256=None)
+    )
 
     with pytest.raises(ForarbeiderRefusedError) as caught:
-        recover(box)
+        finish_pending(box)
 
     assert (caught.value.reason, caught.value.detail) == (
         RefusalReason.UNSAFE_OUTPUT_PATH,
@@ -211,10 +217,14 @@ def test_recovery_never_writes_through_a_symlinked_directory(box: Path, tmp_path
 
 
 def test_recovery_that_does_not_reach_its_manifest_keeps_the_journal(box: Path) -> None:
-    _journal(box, Operation(path=DOCUMENT, sha256=None), Operation(path=INDEX_PATH, sha256=None))
+    _journal(
+        box,
+        Operation(path=DOCUMENT, sha256=None, previous_sha256=None),
+        Operation(path=INDEX_PATH, sha256=None, previous_sha256=None),
+    )
 
     with pytest.raises(ForarbeiderRefusedError) as caught:
-        recover(box)
+        finish_pending(box)
 
     assert (caught.value.reason, caught.value.detail) == (
         RefusalReason.CORPUS_TREE_MISMATCH,
@@ -283,17 +293,19 @@ def test_a_journal_naming_a_path_outside_the_dataset_is_refused(
     raw = {
         "schema_version": 1,
         "record_type": "forarbeider_corpus_journal",
+        "action": "release",
+        "decision_sha256": DIGEST,
         "target_manifest_sha256": DIGEST,
         "operations": [
-            {"path": path, "sha256": digest(payload)},
-            {"path": INDEX_PATH, "sha256": None},
+            {"path": path, "sha256": digest(payload), "previous_sha256": None},
+            {"path": INDEX_PATH, "sha256": None, "previous_sha256": None},
         ],
     }
     (box / JOURNAL).write_text(json.dumps(raw))
     before = {name: (box / name).read_bytes() for name in ("manifest.json", "lover/README.md")}
 
     with pytest.raises(ForarbeiderRefusedError) as caught:
-        recover(box)
+        finish_pending(box)
 
     assert (caught.value.reason, caught.value.detail) == (
         RefusalReason.CORPUS_TREE_MISMATCH,

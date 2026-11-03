@@ -19,6 +19,7 @@ from lovspor.forarbeider.corpus_transaction import JOURNAL, LOCK, STAGING
 from lovspor.forarbeider.corpus_tree import BASELINE, read_dataset
 from lovspor.forarbeider.review_models import ReviewStatus
 from tests.unit.cli_output import said, unwrapped
+from tests.unit.forarbeider_corpus_support import finish_pending
 from tests.unit.forarbeider_promotion_support import (
     WITHDRAWN,
     eligible,
@@ -429,8 +430,8 @@ def test_recovery_finishes_each_completed_operation_without_rewriting_it(
     monkeypatch.setattr(corpus_transaction, "_perform", real_perform)
 
     with corpus_transaction.locked(box):
-        assert corpus_transaction.recover(box) is True
-        assert corpus_transaction.recover(box) is False
+        assert finish_pending(box) is True
+        assert finish_pending(box) is False
 
     assert {path: (box / path).stat().st_mtime_ns for path in completed} == completed
     dataset = read_dataset(box)

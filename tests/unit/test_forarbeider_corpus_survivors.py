@@ -57,10 +57,12 @@ def test_staged_journal_round_trips_operations(tmp_path: Path) -> None:
     journal = Journal(
         schema_version=1,
         record_type="forarbeider_corpus_journal",
+        action="release",
+        decision_sha256="a" * 64,
         target_manifest_sha256="a" * 64,
         operations=(
-            Operation(path="forarbeider/INDEX.md", sha256="b" * 64),
-            Operation(path="forarbeider/manifest.json", sha256="a" * 64),
+            Operation(path="forarbeider/INDEX.md", sha256="b" * 64, previous_sha256=None),
+            Operation(path="forarbeider/manifest.json", sha256="a" * 64, previous_sha256=None),
         ),
     )
     _stage(box, {}, journal)
@@ -139,10 +141,14 @@ box = Path(sys.argv[1])
 (box / '.git').mkdir()
 journal = Journal(
     schema_version=1, record_type='forarbeider_corpus_journal',
+    action='release', decision_sha256='a' * 64,
     target_manifest_sha256='a' * 64,
     operations=(
-        Operation(path='forarbeider/2099-2100/prop-l/9\\u0661.md', sha256='b' * 64),
-        Operation(path='forarbeider/manifest.json', sha256='a' * 64),
+        Operation(
+            path='forarbeider/2099-2100/prop-l/9\\u0661.md', sha256='b' * 64,
+            previous_sha256=None,
+        ),
+        Operation(path='forarbeider/manifest.json', sha256='a' * 64, previous_sha256=None),
     ),
 )
 _stage(box, {}, journal)
