@@ -8,6 +8,45 @@ from lovspor.crosswalk import commands
 from lovspor.crosswalk.errors import CrosswalkError
 
 
+@pytest.mark.parametrize("target_exists", [True, False], ids=["live-link", "dangling-link"])
+def test_write_once_preserves_a_destination_symlink(tmp_path: Path, target_exists: bool) -> None:
+    """commands.write_once promises that an existing file is never replaced."""
+    target = tmp_path / "target.jsonl"
+    original = b'{"previous":true}\n'
+    if target_exists:
+        target.write_bytes(original)
+    output = tmp_path / "release.jsonl"
+    output.symlink_to(target.name)
+
+    with pytest.raises(CrosswalkError):
+        commands.write_once(output, b'{"fresh":true}\n')
+
+    assert output.is_symlink()
+    assert output.readlink() == Path(target.name)
+    if target_exists:
+        assert target.read_bytes() == original
+    else:
+        assert not target.exists()
+    assert not (tmp_path / ".release.jsonl.partial").exists()
+    assert {path.name for path in tmp_path.iterdir()} == (
+        {"release.jsonl", "target.jsonl"} if target_exists else {"release.jsonl"}
+    )
+
+
+def test_empty_output_is_published_once(tmp_path: Path) -> None:
+    """An empty canonical JSONL is valid, and its output still cannot be replaced."""
+    output = tmp_path / "empty.jsonl"
+    commands.write_once(output, b"")
+    assert output.is_file()
+    assert output.read_bytes() == b""
+    assert list(tmp_path.iterdir()) == [output]
+
+    with pytest.raises(CrosswalkError, match="refusing to overwrite"):
+        commands.write_once(output, b'{"fresh":true}\n')
+    assert output.read_bytes() == b""
+    assert list(tmp_path.iterdir()) == [output]
+
+
 def test_partial_staging_write_is_never_published(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
