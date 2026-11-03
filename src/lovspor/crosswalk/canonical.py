@@ -15,6 +15,7 @@ from typing import Any
 from lovspor.crosswalk.errors import CrosswalkContractError
 
 Record = dict[str, Any]
+UTF8 = "utf-8"
 # One fixed set of options, so no call site can drift from the canonical form.
 _dumps = partial(json.dumps, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 

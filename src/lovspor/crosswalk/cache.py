@@ -12,10 +12,12 @@ import json
 from collections.abc import Callable, Iterable
 from dataclasses import asdict
 from datetime import datetime
+from functools import partial
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from lovspor.crosswalk.canonical import UTF8
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.errors import LovsporError
 from lovspor.legislative_chain import (
@@ -38,6 +40,7 @@ from lovspor.stortinget_discovery import (
 )
 
 MANIFEST = "capture-manifest.json"
+_manifest_json = partial(json.dumps, indent=2, ensure_ascii=False, sort_keys=True)
 LAW_PARSER_VERSIONS = {
     "lovtidend_identity": CHAIN_PARSER_VERSION,
     "lovtidend_besl_o": ODELSTING_PARSER_VERSION,
@@ -52,15 +55,15 @@ _LISTING_PARSERS: dict[str, Callable[[ListingSnapshot], Any]] = {
 
 def load_manifest(cache: Path) -> Manifest:
     try:
-        loaded: Manifest = json.loads((cache / MANIFEST).read_text(encoding="utf-8"))
+        loaded: Manifest = json.loads((cache / MANIFEST).read_text(encoding=UTF8))
     except (OSError, json.JSONDecodeError) as exc:
         raise CrosswalkError(f"capture manifest unreadable in {cache}") from exc
     return loaded
 
 
 def write_manifest(cache: Path, manifest: Manifest) -> None:
-    text = json.dumps(manifest, indent=2, ensure_ascii=False, sort_keys=True)
-    (cache / MANIFEST).write_text(text + "\n", encoding="utf-8")
+    text = _manifest_json(manifest)
+    (cache / MANIFEST).write_text(text + "\n", encoding=UTF8)
 
 
 def latest(manifest: Manifest, stage: str, kind: str, key: object) -> Entry | None:
