@@ -1,27 +1,26 @@
 """A previous-release stream must be refused after the bounded prefix is read."""
 
 import os
-import subprocess
-import sys
 import threading
 from pathlib import Path
 
+import pytest
+
 from lovspor.crosswalk.commands import read_previous
+from lovspor.crosswalk.errors import CrosswalkError
 
 
 def test_previous_release_refuses_oversize_without_waiting_for_eof(tmp_path: Path) -> None:
-    # Exercise the regular-file case in this process too: mutmut's selection
-    # tracing cannot associate the subprocess below with read_previous.
+    # Keep the reader in this process so mutation testing exercises the mutated
+    # function as well as recording this test in its selection tracing.
     previous = tmp_path / "complete.jsonl"
     previous.write_bytes(b"{}\n")
     assert read_previous(previous) == b"{}\n"
 
-    # A producer may leave its output pipe open. Refusal must need only limit+1
-    # bytes; waiting for EOF (or even one extra byte) can hang the command.
     fifo = tmp_path / "previous.jsonl"
     os.mkfifo(fifo)
     release = threading.Event()
-    written = threading.Event()
+    waited_for_eof = threading.Event()
     errors: list[BaseException] = []
 
     def produce() -> None:
@@ -29,43 +28,27 @@ def test_previous_release_refuses_oversize_without_waiting_for_eof(tmp_path: Pat
             with fifo.open("wb", buffering=0) as stream:
                 chunk = b"x" * (1024 * 1024)
                 for _ in range(512):
-                    stream.write(chunk)
+                    # Raw writes may be short, so send the entire chunk.
+                    remaining = memoryview(chunk)
+                    while remaining:
+                        remaining = remaining[stream.write(remaining) :]
                 stream.write(b"x")
-                written.set()
-                release.wait(45)
-        except (BrokenPipeError, OSError) as error:
+                # Exactly limit+1 bytes are available. An unbounded read, or a
+                # read of limit+2, cannot finish until this writer closes.
+                if not release.wait(5):
+                    waited_for_eof.set()
+        except OSError as error:
             errors.append(error)
-            written.set()
 
-    script = """
-import sys
-from pathlib import Path
-from lovspor.crosswalk.commands import read_previous
-from lovspor.crosswalk.errors import CrosswalkError
-try:
-    read_previous(Path(sys.argv[1]))
-except CrosswalkError as error:
-    print(error, flush=True)
-else:
-    raise AssertionError('oversized previous release accepted')
-"""
-    process = subprocess.Popen(
-        [sys.executable, "-c", script, str(fifo)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
     writer = threading.Thread(target=produce, daemon=True)
     writer.start()
     try:
-        assert written.wait(30), "reader did not consume the bounded prefix"
-        assert not errors
-        stdout, stderr = process.communicate(timeout=10)
-        assert process.returncode == 0, stderr
-        assert stdout.strip() == f"previous release too large: {fifo}"
+        with pytest.raises(CrosswalkError) as caught:
+            read_previous(fifo)
+        assert str(caught.value) == f"previous release too large: {fifo}"
+        assert not waited_for_eof.is_set(), "reader waited for EOF beyond the bounded prefix"
     finally:
         release.set()
-        if process.poll() is None:
-            process.kill()
-        process.communicate()
-        writer.join(timeout=5)
+        writer.join(timeout=10)
+    assert not writer.is_alive()
+    assert not errors
