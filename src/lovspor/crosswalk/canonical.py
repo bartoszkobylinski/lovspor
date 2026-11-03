@@ -9,15 +9,18 @@ were produced in.
 
 import json
 from collections.abc import Iterable
+from functools import partial
 from typing import Any
 
 from lovspor.crosswalk.errors import CrosswalkContractError
 
 Record = dict[str, Any]
+# One fixed set of options, so no call site can drift from the canonical form.
+_dumps = partial(json.dumps, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
 def canonical_json(value: object) -> str:
-    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return _dumps(value)
 
 
 def record_key(record: Record) -> tuple[str, int]:
@@ -44,7 +47,7 @@ def canonical_record(record: Record) -> Record:
 
 def serialize_records(records: Iterable[Record]) -> bytes:
     ordered = sorted((canonical_record(r) for r in records), key=record_key)
-    return "".join(canonical_json(record) + "\n" for record in ordered).encode("utf-8")
+    return "".join(canonical_json(record) + "\n" for record in ordered).encode()
 
 
 def _refuse_constant(name: str) -> float:
@@ -64,12 +67,12 @@ def _parsed_line(number: int, line: str) -> Record:
 def parse_records(data: bytes) -> list[Record]:
     """Read a JSONL file strictly: UTF-8, one object per line, final newline, no blank line."""
     try:
-        text = data.decode("utf-8")
+        text = data.decode()
     except UnicodeDecodeError as exc:
         raise CrosswalkContractError(["file is not UTF-8"]) from exc
     if text and not text.endswith("\n"):
         raise CrosswalkContractError(["file does not end with a newline"])
-    lines = text.split("\n")[:-1] if text else []
+    lines = text.split("\n")[:-1]
     if any(not line for line in lines):
         raise CrosswalkContractError(["file has a blank line"])
     return [_parsed_line(number, line) for number, line in enumerate(lines, start=1)]
