@@ -177,6 +177,7 @@ def create_sandbox(raw: Path, forbidden: Sequence[Path]) -> Path:
         checked_directory(raw.parent, forbidden)
     try:
         raw.mkdir(mode=0o700)
+        (raw / ".git").mkdir(mode=0o700)
         for name in _GIT_DIRECTORIES:
             (raw / ".git" / name).mkdir(mode=0o700, parents=True)
         for name, text in {**_GIT_FILES, "lovspor-synthetic-sandbox": MARKER_TEXT}.items():
