@@ -56,7 +56,7 @@ def directory(path: Path, detail: str, parent: int | None = None) -> Iterator[in
 
 def _remove_leftover(parent: int, name: str, detail: str) -> None:
     try:
-        status = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        status = os.lstat(name, dir_fd=parent)
     except FileNotFoundError:
         return
     if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1 or not _private(status):
@@ -95,10 +95,13 @@ def read_leaf(parent: int, name: str, detail: str) -> bytes:
         if error.errno == errno.ENOENT:
             raise
         raise _unsafe(detail) from error
-    with os.fdopen(descriptor, "rb") as stream:
-        status = os.fstat(stream.fileno())
+    try:
+        status = os.fstat(descriptor)
         if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1 or not _private(status):
             raise _unsafe(detail)
         if status.st_size > MAX_CORPUS_FILE_BYTES:
             raise _unsafe(detail)
-        return stream.read(MAX_CORPUS_FILE_BYTES + 1)
+        # Bounded although fstat said the file fits: it can grow meanwhile.
+        return os.read(descriptor, MAX_CORPUS_FILE_BYTES + 1)
+    finally:
+        os.close(descriptor)

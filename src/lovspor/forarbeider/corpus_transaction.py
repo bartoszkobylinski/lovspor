@@ -114,7 +114,7 @@ def _previous(sandbox: Path, draft: Draft) -> dict[str, bytes]:
     found: dict[str, bytes] = {}
     for path in [*draft.writes, *draft.removes]:
         if os.path.lexists(sandbox / path):
-            found[path] = _read_public(sandbox / path, DATASET_ROOT)
+            found[path] = _read_public(sandbox / path)
     return found
 
 
@@ -213,7 +213,7 @@ def _undo(sandbox: Path, operation: Operation) -> None:
 
 def _prune(sandbox: Path) -> None:
     """Remove the directories a rolled-back change left empty; ``rmdir`` never follows a link."""
-    for folder, _, _ in os.walk(sandbox / DATASET_ROOT, topdown=False):
+    for folder, _, _ in reversed(list(os.walk(sandbox / DATASET_ROOT))):
         with suppress(OSError):
             Path(folder).rmdir()
 

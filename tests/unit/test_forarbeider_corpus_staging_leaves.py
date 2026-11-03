@@ -330,3 +330,23 @@ def test_a_leaf_that_appears_between_check_and_create_is_refused(
         corpus_leaves.write_leaf(parent, "leaf", b"bytes", "here")
     assert (caught.value.reason, caught.value.detail) == (RefusalReason.UNSAFE_OUTPUT_PATH, "here")
     assert outside.read_bytes() == SENTINEL
+
+
+def test_a_leaf_is_read_with_a_bound_although_fstat_said_it_fits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file can grow between ``fstat`` and the read: the read itself stays bounded."""
+    root = _private_directory(tmp_path / "staging")
+    (root / "leaf").write_bytes(b"xy")
+    asked: list[int] = []
+    real = os.read
+
+    def counted(descriptor: int, size: int) -> bytes:
+        asked.append(size)
+        return real(descriptor, size)
+
+    with corpus_leaves.directory(root, "staging") as parent:
+        monkeypatch.setattr(corpus_leaves.os, "read", counted)
+        assert corpus_leaves.read_leaf(parent, "leaf", "staging") == b"xy"
+        monkeypatch.undo()
+    assert asked == [corpus_leaves.MAX_CORPUS_FILE_BYTES + 1]
