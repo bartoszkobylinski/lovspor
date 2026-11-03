@@ -116,6 +116,20 @@ def test_capture_accepts_an_empty_directory_outside_any_checkout(tmp_path: Path)
     assert writable_target(cache, "capture cache") == cache.resolve()
 
 
+def test_a_manifest_without_a_lover_directory_is_not_lovverk(tmp_path: Path) -> None:
+    directory = tmp_path / "almost"
+    directory.mkdir()
+    (directory / "manifest.json").write_text("{}")
+    assert writable_target(directory, "capture cache") == directory.resolve()
+
+
+def test_a_lover_directory_without_a_manifest_is_not_lovverk(tmp_path: Path) -> None:
+    directory = tmp_path / "almost"
+    directory.mkdir()
+    (directory / "lover").mkdir()
+    assert writable_target(directory, "capture cache") == directory.resolve()
+
+
 def test_writable_target_refuses_before_creating_anything(tmp_path: Path) -> None:
     repo = _worktree(tmp_path / "wt")
     with pytest.raises(CrosswalkError) as caught:
