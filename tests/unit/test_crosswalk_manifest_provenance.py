@@ -120,3 +120,75 @@ def test_manifest_command_refuses_a_candidate_without_capture_and_writes_nothing
     assert manifest_impl(data, output, capture_dir) == (
         f"wrote the manifest of rc.jsonl (release_candidate) to {output}"
     )
+
+
+def test_mixed_manifest_reports_research_drift_without_certifying_that_act(
+    promoted: bytes, capture_dir: Path
+) -> None:
+    """The producer contract requires provenance for every current candidate only."""
+    records = parse_records(promoted)
+    research = next(r for r in records if r["status"] == "unsupported")
+    research["evidence"][0]["body_sha256"] = "f" * 64
+
+    manifest = build_manifest(serialize_records(records), "x", capture_dir)
+
+    assert manifest["release_state"] == "release_candidate"
+    assert manifest["counts"]["release_state"] == {"release_candidate": 3, "research_only": 5}
+    assert manifest["provenance"] == {
+        "verified": True,
+        "capture_manifest_sha256": sha256((capture_dir / MANIFEST).read_bytes()).hexdigest(),
+        "not_reproduced": [],
+        "raw_bytes_not_in_capture": [research["amending_lov_id"]],
+    }
+
+
+@pytest.mark.parametrize("field", ["body_sha256", "parsed_identity_sha256"])
+def test_manifest_checks_current_provenance_without_rejudging_superseded_evidence(
+    promoted: bytes, capture_dir: Path, field: str
+) -> None:
+    """A historical revision may describe older bytes or an older parsed identity."""
+    records = parse_records(promoted)
+    candidate = next(r for r in records if r["release_state"] == "release_candidate")
+    historical = next(
+        r
+        for r in records
+        if r["amending_lov_id"] == candidate["amending_lov_id"] and r["record_revision"] == 1
+    )
+    historical["evidence"][0][field] = "f" * 64
+    data = serialize_records(records)
+
+    manifest = build_manifest(data, "x", capture_dir)
+
+    assert manifest["release_state"] == "release_candidate"
+    assert manifest["counts"]["revisions"] == len(records)
+    assert manifest["files"] == [
+        {"name": "x", "sha256": sha256(data).hexdigest(), "size_bytes": len(data)}
+    ]
+    assert manifest["provenance"]["not_reproduced"] == []
+    assert manifest["provenance"]["raw_bytes_not_in_capture"] == []
+
+
+@pytest.mark.parametrize("drift", ["body", "archive"])
+def test_one_verified_candidate_does_not_certify_another_drifted_candidate(
+    promoted: bytes, capture_dir: Path, tmp_path: Path, drift: str
+) -> None:
+    """Every current candidate must match, including candidates after the first."""
+    records = parse_records(promoted)
+    candidates = [r for r in records if r["release_state"] == "release_candidate"]
+    assert len(candidates) > 1
+    candidate = candidates[-1]
+    if drift == "body":
+        candidate["evidence"][0]["body_sha256"] = "f" * 64
+    else:
+        candidate["source_pins"]["lovdata_archives"][0]["sha256"] = "f" * 64
+    data, output = tmp_path / "rc.jsonl", tmp_path / "manifest.json"
+    data.write_bytes(serialize_records(records))
+
+    with pytest.raises(CrosswalkError, match="raw bytes not in this capture") as caught:
+        manifest_impl(data, output, capture_dir)
+
+    assert str(caught.value) == (
+        f"release candidates raw bytes not in this capture: {[candidate['amending_lov_id']]}"
+    )
+    assert not output.exists()
+    assert not (tmp_path / ".manifest.json.partial").exists()
