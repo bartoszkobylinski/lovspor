@@ -24,7 +24,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from lovspor.crosswalk.canonical import Record, serialize_records
-from lovspor.crosswalk.check import check, current_records, require_passed
+from lovspor.crosswalk.check import CheckReport, check, current_records, require_passed
 from lovspor.crosswalk.contract import ARCHIVE_URL, archive_member, validate_records
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.crosswalk.rights import STATED_FOR_ENDPOINT, STATED_FOR_FILE
@@ -74,13 +74,18 @@ def ineligibility(record: Record, bases: frozenset[str]) -> str | None:
     return None
 
 
-def _promotions(
-    records: list[Record], unverified: set[str], bases: frozenset[str]
-) -> tuple[list[Record], dict[str, int]]:
+def _unproven(report: CheckReport, law_id: str) -> str | None:
+    if law_id in report.unverified:
+        return "not reproduced from the capture"
+    if law_id in report.drifted:
+        return "raw bytes are not those of this capture"
+    return None
+
+
+def _promotions(report: CheckReport, bases: frozenset[str]) -> tuple[list[Record], dict[str, int]]:
     appended, counts = [], {"promoted": 0}
-    for law_id, record in sorted(current_records(records).items()):
-        why = "not reproduced from the capture" if law_id in unverified else None
-        why = why or ineligibility(record, bases)
+    for law_id, record in sorted(current_records(report.records).items()):
+        why = _unproven(report, law_id) or ineligibility(record, bases)
         if why is not None:
             counts[why] = counts.get(why, 0) + 1
             continue
@@ -98,7 +103,7 @@ def promote(data: bytes, approval: Approval, cache: Path) -> tuple[bytes, dict[s
         raise CrosswalkError("the approval names other bytes than this input")
     report = check(data, cache=cache)
     require_passed(report)
-    appended, counts = _promotions(report.records, set(report.unverified), accepted_bases(approval))
+    appended, counts = _promotions(report, accepted_bases(approval))
     records = report.records + appended
     validate_records(records)
     return serialize_records(records), counts

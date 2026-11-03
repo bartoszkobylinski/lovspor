@@ -136,7 +136,9 @@ def test_a_law_outside_the_capture_is_unverified_not_failed(
 def test_check_impl_and_cli(built: bytes, capture_dir: Path, tmp_path: Path) -> None:
     path = tmp_path / "x.jsonl"
     path.write_bytes(built)
-    assert check_impl(path, None, capture_dir) == "ok: 8 records, 0 not reproduced from a capture"
+    assert check_impl(path, None, capture_dir) == (
+        "ok: 8 records, 0 not reproduced from a capture, 0 with raw bytes not in this capture"
+    )
     assert check_impl(path, None, None) == "ok: 8 records"
     path.write_bytes(built.replace(b'":', b'": ', 1))
     with pytest.raises(CrosswalkContractError):

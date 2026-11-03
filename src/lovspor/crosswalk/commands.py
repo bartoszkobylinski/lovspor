@@ -189,8 +189,11 @@ def check_impl(data_path: Path, previous: Path | None, cache: Path | None) -> st
     report = check(data, read_previous(previous), cache)
     if not report.passed:
         raise CrosswalkContractError(report.problems)
-    unverified = f", {len(report.unverified)} not reproduced from a capture" if cache else ""
-    return f"ok: {len(report.records)} records{unverified}"
+    found = f"ok: {len(report.records)} records"
+    if cache is None:
+        return found
+    drift = f"{len(report.drifted)} with raw bytes not in this capture"
+    return f"{found}, {len(report.unverified)} not reproduced from a capture, {drift}"
 
 
 def release_candidate_impl(data_path: Path, approval: Path, cache: Path, output: Path) -> str:
