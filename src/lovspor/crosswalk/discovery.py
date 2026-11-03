@@ -11,7 +11,6 @@ and with the decision absent from a list that was read it is "unlisted", which
 the chain reports as contradicted. Neither can become attested.
 """
 
-import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -26,6 +25,7 @@ from lovspor.crosswalk.cache import (
     parsed_listing,
     parses,
 )
+from lovspor.crosswalk.canonical import canonical_json
 from lovspor.stortinget_case_source import SAK_PARSER_VERSION, CaseSnapshot, LawDecision
 from lovspor.stortinget_discovery import (
     DISCOVERY_PARSER_VERSION,
@@ -149,7 +149,7 @@ def other_decisions(law: Entry, found: Entry | None) -> list[Any]:
 
 
 def _key(decision: object) -> str:
-    return json.dumps(decision, sort_keys=True)
+    return canonical_json(decision)
 
 
 def attach_discovery(laws: list[Entry], decisions: list[Entry]) -> None:

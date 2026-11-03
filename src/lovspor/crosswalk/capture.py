@@ -237,12 +237,12 @@ class Sources:
 REAL_SOURCES = Sources()
 
 
-def checked_scope(law_ids: Iterable[str], lovverk_commit: str) -> list[str]:
+def checked_scope(law_ids: Iterable[str], lovverk_commit: str | None) -> list[str]:
     ordered = sorted(set(law_ids))
     bad = [law_id for law_id in ordered if not _LAW_ID.fullmatch(law_id)]
     if bad or not ordered:
         raise CrosswalkError(f"not a list of Lovdata law ids: {bad[:3] or 'empty'}")
-    if not _GIT_SHA.fullmatch(lovverk_commit):
+    if lovverk_commit is None or not _GIT_SHA.fullmatch(lovverk_commit):
         raise CrosswalkError("lovverk_commit must be a 40-hex commit id")
     return ordered
 
