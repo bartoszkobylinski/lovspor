@@ -7,7 +7,6 @@ edges of each bound, so a quieter or wrong-labelled refusal fails here.
 
 import os
 import re
-import threading
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -31,7 +30,13 @@ from lovspor.forarbeider.release_preflight import Observed, PreflightInputs, Sto
 from lovspor.forarbeider.review_ledger import load_history
 from lovspor.forarbeider.review_models import ReviewStatus, subject_of
 from tests.unit.cli_output import said
-from tests.unit.forarbeider_corpus_support import manifest, member, metadata_of, times
+from tests.unit.forarbeider_corpus_support import (
+    manifest,
+    member,
+    metadata_of,
+    read_beside_fifo,
+    times,
+)
 from tests.unit.forarbeider_promotion_support import (
     eligible,
     plan,
@@ -453,17 +458,8 @@ def test_a_fifo_in_the_dataset_is_refused_without_waiting_for_a_writer(tmp_path:
     path = create_sandbox(tmp_path / "sandbox", ())
     (path / "forarbeider").mkdir()
     os.mkfifo(path / "forarbeider" / "manifest.json")
-    outcome: list[RefusalReason] = []
 
-    def read() -> None:
-        try:
-            read_dataset(path)
-        except ForarbeiderRefusedError as error:
-            outcome.append(error.reason)
+    blocked, outcome = read_beside_fifo(path, path / "forarbeider" / "manifest.json")
 
-    reader = threading.Thread(target=read, daemon=True)
-    reader.start()
-    reader.join(timeout=5)
-
-    assert not reader.is_alive(), "the reader blocked on a FIFO"
+    assert not blocked, "the reader blocked on a FIFO"
     assert outcome == [RefusalReason.UNSAFE_INPUT_PATH]

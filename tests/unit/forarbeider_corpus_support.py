@@ -4,10 +4,15 @@ Built from the structural fixture the release tests stage: an invented
 proposition, so no real government text reaches a test, a log or CI.
 """
 
+import os
+import threading
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from lovspor.forarbeider.chapter_models import ChapterResult
+from lovspor.forarbeider.corpus_tree import read_dataset
+from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.models import ForarbeidRecord
 from lovspor.forarbeider.release_models import destination_of, document_of
 from tests.unit.forarbeider_release_support import (
@@ -87,3 +92,28 @@ def manifest(*members: dict[str, Any]) -> dict[str, Any]:
         "renderer_version": 1,
         "documents": sorted(members, key=lambda item: item["path"]),
     }
+
+
+def read_beside_fifo(checkout: Path, fifo: Path) -> tuple[bool, list[RefusalReason]]:
+    """Read ``checkout``'s dataset while ``fifo`` sits in it: (blocked, refusals).
+
+    A reader that opens the FIFO without O_NONBLOCK waits for a writer forever.
+    After a bounded wait the test opens the writing end itself, so a blocked
+    reader is released and the test fails instead of hanging the process.
+    """
+    outcome: list[RefusalReason] = []
+
+    def read() -> None:
+        try:
+            read_dataset(checkout)
+        except ForarbeiderRefusedError as error:
+            outcome.append(error.reason)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    reader.join(timeout=5)
+    blocked = reader.is_alive()
+    if blocked:
+        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+        reader.join(timeout=5)
+    return blocked, outcome

@@ -24,6 +24,7 @@ from lovspor.forarbeider.corpus_tree import (
     require_sandbox,
 )
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from tests.unit.forarbeider_corpus_support import read_beside_fifo
 
 _GIT = shutil.which("git")
 
@@ -238,7 +239,10 @@ def test_a_fifo_inside_the_dataset_is_refused_without_hanging(sandbox: Path) -> 
     _empty_dataset(sandbox)
     os.mkfifo(sandbox / "forarbeider" / "INDEX.md.fifo")
 
-    _refused(RefusalReason.UNSAFE_INPUT_PATH, read_dataset, sandbox)
+    blocked, outcome = read_beside_fifo(sandbox, sandbox / "forarbeider" / "INDEX.md.fifo")
+
+    assert not blocked, "the reader blocked on a FIFO"
+    assert outcome == [RefusalReason.UNSAFE_INPUT_PATH]
 
 
 def test_an_oversized_dataset_file_is_refused(
