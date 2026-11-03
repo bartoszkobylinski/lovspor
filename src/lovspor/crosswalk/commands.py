@@ -158,20 +158,9 @@ def build_command(
 MAX_APPROVAL_BYTES = 64 * 1024
 
 
-def _read_bounded(path: Path, limit: int, what: str) -> bytes:
-    try:
-        with path.open("rb") as stream:
-            data = stream.read(limit + 1)
-    except OSError as exc:
-        raise CrosswalkError(f"{what} unreadable: {path}") from exc
-    if len(data) > limit:
-        raise CrosswalkError(f"{what} too large: {path}")
-    return data
-
-
 def read_approval(path: Path) -> Approval:
     try:
-        return Approval.model_validate_json(_read_bounded(path, MAX_APPROVAL_BYTES, "approval"))
+        return Approval.model_validate_json(read_bounded(path, MAX_APPROVAL_BYTES, "approval"))
     except ValidationError as exc:
         fields = sorted({".".join(str(p) for p in e["loc"]) for e in exc.errors()})
         raise CrosswalkError(f"approval refused: invalid {', '.join(fields)}") from exc
@@ -179,7 +168,7 @@ def read_approval(path: Path) -> Approval:
 
 def check_impl(data_path: Path, previous: Path | None, cache: Path | None) -> str:
     """One line per problem, then a verdict; raises when anything failed."""
-    data = _read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
+    data = read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
     report = check(data, read_previous(previous), cache)
     if not report.passed:
         raise CrosswalkContractError(report.problems)
@@ -188,7 +177,7 @@ def check_impl(data_path: Path, previous: Path | None, cache: Path | None) -> st
 
 
 def release_candidate_impl(data_path: Path, approval: Path, cache: Path, output: Path) -> str:
-    data = _read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
+    data = read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
     promoted, counts = promote(data, read_approval(approval), cache)
     write_once(output, promoted)
     return "; ".join(f"{reason}: {count}" for reason, count in sorted(counts.items()))

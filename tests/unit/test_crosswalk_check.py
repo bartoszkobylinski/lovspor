@@ -17,9 +17,9 @@ from lovspor.crosswalk.cache import load_manifest
 from lovspor.crosswalk.canonical import parse_records, serialize_records
 from lovspor.crosswalk.check import append_only_problems, check, current_records
 from lovspor.crosswalk.commands import (
-    _read_bounded,
     check_impl,
     read_approval,
+    read_bounded,
     release_candidate_impl,
 )
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
@@ -448,27 +448,27 @@ def test_input_read_error_names_crosswalk_file(tmp_path: Path, command: str) -> 
 def test_bounded_read_equal_limit_and_oversize(tmp_path: Path) -> None:
     path = tmp_path / "bytes"
     path.write_bytes(b"abcd")
-    assert _read_bounded(path, 4, "input") == b"abcd"
+    assert read_bounded(path, 4, "input") == b"abcd"
     path.write_bytes(b"abcde")
     with pytest.raises(CrosswalkError) as caught:
-        _read_bounded(path, 4, "input")
+        read_bounded(path, 4, "input")
     assert str(caught.value) == f"input too large: {path}"
 
 
 def test_bounded_read_rejects_fifo_without_waiting_for_eof(tmp_path: Path) -> None:
     regular = tmp_path / "regular"
     regular.write_bytes(b"abcd")
-    assert _read_bounded(regular, 4, "input") == b"abcd"
+    assert read_bounded(regular, 4, "input") == b"abcd"
     fifo = tmp_path / "fifo"
     os.mkfifo(fifo)
     descriptor = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
     try:
         os.write(descriptor, b"abcde")
         code = (
-            "from pathlib import Path; from lovspor.crosswalk.commands import _read_bounded; "
+            "from pathlib import Path; from lovspor.crosswalk.commands import read_bounded; "
             "from lovspor.crosswalk.errors import CrosswalkError; "
             "import sys\n"
-            "try: _read_bounded(Path(sys.argv[1]), 4, 'input')\n"
+            "try: read_bounded(Path(sys.argv[1]), 4, 'input')\n"
             "except CrosswalkError as e: print(e)\n"
         )
         result = subprocess.run(
