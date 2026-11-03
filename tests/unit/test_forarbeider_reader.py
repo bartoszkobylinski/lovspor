@@ -5,6 +5,7 @@ the PR3B-1 preflight, plan, simulate, sandbox-withdraw and then the reader.
 The reader reads one sandbox, named on every call, and writes nothing.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from typer.testing import CliRunner
 from lovspor.cli import app
 from lovspor.forarbeider.corpus_render import NOT_LAW
 from lovspor.forarbeider.corpus_tree import read_dataset
+from lovspor.forarbeider.models import JSON_LAYOUT
 from lovspor.forarbeider.review_models import ReviewStatus
 from tests.unit.cli_output import said
 from tests.unit.forarbeider_promotion_support import plan, sandbox, simulate, tree, withdraw
@@ -71,7 +73,9 @@ def test_list_names_every_released_proposition_with_its_labels(both: Path) -> No
 
 
 def test_show_states_labels_time_axes_and_every_released_receipt(box: Path, desk: Desk) -> None:
-    shown = loaded(read(box, "show", *exact(L_ID)))
+    result = read(box, "show", *exact(L_ID))
+    shown = loaded(result)
+    member = read_dataset(box).manifest.documents[0]
 
     assert shown["record_type"] == "forarbeider_reader_document"
     assert shown["labels"] == {
@@ -83,6 +87,13 @@ def test_show_states_labels_time_axes_and_every_released_receipt(box: Path, desk
         "asserts_complete_proposition": False,
     }
     assert shown["path"] == L_DOCUMENT
+    assert shown["manifest_sha256"] == read_dataset(box).manifest_sha256
+    assert shown["ministry"] == member.ministry
+    assert shown["markdown_sha256"] == member.markdown_sha256
+    assert member.ministry is not None
+    assert member.markdown_sha256 is not None
+    assert result.stdout.rstrip("\n") == json.dumps(shown, **JSON_LAYOUT)
+    assert "å" in result.stdout
     assert shown["document"]["source_url"].startswith("https://www.regjeringen.no/no/dokumenter/")
     times = shown["times"]
     assert set(times) == {
@@ -125,11 +136,14 @@ def test_a_held_chapter_is_neither_listed_nor_readable(desk: Desk, tmp_path: Pat
     assert simulate(desk, planned_sha, box).exit_code == 0
 
     shown = loaded(read(box, "show", *exact(L_ID)))
+    available = loaded(read(box, "chapter", *exact(L_ID), "--chapter", "2"))
     held = read(box, "chapter", *exact(L_ID), "--chapter", "3")
 
     assert [item["chapter_number"] for item in shown["chapters"]] == [2]
     assert shown["coverage"] == "partial_curated_excerpt"
     assert shown["partial_curated_excerpt"] is True
+    assert available["coverage"] == "partial_curated_excerpt"
+    assert available["partial_curated_excerpt"] is True
     assert held.exit_code == 1
     assert said("refused: chapter_not_released: chapter", held.output)
     assert desk.results[3].source_page_url not in held.output
@@ -140,6 +154,7 @@ def test_chapter_prints_only_that_chapter_annotated_as_preparatory(box: Path, de
 
     assert chapter["record_type"] == "forarbeider_reader_chapter"
     assert chapter["chapter"]["chapter_number"] == 2
+    assert chapter["partial_curated_excerpt"] is True
     assert chapter["chapter"]["source_page_url"] == desk.results[2].source_page_url
     assert chapter["notice"].startswith(NOTICE_START)
     assert chapter["synthetic"] is True
