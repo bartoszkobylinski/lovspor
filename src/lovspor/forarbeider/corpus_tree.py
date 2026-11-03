@@ -122,7 +122,7 @@ def _walk(directory: Path, prefix: str) -> dict[str, bytes]:
             if stat.S_ISDIR(mode):
                 files.update(_walk(Path(entry.path), relative))
             else:
-                files[relative] = _read_public(Path(entry.path), DATASET_ROOT)
+                files[relative] = _read_public(Path(entry.path))
     return files
 
 
