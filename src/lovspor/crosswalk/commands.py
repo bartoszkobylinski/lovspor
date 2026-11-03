@@ -9,7 +9,7 @@ publishes, tags, pushes, or writes into ``lovverk``.
 import os
 import subprocess
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, BinaryIO
 
 import typer
 
@@ -31,16 +31,28 @@ MAX_PREVIOUS_BYTES = 512 * 1024 * 1024
 _ENGINE_ROOT = Path(__file__).resolve().parents[3]
 
 
-def read_law_ids(path: Path) -> list[str]:
-    """One Lovdata law id per line; blank lines and `#` comments are skipped."""
-    # A bounded read, never stat: a pipe reports size 0 and may never reach EOF.
+def read_capped(stream: BinaryIO, limit: int) -> bytes:
+    """At most ``limit + 1`` bytes: one byte past the limit proves the input too large.
+
+    Never stat and never read to EOF: a pipe reports size 0 and may never close.
+    """
+    return stream.read(limit + 1)
+
+
+def read_bounded(path: Path, limit: int, what: str) -> bytes:
     try:
         with path.open("rb") as stream:
-            data = stream.read(MAX_LAW_LIST_BYTES + 1)
+            data = read_capped(stream, limit)
     except OSError as exc:
-        raise CrosswalkError(f"law list unreadable: {path}") from exc
-    if len(data) > MAX_LAW_LIST_BYTES:
-        raise CrosswalkError(f"law list too large: {path}")
+        raise CrosswalkError(f"{what} unreadable: {path}") from exc
+    if len(data) > limit:
+        raise CrosswalkError(f"{what} too large: {path}")
+    return data
+
+
+def read_law_ids(path: Path) -> list[str]:
+    """One Lovdata law id per line; blank lines and `#` comments are skipped."""
+    data = read_bounded(path, MAX_LAW_LIST_BYTES, "law list")
     try:
         text = data.decode()
     except UnicodeDecodeError as exc:
