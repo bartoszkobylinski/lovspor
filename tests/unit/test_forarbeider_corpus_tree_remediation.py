@@ -69,3 +69,21 @@ def test_damaged_identity_refuses_with_the_public_sandbox_error(
     assert caught.value.detail == "sandbox"
     assert str(caught.value) == "corpus_not_sandbox: sandbox"
     assert not (box / "forarbeider").exists()
+
+
+def test_oversized_nested_dataset_file_reports_the_dataset_label(tmp_path: Path) -> None:
+    box = create_sandbox(tmp_path / "box", ())
+    nested = box / "forarbeider" / "2099-2100"
+    nested.mkdir(parents=True)
+    document = nested / "proposition.md"
+    size = 32 * 1024 * 1024 + 1
+    with document.open("wb") as stream:
+        stream.truncate(size)
+
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        read_dataset(box)
+
+    assert caught.value.reason is RefusalReason.INPUT_TOO_LARGE
+    assert caught.value.detail == "forarbeider"
+    assert str(caught.value) == "input_too_large: forarbeider"
+    assert document.stat().st_size == size
