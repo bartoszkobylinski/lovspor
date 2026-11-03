@@ -116,9 +116,12 @@ def check(data: bytes, previous: bytes | None = None, cache: Path | None = None)
     except CrosswalkContractError as exc:
         report.problems = list(exc.problems)
         return report
+    # The contract runs first: canonical ordering reads fields the schema guarantees.
+    report.problems = _contract_problems(report.records)
+    if report.problems:
+        return report
     if not is_canonical(data):
         report.problems.append("file is not in canonical form")
-    report.problems += _contract_problems(report.records)
     if previous is not None:
         report.problems += append_only_problems(report.records, parse_records(previous))
     if cache is not None and not report.problems:
