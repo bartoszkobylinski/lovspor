@@ -432,3 +432,9 @@ def test_avd1_refusal_messages_are_exact() -> None:
     with pytest.raises(CrosswalkError) as caught:
         cap.avd1_archives([])
     assert str(caught.value) == "the publicData catalogue lists no Lovtidend avd. I archive"
+
+
+def test_a_missing_lovverk_commit_is_refused() -> None:
+    with pytest.raises(CrosswalkError) as caught:
+        cap.checked_scope([LAW], None)
+    assert str(caught.value) == "lovverk_commit must be a 40-hex commit id"
