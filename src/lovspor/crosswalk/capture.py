@@ -33,6 +33,7 @@ from lovspor.crosswalk.cache import (
     verified_archive,
     write_manifest,
 )
+from lovspor.crosswalk.canonical import UTF8
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.errors import LovsporError, NetworkError, StortingetStatusError
 from lovspor.sources.lovdata import LovdataArchive, LovdataClient
@@ -75,7 +76,7 @@ class Pacer:
         self._last = self._clock()
 
     def note(self, line: str) -> None:
-        with self._log.open("a", encoding="utf-8") as stream:
+        with self._log.open("a", encoding=UTF8) as stream:
             stream.write(f"{datetime.now(UTC).isoformat()} {line}\n")
 
 
