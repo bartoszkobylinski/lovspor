@@ -116,12 +116,16 @@ def _require_verified_candidates(report: CheckReport, cache: Path | None) -> Non
         raise CrosswalkError(
             "a release_candidate manifest needs verified source provenance: give the capture"
         )
-    for name, laws in (
-        ("not reproduced from the capture", report.unverified),
-        ("raw bytes not in this capture", report.drifted),
-    ):
-        if candidates & set(laws):
-            raise CrosswalkError(f"release candidates {name}: {sorted(candidates & set(laws))}")
+    blocked = [
+        f"release candidates {name}: {sorted(candidates & set(laws))}"
+        for name, laws in (
+            ("not reproduced from the capture", report.unverified),
+            ("raw bytes not in this capture", report.drifted),
+        )
+        if candidates & set(laws)
+    ]
+    if blocked:
+        raise CrosswalkError("; ".join(blocked))
 
 
 def build_manifest(data: bytes, filename: str, cache: Path | None = None) -> dict[str, object]:

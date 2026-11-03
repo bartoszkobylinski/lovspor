@@ -234,16 +234,6 @@ def test_manifest_with_a_cache_still_demands_it_be_readable_for_a_research_only_
         build_manifest(built, "x", missing_cache)
 
 
-@pytest.mark.codex_proposal
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "build_manifest's refusal names only the first blocking reason it finds (check.py's "
-        "unverified before drifted) and drops every candidate blocked for the other reason; "
-        "the PR promises no manifest in that case, which this does honour, but not a message "
-        "that names every blocking candidate"
-    ),
-)
 def test_manifest_refusal_names_every_blocking_candidate_not_only_the_first_reason(
     promoted: bytes, capture_dir: Path
 ) -> None:
@@ -263,8 +253,8 @@ def test_manifest_refusal_names_every_blocking_candidate_not_only_the_first_reas
         "withdrawal": {"withdrawn_on": "2026-11-03", "reason": "producer edge was wrong"},
     }
     records.append(withdrawn)
-    drifted = next(r for r in records if r["amending_lov_id"] == drifted_law and r is not withdrawn)
-    drifted["evidence"][0]["body_sha256"] = "f" * 64
+    # The current candidate itself: superseded revisions are never re-judged.
+    candidates[1]["evidence"][0]["body_sha256"] = "f" * 64
     data = serialize_records(records)
 
     with pytest.raises(CrosswalkError) as caught:
