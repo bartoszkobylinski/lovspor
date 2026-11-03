@@ -13,6 +13,14 @@ from tests.unit.forarbeider_release_support import Desk, at_a_terminal  # noqa: 
 
 @pytest.mark.usefixtures("at_a_terminal")
 @pytest.mark.parametrize(
+    "boundary",
+    [
+        "forarbeider/2099-2100/prop-l/9000001.md",
+        "forarbeider/INDEX.md",
+        "forarbeider/manifest.json",
+    ],
+)
+@pytest.mark.parametrize(
     "damage,diagnostic",
     [
         ("corrupted", "corpus_tree_mismatch: staging"),
@@ -20,7 +28,7 @@ from tests.unit.forarbeider_release_support import Desk, at_a_terminal  # noqa: 
     ],
 )
 def test_recovery_refuses_damaged_payload_and_keeps_the_change_recoverable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str, diagnostic: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str, diagnostic: str, boundary: str
 ) -> None:
     """Enforce operations.md: staged digests, verified recovery, journal kept on failure."""
     desk = Desk(tmp_path / "desk")
@@ -30,22 +38,24 @@ def test_recovery_refuses_damaged_payload_and_keeps_the_change_recoverable(
     replace = transaction.replace
 
     def interrupt(source: Path, target: Path) -> None:
-        if target.suffix == ".md":
-            raise OSError("interrupted before the first document write")
+        if target == box / boundary:
+            raise OSError("interrupted before installing the selected payload")
         replace(source, target)
 
     with monkeypatch.context() as patch:
         patch.setattr(transaction, "replace", interrupt)
         result = simulate(desk, sha, box)
     assert result.exit_code == 1, result.output
-    # Parent directories are created before replace; no dataset file was installed.
-    assert not any(path.is_file() for path in (box / "forarbeider").rglob("*"))
+    assert not (box / boundary).exists()
     journal_path = box / transaction.JOURNAL
     journal_bytes = journal_path.read_bytes()
     journal = transaction.Journal.model_validate_json(journal_bytes)
-    document = journal.operations[0]
-    assert document.sha256 is not None
-    staged = box / transaction.STAGING / document.sha256
+    if boundary == journal.operations[0].path:
+        # Parent directories exist, but the first payload was never installed.
+        assert not any(path.is_file() for path in (box / "forarbeider").rglob("*"))
+    operation = next(item for item in journal.operations if item.path == boundary)
+    assert operation.sha256 is not None
+    staged = box / transaction.STAGING / operation.sha256
     original = staged.read_bytes()
     if damage == "missing":
         staged.unlink()
@@ -67,7 +77,7 @@ def test_recovery_refuses_damaged_payload_and_keeps_the_change_recoverable(
     assert recovered.exit_code == 0, recovered.output
     assert "recovered_interrupted_change" in recovered.output
     assert read_dataset(box).manifest_sha256 == journal.target_manifest_sha256
-    assert (box / document.path).read_bytes() == original
+    assert (box / operation.path).read_bytes() == original
     assert not journal_path.exists()
     assert not (box / transaction.STAGING).exists()
     assert not (box / transaction.LOCK).exists()
