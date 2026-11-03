@@ -1,0 +1,21 @@
+[[equivalent]]
+file = "src/lovspor/forarbeider/release_commands.py"
+symbol = "_approved_pins"
+registered = "2026-11-02, PR #765, from the mutation artifact at commits 9e8eca6a and e04feb5d"
+mutation = """
+-    for result, identity in zip(staged.results, _identities(staged), strict=True):
++    for result, identity in zip(staged.results, _identities(staged), strict=None):
+"""
+justification = """
+`strict` only changes what `zip` does when its iterables have different
+lengths: `strict=True` raises ValueError, while the default (`strict=False`,
+and `None` is falsy) stops at the shorter one. Here the two iterables always
+have the same length. `_identities(staged)` is a tuple evaluated in full
+before the loop starts. It appends exactly one identity per element of
+`staged.results`, in order, or raises ForarbeiderRefusedError before `zip`
+is called. No path returns a tuple with more or fewer elements than
+`staged.results`. So the length-mismatch branch that `strict` controls can
+never be reached, and every variant iterates the same pairs and computes the
+same pins and refusals. The argument rests on Python's `zip` semantics and
+on the body of `_identities` in the same module, not on any dependency.
+"""

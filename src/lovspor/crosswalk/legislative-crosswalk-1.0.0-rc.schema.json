@@ -155,8 +155,9 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "utc_timestamp": {
-      "description": "UTC only, checked by pattern: jsonschema skips format date-time unless an optional validator package is installed.",
+      "description": "UTC only: the pattern fixes the shape, the format names a real calendar instant (the producer's validator registers its own date-time checker).",
       "type": "string",
+      "format": "date-time",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?(?:Z|\\+00:00)$"
     },
     "law_id": {
