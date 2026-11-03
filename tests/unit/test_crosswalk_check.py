@@ -16,7 +16,7 @@ from lovspor.crosswalk import commands
 from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.cache import load_manifest
 from lovspor.crosswalk.canonical import parse_records, serialize_records
-from lovspor.crosswalk.check import append_only_problems, check, current_records
+from lovspor.crosswalk.check import append_only_problems, check, current_records, require_passed
 from lovspor.crosswalk.commands import (
     check_impl,
     read_approval,
@@ -31,7 +31,7 @@ from lovspor.crosswalk.release import (
     ineligibility,
     promote,
 )
-from tests.unit.crosswalk_support import PRODUCER, make_capture
+from tests.unit.crosswalk_support import PRODUCER, attested, make_capture
 
 OPTIONS = BuildOptions(producer_commit=PRODUCER)
 ATTESTED = {"LOV-2022-06-17-63", "LOV-2025-04-25-13", "LOV-2025-06-20-67"}
@@ -708,3 +708,32 @@ def test_crosswalk_file_size_limit_is_inclusive_for_check_and_release(
         check_impl(path, None, None)
     with pytest.raises(CrosswalkError, match="crosswalk file too large"):
         release_candidate_impl(path, path, tmp_path, tmp_path / "out.jsonl")
+
+
+def test_cache_provenance_is_skipped_when_history_already_failed(tmp_path: Path) -> None:
+    # check()'s docstring orders its checks: canonical form, contract, history,
+    # then provenance against the cache, each gating the next. A cache that
+    # cannot even be opened must never be reached once history already failed:
+    # load_manifest would raise CrosswalkError and check() would crash instead
+    # of returning a report, which is exactly what a fail-closed check must not do.
+    record = attested()
+    previous = serialize_records([record])
+    rewritten = serialize_records([{**record, "reason": "rewritten after release"}])
+    missing_cache = tmp_path / "no-such-cache"
+
+    report = check(rewritten, previous=previous, cache=missing_cache)
+
+    assert any("was rewritten" in p for p in report.problems)
+    assert report.unverified == []
+    assert report.drifted == []
+
+
+def test_require_passed_raises_exactly_the_reports_problems() -> None:
+    report = check(serialize_records([attested()]))
+    assert report.passed
+    require_passed(report)  # Does not raise.
+
+    report.problems = ["a problem"]
+    with pytest.raises(CrosswalkContractError) as caught:
+        require_passed(report)
+    assert caught.value.problems == ("a problem",)
