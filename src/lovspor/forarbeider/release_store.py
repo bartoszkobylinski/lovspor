@@ -37,7 +37,14 @@ MAX_EVIDENCE_BYTES = 16 * 1024 * 1024
 MAX_STAGED_BYTES = 64 * 1024 * 1024
 
 Folder = Literal[
-    "dossiers", "authorizations", "revocations", "reports", "plans", "previews", "withdrawals"
+    "dossiers",
+    "authorizations",
+    "revocations",
+    "reports",
+    "plans",
+    "previews",
+    "withdrawal_intents",
+    "withdrawals",
 ]
 
 

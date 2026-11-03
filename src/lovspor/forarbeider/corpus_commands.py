@@ -43,7 +43,7 @@ from lovspor.forarbeider.release_commands import (
 )
 from lovspor.forarbeider.release_models import PreflightReport, digest, record_text
 from lovspor.forarbeider.release_preflight import PreflightInputs, evaluate
-from lovspor.forarbeider.release_store import write_preview, write_record
+from lovspor.forarbeider.release_store import read_named, write_preview, write_record
 from lovspor.forarbeider.synthetic import is_synthetic, write_fixtures
 
 _NOT_PERMISSION = "publication_authorized=false"
@@ -293,6 +293,26 @@ class WithdrawRequest(BaseModel):
     decided: str
 
 
+class WithdrawalIntent(BaseModel):
+    """The owner's decision to withdraw one document, stored before the sandbox changes.
+
+    Named by the manifest digest it leads to, so a retry that finds the sandbox
+    in that state finds the decision that put it there.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal[1]
+    record_type: Literal["forarbeider_sandbox_withdrawal_intent"]
+    document_id: str
+    owner: str
+    withdrawn_at: datetime
+    removed: tuple[str, ...]
+    base_manifest_sha256: str | None
+    result_manifest_sha256: str
+    history_erased: Literal[False]
+
+
 class Withdrawal(BaseModel):
     """The owner withdrew one document from the sandbox: what changed, by path and digest."""
 
@@ -305,20 +325,87 @@ class Withdrawal(BaseModel):
     withdrawn_at: datetime
     removed: tuple[str, ...]
     manifest_sha256: str
+    intent_sha256: str
     history_erased: Literal[False]
 
 
-def _withdraw(sandbox: Path, request: WithdrawRequest, at: datetime) -> Draft:
+class _Decided(NamedTuple):
+    owner: str
+    at: datetime
+
+
+def _intent(
+    request: WithdrawRequest, decided: _Decided, base: str | None, draft: Draft
+) -> WithdrawalIntent:
+    return WithdrawalIntent(
+        schema_version=1,
+        record_type="forarbeider_sandbox_withdrawal_intent",
+        document_id=request.document,
+        owner=decided.owner,
+        withdrawn_at=decided.at,
+        removed=draft.removes,
+        base_manifest_sha256=base,
+        result_manifest_sha256=digest(draft.writes[MANIFEST_PATH]),
+        history_erased=False,
+    )
+
+
+def _unrecorded_intent(workspace: Path, sandbox: Path, document: str) -> WithdrawalIntent | None:
+    """The intent that left the sandbox as it is now, withdrawing ``document``, with no receipt yet.
+
+    Raises:
+        ForarbeiderRefusedError: ``document_not_released`` when that withdrawal
+            already has its receipt: it is done, and done once.
+    """
+    current = read_dataset(sandbox).manifest_sha256
+    if current is None:
+        return None
+    intent = read_named(workspace, "withdrawal_intents", current, WithdrawalIntent)
+    if intent is None or intent.document_id != document:
+        return None
+    if read_named(workspace, "withdrawals", _receipt(intent).intent_sha256, Withdrawal):
+        raise ForarbeiderRefusedError(RefusalReason.DOCUMENT_NOT_RELEASED, "document")
+    return intent
+
+
+def _withdraw(
+    workspace: Path, sandbox: Path, request: WithdrawRequest, decided: _Decided
+) -> WithdrawalIntent:
+    """The intent carried out: an earlier one this state records, or a new one, stored first."""
     with locked(sandbox):
         recover(sandbox)
-        draft = withdraw_draft(read_dataset(sandbox), request.document, at)
+        intent = _unrecorded_intent(workspace, sandbox, request.document)
         release_commands.require_a_person(f"withdraw {request.document}")
+        if intent is not None:
+            return intent
+        dataset = read_dataset(sandbox)
+        draft = withdraw_draft(dataset, request.document, decided.at)
+        intent = _intent(request, decided, dataset.manifest_sha256, draft)
+        write_record(workspace, "withdrawal_intents", intent, intent.result_manifest_sha256)
         apply(sandbox, draft)
-    return draft
+    return intent
+
+
+def _receipt(intent: WithdrawalIntent) -> Withdrawal:
+    return Withdrawal(
+        schema_version=1,
+        record_type="forarbeider_sandbox_withdrawal",
+        document_id=intent.document_id,
+        owner=intent.owner,
+        withdrawn_at=intent.withdrawn_at,
+        removed=intent.removed,
+        manifest_sha256=intent.result_manifest_sha256,
+        intent_sha256=digest(record_text(intent).encode()),
+        history_erased=False,
+    )
 
 
 def sandbox_withdraw_impl(scope: ReleaseScope, request: WithdrawRequest) -> str:
     """Withdraw one document from the sandbox, forward only, at a terminal.
+
+    The intent is stored before the sandbox changes and the receipt after, under
+    the intent's digest: a run that stopped between them is completed by the
+    next, which writes the same receipt and never undoes the withdrawal.
 
     Raises:
         ForarbeiderRefusedError: not a sandbox, no such released document,
@@ -326,21 +413,10 @@ def sandbox_withdraw_impl(scope: ReleaseScope, request: WithdrawRequest) -> str:
     """
     workspace = open_release_workspace(scope)
     sandbox = require_sandbox(request.sandbox, forbidden_trees())
-    owner, at = actor(request.decided)
-    draft = _withdraw(sandbox, request, at)
-    manifest = digest(draft.writes[MANIFEST_PATH])
-    record = Withdrawal(
-        schema_version=1,
-        record_type="forarbeider_sandbox_withdrawal",
-        document_id=request.document,
-        owner=owner,
-        withdrawn_at=at,
-        removed=draft.removes,
-        manifest_sha256=manifest,
-        history_erased=False,
-    )
-    stored = write_record(workspace, "withdrawals", record)
+    intent = _withdraw(workspace, sandbox, request, _Decided(*actor(request.decided)))
+    receipt = _receipt(intent)
+    stored = write_record(workspace, "withdrawals", receipt, receipt.intent_sha256)
     lines = [f"WITHDRAWN {request.document} record {stored}"]
-    lines += [f"removed {path}" for path in draft.removes]
-    lines += [f"rewritten {MANIFEST_PATH} {manifest}", HISTORY_WARNING]
+    lines += [f"removed {path}" for path in intent.removed]
+    lines += [f"rewritten {MANIFEST_PATH} {intent.result_manifest_sha256}", HISTORY_WARNING]
     return "\n".join(lines)
