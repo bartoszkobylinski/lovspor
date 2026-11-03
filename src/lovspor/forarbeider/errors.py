@@ -63,6 +63,8 @@ class RefusalReason(StrEnum):
     PLAN_STALE = "plan_stale"
     RENDER_UNSAFE = "render_unsafe"
     DOCUMENT_NOT_RELEASED = "document_not_released"
+    DOCUMENT_UNKNOWN = "document_unknown"
+    CHAPTER_NOT_RELEASED = "chapter_not_released"
 
 
 class ForarbeiderRefusedError(LovsporError):
