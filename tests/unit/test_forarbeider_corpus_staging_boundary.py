@@ -33,7 +33,7 @@ def test_simulate_refuses_symlinked_staging_without_writing_outside_sandbox(tmp_
     assert not (box / JOURNAL).exists()
     assert not (box / LOCK).exists()
     assert result.exit_code == 1, result.output
-    assert said("refused:", result.output)
+    assert said("refused: unsafe_output_path: staging", result.output)
 
 
 @pytest.mark.usefixtures("at_a_terminal")
