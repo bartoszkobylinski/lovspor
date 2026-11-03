@@ -107,14 +107,7 @@ def engine_commit(root: Path = _ENGINE_ROOT) -> str:
 def read_previous(path: Path | None) -> bytes | None:
     if path is None:
         return None
-    try:
-        with path.open("rb") as stream:
-            data = stream.read(MAX_PREVIOUS_BYTES + 1)
-    except OSError as exc:
-        raise CrosswalkError(f"previous release unreadable: {path}") from exc
-    if len(data) > MAX_PREVIOUS_BYTES:
-        raise CrosswalkError(f"previous release too large: {path}")
-    return data
+    return read_bounded(path, MAX_PREVIOUS_BYTES, "previous release")
 
 
 def write_once(path: Path, data: bytes) -> None:
