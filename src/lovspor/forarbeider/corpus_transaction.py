@@ -125,6 +125,21 @@ def replace(source: Path, target: Path) -> None:
     source.replace(target)
 
 
+def _staging(sandbox: Path) -> Path:
+    """The staging directory inside ``.git``, refused if anything put a link or a file there.
+
+    A symlink at this path would carry every staged byte, and the journal, out of
+    the sandbox before a single dataset operation ran.
+
+    Raises:
+        ForarbeiderRefusedError: ``unsafe_output_path``.
+    """
+    staging = sandbox / STAGING
+    if staging.is_symlink() or (staging.exists() and not staging.is_dir()):
+        raise ForarbeiderRefusedError(RefusalReason.UNSAFE_OUTPUT_PATH, "staging")
+    return staging
+
+
 def _perform(sandbox: Path, operation: Operation) -> None:
     target = sandbox / operation.path
     if _current(target) == operation.sha256:
@@ -132,12 +147,13 @@ def _perform(sandbox: Path, operation: Operation) -> None:
     if operation.sha256 is None:
         target.unlink()
         return
-    staged = sandbox / STAGING / operation.sha256
+    staging = _staging(sandbox)
+    staged = staging / operation.sha256
     payload = staged.read_bytes()
     if digest(payload) != operation.sha256:
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "staging")
     _parent(sandbox, operation.path)
-    copy = sandbox / STAGING / f"{operation.sha256}.next"
+    copy = staging / f"{operation.sha256}.next"
     copy.write_bytes(payload)
     replace(copy, target)
 
@@ -167,6 +183,8 @@ def _clear(sandbox: Path) -> None:
 
 def _journal(sandbox: Path) -> Journal | None:
     path = sandbox / JOURNAL
+    if path.is_symlink():
+        raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "journal")
     if not path.exists():
         return None
     try:
@@ -194,7 +212,7 @@ def recover(sandbox: Path) -> bool:
 
 
 def _stage(sandbox: Path, writes: Mapping[str, bytes], journal: Journal) -> None:
-    staging = sandbox / STAGING
+    staging = _staging(sandbox)
     try:
         staging.mkdir(mode=0o700, exist_ok=True)
         for payload in writes.values():
