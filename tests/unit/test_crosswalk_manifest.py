@@ -15,7 +15,7 @@ from lovspor.crosswalk.commands import manifest_impl
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
 from lovspor.crosswalk.manifest import BLOCKERS, build_manifest, render_manifest
 from lovspor.crosswalk.release import Approval, promote
-from tests.unit.crosswalk_support import COMMIT, PRODUCER, attested, digest, make_capture
+from tests.unit.crosswalk_support import COMMIT, PRODUCER, attested, besl_o, digest, make_capture
 
 OPTIONS = BuildOptions(producer_commit=PRODUCER)
 
@@ -99,6 +99,41 @@ def test_manifest_is_deterministic(built: bytes) -> None:
     first = render_manifest(build_manifest(built, "x"))
     assert render_manifest(build_manifest(built, "x")) == first
     assert first.endswith(b"}\n")
+
+
+def test_manifest_counts_current_revision_independently_for_each_law() -> None:
+    """P5 counts current acts while retaining every historical revision."""
+    first, promoted, other = attested(), attested(), besl_o()
+    promoted.update(record_revision=2, release_state="release_candidate")
+    manifest = build_manifest(serialize_records([promoted, other, first]), "history.jsonl")
+    assert manifest["counts"] == {
+        "revisions": 3,
+        "acts": 2,
+        "status": {"attested": 1, "unsupported": 1},
+        "release_state": {"release_candidate": 1, "research_only": 1},
+        "record_state": {"active": 2},
+    }
+    assert manifest["release_state"] == "release_candidate"
+
+
+@pytest.mark.parametrize("invalid", ["utf8", "noncanonical", "revision_gap", "duplicate_revision"])
+def test_manifest_refuses_invalid_input_without_publishing(tmp_path: Path, invalid: str) -> None:
+    """The manifest is derived only from a file that passes check (P5)."""
+    first, later = attested(), attested()
+    later["record_revision"] = 3
+    data = {
+        "utf8": b"\xff\n",
+        "noncanonical": serialize_records([first]).replace(b'":', b'": ', 1),
+        "revision_gap": serialize_records([first, later]),
+        "duplicate_revision": serialize_records([first, first]),
+    }[invalid]
+    source, output = tmp_path / "input.jsonl", tmp_path / "manifest.json"
+    source.write_bytes(data)
+    with pytest.raises(CrosswalkContractError):
+        manifest_impl(source, output)
+    assert source.read_bytes() == data
+    assert not output.exists()
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["input.jsonl"]
 
 
 def test_manifest_retains_historical_provenance_when_an_archive_is_repinned() -> None:
