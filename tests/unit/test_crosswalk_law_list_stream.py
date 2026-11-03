@@ -6,7 +6,10 @@ import sys
 import threading
 from pathlib import Path
 
-from lovspor.crosswalk.commands import MAX_LAW_LIST_BYTES
+import pytest
+
+from lovspor.crosswalk.commands import MAX_LAW_LIST_BYTES, read_law_ids
+from lovspor.crosswalk.errors import CrosswalkError
 
 _READER = """
 import sys
@@ -54,3 +57,37 @@ def test_law_list_pipe_is_refused_after_limit_plus_one_byte(tmp_path: Path) -> N
         if process.poll() is None:
             process.kill()
         writer.join(5)
+
+
+def test_law_list_rejects_oversized_open_pipe_without_another_byte(tmp_path: Path) -> None:
+    fifo = tmp_path / "open-laws.txt"
+    os.mkfifo(fifo)
+    release = threading.Event()
+    expired = threading.Event()
+    failures: list[Exception] = []
+
+    def produce() -> None:
+        try:
+            with fifo.open("wb", buffering=0) as stream:
+                remaining = memoryview(b"#" * (MAX_LAW_LIST_BYTES + 1))
+                while remaining:
+                    remaining = remaining[stream.write(remaining) :]
+                # Keep EOF and the next byte unavailable until the reader returns.
+                # The deadline only releases a broken reader so the test can fail.
+                if not release.wait(10):
+                    expired.set()
+        except OSError as error:
+            failures.append(error)
+
+    writer = threading.Thread(target=produce, daemon=True)
+    writer.start()
+    try:
+        with pytest.raises(CrosswalkError, match="law list too large") as caught:
+            read_law_ids(fifo)
+        assert str(caught.value) == f"law list too large: {fifo}"
+        assert not expired.is_set(), "reader waited for another byte or EOF"
+    finally:
+        release.set()
+        writer.join(5)
+    assert not writer.is_alive()
+    assert not failures
