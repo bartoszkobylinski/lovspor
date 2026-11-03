@@ -106,6 +106,24 @@ def test_a_manifest_forged_with_another_chapter_receipt_is_not_synthetic(box: Pa
     _refused_everywhere(box, "refused: input_not_synthetic: document")
 
 
+def test_a_withdrawn_entry_forged_is_caught_before_anything_else_is_served(
+    desk: Desk, box: Path
+) -> None:
+    """``open_shelf`` re-renders every member, withdrawn included: dropping it silently
+
+    from ``list`` would let a forged, never-served entry hide behind its own withdrawal.
+    """
+    assert withdraw(desk, box, L_ID).exit_code == 0
+
+    def change(member: ManifestDocument) -> ManifestDocument:
+        first = member.chapters[0].model_copy(update={"text_sha256": "0" * 64})
+        return member.model_copy(update={"chapters": (first, *member.chapters[1:])})
+
+    _forge(box, change)
+
+    _refused_everywhere(box, "refused: input_not_synthetic: document")
+
+
 @pytest.mark.parametrize(
     "injected",
     [
@@ -312,8 +330,12 @@ def test_a_change_in_progress_is_not_read(box: Path, left: str) -> None:
     ],
 )
 def test_a_document_not_named_exactly_is_unknown(box: Path, options: list[str]) -> None:
-    for command in ("show", "provenance"):
-        result = read(box, command, *options)
+    for arguments in (
+        ["show", *options],
+        ["provenance", *options],
+        ["chapter", *options, "--chapter", "2"],
+    ):
+        result = read(box, *arguments)
         assert result.exit_code == 1, result.output
         assert said("refused: document_unknown: document", result.output)
         assert "../" not in result.output
