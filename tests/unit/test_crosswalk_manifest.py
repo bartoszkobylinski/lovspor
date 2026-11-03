@@ -9,6 +9,7 @@ from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from lovspor.crosswalk import commands
 from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.canonical import parse_records, serialize_records
 from lovspor.crosswalk.commands import manifest_impl
@@ -200,6 +201,38 @@ def test_manifest_missing_input_identifies_crosswalk_file(tmp_path: Path) -> Non
     with pytest.raises(CrosswalkError) as error:
         manifest_impl(data, output)
     assert str(error.value) == f"crosswalk file unreadable: {data}"
+    assert not output.exists()
+
+
+def test_manifest_cli_refuses_a_missing_input_file(tmp_path: Path) -> None:
+    """Exercises ``manifest_command``'s generic ``except LovsporError`` branch through the
+    CLI entrypoint, the same way P4's check command is held to (#610 P5)."""
+    missing, output = tmp_path / "missing.jsonl", tmp_path / "manifest.json"
+    args = ["ops", "crosswalk", "manifest", "--input", str(missing), "--output", str(output)]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 1
+    assert f"refused: crosswalk file unreadable: {missing}" in result.output
+    assert not output.exists()
+
+
+def test_manifest_file_size_limit_is_inclusive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # check_impl and release_candidate_impl each bound the input file on MAX_PREVIOUS_BYTES
+    # independently (test_crosswalk_check.py); manifest_impl is a third, separate call site
+    # and a regression there must fail here, not only in the other two.
+    path = tmp_path / "in.jsonl"
+    path.write_bytes(b"{}\n")
+    output = tmp_path / "manifest.json"
+    monkeypatch.setattr(commands, "MAX_PREVIOUS_BYTES", 3)
+    with pytest.raises(CrosswalkError) as at_limit:
+        manifest_impl(path, output)
+    assert "too large" not in str(at_limit.value)
+    assert not output.exists()
+
+    monkeypatch.setattr(commands, "MAX_PREVIOUS_BYTES", 2)
+    with pytest.raises(CrosswalkError, match="crosswalk file too large"):
+        manifest_impl(path, output)
     assert not output.exists()
 
 
