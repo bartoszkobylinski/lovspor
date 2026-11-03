@@ -15,7 +15,7 @@ from lovspor.crosswalk.commands import manifest_impl
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
 from lovspor.crosswalk.manifest import BLOCKERS, build_manifest, render_manifest
 from lovspor.crosswalk.release import Approval, promote
-from tests.unit.crosswalk_support import COMMIT, PRODUCER, make_capture
+from tests.unit.crosswalk_support import COMMIT, PRODUCER, attested, digest, make_capture
 
 OPTIONS = BuildOptions(producer_commit=PRODUCER)
 
@@ -84,6 +84,82 @@ def test_manifest_is_deterministic(built: bytes) -> None:
     first = render_manifest(build_manifest(built, "x"))
     assert render_manifest(build_manifest(built, "x")) == first
     assert first.endswith(b"}\n")
+
+
+def test_manifest_retains_historical_provenance_when_an_archive_is_repinned() -> None:
+    """Distinct pins and parser/commit versions describe all revisions, not only current."""
+    first, second, third = attested(), attested(), attested()
+    second["record_revision"] = 2
+    third["record_revision"] = 3
+    for record in (second, third):
+        record["source_pins"]["producer_commit"] = "c" * 40
+        record["source_pins"]["lovverk_commit"] = "d" * 40
+        record["source_pins"]["lovdata_archives"][0]["sha256"] = digest("repinned archive")
+        for item in record["evidence"]:
+            item["parser_version"] = "replacement-parser-2"
+    data = serialize_records([third, first, second])
+    manifest = build_manifest(data, "crosswalk.jsonl")
+    pins = manifest["lovdata_archives"]
+    assert len(pins) == 2
+    assert pins[0]["source_url"] == pins[1]["source_url"]
+    assert {pin["sha256"] for pin in pins} == {
+        first["source_pins"]["lovdata_archives"][0]["sha256"],
+        digest("repinned archive"),
+    }
+    assert manifest["producer_commits"] == [PRODUCER, "c" * 40]
+    assert manifest["lovverk_commits"] == [COMMIT, "d" * 40]
+    assert manifest["parser_versions"] == [
+        "lovtidend-identity-1",
+        "lovvedtak-discovery-2",
+        "replacement-parser-2",
+        "sak-xml-2",
+    ]
+    assert manifest["counts"]["revisions"] == 3
+    assert manifest["counts"]["acts"] == 1
+    rendered = render_manifest(manifest)
+    assert json.loads(rendered) == manifest
+    assert render_manifest(build_manifest(data, "crosswalk.jsonl")) == rendered
+
+
+def test_manifest_state_and_counts_follow_withdrawal_of_a_release_candidate() -> None:
+    """The module contract derives file state from current records, not past promotion."""
+    first, withdrawn = attested(), attested()
+    first["release_state"] = "release_candidate"
+    withdrawn.update(
+        record_revision=2,
+        record_state="withdrawn",
+        status="unresolved",
+        edge_status={**withdrawn["edge_status"], "decision_case": "unresolved"},
+        reason="producer edge was wrong",
+        reason_code="withdrawn_by_producer",
+        withdrawal={"withdrawn_on": "2026-11-03", "reason": "producer edge was wrong"},
+    )
+    manifest = build_manifest(serialize_records([first, withdrawn]), "x")
+    assert manifest["release_state"] == "research_only"
+    assert manifest["counts"] == {
+        "revisions": 2,
+        "acts": 1,
+        "status": {"unresolved": 1},
+        "release_state": {"research_only": 1},
+        "record_state": {"withdrawn": 1},
+    }
+
+
+def test_empty_checked_file_has_an_empty_manifest_scope() -> None:
+    manifest = build_manifest(b"", "empty.jsonl")
+    assert manifest["files"] == [
+        {"name": "empty.jsonl", "sha256": sha256(b"").hexdigest(), "size_bytes": 0}
+    ]
+    assert manifest["counts"] == {
+        "revisions": 0,
+        "acts": 0,
+        "status": {},
+        "release_state": {},
+        "record_state": {},
+    }
+    assert manifest["release_state"] == "research_only"
+    for field in ("producer_commits", "lovverk_commits", "lovdata_archives", "parser_versions"):
+        assert manifest[field] == []
 
 
 def test_release_candidate_file_level_state(built: bytes, capture_dir: Path) -> None:
