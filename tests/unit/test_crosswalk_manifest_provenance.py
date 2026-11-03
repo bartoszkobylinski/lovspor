@@ -261,6 +261,10 @@ def test_manifest_refusal_names_every_blocking_candidate_not_only_the_first_reas
         build_manifest(data, "x", capture_dir)
     assert withdrawn_law in str(caught.value)
     assert drifted_law in str(caught.value)
+    assert str(caught.value) == (
+        f"release candidates not reproduced from the capture: {[withdrawn_law]}; "
+        f"release candidates raw bytes not in this capture: {[drifted_law]}"
+    )
 
 
 def test_cli_refuses_a_release_candidate_manifest_without_capture(
