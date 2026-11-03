@@ -116,6 +116,19 @@ def test_capture_accepts_an_empty_directory_outside_any_checkout(tmp_path: Path)
     assert writable_target(cache, "capture cache") == cache.resolve()
 
 
+@pytest.mark.parametrize("marker", ["manifest.json", "lover"])
+def test_one_lovverk_marker_alone_is_not_the_corpus(tmp_path: Path, marker: str) -> None:
+    """Lovverk is the manifest and the lover/ tree together; either alone is ordinary."""
+    root = tmp_path / "project"
+    root.mkdir()
+    if marker == "lover":
+        (root / marker).mkdir()
+    else:
+        (root / marker).write_text("{}")
+    target = root / "out.jsonl"
+    assert writable_target(target, "crosswalk output") == target.resolve()
+
+
 def test_writable_target_refuses_before_creating_anything(tmp_path: Path) -> None:
     repo = _worktree(tmp_path / "wt")
     with pytest.raises(CrosswalkError) as caught:
