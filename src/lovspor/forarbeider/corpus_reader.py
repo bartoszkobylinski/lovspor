@@ -80,9 +80,9 @@ def synthetic_rendering(entry: ManifestDocument) -> Rendering:
             bundled propositions do not have.
     """
     kind = entry.document.document_type
-    pages = PROPOSITIONS.get(kind, {})
+    pages = PROPOSITIONS.get(kind)
     numbers = {item.chapter_number for item in entry.chapters}
-    if not pages or not numbers <= set(pages):
+    if pages is None or not numbers <= set(pages):
         raise _not_synthetic()
     first = min(pages)
     metadata = build_record(page_bytes(kind, first), pages[first], RETRIEVED_AT)
