@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.crosswalk.canonical import serialize_records
+from lovspor.crosswalk.check import check
 from tests.unit.crosswalk_support import attested
 
 
@@ -87,3 +88,38 @@ def test_check_refuses_invalid_previous_without_a_traceback(
     assert source.read_bytes() == data
     assert previous.read_bytes() == previous_data
     assert set(tmp_path.iterdir()) == {source, previous}
+
+
+@pytest.mark.parametrize("revisions", [(1, 1), (2,), (1, 3)])
+def test_check_rejects_invalid_previous_revision_history(
+    tmp_path: Path, revisions: tuple[int, ...]
+) -> None:
+    # check._history_problems promises that the previous release is held to
+    # the contract before comparison. All these records are individually valid;
+    # only the previous release's cross-record history violates invariant 6.
+    record = attested()
+    current = serialize_records([{**record, "record_revision": revision} for revision in (1, 2, 3)])
+    previous = serialize_records(
+        [{**record, "record_revision": revision} for revision in revisions]
+    )
+    assert check(current).passed
+    source = tmp_path / "input.jsonl"
+    source.write_bytes(current)
+    prior = tmp_path / "previous.jsonl"
+    prior.write_bytes(previous)
+
+    result = CliRunner().invoke(
+        app,
+        ["ops", "crosswalk", "check", "--input", str(source), "--previous", str(prior)],
+    )
+
+    expected = (
+        f"previous release: {record['amending_lov_id']}: revisions {list(revisions)} "
+        f"are not 1..{len(revisions)} without repeats"
+    )
+    assert result.exit_code == 1
+    assert f"problem: {expected}" in result.output  # Plain typer.echo diagnostic.
+    assert isinstance(result.exception, SystemExit)
+    assert source.read_bytes() == current
+    assert prior.read_bytes() == previous
+    assert set(tmp_path.iterdir()) == {source, prior}
