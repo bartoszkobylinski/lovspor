@@ -62,8 +62,8 @@ def _scope(manifest: Manifest, options: BuildOptions) -> tuple[list[str], str]:
     laws = sorted(set(options.law_ids)) if options.law_ids else None
     _agree(laws, sorted(set(kept_laws)) if kept_laws else None, "law ids")
     _agree(options.lovverk_commit, kept_commit, "Lovverk commit")
-    commit = options.lovverk_commit or kept_commit or ""
-    return checked_scope(laws or kept_laws or [], commit), commit
+    commit = options.lovverk_commit or kept_commit
+    return checked_scope(laws or kept_laws or [], commit), str(commit)
 
 
 def archive_pins(manifest: Manifest) -> list[Record]:
