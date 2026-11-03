@@ -166,3 +166,61 @@ def test_unparseable_cached_case_is_not_read(tmp_path: Path, body: bytes) -> Non
     assert record == entry
     assert snapshot is not None and snapshot.body == body
     assert cache.parses(snapshot) is False
+
+
+@pytest.mark.parametrize("kind", ["saker", "publikasjoner", "sak"])
+@pytest.mark.parametrize("attack", ["external-entity", "entity-expansion"])
+def test_hostile_cached_xml_is_not_usable_evidence(tmp_path: Path, kind: str, attack: str) -> None:
+    # The cache reader's contract says an unparseable response is not read,
+    # rather than an empty listing or usable case (cache.py module docstring).
+    root = {
+        "saker": "saker_oversikt",
+        "publikasjoner": "publikasjoner_oversikt",
+        "sak": "detaljert_sak",
+    }[kind]
+    secret = tmp_path / "secret.txt"
+    secret.write_text("private-marker", encoding="utf-8")
+    declaration = (
+        f'<!ENTITY payload SYSTEM "{secret.as_uri()}">'
+        if attack == "external-entity"
+        else '<!ENTITY a "payload"><!ENTITY b "&a;&a;&a;&a;"><!ENTITY payload "&b;&b;&b;&b;">'
+    )
+    body = f"<!DOCTYPE {root} [{declaration}]><{root}>&payload;</{root}>".encode()
+    (tmp_path / "hostile.xml").write_bytes(body)
+    key = 89016 if kind == "sak" else "2021-2022"
+    record = _entry("discovery", kind, key, "hostile.xml", body)
+    manifest = {"stortinget": [record]}
+
+    if kind == "sak":
+        snapshot, found = cache.case_snapshot(tmp_path, manifest, "discovery", 89016)
+        assert found == record
+        assert snapshot is not None
+        assert cache.parses(snapshot) is False
+    else:
+        assert cache.parsed_listing(tmp_path, manifest, kind, str(key)) is None
+        error = cache.listing_parse_error(tmp_path, manifest, kind, str(key))
+        assert error is not None
+        assert "Forbidden XML DTD" in error
+        assert "private-marker" not in error
+    assert (tmp_path / "hostile.xml").read_bytes() == body
+
+
+@pytest.mark.parametrize("kind", ["saker", "sak"])
+def test_latest_corrupted_capture_is_refused_without_using_older_evidence(
+    tmp_path: Path, kind: str
+) -> None:
+    body = saker() if kind == "saker" else sak(89016, "2021-2022")
+    key = "2021-2022" if kind == "saker" else 89016
+    for name in ("old.xml", "new.xml"):
+        (tmp_path / name).write_bytes(body)
+    entries = [_entry("discovery", kind, key, name, body) for name in ("old.xml", "new.xml")]
+    manifest = {"stortinget": entries}
+    (tmp_path / "new.xml").write_bytes(b"tampered")
+
+    with pytest.raises(CrosswalkError, match="do not match the manifest: new.xml"):
+        if kind == "saker":
+            cache.parsed_listing(tmp_path, manifest, kind, str(key))
+        else:
+            cache.case_snapshot(tmp_path, manifest, "discovery", int(key))
+    assert (tmp_path / "old.xml").read_bytes() == body
+    assert (tmp_path / "new.xml").read_bytes() == b"tampered"
