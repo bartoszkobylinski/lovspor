@@ -263,3 +263,26 @@ def test_cli_gate_refuses_without_an_approval(
     assert result.exit_code == 1
     assert "refused: approval unreadable" in result.output
     assert not (tmp_path / "o").exists()
+
+
+def test_attested_law_outside_capture_cannot_be_promoted(built: bytes, capture_dir: Path) -> None:
+    law_id = "LOV-2022-06-17-63"
+    manifest = load_manifest(capture_dir)
+    manifest["scope"]["law_ids"].remove(law_id)
+    (capture_dir / "capture-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = check(built, cache=capture_dir)
+    assert report.passed, report.problems
+    assert report.unverified == [law_id]
+
+    promoted, counts = promote(built, _approval(built), capture_dir)
+    assert counts["not reproduced from the capture"] == 1
+    assert counts["promoted"] == 2
+    records = parse_records(promoted)
+    assert [r for r in records if r["amending_lov_id"] == law_id] == [
+        r for r in parse_records(built) if r["amending_lov_id"] == law_id
+    ]
+    assert {
+        r["amending_lov_id"] for r in records if r["release_state"] == "release_candidate"
+    } == ATTESTED - {law_id}
+    assert set(built.splitlines()) <= set(promoted.splitlines())
