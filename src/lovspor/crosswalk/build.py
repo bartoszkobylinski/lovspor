@@ -115,9 +115,13 @@ def derive_records(cache: Path, manifest: Manifest, options: BuildOptions) -> li
 
 
 def substance(record: Record) -> str:
-    """What a record says, without its revision, pins or capture-specific bytes and times."""
+    """What a record says, without its revision, pins or capture-specific bytes and times.
+
+    ``release_state`` is the gate's verdict, not the record's content: a rebuild that
+    reads the same evidence must not append a research_only revision over a candidate.
+    """
     kept = copy.deepcopy(canonical_record(record))
-    for name in ("record_revision", "observed_on", "source_pins"):
+    for name in ("record_revision", "observed_on", "source_pins", "release_state"):
         kept.pop(name, None)
     for item in kept.get("evidence", []):
         for name in _VOLATILE_EVIDENCE:

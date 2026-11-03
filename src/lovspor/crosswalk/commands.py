@@ -18,6 +18,7 @@ from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.capture import REAL_SOURCES, Sources, capture
 from lovspor.crosswalk.check import check
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
+from lovspor.crosswalk.paths import writable_target
 from lovspor.crosswalk.release import Approval, promote
 from lovspor.errors import LovsporError
 from lovspor.ops.commands import ops_app
@@ -74,7 +75,10 @@ def capture_impl(
     return f"captured {archives} archives and {responses} Stortinget responses ({failed} failed)"
 
 
-_Cache = Annotated[Path, typer.Option("--cache", help="A new, gitignored capture directory.")]
+_Cache = Annotated[
+    Path,
+    typer.Option("--cache", help="A new, empty directory outside every Git checkout and Lovverk."),
+]
 
 
 @crosswalk_app.command("capture")
@@ -113,11 +117,23 @@ def read_previous(path: Path | None) -> bytes | None:
     return read_bounded(path, MAX_PREVIOUS_BYTES, "previous release")
 
 
+def _claim_staging(staging: Path, path: Path) -> None:
+    """Create the staging file exclusively: an existing one, or a symlink, is someone else's."""
+    try:
+        staging.touch(exist_ok=False)
+    except FileExistsError as exc:
+        raise CrosswalkError(f"refusing to reuse the staging file {staging}") from exc
+    except OSError as exc:
+        raise CrosswalkError(f"could not write {path}: {exc}") from exc
+
+
 def write_once(path: Path, data: bytes) -> None:
     """Write a new file whole or not at all; an existing file is never replaced."""
-    if path.exists():
+    if os.path.lexists(path):
         raise CrosswalkError(f"refusing to overwrite {path}")
+    writable_target(path, "crosswalk output")
     staging = path.with_name(f".{path.name}.partial")
+    _claim_staging(staging, path)
     try:
         staging.write_bytes(data)
         os.link(staging, path)

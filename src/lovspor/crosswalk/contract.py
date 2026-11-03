@@ -12,13 +12,13 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from functools import cache
 from importlib.resources import files
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, FormatChecker
 
 from lovspor.crosswalk.canonical import Record, record_key
 from lovspor.crosswalk.errors import CrosswalkContractError
@@ -37,10 +37,25 @@ def schema() -> dict[str, Any]:
     return loaded
 
 
+# The patterns fix the shape; these checkers refuse a shape that names no real
+# instant (2026-02-30, 24:00), so a bad date is a contract problem, never a ValueError.
+_FORMATS = FormatChecker(formats=())
+
+
+@_FORMATS.checks("date-time", raises=ValueError)
+def _instant(value: object) -> bool:
+    return not isinstance(value, str) or bool(datetime.fromisoformat(value))
+
+
+@_FORMATS.checks("date", raises=ValueError)
+def _day(value: object) -> bool:
+    return not isinstance(value, str) or bool(date.fromisoformat(value))
+
+
 @cache
 def _validator() -> Draft202012Validator:
     Draft202012Validator.check_schema(schema())
-    return Draft202012Validator(schema())
+    return Draft202012Validator(schema(), format_checker=_FORMATS)
 
 
 def schema_problems(record: object) -> list[str]:

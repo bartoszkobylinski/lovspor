@@ -34,6 +34,7 @@ from lovspor.crosswalk.cache import (
     write_manifest,
 )
 from lovspor.crosswalk.errors import CrosswalkError
+from lovspor.crosswalk.paths import new_cache, real_directory
 from lovspor.errors import LovsporError, NetworkError, StortingetStatusError
 from lovspor.sources.lovdata import LovdataArchive, LovdataClient
 from lovspor.stortinget_case_source import CaseSnapshot, archive_sak
@@ -201,8 +202,8 @@ def _archive_record(entry: LovdataArchive, retrieved_at: str, path: Path, cache:
 
 def capture_archive(client: LovdataClient, entry: LovdataArchive, cache: Path) -> Entry:
     """Download into staging, then keep it once under its digest; never overwrite a pin."""
+    staging = real_directory(cache / "lovdata" / ".staging", cache)
     retrieved_at = _now()
-    staging = cache / "lovdata" / ".staging"
     result = client.download(entry, staging)
     target = cache / "lovdata" / result.sha256 / entry.filename
     if target.exists():
@@ -251,7 +252,7 @@ def checked_scope(law_ids: Iterable[str], lovverk_commit: str | None) -> list[st
 def _new_manifest(cache: Path, law_ids: list[str], lovverk_commit: str) -> Manifest:
     if (cache / MANIFEST).exists():
         raise CrosswalkError(f"{cache} already holds a capture; use a new directory")
-    cache.mkdir(parents=True, exist_ok=True)
+    new_cache(cache).mkdir(parents=True, exist_ok=True)
     scope = {"law_ids": law_ids, "lovverk_commit": lovverk_commit}
     return {"started_at": _now(), "scope": scope, "lovdata": [], "stortinget": []}
 
