@@ -148,6 +148,17 @@ def test_check_impl_and_cli(built: bytes, capture_dir: Path, tmp_path: Path) -> 
     assert "problem: file is not in canonical form" in result.output
 
 
+def test_cli_check_refuses_a_missing_input_without_a_traceback(tmp_path: Path) -> None:
+    # check_impl's CrosswalkError (not a CrosswalkContractError) must still reach the
+    # command's second `except LovsporError` branch and exit cleanly, the same way
+    # build_command and capture_command already do for an unreadable input.
+    missing = tmp_path / "missing.jsonl"
+    result = CliRunner().invoke(app, ["ops", "crosswalk", "check", "--input", str(missing)])
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert f"refused: crosswalk file unreadable: {missing}" in result.output
+
+
 # --- release-candidate gate --------------------------------------------------------
 
 
@@ -312,6 +323,41 @@ def test_cli_gate_refuses_without_an_approval(
     assert result.exit_code == 1
     assert "refused: approval unreadable" in result.output
     assert not (tmp_path / "o").exists()
+
+
+def test_cli_gate_refuses_a_failing_check_without_writing_output(
+    built: bytes, tmp_path: Path
+) -> None:
+    # release_candidate_command has one `except LovsporError` branch, not check_command's
+    # two: a CrosswalkContractError from a failing check must still collapse to one
+    # "refused: N crosswalk contract problem(s): ..." line, and never reach write_once.
+    data = tmp_path / "in.jsonl"
+    data.write_bytes(built.replace(b'":', b'": ', 1))
+    approval = tmp_path / "approval.json"
+    approval.write_text(
+        _approval(data.read_bytes()).model_dump_json(by_alias=True), encoding="utf-8"
+    )
+    output = tmp_path / "rc.jsonl"
+    args = [
+        "ops",
+        "crosswalk",
+        "release-candidate",
+        "--input",
+        str(data),
+        "--approval",
+        str(approval),
+        "--cache",
+        str(tmp_path / "no-such-cache"),
+        "--output",
+        str(output),
+    ]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "refused: 1 crosswalk contract problem(s): file is not in canonical form" in (
+        result.output
+    )
+    assert not output.exists()
 
 
 def test_attested_law_outside_capture_cannot_be_promoted(built: bytes, capture_dir: Path) -> None:
