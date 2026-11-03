@@ -256,6 +256,40 @@ def test_reading_at_the_size_bound_returns_every_byte(
         assert corpus_leaves.read_leaf(parent, "leaf", "staging") == b"xy"
 
 
+def test_read_leaf_bounds_a_file_that_grows_during_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real concurrent writer cannot make a size-bounded read return extra bytes."""
+    root = _private_directory(tmp_path / "staging")
+    limit = 4
+    monkeypatch.setattr(corpus_leaves, "MAX_CORPUS_FILE_BYTES", limit)
+    leaf = root / "leaf"
+    with leaf.open("wb") as stream:
+        stream.truncate(limit)
+    stop = threading.Event()
+
+    def grow_and_shrink() -> None:
+        with leaf.open("r+b", buffering=0) as stream:
+            while not stop.is_set():
+                stream.truncate(limit)
+                stream.truncate(limit + 2)
+
+    writer = threading.Thread(target=grow_and_shrink)
+    writer.start()
+    try:
+        with corpus_leaves.directory(root, "staging") as parent:
+            for _ in range(2000):
+                try:
+                    payload = corpus_leaves.read_leaf(parent, "leaf", "staging")
+                except ForarbeiderRefusedError as error:
+                    assert error.reason == RefusalReason.UNSAFE_OUTPUT_PATH
+                else:
+                    assert len(payload) <= limit + 1
+    finally:
+        stop.set()
+        writer.join()
+
+
 def test_missing_leaves_and_directories_raise_not_found(tmp_path: Path) -> None:
     root = _private_directory(tmp_path / "staging")
     with pytest.raises(FileNotFoundError), corpus_leaves.directory(tmp_path / "absent", "staging"):

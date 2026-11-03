@@ -217,6 +217,48 @@ def test_transaction_parent_permissions_and_refusal(tmp_path: Path) -> None:
     )
 
 
+def test_previous_unsafe_file_detail_is_shown(tmp_path: Path) -> None:
+    path = "forarbeider/2099-2100/prop-l/1.md"
+    full = tmp_path / path
+    full.parent.mkdir(parents=True)
+    full.symlink_to(tmp_path / "elsewhere")
+    draft = transaction.Draft(writes={path: b"ignored"}, removes=())
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        transaction._previous(tmp_path, draft)
+    assert (caught.value.reason, caught.value.detail) == (
+        RefusalReason.UNSAFE_INPUT_PATH,
+        "forarbeider",
+    )
+
+
+def test_pending_journal_directory_refusal_keeps_its_original_detail(tmp_path: Path) -> None:
+    git = tmp_path / ".git"
+    git.mkdir()
+    git.chmod(0o770)
+    (tmp_path / transaction.JOURNAL).write_bytes(b"{}")
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        transaction.pending(tmp_path)
+    assert (caught.value.reason, caught.value.detail) == (
+        RefusalReason.CORPUS_TREE_MISMATCH,
+        "journal",
+    )
+    assert isinstance(caught.value.__cause__, ForarbeiderRefusedError)
+    assert caught.value.__cause__.detail == "journal"
+
+
+def test_pending_journal_file_refusal_keeps_its_original_detail(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir(mode=0o700)
+    (tmp_path / transaction.JOURNAL).symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        transaction.pending(tmp_path)
+    assert (caught.value.reason, caught.value.detail) == (
+        RefusalReason.CORPUS_TREE_MISMATCH,
+        "journal",
+    )
+    assert isinstance(caught.value.__cause__, ForarbeiderRefusedError)
+    assert caught.value.__cause__.detail == "journal"
+
+
 def test_staging_is_private_reusable_and_canonical(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     journal = transaction.Journal(
