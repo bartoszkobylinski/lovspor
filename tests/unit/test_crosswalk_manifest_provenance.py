@@ -89,8 +89,9 @@ def test_a_release_candidate_from_another_capture_gets_no_manifest(
     text = manifest_path.read_text(encoding="utf-8")
     other = next(x for x in parse_records(promoted) if x["amending_lov_id"] != law_id)
     manifest_path.write_text(text.replace(law_id, other["amending_lov_id"]), encoding="utf-8")
-    with pytest.raises(CrosswalkError, match="not reproduced from the capture"):
+    with pytest.raises(CrosswalkError) as caught:
         build_manifest(serialize_records(narrowed), "x", capture_dir)
+    assert str(caught.value) == f"release candidates not reproduced from the capture: {[law_id]}"
 
 
 def test_a_research_manifest_without_a_capture_is_labelled_unverified(built: bytes) -> None:
