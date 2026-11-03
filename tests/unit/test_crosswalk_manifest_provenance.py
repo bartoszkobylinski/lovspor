@@ -197,6 +197,82 @@ def test_cli_writes_a_verified_release_candidate_manifest(
     assert written["provenance"]["verified"] is True
 
 
+def test_a_withdrawn_release_candidate_is_never_verified_even_with_its_own_capture(
+    promoted: bytes, capture_dir: Path
+) -> None:
+    """check's `_judge` reports anything but an active record_state as unverified (check.py),
+    regardless of whether the capture reproduces it. A release_candidate withdrawn after
+    promotion therefore blocks the manifest forever, the same as one the capture never
+    reproduced -- there is no path back to a manifest for that law without demoting it."""
+    records = parse_records(promoted)
+    candidate = next(r for r in records if r["release_state"] == "release_candidate")
+    law_id = candidate["amending_lov_id"]
+    withdrawn = {
+        **candidate,
+        "record_revision": candidate["record_revision"] + 1,
+        "record_state": "withdrawn",
+        "status": "unresolved",
+        "edge_status": {**candidate["edge_status"], "decision_case": "unresolved"},
+        "reason": "producer edge was wrong",
+        "reason_code": "withdrawn_by_producer",
+        "withdrawal": {"withdrawn_on": "2026-11-03", "reason": "producer edge was wrong"},
+    }
+    data = serialize_records([*records, withdrawn])
+
+    with pytest.raises(CrosswalkError) as caught:
+        build_manifest(data, "x", capture_dir)
+    assert str(caught.value) == f"release candidates not reproduced from the capture: {[law_id]}"
+
+
+def test_manifest_with_a_cache_still_demands_it_be_readable_for_a_research_only_file(
+    built: bytes, tmp_path: Path
+) -> None:
+    """check() runs provenance whenever a cache is given, even with no release candidate to
+    verify (#610 P5): a research-only file given a bad --cache still gets no manifest."""
+    missing_cache = tmp_path / "no-such-cache"
+    with pytest.raises(CrosswalkError, match="capture manifest unreadable"):
+        build_manifest(built, "x", missing_cache)
+
+
+@pytest.mark.codex_proposal
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "build_manifest's refusal names only the first blocking reason it finds (check.py's "
+        "unverified before drifted) and drops every candidate blocked for the other reason; "
+        "the PR promises no manifest in that case, which this does honour, but not a message "
+        "that names every blocking candidate"
+    ),
+)
+def test_manifest_refusal_names_every_blocking_candidate_not_only_the_first_reason(
+    promoted: bytes, capture_dir: Path
+) -> None:
+    records = parse_records(promoted)
+    candidates = [r for r in records if r["release_state"] == "release_candidate"]
+    assert len(candidates) > 1
+    withdrawn_law = candidates[0]["amending_lov_id"]
+    drifted_law = candidates[1]["amending_lov_id"]
+    withdrawn = {
+        **candidates[0],
+        "record_revision": candidates[0]["record_revision"] + 1,
+        "record_state": "withdrawn",
+        "status": "unresolved",
+        "edge_status": {**candidates[0]["edge_status"], "decision_case": "unresolved"},
+        "reason": "producer edge was wrong",
+        "reason_code": "withdrawn_by_producer",
+        "withdrawal": {"withdrawn_on": "2026-11-03", "reason": "producer edge was wrong"},
+    }
+    records.append(withdrawn)
+    drifted = next(r for r in records if r["amending_lov_id"] == drifted_law and r is not withdrawn)
+    drifted["evidence"][0]["body_sha256"] = "f" * 64
+    data = serialize_records(records)
+
+    with pytest.raises(CrosswalkError) as caught:
+        build_manifest(data, "x", capture_dir)
+    assert withdrawn_law in str(caught.value)
+    assert drifted_law in str(caught.value)
+
+
 def test_cli_refuses_a_release_candidate_manifest_without_capture(
     promoted: bytes, tmp_path: Path
 ) -> None:
