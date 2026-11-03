@@ -17,7 +17,7 @@ Decisions = list[dict[str, Any]]
 
 
 def identity_sha256(identity: dict[str, Any]) -> str:
-    return sha256(canonical_json(identity).encode("utf-8")).hexdigest()
+    return sha256(canonical_json(identity).encode()).hexdigest()
 
 
 def law_identity(law_id: str, lovvedtak: Decisions) -> dict[str, Any]:
