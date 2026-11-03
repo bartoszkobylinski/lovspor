@@ -615,3 +615,39 @@ def test_decision_summary_counts_cross_session_and_multi_decision_cases() -> Non
     assert summary["cases_with_several_typed_lovvedtak"] == 1
     assert summary["decision_outcome"] == {"discovered": 2, "incomplete": 1}
     assert summary["candidates_per_decision"] == {"0": 1, "1": 2}
+
+
+# --- cache location (ADR-0017 D2) ----------------------------------------------------
+
+
+@pytest.mark.parametrize("gitdir", ["clone", "worktree"])
+def test_capture_into_a_checkout_is_refused_before_anything_is_written(
+    tmp_path: Path, gitdir: str
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    if gitdir == "clone":
+        (repo / ".git").mkdir()
+    else:
+        (repo / ".git").write_text("gitdir: /elsewhere/.git/worktrees/wt\n")
+    with pytest.raises(LovsporError, match="refusing to write the capture cache inside the Git"):
+        study.capture(repo / "data" / "cache" / "study-52")
+    assert sorted(p.name for p in repo.rglob("*")) == [".git"]
+
+
+def test_the_default_capture_cache_is_inside_this_checkout_and_refused() -> None:
+    """The in-repo default serves `build` over an old cache; a new capture needs --cache."""
+    with pytest.raises(LovsporError, match="inside the Git checkout"):
+        study.capture(ROOT / "data" / "cache" / "study-52-never-created")
+    assert not (ROOT / "data" / "cache" / "study-52-never-created").exists()
+
+
+def test_capture_into_the_lovverk_corpus_is_refused_before_anything_is_written(
+    tmp_path: Path,
+) -> None:
+    corpus = tmp_path / "lovverk"
+    (corpus / "lover").mkdir(parents=True)
+    (corpus / "manifest.json").write_text("{}")
+    with pytest.raises(LovsporError, match="inside the Lovverk corpus"):
+        study.capture(corpus / "crosswalk" / "study-52")
+    assert sorted(p.name for p in corpus.rglob("*")) == ["lover", "manifest.json"]
