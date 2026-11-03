@@ -55,6 +55,7 @@ from lovspor.crosswalk.discovery import (
     other_decisions,
     publication_listed,
 )
+from lovspor.crosswalk.paths import writable_target
 from lovspor.legislative_chain import (
     CHAIN_PARSER_VERSION,
     ODELSTING_PARSER_VERSION,
@@ -153,6 +154,7 @@ def _now() -> str:
 
 
 def capture(cache: Path) -> dict[str, Any]:
+    writable_target(cache, "capture cache")
     cache.mkdir(parents=True, exist_ok=True)
     pacer = Pacer(cache / "progress.log")
     pacer.note("capture start")
@@ -606,7 +608,12 @@ def render_json(results: dict[str, Any]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stage", choices=("capture", "build"))
-    parser.add_argument("--cache", type=Path, default=ROOT / "data/cache/study-52")
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        default=ROOT / "data/cache/study-52",
+        help="capture: a directory outside every Git checkout; build: the cache to read",
+    )
     parser.add_argument("--json", type=Path, default=DATA / "study-52-2026-11-02.json")
     parser.add_argument("--csv", type=Path, default=DATA / "study-52-2026-11-02.csv")
     args = parser.parse_args()
