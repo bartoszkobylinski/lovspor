@@ -109,6 +109,18 @@ def _contract_problems(records: list[Record]) -> list[str]:
     return []
 
 
+def _history_problems(records: list[Record], previous: bytes) -> list[str]:
+    """The previous release is held to the contract before it is compared, never trusted."""
+    try:
+        before = parse_records(previous)
+    except CrosswalkContractError as exc:
+        return [f"previous release: {problem}" for problem in exc.problems]
+    invalid = _contract_problems(before)
+    if invalid:
+        return [f"previous release: {problem}" for problem in invalid]
+    return append_only_problems(records, before)
+
+
 def check(data: bytes, previous: bytes | None = None, cache: Path | None = None) -> CheckReport:
     report = CheckReport()
     try:
@@ -123,7 +135,7 @@ def check(data: bytes, previous: bytes | None = None, cache: Path | None = None)
     if not is_canonical(data):
         report.problems.append("file is not in canonical form")
     if previous is not None:
-        report.problems += append_only_problems(report.records, parse_records(previous))
+        report.problems += _history_problems(report.records, previous)
     if cache is not None and not report.problems:
         found, report.unverified = provenance(report.records, cache)
         report.problems += found

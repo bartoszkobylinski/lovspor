@@ -7,6 +7,8 @@ import pytest
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from lovspor.crosswalk.canonical import serialize_records
+from tests.unit.crosswalk_support import attested
 
 
 @pytest.mark.parametrize(
@@ -48,3 +50,40 @@ def test_check_reports_schema_invalid_objects_without_crashing(
     assert isinstance(result.exception, SystemExit)
     assert source.read_bytes() == data
     assert list(tmp_path.iterdir()) == [source]
+
+
+@pytest.mark.parametrize(
+    "previous_data",
+    [
+        pytest.param(b"{}\n", id="missing-identity-fields"),
+        pytest.param(
+            b'{"amending_lov_id":"LOV-2022-06-17-63","record_revision":"invalid"}\n',
+            id="non-numeric-revision",
+        ),
+        pytest.param(b"{oops\n", id="malformed-json"),
+        pytest.param(b"\xff\n", id="malformed-utf8"),
+    ],
+)
+def test_check_refuses_invalid_previous_without_a_traceback(
+    tmp_path: Path, previous_data: bytes
+) -> None:
+    # check_command promises "Fail closed: ... append-only history". A broken
+    # previous release must produce a diagnostic, just like a broken input,
+    # rather than leaking KeyError/ValueError from the history comparison.
+    source = tmp_path / "input.jsonl"
+    data = serialize_records([attested()])
+    source.write_bytes(data)
+    previous = tmp_path / "previous.jsonl"
+    previous.write_bytes(previous_data)
+
+    result = CliRunner().invoke(
+        app,
+        ["ops", "crosswalk", "check", "--input", str(source), "--previous", str(previous)],
+    )
+
+    assert result.exit_code == 1
+    assert "problem:" in result.output
+    assert isinstance(result.exception, SystemExit)
+    assert source.read_bytes() == data
+    assert previous.read_bytes() == previous_data
+    assert set(tmp_path.iterdir()) == {source, previous}
