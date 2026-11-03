@@ -32,6 +32,7 @@ def built(capture_dir: Path) -> bytes:
 
 def test_manifest_describes_the_file(built: bytes) -> None:
     manifest = build_manifest(built, "crosswalk.jsonl")
+    assert manifest["manifest_version"] == 1
     assert manifest["schema_version"] == "1.0.0-rc"
     assert manifest["release_state"] == "research_only"
     assert manifest["files"] == [
@@ -70,6 +71,20 @@ def test_archive_pins_are_listed_once_with_their_basis(built: bytes) -> None:
 
 def test_blockers_and_attribution_stay_until_resolved(built: bytes) -> None:
     manifest = build_manifest(built, "x")
+    assert manifest["source_terms"] == [
+        {
+            "source": "Stiftelsen Lovdata, publicData",
+            "terms_url": "https://api.lovdata.no/om-api-tjenesten/",
+            "read_on": "2026-11-02",
+            "licence": "NLOD-2.0",
+        },
+        {
+            "source": "Stortinget, data.stortinget.no eksport",
+            "terms_url": "https://data.stortinget.no/om-datatjenesten/bruksvilkar/",
+            "read_on": "2026-11-02",
+            "licence": "NLOD (current version; the terms name none)",
+        },
+    ]
     assert manifest["unresolved_blockers"] == BLOCKERS
     assert any(b.startswith("R3:") for b in BLOCKERS)
     assert any(b.startswith("R4:") for b in BLOCKERS)
@@ -119,6 +134,25 @@ def test_manifest_retains_historical_provenance_when_an_archive_is_repinned() ->
     rendered = render_manifest(manifest)
     assert json.loads(rendered) == manifest
     assert render_manifest(build_manifest(data, "crosswalk.jsonl")) == rendered
+
+
+def test_repinned_archive_order_uses_content_after_url() -> None:
+    first, second = attested(), attested()
+    second["record_revision"] = 2
+    second["source_pins"]["lovdata_archives"][0]["sha256"] = "0" * 64
+    manifest = build_manifest(serialize_records([first, second]), "crosswalk.jsonl")
+    assert manifest["lovdata_archives"] == [
+        second["source_pins"]["lovdata_archives"][0],
+        first["source_pins"]["lovdata_archives"][0],
+    ]
+
+
+def test_manifest_missing_input_identifies_crosswalk_file(tmp_path: Path) -> None:
+    data, output = tmp_path / "missing.jsonl", tmp_path / "manifest.json"
+    with pytest.raises(CrosswalkError) as error:
+        manifest_impl(data, output)
+    assert str(error.value) == f"crosswalk file unreadable: {data}"
+    assert not output.exists()
 
 
 def test_manifest_state_and_counts_follow_withdrawal_of_a_release_candidate() -> None:
