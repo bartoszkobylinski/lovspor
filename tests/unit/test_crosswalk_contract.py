@@ -442,3 +442,26 @@ def test_archive_member_splits_only_a_lovdata_member_id() -> None:
     )
     for upstream in ("sak/89016", "publikasjoner/2021-2022", "a!b!c", "!m", "a!"):
         assert contract.archive_member(upstream) is None
+
+
+@pytest.mark.parametrize("role", ["law_identity", "law_decision_pair", "correction"])
+def test_archive_separator_cannot_be_hidden_in_a_member_or_archive(role: str) -> None:
+    record = attested()
+    if role == "correction":
+        item = {**_role(record, "law_identity"), "role": role}
+        record["evidence"].append(item)
+    else:
+        item = _role(record, role)
+    assert record_problems(record) == []
+    archive, member = item["upstream_id"].split("!")
+    for upstream in (f"{archive}!extra!{member}", f"{archive}!{member}!extra.xml"):
+        item["upstream_id"] = upstream
+        problems = schema_problems(record)
+        assert problems
+        assert any("upstream_id" in problem for problem in problems)
+        assert record_problems(record) == problems
+        with pytest.raises(CrosswalkContractError) as caught:
+            validate_records([record])
+        assert caught.value.problems == tuple(
+            f"LOV-2022-06-17-63@1: {problem}" for problem in problems
+        )
