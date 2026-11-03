@@ -263,3 +263,81 @@ def test_cli_gate_refuses_without_an_approval(
     assert result.exit_code == 1
     assert "refused: approval unreadable" in result.output
     assert not (tmp_path / "o").exists()
+
+
+def test_attested_law_outside_capture_cannot_be_promoted(built: bytes, capture_dir: Path) -> None:
+    """An otherwise eligible record still needs reproduction from this capture."""
+    law_id = "LOV-2022-06-17-63"
+    manifest = load_manifest(capture_dir)
+    manifest["scope"]["law_ids"].remove(law_id)
+    (capture_dir / "capture-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = check(built, cache=capture_dir)
+    assert report.passed, report.problems
+    assert report.unverified == [law_id]
+    promoted, counts = promote(built, _approval(built), capture_dir)
+    records = parse_records(promoted)
+    assert counts == {
+        "promoted": 2,
+        "not reproduced from the capture": 1,
+        "not an active attested record": 5,
+    }
+    assert [r for r in records if r["amending_lov_id"] == law_id] == [
+        r for r in parse_records(built) if r["amending_lov_id"] == law_id
+    ]
+    assert set(built.splitlines()) <= set(promoted.splitlines())
+
+
+def test_provenance_uses_current_revision_and_preserves_old_identities(
+    built: bytes, capture_dir: Path
+) -> None:
+    """A corrected identity can supersede an older one without rewriting history (D6)."""
+    records = parse_records(built)
+    current = next(r for r in records if r["amending_lov_id"] == "LOV-2022-06-17-63")
+    historical = json.loads(json.dumps(current))
+    case = next(e for e in historical["evidence"] if e["role"] == "decision_case")
+    case["parsed_identity_sha256"] = "f" * 64
+    previous = serialize_records([historical])
+    current["record_revision"] = 2
+    data = serialize_records([*records, historical])
+
+    report = check(data, previous=previous, cache=capture_dir)
+    assert report.passed, report.problems
+    assert report.unverified == []
+    assert previous.splitlines()[0] in data.splitlines()
+
+
+def test_changed_parser_version_is_not_reproduced(built: bytes, capture_dir: Path) -> None:
+    records = parse_records(built)
+    record = next(r for r in records if r["amending_lov_id"] == "LOV-2022-06-17-63")
+    case = next(e for e in record["evidence"] if e["role"] == "decision_case")
+    case["parser_version"] = "sak-xml-999"
+    data = serialize_records(records)
+    assert check(data).passed  # Valid shape alone cannot establish provenance.
+    assert check(data, cache=capture_dir).problems == [
+        "LOV-2022-06-17-63: evidence identities are not reproduced from the capture"
+    ]
+    with pytest.raises(CrosswalkContractError, match="not reproduced"):
+        promote(data, _approval(data), capture_dir)
+
+
+def test_sanction_only_archive_must_have_accepted_rights(built: bytes) -> None:
+    record = next(r for r in parse_records(built) if r["amending_lov_id"] == "LOV-2022-06-17-63")
+    endpoint_pin = next(
+        p
+        for p in record["source_pins"]["lovdata_archives"]
+        if p["licence_basis"] == "stated_for_endpoint"
+    )
+    record["sanction_events"].append(
+        {
+            "law_id": "LOV-2026-01-01-1",
+            "kind": "unclassified_sanction",
+            "source_url": endpoint_pin["source_url"],
+        }
+    )
+    assert check(serialize_records([record])).passed
+    assert all(e["source_url"] != endpoint_pin["source_url"] for e in record["evidence"])
+    assert ineligibility(record, frozenset({"stated_for_file"})) == (
+        "rests on an archive whose licence basis is not accepted"
+    )
+    assert ineligibility(record, frozenset({"stated_for_file", "stated_for_endpoint"})) is None

@@ -30,6 +30,7 @@ from lovspor.crosswalk.cache import (
     discovery_candidates,
     law_records,
     listing_keys,
+    verified_archive,
     write_manifest,
 )
 from lovspor.crosswalk.errors import CrosswalkError
@@ -204,6 +205,8 @@ def capture_archive(client: LovdataClient, entry: LovdataArchive, cache: Path) -
     target = cache / "lovdata" / result.sha256 / entry.filename
     if target.exists():
         result.path.unlink()
+        pin = {"path": str(target.relative_to(cache)), "sha256": result.sha256}
+        verified_archive(cache, pin)
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(result.path, target)

@@ -1,5 +1,6 @@
 """Canonical JSONL of crosswalk records (#610, proposal item l)."""
 
+from copy import deepcopy
 from itertools import permutations
 
 import pytest
@@ -94,3 +95,57 @@ def test_parse_refuses_malformed_files(data: bytes, message: str) -> None:
 def test_empty_file_is_zero_records() -> None:
     assert parse_records(b"") == []
     assert serialize_records([]) == b""
+
+
+def test_nested_lists_sort_by_all_documented_keys_without_changing_input() -> None:
+    record = attested()
+    base = record["evidence"][0]
+    evidence_items = [
+        {**base, "upstream_id": upstream, "source_url": url}
+        for upstream, url in [("b", "a"), ("a", "b"), ("a", "a")]
+    ]
+    record["evidence"] = evidence_items
+    first = record["sanction_events"][0]
+    later = {**first, "law_id": "LOV-2022-06-17-64"}
+    record["sanction_events"] = [later, first]
+    record["source_pins"]["lovdata_archives"] = [
+        archive_pin("lovtidend-avd1-2026.tar.bz2"),
+        archive_pin(),
+    ]
+    original = deepcopy(record)
+
+    ordered = canonical_record(record)
+
+    assert ordered["evidence"] == [evidence_items[2], evidence_items[1], evidence_items[0]]
+    assert ordered["sanction_events"] == [first, later]
+    reversed_lists = deepcopy(record)
+    for field in ("evidence", "sanction_events"):
+        reversed_lists[field].reverse()
+    reversed_lists["source_pins"]["lovdata_archives"].reverse()
+    assert serialize_records([record]) == serialize_records([reversed_lists])
+    assert record == original
+
+
+def test_parse_reports_the_line_of_a_later_json_error() -> None:
+    with pytest.raises(CrosswalkContractError, match="line 2: not JSON"):
+        parse_records(b'{}\n{"broken":}\n')
+
+
+def test_missing_upstream_id_sorts_as_empty_string() -> None:
+    missing = {"role": "law_identity", "source_url": "z"}
+    named = {"role": "law_identity", "source_url": "a", "upstream_id": "A"}
+    assert canonical_record({"evidence": [named, missing]})["evidence"] == [missing, named]
+
+
+@pytest.mark.parametrize(
+    ("data", "problem"),
+    [
+        (b"\xff\n", "file is not UTF-8"),
+        (b"{}", "file does not end with a newline"),
+        (b"{}\n\n", "file has a blank line"),
+    ],
+)
+def test_file_diagnostics_are_exact(data: bytes, problem: str) -> None:
+    with pytest.raises(CrosswalkContractError) as caught:
+        parse_records(data)
+    assert caught.value.problems == (problem,)
