@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lovspor.crosswalk.canonical import Record, serialize_records
 from lovspor.crosswalk.check import check, current_records, require_passed
-from lovspor.crosswalk.contract import ARCHIVE_URL, validate_records
+from lovspor.crosswalk.contract import ARCHIVE_URL, archive_member, validate_records
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.crosswalk.rights import STATED_FOR_ENDPOINT, STATED_FOR_FILE
 
@@ -52,9 +52,9 @@ def cited_archives(record: Record) -> set[str]:
     """Archive URLs the record's evidence and sanction events rest on, not merely pins."""
     cited = {e["source_url"] for e in record["sanction_events"]}
     for item in record["evidence"]:
-        archive, sep, _ = item["upstream_id"].partition("!")
-        if sep:
-            cited.add(ARCHIVE_URL.format(archive))
+        found = archive_member(item["upstream_id"])
+        if found is not None:
+            cited.add(ARCHIVE_URL.format(found[0]))
     return cited
 
 
