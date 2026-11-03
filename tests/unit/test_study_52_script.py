@@ -640,3 +640,14 @@ def test_the_default_capture_cache_is_inside_this_checkout_and_refused() -> None
     with pytest.raises(LovsporError, match="inside the Git checkout"):
         study.capture(ROOT / "data" / "cache" / "study-52-never-created")
     assert not (ROOT / "data" / "cache" / "study-52-never-created").exists()
+
+
+def test_capture_into_the_lovverk_corpus_is_refused_before_anything_is_written(
+    tmp_path: Path,
+) -> None:
+    corpus = tmp_path / "lovverk"
+    (corpus / "lover").mkdir(parents=True)
+    (corpus / "manifest.json").write_text("{}")
+    with pytest.raises(LovsporError, match="inside the Lovverk corpus"):
+        study.capture(corpus / "crosswalk" / "study-52")
+    assert sorted(p.name for p in corpus.rglob("*")) == ["lover", "manifest.json"]
