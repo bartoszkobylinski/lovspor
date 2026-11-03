@@ -103,17 +103,30 @@ def test_manifest_is_deterministic(built: bytes) -> None:
 
 def test_manifest_counts_current_revision_independently_for_each_law() -> None:
     """P5 counts current acts while retaining every historical revision."""
-    first, promoted, other = attested(), attested(), besl_o()
-    promoted.update(record_revision=2, release_state="release_candidate")
-    manifest = build_manifest(serialize_records([promoted, other, first]), "history.jsonl")
+    first, revised, other = attested(), attested(), besl_o()
+    revised.update(record_revision=2, sak_id=None, status="unresolved")
+    revised.update(
+        edge_status={**revised["edge_status"], "decision_case": "unresolved"},
+        reason="case not read",
+        reason_code="source_unreadable",
+        evidence=[e for e in revised["evidence"] if e["role"] != "decision_case"],
+    )
+    manifest = build_manifest(serialize_records([revised, other, first]), "history.jsonl")
     assert manifest["counts"] == {
         "revisions": 3,
         "acts": 2,
-        "status": {"attested": 1, "unsupported": 1},
-        "release_state": {"release_candidate": 1, "research_only": 1},
+        "status": {"unresolved": 1, "unsupported": 1},
+        "release_state": {"research_only": 2},
         "record_state": {"active": 2},
     }
-    assert manifest["release_state"] == "release_candidate"
+    assert manifest["release_state"] == "research_only"
+
+
+def test_a_synthetic_release_candidate_without_a_capture_gets_no_manifest() -> None:
+    first, promoted = attested(), attested()
+    promoted.update(record_revision=2, release_state="release_candidate")
+    with pytest.raises(CrosswalkError, match="needs verified source provenance"):
+        build_manifest(serialize_records([first, promoted]), "history.jsonl")
 
 
 @pytest.mark.parametrize("invalid", ["utf8", "noncanonical", "revision_gap", "duplicate_revision"])
@@ -242,7 +255,7 @@ def test_release_candidate_file_level_state(built: bytes, capture_dir: Path) -> 
         }
     )
     promoted, _ = promote(built, approval, capture_dir)
-    manifest = build_manifest(promoted, "x")
+    manifest = build_manifest(promoted, "x", capture_dir)
     assert manifest["release_state"] == "release_candidate"
     assert manifest["counts"]["release_state"] == {"release_candidate": 3, "research_only": 5}
     assert manifest["counts"]["revisions"] == 11

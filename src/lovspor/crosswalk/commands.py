@@ -240,9 +240,9 @@ def release_candidate_command(
         raise typer.Exit(code=1) from error
 
 
-def manifest_impl(data_path: Path, output: Path) -> str:
+def manifest_impl(data_path: Path, output: Path, cache: Path | None = None) -> str:
     data = read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
-    manifest = build_manifest(data, data_path.name)
+    manifest = build_manifest(data, data_path.name, cache)
     write_once(output, render_manifest(manifest))
     return f"wrote the manifest of {data_path.name} ({manifest['release_state']}) to {output}"
 
@@ -251,10 +251,17 @@ def manifest_impl(data_path: Path, output: Path) -> str:
 def manifest_command(
     data: _Input,
     output: Annotated[Path, typer.Option("--output", help="New manifest file; never overwritten.")],
+    cache: Annotated[
+        Path | None,
+        typer.Option(
+            "--cache",
+            help="The capture to verify provenance against; required for release candidates.",
+        ),
+    ] = None,
 ) -> None:
     """The manifest of a checked crosswalk file, derived only from its bytes."""
     try:
-        typer.echo(manifest_impl(data, output))
+        typer.echo(manifest_impl(data, output, cache))
     except CrosswalkContractError as error:
         for problem in error.problems:
             typer.echo(f"problem: {problem}", err=True)

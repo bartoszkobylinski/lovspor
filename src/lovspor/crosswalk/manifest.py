@@ -4,18 +4,23 @@ Everything in it is derived from the checked JSONL bytes and from fixed facts
 recorded in this module (each with the date it was read). It has no wall clock,
 so the same file always gives the same manifest. The rights blockers stay in it
 until the owner resolves them. There is no `released` state: the file-level
-`release_state` is `release_candidate` only if a current record is one.
-Nothing here publishes.
+`release_state` is `release_candidate` only if a current record is one, and
+such a manifest is written only when every current candidate is reproduced from
+the given capture, raw bytes included. A research manifest written without a
+capture says so in its `provenance` block. Nothing here publishes.
 """
 
 import json
 from collections import Counter
 from functools import partial
 from hashlib import sha256
+from pathlib import Path
 
+from lovspor.crosswalk.cache import MANIFEST
 from lovspor.crosswalk.canonical import Record, canonical_json, canonical_record
-from lovspor.crosswalk.check import check, current_records, require_passed
+from lovspor.crosswalk.check import CheckReport, check, current_records, require_passed
 from lovspor.crosswalk.contract import SCHEMA_VERSION
+from lovspor.crosswalk.errors import CrosswalkError
 
 MANIFEST_VERSION = 1
 _pretty = partial(json.dumps, indent=2, sort_keys=True, ensure_ascii=False)
@@ -54,6 +59,13 @@ BLOCKERS = [
     "Publication, dataset repository and tags are separate owner steps; none is taken here",
 ]
 COVERAGE = "Covers exactly the acts listed in this file; no claim beyond them."
+UNVERIFIED = {
+    "verified": False,
+    "note": (
+        "research_only: contract, invariants and canonical form checked; the evidence was "
+        "not reproduced from a capture"
+    ),
+}
 
 
 def _counts(records: list[Record]) -> dict[str, object]:
@@ -86,15 +98,43 @@ def _release_state(records: list[Record]) -> str:
     return "release_candidate" if "release_candidate" in states else "research_only"
 
 
-def build_manifest(data: bytes, filename: str) -> dict[str, object]:
+def _provenance(report: CheckReport, cache: Path | None) -> dict[str, object]:
+    if cache is None:
+        return UNVERIFIED
+    return {
+        "verified": True,
+        "capture_manifest_sha256": sha256((cache / MANIFEST).read_bytes()).hexdigest(),
+        "not_reproduced": report.unverified,
+        "raw_bytes_not_in_capture": report.drifted,
+    }
+
+
+def _require_verified_candidates(report: CheckReport, cache: Path | None) -> None:
+    current = current_records(report.records)
+    candidates = {law for law, r in current.items() if r["release_state"] == "release_candidate"}
+    if candidates and cache is None:
+        raise CrosswalkError(
+            "a release_candidate manifest needs verified source provenance: give the capture"
+        )
+    for name, laws in (
+        ("not reproduced from the capture", report.unverified),
+        ("raw bytes not in this capture", report.drifted),
+    ):
+        if candidates & set(laws):
+            raise CrosswalkError(f"release candidates {name}: {sorted(candidates & set(laws))}")
+
+
+def build_manifest(data: bytes, filename: str, cache: Path | None = None) -> dict[str, object]:
     """The manifest of one checked file; refuses a file that does not pass `check`."""
-    report = check(data)
+    report = check(data, cache=cache)
     require_passed(report)
+    _require_verified_candidates(report, cache)
     records = [canonical_record(r) for r in report.records]
     return {
         "manifest_version": MANIFEST_VERSION,
         "schema_version": SCHEMA_VERSION,
         "release_state": _release_state(records),
+        "provenance": _provenance(report, cache),
         "files": [{"name": filename, "sha256": sha256(data).hexdigest(), "size_bytes": len(data)}],
         "counts": _counts(records),
         "producer_commits": _commits(records, "producer_commit"),
