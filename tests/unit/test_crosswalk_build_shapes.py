@@ -19,7 +19,15 @@ from lovspor.crosswalk.build import BuildOptions, append_revisions, build, subst
 from lovspor.crosswalk.cache import load_manifest
 from lovspor.crosswalk.canonical import parse_records
 from lovspor.crosswalk.errors import CrosswalkError
-from lovspor.crosswalk.records import observed_on, reason
+from lovspor.crosswalk.records import (
+    Context,
+    decision_key,
+    edge_status,
+    observed_on,
+    overall_status,
+    reason,
+    sanction_events,
+)
 from lovspor.stortinget_case_source import LawDecision
 from tests.unit.crosswalk_support import (
     COMMIT,
@@ -207,6 +215,65 @@ def test_observed_on_is_the_latest_utc_date() -> None:
         "source_pins": {"lovdata_archives": [{"retrieved_at": "2026-11-02T10:00:00+00:00"}]},
     }
     assert observed_on(record) == "2026-11-03"
+
+
+def test_overall_status_picks_the_worst_edge_in_fixed_order() -> None:
+    """Contract in build.py's module docstring: 'the worst edge, no edge repairing another'."""
+    assert overall_status({"a": "attested", "b": "attested"}) == "attested"
+    assert overall_status({}) == "attested"
+    assert overall_status({"a": "attested", "b": "unresolved"}) == "unresolved"
+    assert overall_status({"a": "unsupported", "b": "unresolved"}) == "unsupported"
+    assert overall_status({"a": "ambiguous", "b": "unsupported"}) == "ambiguous"
+    assert overall_status({"a": "contradicted", "b": "ambiguous"}) == "contradicted"
+
+
+def test_edge_status_derives_decision_case_from_law_decision_when_not_attested() -> None:
+    """When the law_decision edge is not attested, decision_case follows it, not the chain."""
+    unsupported = {
+        "law_identity": {"status": "attested"},
+        "law_decision": {"status": "unsupported"},
+        "chain": {"status": "ambiguous"},
+    }
+    assert edge_status(unsupported)["decision_case"] == "unsupported"
+    unresolved = {
+        "law_identity": {"status": "attested"},
+        "law_decision": {"status": "unresolved"},
+        "chain": {"status": "attested"},
+    }
+    assert edge_status(unresolved)["decision_case"] == "unresolved"
+    attested = {
+        "law_identity": {"status": "unresolved"},
+        "law_decision": {"status": "attested"},
+        "chain": {"status": "contradicted"},
+    }
+    assert edge_status(attested) == {
+        "law_identity": "unresolved",
+        "law_decision": "attested",
+        "decision_case": "contradicted",
+    }
+
+
+def test_sanction_events_only_appear_for_an_attested_decision() -> None:
+    """Every other act the decision sanctions, never only the one being built (#618)."""
+    decision = {"session_id": "2021-2022", "number": 85}
+    sanctioned_laws = [
+        {"amending_lov_id": "LOV-A", "lovdata_matches": [{"archive_source_url": "u-a"}]},
+        {"amending_lov_id": "LOV-B", "lovdata_matches": [{"archive_source_url": "u-b"}]},
+    ]
+    ctx = Context(
+        pins=[],
+        commits=("c" * 40, "p" * 40),
+        sanctioned={decision_key(decision): sanctioned_laws},
+        discoveries={},
+        publications={},
+    )
+    attested = {"law_decision": {"status": "attested", "decision": decision}}
+    assert sanction_events(attested, ctx) == [
+        {"law_id": "LOV-A", "kind": "unclassified_sanction", "source_url": "u-a"},
+        {"law_id": "LOV-B", "kind": "unclassified_sanction", "source_url": "u-b"},
+    ]
+    unresolved = {"law_decision": {"status": "unresolved", "decision": decision}}
+    assert sanction_events(unresolved, ctx) == []
 
 
 # --- discovery -----------------------------------------------------------------------
