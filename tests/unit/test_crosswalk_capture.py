@@ -340,6 +340,28 @@ def test_full_capture_writes_a_complete_manifest(tmp_path: Path, httpx_mock: HTT
     assert hosts == {"api.lovdata.no", "data.stortinget.no"}
 
 
+def test_capture_uses_the_supplied_stortinget_client_and_closes_it(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    # `Sources.stortinget` is the public injection point for the Stortinget side,
+    # mirroring `Sources.lovdata`; `capture` must use exactly the client given,
+    # not always build its own `httpx.Client(timeout=60)`.
+    _full_capture(httpx_mock)
+    cache = tmp_path / "run"
+    client = httpx.Client(timeout=60, headers={"X-Supplied": "stortinget-client"})
+    sources = cap.Sources(pacer=_pacer(tmp_path), stortinget=client)
+    manifest = cap.capture(cache, [LAW], COMMIT, sources)
+    assert manifest["stortinget"] and all(r["error"] is None for r in manifest["stortinget"])
+    stortinget_requests = [
+        request for request in httpx_mock.get_requests() if request.url.host == "data.stortinget.no"
+    ]
+    assert stortinget_requests
+    assert all(
+        request.headers["x-supplied"] == "stortinget-client" for request in stortinget_requests
+    )
+    assert client.is_closed
+
+
 def test_capture_never_reuses_a_directory(tmp_path: Path) -> None:
     (tmp_path / MANIFEST).write_text("{}")
     with pytest.raises(CrosswalkError, match="already holds a capture"):

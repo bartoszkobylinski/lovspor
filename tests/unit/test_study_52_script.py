@@ -12,11 +12,14 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 
+import httpx
 import pytest
+from pytest_httpx import HTTPXMock
 
 from lovspor.crosswalk import cache as crosswalk_cache
 from lovspor.errors import LovsporError
 from lovspor.stortinget_case_source import LawDecision
+from tests.unit.crosswalk_support import tar_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
 NS = 'xmlns="http://data.stortinget.no"'
@@ -651,3 +654,66 @@ def test_capture_into_the_lovverk_corpus_is_refused_before_anything_is_written(
     with pytest.raises(LovsporError, match="inside the Lovverk corpus"):
         study.capture(corpus / "crosswalk" / "study-52")
     assert sorted(p.name for p in corpus.rglob("*")) == ["lover", "manifest.json"]
+
+
+# --- capture happy path (#610, P2 refactor onto lovspor.crosswalk) -------------------
+
+LOVDATA_API = "https://api.lovdata.no/v1/publicData"
+STORTINGET_EKSPORT = "https://data.stortinget.no/eksport"
+
+
+def test_capture_wires_lovdata_then_verification_and_writes_one_manifest(
+    tmp_path: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """study.capture() now delegates to lovspor.crosswalk.capture; this pins the
+    glue that stayed in the script: the scope it writes, and the verification
+    pass over #617's labels that discovery never sees (#768)."""
+    law = "LOV-2022-06-17-63"
+    archive_name = "lovtidend-avd1-2026.tar.bz2"
+    body = tar_bytes({})  # no member claims `law`, so discovery finds no decision to chase.
+    httpx_mock.add_response(
+        url=f"{LOVDATA_API}/list",
+        json=[
+            {
+                "filename": archive_name,
+                "description": "d",
+                "sizeBytes": len(body),
+                "lastModified": "2026-10-01T00:00:00Z",
+            }
+        ],
+    )
+    httpx_mock.add_response(url=f"{LOVDATA_API}/get/{archive_name}", content=body)
+
+    labels = tmp_path / "labels.csv"
+    labels.write_text("sak_id\n103533\n7\n103533\n", encoding="utf-8")
+    monkeypatch.setattr(study, "LABELS_CSV", labels)
+    monkeypatch.setattr(study, "load_inputs", lambda: {"mentions": {law: 1}})
+
+    for sak_id in (7, 103533):
+        httpx_mock.add_response(
+            url=f"{STORTINGET_EKSPORT}/sak?sakid={sak_id}",
+            content=_sak(sak_id, "2021-2022"),
+            headers={"Content-Type": "text/xml"},
+        )
+
+    cache = tmp_path / "run"
+    manifest = study.capture(cache)
+
+    assert manifest == crosswalk_cache.load_manifest(cache)
+    assert manifest["scope"] == {"law_ids": [law], "lovverk_commit": None}
+    assert [a["filename"] for a in manifest["lovdata"]] == [archive_name]
+    keys = [(r["stage"], r["kind"], r["key"]) for r in manifest["stortinget"]]
+    assert keys == [("verification", "sak", 7), ("verification", "sak", 103533)]
+    assert all(r["error"] is None for r in manifest["stortinget"])
+    assert datetime.fromisoformat(manifest["started_at"]) <= datetime.fromisoformat(
+        manifest["finished_at"]
+    )
+    log = (cache / "progress.log").read_text(encoding="utf-8")
+    assert "capture start" in log
+    assert "lovdata done" in log
+    assert "capture done" in log
+    assert not any(
+        httpx.URL(str(r.url)).path.startswith("/eksport/saker")
+        or httpx.URL(str(r.url)).path.startswith("/eksport/publikasjoner")
+        for r in httpx_mock.get_requests()
+    )
