@@ -1,8 +1,8 @@
 """A checkout's ``forarbeider/`` tree, and the disposable synthetic sandbox (#738, PR3B-2).
 
 No Git command runs: this package never starts a subprocess. A checkout is
-read file by file through no-follow descriptors, so a symlink or a special
-file anywhere in ``forarbeider/`` is refused, never followed, and the tree
+read file by file through no-follow descriptors, so a symlink, a hard link or
+a special file anywhere in ``forarbeider/`` is refused, never followed, and the tree
 must be exactly what its manifest lists.
 
 The sandbox is the only tree this package may write. It is a new, empty
@@ -116,11 +116,13 @@ def _walk(directory: Path, prefix: str) -> dict[str, bytes]:
     with os.scandir(directory) as entries:
         for entry in sorted(entries, key=lambda item: item.name):
             relative = f"{prefix}/{entry.name}"
-            mode = os.lstat(entry.path).st_mode
-            if stat.S_ISLNK(mode):
+            status = os.lstat(entry.path)
+            if stat.S_ISLNK(status.st_mode):
                 raise _unsafe(DATASET_ROOT)
-            if stat.S_ISDIR(mode):
+            if stat.S_ISDIR(status.st_mode):
                 files.update(_walk(Path(entry.path), relative))
+            elif status.st_nlink != 1:
+                raise _unsafe(DATASET_ROOT)
             else:
                 files[relative] = _read_public(Path(entry.path))
     return files
@@ -148,9 +150,20 @@ def read_dataset(checkout: Path) -> Dataset:
         ForarbeiderRefusedError: an unsafe tree, ``manifest_invalid`` or
             ``manifest_incompatible``, or ``corpus_tree_mismatch``.
     """
+    return read_dataset_files(checkout)[0]
+
+
+def read_dataset_files(checkout: Path) -> tuple[Dataset, dict[str, bytes]]:
+    """:func:`read_dataset`, with the member files' bytes as read: the ones their digests proved.
+
+    A reader serves these bytes, never a second read that could find others.
+
+    Raises:
+        ForarbeiderRefusedError: as :func:`read_dataset`.
+    """
     files = _dataset_files(checked_checkout(checkout))
     if files is None:
-        return Dataset(EMPTY_MANIFEST, None)
+        return Dataset(EMPTY_MANIFEST, None), {}
     raw = files.pop(MANIFEST_PATH, None)
     if raw is None:
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, MANIFEST_PATH)
@@ -158,7 +171,7 @@ def read_dataset(checkout: Path) -> Dataset:
     if files.pop(INDEX_PATH, None) != render_index(manifest).encode():
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, INDEX_PATH)
     verify_members(manifest, files)
-    return Dataset(manifest, digest(raw))
+    return Dataset(manifest, digest(raw)), files
 
 
 def _write_new(path: Path, text: str) -> None:
