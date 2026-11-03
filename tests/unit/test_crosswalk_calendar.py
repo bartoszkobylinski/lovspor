@@ -79,3 +79,59 @@ def test_malformed_stamp_is_a_typed_contract_error_not_a_value_error() -> None:
     with pytest.raises(CrosswalkContractError) as caught:
         validate_records([record])
     assert any("/evidence/1/retrieved_at" in problem for problem in caught.value.problems)
+
+
+@pytest.mark.parametrize("day", ["2000-02-29", "2024-02-29", "2026-04-30"])
+@pytest.mark.parametrize("suffix", ["T00:00:00Z", "T23:59:59.123456+00:00"])
+def test_real_calendar_boundaries_validate_through_all_date_fields(day: str, suffix: str) -> None:
+    record = _withdrawn(day)
+    record["observed_on"] = day
+    for item in record["evidence"]:
+        item["retrieved_at"] = day + suffix
+    pin = record["source_pins"]["lovdata_archives"][0]
+    pin["retrieved_at"] = pin["last_modified"] = day + suffix
+
+    assert schema_problems(record) == []
+    assert record_problems(record) == []
+    first = attested()
+    validate_records([first, record])
+
+
+@pytest.mark.parametrize("day", ["1900-02-29", "2100-02-29", "0000-01-01"])
+def test_non_calendar_dates_report_every_affected_path(day: str) -> None:
+    record = _withdrawn(day)
+    record["observed_on"] = day
+    record["evidence"][0]["retrieved_at"] = day + "T00:00:00Z"
+    pin = record["source_pins"]["lovdata_archives"][0]
+    pin["retrieved_at"] = pin["last_modified"] = day + "T00:00:00Z"
+
+    problems = schema_problems(record)
+    assert record_problems(record) == problems
+    assert {problem.split(": ", 1)[0] for problem in problems} == {
+        "/observed_on",
+        "/withdrawal/withdrawn_on",
+        "/evidence/0/retrieved_at",
+        "/source_pins/lovdata_archives/0/retrieved_at",
+        "/source_pins/lovdata_archives/0/last_modified",
+    }
+    with pytest.raises(CrosswalkContractError) as caught:
+        validate_records([record])
+    assert caught.value.problems == tuple(f"LOV-2022-06-17-63@2: {p}" for p in problems)
+
+
+@pytest.mark.parametrize("value", [None, 20261102, [], {}])
+def test_non_string_calendar_fields_are_schema_errors(value: object) -> None:
+    record = _withdrawn("2026-11-03")
+    record["observed_on"] = value
+    record["withdrawal"]["withdrawn_on"] = value
+    record["evidence"][0]["retrieved_at"] = value
+    pin = record["source_pins"]["lovdata_archives"][0]
+    pin["retrieved_at"] = pin["last_modified"] = value
+
+    problems = schema_problems(record)
+    assert len(problems) == 5
+    assert all("is not of type 'string'" in problem for problem in problems)
+    assert record_problems(record) == problems
+    with pytest.raises(CrosswalkContractError) as caught:
+        validate_records([record])
+    assert len(caught.value.problems) == 5
