@@ -20,12 +20,13 @@ import json
 import os
 import shutil
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from lovspor.forarbeider.corpus_leaves import directory, read_leaf, write_leaf
 from lovspor.forarbeider.corpus_models import DATASET_ROOT, INDEX_PATH, MANIFEST_PATH
 from lovspor.forarbeider.corpus_plan import Draft, dataset_path
 from lovspor.forarbeider.corpus_tree import read_dataset, require_sandbox
@@ -125,19 +126,24 @@ def replace(source: Path, target: Path) -> None:
     source.replace(target)
 
 
-def _staging(sandbox: Path) -> Path:
-    """The staging directory inside ``.git``, refused if anything put a link or a file there.
+@contextmanager
+def _staging(sandbox: Path, create: bool = False) -> Iterator[int]:
+    """The staging directory inside ``.git``, opened as a descriptor, never through a link.
 
-    A symlink at this path would carry every staged byte, and the journal, out of
-    the sandbox before a single dataset operation ran.
+    Every staged file is then reached through this descriptor only, so a
+    symlink, FIFO or hard link at the directory or at any file in it carries
+    no byte out of the sandbox.
 
     Raises:
         ForarbeiderRefusedError: ``unsafe_output_path``.
     """
-    staging = sandbox / STAGING
-    if staging.is_symlink() or (staging.exists() and not staging.is_dir()):
-        raise ForarbeiderRefusedError(RefusalReason.UNSAFE_OUTPUT_PATH, "staging")
-    return staging
+    git, name = (sandbox / STAGING).parent, (sandbox / STAGING).name
+    with directory(git, "staging") as parent:
+        if create:
+            with suppress(FileExistsError):
+                os.mkdir(name, 0o700, dir_fd=parent)
+        with directory(Path(name), "staging", parent) as staging:
+            yield staging
 
 
 def _perform(sandbox: Path, operation: Operation) -> None:
@@ -147,15 +153,14 @@ def _perform(sandbox: Path, operation: Operation) -> None:
     if operation.sha256 is None:
         target.unlink()
         return
-    staging = _staging(sandbox)
-    staged = staging / operation.sha256
-    payload = staged.read_bytes()
-    if digest(payload) != operation.sha256:
-        raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "staging")
-    _parent(sandbox, operation.path)
-    copy = staging / f"{operation.sha256}.next"
-    copy.write_bytes(payload)
-    replace(copy, target)
+    with _staging(sandbox) as staging:
+        payload = read_leaf(staging, operation.sha256, "staging")
+        if digest(payload) != operation.sha256:
+            raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "staging")
+        _parent(sandbox, operation.path)
+        copy = f"{operation.sha256}.next"
+        write_leaf(staging, copy, payload, "staging")
+        replace(sandbox / STAGING / copy, target)
 
 
 def _run(sandbox: Path, journal: Journal) -> None:
@@ -183,13 +188,13 @@ def _clear(sandbox: Path) -> None:
 
 def _journal(sandbox: Path) -> Journal | None:
     path = sandbox / JOURNAL
-    if path.is_symlink():
-        raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "journal")
-    if not path.exists():
+    if not os.path.lexists(path):
         return None
     try:
-        return Journal.model_validate_json(path.read_bytes())
-    except (OSError, ValidationError) as error:
+        with directory(path.parent, "journal") as parent:
+            raw = read_leaf(parent, path.name, "journal")
+        return Journal.model_validate_json(raw)
+    except (OSError, ValidationError, ForarbeiderRefusedError) as error:
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "journal") from error
 
 
@@ -212,14 +217,13 @@ def recover(sandbox: Path) -> bool:
 
 
 def _stage(sandbox: Path, writes: Mapping[str, bytes], journal: Journal) -> None:
-    staging = _staging(sandbox)
+    text = json.dumps(json.loads(journal.model_dump_json()), **JSON_LAYOUT) + "\n"
     try:
-        staging.mkdir(mode=0o700, exist_ok=True)
-        for payload in writes.values():
-            (staging / digest(payload)).write_bytes(payload)
-        text = json.dumps(json.loads(journal.model_dump_json()), **JSON_LAYOUT) + "\n"
-        (staging / "journal.next").write_bytes(text.encode())
-        replace(staging / "journal.next", sandbox / JOURNAL)
+        with _staging(sandbox, create=True) as staging:
+            for payload in writes.values():
+                write_leaf(staging, digest(payload), payload, "staging")
+            write_leaf(staging, "journal.next", text.encode(), "staging")
+        replace(sandbox / STAGING / "journal.next", sandbox / JOURNAL)
     except OSError as error:
         raise _failed("staging") from error
 
