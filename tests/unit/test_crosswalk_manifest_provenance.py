@@ -1,11 +1,14 @@
 """A release_candidate manifest needs verified provenance; research manifests say they lack it."""
 
+import json
 from hashlib import sha256
 from pathlib import Path
 
 import pytest
 from pytest_httpx import HTTPXMock
+from typer.testing import CliRunner
 
+from lovspor.cli import app
 from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.cache import MANIFEST
 from lovspor.crosswalk.canonical import parse_records, serialize_records
@@ -166,6 +169,46 @@ def test_manifest_checks_current_provenance_without_rejudging_superseded_evidenc
     ]
     assert manifest["provenance"]["not_reproduced"] == []
     assert manifest["provenance"]["raw_bytes_not_in_capture"] == []
+
+
+def test_cli_writes_a_verified_release_candidate_manifest(
+    promoted: bytes, capture_dir: Path, tmp_path: Path
+) -> None:
+    """The ``--cache`` option actually reaches ``build_manifest`` through the CLI."""
+    data, output = tmp_path / "rc.jsonl", tmp_path / "manifest.json"
+    data.write_bytes(promoted)
+    args = [
+        "ops",
+        "crosswalk",
+        "manifest",
+        "--input",
+        str(data),
+        "--cache",
+        str(capture_dir),
+        "--output",
+        str(output),
+    ]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 0
+    assert f"wrote the manifest of rc.jsonl (release_candidate) to {output}" in result.output
+    written = json.loads(output.read_text())
+    assert written["release_state"] == "release_candidate"
+    assert written["provenance"]["verified"] is True
+
+
+def test_cli_refuses_a_release_candidate_manifest_without_capture(
+    promoted: bytes, tmp_path: Path
+) -> None:
+    """Exercises ``manifest_command``'s ``except LovsporError`` branch, not its contract one."""
+    data, output = tmp_path / "rc.jsonl", tmp_path / "manifest.json"
+    data.write_bytes(promoted)
+    args = ["ops", "crosswalk", "manifest", "--input", str(data), "--output", str(output)]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 1
+    assert "refused: a release_candidate manifest needs verified source provenance" in (
+        result.output
+    )
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("drift", ["body", "archive"])
