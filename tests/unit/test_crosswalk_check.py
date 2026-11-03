@@ -12,6 +12,7 @@ from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from lovspor.crosswalk import commands
 from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.cache import load_manifest
 from lovspor.crosswalk.canonical import parse_records, serialize_records
@@ -664,3 +665,46 @@ def test_approval_nested_values_report_the_scalar_field_names(tmp_path: Path) ->
     assert str(caught.value) == (
         "approval refused: invalid R1, R2, approved_by, approved_on, input_sha256"
     )
+
+
+def test_approval_size_limit_is_inclusive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Sibling bounded reads (previous release, law list) each pin this boundary;
+    # MAX_APPROVAL_BYTES is new in P4 and had no test holding it to the same contract.
+    body = json.dumps(
+        {
+            "input_sha256": "0" * 64,
+            "approved_by": "owner",
+            "approved_on": "2026-11-03",
+            "R1": "approved",
+            "R2": "approved",
+        }
+    ).encode()
+    path = tmp_path / "approval.json"
+    path.write_bytes(body)
+    monkeypatch.setattr(commands, "MAX_APPROVAL_BYTES", len(body))
+    assert read_approval(path).r1 == "approved"
+    monkeypatch.setattr(commands, "MAX_APPROVAL_BYTES", len(body) - 1)
+    with pytest.raises(CrosswalkError, match="approval too large"):
+        read_approval(path)
+
+
+def test_crosswalk_file_size_limit_is_inclusive_for_check_and_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # check_impl and release_candidate_impl each bound the input file on MAX_PREVIOUS_BYTES
+    # independently; a regression in either call site must fail here, not only in build's.
+    path = tmp_path / "in.jsonl"
+    path.write_bytes(b"{}\n")
+    monkeypatch.setattr(commands, "MAX_PREVIOUS_BYTES", 3)
+    with pytest.raises(CrosswalkError) as at_limit:
+        check_impl(path, None, None)
+    assert "too large" not in str(at_limit.value)
+    with pytest.raises(CrosswalkError) as at_limit:
+        release_candidate_impl(path, path, tmp_path, tmp_path / "out.jsonl")
+    assert "too large" not in str(at_limit.value)
+
+    monkeypatch.setattr(commands, "MAX_PREVIOUS_BYTES", 2)
+    with pytest.raises(CrosswalkError, match="crosswalk file too large"):
+        check_impl(path, None, None)
+    with pytest.raises(CrosswalkError, match="crosswalk file too large"):
+        release_candidate_impl(path, path, tmp_path, tmp_path / "out.jsonl")
