@@ -8,7 +8,7 @@ import pytest
 from lovspor.crosswalk import cache
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.stortinget_case_source import LawDecision
-from tests.unit.crosswalk_support import document, saker, tar_bytes
+from tests.unit.crosswalk_support import document, sak, saker, tar_bytes
 
 LAW = "LOV-2022-06-17-63"
 
@@ -115,3 +115,54 @@ def test_an_archive_that_no_longer_matches_its_pin_is_refused(tmp_path: Path) ->
         cache.verified_archive(tmp_path, {**pin, "sha256": "0" * 64})
     with pytest.raises(CrosswalkError, match="do not match the manifest"):
         cache.verified_archive(tmp_path, {"filename": "a", "path": "a.tar.bz2"})
+
+
+@pytest.mark.parametrize("reader", [cache.cached_body, cache.verified_archive])
+def test_cached_objects_cannot_escape_through_symlinks(tmp_path: Path, reader) -> None:
+    directory = tmp_path / "cache"
+    directory.mkdir()
+    outside = tmp_path / "outside.xml"
+    outside.write_bytes(b"pinned bytes")
+    (directory / "object.xml").symlink_to(outside)
+    record = _entry("discovery", "sak", 1, "object.xml", outside.read_bytes())
+
+    with pytest.raises(CrosswalkError, match="leaves the cache"):
+        reader(directory, record)
+    assert outside.read_bytes() == b"pinned bytes"
+
+
+@pytest.mark.parametrize("kind,key", [("saker", "2021-2022"), ("sak", 89016)])
+def test_latest_failed_capture_never_falls_back_to_older_evidence(
+    tmp_path: Path, kind: str, key: str | int
+) -> None:
+    body = saker() if kind == "saker" else sak(89016, "2021-2022")
+    path = tmp_path / "old.xml"
+    path.write_bytes(body)
+    first = _entry("discovery", kind, key, path.name, body)
+    manifest = {"stortinget": [first]}
+    if kind == "saker":
+        assert cache.parsed_listing(tmp_path, manifest, kind, str(key)) == ()
+    else:
+        snapshot, record = cache.case_snapshot(tmp_path, manifest, "discovery", int(key))
+        assert snapshot is not None and cache.parses(snapshot)
+        assert record == first
+
+    failure = {"stage": "discovery", "kind": kind, "key": key, "error": "HTTP 403"}
+    manifest["stortinget"].append(failure)
+    # A refusal has no cached path or digest; old bytes must not be substituted.
+    if kind == "saker":
+        assert cache.listing_snapshot(tmp_path, manifest, kind, str(key)) is None
+        assert cache.parsed_listing(tmp_path, manifest, kind, str(key)) is None
+    else:
+        assert cache.case_snapshot(tmp_path, manifest, "discovery", int(key)) == (None, failure)
+    assert path.read_bytes() == body
+
+
+@pytest.mark.parametrize("body", [b"<broken", b"<not-a-case/>", b"\xff"])
+def test_unparseable_cached_case_is_not_read(tmp_path: Path, body: bytes) -> None:
+    (tmp_path / "case.xml").write_bytes(body)
+    entry = _entry("discovery", "sak", 89016, "case.xml", body)
+    snapshot, record = cache.case_snapshot(tmp_path, {"stortinget": [entry]}, "discovery", 89016)
+    assert record == entry
+    assert snapshot is not None and snapshot.body == body
+    assert cache.parses(snapshot) is False
