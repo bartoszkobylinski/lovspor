@@ -14,6 +14,7 @@ from pytest_httpx import HTTPXMock
 
 from lovspor.crosswalk import cache
 from lovspor.crosswalk import capture as cap
+from lovspor.crosswalk.commands import MAX_LAW_LIST_BYTES, read_law_ids
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.errors import NetworkError, StortingetStatusError
 from lovspor.legislative_chain import LovtidendMember
@@ -438,3 +439,27 @@ def test_a_missing_lovverk_commit_is_refused() -> None:
     with pytest.raises(CrosswalkError) as caught:
         cap.checked_scope([LAW], None)
     assert str(caught.value) == "lovverk_commit must be a 40-hex commit id"
+
+
+def test_law_list_at_the_size_limit_is_read(tmp_path: Path) -> None:
+    laws = tmp_path / "laws.txt"
+    head = f"{LAW}\n"
+    laws.write_text(head + "#" * (MAX_LAW_LIST_BYTES - len(head) - 1) + "\n", encoding="utf-8")
+    assert laws.stat().st_size == MAX_LAW_LIST_BYTES
+    assert read_law_ids(laws) == [LAW]
+    laws.write_text(head + "#" * (MAX_LAW_LIST_BYTES - len(head)) + "\n", encoding="utf-8")
+    with pytest.raises(CrosswalkError, match="law list too large"):
+        read_law_ids(laws)
+
+
+def test_attempt_makes_exactly_the_bounded_number_of_calls(tmp_path: Path) -> None:
+    calls = []
+
+    def request() -> str:
+        calls.append(1)
+        if len(calls) < cap.ATTEMPTS:
+            raise StortingetStatusError(503, "u")
+        return "ok"
+
+    assert cap.attempt(_pacer(tmp_path), request) == "ok"
+    assert len(calls) == cap.ATTEMPTS
