@@ -1,10 +1,18 @@
 """Timestamps and dates must name a real calendar instant, not only match the shape."""
 
+from datetime import datetime
 from typing import Any
 
 import pytest
 
-from lovspor.crosswalk.contract import record_problems, schema_problems, validate_records
+from lovspor.crosswalk import contract
+from lovspor.crosswalk.contract import (
+    _instant,
+    _names_itself,
+    record_problems,
+    schema_problems,
+    validate_records,
+)
 from lovspor.crosswalk.errors import CrosswalkContractError
 from tests.unit.crosswalk_support import attested
 
@@ -27,6 +35,8 @@ BAD_STAMPS = [
     "2026-02-30T10:00:00Z",
     "2026-13-01T10:00:00Z",
     "2026-11-02T24:00:00Z",
+    "2026-11-02T24:00:00+00:00",
+    "2026-12-31T24:00:00Z",
     "2026-11-02T10:60:00Z",
     "2026-11-02T10:00:61+00:00",
     "2025-02-29T10:00:00Z",
@@ -117,6 +127,47 @@ def test_non_calendar_dates_report_every_affected_path(day: str) -> None:
     with pytest.raises(CrosswalkContractError) as caught:
         validate_records([record])
     assert caught.value.problems == tuple(f"LOV-2022-06-17-63@2: {p}" for p in problems)
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    ["2026-11-02T10:00:00Z", "2026-11-02T10:00:00.5+00:00", "2026-11-02T00:00:00Z"],
+)
+def test_names_itself_true_for_a_stamp_that_round_trips(stamp: str) -> None:
+    assert _names_itself(stamp) is True
+
+
+def test_names_itself_false_when_the_parsed_instant_prints_back_differently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Python 3.14's `fromisoformat` quietly rolls 24:00 into the next midnight
+    instead of raising; a fake stands in so the rollover is caught on every
+    interpreter this suite runs on, not only one that happens to roll over."""
+    rolled_over = datetime(2026, 11, 3, 0, 0, 0)
+
+    class _RollsOverSilently:
+        @staticmethod
+        def fromisoformat(value: str) -> datetime:
+            return rolled_over
+
+    monkeypatch.setattr(contract, "datetime", _RollsOverSilently)
+    assert _names_itself("2026-11-02T24:00:00Z") is False
+
+
+def test_instant_rejects_without_raising_when_the_rollover_hides_the_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The format checker must see an ordinary `False`, not an uncaught exception,
+    when a lenient `fromisoformat` hides a 24:00 rollover."""
+    rolled_over = datetime(2026, 11, 3, 0, 0, 0)
+
+    class _RollsOverSilently:
+        @staticmethod
+        def fromisoformat(value: str) -> datetime:
+            return rolled_over
+
+    monkeypatch.setattr(contract, "datetime", _RollsOverSilently)
+    assert _instant("2026-11-02T24:00:00Z") is False
 
 
 @pytest.mark.parametrize("value", [None, 20261102, [], {}])
