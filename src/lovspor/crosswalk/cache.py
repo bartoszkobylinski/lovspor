@@ -222,7 +222,7 @@ def law_header(member: LovtidendMember) -> Entry:
 
 def law_edge(header: Entry) -> Entry:
     """What the Lovtidend header alone says about the decision behind the act."""
-    lovvedtak, besl_o = header.get("lovvedtak", []), header.get("besl_o", [])
+    lovvedtak, besl_o = header.get("lovvedtak", []), header.get("besl_o")
     if "error" in header:
         return {"status": "unresolved", "kind": "unreadable", "reason": header["error"]}
     if len(lovvedtak) > 1:

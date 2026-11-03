@@ -33,6 +33,7 @@ _ENGINE_ROOT = Path(__file__).resolve().parents[3]
 
 def read_law_ids(path: Path) -> list[str]:
     """One Lovdata law id per line; blank lines and `#` comments are skipped."""
+    # A bounded read, never stat: a pipe reports size 0 and may never reach EOF.
     try:
         with path.open("rb") as stream:
             data = stream.read(MAX_LAW_LIST_BYTES + 1)
