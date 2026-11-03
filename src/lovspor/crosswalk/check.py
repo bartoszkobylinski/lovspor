@@ -32,6 +32,7 @@ from lovspor.crosswalk.contract import validate_records
 from lovspor.crosswalk.errors import CrosswalkContractError
 
 _IDENTITY_FIELDS = ("role", "upstream_id", "parsed_identity_sha256", "parser_version")
+_RAW_KEY = ("role", "upstream_id", "source_url")
 _REBUILD_COMMIT = "0" * 40
 # Commits do not enter evidence identities, so a rebuild pins placeholders for them.
 _rebuild = partial(BuildOptions, _REBUILD_COMMIT)
@@ -41,6 +42,9 @@ _rebuild = partial(BuildOptions, _REBUILD_COMMIT)
 class CheckReport:
     problems: list[str] = field(default_factory=list)
     unverified: list[str] = field(default_factory=list)
+    # Identities reproduced, but the claimed raw bytes or archive pins are not this
+    # capture's: byte-only source drift, or a fabricated digest. Never certified.
+    drifted: list[str] = field(default_factory=list)
     records: list[Record] = field(default_factory=list)
 
     @property
@@ -78,19 +82,39 @@ def _identities(record: Record) -> set[tuple[str, ...]]:
     return {tuple(str(item[f]) for f in _IDENTITY_FIELDS) for item in record["evidence"]}
 
 
-def provenance(records: list[Record], cache: Path) -> tuple[list[str], list[str]]:
-    """Rebuild from the cached bytes; compare each current record's evidence identities."""
+def _raw(record: Record) -> set[str]:
+    """The exact bytes a record claims: each evidence body and each archive pin."""
+    bodies = {
+        canonical_json([item[f] for f in (*_RAW_KEY, "body_sha256")]) for item in record["evidence"]
+    }
+    return bodies | {canonical_json(pin) for pin in record["source_pins"]["lovdata_archives"]}
+
+
+@dataclass
+class Provenance:
+    problems: list[str] = field(default_factory=list)
+    unverified: list[str] = field(default_factory=list)
+    drifted: list[str] = field(default_factory=list)
+
+
+def _judge(found: Provenance, law_id: str, record: Record, rebuilt: Record | None) -> None:
+    if rebuilt is None or record["record_state"] != "active":
+        found.unverified.append(law_id)
+    elif _identities(record) != _identities(rebuilt):
+        found.problems.append(f"{law_id}: evidence identities are not reproduced from the capture")
+    elif _raw(record) != _raw(rebuilt):
+        found.drifted.append(law_id)
+
+
+def provenance(records: list[Record], cache: Path) -> Provenance:
+    """Rebuild from the cached bytes: identities first, then the exact raw bytes claimed."""
     manifest, current = load_manifest(cache), current_records(records)
     options = _rebuild_options(manifest, sorted(current))
     fresh = {r["amending_lov_id"]: r for r in derive_records(cache, manifest, options)}
-    problems, unverified = [], []
+    found = Provenance()
     for law_id, record in sorted(current.items()):
-        rebuilt = fresh.get(law_id)
-        if rebuilt is None or record["record_state"] != "active":
-            unverified.append(law_id)
-        elif _identities(record) != _identities(rebuilt):
-            problems.append(f"{law_id}: evidence identities are not reproduced from the capture")
-    return problems, unverified
+        _judge(found, law_id, record, fresh.get(law_id))
+    return found
 
 
 def _rebuild_options(manifest: dict[str, object], law_ids: list[str]) -> BuildOptions:
@@ -120,6 +144,13 @@ def _history_problems(records: list[Record], previous: bytes) -> list[str]:
     return append_only_problems(records, before)
 
 
+def _add_provenance(report: CheckReport, cache: Path) -> None:
+    found = provenance(report.records, cache)
+    report.problems = found.problems
+    report.unverified = found.unverified
+    report.drifted = found.drifted
+
+
 def check(data: bytes, previous: bytes | None = None, cache: Path | None = None) -> CheckReport:
     report = CheckReport()
     try:
@@ -136,7 +167,7 @@ def check(data: bytes, previous: bytes | None = None, cache: Path | None = None)
     if previous is not None:
         report.problems += _history_problems(report.records, previous)
     if cache is not None and not report.problems:
-        report.problems, report.unverified = provenance(report.records, cache)
+        _add_provenance(report, cache)
     return report
 
 
