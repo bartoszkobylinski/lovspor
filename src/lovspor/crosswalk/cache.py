@@ -13,11 +13,10 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict
 from datetime import datetime
 from functools import partial
-from hashlib import sha256
+from hashlib import file_digest, sha256
 from pathlib import Path
 from typing import Any
 
-from lovspor.crosswalk.canonical import UTF8
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.errors import LovsporError
 from lovspor.legislative_chain import (
@@ -55,7 +54,7 @@ _LISTING_PARSERS: dict[str, Callable[[ListingSnapshot], Any]] = {
 
 def load_manifest(cache: Path) -> Manifest:
     try:
-        loaded: Manifest = json.loads((cache / MANIFEST).read_text(encoding=UTF8))
+        loaded: Manifest = json.loads((cache / MANIFEST).read_bytes())
     except (OSError, json.JSONDecodeError) as exc:
         raise CrosswalkError(f"capture manifest unreadable in {cache}") from exc
     return loaded
@@ -63,7 +62,7 @@ def load_manifest(cache: Path) -> Manifest:
 
 def write_manifest(cache: Path, manifest: Manifest) -> None:
     text = _manifest_json(manifest)
-    (cache / MANIFEST).write_text(text + "\n", encoding=UTF8)
+    (cache / MANIFEST).write_bytes((text + "\n").encode())
 
 
 def latest(manifest: Manifest, stage: str, kind: str, key: object) -> Entry | None:
@@ -180,10 +179,8 @@ def discovery_candidates(
 def verified_archive(cache: Path, record: Entry) -> Path:
     """The cached archive, only if it still hashes to its pin; read in chunks, never whole."""
     path = _inside(cache, record["path"])
-    digest = sha256()
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(chunk)
+        digest = file_digest(stream, sha256)
     if digest.hexdigest() != record.get("sha256"):
         raise CrosswalkError(f"cached archive bytes do not match the manifest: {record['path']}")
     return path
