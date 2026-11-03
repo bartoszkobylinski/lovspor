@@ -15,6 +15,7 @@ gate.
 """
 
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 from lovspor.crosswalk.build import BuildOptions, derive_records
@@ -32,6 +33,8 @@ from lovspor.crosswalk.errors import CrosswalkContractError
 
 _IDENTITY_FIELDS = ("role", "upstream_id", "parsed_identity_sha256", "parser_version")
 _REBUILD_COMMIT = "0" * 40
+# Commits do not enter evidence identities, so a rebuild pins placeholders for them.
+_rebuild = partial(BuildOptions, _REBUILD_COMMIT)
 
 
 @dataclass
@@ -91,14 +94,10 @@ def provenance(records: list[Record], cache: Path) -> tuple[list[str], list[str]
 
 
 def _rebuild_options(manifest: dict[str, object], law_ids: list[str]) -> BuildOptions:
-    """The capture's own scope; a capture that records none is rebuilt for the file's acts.
-
-    Commits do not enter evidence identities, so placeholders are used for them.
-    """
+    """The capture's own scope; a capture that records none is rebuilt for the file's acts."""
     if manifest.get("scope"):
-        return BuildOptions(producer_commit=_REBUILD_COMMIT)
-    laws = tuple(law_ids)
-    return BuildOptions(_REBUILD_COMMIT, lovverk_commit=_REBUILD_COMMIT, law_ids=laws)
+        return _rebuild()
+    return _rebuild(lovverk_commit=_REBUILD_COMMIT, law_ids=tuple(law_ids))
 
 
 def _contract_problems(records: list[Record]) -> list[str]:
@@ -137,8 +136,7 @@ def check(data: bytes, previous: bytes | None = None, cache: Path | None = None)
     if previous is not None:
         report.problems += _history_problems(report.records, previous)
     if cache is not None and not report.problems:
-        found, report.unverified = provenance(report.records, cache)
-        report.problems += found
+        report.problems, report.unverified = provenance(report.records, cache)
     return report
 
 

@@ -162,7 +162,8 @@ def read_approval(path: Path) -> Approval:
     try:
         return Approval.model_validate_json(read_bounded(path, MAX_APPROVAL_BYTES, "approval"))
     except ValidationError as exc:
-        fields = sorted({".".join(str(p) for p in e["loc"]) for e in exc.errors()})
+        # Approval is flat, so each error's location is one top-level field.
+        fields = sorted({str(e["loc"][0]) for e in exc.errors()})
         raise CrosswalkError(f"approval refused: invalid {', '.join(fields)}") from exc
 
 
