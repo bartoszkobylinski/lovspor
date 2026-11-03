@@ -117,7 +117,7 @@ def read_previous(path: Path | None) -> bytes | None:
 def _claim_staging(staging: Path, path: Path) -> None:
     """Create the staging file exclusively: an existing one, or a symlink, is someone else's."""
     try:
-        staging.touch(exist_ok=False)
+        staging.open("xb").close()
     except FileExistsError as exc:
         raise CrosswalkError(f"refusing to reuse the staging file {staging}") from exc
     except OSError as exc:
