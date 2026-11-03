@@ -380,3 +380,18 @@ def test_cli_exposes_capture_and_refuses_with_exit_1(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert "refused:" in result.output
     assert not (tmp_path / "run").exists()
+
+
+def test_an_existing_digest_object_with_other_bytes_is_refused(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    name = "lovtidend-avd1-2026.tar.bz2"
+    body = tar_bytes({})
+    target = tmp_path / "lovdata" / sha256(body).hexdigest() / name
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"corrupt")
+    httpx_mock.add_response(url=f"{API}/get/{name}", content=body)
+    with LovdataClient() as client, pytest.raises(CrosswalkError, match="do not match"):
+        cap.capture_archive(client, _entry(name, len(body)), tmp_path)
+    assert target.read_bytes() == b"corrupt"
+    assert not list((tmp_path / "lovdata/.staging").iterdir())
