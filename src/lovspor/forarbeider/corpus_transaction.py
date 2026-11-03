@@ -199,8 +199,8 @@ def _stage(sandbox: Path, writes: Mapping[str, bytes], journal: Journal) -> None
         staging.mkdir(mode=0o700, exist_ok=True)
         for payload in writes.values():
             (staging / digest(payload)).write_bytes(payload)
-        text = json.dumps(journal.model_dump(mode="json"), **JSON_LAYOUT) + "\n"
-        (staging / "journal.next").write_text(text, encoding="utf-8")
+        text = json.dumps(json.loads(journal.model_dump_json()), **JSON_LAYOUT) + "\n"
+        (staging / "journal.next").write_bytes(text.encode())
         replace(staging / "journal.next", sandbox / JOURNAL)
     except OSError as error:
         raise _failed("staging") from error

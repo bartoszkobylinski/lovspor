@@ -19,7 +19,7 @@ import json
 import re
 from collections.abc import Sequence
 from datetime import datetime
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from lovspor.forarbeider.chapter_models import ChapterResult, TextBlock, text_hash
 from lovspor.forarbeider.corpus_models import (
@@ -46,6 +46,8 @@ _UNSAFE_CHARACTER = re.compile(
 _DEEPEST = 6
 _TYPE_LABELS = {"prop-l": "L", "prop-ls": "LS"}
 _EN_DASH = "\u2013"
+#: Non-ASCII stays as written: a JSON string is a YAML double-quoted scalar either way.
+_SCALAR: dict[str, Any] = {"ensure_ascii": False}
 NOT_LAW = (
     "> **Forarbeid: preparatory material, NOT enacted law.** It does not state whether"
     " the proposal was adopted, and it is not a source of law in force."
@@ -94,7 +96,7 @@ def _inline(text: str) -> str:
 
 
 def _scalar(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False)
+    return json.dumps(value, **_SCALAR)
 
 
 def _checked(rendering: Rendering) -> tuple[ChapterResult, ...]:
@@ -200,7 +202,8 @@ def _chapter(result: ChapterResult) -> list[str]:
     opens = blocks[0].kind == "heading" and blocks[0].level == 1
     if not opens or blocks[0].text != result.chapter_title:
         lines += [f"## {_inline(_line(result.chapter_title, 'chapter_title'))}", ""]
-    for previous, block in zip((None, *blocks), blocks, strict=False):
+    for index, block in enumerate(blocks):
+        previous = blocks[index - 1] if index else None
         tight = previous is not None and previous.kind == block.kind == "list_item"
         if previous is not None and not tight:
             lines.append("")

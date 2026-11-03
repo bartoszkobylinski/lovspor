@@ -71,7 +71,7 @@ class Verified(NamedTuple):
     report_sha256: str
 
 
-def _rerun(scope: ChapterScope, run: Run, expected: str) -> Verified:
+def _rerun(scope: ChapterScope, run: Run, expected: str | None) -> Verified:
     """The preflight of ``run`` evaluated again from the private files as they are now.
 
     Anything changed since the report, even a chapter fewer, denies: the plan
@@ -211,7 +211,7 @@ def _simulated_draft(scope: ChapterScope, plan: PromotionPlan, sandbox: Path) ->
         checkpoints=plan.checkpoints,
         at=plan.at.isoformat(),
     )
-    verified = _rerun(scope, run, plan.report_sha256 or "")
+    verified = _rerun(scope, run, plan.report_sha256)
     results = [item.result for item in verified.inputs.observed]
     if not is_synthetic(verified.inputs.metadata, results):
         raise ForarbeiderRefusedError(RefusalReason.INPUT_NOT_SYNTHETIC, "observation")

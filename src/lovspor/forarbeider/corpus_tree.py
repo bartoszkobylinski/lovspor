@@ -51,6 +51,9 @@ _GIT_FILES = {
     "config": "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n",
     "description": "Disposable synthetic sandbox; no remote, never pushed.\n",
 }
+#: The label of every sandbox refusal; a read inside a check that only answers yes or no
+#: never shows it.
+SANDBOX = "sandbox"
 _GIT_DIRECTORIES = ("objects", "objects/info", "objects/pack", "refs", "refs/heads", "refs/tags")
 
 
@@ -113,9 +116,10 @@ def _walk(directory: Path, prefix: str) -> dict[str, bytes]:
     with os.scandir(directory) as entries:
         for entry in sorted(entries, key=lambda item: item.name):
             relative = f"{prefix}/{entry.name}"
-            if entry.is_symlink():
+            mode = entry.stat(follow_symlinks=False).st_mode
+            if stat.S_ISLNK(mode):
                 raise _unsafe(DATASET_ROOT)
-            if entry.is_dir(follow_symlinks=False):
+            if stat.S_ISDIR(mode):
                 files.update(_walk(Path(entry.path), relative))
             else:
                 files[relative] = _read_public(Path(entry.path), DATASET_ROOT)
@@ -159,8 +163,8 @@ def read_dataset(checkout: Path) -> Dataset:
 
 def _write_new(path: Path, text: str) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        stream.write(text)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(text.encode())
 
 
 def create_sandbox(raw: Path, forbidden: Sequence[Path]) -> Path:
@@ -179,7 +183,7 @@ def create_sandbox(raw: Path, forbidden: Sequence[Path]) -> Path:
         raw.mkdir(mode=0o700)
         (raw / ".git").mkdir(mode=0o700)
         for name in _GIT_DIRECTORIES:
-            (raw / ".git" / name).mkdir(mode=0o700, parents=True)
+            (raw / ".git" / name).mkdir(mode=0o700)
         for name, text in {**_GIT_FILES, "lovspor-synthetic-sandbox": MARKER_TEXT}.items():
             _write_new(raw / ".git" / name, text)
         for name, text in BASELINE.items():
@@ -217,7 +221,7 @@ def require_sandbox(raw: Path, forbidden: Sequence[Path]) -> Path:
 
 def _ours(path: Path, expected: bytes) -> bool:
     try:
-        return _read_public(path, "sandbox") == expected
+        return _read_public(path, SANDBOX) == expected
     except ForarbeiderRefusedError:
         return False
 
@@ -225,7 +229,7 @@ def _ours(path: Path, expected: bytes) -> bool:
 def _has_remote(config: Path) -> bool:
     """A remote, or any URL, means the checkout can reach somewhere: not a sandbox."""
     try:
-        text = _read_public(config, "sandbox")
+        text = _read_public(config, SANDBOX)
     except ForarbeiderRefusedError:
         return True
     return b"[remote" in text or b"url" in text
@@ -247,9 +251,10 @@ def _require_baseline(path: Path) -> None:
         for entry in entries:
             if entry.name in {".git", DATASET_ROOT}:
                 continue
-            if entry.is_symlink():
+            mode = entry.stat(follow_symlinks=False).st_mode
+            if stat.S_ISLNK(mode):
                 raise _unsafe("sandbox")
-            if entry.is_dir(follow_symlinks=False):
+            if stat.S_ISDIR(mode):
                 found.update(_walk(Path(entry.path), entry.name))
             else:
                 found[entry.name] = _read_public(Path(entry.path), "sandbox")
