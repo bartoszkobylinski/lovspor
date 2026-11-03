@@ -516,3 +516,36 @@ def test_cli_build_refuses_invalid_previous_history_without_publication(
     assert previous.read_bytes() == data
     assert not output.exists()
     assert not list(tmp_path.glob(".*.partial"))
+
+
+def _with_candidate(first: bytes, law_id: str) -> bytes:
+    """``first`` plus the revision the release-candidate gate appends for one act."""
+    records = parse_records(first)
+    record = next(r for r in records if r["amending_lov_id"] == law_id)
+    assert (record["status"], record["release_state"]) == ("attested", "research_only")
+    promoted = {**record, "release_state": "release_candidate", "record_revision": 2}
+    return serialize_records([*records, promoted])
+
+
+def test_rebuild_keeps_an_unchanged_release_candidate(capture_dir: Path) -> None:
+    previous = _with_candidate(build(capture_dir, OPTIONS), "LOV-2022-06-17-63")
+    validate_records(parse_records(previous))
+    assert build(capture_dir, BuildOptions(PRODUCER, previous=previous)) == previous
+
+
+def test_a_changed_release_candidate_gets_a_research_only_revision(capture_dir: Path) -> None:
+    previous = _with_candidate(build(capture_dir, OPTIONS), "LOV-2022-06-17-63")
+    manifest = load_manifest(capture_dir)
+    case = next(e for e in manifest["stortinget"] if e["kind"] == "sak" and e["key"] == 89016)
+    manifest["stortinget"].append({**case, "error": "network timeout", "http_status": None})
+    write_manifest(capture_dir, manifest)
+
+    data = build(capture_dir, BuildOptions(PRODUCER, previous=previous))
+    assert set(previous.splitlines()) <= set(data.splitlines())
+    history = [r for r in parse_records(data) if r["amending_lov_id"] == "LOV-2022-06-17-63"]
+    assert [(r["record_revision"], r["release_state"]) for r in history] == [
+        (1, "research_only"),
+        (2, "release_candidate"),
+        (3, "research_only"),
+    ]
+    assert history[-1]["status"] == "unresolved"
