@@ -1,9 +1,11 @@
 """Producer outputs obey the same path rules as captures, and their staging is never reused."""
 
+import os
 from pathlib import Path
 
 import pytest
 
+from lovspor.crosswalk import commands
 from lovspor.crosswalk.commands import write_once
 from lovspor.crosswalk.errors import CrosswalkError
 
@@ -50,3 +52,41 @@ def test_a_dangling_symlink_output_is_never_written_through(tmp_path: Path) -> N
     with pytest.raises(CrosswalkError, match="refusing to overwrite"):
         write_once(output, b"x\n")
     assert not (tmp_path / "elsewhere.jsonl").exists()
+
+
+def test_a_dangling_staging_symlink_is_never_followed(tmp_path: Path) -> None:
+    staging = tmp_path / ".out.jsonl.partial"
+    staging.symlink_to(tmp_path / "planted")
+    with pytest.raises(CrosswalkError, match="refusing to reuse the staging file"):
+        write_once(tmp_path / "out.jsonl", b"x\n")
+    assert not (tmp_path / "planted").exists()
+    assert staging.is_symlink()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_an_unwritable_directory_names_the_output_it_could_not_write(tmp_path: Path) -> None:
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o555)
+    try:
+        with pytest.raises(CrosswalkError) as caught:
+            write_once(locked / "out.jsonl", b"x\n")
+    finally:
+        locked.chmod(0o755)
+    assert str(caught.value).startswith(f"could not write {locked / 'out.jsonl'}: ")
+    assert _tree(locked) == []
+
+
+def test_a_staging_file_removed_by_someone_else_still_ends_in_a_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "out.jsonl"
+
+    def vanished(source: Path, destination: Path) -> None:
+        Path(source).unlink()
+        raise OSError("staging vanished")
+
+    monkeypatch.setattr(commands.os, "link", vanished)
+    with pytest.raises(CrosswalkError, match="could not write .*staging vanished"):
+        write_once(output, b"x\n")
+    assert _tree(tmp_path) == []

@@ -171,6 +171,30 @@ def test_verification_captures_never_stand_in_for_discovery(capture_dir: Path) -
     assert (record["status"], record["reason_code"]) == ("unresolved", "source_unreadable")
 
 
+def test_a_missing_saker_listing_leaves_discovery_incomplete(capture_dir: Path) -> None:
+    """Losing the saker listing itself, not a single case, must surface as `incomplete`."""
+    manifest = load_manifest(capture_dir)
+    manifest["stortinget"] = [
+        e
+        for e in manifest["stortinget"]
+        if not (e["stage"] == "discovery" and e["kind"] == "saker" and e["key"] == "2024-2025")
+    ]
+    write_manifest(capture_dir, manifest)
+    records = _by_law(build(capture_dir, OPTIONS))
+    for law in ("LOV-2025-04-25-13", "LOV-2025-06-20-67"):
+        record = records[law]
+        assert (record["status"], record["reason_code"]) == ("unresolved", "source_unreadable")
+        assert record["reason"] == (
+            "discovery incomplete: a saker listing was not read or did not parse"
+        )
+        assert record["sak_id"] is None
+        assert "decision_case" not in {e["role"] for e in record["evidence"]}
+        assert {e["law_id"] for e in record["sanction_events"]} == {
+            "LOV-2025-04-25-13",
+            "LOV-2025-06-20-67",
+        }
+
+
 def test_tampered_cache_is_refused(capture_dir: Path) -> None:
     manifest = load_manifest(capture_dir)
     entry = next(e for e in manifest["stortinget"] if e["kind"] == "sak")
@@ -425,6 +449,19 @@ def test_cli_build_refuses_a_missing_capture(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert "refused:" in result.output
     assert not (tmp_path / MANIFEST).exists()
+
+
+def test_cli_build_without_producer_commit_falls_back_to_engine_head(
+    capture_dir: Path, tmp_path: Path, offline: None
+) -> None:
+    runner = CliRunner()
+    output = tmp_path / "out.jsonl"
+    args = ["ops", "crosswalk", "build", "--cache", str(capture_dir), "--output", str(output)]
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0, result.output
+    produced = {r["amending_lov_id"]: r for r in parse_records(output.read_bytes())}
+    assert all(r["source_pins"]["producer_commit"] == engine_commit() for r in produced.values())
 
 
 def test_build_is_unchanged_by_archive_and_scope_order(capture_dir: Path, offline: None) -> None:

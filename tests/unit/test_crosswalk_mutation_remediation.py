@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -297,3 +298,30 @@ def test_identity_hash_uses_canonical_utf8_and_identity_fields() -> None:
         "session_id": "2021-2022",
         "lovvedtak": ["a", "z"],
     }
+
+
+def test_a_staging_write_failure_names_the_real_output_path(tmp_path: Path) -> None:
+    """``_claim_staging``'s OSError branch must report the output it was writing, not the staging path's own caller-less None."""  # noqa: E501
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"not a directory\n")
+    target = blocker / "out.jsonl"
+    with pytest.raises(CrosswalkError) as error:
+        commands.write_once(target, b"x\n")
+    assert str(error.value).startswith(f"could not write {target}:")
+
+
+def test_a_staged_crosswalk_file_already_gone_does_not_fail_a_finished_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cleanup tolerates a staging file a concurrent process already removed."""
+    real_link = os.link
+
+    def link_and_lose(source: str, target: str) -> None:
+        real_link(source, target)
+        Path(source).unlink()
+
+    monkeypatch.setattr(os, "link", link_and_lose)
+    target = tmp_path / "out.jsonl"
+    commands.write_once(target, b"x\n")
+    assert target.read_bytes() == b"x\n"
+    assert list(tmp_path.iterdir()) == [target]

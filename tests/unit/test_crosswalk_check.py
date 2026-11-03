@@ -356,6 +356,38 @@ def test_provenance_uses_current_revision_and_preserves_old_identities(
     assert previous.splitlines()[0] in data.splitlines()
 
 
+def test_withdrawn_current_record_is_unverified_even_when_reproduced(
+    built: bytes, capture_dir: Path
+) -> None:
+    """`_judge` treats a withdrawn record as unverified before it ever compares evidence.
+
+    Evidence, pins and sanction events are left exactly as the capture produced
+    them, so a rebuild would otherwise match both identity and raw bytes. The
+    withdrawal alone must still bar certification (#610, P4): a withdrawn record
+    is never "passed" by provenance, only ever unverified.
+    """
+    records = parse_records(built)
+    law_id = "LOV-2022-06-17-63"
+    current = next(r for r in records if r["amending_lov_id"] == law_id)
+    withdrawn = json.loads(json.dumps(current))
+    withdrawn.update(
+        record_revision=2,
+        record_state="withdrawn",
+        status="unresolved",
+        edge_status={**current["edge_status"], "decision_case": "unresolved"},
+        reason="producer edge was wrong",
+        reason_code="withdrawn_by_producer",
+        withdrawal={"withdrawn_on": "2026-11-03", "reason": "producer edge was wrong"},
+    )
+    data = serialize_records([*records, withdrawn])
+
+    report = check(data, cache=capture_dir)
+
+    assert report.passed, report.problems
+    assert report.unverified == [law_id]
+    assert report.drifted == []
+
+
 def test_changed_parser_version_is_not_reproduced(built: bytes, capture_dir: Path) -> None:
     records = parse_records(built)
     record = next(r for r in records if r["amending_lov_id"] == "LOV-2022-06-17-63")
