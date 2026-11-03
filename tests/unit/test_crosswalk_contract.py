@@ -433,3 +433,26 @@ def test_multiple_archive_separators_are_rejected_before_invariants(role: str) -
     problems = schema_problems(record)
     assert problems
     assert record_problems(record) == problems
+
+
+@pytest.mark.parametrize("role", ["law_identity", "law_decision_pair", "correction"])
+def test_archive_separator_cannot_be_hidden_in_a_member_or_archive(role: str) -> None:
+    record = attested()
+    if role == "correction":
+        item = {**_role(record, "law_identity"), "role": role}
+        record["evidence"].append(item)
+    else:
+        item = _role(record, role)
+    assert record_problems(record) == []
+    archive, member = item["upstream_id"].split("!")
+    for upstream in (f"{archive}!extra!{member}", f"{archive}!{member}!extra.xml"):
+        item["upstream_id"] = upstream
+        problems = schema_problems(record)
+        assert problems
+        assert any("upstream_id" in problem for problem in problems)
+        assert record_problems(record) == problems
+        with pytest.raises(CrosswalkContractError) as caught:
+            validate_records([record])
+        assert caught.value.problems == tuple(
+            f"LOV-2022-06-17-63@1: {problem}" for problem in problems
+        )
