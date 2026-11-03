@@ -29,12 +29,11 @@ MAX_LAW_LIST_BYTES = 1_000_000
 def read_law_ids(path: Path) -> list[str]:
     """One Lovdata law id per line; blank lines and `#` comments are skipped."""
     try:
-        with path.open("rb") as stream:
-            data = stream.read(MAX_LAW_LIST_BYTES + 1)
+        if path.stat().st_size > MAX_LAW_LIST_BYTES:
+            raise CrosswalkError(f"law list too large: {path}")
+        data = path.read_bytes()
     except OSError as exc:
         raise CrosswalkError(f"law list unreadable: {path}") from exc
-    if len(data) > MAX_LAW_LIST_BYTES:
-        raise CrosswalkError(f"law list too large: {path}")
     try:
         text = data.decode()
     except UnicodeDecodeError as exc:
