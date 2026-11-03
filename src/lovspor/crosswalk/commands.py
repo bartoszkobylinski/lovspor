@@ -41,7 +41,7 @@ def read_law_ids(path: Path) -> list[str]:
     if len(data) > MAX_LAW_LIST_BYTES:
         raise CrosswalkError(f"law list too large: {path}")
     try:
-        text = data.decode("utf-8")
+        text = data.decode()
     except UnicodeDecodeError as exc:
         raise CrosswalkError(f"law list is not UTF-8: {path}") from exc
     lines = (line.strip() for line in text.splitlines())
