@@ -55,6 +55,8 @@ def cited_archives(record: Record) -> set[str]:
         found = archive_member(item["upstream_id"])
         if found is not None:
             cited.add(ARCHIVE_URL.format(found[0]))
+        elif "!" in item["upstream_id"]:
+            raise CrosswalkError(f"malformed archive member id: {item['upstream_id']}")
     return cited
 
 

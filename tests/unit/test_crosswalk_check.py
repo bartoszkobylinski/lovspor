@@ -468,8 +468,12 @@ def test_approval_controls_accepted_licence_bases(r2: str) -> None:
     assert accepted_bases(_approval(b"", r2)) == frozenset(expected)
 
 
-def test_archive_citation_splits_before_member_exclamation() -> None:
+def test_archive_citation_refuses_a_member_id_with_a_second_separator() -> None:
+    # The schema allows exactly one "!" (archive!member); anything else is refused, never guessed.
     record = {"sanction_events": [], "evidence": [{"upstream_id": "archive.tar.bz2!dir/a!b.xml"}]}
+    with pytest.raises(CrosswalkError, match="malformed archive member id"):
+        cited_archives(record)
+    record["evidence"] = [{"upstream_id": "archive.tar.bz2!dir/b.xml"}, {"upstream_id": "sak/1"}]
     assert cited_archives(record) == {"https://api.lovdata.no/v1/publicData/get/archive.tar.bz2"}
 
 
