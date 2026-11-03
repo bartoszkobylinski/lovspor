@@ -8,7 +8,7 @@ import pytest
 from lovspor.crosswalk import cache
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.stortinget_case_source import LawDecision
-from tests.unit.crosswalk_support import document, sak, saker, tar_bytes
+from tests.unit.crosswalk_support import document, pubs, sak, saker, tar_bytes
 
 LAW = "LOV-2022-06-17-63"
 
@@ -252,3 +252,43 @@ def test_latest_corrupted_capture_is_refused_without_using_older_evidence(
             cache.case_snapshot(tmp_path, manifest, "discovery", int(key))
     assert (tmp_path / "old.xml").read_bytes() == body
     assert (tmp_path / "new.xml").read_bytes() == b"tampered"
+
+
+@pytest.mark.parametrize("kind", ["saker", "publikasjoner", "sak"])
+def test_latest_unparseable_capture_never_falls_back_to_older_evidence(
+    tmp_path: Path, kind: str
+) -> None:
+    # cache.py: bytes that do not parse are "not read", never an empty answer.
+    # Both bodies match their pins: this exercises parsing, not digest refusal.
+    session = "2021-2022"
+    bodies = {
+        "saker": saker((89016, "Lovvedtak 85 (2021-2022)")),
+        "publikasjoner": pubs("vedtak-202122-085"),
+        "sak": sak(89016, session),
+    }
+    key = 89016 if kind == "sak" else session
+    old_body = bodies[kind]
+    new_body = b"<broken"
+    (tmp_path / "old.xml").write_bytes(old_body)
+    (tmp_path / "new.xml").write_bytes(new_body)
+    old = _entry("discovery", kind, key, "old.xml", old_body)
+    new = _entry("discovery", kind, key, "new.xml", new_body)
+    manifest = {"stortinget": [old]}
+
+    if kind == "sak":
+        snapshot, _ = cache.case_snapshot(tmp_path, manifest, "discovery", 89016)
+        assert snapshot is not None and cache.parses(snapshot)
+    else:
+        assert cache.parsed_listing(tmp_path, manifest, kind, session)
+
+    manifest["stortinget"].append(new)
+    if kind == "sak":
+        snapshot, record = cache.case_snapshot(tmp_path, manifest, "discovery", 89016)
+        assert record == new
+        assert snapshot is not None and snapshot.body == new_body
+        assert not cache.parses(snapshot)
+    else:
+        assert cache.parsed_listing(tmp_path, manifest, kind, session) is None
+        assert cache.listing_parse_error(tmp_path, manifest, kind, session) is not None
+    assert (tmp_path / "old.xml").read_bytes() == old_body
+    assert (tmp_path / "new.xml").read_bytes() == new_body

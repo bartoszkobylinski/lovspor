@@ -18,6 +18,7 @@ from lovspor.crosswalk.contract import (
     validate_records,
 )
 from lovspor.crosswalk.errors import CrosswalkContractError
+from lovspor.legislative_chain import member_names_law
 from tests.unit.crosswalk_support import (
     ARCHIVE_URL,
     archive_pin,
@@ -465,3 +466,61 @@ def test_archive_separator_cannot_be_hidden_in_a_member_or_archive(role: str) ->
         assert caught.value.problems == tuple(
             f"LOV-2022-06-17-63@1: {problem}" for problem in problems
         )
+
+
+@pytest.mark.parametrize("role", ["law_identity", "law_decision_pair", "correction"])
+def test_pinned_url_must_name_the_archive_in_the_evidence_id(role: str) -> None:
+    record = attested()
+    item = _role(record, "law_identity")
+    if role == "correction":
+        item = {**item, "role": role}
+        record["evidence"].append(item)
+    else:
+        item = _role(record, role)
+    other_pin = archive_pin("lovtidend-avd1-2026.tar.bz2")
+    record["source_pins"]["lovdata_archives"].append(other_pin)
+    item["source_url"] = other_pin["source_url"]
+
+    assert schema_problems(record) == []
+    assert record_problems(record) == [
+        f"evidence {item['upstream_id']} cites an archive that is not pinned"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("role", "parameter"),
+    [
+        ("decision_case", "sakid=89016"),
+        ("decision_publication", "sesjonid=2021-2022"),
+        ("decision_publication", "publikasjontype=lovvedtak"),
+    ],
+)
+def test_repeated_identity_query_parameter_is_refused(role: str, parameter: str) -> None:
+    record = attested()
+    _role(record, role)["source_url"] += f"&{parameter}"
+    assert schema_problems(record) == []
+    problems = record_problems(record)
+    assert len(problems) == 1
+    assert problems[0].startswith(role)
+
+
+@pytest.mark.parametrize("prefix", ["nl", "sf"])
+@pytest.mark.parametrize("number", ["63", "063", "0063"])
+def test_member_names_law_accepts_both_prefixes_and_number_padding(
+    prefix: str, number: str
+) -> None:
+    assert member_names_law(f"lti/2022/{prefix}-20220617-{number}.xml", "LOV-2022-06-17-63")
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        "lti/2022/nl-20220617-064.xml",
+        "lti/2022/nl-20220618-063.xml",
+        "lti/2022/nl-20220617-063.xml.bak",
+        "prefix/lti/2022/nl-20220617-063.xml",
+        "lti/2022/nl-20220617-063.xml\n",
+    ],
+)
+def test_member_names_law_requires_the_whole_path_and_exact_act(member: str) -> None:
+    assert not member_names_law(member, "LOV-2022-06-17-63")

@@ -177,3 +177,10 @@ def test_empty_jsonl_is_canonical_but_a_blank_line_is_not_a_record() -> None:
     with pytest.raises(CrosswalkContractError) as caught:
         parse_records(b"\n")
     assert caught.value.problems == ("file has a blank line",)
+
+
+def test_revisions_sort_numerically_when_crossing_single_digits() -> None:
+    records = [attested() | {"record_revision": revision} for revision in (10, 2, 1)]
+    data = serialize_records(iter(records))
+    assert [record["record_revision"] for record in parse_records(data)] == [1, 2, 10]
+    assert is_canonical(data)
