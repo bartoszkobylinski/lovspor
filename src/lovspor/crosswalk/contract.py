@@ -9,6 +9,7 @@ check stage's work.
 """
 
 import json
+import re
 from collections import defaultdict
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -26,6 +27,7 @@ from lovspor.legislative_chain import member_names_law
 SCHEMA_VERSION = "1.0.0-rc"
 SCHEMA_RESOURCE = "legislative-crosswalk-1.0.0-rc.schema.json"
 ARCHIVE_URL = "https://api.lovdata.no/v1/publicData/get/{}"
+_MEMBER_ID = re.compile(r"(?P<archive>[^!]+)!(?P<member>[^!]+)")
 
 
 @cache
@@ -104,6 +106,12 @@ def _publication_named(record: Record) -> list[str]:
     return problems
 
 
+def archive_member(upstream_id: str) -> tuple[str, str] | None:
+    """`(archive, member)` of an `<archive>!<member>` upstream id; None for a sak or list."""
+    match = _MEMBER_ID.fullmatch(upstream_id)
+    return (match["archive"], match["member"]) if match else None
+
+
 def _pinned_archives(record: Record) -> set[str]:
     return {pin["source_url"] for pin in record["source_pins"]["lovdata_archives"]}
 
@@ -112,9 +120,9 @@ def _archives_pinned(record: Record) -> list[str]:
     """Invariant 4: every archive a record cites is pinned, by the URL that names it."""
     pinned, problems = _pinned_archives(record), []
     for item in record["evidence"]:
-        archive, sep, _ = item["upstream_id"].partition("!")
-        if sep and (
-            item["source_url"] != ARCHIVE_URL.format(archive) or item["source_url"] not in pinned
+        cited = archive_member(item["upstream_id"])
+        if cited and (
+            item["source_url"] != ARCHIVE_URL.format(cited[0]) or item["source_url"] not in pinned
         ):
             problems.append(f"evidence {item['upstream_id']} cites an archive that is not pinned")
     for event in record["sanction_events"]:
@@ -127,8 +135,8 @@ def _law_member(record: Record) -> list[str]:
     """Law identity evidence is the amending act's own Lovtidend document."""
     law_id, problems = record["amending_lov_id"], []
     for item in _by_role(record, "law_identity") + _by_role(record, "law_decision_pair"):
-        _, _, member = item["upstream_id"].partition("!")
-        if not member_names_law(member, law_id):
+        cited = archive_member(item["upstream_id"])
+        if cited is None or not member_names_law(cited[1], law_id):
             problems.append(f"evidence {item['upstream_id']} is not the document of {law_id}")
     return problems
 

@@ -433,3 +433,12 @@ def test_multiple_archive_separators_are_rejected_before_invariants(role: str) -
     problems = schema_problems(record)
     assert problems
     assert record_problems(record) == problems
+
+
+def test_archive_member_splits_only_a_lovdata_member_id() -> None:
+    assert contract.archive_member("lovtidend-avd1-2026.tar.bz2!lti/2026/nl-20260101-001.xml") == (
+        "lovtidend-avd1-2026.tar.bz2",
+        "lti/2026/nl-20260101-001.xml",
+    )
+    for upstream in ("sak/89016", "publikasjoner/2021-2022", "a!b!c", "!m", "a!"):
+        assert contract.archive_member(upstream) is None
