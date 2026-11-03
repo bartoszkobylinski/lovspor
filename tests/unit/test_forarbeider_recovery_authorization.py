@@ -199,6 +199,23 @@ def test_another_plans_journal_is_refused_and_left_alone(tmp_path: Path) -> None
     assert tree(path) == before
 
 
+def test_a_pending_withdrawal_journal_blocks_a_release_simulate(desk: Desk, box: Path) -> None:
+    sha = planned(desk, box)
+    assert simulate(desk, sha, box).exit_code == 0
+    with pytest.MonkeyPatch.context() as patch:
+        _interrupt_after(patch, INDEX)
+        assert withdraw(desk, box, "regjeringen-9000001").exit_code == 1
+    assert (box / JOURNAL).exists()
+    before = tree(box)
+
+    result = simulate(desk, sha, box)
+
+    assert result.exit_code == 1, result.output
+    assert said("refused: corpus_tree_mismatch: journal", result.output)
+    assert tree(box) == before, "a withdrawal's journal is left for a withdrawal to finish"
+    assert (box / JOURNAL).exists()
+
+
 def test_a_journal_naming_an_unknown_plan_is_refused_by_withdrawal(desk: Desk, box: Path) -> None:
     sha = planned(desk, box)
     _crash(desk, box, sha, INDEX)
