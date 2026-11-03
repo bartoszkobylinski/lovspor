@@ -6,8 +6,16 @@ import sys
 import threading
 from pathlib import Path
 
+from lovspor.crosswalk.commands import read_previous
+
 
 def test_previous_release_refuses_oversize_without_waiting_for_eof(tmp_path: Path) -> None:
+    # Exercise the regular-file case in this process too: mutmut's selection
+    # tracing cannot associate the subprocess below with read_previous.
+    previous = tmp_path / "complete.jsonl"
+    previous.write_bytes(b"{}\n")
+    assert read_previous(previous) == b"{}\n"
+
     # A producer may leave its output pipe open. Refusal must need only limit+1
     # bytes; waiting for EOF (or even one extra byte) can hang the command.
     fifo = tmp_path / "previous.jsonl"
