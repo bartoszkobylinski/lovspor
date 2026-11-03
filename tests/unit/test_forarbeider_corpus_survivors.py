@@ -17,7 +17,7 @@ from lovspor.forarbeider.corpus_tree import (
     require_sandbox,
 )
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
-from tests.unit.forarbeider_corpus_support import metadata_of
+from tests.unit.forarbeider_corpus_support import beside_fifo, metadata_of
 from tests.unit.forarbeider_promotion_support import planned, simulate
 from tests.unit.forarbeider_release_support import Desk, at_a_terminal  # noqa: F401
 from tests.unit.test_forarbeider_corpus_render import _rendering
@@ -85,10 +85,11 @@ def test_unreadable_sandbox_identity_is_refused(tmp_path: Path, name: str, kind:
         outside = tmp_path / "outside"
         outside.write_bytes(original)
         path.symlink_to(outside)
-    with pytest.raises(ForarbeiderRefusedError) as caught:
-        require_sandbox(box, ())
-    assert caught.value.reason is RefusalReason.CORPUS_NOT_SANDBOX
-    assert caught.value.detail == "sandbox"
+    blocked, refusals = beside_fifo(lambda: require_sandbox(box, ()), path)
+    assert not blocked, "the sandbox check blocked on a FIFO"
+    assert [(error.reason, error.detail) for error in refusals] == [
+        (RefusalReason.CORPUS_NOT_SANDBOX, "sandbox")
+    ]
 
 
 @pytest.mark.parametrize("name", ["lover", "forarbeider"])

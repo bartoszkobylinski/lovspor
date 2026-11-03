@@ -21,7 +21,7 @@ from lovspor.forarbeider.chapter_models import TextBlock, text_hash
 from lovspor.forarbeider.corpus_plan import release_draft, withdraw_draft
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.release_store import write_preview
-from tests.unit.forarbeider_corpus_support import manifest, member, metadata_of, times
+from tests.unit.forarbeider_corpus_support import manifest, member, metadata_of, refusal_of, times
 from tests.unit.forarbeider_release_support import REVIEWED, Desk
 
 
@@ -334,9 +334,9 @@ def test_public_file_refusals(tmp_path: Path, kind: str) -> None:
         with path.open("wb") as stream:
             stream.truncate(tree.MAX_CORPUS_FILE_BYTES + 1)
         reason = RefusalReason.INPUT_TOO_LARGE
-    with pytest.raises(ForarbeiderRefusedError) as caught:
-        tree._read_public(path, "forarbeider")
-    assert (caught.value.reason, caught.value.detail) == (reason, "forarbeider")
+    fifo = path if kind == "fifo" else None
+    refused = refusal_of(lambda: tree._read_public(path, "forarbeider"), fifo)
+    assert (refused.reason, refused.detail) == (reason, "forarbeider")
 
 
 def test_public_file_exact_size_limit(tmp_path: Path) -> None:
@@ -396,12 +396,11 @@ def test_sandbox_baseline_and_sharing_details(tmp_path: Path, kind: str) -> None
         box.chmod(0o701)
         assert tree.require_sandbox(box, ()) == box
         return
-    with pytest.raises(ForarbeiderRefusedError) as caught:
-        tree.require_sandbox(box, ())
-    assert (caught.value.reason, caught.value.detail) == (reason, "sandbox")
-    with pytest.raises(ForarbeiderRefusedError) as baseline:
-        tree._require_baseline(box)
-    assert (baseline.value.reason, baseline.value.detail) == (reason, "sandbox")
+    fifo = box / "extra" if kind == "fifo" else None
+    refused = refusal_of(lambda: tree.require_sandbox(box, ()), fifo)
+    assert (refused.reason, refused.detail) == (reason, "sandbox")
+    baseline = refusal_of(lambda: tree._require_baseline(box), fifo)
+    assert (baseline.reason, baseline.detail) == (reason, "sandbox")
 
 
 @pytest.mark.parametrize("kind", ["file", "fifo"])
@@ -412,12 +411,9 @@ def test_dataset_unsafe_details(tmp_path: Path, kind: str) -> None:
     else:
         (box / "forarbeider").mkdir()
         os.mkfifo(box / "forarbeider/pipe")
-    with pytest.raises(ForarbeiderRefusedError) as caught:
-        tree.read_dataset(box)
-    assert (caught.value.reason, caught.value.detail) == (
-        RefusalReason.UNSAFE_INPUT_PATH,
-        "forarbeider",
-    )
+    fifo = box / "forarbeider/pipe" if kind == "fifo" else None
+    refused = refusal_of(lambda: tree.read_dataset(box), fifo)
+    assert (refused.reason, refused.detail) == (RefusalReason.UNSAFE_INPUT_PATH, "forarbeider")
 
 
 def test_write_new_never_overwrites_existing_file(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@ proposition, so no real government text reaches a test, a log or CI.
 
 import os
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -94,26 +94,48 @@ def manifest(*members: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def read_beside_fifo(checkout: Path, fifo: Path) -> tuple[bool, list[RefusalReason]]:
-    """Read ``checkout``'s dataset while ``fifo`` sits in it: (blocked, refusals).
+def beside_fifo(
+    action: Callable[[], object], fifo: Path
+) -> tuple[bool, list[ForarbeiderRefusedError]]:
+    """Run ``action`` while ``fifo`` sits where it reads: (blocked, refusals).
 
     A reader that opens the FIFO without O_NONBLOCK waits for a writer forever.
     After a bounded wait the test opens the writing end itself, so a blocked
     reader is released and the test fails instead of hanging the process.
     """
-    outcome: list[RefusalReason] = []
+    refusals: list[ForarbeiderRefusedError] = []
 
-    def read() -> None:
+    def run() -> None:
         try:
-            read_dataset(checkout)
+            action()
         except ForarbeiderRefusedError as error:
-            outcome.append(error.reason)
+            refusals.append(error)
 
-    reader = threading.Thread(target=read, daemon=True)
+    reader = threading.Thread(target=run, daemon=True)
     reader.start()
     reader.join(timeout=5)
     blocked = reader.is_alive()
     if blocked:
         os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
         reader.join(timeout=5)
-    return blocked, outcome
+    return blocked, refusals
+
+
+def read_beside_fifo(checkout: Path, fifo: Path) -> tuple[bool, list[RefusalReason]]:
+    """``read_dataset`` of ``checkout`` beside ``fifo``: (blocked, refusal reasons)."""
+    blocked, refusals = beside_fifo(lambda: read_dataset(checkout), fifo)
+    return blocked, [error.reason for error in refusals]
+
+
+def refusal_of(action: Callable[[], object], fifo: Path | None = None) -> ForarbeiderRefusedError:
+    """The one refusal ``action`` raises, bounded in time when ``fifo`` is in its way."""
+    if fifo is None:
+        try:
+            action()
+        except ForarbeiderRefusedError as error:
+            return error
+        raise AssertionError("no refusal raised")
+    blocked, refusals = beside_fifo(action, fifo)
+    assert not blocked, "blocked on a FIFO"
+    assert len(refusals) == 1, refusals
+    return refusals[0]
