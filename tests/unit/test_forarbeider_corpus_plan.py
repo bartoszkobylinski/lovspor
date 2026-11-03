@@ -203,7 +203,10 @@ def test_recovery_never_writes_through_a_symlinked_directory(box: Path, tmp_path
     with pytest.raises(ForarbeiderRefusedError) as caught:
         recover(box)
 
-    assert caught.value.reason is RefusalReason.UNSAFE_OUTPUT_PATH
+    assert (caught.value.reason, caught.value.detail) == (
+        RefusalReason.UNSAFE_OUTPUT_PATH,
+        "forarbeider",
+    )
     assert list((tmp_path / "elsewhere").iterdir()) == []
 
 
@@ -213,7 +216,10 @@ def test_recovery_that_does_not_reach_its_manifest_keeps_the_journal(box: Path) 
     with pytest.raises(ForarbeiderRefusedError) as caught:
         recover(box)
 
-    assert caught.value.reason is RefusalReason.CORPUS_TREE_MISMATCH
+    assert (caught.value.reason, caught.value.detail) == (
+        RefusalReason.CORPUS_TREE_MISMATCH,
+        "forarbeider/manifest.json",
+    )
     assert (box / JOURNAL).exists()
 
 

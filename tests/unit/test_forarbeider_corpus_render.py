@@ -275,10 +275,15 @@ def test_chapters_of_another_document_or_out_of_order_are_refused(tmp_path: Path
     other = Desk(tmp_path / "ls", kind="ls")
 
     for chapters in [(3, 2), (2, 2)]:
-        with pytest.raises(ForarbeiderRefusedError):
+        with pytest.raises(ForarbeiderRefusedError) as caught:
             render_document(_rendering(desk, chapters))
-    with pytest.raises(ForarbeiderRefusedError):
+        assert (caught.value.reason, caught.value.detail) == (
+            RefusalReason.RENDER_UNSAFE,
+            "chapters",
+        )
+    with pytest.raises(ForarbeiderRefusedError) as caught:
         render_document(_rendering(desk, (2,), ch2=other.results[2]))
+    assert caught.value.detail == "chapters"
 
 
 def test_the_rendering_names_no_reviewer_evidence_or_private_note(tmp_path: Path) -> None:
