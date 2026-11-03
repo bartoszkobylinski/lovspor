@@ -221,7 +221,7 @@ def release_candidate_command(
 
 
 def manifest_impl(data_path: Path, output: Path) -> str:
-    data = _read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
+    data = read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
     manifest = build_manifest(data, data_path.name)
     write_once(output, render_manifest(manifest))
     return f"wrote the manifest of {data_path.name} ({manifest['release_state']}) to {output}"
