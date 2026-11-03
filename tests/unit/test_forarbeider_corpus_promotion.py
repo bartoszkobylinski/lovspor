@@ -561,6 +561,23 @@ def test_the_synthetic_fixtures_are_never_written_into_a_repository(
     assert said("refused: unsafe_output_path: fixtures", result.output)
 
 
+def test_a_tampered_fixture_is_refused_not_overwritten(desk: Desk, tmp_path: Path) -> None:
+    out = tmp_path / "fixtures"
+    arguments = [*release_options(desk), "synthetic-fixtures", "--out", str(out)]
+    assert desk.invoke(arguments).exit_code == 0
+    before = {path.name: path.read_bytes() for path in out.iterdir()}
+    tampered = out / "prop-l-ch2.html"
+    tampered.write_bytes(b"endret innhold")
+
+    result = desk.invoke(arguments)
+
+    assert result.exit_code == 1
+    assert said("refused: observation_exists: fixtures", result.output)
+    assert tampered.read_bytes() == b"endret innhold"
+    after = {path.name: path.read_bytes() for path in out.iterdir()}
+    assert {**before, "prop-l-ch2.html": b"endret innhold"} == after
+
+
 def test_a_held_chapter_is_left_out_and_the_document_marked_partial(desk: Desk, box: Path) -> None:
     desk.decide(2, ReviewStatus.APPROVED)
     desk.decide(3, ReviewStatus.HELD)
