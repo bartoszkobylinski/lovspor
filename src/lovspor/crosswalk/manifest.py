@@ -10,6 +10,7 @@ Nothing here publishes.
 
 import json
 from collections import Counter
+from functools import partial
 from hashlib import sha256
 
 from lovspor.crosswalk.canonical import Record, canonical_json, canonical_record
@@ -17,6 +18,7 @@ from lovspor.crosswalk.check import check, current_records, require_passed
 from lovspor.crosswalk.contract import SCHEMA_VERSION
 
 MANIFEST_VERSION = 1
+_pretty = partial(json.dumps, indent=2, sort_keys=True, ensure_ascii=False)
 ATTRIBUTION = {
     "nb": (
         "Inneholder data under Norsk lisens for offentlige data (NLOD) tilgjengeliggjort av "
@@ -107,4 +109,4 @@ def build_manifest(data: bytes, filename: str) -> dict[str, object]:
 
 
 def render_manifest(manifest: dict[str, object]) -> bytes:
-    return (json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
+    return (_pretty(manifest) + "\n").encode()
