@@ -214,4 +214,4 @@ def test_the_sandbox_option_is_required() -> None:
     result = CliRunner().invoke(app, ["ops", "forarbeider-read", "list"])
 
     assert result.exit_code == 2
-    assert "--sandbox" in result.output
+    assert said("--sandbox", result.output)
