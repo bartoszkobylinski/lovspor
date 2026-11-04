@@ -576,7 +576,15 @@ jobs:
           # The marker names the ACTUAL author — a Claude-written commit
           # stamped [agent:codex-tests] would be fabricated provenance.
           git commit -m "test: add independent coverage for PR #${{ github.event.pull_request.number }} [agent:${{ needs.codex-author.outputs.author || 'codex' }}-tests]"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          # Issue #782: a GitHub 5xx on this push cost a whole green round. The
+          # script retries server errors only, bounded; a real rejection fails
+          # on its first answer. Guarded for one release cycle (#381): a head
+          # that predates the script pushes once, as before.
+          if [ -x scripts/ci/push_with_retry.sh ]; then
+            scripts/ci/push_with_retry.sh origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          else
+            git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          fi
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
       # Issue #160: an unfixable lint in agent output failed the normalize step
@@ -624,11 +632,22 @@ jobs:
         if: failure() && steps.verdict.outcome != 'failure' && !(needs.codex-author.result == 'failure' && needs.codex-author.outputs.skip == '') && needs.codex-author.outputs.not_run == ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # #782: the push step fails only after the verdict passed, so the
+          # tests did run. Saying "before the tests ran" sent the reader to the
+          # wrong half of the job.
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
         run: |
           gh pr edit "${{ github.event.pull_request.number }}" --add-label "needs-human:pipeline"
           {
-            echo "codex-tests BLOCKED before the tests ran — this is a pipeline"
-            echo "failure, not evidence about the implementation."
+            if [ "${PUSH_OUTCOME:-}" = "failure" ]; then
+              echo "codex-tests BLOCKED after the tests passed: pushing the commit"
+              echo "failed. This is a pipeline failure, not evidence about the"
+              echo "implementation; the push log in the run says whether GitHub"
+              echo "refused it or kept answering with a server error."
+            else
+              echo "codex-tests BLOCKED before the tests ran — this is a pipeline"
+              echo "failure, not evidence about the implementation."
+            fi
             echo ""
             echo "Nothing was pushed, and the independent author's work for this"
             echo "round is preserved as artifact \`agent-work-${{ github.event.pull_request.head.sha }}\`."

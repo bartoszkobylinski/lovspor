@@ -878,7 +878,11 @@ class TestEscalationCoversEveryFailure:
         )
         command = fallback["run"]
 
-        assert fallback["env"] == {"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
+        assert fallback["env"] == {
+            "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
+            # #782: a failed push is reported as after the tests passed.
+            "PUSH_OUTCOME": "${{ steps.push.outcome }}",
+        }
         assert "agent-work-${{ github.event.pull_request.head.sha }}" in command
         assert (
             "scripts/ci/pr_sticky_comment.sh pipeline "
