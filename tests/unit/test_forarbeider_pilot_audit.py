@@ -463,3 +463,38 @@ def test_audit_requires_an_evaluation_time_before_writing(tmp_path: Path) -> Non
     assert result.exit_code == 2, result.output
     assert said("Missing option '--at'", result.output)
     assert not (desk.workspace / "reports").exists()
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize(
+    ("at", "verdict", "reason"),
+    [
+        ("2100-04-10T11:59:59Z", "HOLD", "authorization_not_yet_valid"),
+        ("2100-04-10T14:00:00+02:00", "PASS", None),
+        ("2100-04-30T23:59:59Z", "PASS", None),
+        ("2100-05-01T02:00:00+02:00", "DENY", "authorization_expired"),
+    ],
+)
+def test_audit_tracks_the_preflight_authorization_validity_boundaries(
+    tmp_path: Path, kind: str, at: str, verdict: str, reason: str | None
+) -> None:
+    """An already issued grant waits for its start and expires at its end, in UTC."""
+    desk = Desk(tmp_path / kind, kind)
+    desk.approve_all()
+    dossier = said_digest(desk.dossier().output, "dossier")
+    authorized = desk.authorize(dossier, valid="2100-04-10T12:00:00Z/2100-05-01T00:00:00Z")
+    assert authorized.exit_code == 0, authorized.output
+    authorization = said_digest(authorized.output, "authorization")
+    checkpoints = desk.all_checkpoints()
+    preflight = desk.preflight(authorization, checkpoints, at=at)
+
+    result = _audit(desk, authorization, checkpoints, at=at)
+
+    assert result.exit_code == (0 if verdict == "PASS" else 2), result.output
+    assert _verdicts(result.output) == {2: verdict, 3: verdict}
+    for number in (2, 3):
+        assert _reasons(result.output, number) == ([reason] if reason else ["-"])
+    assert said_digest(result.output, "report") == said_digest(preflight.output, "report")
+    report = desk.report(result.output)
+    assert report["document_reasons"] == ([reason] if reason else [])
+    assert report["publication_authorized"] is False
