@@ -167,6 +167,30 @@ def test_an_absent_purpose_holds_and_a_conflicting_one_denies(
 
 
 @pytest.mark.parametrize("kind", KINDS)
+def test_a_dossier_with_no_declared_purpose_holds_every_chapter(tmp_path: Path, kind: str) -> None:
+    desk = Desk(tmp_path / kind, kind)
+    desk.approve_all()
+    _, authorization = desk.released()
+    options = [
+        option
+        for evidence_kind, path in desk.evidence.items()
+        if evidence_kind != "publication_purpose"
+        for option in ("--evidence", f"{evidence_kind}@2,3={path}")
+    ]
+    dossier = desk.dossier(options)
+    assert dossier.exit_code == 0, dossier.output
+    stored = _rewritten(desk, authorization, dossier_sha256=said_digest(dossier.output, "dossier"))
+
+    result = _audit(desk, stored, desk.all_checkpoints())
+
+    assert result.exit_code == 2, result.output
+    assert _verdicts(result.output) == {2: "HOLD", 3: "HOLD"}
+    assert _counts(result.output).endswith("audited 2 pass 0 hold 2 deny 0")
+    for number in (2, 3):
+        assert "purpose_evidence_missing" in _reasons(result.output, number)
+
+
+@pytest.mark.parametrize("kind", KINDS)
 def test_a_dossier_without_the_owners_purpose_denies_every_chapter(
     tmp_path: Path, kind: str
 ) -> None:
