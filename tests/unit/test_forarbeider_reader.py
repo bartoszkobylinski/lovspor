@@ -257,3 +257,25 @@ def test_the_sandbox_option_is_required() -> None:
 
     assert result.exit_code == 2
     assert said("--sandbox", result.output)
+
+
+def _without(options: list[str], flag: str) -> list[str]:
+    """``options`` as pairs, with the pair naming ``flag`` dropped."""
+    pairs = [options[index : index + 2] for index in range(0, len(options), 2)]
+    return [item for pair in pairs if pair[0] != flag for item in pair]
+
+
+@pytest.mark.parametrize("command", ["show", "chapter", "provenance"])
+@pytest.mark.parametrize("flag", ["--document", "--session", "--type"])
+def test_a_document_naming_option_missing_is_a_usage_error(
+    box: Path, command: str, flag: str
+) -> None:
+    arguments = [command, *_without(exact(L_ID), flag)]
+    if command == "chapter":
+        arguments += ["--chapter", "2"]
+
+    result = read(box, *arguments)
+
+    assert result.exit_code == 2, result.output
+    assert said(flag, result.output)
+    assert result.stdout == ""
