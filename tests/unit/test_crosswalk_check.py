@@ -234,6 +234,25 @@ def test_inferred_rights_and_corrections_are_never_promoted(built: bytes) -> Non
     )
 
 
+def test_ineligibility_checks_status_and_record_state_independently(built: bytes) -> None:
+    """release.py promises promotion only for a record that is 'attested, active':
+
+    status and record_state are two separate fields, and either one alone
+    failing must block promotion with the same diagnostic, not just the two
+    combined (#610, P4, R1/R2 gate)."""
+    record = next(r for r in parse_records(built) if r["amending_lov_id"] == "LOV-2022-06-17-63")
+    every = frozenset({"stated_for_file", "stated_for_endpoint"})
+    assert record["status"] == "attested"
+    assert record["record_state"] == "active"
+    assert ineligibility(record, every) is None
+    assert ineligibility({**record, "record_state": "withdrawn"}, every) == (
+        "not an active attested record"
+    )
+    assert ineligibility({**record, "status": "unresolved"}, every) == (
+        "not an active attested record"
+    )
+
+
 def test_approval_must_name_these_bytes(built: bytes, capture_dir: Path) -> None:
     other = _approval(built + b" ")
     with pytest.raises(CrosswalkError, match="other bytes"):

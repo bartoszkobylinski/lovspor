@@ -2864,10 +2864,47 @@ Only the chapters that pass are planned. The report is then a `partial_curated_e
 
 - Code checks that evidence exists, is bound to a chapter and has its declared bytes. Whether it is legally sufficient is the owner's judgement: `legal_sufficiency_decided_by_code: false`. §§ 14 and 24, personopplysningsloven and the source terms are not resolved by any test.
 - The authorization is a private declaration. A handle, a typed phrase and a terminal are not authenticated identity (`identity_authenticated: false`), and a pseudo-terminal passes the terminal check.
-- `--at` and every decision time are the operator's word; there is no clock. The order checks above catch an impossible chain, not a backdated one: anyone who can choose every timestamp can choose them in order. A promotion step (PR3B-2) must check validity against a trusted clock at the moment it writes.
+- `--at` and every decision time are the operator's word; there is no clock. The order checks above catch an impossible chain, not a backdated one: anyone who can choose every timestamp can choose them in order. The PR3B-2 simulator below also ends an authorization by the machine clock, which is not a trusted clock either.
 - Checkpoints are `operator_supplied_unauthenticated`: they detect a cut or rewritten chain only if they were kept where this user's processes cannot rewrite them too.
 - A revocation is found by the authorization's digest in the same workspace; someone who can write there can delete it.
 - Nothing was released for real: the workflow is tested on synthetic Prop. L and Prop. LS chapters only. PR3B-2 (promotion) and PR3B-3 (an opt-in reader) need separate approval.
+
+## Forarbeider: synthetic promotion plan and simulator (issue #738)
+
+ADR-0018 PR3B-2, scoped by the owner to code and **synthetic** tests only. It defines the isolated `forarbeider/` dataset (its own `manifest.json`, `INDEX.md` and `<session>/<prop-l|prop-ls>/<document id>.md`) and the engine that would write it, but **writes nothing real**: the only tree it can write is a disposable sandbox this command made, and only from the bundled synthetic Prop. 901 L and Prop. 902 LS. There is no `--publish` or `--force`, no command touches a `lovverk` clone, and nothing runs `git add`, `commit` or `push`. A real release, and PR3B-3 (an opt-in reader), need their own owner, legal, privacy and source-terms gates first.
+
+```bash
+# The bundled synthetic propositions as staged files, owner-only, outside Git
+release synthetic-fixtures --out ~/forarbeider-staging/synthetic
+# ...then review, dossier, authorize and preflight them as in the section above.
+
+# 1. The plan: re-runs the preflight the report came from, reads the corpus, writes no checkout
+chapters plan --report <report sha256> --corpus ~/forarbeider-sandbox \
+  --checkpoint <subject>@<revision>:<head>
+
+# 2. A disposable sandbox: a new, empty Git checkout with a synthetic baseline, no remote
+release sandbox-create --path ~/forarbeider-sandbox
+
+# 3. Apply the plan to the sandbox, re-validated now
+chapters simulate --plan <plan sha256> --sandbox ~/forarbeider-sandbox
+
+# 4. Withdraw one document from the sandbox, forward only, at a terminal
+release sandbox-withdraw --sandbox ~/forarbeider-sandbox \
+  --document regjeringen-9000001 --decided owner-1@2100-04-12T12:00:00Z
+```
+
+Make the sandbox before the plan you mean to apply: a plan records the dataset state it was made against, and `simulate` refuses it against any other (`plan_stale: plan`).
+
+- **`plan`** takes an `eligible_preview` report and the checkpoints it was evaluated against, and evaluates the preflight again from the private files as they are now, at the report's own `--at`. Anything different, even one chapter fewer, is a DENY (exit 2, `promotion_denied`): a held, rejected or reopened review, a revocation, a changed page, text, dossier or evidence file, a missing or other checkpoint. It then reads the corpus checkout's `forarbeider/` tree, which must be exactly what its manifest lists, and renders the manifest, index and document. Those bytes go to `<workspace>/previews/<sha256>.preview`, the plan to `<workspace>/plans/<sha256>.json`, both owner-only and outside Git. The checkout is never written, a real one included. A plan says `publication_authorized=false writes_corpus=false`.
+- **`sandbox-create`** makes a new, owner-only directory outside every repository: the skeleton `git init` writes (unborn `main`, no remote, no commit), a marker inside `.git`, and placeholder `README.md`, `manifest.json`, `lover/`, `forskrifter/` and `lokale-forskrifter/` that every write checks unchanged. No Git command runs: this package never starts a subprocess.
+- **`simulate`** refuses anything but a sandbox it made (a clone, a remote, an edited baseline, a symlink, a directory others can write), and a plan whose pages are not the bundled synthetic ones. It re-runs the preflight, ends the authorization by the machine clock against `valid_until`, and rebuilds the plan from the sandbox as it is now. Then it writes one change under an exclusive lock: the new bytes, and the previous bytes of every file replaced or removed, are staged inside `.git`, each staging file created and read through a no-follow descriptor (a symlink, FIFO or hard link there is refused, never followed), and a journal lists every operation and names its action and the plan behind it. Documents, index and manifest are each replaced whole, and the tree is read back and verified before the journal is removed. Every run re-checks the plan first, a retry included: an interrupted change of this plan is finished only while the plan still holds, and rolled back, every file put back as it was, once it is revoked, expired or otherwise denied. An applied plan retried after that is denied, not `UNCHANGED`; taking it down is a withdrawal. A journal of another plan or a withdrawal is refused and left alone. A journal can only name dataset files.
+- **`sandbox-withdraw`** keeps the member, marked `withdrawn` with its `withdrawn_at`, removes its file and drops it from the index. It needs no grant: an interrupted release is rolled back first, whatever its plan's state, and an interrupted withdrawal finished; a journal naming no plan or intent in the workspace is refused. Before the sandbox changes it stores a withdrawal intent (owner, time, document, manifest digests before and after) in the workspace's `withdrawal_intents/`; the receipt in `withdrawals/` follows the change, under the intent's digest. If the receipt cannot be written the withdrawal still stands, and the next run of the same command writes that receipt from the original decision, once. A withdrawal that has its receipt is refused as `document_not_released`. It says, and the withdrawal record keeps (`history_erased: false`), that **Git history and every clone keep the earlier bytes; a revert does not erase them**. For a real corpus that is why the only safe choice for a doubtful chapter is to withhold it before release: taking down published bytes is the owner's decision and an escalation outside any command here.
+
+**The dataset, version 1.** The manifest is the membership list, not a directory glob. Each member carries its identity (government document id, session, Prop. L or LS), `source_document_type: forarbeid`, `normative: false`, `source_provider: regjeringen.no`, `rights_basis: åndsverkloven § 14` and `source_license: null`, all fixed by type. It lists per-chapter receipts (page, `source_sha256`, `text_sha256`, extractor and normalizer versions, `retrieved_at`, `review_decided_at`), the coverage, and separate times: `source_published_at` only as the PR1 metadata stated it, the dossier review, the owner's decision, the release and the withdrawal, all `operator_supplied_unauthenticated`. The corpus records a change at its Git commit time, which the file never states. There is no `valid_at`. A duplicate, a path that is not the document's own, an unknown key, another schema version, bytes not in canonical form, a contradictory receipt, a dangling member or a stray file are refused.
+
+**The rendering.** Markdown only from the pinned PR2 text blocks, in source order, each chapter under its page URL. Front matter and a banner say it is preparatory material, NOT enacted law, that it does not state whether the proposal was adopted, and, unless every listed chapter is released, that it is a partial curated excerpt and not the complete proposition. The source text is escaped so it cannot open a link, image, HTML or a block. A URL outside the regjeringen.no grammar, or a title or block holding a control, line separator or bidi override, is refused. Same inputs and renderer version, same bytes: there is no clock in the renderer.
+
+**Limits, unresolved.** No rights, privacy or source-terms clearance is established by this code or its tests, and actor, times and checkpoints stay unauthenticated. The sandbox is the operator's own directory: someone who can write it can edit its journal or tree, which the next run then refuses rather than repairs.
 
 ## Idempotency
 
