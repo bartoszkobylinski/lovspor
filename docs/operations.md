@@ -2871,7 +2871,7 @@ Only the chapters that pass are planned. The report is then a `partial_curated_e
 
 ## Forarbeider: synthetic promotion plan and simulator (issue #738)
 
-ADR-0018 PR3B-2, scoped by the owner to code and **synthetic** tests only. It defines the isolated `forarbeider/` dataset (its own `manifest.json`, `INDEX.md` and `<session>/<prop-l|prop-ls>/<document id>.md`) and the engine that would write it, but **writes nothing real**: the only tree it can write is a disposable sandbox this command made, and only from the bundled synthetic Prop. 901 L and Prop. 902 LS. There is no `--publish` or `--force`, no command touches a `lovverk` clone, and nothing runs `git add`, `commit` or `push`. A real release, and PR3B-3 (an opt-in reader), need their own owner, legal, privacy and source-terms gates first.
+ADR-0018 PR3B-2, scoped by the owner to code and **synthetic** tests only. It defines the isolated `forarbeider/` dataset (its own `manifest.json`, `INDEX.md` and `<session>/<prop-l|prop-ls>/<document id>.md`) and the engine that would write it, but **writes nothing real**: the only tree it can write is a disposable sandbox this command made, and only from the bundled synthetic Prop. 901 L and Prop. 902 LS. There is no `--publish` or `--force`, no command touches a `lovverk` clone, and nothing runs `git add`, `commit` or `push`. A real release needs its own owner, legal, privacy and source-terms gates first; the PR3B-3 reader below reads a synthetic sandbox only.
 
 ```bash
 # The bundled synthetic propositions as staged files, owner-only, outside Git
@@ -2905,6 +2905,27 @@ Make the sandbox before the plan you mean to apply: a plan records the dataset s
 **The rendering.** Markdown only from the pinned PR2 text blocks, in source order, each chapter under its page URL. Front matter and a banner say it is preparatory material, NOT enacted law, that it does not state whether the proposal was adopted, and, unless every listed chapter is released, that it is a partial curated excerpt and not the complete proposition. The source text is escaped so it cannot open a link, image, HTML or a block. A URL outside the regjeringen.no grammar, or a title or block holding a control, line separator or bidi override, is refused. Same inputs and renderer version, same bytes: there is no clock in the renderer.
 
 **Limits, unresolved.** No rights, privacy or source-terms clearance is established by this code or its tests, and actor, times and checkpoints stay unauthenticated. The sandbox is the operator's own directory: someone who can write it can edit its journal or tree, which the next run then refuses rather than repairs.
+
+## Forarbeider: opt-in synthetic reader (issue #738)
+
+ADR-0018 PR3B-3, scoped by the owner to code and **synthetic** tests only. A separate, offline, read-only command reads the `forarbeider/` dataset of **one sandbox made by `sandbox-create`**, named on every call. Nothing else sees forarbeider: `get_law`, `corpus_status`, law and body search, MCP, the site, indexes, embeddings and benchmarks never import it and answer the same whether the dataset is absent, released, corrupt or unsafe. There is no default path, no environment switch and no discovery.
+
+```bash
+lovspor ops forarbeider-read --sandbox ~/forarbeider-sandbox list
+lovspor ops forarbeider-read --sandbox ~/forarbeider-sandbox show \
+  --document regjeringen-9000001 --session 2099-2100 --type prop-l
+lovspor ops forarbeider-read --sandbox ~/forarbeider-sandbox chapter \
+  --document regjeringen-9000001 --session 2099-2100 --type prop-l --chapter 2
+lovspor ops forarbeider-read --sandbox ~/forarbeider-sandbox provenance \
+  --document regjeringen-9000001 --session 2099-2100 --type prop-l
+```
+
+- **What it serves.** Only members the manifest lists as `released`; a `withdrawn` one never, even though it was released before (`document_not_released`). A document is named exactly by its government id, session and type: no law id, title or path lookup, and anything else is `document_unknown`. A chapter that is held, unlisted or not released is `chapter_not_released`.
+- **What it proves first.** `require_sandbox` (the marker, no remote, the baseline, owner-only), no change in progress (a lock or journal is `corpus_locked`), and the whole `forarbeider/` tree exactly as its manifest lists it: a stray file, a dangling member, an edited index, other bytes than the manifest's digest, a symlink, hard link, FIFO, oversized file, wrong schema or duplicate member are refused. Then each member is rendered again from the bundled synthetic pages: its manifest entry and its file must be byte-identical to that rendering, or it is `input_not_synthetic`. That refuses a forged entry, an injected link or front matter line, malformed UTF-8, and any real document. The bytes printed are the ones whose digest was checked, read once.
+- **What it prints.** One JSON record per call, `schema_version: 1`, `record_type` `forarbeider_reader_list`, `_document`, `_chapter` or `_provenance`, each `synthetic: true` with the notice that a forarbeid is preparatory material, NOT enacted law. `show` gives identity, the labels (`forarbeid`, `normative: false`, `regjeringen.no`, `åndsverkloven § 14`, `source_license: null`, `asserts_complete_proposition: false`), coverage and `partial_curated_excerpt`, every released chapter's receipt and the separate time axes (source published, reviewed, owner decided, released; all `operator_supplied_unauthenticated`, the corpus time being Git's). `chapter` prints that one chapter's synthetic Markdown under its source URL. `provenance` gives the source receipts and the manifest and document digests it verified. No reviewer handle, dossier, evidence, authorization or raw page is ever printed. A refusal is `refused: <reason>: <detail>` on stderr, exit 1, a path shown as `input`.
+- **Writes nothing.** No file, cache, index, HTTP, subprocess or background job; the reader's modules hold no write call at all (tested).
+
+**Limits.** Reading a synthetic sandbox is **not** approval to publish or host real forarbeider text, and the reader refuses anything but the bundled synthetic propositions. Checksums prove which bytes these are, not whether they may be published: åndsverkloven § 14 and § 24, personopplysningsloven and the source's terms are decided by the owner, outside any command. A real pilot needs its own owner, legal, privacy and source-terms gates and a separately reviewed change.
 
 ## Idempotency
 
