@@ -328,6 +328,16 @@ def test_a_non_object_record_is_labelled_record_not_by_its_fields() -> None:
     )
 
 
+@pytest.mark.parametrize("bad", ["hello", 5, 3.14, True], ids=["str", "int", "float", "bool"])
+def test_every_non_object_json_value_is_labelled_record_not_crashed(bad: object) -> None:
+    """The fix's own claim is "a non-object record", not "a null or list record":
+    a JSONL line holding a string, number, or boolean has no .get either, so it
+    must be labelled the same way as None and [] instead of raising AttributeError."""
+    with pytest.raises(CrosswalkContractError) as caught:
+        validate_records([bad])  # type: ignore[list-item]
+    assert caught.value.problems == (f"record: /: {bad!r} is not of type 'object'",)
+
+
 def test_validate_records_checks_history_once_records_are_valid() -> None:
     with pytest.raises(CrosswalkContractError, match="without repeats"):
         validate_records([attested(), attested()])
