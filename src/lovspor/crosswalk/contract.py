@@ -221,12 +221,16 @@ def history_problems(records: Iterable[Record]) -> list[str]:
     ]
 
 
+def _label(record: object) -> str:
+    if not isinstance(record, dict):
+        return "record"
+    return f"{record.get('amending_lov_id')}@{record.get('record_revision')}"
+
+
 def validate_records(records: list[Record]) -> None:
     """Raise with every problem of every record, then the history problems."""
     problems = [
-        f"{record.get('amending_lov_id')}@{record.get('record_revision')}: {problem}"
-        for record in records
-        for problem in record_problems(record)
+        f"{_label(record)}: {problem}" for record in records for problem in record_problems(record)
     ]
     if not problems:
         problems = history_problems(records)

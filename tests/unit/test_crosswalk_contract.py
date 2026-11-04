@@ -20,7 +20,9 @@ from lovspor.crosswalk.contract import (
 from lovspor.crosswalk.errors import CrosswalkContractError
 from lovspor.legislative_chain import member_names_law
 from tests.unit.crosswalk_support import (
+    ARCHIVE,
     ARCHIVE_URL,
+    MEMBER,
     archive_pin,
     attested,
     besl_o,
@@ -161,6 +163,19 @@ def test_618_correction_needs_correction_evidence_and_a_named_predecessor() -> N
     assert any("names no other event" in p for p in record_problems(record))
 
 
+def test_618_correction_cannot_name_itself_as_its_own_predecessor() -> None:
+    record = attested()
+    record["sanction_events"][0]["kind"] = "corrective_resanction"
+    record["sanction_events"][0]["corrects_law_id"] = record["sanction_events"][0]["law_id"]
+    record["evidence"].append(
+        evidence("correction", ARCHIVE_URL, f"{ARCHIVE}!{MEMBER}", "lovtidend-identity-1")
+    )
+    assert schema_problems(record) == []
+    assert record_problems(record) == [
+        "corrects_law_id LOV-2022-06-17-63 names no other event of the record"
+    ]
+
+
 def test_correction_evidence_never_from_regjeringen_or_stortinget() -> None:
     record = attested()
     url = "https://www.regjeringen.no/no/aktuelt/x/id1/"
@@ -291,6 +306,25 @@ def test_validate_records_reports_every_problem() -> None:
     assert len(caught.value.problems) >= 2
     assert all(
         p.startswith(("LOV-2022-06-17-63@1", "LOV-2009-06-19-107@1")) for p in caught.value.problems
+    )
+
+
+def test_validate_records_reports_a_non_dict_record_instead_of_crashing() -> None:
+    """validate_records's own docstring promises "every problem of every record";
+    record_problems already turns a non-dict record into schema problems
+    (test_schema_errors_are_returned_before_invariants_run), so the aggregator
+    is expected to report them the same way, not crash formatting the message."""
+    with pytest.raises(CrosswalkContractError) as caught:
+        validate_records([None])
+    assert caught.value.problems
+
+
+def test_a_non_object_record_is_labelled_record_not_by_its_fields() -> None:
+    with pytest.raises(CrosswalkContractError) as caught:
+        validate_records([None, [], attested()])  # type: ignore[list-item]
+    assert caught.value.problems == (
+        "record: /: None is not of type 'object'",
+        "record: /: [] is not of type 'object'",
     )
 
 
