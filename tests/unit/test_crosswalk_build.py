@@ -468,6 +468,81 @@ def test_cli_build_refuses_a_missing_capture(tmp_path: Path) -> None:
     assert not (tmp_path / MANIFEST).exists()
 
 
+def test_cli_build_refuses_a_missing_previous_file(tmp_path: Path) -> None:
+    runner = CliRunner()
+    output = tmp_path / "out.jsonl"
+    args = [
+        "ops",
+        "crosswalk",
+        "build",
+        "--cache",
+        str(tmp_path / "cache"),
+        "--output",
+        str(output),
+        "--previous",
+        str(tmp_path / "absent.jsonl"),
+        "--producer-commit",
+        PRODUCER,
+    ]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 1
+    assert "refused:" in result.output
+    assert "unreadable" in result.output
+    assert not output.exists()
+
+
+def test_cli_build_refuses_an_oversized_previous_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(commands, "MAX_PREVIOUS_BYTES", 3)
+    previous = tmp_path / "previous.jsonl"
+    previous.write_bytes(b"{}\n\n")
+    output = tmp_path / "out.jsonl"
+    runner = CliRunner()
+    args = [
+        "ops",
+        "crosswalk",
+        "build",
+        "--cache",
+        str(tmp_path / "cache"),
+        "--output",
+        str(output),
+        "--previous",
+        str(previous),
+        "--producer-commit",
+        PRODUCER,
+    ]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 1
+    assert "refused:" in result.output
+    assert "previous release too large" in result.output
+    assert not output.exists()
+
+
+def test_cli_build_without_producer_commit_reports_an_engine_commit_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise OSError("git unavailable")
+
+    monkeypatch.setattr(commands.subprocess, "run", refuse)
+    output = tmp_path / "out.jsonl"
+    runner = CliRunner()
+    args = [
+        "ops",
+        "crosswalk",
+        "build",
+        "--cache",
+        str(tmp_path / "cache"),
+        "--output",
+        str(output),
+    ]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 1
+    assert "refused: producer commit unknown: pass --producer-commit" in result.output
+    assert not output.exists()
+
+
 def test_cli_build_without_producer_commit_falls_back_to_engine_head(
     capture_dir: Path, tmp_path: Path, offline: None
 ) -> None:
