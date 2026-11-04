@@ -5,6 +5,7 @@ archive pins are not in this capture is byte-only drift: not a contract failure,
 but never certified and never promoted.
 """
 
+from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
 
@@ -129,3 +130,44 @@ def test_check_command_reports_drift(built: bytes, capture_dir: Path, tmp_path: 
         "ok: 8 records, 0 not reproduced from a capture, 1 with raw bytes not in this capture"
     )
     assert check_impl(path, None, None) == "ok: 8 records"
+
+
+@pytest.mark.parametrize("drift_revision", [1, 2])
+def test_promotion_judges_current_raw_bytes_and_preserves_history(
+    built: bytes, capture_dir: Path, drift_revision: int
+) -> None:
+    # check.current_records and release._promotions explicitly judge the highest
+    # revision. D6 still requires every earlier revision to remain byte-identical.
+    records = parse_records(built)
+    historical = next(record for record in records if record["amending_lov_id"] == LAW)
+    current = deepcopy(historical)
+    current["record_revision"] = 2
+    drifted = historical if drift_revision == 1 else current
+    drifted["evidence"][0]["body_sha256"] = "f" * 64
+    previous = serialize_records(records)
+    data = serialize_records([*records, current])
+
+    report = check(data, previous=previous, cache=capture_dir)
+
+    assert report.passed, report.problems
+    assert report.unverified == []
+    assert report.drifted == ([LAW] if drift_revision == 2 else [])
+
+    promoted, counts = promote(data, _approval(data), capture_dir)
+
+    assert check(promoted, previous=data, cache=capture_dir).passed
+    assert set(data.splitlines()) <= set(promoted.splitlines())
+    law_history = [r for r in parse_records(promoted) if r["amending_lov_id"] == LAW]
+    assert law_history[:2] == [historical, current]
+    if drift_revision == 1:
+        assert counts == {"promoted": 3, "not an active attested record": 5}
+        assert law_history[2:] == [
+            {**current, "record_revision": 3, "release_state": "release_candidate"}
+        ]
+    else:
+        assert counts == {
+            "promoted": 2,
+            "not an active attested record": 5,
+            "raw bytes are not those of this capture": 1,
+        }
+        assert len(law_history) == 2
