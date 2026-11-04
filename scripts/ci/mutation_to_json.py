@@ -179,6 +179,41 @@ def parse_survivors(survivors_file: Path | None) -> list[dict[str, object]]:
     return [_parse_detail(line) for line in text.splitlines() if line.strip()]
 
 
+# After a run over named mutants, mutmut prints one `<emoji> <id>` line per mutant
+# under "Mutant results". An id always carries the marker, so the progress line's
+# `⏰ 3` counts never read as a mutant (#776).
+_RAW_EMOJI = {"timed_out": "⏰", "suspicious": "🤔"}
+
+
+def _raw_named(raw: str, emoji: str) -> list[str]:
+    line = re.compile(rf"^[ \t]*{emoji}[ \t]+(\S+__mutmut_\d+)[ \t\r]*$", re.MULTILINE)
+    return line.findall(raw)
+
+
+def _unique(entries: list[dict[str, object]]) -> list[dict[str, object]]:
+    return list({str(entry["id"]): entry for entry in entries}.values())
+
+
+def parse_unverdicted(
+    raw: str, timeouts_file: Path | None, suspicious_file: Path | None
+) -> dict[str, list[dict[str, object]]]:
+    """Timed-out and suspicious mutants, named like survivors (#776).
+
+    The detail files say what each mutant changed; without them the raw log
+    still names each one, and the entry says it holds the id only. These lists
+    explain the verdict and never move it: counts, score and gate come from the
+    progress line and the exit bits alone.
+    """
+    named: dict[str, list[dict[str, object]]] = {}
+    for key, path in (("timed_out", timeouts_file), ("suspicious", suspicious_file)):
+        entries = parse_survivors(path) or [
+            _id_only(mutant_id, "id_only: named in the raw log")
+            for mutant_id in _raw_named(raw, _RAW_EMOJI[key])
+        ]
+        named[key] = _unique(entries)
+    return named
+
+
 class Equivalent(NamedTuple):
     """One registered equivalent mutant: what it changes, and why that is safe."""
 
@@ -458,7 +493,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit")
     ap.add_argument("--raw", type=Path)
-    ap.add_argument("--survivors-file", type=Path, default=None)
+    for detail in ("--survivors-file", "--timeouts-file", "--suspicious-file"):
+        ap.add_argument(detail, type=Path, default=None)
     ap.add_argument("--tool-exit-code", type=int)
     ap.add_argument("--out", type=Path)
     ap.add_argument("--check-equivalents", action="store_true")
@@ -474,6 +510,7 @@ def main() -> int:
 
     raw = args.raw.read_text(errors="replace") if args.raw.exists() else ""
     result = build_result(args.commit, raw, args.tool_exit_code, args.survivors_file)
+    result.update(parse_unverdicted(raw, args.timeouts_file, args.suspicious_file))
     args.out.write_text(json.dumps(result, indent=2) + "\n")
     gate = result["gate"]
     print(f"wrote {args.out} (gate.passed={gate['passed']}, reason={gate['reason']})")  # type: ignore[index]

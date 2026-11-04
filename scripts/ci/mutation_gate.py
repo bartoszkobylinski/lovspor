@@ -100,7 +100,7 @@ def _survivor_bullet(s: object) -> str | None:
     return bullet + _equivalent_note(s)
 
 
-def _survivor_lines(survivors: object, limit: int = 10) -> list[str]:
+def _survivor_lines(survivors: object, label: str = "Survivors", limit: int = 10) -> list[str]:
     """Triage list for the job summary; the artifact holds the full detail."""
     if not isinstance(survivors, list):
         return []
@@ -110,7 +110,7 @@ def _survivor_lines(survivors: object, limit: int = 10) -> list[str]:
     shown = bullets[:limit]
     if len(bullets) > limit:
         shown.append(f"  - … and {len(bullets) - limit} more (see the artifact)")
-    return ["- Survivors:", *shown]
+    return [f"- {label}:", *shown]
 
 
 def _register_lines(equivalents: object) -> list[str]:
@@ -181,9 +181,12 @@ BLOCKERS = {
     "timeout": (
         "{n} timed-out mutant(s) got no verdict — mutmut stopped them at its per-mutant"
         " time limit, so whether a test kills them was never measured; the artifact"
-        " does not list them, triage them by hand (`mutmut results`)"
+        " names each under `timed_out` (#776)"
     ),
-    "invalid": "{n} suspicious mutant(s) — mutmut could not tell killed from survived",
+    "invalid": (
+        "{n} suspicious mutant(s) — mutmut could not tell killed from survived; the"
+        " artifact names each under `suspicious`"
+    ),
     "no_tests": "{n} mutant(s) no test reaches",
     "unmeasured": "{n} mutant(s) got no verdict — killed by a signal",
 }
@@ -237,6 +240,8 @@ def _print_summary(r: dict[str, object], extracted: tuple[Any, ...]) -> None:
         print(f"- Hint: `{hint}`")
     for line in [
         *_survivor_lines(r.get("survivors")),
+        *_survivor_lines(r.get("timed_out"), "Timed out"),
+        *_survivor_lines(r.get("suspicious"), "Suspicious"),
         *_register_lines(r.get("equivalents")),
         *_unmeasured_changed_lines(r.get("unmeasured_changed_lines")),
     ]:

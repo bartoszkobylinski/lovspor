@@ -190,6 +190,15 @@ Ids renumber whenever the file changes upstream of the mutant, so a cross-round
 comparison quotes the `diff`. The job summary lists the first ten survivors as
 `id — file:line — replacement`, so a red gate is triageable without downloading anything.
 
+Timed-out and suspicious mutants are named the same way (issue #776), under
+`timed_out` and `suspicious`, with the same record shape. The job takes their ids from
+`mutmut results` and runs them through `mutation_survivors.py` too. When that file is
+missing, the ids come from the raw log's "Mutant results" lines (`⏰ <id>`, `🤔 <id>`),
+marked `id_only: named in the raw log`. These lists explain the verdict and never
+move it: counts, score and gate still come from the progress line and the exit bits.
+The keys are additive within `schema_version: 1`, so an artifact without them is
+still valid.
+
 ## Anti-loop invariants
 
 - `concurrency: pr-<PR#>` + `cancel-in-progress` — stale runs die on new SHA.
