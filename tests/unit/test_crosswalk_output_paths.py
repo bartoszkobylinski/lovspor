@@ -90,3 +90,57 @@ def test_a_staging_file_removed_by_someone_else_still_ends_in_a_refusal(
     with pytest.raises(CrosswalkError, match="could not write .*staging vanished"):
         write_once(output, b"x\n")
     assert _tree(tmp_path) == []
+
+
+@pytest.mark.parametrize("failure", ["write", "link"])
+def test_failed_output_publication_removes_partial_bytes_and_can_be_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """write_once promises a whole new file or none, including after a short write."""
+    output = tmp_path / "out.jsonl"
+    staging = tmp_path / ".out.jsonl.partial"
+    data = b'{"complete":true}\n'
+    original_write = Path.write_bytes
+
+    def failed_write(path: Path, body: bytes) -> int:
+        assert path == staging
+        original_write(path, body[:4])
+        raise OSError("disk full")
+
+    def failed_link(source: Path, destination: Path) -> None:
+        assert source == staging
+        assert destination == output
+        assert source.read_bytes() == data
+        raise OSError("link refused")
+
+    with monkeypatch.context() as patch:
+        if failure == "write":
+            patch.setattr(Path, "write_bytes", failed_write)
+        else:
+            patch.setattr(commands.os, "link", failed_link)
+        with pytest.raises(CrosswalkError, match="could not write"):
+            write_once(output, data)
+
+    assert _tree(tmp_path) == []
+    write_once(output, data)
+    assert output.read_bytes() == data
+    assert _tree(tmp_path) == ["out.jsonl"]
+
+
+def test_output_created_during_publication_is_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The initial existence check cannot authorize replacing a concurrent output."""
+    output = tmp_path / "out.jsonl"
+    original_link = os.link
+
+    def competing_writer(source: Path, destination: Path) -> None:
+        destination.write_bytes(b"other writer\n")
+        original_link(source, destination)
+
+    monkeypatch.setattr(commands.os, "link", competing_writer)
+    with pytest.raises(CrosswalkError, match="could not write"):
+        write_once(output, b"our output\n")
+
+    assert output.read_bytes() == b"other writer\n"
+    assert _tree(tmp_path) == ["out.jsonl"]
