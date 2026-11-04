@@ -22,6 +22,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Iterator
+from importlib.machinery import PathFinder
 from pathlib import Path
 
 import pytest
@@ -69,3 +70,33 @@ def test_the_remediation_prompt_says_so() -> None:
     assert "`subprocess`" in prompt
     assert "`sys.executable`" in prompt
     assert "imports the original" in prompt
+
+
+def test_child_imports_original_even_when_parent_resolves_shadow_package(
+    mutated_tree: Path,
+) -> None:
+    """Check the import consequence claimed by the remediation prompt (#763)."""
+    shadow_package = mutated_tree / "mutants" / "src" / "lovspor"
+    shadow_package.mkdir()
+    shadow_init = shadow_package / "__init__.py"
+    shadow_init.write_text("", encoding="utf-8")
+    setup_source_paths()
+
+    # PathFinder bypasses sys.modules: other tests already imported lovspor.
+    parent_spec = PathFinder.find_spec("lovspor", sys.path)
+    assert parent_spec is not None
+    assert parent_spec.origin == str(shadow_init)
+
+    child = subprocess.run(
+        [sys.executable, "-c", "import lovspor; print(lovspor.__file__)"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+        env={**os.environ, "MUTANT_UNDER_TEST": "lovspor.x_f__mutmut_1"},
+    )
+
+    assert (
+        Path(child.stdout.strip()).resolve()
+        == (_REPO / "src" / "lovspor" / "__init__.py").resolve()
+    )
