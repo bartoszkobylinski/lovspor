@@ -89,7 +89,10 @@ UNKNOWN = (1, "fatal: something nobody has seen before\n")
 
 
 def _run(
-    tmp_path: Path, answers: list[tuple[int, str]], attempts: str = "3"
+    tmp_path: Path,
+    answers: list[tuple[int, str]],
+    attempts: str = "3",
+    delay: str | None = "0",
 ) -> tuple[int, str, list[list[str]]]:
     state = tmp_path / "state"
     bin_dir = tmp_path / "bin"
@@ -99,13 +102,18 @@ def _run(
     stub = bin_dir / "git"
     stub.write_text(_GIT_STUB)
     stub.chmod(0o755)
+    sleep_stub = bin_dir / "sleep"
+    sleep_stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$PUSH_STUB_STATE/sleeps"\n')
+    sleep_stub.chmod(0o755)
     env = {
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "PUSH_STUB_STATE": str(state),
         "PUSH_RETRY_ATTEMPTS": attempts,
-        "PUSH_RETRY_DELAY_SECONDS": "0",
     }
+    env.pop("PUSH_RETRY_DELAY_SECONDS", None)
+    if delay is not None:
+        env["PUSH_RETRY_DELAY_SECONDS"] = delay
     completed = subprocess.run(
         ["bash", str(_SCRIPT), "origin", "HEAD:feat/x"],
         env=env,
@@ -169,13 +177,47 @@ def test_a_rejection_after_a_server_error_stops_at_once(tmp_path: Path) -> None:
     assert len(calls) == 2
 
 
-def test_a_server_error_mixed_with_a_policy_refusal_is_not_retried(tmp_path: Path) -> None:
-    mixed = (1, SERVER_500[1] + PROTECTED[1])
+@pytest.mark.parametrize(
+    "refusal",
+    [NON_FAST_FORWARD, FORBIDDEN, UNAUTHORIZED, PROTECTED, HOOK, WORKFLOW_SCOPE],
+    ids=["non-fast-forward", "403", "auth", "protected", "hook", "workflow-scope"],
+)
+def test_a_server_error_mixed_with_a_policy_refusal_is_not_retried(
+    tmp_path: Path, refusal: tuple[int, str]
+) -> None:
+    mixed = (1, SERVER_500[1] + refusal[1])
 
     code, _, calls = _run(tmp_path, [mixed, OK])
 
     assert code == 1
     assert len(calls) == 1
+    assert not (tmp_path / "state" / "sleeps").exists()
+
+
+def test_default_backoff_waits_fifteen_then_thirty_seconds(tmp_path: Path) -> None:
+    code, _, calls = _run(tmp_path, [SERVER_500], delay=None)
+
+    assert code == 2
+    assert len(calls) == 3
+    assert (tmp_path / "state" / "sleeps").read_text().splitlines() == ["15", "30"]
+
+
+def test_one_attempt_never_sleeps_or_pushes_again(tmp_path: Path) -> None:
+    code, _, calls = _run(tmp_path, [SERVER_500, OK], attempts="1")
+
+    assert code == 2
+    assert calls == [["push", "origin", "HEAD:feat/x"]]
+    assert not (tmp_path / "state" / "sleeps").exists()
+
+
+@pytest.mark.parametrize("delay", ["-1", "1.5", "invalid"])
+def test_invalid_delay_is_refused_before_any_push(tmp_path: Path, delay: str) -> None:
+    code, stderr, calls = _run(tmp_path, [OK], delay=delay)
+
+    assert code == 1
+    assert calls == []
+    assert "PUSH_RETRY_DELAY_SECONDS must be a whole number" in stderr
+    assert not (tmp_path / "state" / "sleeps").exists()
 
 
 def test_gits_own_output_reaches_the_log(tmp_path: Path) -> None:
