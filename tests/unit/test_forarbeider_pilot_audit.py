@@ -423,6 +423,8 @@ def test_malformed_audit_options_are_refused_without_a_report(
 
     assert result.exit_code == 1, result.output
     assert said(f"refused: {reason}", result.output)
+    assert said(f"refused: {reason}", result.stderr)
+    assert result.stdout == ""
     assert str(tmp_path) not in result.output
     assert not (desk.workspace / "reports").exists()
     assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before

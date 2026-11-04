@@ -168,3 +168,30 @@ def test_document_reasons_and_missing_gates_are_listed_on_every_chapter_sorted()
 def test_only_every_chapter_passing_is_a_pass() -> None:
     assert audit_lines(_report(_outcome(), _outcome(number=3)), DIGEST)[1] is True
     assert audit_lines(_report(), DIGEST)[1] is False
+
+
+@pytest.mark.parametrize("document_level", [False, True])
+def test_every_waiting_reason_together_still_holds(document_level: bool) -> None:
+    reasons = tuple(DenyReason(value) for value in sorted(HOLD_REASONS))
+    outcome = _outcome(eligible=False) if document_level else _outcome(*reasons)
+
+    assert verdict_of(outcome, reasons if document_level else ()) is Verdict.HOLD
+
+
+@pytest.mark.parametrize("count", [0, 1, 4])
+def test_serialized_report_audits_every_chapter_exactly_once(count: int) -> None:
+    report = _report(
+        *(_outcome(DenyReason.REVIEW_MISSING, number=number) for number in range(1, count + 1))
+    )
+    restored = PreflightReport.model_validate_json(report.model_dump_json())
+
+    text, passed = audit_lines(restored, DIGEST)
+
+    chapters = [line for line in text.splitlines() if line.startswith("chapter ")]
+    assert chapters == [
+        f"chapter {number} HOLD source {DIGEST} text {DIGEST} "
+        f"url {URL}?ch={number} reasons review_missing"
+        for number in range(1, count + 1)
+    ]
+    assert f"audited {count} pass 0 hold {count} deny 0" in text
+    assert passed is False
