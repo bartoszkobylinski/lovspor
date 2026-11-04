@@ -620,3 +620,31 @@ def test_member_names_law_accepts_both_prefixes_and_number_padding(
 )
 def test_member_names_law_requires_the_whole_path_and_exact_act(member: str) -> None:
     assert not member_names_law(member, "LOV-2022-06-17-63")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("record_revision",),
+        ("sak_id",),
+        ("decision", "number"),
+        ("source_pins", "lovdata_archives", 0, "size_bytes"),
+    ],
+)
+@pytest.mark.parametrize("value", [True, False])
+def test_integer_contract_fields_refuse_json_booleans(path: tuple, value: bool) -> None:
+    record = attested()
+    parent = record
+    for part in path[:-1]:
+        parent = parent[part]
+    parent[path[-1]] = value
+
+    problems = schema_problems(record)
+    prefix = "/" + "/".join(str(part) for part in path) + ": "
+    assert any(p.startswith(prefix) and "'integer'" in p for p in problems)
+    assert record_problems(record) == problems
+    with pytest.raises(CrosswalkContractError) as caught:
+        validate_records([record])
+    assert caught.value.problems == tuple(
+        f"{record['amending_lov_id']}@{record['record_revision']}: {p}" for p in problems
+    )
