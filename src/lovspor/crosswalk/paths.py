@@ -54,7 +54,14 @@ def new_cache(cache: Path) -> Path:
 def real_directory(directory: Path, inside: Path) -> Path:
     """Create ``directory`` and refuse it unless it is a real directory under ``inside``."""
     writable_target(directory, "staging directory")
+    # Checked before mkdir so a refusal creates nothing, and again after it
+    # because a symlink can appear between the check and the mkdir.
+    _refuse_unsafe_staging(directory, inside)
     directory.mkdir(parents=True, exist_ok=True)
+    _refuse_unsafe_staging(directory, inside)
+    return directory
+
+
+def _refuse_unsafe_staging(directory: Path, inside: Path) -> None:
     if directory.is_symlink() or not directory.resolve().is_relative_to(inside.resolve()):
         raise CrosswalkError(f"refusing an unsafe staging directory: {directory}")
-    return directory
