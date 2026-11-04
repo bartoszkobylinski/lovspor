@@ -313,3 +313,34 @@ def test_manifest_impl_writes_once_and_cli_refuses(built: bytes, tmp_path: Path)
     result = CliRunner().invoke(app, [*args, "--output", str(tmp_path / "m2.json")])
     assert result.exit_code == 1
     assert "problem: file is not in canonical form" in result.output
+
+
+def test_manifest_impl_message_names_research_only_state(built: bytes, tmp_path: Path) -> None:
+    """research_only is named exactly in manifest_impl's message, the same way the
+    release_candidate branch is pinned exactly in
+    test_manifest_command_refuses_a_candidate_without_capture_and_writes_nothing."""
+    data, output = tmp_path / "crosswalk.jsonl", tmp_path / "manifest.json"
+    data.write_bytes(built)
+    assert manifest_impl(data, output) == (
+        f"wrote the manifest of crosswalk.jsonl (research_only) to {output}"
+    )
+
+
+def test_cli_writes_a_research_only_manifest(built: bytes, tmp_path: Path) -> None:
+    """The CLI's default path (no --cache) is never exercised end to end elsewhere: every
+    other CLI invocation in this module either refuses or supplies --cache."""
+    data, output = tmp_path / "crosswalk.jsonl", tmp_path / "manifest.json"
+    data.write_bytes(built)
+    args = ["ops", "crosswalk", "manifest", "--input", str(data), "--output", str(output)]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 0
+    assert f"wrote the manifest of crosswalk.jsonl (research_only) to {output}" in result.output
+    written = json.loads(output.read_text())
+    assert written["release_state"] == "research_only"
+    assert written["provenance"] == {
+        "verified": False,
+        "note": (
+            "research_only: contract, invariants and canonical form checked; the evidence was "
+            "not reproduced from a capture"
+        ),
+    }
