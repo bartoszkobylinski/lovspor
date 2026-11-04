@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import inspect
+import io
 from collections.abc import Callable
 from datetime import date
 
 import pytest
 from pydantic import TypeAdapter
+from pypdf import PdfWriter
 
 from lovspor.promotion import (
     ExtractedDocument,
@@ -59,8 +61,8 @@ def test_faq_page_content_hash_does_not_depend_on_the_page_tail() -> None:
     assert content_hash(with_tail) == content_hash(without)
 
 
-def test_extractor_version_is_fourteen_since_the_enactment_forms() -> None:
-    assert EXTRACTOR_VERSION == 14
+def test_extractor_version_is_fifteen_since_pypdf_6_21_4() -> None:
+    assert EXTRACTOR_VERSION == 15
 
 
 @pytest.mark.parametrize("extract", [extract_regulation, extract_received])
@@ -82,7 +84,27 @@ def test_pdf_holds_record_the_upgraded_extractor_version(
     assert isinstance(result, HeldExtraction), result
     assert result.reason is reason
     assert result.source_form is SourceForm.PDF
-    assert result.extractor_version == 14
+    assert result.extractor_version == 15
+
+
+@pytest.mark.parametrize("extract", [extract_regulation, extract_received])
+def test_encrypted_pdf_is_an_unreadable_hold_with_the_upgraded_version(
+    extract: Callable[[bytes, str], ExtractionResult],
+) -> None:
+    """A reader refusal must remain a typed hold after the pypdf upgrade."""
+    writer = PdfWriter()
+    writer.append(io.BytesIO(minimal_pdf()))
+    writer.encrypt("test-password")
+    encrypted = io.BytesIO()
+    writer.write(encrypted)
+
+    result = extract(encrypted.getvalue(), PDF)
+
+    assert isinstance(result, HeldExtraction), result
+    assert result.reason is ExtractionHoldReason.UNREADABLE
+    assert result.source_form is SourceForm.PDF
+    assert result.extractor_version == 15
+    assert "PDF did not parse:" in result.detail
 
 
 @pytest.mark.parametrize(
@@ -95,7 +117,7 @@ def test_received_sources_record_the_upgraded_extractor_version(
     """The shared engine bump applies to the received channel in every form."""
     result = extract_received(payload, content_type)
     assert isinstance(result, ExtractedDocument), result
-    assert result.extractor_version == 14
+    assert result.extractor_version == 15
     assert result.regulation.full_text == "\n".join(REGULATION_LINES)
 
 
@@ -105,7 +127,7 @@ def test_received_sources_record_the_upgraded_extractor_version(
 )
 def test_binary_sources_record_extractor_version_eight(payload: bytes, content_type: str) -> None:
     """The library upgrade changes the engine version recorded on every source form."""
-    assert _extracted(payload, content_type).extractor_version == 14
+    assert _extracted(payload, content_type).extractor_version == 15
 
 
 def test_html_page_extracts_block_body_and_fields() -> None:

@@ -286,6 +286,58 @@ def test_release_candidate_refuses_an_inferred_licence_basis() -> None:
     assert schema_problems(record)
 
 
+@pytest.mark.parametrize("release_state", ["research_only", "release_candidate"])
+@pytest.mark.parametrize(
+    "basis", ["stated_for_file", "stated_for_endpoint", "inferred_same_dataset"]
+)
+def test_licence_eligibility_checks_every_pin(release_state: str, basis: str) -> None:
+    """The RC restriction applies to every archive, including a second pin."""
+    record = attested()
+    record["release_state"] = release_state
+    record["source_pins"]["lovdata_archives"].append(
+        archive_pin("lovtidend-avd1-2026.tar.bz2", basis=basis)
+    )
+    if release_state == "release_candidate" and basis == "inferred_same_dataset":
+        problems = schema_problems(record)
+        assert len(problems) == 1
+        assert problems[0].startswith("/source_pins/lovdata_archives/1/licence_basis:")
+        with pytest.raises(CrosswalkContractError) as caught:
+            validate_records([record])
+        assert caught.value.problems == tuple(f"LOV-2022-06-17-63@1: {p}" for p in problems)
+    else:
+        assert record_problems(record) == []
+        validate_records([record])
+
+
+def test_active_revision_cannot_carry_withdrawal_metadata() -> None:
+    record = attested()
+    record["record_revision"] = 2
+    assert record_problems(record) == []
+    record["withdrawal"] = {"withdrawn_on": "2026-11-03", "reason": "incorrect edge"}
+    problems = schema_problems(record)
+    assert problems
+    assert record_problems(record) == problems
+    with pytest.raises(CrosswalkContractError) as caught:
+        validate_records([attested(), record])
+    assert caught.value.problems == tuple(f"LOV-2022-06-17-63@2: {p}" for p in problems)
+
+
+def test_unclassified_sanction_cannot_claim_a_correction_target() -> None:
+    record = attested()
+    record["sanction_events"].append(
+        {"law_id": "LOV-2022-06-17-64", "kind": "unclassified_sanction", "source_url": ARCHIVE_URL}
+    )
+    assert record_problems(record) == []
+    record["sanction_events"][1]["corrects_law_id"] = record["amending_lov_id"]
+    problems = schema_problems(record)
+    assert len(problems) == 1
+    assert problems[0].startswith("/sanction_events/1:")
+    assert record_problems(record) == problems
+    with pytest.raises(CrosswalkContractError) as caught:
+        validate_records([record])
+    assert caught.value.problems == tuple(f"LOV-2022-06-17-63@1: {p}" for p in problems)
+
+
 def test_history_needs_contiguous_unique_revisions() -> None:
     first, second = attested(), attested()
     second["record_revision"] = 3
