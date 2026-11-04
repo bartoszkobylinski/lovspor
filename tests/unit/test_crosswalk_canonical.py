@@ -1,6 +1,10 @@
 """Canonical JSONL of crosswalk records (#610, proposal item l)."""
 
+import os
+import subprocess
+import sys
 from copy import deepcopy
+from hashlib import sha256
 from itertools import permutations
 
 import pytest
@@ -184,3 +188,44 @@ def test_revisions_sort_numerically_when_crossing_single_digits() -> None:
     data = serialize_records(iter(records))
     assert [record["record_revision"] for record in parse_records(data)] == [1, 2, 10]
     assert is_canonical(data)
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_nested_non_finite_numbers_are_typed_contract_errors(constant: str) -> None:
+    data = ('{"evidence":[{"nested":' + constant + "}]}\n").encode()
+    with pytest.raises(CrosswalkContractError) as caught:
+        parse_records(data)
+    assert caught.value.problems == (f"non-finite number {constant} is not JSON",)
+
+
+def test_canonical_bytes_and_digest_are_stable_across_python_sessions() -> None:
+    """The documented same-records/same-bytes rule survives process hash randomisation."""
+    records = [attested(), besl_o()]
+    records[0]["reason"] = "Ærlig øy 😀"
+    expected = serialize_records(records)
+    program = """
+import json
+import sys
+from lovspor.crosswalk.canonical import serialize_records
+
+def reorder(value):
+    if isinstance(value, dict):
+        return {key: reorder(value[key]) for key in set(value)}
+    if isinstance(value, list):
+        return [reorder(item) for item in reversed(value)]
+    return value
+
+records = [json.loads(line) for line in sys.stdin.buffer.read().splitlines()]
+sys.stdout.buffer.write(serialize_records(reorder(records)))
+"""
+    for seed in ("1", "42"):
+        result = subprocess.run(
+            [sys.executable, "-c", program],
+            input=expected,
+            capture_output=True,
+            env={**os.environ, "PYTHONHASHSEED": seed, "PYTHONIOENCODING": "ascii"},
+            check=True,
+            timeout=20,
+        )
+        assert result.stdout == expected
+        assert sha256(result.stdout).digest() == sha256(expected).digest()
