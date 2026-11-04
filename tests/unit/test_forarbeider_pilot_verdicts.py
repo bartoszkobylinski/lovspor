@@ -11,7 +11,14 @@ from typing import Any
 import pytest
 
 from lovspor.forarbeider import pilot_audit
-from lovspor.forarbeider.pilot_audit import WAITING, Verdict, audit_lines, chapter_url, verdict_of
+from lovspor.forarbeider.pilot_audit import (
+    WAITING,
+    Firm,
+    Verdict,
+    audit_lines,
+    chapter_url,
+    verdict_of,
+)
 from lovspor.forarbeider.release_models import (
     ChapterOutcome,
     DenyReason,
@@ -28,7 +35,6 @@ HOLD_REASONS = {
     "dossier_chapter_missing",
     "dossier_missing",
     "evidence_incomplete",
-    "not_authorized",
     "observation_missing",
     "purpose_evidence_missing",
     "purpose_not_authorized",
@@ -215,3 +221,33 @@ def test_serialized_report_audits_every_chapter_exactly_once(count: int) -> None
     ]
     assert f"audited {count} pass 0 hold {count} deny 0" in text
     assert passed is False
+
+
+def test_a_waiting_reason_known_firm_denies_and_only_that_one() -> None:
+    held = _outcome(DenyReason.REVIEW_NOT_APPROVED, DenyReason.CHECKPOINT_MISSING)
+    firm = frozenset({DenyReason.REVIEW_NOT_APPROVED})
+
+    assert verdict_of(held, (), firm) is Verdict.DENY
+    assert verdict_of(held, ()) is Verdict.HOLD
+    assert verdict_of(_outcome(DenyReason.CHECKPOINT_MISSING), (), firm) is Verdict.HOLD
+    assert verdict_of(_outcome(), (DenyReason.REVIEW_NOT_APPROVED,), firm) is Verdict.DENY
+
+
+def test_a_firm_reason_reaches_its_own_chapter_and_a_document_one_every_chapter() -> None:
+    firm = Firm(
+        document=frozenset({DenyReason.PURPOSE_EVIDENCE_MISSING}),
+        chapters={3: frozenset({DenyReason.REVIEW_NOT_APPROVED})},
+    )
+    report = _report(
+        _outcome(DenyReason.REVIEW_NOT_APPROVED),
+        _outcome(DenyReason.REVIEW_NOT_APPROVED, number=3),
+        _outcome(DenyReason.PURPOSE_EVIDENCE_MISSING, number=4),
+    )
+
+    text, passed = audit_lines(report, DIGEST, firm)
+
+    assert [line.split()[2] for line in text.splitlines()[2:5]] == ["HOLD", "DENY", "DENY"]
+    assert "audited 3 pass 0 hold 1 deny 2" in text
+    assert passed is False
+    assert firm.of(2) == {DenyReason.PURPOSE_EVIDENCE_MISSING}
+    assert Firm().of(3) == frozenset()

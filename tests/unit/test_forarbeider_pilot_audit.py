@@ -200,7 +200,7 @@ def test_a_partial_excerpt_passes_the_authorized_chapter_only(tmp_path: Path, ki
 
     result = _audit(desk, authorization, desk.all_checkpoints())
 
-    assert _verdicts(result.output) == {2: "PASS", 3: "HOLD"}
+    assert _verdicts(result.output) == {2: "PASS", 3: "DENY"}
     assert "not_authorized" in _reasons(result.output, 3)
     assert "coverage partial_curated_excerpt" in result.output
 
