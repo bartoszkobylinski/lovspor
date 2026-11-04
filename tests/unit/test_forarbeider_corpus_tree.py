@@ -228,6 +228,16 @@ def test_a_symlink_inside_the_dataset_is_refused_not_followed(
     assert error.detail == "forarbeider"
 
 
+def test_a_hard_link_inside_the_dataset_is_refused(sandbox: Path, tmp_path: Path) -> None:
+    """A file with a second name elsewhere is not the dataset's own, whatever its bytes (PR3B-3)."""
+    _empty_dataset(sandbox)
+    os.link(sandbox / "forarbeider" / "manifest.json", tmp_path / "second-name.json")
+
+    error = _refused(RefusalReason.UNSAFE_INPUT_PATH, read_dataset, sandbox)
+
+    assert error.detail == "forarbeider"
+
+
 def test_a_symlinked_dataset_directory_is_refused(sandbox: Path, tmp_path: Path) -> None:
     (tmp_path / "elsewhere").mkdir()
     (sandbox / "forarbeider").symlink_to(tmp_path / "elsewhere")
