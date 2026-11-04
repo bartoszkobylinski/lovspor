@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import inspect
+import io
 from collections.abc import Callable
 from datetime import date
 
 import pytest
 from pydantic import TypeAdapter
+from pypdf import PdfWriter
 
 from lovspor.promotion import (
     ExtractedDocument,
@@ -83,6 +85,26 @@ def test_pdf_holds_record_the_upgraded_extractor_version(
     assert result.reason is reason
     assert result.source_form is SourceForm.PDF
     assert result.extractor_version == 15
+
+
+@pytest.mark.parametrize("extract", [extract_regulation, extract_received])
+def test_encrypted_pdf_is_an_unreadable_hold_with_the_upgraded_version(
+    extract: Callable[[bytes, str], ExtractionResult],
+) -> None:
+    """A reader refusal must remain a typed hold after the pypdf upgrade."""
+    writer = PdfWriter()
+    writer.append(io.BytesIO(minimal_pdf()))
+    writer.encrypt("test-password")
+    encrypted = io.BytesIO()
+    writer.write(encrypted)
+
+    result = extract(encrypted.getvalue(), PDF)
+
+    assert isinstance(result, HeldExtraction), result
+    assert result.reason is ExtractionHoldReason.UNREADABLE
+    assert result.source_form is SourceForm.PDF
+    assert result.extractor_version == 15
+    assert "PDF did not parse:" in result.detail
 
 
 @pytest.mark.parametrize(
