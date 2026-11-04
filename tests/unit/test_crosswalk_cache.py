@@ -159,6 +159,51 @@ def test_cached_objects_cannot_escape_through_symlinks(tmp_path: Path, reader) -
     assert outside.read_bytes() == b"pinned bytes"
 
 
+@pytest.mark.parametrize("reader", [cache.cached_body, cache.verified_archive])
+@pytest.mark.parametrize("escape", ["absolute", "symlinked-parent"])
+def test_cache_readers_refuse_paths_into_a_sibling_with_the_same_prefix(
+    tmp_path: Path, reader, escape: str
+) -> None:
+    """Manifest objects must stay inside the cache, even with a matching digest."""
+    directory = tmp_path / "cache"
+    directory.mkdir()
+    sibling = tmp_path / "cache-other"
+    sibling.mkdir()
+    outside = sibling / "object.xml"
+    body = b"pinned external bytes"
+    outside.write_bytes(body)
+    if escape == "absolute":
+        manifest_path = str(outside)
+    else:
+        (directory / "nested").symlink_to(sibling, target_is_directory=True)
+        manifest_path = "nested/object.xml"
+    record = _entry("discovery", "sak", 1, manifest_path, body)
+
+    with pytest.raises(CrosswalkError, match="manifest path leaves the cache"):
+        reader(directory, record)
+
+    assert outside.read_bytes() == body
+
+
+@pytest.mark.parametrize("reader", [cache.cached_body, cache.verified_archive])
+def test_offline_cache_readers_accept_a_symlinked_cache_root(tmp_path: Path, reader) -> None:
+    """The study's documented external-cache symlink remains readable offline."""
+    directory = tmp_path / "external-cache"
+    directory.mkdir()
+    body = b"pinned cached bytes"
+    object_path = directory / "object.xml"
+    object_path.write_bytes(body)
+    link = tmp_path / "study-cache"
+    link.symlink_to(directory, target_is_directory=True)
+    record = _entry("discovery", "sak", 1, object_path.name, body)
+
+    result = reader(link, record)
+
+    assert result == (body if reader is cache.cached_body else object_path.resolve())
+    assert link.is_symlink()
+    assert object_path.read_bytes() == body
+
+
 @pytest.mark.parametrize("kind,key", [("saker", "2021-2022"), ("sak", 89016)])
 def test_latest_failed_capture_never_falls_back_to_older_evidence(
     tmp_path: Path, kind: str, key: str | int

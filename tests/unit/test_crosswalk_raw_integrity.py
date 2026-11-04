@@ -94,6 +94,40 @@ def test_a_dropped_archive_pin_is_drift(built: bytes, capture_dir: Path) -> None
     assert report.drifted == [LAW]
 
 
+@pytest.mark.parametrize("field", ["retrieved_at", "licence_basis"])
+def test_accepted_archive_metadata_cannot_bypass_capture_provenance(
+    built: bytes, capture_dir: Path, field: str
+) -> None:
+    # check._raw claims the entire archive pin, not just its body digest.
+    # Both licence bases are accepted under R2 approved; neither that approval
+    # nor a schema-valid timestamp may certify metadata absent from the capture.
+    records = parse_records(built)
+    record = next(r for r in records if r["amending_lov_id"] == LAW)
+    pin = record["source_pins"]["lovdata_archives"][0]
+    if field == "retrieved_at":
+        # Keep the UTC day so observed_on remains valid independently of drift.
+        value = pin[field][:11] + "23:59:59Z"
+    else:
+        value = "stated_for_endpoint" if pin[field] == "stated_for_file" else "stated_for_file"
+    assert value != pin[field]
+    pin[field] = value
+    data = serialize_records(records)
+
+    report = check(data, cache=capture_dir)
+
+    assert report.problems == []
+    assert report.unverified == []
+    assert report.drifted == [LAW]
+    promoted, counts = promote(data, _approval(data), capture_dir)
+    assert counts == {
+        "promoted": 2,
+        "not an active attested record": 5,
+        "raw bytes are not those of this capture": 1,
+    }
+    assert [r for r in parse_records(promoted) if r["amending_lov_id"] == LAW] == [record]
+    assert set(data.splitlines()) <= set(promoted.splitlines())
+
+
 def test_a_changed_identity_is_a_problem_not_drift(built: bytes, capture_dir: Path) -> None:
     def tamper(record: dict) -> None:
         record["evidence"][0]["parsed_identity_sha256"] = "f" * 64
