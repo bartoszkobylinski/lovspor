@@ -2927,6 +2927,82 @@ lovspor ops forarbeider-read --sandbox ~/forarbeider-sandbox provenance \
 
 **Limits.** Reading a synthetic sandbox is **not** approval to publish or host real forarbeider text, and the reader refuses anything but the bundled synthetic propositions. Checksums prove which bytes these are, not whether they may be published: åndsverkloven § 14 and § 24, personopplysningsloven and the source's terms are decided by the owner, outside any command. A real pilot needs its own owner, legal, privacy and source-terms gates and a separately reviewed change.
 
+## Forarbeider: private real-document pilot readiness (issue #738)
+
+ADR-0018 PR4. The question here is narrow: can **one** Prop. L and **one** Prop. LS that the owner saved by hand go through the existing checks, offline and in private, and what stands between them and a release? Nothing in this section publishes, fetches, crawls or writes a Git checkout, and nothing in it is release clearance. Only the owner authorizes a real release, and this PR does not.
+
+**Status of the real pilot: `REAL_INPUT_NOT_PROVIDED`.** No real page was supplied to this change, so every result below comes from the bundled synthetic Prop. 901 L and Prop. 902 LS. A real run is the owner's, with the steps below, and its outcome is recorded by the owner, never inferred from these tests.
+
+### What the supported commands already carry
+
+| Step | Supported command | Real saved pages | Missing in code | Needs a person |
+| --- | --- | --- | --- | --- |
+| Saved page to metadata | `ops forarbeider-metadata` | yes, offline, 16 MiB, page and chapter proved | nothing | choosing and saving the page; `--retrieved-at` is the operator's word |
+| Page to held chapter | `ops forarbeider-chapter` | yes; withheld body on annex, table, image, footnotes, hidden or repaired markup | nothing; markup read on two propositions of 2025-2026 only | reading every hold reason |
+| Review | `ops forarbeider-review` | yes, append-only private ledger | nothing | the reviewer's decision and attestations |
+| Case-specific evidence | `forarbeider-release chapters dossier` | yes, private evidence files bound to chapters | nothing | writing each evidence note (checklist below) |
+| Owner authorization candidate | `chapters authorize` | yes, at a terminal, typed phrase | nothing | the owner alone |
+| Preflight | `chapters preflight` | yes; re-proves every page, text, chain, checkpoint and evidence digest | nothing | keeping checkpoints outside the ledger |
+| **Per-chapter audit** | **`chapters pilot-audit`** (this PR) | yes | was missing: one PASS / HOLD / DENY per chapter with digests and URLs | reading it; a PASS is not clearance |
+| Private plan | `chapters plan` | yes; renders into `<workspace>/previews/`, owner-only, writes no checkout | nothing | none; its preview holds chapter text, keep it private |
+| Sandbox write | `chapters simulate` | **no**: synthetic pages only (`input_not_synthetic`) | by design | a future, separately approved PR |
+| Reader | `ops forarbeider-read` | **no**: synthetic sandbox only | by design | a future, separately approved PR |
+
+So the private real path ends at `plan`: a private preview in the workspace, no corpus. Every step after that refuses a real page, and this PR keeps it so.
+
+### The pilot audit
+
+```bash
+chapters pilot-audit --at 2026-11-10T12:00:00+01:00 \
+  --authorization <authorization sha256> \
+  --checkpoint <subject>@<revision>:<head> --checkpoint <subject>@<revision>:<head>
+```
+
+That is the synthetic Prop. 901 L with only chapter 2 in the dossier and the grant, digests shown as `<sha256>`, exit 2. It takes the inputs `preflight` takes, evaluates them with the same code, stores the same private report under `<workspace>/reports/<sha256>.json` (the digest printed is the preflight's own) and prints:
+
+```text
+PILOT_AUDIT regjeringen-9000001 prop-l 2099-2100 report <sha256> publication_authorized=false release_clearance=false
+counts listed 4 audited 2 pass 1 hold 1 deny 0 coverage partial_curated_excerpt
+chapter 2 PASS source <sha256> text <sha256> url https://www.regjeringen.no/no/dokumenter/prop.-901-l-20992100/id9000001/?ch=2 reasons -
+chapter 3 HOLD source <sha256> text <sha256> url https://www.regjeringen.no/no/dokumenter/prop.-901-l-20992100/id9000001/?ch=3 reasons dossier_chapter_missing,evidence_incomplete,missing:privacy,missing:publication_purpose,missing:source_completeness,missing:source_rights,missing:third_party_screening,not_authorized,purpose_not_authorized
+technical audit only: PASS is not release clearance
+```
+
+- **PASS** is a chapter the preflight finds eligible.
+- **HOLD** is a chapter whose every reason is something nobody has given yet: `review_missing`, `review_not_approved`, a missing evidence gate (`missing:<gate>`), `evidence_incomplete`, `checkpoint_missing`, `dossier_missing`, `dossier_chapter_missing`, `authorization_missing`, `authorization_not_yet_valid`, `not_authorized`, `purpose_evidence_missing`, `purpose_not_authorized`, `observation_missing`, and `body_withheld` (the extractor withholds the body, so it waits for a later extractor or stays out).
+- **DENY** is everything else: a page or text that changed, a forged or edited evidence file or record, a foreign chapter or document, a superseded review, a revoked or expired grant, a broken chain, a checkpoint that does not match. A reason code added later is DENY until it is classified (`tests/unit/test_forarbeider_pilot_verdicts.py`). **A missing saved page is DENY:** pages are found by the digest their observation recorded, so a page whose bytes drifted looks exactly like one that was never given.
+- Exit 0 only when every audited chapter is PASS; otherwise exit 2 after the report is written; exit 1 is a typed refusal with nothing written. One call audits one document. The pilot set is two explicit calls, one per document; there is no selection, discovery or batch mode.
+- Printed: ids, digests, counts, reason codes and the chapter's source URL. Never chapter text, evidence content, file paths or names, or handles (tested for both document types).
+
+### Runbook: one Prop. L and one Prop. LS, in private
+
+1. **Before saving anything,** the owner records the human checklist items 1 and 2 below. Unknown means stop.
+2. **The owner picks** one recent Prop. L and one recent Prop. LS on regjeringen.no and, for each, the chapter pages (`…/id<document>/?ch=N`) to try. Nothing chooses them for you; no command lists, fetches or follows pages.
+3. **Save each chosen page by hand, as served,** into `~/forarbeider-staging/raw/` (`install -d -m 700` first, outside Git, outside cloud-synchronised folders), one file per `?ch=N` page, and `chmod 600` it. Note the retrieval time with its offset. Do not edit a saved file: if `forarbeider-metadata` refuses it (`incomplete_page`, `page_chapter_unproved`), save it again.
+4. **Per document:** `forarbeider-metadata` on one of its pages, then `forarbeider-chapter` on each chosen page, then review each chapter with `forarbeider-review` (sections above). Copy every `review verify` head to a place this user's processes cannot rewrite.
+5. **Write the evidence notes** for the checklist below as private files under `~/forarbeider-staging/evidence/`, then `chapters dossier`, and, only if the owner so decides at a terminal, `chapters authorize`.
+6. **Audit:** `chapters pilot-audit` once for the Prop. L and once for the Prop. LS. Keep only the printed lines; the report stays in the workspace.
+7. **Optional:** `chapters plan` for a PASS document, against an empty sandbox or a corpus copy you do not care about, to see the private preview. Nothing is written to any checkout.
+8. **Stop.** Record the outcome (PASS, HOLD or DENY per chapter, with the report digest) in the owner's private log. Delete the saved pages and staged chapters when the pilot ends, and within 90 days of retrieval at the latest (retention rules above).
+
+**STOP gates.** Stop and decide as the owner, never route around, when: any checklist item is unknown (HOLD); `forarbeider-chapter` withholds the body; any chapter is DENY; the page's markup is older or different from what the extractor read; a page names private persons; or anything would put chapter text into Git, CI, an issue, a PR, a log or a chat. The audit itself never asks to proceed.
+
+### Human-only checklist, per document, with dated evidence
+
+Each item is a private, dated note, written and judged by a person. Code checks that a note exists, is bound to the chapter and has its recorded bytes, never whether it is right. Claude does not attest any of these and does not act as the owner. **Unknown = HOLD.**
+
+1. **regjeringen.no terms and access policy** read on the date of saving: robots and terms for manual saving and for later redistribution, and who to contact (`source_rights` note).
+2. **Rights:** åndsverkloven § 14 for the document type and § 24 for the database or catalogue, including whether a curated excerpt changes either (`source_rights` note).
+3. **Third-party material:** annexes, quoted works, images, tables and media screened, each chapter (`third_party_screening` note).
+4. **Personal data:** a purpose and basis under personopplysningsloven, or a reviewed finding that the chapter holds no personal data; a chapter the extractor flagged cannot rest on a no-personal-data finding (`privacy_processing_basis` or `privacy_no_personal_data` note).
+5. **Source integrity:** the saved bytes are the page as served on that date, the chapter list matches, nothing hidden (`source_completeness` note).
+6. **Takedown and contact, retention and Git permanence:** how a takedown request is received and handled, how long anything is kept, and that a release into Git cannot be erased from history or clones. No evidence gate checks this separately: keep it in the `publication_purpose` note, which the owner's authorization binds.
+7. **Separate owner sign-off** for the release itself, after 1 to 6: `chapters authorize` records a candidate only; a real release needs a separate, reviewed change.
+
+### What a future real-data PR needs
+
+A separate PR, separately approved, would have to: allow a reviewed real document set through `simulate` into a staging checkout (today synthetic only); decide where a real dataset lives and who may push it; extend the reader beyond the bundled synthetic propositions with the same labels; add a takedown runbook that accepts Git history permanence; and carry the owner's dated sign-off for exactly those documents. Until then no real chapter body belongs in any Git repository or branch, including tests, fixtures, PR text and CI logs.
+
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.
