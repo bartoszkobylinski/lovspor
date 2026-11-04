@@ -102,6 +102,26 @@ def test_an_eligible_chapter_passes() -> None:
     assert verdict_of(_outcome(), ()) is Verdict.PASS
 
 
+@pytest.mark.parametrize("document_level", [False, True])
+def test_a_future_reason_defaults_to_deny(document_level: bool) -> None:
+    # Simulate an enum extension without adding that reason to the waiting list.
+    future_reason = "future_preflight_failure"
+    outcome = _outcome().model_copy(
+        update={"eligible": False, "reasons": () if document_level else (future_reason,)}
+    )
+    report = _report(outcome).model_copy(
+        update={"document_reasons": (future_reason,) if document_level else ()}
+    )
+
+    text, passed = audit_lines(report, DIGEST)
+
+    assert passed is False
+    assert "audited 1 pass 0 hold 0 deny 1" in text
+    assert text.splitlines()[2] == (
+        f"chapter 2 DENY source {DIGEST} text {DIGEST} url {URL}?ch=2 reasons {future_reason}"
+    )
+
+
 def test_one_wrong_reason_among_waiting_ones_denies() -> None:
     outcome = _outcome(DenyReason.REVIEW_MISSING, DenyReason.EVIDENCE_DIGEST_MISMATCH)
 

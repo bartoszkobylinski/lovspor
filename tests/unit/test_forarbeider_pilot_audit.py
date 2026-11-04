@@ -155,6 +155,31 @@ def test_a_missing_checkpoint_holds(tmp_path: Path, kind: str) -> None:
 
 
 @pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("mismatch", ["revision", "head"])
+def test_a_mismatched_checkpoint_denies_and_stores_its_report(
+    tmp_path: Path, kind: str, mismatch: str
+) -> None:
+    desk, authorization = _released(tmp_path, kind)
+    subject, pin = desk.checkpoint(3).rsplit("@", 1)
+    revision, head = pin.split(":")
+    if mismatch == "revision":
+        revision = str(int(revision) + 1)
+    else:
+        head = ("0" if head[0] != "0" else "1") + head[1:]
+    checkpoints = [desk.checkpoint(2), f"{subject}@{revision}:{head}"]
+
+    result = _audit(desk, authorization, checkpoints)
+
+    assert result.exit_code == 2, result.output
+    assert _verdicts(result.output) == {2: "PASS", 3: "DENY"}
+    assert _reasons(result.output, 3) == ["checkpoint_mismatch"]
+    report = desk.report(result.output)
+    chapter = next(item for item in report["chapters"] if item["chapter_number"] == 3)
+    assert chapter["eligible"] is False
+    assert chapter["reasons"] == ["checkpoint_mismatch"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
 def test_a_withheld_body_holds_and_states_no_text_digest(tmp_path: Path, kind: str) -> None:
     desk = Desk(tmp_path / kind, kind, extras={3: TABLE})
     desk.decide(2, ReviewStatus.APPROVED)
