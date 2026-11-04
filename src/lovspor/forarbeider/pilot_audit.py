@@ -71,7 +71,8 @@ def chapter_url(report: PreflightReport, number: int) -> str:
     return locator.model_copy(update={"chapter": number}).page_url
 
 
-def _chapter_line(report: PreflightReport, item: ChapterOutcome, verdict: Verdict) -> str:
+def _chapter_line(report: PreflightReport, item: ChapterOutcome) -> str:
+    verdict = verdict_of(item, report.document_reasons)
     codes: list[str] = [*report.document_reasons, *item.reasons]
     codes += [f"missing:{gate}" for gate in item.missing_evidence]
     return (
@@ -95,7 +96,7 @@ def audit_lines(report: PreflightReport, sha: str) -> tuple[str, bool]:
         + f" coverage {report.coverage}"
     )
     lines = [head, counts]
-    lines += [_chapter_line(report, *pair) for pair in zip(report.chapters, verdicts, strict=True)]
+    lines += [_chapter_line(report, item) for item in report.chapters]
     passed = bool(verdicts) and set(verdicts) == {Verdict.PASS}
     return "\n".join([*lines, CLEARANCE]), passed
 
