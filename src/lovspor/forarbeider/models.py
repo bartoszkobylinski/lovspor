@@ -29,6 +29,8 @@ from lovspor.atomic_io import atomic_write_text
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.identity import DocumentType, SourceLocator, parse_source_url
 
+PRIVATE_FILE_MODE = 0o600
+
 JSON_LAYOUT: dict[str, Any] = {"sort_keys": True, "indent": 2, "ensure_ascii": False}
 
 _Text = Annotated[str, Field(pattern=r"\S")]
@@ -128,8 +130,12 @@ def metadata_text(record: ForarbeidRecord) -> str:
 
 
 def write_metadata(record: ForarbeidRecord, path: Path) -> None:
-    """Write ``record`` atomically; ``path`` must already have passed the staging check."""
-    atomic_write_text(path, metadata_text(record))
+    """Write ``record`` atomically and owner-only; ``path`` must have passed the staging check.
+
+    The mode is set on the staged file before it is renamed in, so the record is
+    never visible with the umask's mode (#783).
+    """
+    atomic_write_text(path, metadata_text(record), mode=PRIVATE_FILE_MODE)
 
 
 def read_metadata(path: Path) -> ForarbeidRecord:

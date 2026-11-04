@@ -18,7 +18,7 @@ from lovspor.forarbeider.chapter_models import ChapterResult, result_text
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.models import ForarbeidRecord, write_metadata
 from lovspor.forarbeider.page import build_record
-from lovspor.forarbeider.staging import checked_output, write_observation
+from lovspor.forarbeider.staging import checked_output, require_replaceable, write_observation
 from lovspor.ops.commands import ops_app
 
 #: Far above the largest sampled chapter page (166 KB), below what memory would notice.
@@ -53,6 +53,7 @@ def _saved_page(html: Path) -> bytes:
 
 def _write(record: ForarbeidRecord, target: Path) -> None:
     try:
+        require_replaceable(target)
         write_metadata(record, target)
     except OSError as error:
         raise ForarbeiderRefusedError(RefusalReason.OUTPUT_WRITE_FAILED, str(target)) from error
