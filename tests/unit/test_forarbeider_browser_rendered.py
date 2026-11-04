@@ -103,3 +103,37 @@ def test_the_plain_page_still_reads(tmp_path: Path) -> None:
     assert read_proposition(METADATA.read_bytes(), METADATA_URL).title == TITLE
     assert run_chapter(CHAPTER, tmp_path / "chapter.json")[0] == 0
     assert CHAPTER_URL.endswith("?ch=2")
+
+
+@pytest.mark.parametrize("length", [151, 300])
+def test_a_long_title_rewritten_at_130_is_named_as_browser_rendered(
+    tmp_path: Path, length: int
+) -> None:
+    title = TITLE + "ø" * (length - len(TITLE))
+    plain = METADATA.read_bytes().replace(TITLE.encode(), title.encode())
+    assert read_proposition(plain, METADATA_URL).title == title
+    rewritten = (
+        f'<h2 class="subheader truncate">{title[:130]}'
+        '<button type="button" aria-hidden="true" data-show-doctitle="">'
+        '... <span class="show-full-doctitle">(vis)</span></button>'
+        f'<span class="visuallyhidden">{title[130:]}</span></h2>'
+    )
+    page = plain.replace(
+        f'<h2 class="subheader truncate">\n{title}</h2>'.encode(), rewritten.encode()
+    )
+
+    code, printed, output = _metadata(tmp_path, page)
+
+    assert code == 1
+    assert said("refused: browser_rendered_page: subheader", printed)
+    assert not output.exists()
+
+
+def test_similar_markup_without_the_script_attribute_remains_a_conflict() -> None:
+    page = _rendered(METADATA.read_bytes()).replace(b' data-show-doctitle=""', b"")
+
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        read_proposition(page, METADATA_URL)
+
+    assert caught.value.reason is RefusalReason.CONFLICTING_IDENTITY
+    assert caught.value.detail == "subheader"
