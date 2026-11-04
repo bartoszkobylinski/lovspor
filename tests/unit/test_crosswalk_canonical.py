@@ -237,3 +237,11 @@ sys.stdout.buffer.write(serialize_records(reorder(records)))
         )
         assert result.stdout == expected
         assert sha256(result.stdout).digest() == sha256(expected).digest()
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_constants_are_refused_inside_nested_json(constant: str) -> None:
+    data = ('{"evidence":[{"value":' + constant + "}]}\n").encode()
+    with pytest.raises(CrosswalkContractError) as caught:
+        parse_records(data)
+    assert caught.value.problems == (f"non-finite number {constant} is not JSON",)
