@@ -12,6 +12,7 @@ network cut.
 import json
 import shutil
 import socket
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,43 @@ def test_output_is_canonical_valid_and_byte_identical(capture_dir: Path, offline
     assert is_canonical(data)
     validate_records(parse_records(data))
     assert build(capture_dir, OPTIONS) == data
+
+
+@pytest.mark.parametrize(
+    ("kind", "key", "role"),
+    [
+        ("sak", 89016, "decision_case"),
+        ("publikasjoner", "2021-2022", "decision_publication"),
+    ],
+)
+def test_xml_whitespace_drift_keeps_identity_and_appends_no_revision(
+    capture_dir: Path, offline: None, kind: str, key: int | str, role: str
+) -> None:
+    """D8 compares parsed identities even when a new capture has different XML bytes."""
+    previous = build(capture_dir, OPTIONS)
+    manifest = load_manifest(capture_dir)
+    entry = next(
+        item
+        for item in manifest["stortinget"]
+        if (item["stage"], item["kind"], item["key"]) == ("discovery", kind, key)
+    )
+    path = capture_dir / entry["path"]
+    old_body = path.read_bytes()
+    noisy_body = old_body.replace(b"><", b">\r\n  <")
+    assert noisy_body != old_body
+    path.write_bytes(noisy_body)
+    entry["sha256"] = sha256(noisy_body).hexdigest()
+    write_manifest(capture_dir, manifest)
+
+    fresh = build(capture_dir, OPTIONS)
+    law = "LOV-2022-06-17-63"
+    old_evidence = next(item for item in _by_law(previous)[law]["evidence"] if item["role"] == role)
+    new_evidence = next(item for item in _by_law(fresh)[law]["evidence"] if item["role"] == role)
+    assert new_evidence["body_sha256"] == sha256(noisy_body).hexdigest()
+    assert new_evidence["body_sha256"] != old_evidence["body_sha256"]
+    assert new_evidence["parsed_identity_sha256"] == old_evidence["parsed_identity_sha256"]
+    assert fresh == build(capture_dir, OPTIONS)
+    assert build(capture_dir, BuildOptions(producer_commit=PRODUCER, previous=previous)) == previous
 
 
 def test_a_copied_capture_builds_the_same_bytes(
