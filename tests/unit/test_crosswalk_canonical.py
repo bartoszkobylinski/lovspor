@@ -184,3 +184,11 @@ def test_revisions_sort_numerically_when_crossing_single_digits() -> None:
     data = serialize_records(iter(records))
     assert [record["record_revision"] for record in parse_records(data)] == [1, 2, 10]
     assert is_canonical(data)
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_constants_are_refused_inside_nested_json(constant: str) -> None:
+    data = ('{"evidence":[{"value":' + constant + "}]}\n").encode()
+    with pytest.raises(CrosswalkContractError) as caught:
+        parse_records(data)
+    assert caught.value.problems == (f"non-finite number {constant} is not JSON",)
