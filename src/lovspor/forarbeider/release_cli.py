@@ -31,6 +31,7 @@ from lovspor.forarbeider.corpus_commands import (
     simulate_impl,
 )
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from lovspor.forarbeider.pilot_audit import pilot_audit_impl
 from lovspor.forarbeider.release_commands import (
     ChapterScope,
     Grant,
@@ -157,6 +158,33 @@ def preflight(
     """Evaluate the staged chapters and write a private deny or preview report."""
     run = Run(authorization=authorization, checkpoints=tuple(checkpoint or ()), at=at)
     run_preflight(ctx.obj, run)
+
+
+@chapters_app.command("pilot-audit")
+def pilot_audit(
+    ctx: typer.Context,
+    at: Annotated[str, typer.Option(help="The moment evaluated, ISO 8601 with offset.")],
+    authorization: Annotated[str | None, typer.Option(help="The authorization sha256.")] = None,
+    checkpoint: Annotated[
+        list[str] | None,
+        typer.Option(help="SUBJECT@REVISION:HEAD kept outside the ledger; may be repeated."),
+    ] = None,
+) -> None:
+    """The preflight per chapter as PASS, HOLD or DENY. A PASS is not release clearance."""
+    run = Run(authorization=authorization, checkpoints=tuple(checkpoint or ()), at=at)
+    run_audit(ctx.obj, run)
+
+
+def run_audit(scope: ChapterScope, run: Run) -> None:
+    """Print the audit; anything short of every chapter PASS exits 2 after its report is written."""
+    try:
+        lines, passed = pilot_audit_impl(scope, run)
+    except ForarbeiderRefusedError as error:
+        typer.echo(refusal_line(error), err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(lines)
+    if not passed:
+        raise typer.Exit(code=DENY_EXIT)
 
 
 @release_app.command("revoke")
