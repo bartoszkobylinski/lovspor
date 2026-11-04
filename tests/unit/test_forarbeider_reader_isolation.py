@@ -146,14 +146,14 @@ def _default_surfaces(corpus: Path, sha: str, out: Path) -> dict[str, Any]:
 
 
 @pytest.mark.usefixtures("at_a_terminal")
+@pytest.mark.parametrize("state", [_released_dataset, _corrupt_dataset, _unsafe_dataset])
 def test_site_indexes_embeddings_and_benchmark_surface_ignore_a_committed_dataset(
-    tmp_path: Path,
+    tmp_path: Path, state: Callable[[Path, Path], None]
 ) -> None:
     corpus, first = throwaway_corpus(tmp_path / "lovverk")
     before = _default_surfaces(corpus, first, tmp_path / "site-before")
 
-    box = released_box(Desk(tmp_path / "desk"), tmp_path / "sandbox")
-    shutil.copytree(box / "forarbeider", corpus / "forarbeider")
+    state(tmp_path, corpus)
     second = commit_all(corpus, "forarbeider")
 
     assert second != first
