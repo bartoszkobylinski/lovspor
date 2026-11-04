@@ -379,3 +379,60 @@ def test_a_forged_stored_dossier_is_refused_and_reports_nothing(tmp_path: Path, 
     assert result.exit_code == 1
     assert said("refused: release_record_corrupt", result.output)
     assert not (desk.workspace / "reports").exists()
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("state", ["pass", "hold", "deny"])
+def test_audit_and_preflight_store_the_identical_report(
+    tmp_path: Path, kind: str, state: str
+) -> None:
+    desk, authorization = _released(tmp_path, kind)
+    checkpoints = desk.all_checkpoints()
+    if state == "hold":
+        checkpoints = [desk.checkpoint(2)]
+    elif state == "deny":
+        desk.evidence["source_rights"].write_bytes(b"changed evidence")
+    preflight = desk.preflight(authorization, checkpoints)
+    sha = said_digest(preflight.output, "report")
+    path = desk.workspace / "reports" / f"{sha}.json"
+    before = path.read_bytes()
+
+    audit = _audit(desk, authorization, checkpoints)
+
+    assert audit.exit_code == (0 if state == "pass" else 2), audit.output
+    assert said_digest(audit.output, "report") == sha
+    assert path.read_bytes() == before
+    assert list((desk.workspace / "reports").glob("*.json")) == [path]
+
+
+@pytest.mark.parametrize(
+    ("at", "checkpoints", "reason"),
+    [
+        ("not-a-date", [], "invalid_timestamp"),
+        ("2100-04-10T12:00:00", [], "invalid_timestamp"),
+        (AT, ["malformed-checkpoint"], "release_invalid: checkpoint"),
+    ],
+)
+def test_malformed_audit_options_are_refused_without_a_report(
+    tmp_path: Path, at: str, checkpoints: list[str], reason: str
+) -> None:
+    desk = Desk(tmp_path)
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+
+    result = _audit(desk, None, checkpoints, at=at)
+
+    assert result.exit_code == 1, result.output
+    assert said(f"refused: {reason}", result.output)
+    assert str(tmp_path) not in result.output
+    assert not (desk.workspace / "reports").exists()
+    assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
+
+
+def test_audit_requires_an_evaluation_time_before_writing(tmp_path: Path) -> None:
+    desk = Desk(tmp_path)
+
+    result = desk.invoke([*desk.scope(), "pilot-audit"])
+
+    assert result.exit_code == 2, result.output
+    assert said("Missing option '--at'", result.output)
+    assert not (desk.workspace / "reports").exists()
