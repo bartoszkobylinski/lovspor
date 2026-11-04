@@ -16,7 +16,7 @@ from lovspor.forarbeider.corpus_render import NOT_LAW
 from lovspor.forarbeider.corpus_tree import read_dataset
 from lovspor.forarbeider.models import JSON_LAYOUT
 from lovspor.forarbeider.review_models import ReviewStatus
-from tests.unit.cli_output import said
+from tests.unit.cli_output import said, unwrapped
 from tests.unit.forarbeider_promotion_support import plan, sandbox, simulate, tree, withdraw
 from tests.unit.forarbeider_reader_support import (
     L_DOCUMENT,
@@ -28,7 +28,14 @@ from tests.unit.forarbeider_reader_support import (
     read,
     released_box,
 )
-from tests.unit.forarbeider_release_support import Desk, at_a_terminal, said_digest  # noqa: F401
+from tests.unit.forarbeider_release_support import (
+    OWNER,
+    PRIVATE_MARKER,
+    REVIEWER,
+    Desk,
+    at_a_terminal,  # noqa: F401
+    said_digest,
+)
 
 pytestmark = pytest.mark.usefixtures("at_a_terminal")
 
@@ -191,6 +198,26 @@ def test_reading_writes_nothing_anywhere(box: Path, desk: Desk, tmp_path: Path) 
     assert read(box, "show", *exact(LS_ID)).exit_code == 1
 
     assert tree(tmp_path) == before
+
+
+def test_reading_never_prints_a_reviewer_owner_handle_dossier_or_evidence_marker(
+    box: Path, desk: Desk
+) -> None:
+    """docs/operations.md's own promise for PR3B-3: only the manifest's labels, receipts
+    and digests are shown, never the PR3A reviewer, the owner who decided release, the
+    dossier's evidence or the desk's private ledger and workspace directories.
+    """
+    private = (REVIEWER, OWNER, PRIVATE_MARKER, str(desk.ledger), str(desk.workspace))
+
+    for arguments in (
+        ["list"],
+        ["show", *exact(L_ID)],
+        ["chapter", *exact(L_ID), "--chapter", "2"],
+        ["provenance", *exact(L_ID)],
+    ):
+        printed = unwrapped(read(box, *arguments).output)
+        for marker in private:
+            assert unwrapped(marker) not in printed, (arguments, marker)
 
 
 def test_the_same_sandbox_reads_byte_identically_twice(both: Path) -> None:
