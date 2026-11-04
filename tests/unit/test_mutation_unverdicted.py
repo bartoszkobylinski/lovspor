@@ -124,6 +124,64 @@ def test_without_detail_files_the_raw_log_still_names_them(tmp_path: Path) -> No
     assert [entry["id"] for entry in result["suspicious"]] == [SUSPICIOUS_ID]  # type: ignore[union-attr]
 
 
+@pytest.mark.parametrize("contents", [None, "", " \n\t\n"], ids=["missing", "empty", "blank"])
+def test_unavailable_detail_files_fall_back_independently(
+    tmp_path: Path, contents: str | None
+) -> None:
+    """The documented raw-log fallback applies to each bucket separately."""
+    unavailable = tmp_path / "timeouts.jsonl"
+    if contents is not None:
+        unavailable.write_text(contents)
+    detailed = tmp_path / "suspicious.jsonl"
+    detail = json.loads(_detail(SUSPICIOUS_ID))
+    detailed.write_text(json.dumps(detail) + "\n")
+
+    result = mutation_to_json.parse_unverdicted(_raw_log(), unavailable, detailed)
+
+    assert result["timed_out"] == [
+        dict.fromkeys(mutation_to_json.SURVIVOR_KEYS, None)
+        | {"id": TIMEOUT_ID, "detail_source": "id_only: named in the raw log"}
+    ]
+    assert result["suspicious"] == [detail]
+
+
+@pytest.mark.parametrize(("key", "emoji"), [("timed_out", "⏰"), ("suspicious", "🤔")])
+def test_detail_source_takes_precedence_over_raw_names(
+    tmp_path: Path, key: str, emoji: str
+) -> None:
+    """Raw names are a fallback, not additional evidence over a collected list."""
+    path = tmp_path / "detail.jsonl"
+    detail = json.loads(_detail(TIMEOUT_ID))
+    path.write_text(json.dumps(detail) + "\n")
+
+    result = mutation_to_json.parse_unverdicted(
+        f"{emoji} {SUSPICIOUS_ID}\n",
+        path if key == "timed_out" else None,
+        path if key == "suspicious" else None,
+    )
+
+    assert result[key] == [detail]
+
+
+@pytest.mark.parametrize("with_lists", [False, True], ids=["old-artifact", "named-artifact"])
+def test_additive_lists_do_not_change_the_gate_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_lists: bool
+) -> None:
+    """Schema 1 remains valid without lists; diagnostic names never clear a red gate."""
+    result = _run(tmp_path, _raw_log())
+    assert result["schema_version"] == 1
+    if not with_lists:
+        del result["timed_out"]
+        del result["suspicious"]
+    path = tmp_path / "gate.json"
+    path.write_text(json.dumps(result))
+    monkeypatch.setattr("sys.argv", ["mutation_gate.py", str(path)])
+
+    assert mutation_gate.main() == 1
+    monkeypatch.setattr("sys.argv", ["mutation_gate.py", "--summary", str(path)])
+    assert mutation_gate.main() == 0
+
+
 def test_a_bare_id_list_is_read_as_ids(tmp_path: Path) -> None:
     result = _run(tmp_path, _raw_log(suspicious=0), timeouts=f"{TIMEOUT_ID}\n")
 
