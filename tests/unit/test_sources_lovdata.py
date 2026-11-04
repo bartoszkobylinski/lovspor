@@ -488,7 +488,7 @@ def test_explicit_zero_timeout_does_not_fall_through_to_env(
 def test_download_result_is_frozen() -> None:
     result = DownloadResult(
         filename="x.tar.bz2",
-        path=Path("/tmp/x.tar.bz2"),  # noqa: S108
+        path=Path("cache/x.tar.bz2"),
         size_bytes=100,
         sha256="a" * 64,
     )
@@ -499,12 +499,12 @@ def test_download_result_is_frozen() -> None:
 def test_download_result_carries_all_fields() -> None:
     result = DownloadResult(
         filename="gjeldende-lover.tar.bz2",
-        path=Path("/tmp/gjeldende-lover.tar.bz2"),  # noqa: S108
+        path=Path("cache/gjeldende-lover.tar.bz2"),
         size_bytes=5844867,
         sha256="abcdef0123456789" * 4,
     )
     assert result.filename == "gjeldende-lover.tar.bz2"
-    assert result.path == Path("/tmp/gjeldende-lover.tar.bz2")  # noqa: S108
+    assert result.path == Path("cache/gjeldende-lover.tar.bz2")
     assert result.size_bytes == 5844867
     assert result.sha256 == "abcdef0123456789" * 4
 
