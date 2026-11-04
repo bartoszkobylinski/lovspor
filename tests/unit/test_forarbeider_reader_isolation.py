@@ -2,12 +2,15 @@
 
 The law readers never see ``forarbeider/``: ``get_law``, ``corpus_status``,
 law and body search, sections and recent changes answer the same whether the
-dataset is absent, released, corrupt or unsafe. Only ``ops_cli.py`` imports
+dataset is absent, released, corrupt or unsafe. A dataset committed to the
+corpus leaves the emitted site, the slug index, the embedding inputs and the
+benchmark's pinned tool surface as they were. Only ``ops_cli.py`` imports
 the package, and the reader's own modules hold no write, no process and no
 network call, so reading cannot change anything.
 """
 
 import ast
+import json
 import os
 import shutil
 from collections.abc import Callable
@@ -16,11 +19,18 @@ from typing import Any
 
 import pytest
 
+from lovspor.embeddings.inputs import build_embedding_inputs
+from lovspor.llhb.mcp_surface import tool_surface
 from lovspor.mcp import CorpusReader
+from lovspor.publish.emit import emit_site
+from lovspor.slug_index import build_slug_index
+from lovspor.storage.manifest import read_manifest
 from tests.unit.forarbeider_reader_support import released_box
 from tests.unit.forarbeider_release_support import Desk, at_a_terminal  # noqa: F401
+from tests.unit.site_fixtures import commit_all, throwaway_corpus
 from tests.unit.test_mcp import _record, _seed_corpus
 
+SITE_MANIFEST = "site-manifest.json"
 PACKAGE = Path(__file__).parents[2] / "src" / "lovspor" / "forarbeider"
 READER_MODULES = ("corpus_reader.py", "reader_views.py", "reader_cli.py")
 #: Names that would write, move, delete, spawn or reach out.
@@ -102,6 +112,52 @@ def test_the_law_readers_answer_the_same_whatever_forarbeider_holds(
 
     assert _law_answers(law) == before
     assert "forarbeider" not in (law / "manifest.json").read_text()
+
+
+def _site(out: Path, sha: str) -> dict[str, Any]:
+    """Every emitted file's bytes; of the build stamp, everything but the commit it was built at."""
+    files: dict[str, Any] = {
+        path.relative_to(out).as_posix(): path.read_bytes()
+        for path in sorted(out.rglob("*"))
+        if path.is_file()
+    }
+    stamp = json.loads(files.pop(SITE_MANIFEST))
+    assert stamp.pop("corpus_commit") == sha
+    return {**files, SITE_MANIFEST: stamp}
+
+
+def _default_surfaces(corpus: Path, sha: str, out: Path) -> dict[str, Any]:
+    """The site, the slug index, the embedding inputs and the benchmark's pinned tool surface.
+
+    A law's ``source_revision`` is the commit that last changed it, so the site
+    built after the dataset's commit must still name the first one.
+    """
+    emit_site(corpus, sha, out)
+    manifest = read_manifest(corpus / "manifest.json")
+    return {
+        "site": _site(out, sha),
+        "slug_index": build_slug_index(manifest.documents),
+        "embedding_inputs": {
+            key: build_embedding_inputs((corpus / record.markdown_path).read_text("utf-8"))
+            for key, record in manifest.documents.items()
+        },
+        "benchmark_tool_surface": tool_surface(corpus),
+    }
+
+
+@pytest.mark.usefixtures("at_a_terminal")
+def test_site_indexes_embeddings_and_benchmark_surface_ignore_a_committed_dataset(
+    tmp_path: Path,
+) -> None:
+    corpus, first = throwaway_corpus(tmp_path / "lovverk")
+    before = _default_surfaces(corpus, first, tmp_path / "site-before")
+
+    box = released_box(Desk(tmp_path / "desk"), tmp_path / "sandbox")
+    shutil.copytree(box / "forarbeider", corpus / "forarbeider")
+    second = commit_all(corpus, "forarbeider")
+
+    assert second != first
+    assert _default_surfaces(corpus, second, tmp_path / "site-after") == before
 
 
 def _names(path: Path) -> set[str]:
