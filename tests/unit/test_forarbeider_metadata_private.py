@@ -128,3 +128,87 @@ def test_an_output_inside_a_checkout_is_still_refused_first(tmp_path: Path) -> N
     assert result.exit_code == 1
     assert said("refused: unsafe_output_path:", result.output)
     assert not output.exists()
+
+
+@pytest.mark.parametrize("occupied_stage", [False, True], ids=["usual-stage", "taken-stage"])
+@pytest.mark.usefixtures("umask")
+def test_record_is_private_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, occupied_stage: bool
+) -> None:
+    """Operations promises 0600 on the staged file before the rename (#783)."""
+    output = tmp_path / "record.json"
+    stage = tmp_path / "record.json.tmp"
+    if occupied_stage:
+        stage.write_bytes(b"foreign staging file")
+    replace = Path.replace
+    published: list[Path] = []
+
+    def inspect_publication(staged: Path, destination: Path) -> Path:
+        assert destination == output
+        assert not output.exists()
+        assert _mode(staged) == 0o600
+        assert staged.read_bytes()
+        published.append(staged)
+        return replace(staged, destination)
+
+    monkeypatch.setattr(Path, "replace", inspect_publication)
+
+    result = CliRunner().invoke(app, _argv(FIXTURE, output))
+
+    assert result.exit_code == 0, result.output
+    assert len(published) == 1
+    assert _mode(output) == 0o600
+    if occupied_stage:
+        assert stage.read_bytes() == b"foreign staging file"
+    assert set(tmp_path.iterdir()) == ({output, stage} if occupied_stage else {output})
+
+
+def test_a_record_owned_by_someone_else_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The documented 'not yours' refusal must apply even to a 0600 record."""
+    output = tmp_path / "record.json"
+    previous = b'{"existing": "other owner"}\n'
+    output.write_bytes(previous)
+    output.chmod(0o600)
+    status = output.stat()
+    # No privileged chown: model the caller as a different effective owner.
+    monkeypatch.setattr(os, "geteuid", lambda: status.st_uid + 1)
+
+    result = CliRunner().invoke(app, _argv(FIXTURE, output))
+
+    assert result.exit_code == 1
+    assert said(f"refused: observation_unsafe: {output}", result.output)
+    assert output.read_bytes() == previous
+    assert output.stat().st_ino == status.st_ino
+    assert output.stat().st_uid == status.st_uid
+    assert _mode(output) == 0o600
+    assert list(tmp_path.iterdir()) == [output]
+
+
+def test_failed_record_inspection_is_a_typed_refusal_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "record.json"
+    previous = b'{"existing": "private"}\n'
+    output.write_bytes(previous)
+    output.chmod(0o600)
+    status = output.stat()
+    original_open = os.open
+
+    def refuse_inspection(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        if path == output:
+            raise PermissionError("simulated inspection failure")
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", refuse_inspection)
+
+    result = CliRunner().invoke(app, _argv(FIXTURE, output))
+
+    assert result.exit_code == 1
+    assert said(f"refused: output_write_failed: {output}", result.output)
+    assert output.read_bytes() == previous
+    assert output.stat().st_ino == status.st_ino
+    assert output.stat().st_uid == status.st_uid
+    assert _mode(output) == 0o600
+    assert list(tmp_path.iterdir()) == [output]
