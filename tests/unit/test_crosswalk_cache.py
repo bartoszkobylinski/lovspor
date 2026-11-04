@@ -117,6 +117,39 @@ def test_an_archive_that_no_longer_matches_its_pin_is_refused(tmp_path: Path) ->
         cache.verified_archive(tmp_path, {"filename": "a", "path": "a.tar.bz2"})
 
 
+@pytest.mark.parametrize("across_archives", [False, True], ids=["one-archive", "two-archives"])
+def test_identical_law_claimants_remain_ambiguous_in_real_archives(
+    tmp_path: Path, across_archives: bool
+) -> None:
+    """cache.read_archives keeps every claimant; law_record requires exactly one."""
+    body = document(LAW, "Lovvedtak 85 (2021-2022)")
+    first = "lti/2022/nl-20220617-063.xml"
+    second = "lti/2022/sf-20220617-0063.xml"
+    contents = [{first: body}, {first: body}] if across_archives else [{first: body, second: body}]
+    pins = []
+    expected = []
+    for index, members in enumerate(contents):
+        name = f"lovtidend-avd1-{2025 + index}.tar.bz2"
+        archive = tar_bytes(members)
+        (tmp_path / name).write_bytes(archive)
+        pins.append({"filename": name, "path": name, "sha256": sha256(archive).hexdigest()})
+        expected.extend((name, member) for member in members)
+
+    [record] = cache.law_records(tmp_path, pins, [LAW])
+
+    assert [(m["archive"], m["member"]) for m in record["lovdata_matches"]] == expected
+    assert [m["sha256"] for m in record["lovdata_matches"]] == [sha256(body).hexdigest()] * 2
+    assert record["law_identity"] == {"status": "ambiguous", "reason": "several members"}
+    assert record["law_decision"] == {
+        "status": "ambiguous",
+        "kind": "not_read",
+        "reason": "several members",
+    }
+    assert "header" not in record
+    assert cache.cited_decisions([record]) == []
+    assert sorted(path.name for path in tmp_path.iterdir()) == sorted(pin["path"] for pin in pins)
+
+
 @pytest.mark.parametrize("reader", [cache.cached_body, cache.verified_archive])
 def test_cache_readers_refuse_symlinks_leaving_capture(tmp_path: Path, reader) -> None:
     outside = tmp_path / "outside.xml"
