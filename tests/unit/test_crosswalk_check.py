@@ -267,7 +267,14 @@ def test_a_failing_check_blocks_promotion(built: bytes, capture_dir: Path) -> No
 
 @pytest.mark.parametrize(
     "change",
-    [{"R1": "rejected"}, {"R2": "maybe"}, {"input_sha256": "x"}, {"approved_by": ""}, {"extra": 1}],
+    [
+        {"R1": "rejected"},
+        {"R2": "maybe"},
+        {"input_sha256": "x"},
+        {"approved_by": ""},
+        {"extra": 1},
+        {"approved_on": "2026-13-45"},
+    ],
 )
 def test_an_approval_file_is_strict(tmp_path: Path, change: dict) -> None:
     body = {
@@ -283,6 +290,24 @@ def test_an_approval_file_is_strict(tmp_path: Path, change: dict) -> None:
         read_approval(path)
     path.write_text(json.dumps(body), encoding="utf-8")
     assert read_approval(path).r1 == "approved"
+
+
+def test_approval_refuses_a_date_that_names_no_calendar_instant(tmp_path: Path) -> None:
+    # Unlike contract.py's record dates (db4c95e1d53), approved_on is a pydantic
+    # `date` field, not a JSON-schema pattern: a month of 13 must still be refused
+    # cleanly, by field name, rather than crash or silently coerce.
+    body = {
+        "input_sha256": "0" * 64,
+        "approved_by": "owner",
+        "approved_on": "2026-13-45",
+        "R1": "approved",
+        "R2": "approved",
+    }
+    path = tmp_path / "approval.json"
+    path.write_text(json.dumps(body), encoding="utf-8")
+    with pytest.raises(CrosswalkError) as caught:
+        read_approval(path)
+    assert str(caught.value) == "approval refused: invalid approved_on"
 
 
 def test_release_candidate_impl_writes_a_new_file(
