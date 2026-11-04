@@ -170,6 +170,21 @@ def test_staging_reached_through_a_symlinked_parent_is_refused(tmp_path: Path) -
     assert str(caught.value) == (
         f"refusing an unsafe staging directory: {cache / 'lovdata' / '.staging'}"
     )
+    assert _tree(elsewhere) == []
+    assert (cache / "lovdata").is_symlink()
+
+
+def test_staging_outside_the_cache_is_refused_without_creating_directories(tmp_path: Path) -> None:
+    """The producer's refusal contract promises no writes before path validation."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    staging = tmp_path / "elsewhere" / "nested" / ".staging"
+
+    with pytest.raises(CrosswalkError, match="unsafe staging directory"):
+        real_directory(staging, cache)
+
+    assert not (tmp_path / "elsewhere").exists()
+    assert _tree(cache) == []
 
 
 def test_staging_inside_the_cache_is_created_and_returned(tmp_path: Path) -> None:
