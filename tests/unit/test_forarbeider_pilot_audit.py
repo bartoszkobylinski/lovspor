@@ -354,3 +354,28 @@ def test_a_workspace_linked_into_a_repository_is_refused(tmp_path: Path, kind: s
     assert said("refused: unsafe_output_path: workspace", result.output)
     assert str(tmp_path) not in result.output
     assert not (repository / "workspace" / "reports").exists()
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_an_authorized_chapter_not_supplied_holds(tmp_path: Path, kind: str) -> None:
+    desk, authorization = _released(tmp_path, kind)
+
+    result = _audit(desk, authorization, desk.all_checkpoints(), chapters=(2,))
+
+    assert _verdicts(result.output)[3] == "HOLD"
+    assert _reasons(result.output, 3) == ["observation_missing"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_forged_stored_dossier_is_refused_and_reports_nothing(tmp_path: Path, kind: str) -> None:
+    desk = Desk(tmp_path / kind, kind)
+    desk.approve_all()
+    dossier, authorization = desk.released()
+    stored = desk.workspace / "dossiers" / f"{dossier}.json"
+    stored.write_text(stored.read_text().replace(REVIEWER, "reviewer-z"))
+
+    result = _audit(desk, authorization, desk.all_checkpoints())
+
+    assert result.exit_code == 1
+    assert said("refused: release_record_corrupt", result.output)
+    assert not (desk.workspace / "reports").exists()
