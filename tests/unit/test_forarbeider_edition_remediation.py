@@ -6,11 +6,13 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from lxml import html
 
-from lovspor.forarbeider.edition import read_landing
+from lovspor.forarbeider.edition import _require_landing_header, read_landing
 from lovspor.forarbeider.edition_commands import _record, build_evidence, edition_impl
 from lovspor.forarbeider.edition_models import EditionEvidence, evidence_text, read_edition_evidence
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
+from lovspor.forarbeider.identity import parse_source_url
 from lovspor.forarbeider.models import read_metadata
 from tests.unit.test_forarbeider_edition import CORRECTED, LS_URL, NOTICE, _corrected
 from tests.unit.test_forarbeider_edition_cli import CAPTURED, L_LANDING, PLAIN, _metadata
@@ -142,3 +144,50 @@ def test_evidence_serialization_uses_the_documented_layout() -> None:
         + "\n"
     )
     assert evidence_text(evidence) == expected
+
+
+@pytest.mark.parametrize("kind", ["ls", "l"])
+def test_evidence_preserves_every_document_identity_field(tmp_path: Path, kind: str) -> None:
+    record = read_metadata(_metadata(tmp_path, kind))
+    payload, url = (
+        (CORRECTED.read_bytes(), LS_URL) if kind == "ls" else (PLAIN.read_bytes(), L_LANDING)
+    )
+    evidence, _ = build_evidence(payload, url, datetime.fromisoformat(CAPTURED), record)
+    for field in (
+        "document_type",
+        "session",
+        "proposition_number",
+        "source_document_id",
+        "source_url",
+        "id",
+    ):
+        assert getattr(evidence, field) == getattr(record, field)
+
+
+@pytest.mark.parametrize("attribute", [None, "", "XXXX"])
+def test_missing_or_invalid_edition_href_has_the_same_typed_refusal(attribute: str | None) -> None:
+    original = (
+        'href="/contentassets/00000000000000000000000000000002/no/opri/'
+        'prp209921000900000dddopri.pdf"'
+    )
+    replacement = "" if attribute is None else f'href="{attribute}"'
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        read_landing(_corrected(original, replacement), LS_URL)
+    assert caught.value.reason.value == "edition_unrecognized"
+    assert caught.value.detail == "edition link"
+
+
+@pytest.mark.parametrize("field", ["h1", "og:title", "DC.Title"])
+def test_landing_header_checks_each_of_its_three_identity_statements(field: str) -> None:
+    root = html.fromstring(CORRECTED.read_bytes())
+    if field == "h1":
+        root.xpath("//h1")[0].text = "Prop. 902 LS (2099\u20132100)"
+    else:
+        attribute = "property" if field == "og:title" else "name"
+        root.xpath(f'//meta[@{attribute}="{field}"]')[0].set(
+            "content", "Prop. 902 LS (2099\u20132100)"
+        )
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        _require_landing_header(root, parse_source_url(LS_URL))
+    assert caught.value.reason.value == "conflicting_identity"
+    assert caught.value.detail == field
