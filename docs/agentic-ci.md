@@ -414,7 +414,12 @@ was not taken: the scope guard and the `BEFORE_SHA` arithmetic both assume the h
   #455). That killing test must drive the real code: the prompt forbids monkeypatching
   anything of the module under mutation, and a mutant only a mock can kill is reported
   as likely equivalent, not killed — on PR #422 two equivalent `run_sync` mutants were
-  "killed" by mocking the orchestrator's own functions (issue #427). A
+  "killed" by mocking the orchestrator's own functions (issue #427). It must also
+  run in the pytest process mutmut started: mutmut puts its mutated copy on that
+  process's `sys.path` only, so a test that imports the code in a child
+  (`subprocess` with `sys.executable`) runs the original and cannot kill anything. On
+  PR #754 cycle 1 spent itself on such a test (issue #763). The prompt says so, and
+  `tests/unit/test_mutation_child_process.py` pins the mutmut behaviour behind it. A
   timed-out mutant is neither killed nor survived — it got no verdict inside mutmut's
   per-mutant time limit — so the job summary and the gate's log line list survived,
   timed-out, suspicious, uncovered and no-verdict counts separately too.

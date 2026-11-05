@@ -51,6 +51,14 @@ return values, output. If you cannot observe the mutant's effect without replaci
 part of the module under test, a mutant only a mock can kill is likely_equivalent:
 report it with the equivalence argument below instead of killing it.
 
+A killing test must call the mutated code in the pytest process mutmut started.
+Mutmut puts its mutated copy on that process's `sys.path` only, so a child started
+with `subprocess` and `sys.executable` imports the original module, and a mutant can
+never fail there (issue #763: on PR #754 the same assertion did not kill from a
+child and killed in process). A test that runs a command in a child may stay as
+coverage, but it does not count as the kill: add an in-process test that calls the
+function, or the typer app through `CliRunner`, and asserts the same thing.
+
 CLI output is asserted by what the command printed, never by how the terminal laid
 it out (issues #295, #608). The unit conftest pins `COLUMNS=20`, so typer/rich help and
 usage-error panels wrap mid-token and carry ANSI colour and box drawing: an assert such

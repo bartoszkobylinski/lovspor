@@ -56,6 +56,12 @@ One mutmut 3.8.0 run, scoped to **functions**, not files:
 - So a killing test belongs in `tests/unit/` and must actually exercise the mutated
   function. A survivor whose function has no covering unit test shows up as `no tests`
   (gate reason `uncovered_mutants`).
+- A mutant runs only inside the pytest process mutmut started (issue #763). Mutmut's
+  `setup_source_paths()` puts `mutants/src` first on that process's `sys.path` and drops
+  `src`, and sets no `PYTHONPATH`. A child started with `subprocess` and `sys.executable`
+  imports the original module through the editable install, so it can never kill a
+  mutant. Kill in process: call the function, or the typer app through `CliRunner`.
+  `tests/unit/test_mutation_child_process.py` pins that behaviour of mutmut 3.8.0.
 - Per-mutant time limit: `(estimated_time + timeout_constant) * timeout_multiplier`, with
   `timeout_constant = 7.0`, `timeout_multiplier = 15.0` (#423).
 
