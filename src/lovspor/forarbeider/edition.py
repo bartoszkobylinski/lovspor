@@ -99,12 +99,13 @@ def _require_landing_header(root: html.HtmlElement, locator: SourceLocator) -> h
         raise ForarbeiderRefusedError(RefusalReason.DOM_CHANGED, "article-header")
     if headers[0].xpath(_SCRIPT_TITLE_CONTROL):
         raise ForarbeiderRefusedError(RefusalReason.BROWSER_RENDERED_PAGE, "subheader")
-    stated = (
-        _clean(headers[0].xpath("./h1")[0].text_content()),
-        _required_meta(root, ("property", "og:title"), RefusalReason.DOM_CHANGED),
-        _required_meta(root, ("name", "DC.Title"), RefusalReason.TITLE_MISSING).partition(" - ")[0],
-    )
-    for name, reference in zip(("h1", "og:title", "DC.Title"), stated, strict=True):
+    stated = {
+        "h1": _clean(headers[0].xpath("./h1")[0].text_content()),
+        "og:title": _required_meta(root, ("property", "og:title"), RefusalReason.DOM_CHANGED),
+        "DC.Title": _required_meta(root, ("name", "DC.Title"), RefusalReason.TITLE_MISSING),
+    }
+    stated["DC.Title"] = stated["DC.Title"].partition(" - ")[0]
+    for name, reference in stated.items():
         if parse_reference(reference) != locator.reference:
             raise ForarbeiderRefusedError(RefusalReason.CONFLICTING_IDENTITY, name)
     return headers[0]
@@ -160,8 +161,8 @@ def _edition_links(heading: html.HtmlElement) -> tuple[str, tuple[str, ...]]:
 
 
 def _edition_link(link: html.HtmlElement) -> tuple[str, str]:
-    href = link.get("href") or ""
-    asset = _ASSET.fullmatch(href)
+    href = link.get("href")
+    asset = None if href is None else _ASSET.fullmatch(href)
     if asset is None:
         raise ForarbeiderRefusedError(RefusalReason.EDITION_UNRECOGNIZED, "edition link")
     if not _clean(link.text_content()).startswith(_LABELS[asset["kind"]]):

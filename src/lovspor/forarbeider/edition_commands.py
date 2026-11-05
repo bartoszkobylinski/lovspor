@@ -22,6 +22,7 @@ from lovspor.forarbeider.edition_models import EditionEvidence, evidence_text
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.identity import SourceLocator
 from lovspor.forarbeider.models import ForarbeidRecord, proved_identity
+from lovspor.forarbeider.page import identity_fields
 from lovspor.forarbeider.staging import checked_output, read_private, write_observation
 from lovspor.ops.commands import ops_app
 
@@ -33,14 +34,6 @@ _FIXED_FIELDS: dict[str, object] = {
     "parser_version": 1,
     "chapter_edition": "unknown",
 }
-_IDENTITY = (
-    "document_type",
-    "session",
-    "proposition_number",
-    "source_document_id",
-    "source_url",
-    "id",
-)
 
 
 def _record(path: Path) -> ForarbeidRecord:
@@ -65,6 +58,13 @@ def _require_same_document(record: ForarbeidRecord, landing: SourceLocator) -> N
         raise ForarbeiderRefusedError(RefusalReason.EDITION_IDENTITY_MISMATCH, record.id)
 
 
+def _identity(landing: SourceLocator) -> dict[str, object]:
+    """The v1 record's identity fields, without the chapter page the landing page is not."""
+    fields = identity_fields(landing)
+    del fields["source_page_url"]
+    return fields
+
+
 def build_evidence(
     payload: bytes, landing_url: str, retrieved_at: datetime, record: ForarbeidRecord
 ) -> tuple[EditionEvidence, EditionFacts]:
@@ -77,7 +77,7 @@ def build_evidence(
     _require_same_document(record, landing)
     fields = {
         **_FIXED_FIELDS,
-        **dict(zip(_IDENTITY, proved_identity(landing), strict=True)),
+        **_identity(landing),
         "landing_page_url": landing.page_url,
         "landing_retrieved_at": retrieved_at,
         "landing_sha256": hashlib.sha256(payload).hexdigest(),
