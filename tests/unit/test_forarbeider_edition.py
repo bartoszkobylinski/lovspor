@@ -287,3 +287,37 @@ def test_wording_in_the_tail_of_a_recognised_node_is_unrecognized() -> None:
     payload = _corrected("</h3>", "</h3> Korrigert utgave")
 
     assert _refusal(payload) is RefusalReason.EDITION_UNRECOGNIZED
+
+
+def test_multiple_rettebrev_are_preserved_in_source_order() -> None:
+    link = (
+        '<li><a href="/contentassets/00000000000000000000000000000002/no/rett/second.pdf">'
+        "Rettebrev 14. mai 2100</a></li>"
+    )
+
+    _, facts = read_landing(_corrected("</ul>", f"{link}</ul>"), LS_URL)
+
+    assert facts.rettebrev_urls == (
+        f"{ASSETS}/rett/rettebrev.pdf",
+        f"{ASSETS}/rett/second.pdf",
+    )
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "/contentassets/00000000000000000000000000000002/no/rett/second.pdf?download=1",
+        "/contentassets/00000000000000000000000000000002/no/rett/second.pdf#page=1",
+        "https://example.org/second.pdf",
+    ],
+    ids=["query", "fragment", "unfamiliar-target"],
+)
+def test_an_extra_unfamiliar_link_does_not_hide_behind_valid_edition_links(href: str) -> None:
+    link = f'<li><a href="{href}">Rettebrev</a></li>'
+
+    assert _refusal(_corrected("</ul>", f"{link}</ul>")) is RefusalReason.EDITION_UNRECOGNIZED
+
+
+@pytest.mark.parametrize("notice", [f"<div>{NOTICE}</div>", NOTICE.replace("per ", "<b>per</b> ")])
+def test_a_notice_with_unobserved_nesting_is_refused(notice: str) -> None:
+    assert _refusal(_corrected(NOTICE, notice)) is RefusalReason.EDITION_UNRECOGNIZED
