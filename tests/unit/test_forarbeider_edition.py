@@ -348,3 +348,29 @@ def test_valid_calendar_boundaries_preserve_the_stated_date(stated: str, expecte
     _, facts = read_landing(_corrected("13.5.2100", stated), LS_URL)
 
     assert facts.corrected_on == expected
+
+
+def test_a_corrected_edition_without_its_original_pdf_is_conflicting() -> None:
+    # Remove the observed item, retaining the correction notice and rettebrev.
+    text = CORRECTED.read_text(encoding="utf-8")
+    start = text.index('<li><a href="/contentassets/', text.index(BLOCK_START))
+    end = text.index("</li>", start) + len("</li>")
+    original = text[start:end]
+
+    assert _refusal(_corrected(original, "")) is RefusalReason.EDITION_CONFLICTING
+
+
+@pytest.mark.parametrize("stated", ["29.2.2100", "0.5.2100", "13.0.2100", "13.13.2100"])
+def test_invalid_calendar_boundaries_are_unrecognized(stated: str) -> None:
+    assert _refusal(_corrected("13.5.2100", stated)) is RefusalReason.EDITION_UNRECOGNIZED
+
+
+@pytest.mark.parametrize("page", ["plain", "corrected"])
+def test_a_stray_original_pdf_is_refused_even_without_edition_wording(page: str) -> None:
+    fixture, url = (PLAIN, L_URL) if page == "plain" else (CORRECTED, LS_URL)
+    link = (
+        '<a href="/contentassets/00000000000000000000000000000002/no/opri/extra.pdf">Download</a>'
+    )
+    text = fixture.read_text(encoding="utf-8").replace("<footer", f"{link}<footer")
+
+    assert _refusal(text.encode(), url) is RefusalReason.EDITION_UNRECOGNIZED
