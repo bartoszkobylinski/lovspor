@@ -26,13 +26,16 @@ def verifier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None
     monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
 
 
-def test_signers_are_utf8_even_in_ascii_locale(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "principal", ["eier-æ@example.invalid", "eier-\u65e5\u672c@example.invalid"]
+)
+def test_signers_are_utf8_even_in_ascii_locale(tmp_path: Path, principal: str) -> None:
     signers = tmp_path / "signers"
-    signers.write_bytes("eier-æ@example.invalid key\n".encode())
+    signers.write_bytes(f"# trusted owners\n\n {principal} key \n".encode())
     previous = locale.setlocale(locale.LC_CTYPE)
     try:
         locale.setlocale(locale.LC_CTYPE, "C")
-        assert _signer_lines(signers) == ["eier-æ@example.invalid key"]
+        assert _signer_lines(signers) == [f"{principal} key"]
     finally:
         locale.setlocale(locale.LC_CTYPE, previous)
 
@@ -54,8 +57,11 @@ def test_verifier_replaces_invalid_output_bytes(
     assert _ssh_keygen(["find-principals"], b"") == "\ufffd"
 
 
-def test_verifier_refuses_a_nonzero_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    verifier(tmp_path, monkeypatch, "exit 1")
+@pytest.mark.parametrize("exit_code", [1, 2, 255])
+def test_verifier_refuses_a_nonzero_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int
+) -> None:
+    verifier(tmp_path, monkeypatch, f"printf 'untrusted signer'; exit {exit_code}")
     with pytest.raises(CrosswalkError) as caught:
         _ssh_keygen(["find-principals"], b"")
     assert str(caught.value) == "approval signature refused: not by a trusted signer"
@@ -73,7 +79,16 @@ def test_signature_requires_exactly_one_principal(
     assert str(caught.value) == "approval signature refused: not exactly one trusted signer"
 
 
-@pytest.mark.parametrize("size", [0, MAX_SIGNATURE_BYTES, MAX_SIGNATURE_BYTES + 1])
+@pytest.mark.parametrize(
+    "size",
+    [
+        0,
+        MAX_SIGNATURE_BYTES,
+        MAX_SIGNATURE_BYTES + 1,
+        MAX_SIGNATURE_BYTES + 2,
+        MAX_SIGNATURE_BYTES + 4096,
+    ],
+)
 def test_signature_size_boundary(tmp_path: Path, size: int) -> None:
     signature = tmp_path / "signature"
     data = b"x" * size
@@ -102,9 +117,12 @@ def test_oversized_signature_is_not_loaded_whole(tmp_path: Path) -> None:
     assert peak < 1024 * 1024
 
 
-def test_real_signature_verification(tmp_path: Path) -> None:
+@pytest.mark.parametrize("data", [b"", b"approval bytes", b"\x00\xff\n" * 1024])
+def test_real_signature_verification(tmp_path: Path, data: bytes) -> None:
     signer = new_signer(tmp_path / "keys")
     message = tmp_path / "message"
-    message.write_bytes(b"approval bytes")
+    message.write_bytes(data)
     signature = sign(signer, message)
     assert verify_signature(message.read_bytes(), signature, signer.signers).principal == PRINCIPAL
+    with pytest.raises(CrosswalkError, match="approval signature refused"):
+        verify_signature(data + b"tampered", signature, signer.signers)
