@@ -19,6 +19,7 @@ and in the mutation-testing skill.
 from __future__ import annotations
 
 import os
+import runpy
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -98,6 +99,20 @@ def test_child_imports_original_even_when_parent_resolves_shadow_package(
     assert child == original
     assert child != shadow_init.resolve()
     assert child.parts[-3:] == ("src", "lovspor", "__init__.py")
+
+
+def test_child_import_assertion_works_from_a_shadow_test_copy(mutated_tree: Path) -> None:
+    """The #796 regression: the test's own location must not locate the original."""
+    shadow_test = mutated_tree / "mutants" / "tests" / "unit" / Path(__file__).name
+    shadow_test.parent.mkdir(parents=True)
+    shadow_test.write_text(Path(__file__).read_text(encoding="utf-8"), encoding="utf-8")
+
+    copied_module = runpy.run_path(str(shadow_test))
+
+    assert copied_module["_REPO"] == mutated_tree / "mutants"
+    copied_module["test_child_imports_original_even_when_parent_resolves_shadow_package"](
+        mutated_tree
+    )
 
 
 def _child_lovspor_file(env: dict[str, str]) -> Path:
