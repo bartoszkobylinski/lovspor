@@ -191,6 +191,14 @@ def test_revisions_sort_numerically_when_crossing_single_digits() -> None:
 
 
 @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_numbers_are_refused_inside_nested_evidence(constant: str) -> None:
+    data = ('{"evidence":[{"nested":{"value":' + constant + "}}]}\n").encode()
+    with pytest.raises(CrosswalkContractError) as caught:
+        parse_records(data)
+    assert caught.value.problems == (f"non-finite number {constant} is not JSON",)
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
 def test_nested_non_finite_numbers_are_typed_contract_errors(constant: str) -> None:
     data = ('{"evidence":[{"nested":' + constant + "}]}\n").encode()
     with pytest.raises(CrosswalkContractError) as caught:

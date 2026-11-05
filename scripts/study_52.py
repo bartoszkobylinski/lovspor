@@ -45,6 +45,16 @@ from lovspor.crosswalk.cache import (
 )
 from lovspor.crosswalk.cache import law_records as crosswalk_law_records
 from lovspor.crosswalk.capture import Pacer, capture_lovdata, capture_sak, capture_stortinget
+from lovspor.crosswalk.discovery import (
+    attach_discovery,
+    case_summary,
+    chain,
+    confirmed,
+    discovery_record,
+    listings_used,
+    other_decisions,
+    publication_listed,
+)
 from lovspor.crosswalk.paths import writable_target
 from lovspor.legislative_chain import (
     CHAIN_PARSER_VERSION,
@@ -62,13 +72,9 @@ from lovspor.stortinget_case_source import (
 from lovspor.stortinget_discovery import (
     DISCOVERY_PARSER_VERSION,
     Observation,
-    candidate_saks,
     case_identity,
     classify_drift,
-    discover,
-    export_id,
     parse_case,
-    previous_session,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -189,124 +195,12 @@ _case = case_snapshot
 _parses = parses
 
 
-def _publication_listed(cache: Path, manifest: dict[str, Any], decision: LawDecision):
-    """True or False from the session's Lovvedtak list; None if it was not read or parsed."""
-    ids = _parsed_listing(cache, manifest, "publikasjoner", decision.session_id)
-    return None if ids is None else export_id(decision) in ids
-
-
-# Evidence policy (#768): the session's Lovvedtak publication list is a REQUIRED,
-# independent confirmation that the decision exists. A typed case reference alone
-# never discovers: with the list unread or unparseable the outcome is "incomplete",
-# and with the decision absent from a list that was read it is "unlisted", which
-# the chain reports as contradicted. Neither can become attested.
-_UNCONFIRMED = {
-    None: ("incomplete", "the session's Lovvedtak publication list was not read or parsed"),
-    False: ("unlisted", "the decision is absent from the session's Lovvedtak publication list"),
-}
-
-
-def _confirmed(outcome: str, listed: bool | None) -> tuple[str, str | None]:
-    """Gate a discovery on the publication list; other outcomes pass unchanged."""
-    if outcome != "discovered" or listed is True:
-        return outcome, None
-    return _UNCONFIRMED[listed]
-
-
-def discovery_record(
-    cache: Path, manifest: dict[str, Any], decision: LawDecision
-) -> dict[str, Any]:
-    hints = _hints(cache, manifest, decision)
-    listed = _publication_listed(cache, manifest, decision)
-    base = {"decision": asdict(decision), "export_id": export_id(decision)}
-    base["publication_listed"] = listed
-    base["listings"] = _listings_used(cache, manifest, decision)
-    base["parser_versions"] = {
-        "stortinget_discovery": DISCOVERY_PARSER_VERSION,
-        "stortinget_sak": SAK_PARSER_VERSION,
-    }
-    if hints is None:
-        reason = "a saker listing was not read or did not parse"
-        return {**base, "outcome": "incomplete", "reason": reason}
-    candidates = candidate_saks(hints, decision)
-    pairs = [_case(cache, manifest, "discovery", sak_id) for sak_id in candidates]
-    cases = [snapshot for snapshot, _ in pairs if snapshot is not None and _parses(snapshot)]
-    failed = [sak_id for sak_id in candidates if sak_id not in {c.sak_id for c in cases}]
-    found = discover(decision, cases, failed)
-    outcome, reason = _confirmed(found.outcome, listed)
-    return {
-        **base,
-        "outcome": outcome,
-        "reason": reason,
-        "sak_ids": list(found.sak_ids),
-        "candidates": list(found.candidates),
-        "failed": list(found.failed),
-        "cases": [_case_summary(s) for s in cases if s.sak_id in found.sak_ids],
-    }
-
-
-def _listings_used(
-    cache: Path, manifest: dict[str, Any], decision: LawDecision
-) -> list[dict[str, Any]]:
-    session = decision.session_id
-    keys = (("publikasjoner", session), ("saker", session), ("saker", previous_session(session)))
-    fields = ("kind", "key", "source_url", "sha256", "retrieved_at", "http_status", "error")
-    used = [(key, _latest(manifest, "discovery", *key)) for key in keys]
-    return [
-        {**{f: record.get(f) for f in fields}, "parse_error": _parse_error(cache, manifest, *key)}
-        for key, record in used
-        if record is not None
-    ]
-
-
-def _case_summary(snapshot: CaseSnapshot) -> dict[str, Any]:
-    case = parse_case(snapshot)
-    return {
-        "sak_id": case.sak_id,
-        "sak_sesjon": case.session_id,
-        "typed_lovvedtak": [asdict(d) for d in case.lovvedtak],
-        "source_url": snapshot.source_url,
-        "sha256": snapshot.source_sha256,
-        "retrieved_at": snapshot.observed_at.isoformat(),
-        "parser_version": SAK_PARSER_VERSION,
-    }
-
-
-def _chain(law: dict[str, Any], found: dict[str, Any] | None) -> dict[str, Any]:
-    """The label-free chain: the header's decision, then a typed, unique case."""
-    edge = law["law_decision"]
-    if edge["status"] != "attested":
-        return {"status": edge["status"], "reason": edge.get("reason")}
-    if found is None or found["outcome"] in {"not_found", "incomplete"}:
-        outcome = "not_attempted" if found is None else found["outcome"]
-        detail = "" if found is None or not found.get("reason") else f": {found['reason']}"
-        return {"status": "unresolved", "reason": f"discovery {outcome}{detail}"}
-    if found["outcome"] == "unlisted":
-        return {"status": "contradicted", "reason": f"discovery unlisted: {found['reason']}"}
-    if found["outcome"] == "ambiguous":
-        return {"status": "ambiguous", "reason": f"typed in saker {found['sak_ids']}"}
-    return {"status": "attested", "reason": None, "sak_id": found["sak_ids"][0]}
-
-
-def _other_decisions(law: dict[str, Any], found: dict[str, Any] | None) -> list[Any]:
-    if found is None or found["outcome"] != "discovered":
-        return []
-    own = law["law_decision"]["decision"]
-    return [d for d in found["cases"][0]["typed_lovvedtak"] if d != own]
-
-
-def attach_discovery(laws: list[dict[str, Any]], decisions: list[dict[str, Any]]) -> None:
-    by_decision = {json.dumps(d["decision"], sort_keys=True): d for d in decisions}
-    for law in laws:
-        decision = law["law_decision"].get("decision")
-        found = by_decision.get(json.dumps(decision, sort_keys=True)) if decision else None
-        law["discovery"] = (
-            {"outcome": "not_attempted"}
-            if found is None
-            else {k: found.get(k) for k in ("outcome", "reason", "sak_ids", "candidates", "failed")}
-        )
-        law["chain"] = _chain(law, found)
-        law["chain"]["other_case_decisions"] = _other_decisions(law, found)
+_publication_listed = publication_listed
+_confirmed = confirmed
+_listings_used = listings_used
+_case_summary = case_summary
+_chain = chain
+_other_decisions = other_decisions
 
 
 # --- verification and evaluation (labels) ------------------------------------------

@@ -151,6 +151,34 @@ def test_identical_law_claimants_remain_ambiguous_in_real_archives(
 
 
 @pytest.mark.parametrize("reader", [cache.cached_body, cache.verified_archive])
+def test_cache_readers_refuse_symlinks_leaving_capture(tmp_path: Path, reader) -> None:
+    outside = tmp_path / "outside.xml"
+    outside.write_bytes(b"pinned bytes")
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    (capture / "linked.xml").symlink_to(outside)
+    record = _entry("discovery", "sak", 1, "linked.xml", outside.read_bytes())
+
+    with pytest.raises(CrosswalkError, match="leaves the cache"):
+        reader(capture, record)
+    assert outside.read_bytes() == b"pinned bytes"
+
+
+def test_archive_digest_includes_bytes_after_first_chunk(tmp_path: Path) -> None:
+    archive = tmp_path / "archive.tar.bz2"
+    body = b"a" * (1 << 20) + b"tail"
+    archive.write_bytes(body)
+    record = {"path": archive.name, "sha256": sha256(body).hexdigest()}
+    assert cache.verified_archive(tmp_path, record) == archive.resolve()
+
+    with archive.open("r+b") as stream:
+        stream.seek(1 << 20)
+        stream.write(b"fail")
+    with pytest.raises(CrosswalkError, match="do not match the manifest"):
+        cache.verified_archive(tmp_path, record)
+
+
+@pytest.mark.parametrize("reader", [cache.cached_body, cache.verified_archive])
 def test_cached_objects_cannot_escape_through_symlinks(tmp_path: Path, reader) -> None:
     directory = tmp_path / "cache"
     directory.mkdir()
