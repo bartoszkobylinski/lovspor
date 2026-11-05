@@ -18,6 +18,7 @@ from typer.testing import CliRunner
 from lovspor.cli import app
 from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.cache import MANIFEST, load_manifest
+from lovspor.crosswalk.canonical import parse_records
 from lovspor.crosswalk.commands import crosswalk_app
 from lovspor.crosswalk.errors import CrosswalkError
 from tests.unit.crosswalk_support import COMMIT, PRODUCER, SCENARIO_LAWS, make_capture
@@ -73,3 +74,33 @@ def test_an_explicit_library_scope_still_builds_a_scopeless_capture(scopeless: P
     """The library path the study used stays: the caller states the scope, nothing is guessed."""
     options = BuildOptions(PRODUCER, lovverk_commit=COMMIT, law_ids=tuple(SCENARIO_LAWS))
     assert build(scopeless, options).count(b"\n") == len(SCENARIO_LAWS)
+
+
+@pytest.mark.parametrize("law_ids", [None, ()])
+def test_a_commit_alone_cannot_supply_the_missing_scope(
+    scopeless: Path, law_ids: tuple[str, ...] | None
+) -> None:
+    options = BuildOptions(PRODUCER, lovverk_commit=COMMIT, law_ids=law_ids)
+    with pytest.raises(CrosswalkError) as caught:
+        build(scopeless, options)
+    assert str(caught.value) == NO_SCOPE
+
+
+def test_explicit_laws_still_require_a_lovverk_commit(scopeless: Path) -> None:
+    options = BuildOptions(PRODUCER, law_ids=tuple(SCENARIO_LAWS))
+    with pytest.raises(CrosswalkError, match="lovverk_commit must be a 40-hex commit id"):
+        build(scopeless, options)
+
+
+def test_explicit_scope_does_not_expand_to_the_cached_laws(scopeless: Path) -> None:
+    """The documented library fallback uses only the caller's scope, without cache writes."""
+    before = {p.relative_to(scopeless): p.read_bytes() for p in scopeless.rglob("*") if p.is_file()}
+    law = "LOV-2022-06-17-63"
+    options = BuildOptions(PRODUCER, lovverk_commit=COMMIT, law_ids=(law,))
+
+    first = build(scopeless, options)
+
+    assert [r["amending_lov_id"] for r in parse_records(first)] == [law]
+    assert build(scopeless, options) == first
+    after = {p.relative_to(scopeless): p.read_bytes() for p in scopeless.rglob("*") if p.is_file()}
+    assert after == before
