@@ -8,7 +8,10 @@ import copy
 import io
 import tarfile
 from hashlib import sha256
+from pathlib import Path
 from typing import Any
+
+from lovspor.crosswalk import capture as cap
 
 ARCHIVE = "lovtidend-avd1-2001-2025.tar.bz2"
 ARCHIVE_URL = f"https://api.lovdata.no/v1/publicData/get/{ARCHIVE}"
@@ -241,3 +244,24 @@ def mock_scenario(httpx_mock: Any) -> None:
         httpx_mock.add_response(url=f"{API}/get/{name}", content=body)
     for url, body in scenario_stortinget().items():
         httpx_mock.add_response(url=url, content=body, headers={"Content-Type": "text/xml"})
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def make_capture(tmp_path: Path, httpx_mock: Any) -> Path:
+    """The scenario captured through the real capture code, HTTP mocked."""
+    mock_scenario(httpx_mock)
+    clock = FakeClock()
+    pacer = cap.Pacer(tmp_path / "progress.log", clock=clock, sleep=clock.sleep)
+    cache = tmp_path / "capture"
+    cap.capture(cache, SCENARIO_LAWS, COMMIT, cap.Sources(pacer=pacer))
+    return cache

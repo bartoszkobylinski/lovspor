@@ -12,11 +12,14 @@ from pathlib import Path
 from typing import Annotated, BinaryIO
 
 import typer
+from pydantic import ValidationError
 
 from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.capture import REAL_SOURCES, Sources, capture
-from lovspor.crosswalk.errors import CrosswalkError
+from lovspor.crosswalk.check import check
+from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
 from lovspor.crosswalk.paths import writable_target
+from lovspor.crosswalk.release import Approval, promote
 from lovspor.errors import LovsporError
 from lovspor.ops.commands import ops_app
 
@@ -163,6 +166,75 @@ def build_command(
             producer_commit=producer_commit or engine_commit(), previous=read_previous(previous)
         )
         typer.echo(build_impl(cache, output, options))
+    except LovsporError as error:
+        typer.echo(f"refused: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+
+MAX_APPROVAL_BYTES = 64 * 1024
+
+
+def read_approval(path: Path) -> Approval:
+    try:
+        return Approval.model_validate_json(read_bounded(path, MAX_APPROVAL_BYTES, "approval"))
+    except ValidationError as exc:
+        # Approval is flat, so each error's location is one top-level field, or
+        # none when the document itself is not a JSON object.
+        fields = sorted({str(e["loc"][0]) if e["loc"] else "document" for e in exc.errors()})
+        raise CrosswalkError(f"approval refused: invalid {', '.join(fields)}") from exc
+
+
+def check_impl(data_path: Path, previous: Path | None, cache: Path | None) -> str:
+    """One line per problem, then a verdict; raises when anything failed."""
+    data = read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
+    report = check(data, read_previous(previous), cache)
+    if not report.passed:
+        raise CrosswalkContractError(report.problems)
+    found = f"ok: {len(report.records)} records"
+    if cache is None:
+        return found
+    drift = f"{len(report.drifted)} with raw bytes not in this capture"
+    return f"{found}, {len(report.unverified)} not reproduced from a capture, {drift}"
+
+
+def release_candidate_impl(data_path: Path, approval: Path, cache: Path, output: Path) -> str:
+    data = read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
+    promoted, counts = promote(data, read_approval(approval), cache)
+    write_once(output, promoted)
+    return "; ".join(f"{reason}: {count}" for reason, count in sorted(counts.items()))
+
+
+_Input = Annotated[Path, typer.Option("--input", help="A crosswalk JSONL file.")]
+
+
+@crosswalk_app.command("check")
+def check_command(
+    data: _Input,
+    previous: Annotated[Path | None, typer.Option("--previous", help="Previous release.")] = None,
+    cache: Annotated[Path | None, typer.Option("--cache", help="Capture to verify.")] = None,
+) -> None:
+    """Fail closed: canonical form, contract, append-only history, provenance."""
+    try:
+        typer.echo(check_impl(data, previous, cache))
+    except CrosswalkContractError as error:
+        for problem in error.problems:
+            typer.echo(f"problem: {problem}", err=True)
+        raise typer.Exit(code=1) from error
+    except LovsporError as error:
+        typer.echo(f"refused: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+
+@crosswalk_app.command("release-candidate")
+def release_candidate_command(
+    data: _Input,
+    approval: Annotated[Path, typer.Option("--approval", help="The owner's approval file.")],
+    cache: _Cache,
+    output: Annotated[Path, typer.Option("--output", help="New JSONL file; never overwritten.")],
+) -> None:
+    """Explicit gate: promote eligible records under the owner's approval of these bytes."""
+    try:
+        typer.echo(release_candidate_impl(data, approval, cache, output))
     except LovsporError as error:
         typer.echo(f"refused: {error}", err=True)
         raise typer.Exit(code=1) from error

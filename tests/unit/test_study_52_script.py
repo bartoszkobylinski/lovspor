@@ -656,6 +656,30 @@ def test_capture_into_the_lovverk_corpus_is_refused_before_anything_is_written(
     assert sorted(p.name for p in corpus.rglob("*")) == ["lover", "manifest.json"]
 
 
+def test_a_symlink_into_a_checkout_cannot_carry_the_capture_cache_write(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "data").mkdir(parents=True)
+    (repo / ".git").mkdir()
+    link = tmp_path / "innocent"
+    link.symlink_to(repo / "data")
+    with pytest.raises(LovsporError, match="inside the Git checkout"):
+        study.capture(link / "study-52")
+    assert sorted(p.name for p in repo.rglob("*")) == [".git", "data"]
+
+
+def test_capture_refuses_the_env_configured_lovverk_corpus(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    corpus = tmp_path / "configured-lovverk"
+    corpus.mkdir()
+    monkeypatch.setenv("LOVVERK_CORPUS_PATH", str(corpus))
+    with pytest.raises(LovsporError, match="inside the Lovverk corpus"):
+        study.capture(corpus / "study-52")
+    assert sorted(p.name for p in corpus.rglob("*")) == []
+
+
 # --- capture happy path (#610, P2 refactor onto lovspor.crosswalk) -------------------
 
 LOVDATA_API = "https://api.lovdata.no/v1/publicData"
