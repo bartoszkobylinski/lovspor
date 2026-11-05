@@ -66,3 +66,47 @@ def test_option_help_reads_the_click_parameter_at_any_width() -> None:
 def test_option_help_refuses_an_option_the_command_does_not_have() -> None:
     with pytest.raises(LookupError, match="--missing"):
         option_help(_app(), ["capture"], "--missing")
+
+
+@pytest.mark.parametrize("option", ["--cache", "-c"])
+def test_option_help_reads_root_command_option_aliases(option: str) -> None:
+    app = typer.Typer()
+
+    @app.command()
+    def capture(cache: Annotated[str, typer.Option("--cache", "-c", help=_HELP)] = "") -> None:
+        """A single command is the root Click command."""
+
+    assert option_help(app, [], option) == _HELP
+
+
+def test_option_help_returns_none_when_option_has_no_help() -> None:
+    app = typer.Typer()
+
+    @app.command()
+    def capture(cache: Annotated[str, typer.Option("--cache")] = "") -> None:
+        """Capture."""
+
+    assert option_help(app, (), "--cache") is None
+
+
+def test_option_help_selects_nested_command_without_using_parent_or_sibling_help() -> None:
+    app = _app()
+    nested = typer.Typer()
+    app.add_typer(nested, name="nested")
+
+    @nested.callback()
+    def group(cache: Annotated[str, typer.Option("--cache", help="Group cache")] = "") -> None:
+        """Nested group."""
+
+    @nested.command()
+    def capture(cache: Annotated[str, typer.Option("--cache", help="Nested cache")] = "") -> None:
+        """Nested capture."""
+
+    @nested.command()
+    def other() -> None:
+        """A sibling without a cache option."""
+
+    assert option_help(app, ("nested",), "--cache") == "Group cache"
+    assert option_help(app, ("nested", "capture"), "--cache") == "Nested cache"
+    with pytest.raises(LookupError, match="nested other has no option --cache"):
+        option_help(app, ("nested", "other"), "--cache")
