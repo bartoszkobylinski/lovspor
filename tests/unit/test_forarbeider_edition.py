@@ -321,3 +321,30 @@ def test_an_extra_unfamiliar_link_does_not_hide_behind_valid_edition_links(href:
 @pytest.mark.parametrize("notice", [f"<div>{NOTICE}</div>", NOTICE.replace("per ", "<b>per</b> ")])
 def test_a_notice_with_unobserved_nesting_is_refused(notice: str) -> None:
     assert _refusal(_corrected(NOTICE, notice)) is RefusalReason.EDITION_UNRECOGNIZED
+
+
+@pytest.mark.parametrize("attribute", ['property="og:title"', 'name="DC.Title"'])
+def test_each_metadata_title_must_agree_with_the_landing_identity(attribute: str) -> None:
+    payload = _corrected(
+        f'{attribute} content="Prop. 900 LS',
+        f'{attribute} content="Prop. 902 LS',
+    )
+
+    assert _refusal(payload) is RefusalReason.CONFLICTING_IDENTITY
+
+
+@pytest.mark.parametrize("closing", ["</a>", "</div>\n    <h1>"])
+def test_recognized_notice_and_link_tails_cannot_hide_another_edition(closing: str) -> None:
+    payload = _corrected(closing, closing.replace(">", ">Korrigert utgave ", 1))
+
+    assert _refusal(payload) is RefusalReason.EDITION_UNRECOGNIZED
+
+
+@pytest.mark.parametrize(
+    ("stated", "expected"),
+    [("29.2.2096", date(2096, 2, 29)), ("01.01.2100", date(2100, 1, 1))],
+)
+def test_valid_calendar_boundaries_preserve_the_stated_date(stated: str, expected: date) -> None:
+    _, facts = read_landing(_corrected("13.5.2100", stated), LS_URL)
+
+    assert facts.corrected_on == expected

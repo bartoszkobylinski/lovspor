@@ -7,7 +7,12 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from lovspor.forarbeider.edition_models import EditionEvidence, evidence_text, read_edition_evidence
+from lovspor.forarbeider.edition_models import (
+    MAX_EVIDENCE_BYTES,
+    EditionEvidence,
+    evidence_text,
+    read_edition_evidence,
+)
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 
 CANONICAL = "https://www.regjeringen.no/no/dokumenter/prop.-900-ls-20992100/id9000002/"
@@ -165,3 +170,31 @@ def test_a_hand_edited_evidence_file_is_refused_on_read(tmp_path: Path) -> None:
         read_edition_evidence(path)
 
     assert caught.value.reason is RefusalReason.SCHEMA_INVALID
+
+
+@pytest.mark.parametrize("payload", [b"", b'{"schema_version":', b"\xff", b"[]"])
+def test_malformed_evidence_is_a_typed_schema_refusal(tmp_path: Path, payload: bytes) -> None:
+    path = tmp_path / "e.json"
+    path.write_bytes(payload)
+    path.chmod(0o600)
+
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        read_edition_evidence(path)
+
+    assert caught.value.reason is RefusalReason.SCHEMA_INVALID
+    assert path.read_bytes() == payload
+
+
+@pytest.mark.parametrize("extra", [0, 1], ids=["at-limit", "over-limit"])
+def test_evidence_read_size_boundary(tmp_path: Path, extra: int) -> None:
+    path = tmp_path / "e.json"
+    payload = evidence_text(EditionEvidence.model_validate(_valid())).encode("utf-8")
+    path.write_bytes(payload + b" " * (MAX_EVIDENCE_BYTES + extra - len(payload)))
+    path.chmod(0o600)
+
+    if extra:
+        with pytest.raises(ForarbeiderRefusedError) as caught:
+            read_edition_evidence(path)
+        assert caught.value.reason is RefusalReason.INPUT_TOO_LARGE
+    else:
+        assert read_edition_evidence(path) == EditionEvidence.model_validate(_valid())
