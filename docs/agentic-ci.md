@@ -506,6 +506,14 @@ Two rules follow, and they are pinned by tests:
   `needs-human:pipeline`. Until this existed, both deaths on PR #269 were reported
   as `codex-tests BLOCKED before the tests ran` — the tests had run; the machine
   stopped.
+- **A GitHub server error on the codex-tests push is retried, nothing else is (issue
+  #782).** The commit is pushed by `scripts/ci/push_with_retry.sh`: up to 3 attempts,
+  15 s then 30 s apart, and only while git's output shows a 5xx (`Internal Server
+  Error`, `returned error: 5xx`, `HTTP 5xx`). A non-fast-forward, a 401/403, a
+  protected branch, a declined hook, a missing `workflows` permission, or any error
+  the script does not recognise fails on its first answer. The escalation then says
+  `codex-tests BLOCKED after the tests passed: pushing the commit failed` instead of
+  "before the tests ran". The remediation lane's push is unchanged.
 - **A lane that died in `Set up job` is the runner, not the diff and not Codex (issue
   #493).** When the Mac runner times out downloading a pinned action from
   `codeload.github.com`, `codex-author` fails in GitHub's own first step and its jobs
