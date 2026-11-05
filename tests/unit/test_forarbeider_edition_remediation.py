@@ -53,7 +53,9 @@ from tests.unit.test_forarbeider_edition_models import _valid
             "edition_unrecognized",
             "edition heading",
         ),
-        ('class="link-list"', 'class="other"', "edition_conflicting", "edition links"),
+        # An unfamiliar edition list is unrecognised markup, not a list missing
+        # its links (GPT-6 review of PR #791: the list is read whole or refused).
+        ('class="link-list"', 'class="other"', "edition_unrecognized", "edition block"),
         (
             "/no/opri/prp209921000900000dddopri.pdf",
             "/no/opri/a.docx",

@@ -48,8 +48,8 @@ _NOTICE = re.compile(
 )
 _BLOCKS = "//h3[contains(concat(' ', normalize-space(@class), ' '), ' edition ')]"
 _BLOCK_HEADING = "Opprinnelig utgave og rettebrev"
-_LINK_LIST = "contains(concat(' ', normalize-space(@class), ' '), ' link-list ')"
-_BLOCK_LINKS = f"./following-sibling::*[1][self::ul][{_LINK_LIST}]/li/a"
+_FOOTERS = "//footer"
+_FOOTER_CLASS = "page-footer"
 _ASSET = re.compile(r"/contentassets/[0-9a-f]{32}/no/(?P<kind>opri|rett)/[A-Za-z0-9_-]+\.pdf")
 _LABELS = {"opri": "Opprinnelig utgave", "rett": "Rettebrev"}
 _EDITION_WORDING = re.compile(
@@ -89,8 +89,28 @@ def read_landing(payload: bytes, landing_url: str) -> tuple[SourceLocator, Editi
     _require_proposition(root)
     require_whole_page(text)
     _require_identity(root, locator)
+    _require_landing_footer(root)
     header = _require_landing_header(root, locator)
     return locator, _edition(root, header)
+
+
+def _require_landing_footer(root: html.HtmlElement) -> None:
+    """The page reaches its one ``footer.page-footer``, a child of ``body`` after ``main``.
+
+    ``require_whole_page`` proves the source closes; a landing page has no
+    chapter navigation for it to check, so the footer is what proves the page
+    was not cut and closed again. An absent notice reads as ``unknown`` only on
+    a page proved whole.
+    """
+    footers = root.xpath(_FOOTERS)
+    footer = footers[0] if len(footers) == 1 else None
+    if (
+        footer is None
+        or footer.getparent() is not root.body
+        or _FOOTER_CLASS not in footer.classes
+        or not footer.xpath("preceding::main")
+    ):
+        raise ForarbeiderRefusedError(RefusalReason.INCOMPLETE_PAGE, "page footer")
 
 
 def _require_landing_header(root: html.HtmlElement, locator: SourceLocator) -> html.HtmlElement:
@@ -121,8 +141,9 @@ def _edition(root: html.HtmlElement, header: html.HtmlElement) -> EditionFacts:
         _require_no_edition_wording(root)
         return _UNKNOWN
     corrected_on = _corrected_on(notices[0], header)
-    original, rettebrev = _edition_links(blocks[0])
-    _require_no_edition_wording(root, (notices[0], blocks[0], *blocks[0].xpath(_BLOCK_LINKS)))
+    anchors = _edition_anchors(blocks[0])
+    original, rettebrev = _edition_links(blocks[0], anchors)
+    _require_no_edition_wording(root, (notices[0], blocks[0], *anchors))
     return EditionFacts(
         kind="corrected",
         corrected_on=corrected_on,
@@ -148,11 +169,48 @@ def _corrected_on(notice: html.HtmlElement, header: html.HtmlElement) -> date:
         raise unrecognized from error
 
 
-def _edition_links(heading: html.HtmlElement) -> tuple[str, tuple[str, ...]]:
+def _blank(*texts: str | None) -> bool:
+    return not "".join(text or "" for text in texts).strip()
+
+
+def _edition_anchors(heading: html.HtmlElement) -> list[html.HtmlElement]:
+    """Every link of the edition list, once the block is exactly ``h3`` + ``ul.link-list``.
+
+    Each item must be ``li > a`` and nothing else, so no entry is skipped: an
+    unfamiliar one refuses the page instead of dropping out of the result.
+    """
+    block = list(heading.getparent())
+    listing = block[-1]
+    if (
+        block != [heading, listing]
+        or listing.tag != "ul"
+        or "link-list" not in listing.classes
+        or not _blank(heading.getparent().text, heading.tail, listing.text, listing.tail)
+    ):
+        raise ForarbeiderRefusedError(RefusalReason.EDITION_UNRECOGNIZED, "edition block")
+    return [_item_anchor(item) for item in listing]
+
+
+def _item_anchor(item: html.HtmlElement) -> html.HtmlElement:
+    anchors = list(item) if item.tag == "li" and not item.attrib else []
+    anchor = anchors[0] if len(anchors) == 1 else None
+    if (
+        anchor is None
+        or anchor.tag != "a"
+        or len(anchor)
+        or not _blank(item.text, anchor.tail, item.tail)
+    ):
+        raise ForarbeiderRefusedError(RefusalReason.EDITION_UNRECOGNIZED, "edition list item")
+    return anchor
+
+
+def _edition_links(
+    heading: html.HtmlElement, anchors: list[html.HtmlElement]
+) -> tuple[str, tuple[str, ...]]:
     if _clean(heading.text_content()) != _BLOCK_HEADING:
         raise ForarbeiderRefusedError(RefusalReason.EDITION_UNRECOGNIZED, "edition heading")
     found: dict[str, list[str]] = {"opri": [], "rett": []}
-    for link in heading.xpath(_BLOCK_LINKS):
+    for link in anchors:
         kind, url = _edition_link(link)
         found[kind].append(url)
     if len(found["opri"]) != 1 or not found["rett"]:
