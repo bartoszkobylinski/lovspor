@@ -20,9 +20,8 @@ import csv
 import io
 import json
 import sys
-import time
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -31,15 +30,26 @@ from typing import Any
 
 import httpx
 
-from lovspor.errors import LovsporError, StortingetStatusError
+from lovspor.crosswalk.cache import (
+    MANIFEST,
+    cached_body,
+    case_snapshot,
+    cited_decisions,
+    hints,
+    latest,
+    listing_parse_error,
+    listing_snapshot,
+    parsed_listing,
+    parses,
+    write_manifest,
+)
+from lovspor.crosswalk.cache import law_records as crosswalk_law_records
+from lovspor.crosswalk.capture import Pacer, capture_lovdata, capture_sak, capture_stortinget
+from lovspor.crosswalk.paths import writable_target
 from lovspor.legislative_chain import (
     CHAIN_PARSER_VERSION,
     ODELSTING_PARSER_VERSION,
     LawPublication,
-    LovtidendMember,
-    cited_odelsting_decisions,
-    parse_law_publication,
-    read_lovtidend_members,
     resolve_chain,
 )
 from lovspor.sources.lovdata import LovdataClient
@@ -48,22 +58,16 @@ from lovspor.stortinget_case_source import (
     CaseMetadata,
     CaseSnapshot,
     LawDecision,
-    archive_sak,
 )
 from lovspor.stortinget_discovery import (
     DISCOVERY_PARSER_VERSION,
-    ListingSnapshot,
     Observation,
     candidate_saks,
     case_identity,
     classify_drift,
     discover,
     export_id,
-    fetch_case,
-    fetch_listing,
     parse_case,
-    parse_lovvedtak_listing,
-    parse_sak_listing,
     previous_session,
 )
 
@@ -74,10 +78,6 @@ SOURCE_CSV = DATA / "lovverk-first-source-extraction-2026-10-14.csv"
 LABELS_CSV = DATA / "lovverk-first-52-proceedings-2026-10-14.csv"
 PILOT_EVIDENCE = DATA / "pilot-e4-evidence-2026-11-01.json"
 ARCHIVES = ("lovtidend-avd1-2001-2025.tar.bz2", "lovtidend-avd1-2026.tar.bz2")
-ARCHIVE_URL = "https://api.lovdata.no/v1/publicData/get/{}"
-REQUEST_GAP_SECONDS = 0.7  # Stortinget allows 100 calls a minute.
-RATE_LIMIT_PAUSE_SECONDS = 61.0
-MANIFEST = "capture-manifest.json"
 PARSER_VERSIONS = {
     "lovtidend_identity": CHAIN_PARSER_VERSION,
     "lovtidend_besl_o": ODELSTING_PARSER_VERSION,
@@ -125,164 +125,42 @@ def load_inputs(path: Path = SOURCE_CSV) -> dict[str, Any]:
 
 
 # --- capture -----------------------------------------------------------------------
+# The network machinery lives in lovspor.crosswalk.capture; only the verification
+# pass, which reads the #617 labels, stays here.
 
 
-class Pacer:
-    """Single-threaded spacing of Stortinget requests, with a progress log."""
-
-    def __init__(self, log: Path, gap: float = REQUEST_GAP_SECONDS) -> None:
-        self._gap, self._last, self._log = gap, 0.0, log
-
-    def wait(self) -> None:
-        delay = self._last + self._gap - time.monotonic()
-        if delay > 0:
-            time.sleep(delay)
-        self._last = time.monotonic()
-
-    def note(self, line: str) -> None:
-        with self._log.open("a", encoding="utf-8") as stream:
-            stream.write(f"{datetime.now(UTC).isoformat()} {line}\n")
+def _client() -> httpx.Client:
+    return httpx.Client(timeout=60, follow_redirects=False)
 
 
-def _store(directory: Path, name: str, body: bytes) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / name
-    if not path.exists():
-        path.write_bytes(body)
-    elif path.read_bytes() != body:
-        raise LovsporError(f"cached object differs from its digest name: {path}")
-    return path
-
-
-def _failure(role: dict[str, Any], exc: LovsporError) -> dict[str, Any]:
-    status = exc.status_code if isinstance(exc, StortingetStatusError) else None
-    error = f"{type(exc).__name__}: {exc}"
-    return {**role, "error": error, "http_status": status, "retrieved_at": _now()}
+def _capture_stortinget(cache: Path, manifest: dict[str, Any], pacer: Pacer) -> None:
+    with _client() as client:
+        capture_stortinget(client, cache, manifest, pacer)
+        # The verification pass reads the labels; discovery above has finished.
+        for sak_id in sorted({int(row["sak_id"]) for row in _csv_rows(LABELS_CSV)}):
+            record = capture_sak(client, cache, pacer, ("verification", sak_id))
+            manifest["stortinget"].append(record)
+            write_manifest(cache, manifest)
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _attempt(pacer: Pacer, request: Callable[[], Any]) -> Any:
-    """One request, and on a 429 one more after a full minute; then the refusal stands."""
-    for attempt in (1, 2):
-        pacer.wait()
-        try:
-            return request()
-        except StortingetStatusError as exc:
-            if exc.status_code != 429 or attempt == 2:  # noqa: PLR2004
-                raise
-            pacer.note(f"429 on {exc.url}; pausing {RATE_LIMIT_PAUSE_SECONDS}s")
-            time.sleep(RATE_LIMIT_PAUSE_SECONDS)
-    raise AssertionError("unreachable")
-
-
-def _listing_record(cache: Path, snapshot: ListingSnapshot) -> dict[str, Any]:
-    name = f"{snapshot.kind}-{snapshot.session_id}-{snapshot.source_sha256}.xml"
-    path = _store(cache / "stortinget/listings", name, snapshot.body)
-    return {
-        "source_url": snapshot.source_url,
-        "retrieved_at": snapshot.observed_at.isoformat(),
-        "content_type": snapshot.content_type,
-        "sha256": snapshot.source_sha256,
-        "size_bytes": len(snapshot.body),
-        "path": str(path.relative_to(cache)),
-    }
-
-
-def _sak_record(cache: Path, snapshot: CaseSnapshot, stage: str) -> dict[str, Any]:
-    path = archive_sak(snapshot, cache / "stortinget" / stage)
-    return {
-        "source_url": snapshot.source_url,
-        "retrieved_at": snapshot.observed_at.isoformat(),
-        "content_type": snapshot.content_type,
-        "sha256": snapshot.source_sha256,
-        "size_bytes": len(snapshot.body),
-        "path": str(path.relative_to(cache)),
-    }
-
-
-def capture_listing(client: httpx.Client, cache: Path, pacer: Pacer, key: tuple[str, str]):
-    kind, session = key
-    role = {"stage": "discovery", "kind": kind, "key": session}
-    try:
-        snapshot = _attempt(pacer, lambda: fetch_listing(client, kind, session))  # type: ignore[arg-type]
-    except LovsporError as exc:
-        pacer.note(f"FAIL {kind} {session}: {exc}")
-        return _failure(role, exc)
-    pacer.note(f"ok {kind} {session} {snapshot.source_sha256[:12]}")
-    return {**role, **_listing_record(cache, snapshot), "error": None, "http_status": 200}
-
-
-def capture_sak(client: httpx.Client, cache: Path, pacer: Pacer, key: tuple[str, int]):
-    stage, sak_id = key
-    role = {"stage": stage, "kind": "sak", "key": sak_id}
-    try:
-        snapshot = _attempt(pacer, lambda: fetch_case(client, sak_id))
-    except LovsporError as exc:
-        pacer.note(f"FAIL {stage} sak {sak_id}: {exc}")
-        return _failure(role, exc)
-    pacer.note(f"ok {stage} sak {sak_id} {snapshot.source_sha256[:12]}")
-    return {**role, **_sak_record(cache, snapshot, stage), "error": None, "http_status": 200}
-
-
-def capture_lovdata(cache: Path) -> list[dict[str, Any]]:
-    records = []
-    with LovdataClient() as client:
-        catalogue = {entry.filename: entry for entry in client.list_datasets()}
-        for name in ARCHIVES:
-            retrieved_at = _now()
-            result = client.download(catalogue[name], cache / "lovdata")
-            records.append(
-                {
-                    "filename": name,
-                    "source_url": ARCHIVE_URL.format(name),
-                    "retrieved_at": retrieved_at,
-                    "last_modified": catalogue[name].last_modified.isoformat(),
-                    "catalogue_size_bytes": catalogue[name].size_bytes,
-                    "sha256": result.sha256,
-                    "size_bytes": result.size_bytes,
-                    "path": str(result.path.relative_to(cache)),
-                }
-            )
-    return records
-
-
-def _write_manifest(cache: Path, manifest: dict[str, Any]) -> None:
-    text = json.dumps(manifest, indent=2, ensure_ascii=False, sort_keys=True)
-    (cache / MANIFEST).write_text(text + "\n", encoding="utf-8")
-
-
-def _capture_stortinget(cache: Path, manifest: dict[str, Any], pacer: Pacer) -> None:
-    laws = law_records(cache, manifest["lovdata"], load_inputs()["mentions"])
-    decisions = cited_decisions(laws)
-    with httpx.Client(timeout=60, follow_redirects=False) as client:
-        for key in listing_keys(decisions):
-            manifest["stortinget"].append(capture_listing(client, cache, pacer, key))
-            _write_manifest(cache, manifest)
-        for sak_id in discovery_candidates(cache, manifest, decisions):
-            record = capture_sak(client, cache, pacer, ("discovery", sak_id))
-            manifest["stortinget"].append(record)
-            _write_manifest(cache, manifest)
-        # The verification pass reads the labels; discovery above has finished.
-        for sak_id in sorted({int(row["sak_id"]) for row in _csv_rows(LABELS_CSV)}):
-            record = capture_sak(client, cache, pacer, ("verification", sak_id))
-            manifest["stortinget"].append(record)
-            _write_manifest(cache, manifest)
-
-
 def capture(cache: Path) -> dict[str, Any]:
+    writable_target(cache, "capture cache")
     cache.mkdir(parents=True, exist_ok=True)
     pacer = Pacer(cache / "progress.log")
     pacer.note("capture start")
     manifest: dict[str, Any] = {"started_at": _now(), "lovdata": [], "stortinget": []}
-    manifest["lovdata"] = capture_lovdata(cache)
+    manifest["scope"] = {"law_ids": sorted(load_inputs()["mentions"]), "lovverk_commit": None}
+    with LovdataClient() as client:
+        manifest["lovdata"] = capture_lovdata(client, cache)
     pacer.note(f"lovdata done: {[r['sha256'][:12] for r in manifest['lovdata']]}")
-    _write_manifest(cache, manifest)
+    write_manifest(cache, manifest)
     _capture_stortinget(cache, manifest, pacer)
     manifest["finished_at"] = _now()
-    _write_manifest(cache, manifest)
+    write_manifest(cache, manifest)
     pacer.note("capture done")
     return manifest
 
@@ -290,196 +168,25 @@ def capture(cache: Path) -> dict[str, Any]:
 # --- law edge (Lovdata) ------------------------------------------------------------
 
 
-def _read_archives(cache: Path, archives: list[dict[str, Any]], law_ids: list[str]):
-    found: dict[str, list[tuple[dict[str, Any], LovtidendMember]]] = {i: [] for i in law_ids}
-    for record in archives:
-        members = read_lovtidend_members(cache / record["path"], law_ids)
-        for law_id, matches in members.items():
-            found[law_id].extend((record, member) for member in matches)
-    return found
-
-
-def _match(archive: dict[str, Any], member: LovtidendMember) -> dict[str, Any]:
-    return {
-        "archive": archive["filename"],
-        "member": member.name,
-        "sha256": member.sha256,
-        "archive_source_url": archive.get("source_url"),
-        "archive_sha256": archive.get("sha256"),
-        "archive_retrieved_at": archive.get("retrieved_at"),
-        "archive_last_modified": archive.get("last_modified"),
-    }
-
-
-def _header(member: LovtidendMember) -> dict[str, Any]:
-    try:
-        lovvedtak = parse_law_publication(member).lovvedtak
-        besl_o = cited_odelsting_decisions(member)
-    except LovsporError as exc:
-        return {"error": f"{type(exc).__name__}: {exc}"}
-    return {"lovvedtak": [asdict(d) for d in lovvedtak], "besl_o": [asdict(d) for d in besl_o]}
-
-
-def _law_edge(header: dict[str, Any]) -> dict[str, Any]:
-    """What the Lovtidend header alone says about the decision behind the act."""
-    lovvedtak, besl_o = header.get("lovvedtak", []), header.get("besl_o", [])
-    if "error" in header:
-        return {"status": "unresolved", "kind": "unreadable", "reason": header["error"]}
-    if len(lovvedtak) > 1:
-        return {"status": "ambiguous", "kind": "several", "reason": "header cites several"}
-    if lovvedtak:
-        return {"status": "attested", "kind": "lovvedtak", "decision": lovvedtak[0]}
-    if besl_o:
-        reason = "header cites Besl. O.; the reader types Lovvedtak only"
-        return {"status": "unsupported", "kind": "besl_o", "reason": reason}
-    return {"status": "unresolved", "kind": "none", "reason": "header cites no decision"}
-
-
-def _law_record(law_id: str, matches: list[tuple[dict[str, Any], LovtidendMember]]):
-    record: dict[str, Any] = {"amending_lov_id": law_id, "law_year": int(law_id[4:8])}
-    record["lovdata_matches"] = [_match(archive, member) for archive, member in matches]
-    record["parser_versions"] = {
-        "lovtidend_identity": CHAIN_PARSER_VERSION,
-        "lovtidend_besl_o": ODELSTING_PARSER_VERSION,
-    }
-    if len(matches) != 1:
-        status = "unresolved" if not matches else "ambiguous"
-        reason = "no member in either archive" if not matches else "several members"
-        record["law_identity"] = {"status": status, "reason": reason}
-        record["law_decision"] = {"status": status, "kind": "not_read", "reason": reason}
-        return record
-    header = _header(matches[0][1])
-    identity = "unresolved" if "error" in header else "attested"
-    record["law_identity"] = {"status": identity, "reason": header.get("error")}
-    record["header"] = header
-    record["law_decision"] = _law_edge(header)
-    return record
-
-
 def law_records(
     cache: Path, archives: list[dict[str, Any]], mentions: dict[str, int]
 ) -> list[dict[str, Any]]:
-    found = _read_archives(cache, archives, sorted(mentions))
-    records = [_law_record(law_id, found[law_id]) for law_id in sorted(mentions)]
+    records = crosswalk_law_records(cache, archives, mentions)
     for record in records:
         record["base_act_reference_occurrences"] = mentions[record["amending_lov_id"]]
     return records
 
 
-def cited_decisions(laws: Iterable[dict[str, Any]]) -> list[LawDecision]:
-    """Every Lovvedtak a header cites, even where the law edge is ambiguous."""
-    cited = {
-        LawDecision(**decision)
-        for law in laws
-        for decision in law.get("header", {}).get("lovvedtak", [])
-    }
-    return sorted(cited, key=lambda d: (d.session_id, d.number))
-
-
-def listing_keys(decisions: Iterable[LawDecision]) -> list[tuple[str, str]]:
-    """The decision session's Lovvedtak list, and the saker of it and of the session before."""
-    keys = set()
-    for decision in decisions:
-        keys.add(("publikasjoner", decision.session_id))
-        keys.add(("saker", decision.session_id))
-        keys.add(("saker", previous_session(decision.session_id)))
-    return sorted(keys)
-
-
 # --- discovery (label-free) --------------------------------------------------------
-
-
-def _latest(manifest: dict[str, Any], stage: str, kind: str, key: Any) -> dict[str, Any] | None:
-    found = [
-        r for r in manifest["stortinget"] if (r["stage"], r["kind"], r["key"]) == (stage, kind, key)
-    ]
-    return found[-1] if found else None
-
-
-def _cached_body(cache: Path, record: dict[str, Any] | None) -> bytes | None:
-    if record is None or record["error"] is not None:
-        return None
-    body = (cache / record["path"]).read_bytes()
-    if sha256(body).hexdigest() != record["sha256"]:
-        raise LovsporError(f"cached bytes do not match the manifest: {record['path']}")
-    return body
-
-
-def _listing(cache: Path, manifest: dict[str, Any], kind: str, session: str):
-    record = _latest(manifest, "discovery", kind, session)
-    body = _cached_body(cache, record)
-    if body is None or record is None:
-        return None
-    observed = datetime.fromisoformat(record["retrieved_at"])
-    return ListingSnapshot(
-        kind,  # type: ignore[arg-type]
-        session,
-        record["source_url"],
-        observed,
-        record["content_type"],
-        record["sha256"],
-        body,
-    )
-
-
-_LISTING_PARSERS = {"saker": parse_sak_listing, "publikasjoner": parse_lovvedtak_listing}
-
-
-def _parsed_listing(cache: Path, manifest: dict[str, Any], kind: str, session: str):
-    """A listing's parsed content, or None if it was not read or its bytes do not parse.
-
-    An HTTP 200 whose body is not the expected XML is a failed read, never an
-    empty listing, so it cannot turn into "no candidates" or "not listed".
-    """
-    listing = _listing(cache, manifest, kind, session)
-    if listing is None:
-        return None
-    try:
-        return _LISTING_PARSERS[kind](listing)
-    except LovsporError:
-        return None
-
-
-def _parse_error(cache: Path, manifest: dict[str, Any], kind: str, session: str) -> str | None:
-    """The parse failure of a listing that was read, kept as a source diagnostic."""
-    listing = _listing(cache, manifest, kind, session)
-    if listing is None:
-        return None
-    try:
-        _LISTING_PARSERS[kind](listing)
-    except LovsporError as exc:
-        return f"{type(exc).__name__}: {exc}"
-    return None
-
-
-def _hints(cache: Path, manifest: dict[str, Any], decision: LawDecision):
-    """Henvisning hints from both sessions; None if either listing was not read or parsed."""
-    sessions = (decision.session_id, previous_session(decision.session_id))
-    parsed = [_parsed_listing(cache, manifest, "saker", session) for session in sessions]
-    if any(hints is None for hints in parsed):
-        return None
-    return [hint for hints in parsed if hints is not None for hint in hints]
-
-
-def discovery_candidates(
-    cache: Path, manifest: dict[str, Any], decisions: Iterable[LawDecision]
-) -> list[int]:
-    found: set[int] = set()
-    for decision in decisions:
-        found.update(candidate_saks(_hints(cache, manifest, decision) or [], decision))
-    return sorted(found)
-
-
-def _case(cache: Path, manifest: dict[str, Any], stage: str, sak_id: int):
-    record = _latest(manifest, stage, "sak", sak_id)
-    body = _cached_body(cache, record)
-    if body is None or record is None:
-        return None, record
-    observed = datetime.fromisoformat(record["retrieved_at"])
-    snapshot = CaseSnapshot(
-        sak_id, record["source_url"], observed, record["content_type"], record["sha256"], body
-    )
-    return snapshot, record
+# Cache reading lives in lovspor.crosswalk.cache; these names keep the study's text.
+_latest = latest
+_cached_body = cached_body
+_listing = listing_snapshot
+_parsed_listing = parsed_listing
+_parse_error = listing_parse_error
+_hints = hints
+_case = case_snapshot
+_parses = parses
 
 
 def _publication_listed(cache: Path, manifest: dict[str, Any], decision: LawDecision):
@@ -550,15 +257,6 @@ def _listings_used(
         for key, record in used
         if record is not None
     ]
-
-
-def _parses(snapshot: CaseSnapshot) -> bool:
-    """A candidate whose bytes do not parse was not read; it is never a silent no."""
-    try:
-        parse_case(snapshot)
-    except LovsporError:
-        return False
-    return True
 
 
 def _case_summary(snapshot: CaseSnapshot) -> dict[str, Any]:
@@ -1016,7 +714,12 @@ def render_json(results: dict[str, Any]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stage", choices=("capture", "build"))
-    parser.add_argument("--cache", type=Path, default=ROOT / "data/cache/study-52")
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        default=ROOT / "data/cache/study-52",
+        help="capture: a directory outside every Git checkout; build: the cache to read",
+    )
     parser.add_argument("--json", type=Path, default=DATA / "study-52-2026-11-02.json")
     parser.add_argument("--csv", type=Path, default=DATA / "study-52-2026-11-02.csv")
     args = parser.parse_args()

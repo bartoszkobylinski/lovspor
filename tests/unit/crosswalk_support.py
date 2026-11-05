@@ -5,6 +5,8 @@ sak 89016); every digest is synthetic, so nothing here stands for captured bytes
 """
 
 import copy
+import io
+import tarfile
 from hashlib import sha256
 from typing import Any
 
@@ -107,3 +109,54 @@ def besl_o() -> dict[str, Any]:
         evidence("law_identity", ARCHIVE_URL, f"{ARCHIVE}!{member}", "lovtidend-identity-1")
     ]
     return record
+
+
+# --- synthetic source bytes, in the real shapes (never real Lovdata XML) -------------
+
+NS = 'xmlns="http://data.stortinget.no"'
+
+
+def document(law_id: str, misc: str) -> bytes:
+    slug = law_id.removeprefix("LOV-")
+    return (
+        '<html lang="no"><body><header class="documentHeader"><dl>'
+        f'<dd class="legacyID">{law_id}</dd><dd class="dokid">LTI/lov/{slug}</dd>'
+        f'<dd class="miscInformation">{misc}</dd><dd class="refid">lov/{slug}</dd>'
+        "</dl></header></body></html>"
+    ).encode()
+
+
+def tar_bytes(members: dict[str, bytes]) -> bytes:
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w:bz2") as tar:
+        for name, body in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
+    return stream.getvalue()
+
+
+def saker(*items: tuple[int, str]) -> bytes:
+    found = "".join(f"<sak><id>{i}</id><henvisning>{h}</henvisning></sak>" for i, h in items)
+    return f"<saker_oversikt {NS}><saker_liste>{found}</saker_liste></saker_oversikt>".encode()
+
+
+def pubs(*ids: str) -> bytes:
+    found = "".join(f"<publikasjon><id>{i}</id><type>lovvedtak</type></publikasjon>" for i in ids)
+    return (
+        f"<publikasjoner_oversikt {NS}><publikasjoner_liste>{found}"
+        "</publikasjoner_liste></publikasjoner_oversikt>"
+    ).encode()
+
+
+def sak(sak_id: int, session: str, *decisions: tuple[str, int]) -> bytes:
+    refs = "".join(
+        f"<publikasjon_referanse><eksport_id>vedtak-{s[:4]}{s[-2:]}-{n:03d}</eksport_id>"
+        f"<lenke_tekst>Lovvedtak {n} ({s})</lenke_tekst><type>lovvedtak</type>"
+        "</publikasjon_referanse>"
+        for s, n in decisions
+    )
+    return (
+        f"<detaljert_sak {NS}><id>{sak_id}</id><sak_sesjon>{session}</sak_sesjon>"
+        f"<publikasjon_referanse_liste>{refs}</publikasjon_referanse_liste></detaljert_sak>"
+    ).encode()
