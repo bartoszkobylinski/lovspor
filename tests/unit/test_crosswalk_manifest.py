@@ -102,6 +102,28 @@ def test_manifest_is_deterministic(built: bytes) -> None:
     assert first.endswith(b"}\n")
 
 
+def test_manifest_file_pin_counts_utf8_bytes_and_preserves_filename(tmp_path: Path) -> None:
+    """P5 pins the exact checked file, including non-ASCII content and its basename."""
+    record = besl_o()
+    record["reason"] = "Kilden støtter ikke denne koblingen – må undersøkes"  # noqa: RUF001
+    data = serialize_records([record])
+    assert len(data) > len(data.decode("utf-8"))
+    source = tmp_path / "krysskobling-æøå.jsonl"
+    output = tmp_path / "manifest.json"
+    source.write_bytes(data)
+
+    manifest_impl(source, output)
+
+    rendered = output.read_bytes()
+    manifest = json.loads(rendered)
+    assert manifest["files"] == [
+        {"name": source.name, "sha256": sha256(data).hexdigest(), "size_bytes": len(data)}
+    ]
+    assert rendered == render_manifest(build_manifest(data, source.name))
+    assert render_manifest(manifest) == rendered
+    assert source.read_bytes() == data
+
+
 def test_manifest_counts_current_revision_independently_for_each_law() -> None:
     """P5 counts current acts while retaining every historical revision."""
     first, revised, other = attested(), attested(), besl_o()

@@ -65,6 +65,33 @@ def test_a_verified_release_candidate_manifest_names_its_capture(
     }
 
 
+def test_capture_provenance_hashes_exact_bytes_not_reserialized_json(
+    promoted: bytes, capture_dir: Path
+) -> None:
+    """P5 names the capture manifest's SHA-256, including its byte representation."""
+    path = capture_dir / MANIFEST
+    original = path.read_bytes()
+    before = build_manifest(promoted, "x", capture_dir)
+    reformatted = json.dumps(json.loads(original), separators=(",", ":")).encode() + b"\r\n"
+    assert reformatted != original
+    assert json.loads(reformatted) == json.loads(original)
+    path.write_bytes(reformatted)
+
+    after = build_manifest(promoted, "x", capture_dir)
+    assert after["provenance"] == {
+        "verified": True,
+        "capture_manifest_sha256": sha256(reformatted).hexdigest(),
+        "not_reproduced": [],
+        "raw_bytes_not_in_capture": [],
+    }
+    assert before["provenance"]["capture_manifest_sha256"] == sha256(original).hexdigest()
+    assert before["provenance"] != after["provenance"]
+    assert {k: v for k, v in before.items() if k != "provenance"} == {
+        k: v for k, v in after.items() if k != "provenance"
+    }
+    assert path.read_bytes() == reformatted
+
+
 def _fabricate_candidate_digest(promoted: bytes) -> bytes:
     records = parse_records(promoted)
     candidate = next(r for r in records if r["release_state"] == "release_candidate")
