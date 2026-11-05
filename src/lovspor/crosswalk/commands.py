@@ -14,6 +14,8 @@ from typing import Annotated, BinaryIO
 import typer
 from pydantic import ValidationError
 
+from lovspor.crosswalk import approval as approvals
+from lovspor.crosswalk.approval import CandidateProof, SignedApproval
 from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.capture import REAL_SOURCES, Sources, capture
 from lovspor.crosswalk.check import check, require_reproduced
@@ -176,8 +178,12 @@ MAX_APPROVAL_BYTES = 64 * 1024
 
 
 def read_approval(path: Path) -> Approval:
+    return _parse_approval(read_bounded(path, MAX_APPROVAL_BYTES, "approval"))
+
+
+def _parse_approval(raw: bytes) -> Approval:
     try:
-        return Approval.model_validate_json(read_bounded(path, MAX_APPROVAL_BYTES, "approval"))
+        return Approval.model_validate_json(raw)
     except ValidationError as exc:
         # Approval is flat, so each error's location is one top-level field, or
         # none when the document itself is not a JSON object.
@@ -208,9 +214,19 @@ def check_impl(
     return f"{found}, {len(report.unverified)} not reproduced from a capture, {drift}"
 
 
+def read_signed_approval(path: Path) -> SignedApproval:
+    """The approval at ``path``, signed in ``<path>.sig`` by a trusted signer (#792)."""
+    raw = read_bounded(path, MAX_APPROVAL_BYTES, "approval")
+    signature = approvals.signature_path(path)
+    return approvals.signed_approval(
+        raw, _parse_approval(raw), signature, approvals.TRUSTED_SIGNERS
+    )
+
+
 def release_candidate_impl(data_path: Path, approval: Path, cache: Path, output: Path) -> str:
     data = read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
-    promoted, counts = promote(data, read_approval(approval), cache)
+    signed = read_signed_approval(approval)
+    promoted, counts = promote(data, signed.approval, cache)
     write_once(output, promoted)
     return "; ".join(f"{reason}: {count}" for reason, count in sorted(counts.items()))
 
@@ -246,7 +262,10 @@ def check_command(
 @crosswalk_app.command("release-candidate")
 def release_candidate_command(
     data: _Input,
-    approval: Annotated[Path, typer.Option("--approval", help="The owner's approval file.")],
+    approval: Annotated[
+        Path,
+        typer.Option("--approval", help="The owner's approval, signed beside it in <file>.sig."),
+    ],
     cache: _Cache,
     output: Annotated[Path, typer.Option("--output", help="New JSONL file; never overwritten.")],
 ) -> None:
@@ -258,9 +277,22 @@ def release_candidate_command(
         raise typer.Exit(code=1) from error
 
 
-def manifest_impl(data_path: Path, output: Path, cache: Path | None = None) -> str:
+def read_proof(data: bytes, proof_dir: Path, cache: Path | None) -> CandidateProof:
+    """Replay the gate from the approval directory: signed approval and approved input."""
+    if cache is None:
+        raise CrosswalkError("--approval-proof replays the gate against a capture: give --cache")
+    signed = read_signed_approval(proof_dir / approvals.APPROVAL_FILE)
+    approved = proof_dir / approvals.APPROVED_INPUT_FILE
+    approved_input = read_bounded(approved, MAX_PREVIOUS_BYTES, "approved input")
+    return approvals.prove_candidates(data, approved_input, signed, cache)
+
+
+def manifest_impl(
+    data_path: Path, output: Path, cache: Path | None = None, proof_dir: Path | None = None
+) -> str:
     data = read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
-    manifest = build_manifest(data, data_path.name, cache)
+    proof = None if proof_dir is None else read_proof(data, proof_dir, cache)
+    manifest = build_manifest(data, data_path.name, cache, proof)
     write_once(output, render_manifest(manifest))
     return f"wrote the manifest of {data_path.name} ({manifest['release_state']}) to {output}"
 
@@ -276,10 +308,20 @@ def manifest_command(
             help="The capture to verify provenance against; required for release candidates.",
         ),
     ] = None,
+    proof: Annotated[
+        Path | None,
+        typer.Option(
+            "--approval-proof",
+            help=(
+                "Directory with approval.json, approval.json.sig and approved-input.jsonl; "
+                "required for release candidates."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """The manifest of a checked crosswalk file, derived only from its bytes."""
     try:
-        typer.echo(manifest_impl(data, output, cache))
+        typer.echo(manifest_impl(data, output, cache, proof))
     except CrosswalkContractError as error:
         for problem in error.problems:
             typer.echo(f"problem: {problem}", err=True)

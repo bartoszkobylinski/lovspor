@@ -10,7 +10,9 @@ from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.crosswalk import commands
+from lovspor.crosswalk.approval import CandidateProof
 from lovspor.crosswalk.build import BuildOptions, build
+from lovspor.crosswalk.cache import MANIFEST
 from lovspor.crosswalk.canonical import parse_records, serialize_records
 from lovspor.crosswalk.commands import manifest_impl
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
@@ -310,7 +312,10 @@ def test_release_candidate_file_level_state(built: bytes, capture_dir: Path) -> 
         }
     )
     promoted, _ = promote(built, approval, capture_dir)
-    manifest = build_manifest(promoted, "x", capture_dir)
+    capture = sha256((capture_dir / MANIFEST).read_bytes()).hexdigest()
+    # A stand-in for the replay, which test_crosswalk_approval_binding.py covers.
+    proof = CandidateProof(sha256(promoted).hexdigest(), capture, {"proof": "stand-in"})
+    manifest = build_manifest(promoted, "x", capture_dir, proof)
     assert manifest["release_state"] == "release_candidate"
     assert manifest["counts"]["release_state"] == {"release_candidate": 3, "research_only": 5}
     assert manifest["counts"]["revisions"] == 11

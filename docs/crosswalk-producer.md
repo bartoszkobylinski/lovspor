@@ -23,8 +23,8 @@ now; pass `--cache` outside the checkout.
 | Capture | `lovspor ops crosswalk capture --cache DIR --laws FILE --lovverk-commit SHA` | Lovdata publicData, `data.stortinget.no/eksport` only | a new, empty cache directory outside every Git checkout and Lovverk (write-once) |
 | Build | `lovspor ops crosswalk build --cache DIR --output FILE [--previous FILE]` | none | one new canonical JSONL file |
 | Check | `lovspor ops crosswalk check --input FILE [--previous FILE] [--cache DIR [--strict]]` | none | nothing; exit 1 on any problem |
-| Release candidate | `lovspor ops crosswalk release-candidate --input FILE --approval FILE --cache DIR --output FILE` | none | one new JSONL file |
-| Manifest | `lovspor ops crosswalk manifest --input FILE --output FILE [--cache DIR]` | none | one new manifest file |
+| Release candidate | `lovspor ops crosswalk release-candidate --input FILE --approval FILE --cache DIR --output FILE` (signature in `FILE.sig`) | none | one new JSONL file |
+| Manifest | `lovspor ops crosswalk manifest --input FILE --output FILE [--cache DIR [--approval-proof DIR]]` | none | one new manifest file |
 
 - **Capture** (`lovspor.crosswalk.capture`):
   - Reads every Lovtidend avd. I archive the catalogue lists, the decision sessions' listings and every case a listing hint proposes.
@@ -68,6 +68,19 @@ now; pass `--cache` outside the checkout.
     ```
 
     `R2` is `approved` or `rejected`. The tool never writes this file.
+  - `approved_by` is text and authenticates nobody (#792). The approval counts
+    only with a detached SSH signature over its exact bytes, beside it as
+    `<approval>.sig`, made in the namespace `lovspor-crosswalk-approval`:
+
+    ```bash
+    ssh-keygen -Y sign -f <owner key> -n lovspor-crosswalk-approval approval.json
+    ```
+
+    The signer must be listed in `src/lovspor/crosswalk/approval-signers`
+    (OpenSSH allowed_signers format). That file ships with **no key**: only the
+    owner adds their own public key, in a change they make and merge. Until then
+    every approval is refused (`no trusted approval signer is configured: release
+    candidates stay blocked`). No tool or agent creates, chooses or adds a key.
   - Promotes, as a new revision, only active attested records that the capture reproduces, raw bytes included, and whose cited archives have an accepted licence basis.
   - Corrections stay out while R4 is blocked.
 - **Manifest** (`lovspor.crosswalk.manifest`):
@@ -83,6 +96,15 @@ now; pass `--cache` outside the checkout.
     with drift has `verified: true`, `fully_reproduced: false` and names the acts
     in `not_reproduced` / `raw_bytes_not_in_capture`. Without `--cache` both are
     `false`.
+  - A `release_candidate` file also needs `--approval-proof DIR` holding
+    `approval.json`, `approval.json.sig` and `approved-input.jsonl` (#792). The
+    signature is verified as above, then the gate is replayed:
+    `promote(approved-input.jsonl, approval, capture)` must give the file byte for
+    byte. A hand-edited `release_state`, a rewritten earlier revision, drift, a
+    wrong pin or another approval's output gets no manifest. The manifest's
+    `approval` block names the approved input, approval, signature and trusted
+    signers file by SHA-256, plus the signer's principal. Research manifests carry
+    no `approval` block and are unchanged.
   - Holds the counts, commits, archive pins, parser versions, source terms (with the date they were read), the provisional attribution and the unresolved rights blockers.
   - Has no wall clock and no `released` state.
 
