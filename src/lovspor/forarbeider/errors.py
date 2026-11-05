@@ -26,6 +26,7 @@ class RefusalReason(StrEnum):
     DOM_CHANGED = "dom_changed"
     SOURCE_IDENTITY_MISSING = "source_identity_missing"
     CONFLICTING_IDENTITY = "conflicting_identity"
+    BROWSER_RENDERED_PAGE = "browser_rendered_page"
     REFERENCE_MISSING = "reference_missing"
     TITLE_MISSING = "title_missing"
     CHAPTER_NAVIGATION_MISSING = "chapter_navigation_missing"

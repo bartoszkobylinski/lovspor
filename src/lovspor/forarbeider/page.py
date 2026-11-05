@@ -45,6 +45,8 @@ _FIXED_FIELDS: dict[str, object] = {
 _PROPOSITION_TYPE = "Proposisjon"
 _HEADER = "//main//div[contains(concat(' ', normalize-space(@class), ' '), ' content-header ')]"
 _SUBHEADER = "./h2[contains(concat(' ', normalize-space(@class), ' '), ' subheader ')]"
+_SCRIPT_TITLE_CONTROL = ".//*[@data-show-doctitle]"
+"""The control regjeringen.no's script puts into a long subheader; the served page has none."""
 _OWNERS = "//div[@data-nav='content-owner-link']//a"
 _NAVIGATION = "//ul[@data-longdoc-table-of-content]"
 
@@ -216,6 +218,8 @@ def _title(root: html.HtmlElement, locator: SourceLocator) -> str:
 
 def _require_same_subheader(header: html.HtmlElement, title: str) -> None:
     for subheader in header.xpath(_SUBHEADER):
+        if subheader.xpath(_SCRIPT_TITLE_CONTROL):
+            raise ForarbeiderRefusedError(RefusalReason.BROWSER_RENDERED_PAGE, "subheader")
         if _clean(subheader.text_content()) != title:
             raise ForarbeiderRefusedError(RefusalReason.CONFLICTING_IDENTITY, "subheader")
 
