@@ -198,6 +198,72 @@ def test_the_brief_is_bounded(tmp_path: Path, capsys: pytest.CaptureFixture[str]
     assert len(brief) < 40_000
 
 
+@pytest.mark.parametrize(
+    ("key", "heading"),
+    [("survivors", "Survivors"), ("timed_out", "Timed out"), ("suspicious", "Suspicious")],
+)
+def test_brief_shows_changed_lines_with_indentation_without_diff_metadata(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], key: str, heading: str
+) -> None:
+    """The work list must show the mutation itself, including Python indentation."""
+    result = _timeout_only(tmp_path)
+    entry = json.loads(_detail(TIMEOUT_ID))
+    changes = ["-        return value", "+    return value", "-    old = 1", "+    new = 2"]
+    changes += ["-    before = 3", "+    after = 4", "+    omitted = 5"]
+    entry["diff"] = "\n".join(
+        ["--- a/source.py", "+++ b/source.py", "@@ -1,4 +1,4 @@", " unchanged", *changes]
+    )
+    result[key] = [entry]
+
+    section = _section(_gate(tmp_path, result, "--brief", capsys), heading)
+
+    assert [line for line in section.splitlines() if line.startswith("  - `")] == [
+        f"  - `{line}`" for line in changes[:6]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("key", "heading"), [("timed_out", "Timed out"), ("suspicious", "Suspicious")]
+)
+def test_brief_keeps_unrecovered_names_distinct_from_an_empty_bucket(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], key: str, heading: str
+) -> None:
+    """Counts remain evidence even when the additive diagnostic list is empty."""
+    result = _run(tmp_path, _raw_log(results=""))
+    assert result[key] == []
+
+    section = _section(_gate(tmp_path, result, "--brief", capsys), heading)
+
+    assert section.splitlines()[1:] == ["none named (1 counted)"]
+
+
+@pytest.mark.parametrize("damage", ["invalid-json", "unsupported-schema", "invalid-gate"])
+def test_brief_refuses_invalid_artifacts_before_printing_a_work_list(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    damage: str,
+) -> None:
+    result = _timeout_only(tmp_path)
+    if damage == "unsupported-schema":
+        result["schema_version"] = 2
+    elif damage == "invalid-gate":
+        result["gate"] = {"passed": "false", "reason": "timeout_mutants"}
+    path = tmp_path / "invalid.json"
+    path.write_text("{truncated" if damage == "invalid-json" else json.dumps(result))
+    before = path.read_bytes()
+    capsys.readouterr()
+    monkeypatch.setattr("sys.argv", ["mutation_gate.py", "--brief", str(path)])
+
+    assert mutation_gate.main() == 1
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err.strip()
+    assert "Traceback" not in output.err
+    assert path.read_bytes() == before
+
+
 def test_untrusted_text_cannot_break_out_of_its_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
