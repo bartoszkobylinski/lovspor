@@ -6,6 +6,7 @@ manifest says in ``fully_reproduced`` whether every current record was reproduce
 from the capture, raw bytes included. ``verified`` keeps its meaning.
 """
 
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -158,3 +159,95 @@ def test_manifest_says_a_clean_file_is_fully_reproduced(built: bytes, capture_di
 def test_a_manifest_without_a_capture_is_not_fully_reproduced(built: bytes) -> None:
     assert build_manifest(built, "x")["provenance"] == UNVERIFIED
     assert UNVERIFIED["fully_reproduced"] is False
+
+
+def test_strict_check_and_manifest_include_archive_pin_drift(
+    built: bytes, capture_dir: Path, tmp_path: Path
+) -> None:
+    """Exactly this capture's bytes includes archive pins, not just evidence bodies."""
+    records = parse_records(built)
+    record = records[-1]
+    record["source_pins"]["lovdata_archives"][0]["sha256"] = "f" * 64
+    data = serialize_records(records)
+    law_id = record["amending_lov_id"]
+
+    with pytest.raises(CrosswalkContractError) as caught:
+        check_impl(_write(tmp_path, data), None, capture_dir, strict=True)
+
+    assert caught.value.problems == (f"{law_id}: raw bytes not in this capture",)
+    provenance = build_manifest(data, "x", capture_dir)["provenance"]
+    assert provenance["verified"] is True
+    assert provenance["fully_reproduced"] is False
+    assert provenance["not_reproduced"] == []
+    assert provenance["raw_bytes_not_in_capture"] == [law_id]
+
+
+def test_strict_check_preserves_append_only_validation(
+    built: bytes, capture_dir: Path, tmp_path: Path
+) -> None:
+    """A capture match cannot excuse rewriting the previous release (D6)."""
+    previous = _write(tmp_path, built)
+    records = parse_records(built)
+    records[0]["source_pins"]["producer_commit"] = "c" * 40
+    current = tmp_path / "current.jsonl"
+    current.write_bytes(serialize_records(records))
+
+    with pytest.raises(CrosswalkContractError) as caught:
+        check_impl(current, previous, capture_dir, strict=True)
+
+    assert caught.value.problems == (
+        f"{records[0]['amending_lov_id']}@1: revision of the previous release was rewritten",
+    )
+
+
+@pytest.mark.parametrize("field", ["body_sha256", "parsed_identity_sha256"])
+def test_strict_provenance_only_judges_current_revisions(
+    built: bytes, capture_dir: Path, tmp_path: Path, field: str
+) -> None:
+    """Old evidence remains in history; only current records must reproduce."""
+    records = parse_records(built)
+    historical = deepcopy(records[0])
+    historical["evidence"][0][field] = "f" * 64
+    records[0]["record_revision"] = 2
+    data = serialize_records([*records, historical])
+    previous = tmp_path / "previous.jsonl"
+    previous.write_bytes(serialize_records([historical]))
+
+    assert check_impl(_write(tmp_path, data), previous, capture_dir, strict=True) == (
+        f"ok: {len(records) + 1} records, 0 not reproduced from a capture, "
+        "0 with raw bytes not in this capture"
+    )
+    assert build_manifest(data, "x", capture_dir)["provenance"]["fully_reproduced"] is True
+
+
+def test_strict_cli_reports_all_gaps_without_writing(
+    built: bytes, capture_dir: Path, tmp_path: Path
+) -> None:
+    records = parse_records(built)
+    records[2]["evidence"][0]["body_sha256"] = "f" * 64
+    uncovered = _uncovered(built, capture_dir)
+    path = _write(tmp_path, serialize_records(records))
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "crosswalk",
+            "check",
+            "--input",
+            str(path),
+            "--cache",
+            str(capture_dir),
+            "--strict",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert result.output.splitlines() == [
+        f"problem: {uncovered}: not reproduced from the capture",
+        f"problem: {records[2]['amending_lov_id']}: raw bytes not in this capture",
+    ]
+    assert {
+        p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()
+    } == before
