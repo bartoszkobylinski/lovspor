@@ -263,3 +263,27 @@ def test_a_refusal_names_no_page_text() -> None:
 
     assert "hemmelig" not in str(caught.value)
     assert "Strukturell" not in str(caught.value)
+
+
+@pytest.mark.parametrize("page", ["plain", "corrected"])
+@pytest.mark.parametrize(
+    "split",
+    [
+        "Korrigert <em>utgave</em>",
+        "<span>Opprinnelig</span><span>utgave</span>",
+        "Rette<b>brev</b>",
+        "<i>Korrigert</i>\n  <i>utgave</i>",
+    ],
+    ids=["across-em", "adjacent-spans", "inside-a-word", "across-a-line"],
+)
+def test_edition_wording_split_by_markup_is_still_unrecognized(page: str, split: str) -> None:
+    fixture, url = (PLAIN, L_URL) if page == "plain" else (CORRECTED, LS_URL)
+    text = fixture.read_text(encoding="utf-8").replace("<footer", f"<p>{split}</p><footer")
+
+    assert _refusal(text.encode(), url) is RefusalReason.EDITION_UNRECOGNIZED
+
+
+def test_wording_in_the_tail_of_a_recognised_node_is_unrecognized() -> None:
+    payload = _corrected("</h3>", "</h3> Korrigert utgave")
+
+    assert _refusal(payload) is RefusalReason.EDITION_UNRECOGNIZED

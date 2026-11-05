@@ -52,7 +52,9 @@ _LINK_LIST = "contains(concat(' ', normalize-space(@class), ' '), ' link-list ')
 _BLOCK_LINKS = f"./following-sibling::*[1][self::ul][{_LINK_LIST}]/li/a"
 _ASSET = re.compile(r"/contentassets/[0-9a-f]{32}/no/(?P<kind>opri|rett)/[A-Za-z0-9_-]+\.pdf")
 _LABELS = {"opri": "Opprinnelig utgave", "rett": "Rettebrev"}
-_EDITION_WORDING = re.compile(r"korrigert\s+utgave|opprinnelig\s+utgave|rettebrev", re.IGNORECASE)
+_EDITION_WORDING = re.compile(
+    r"korrigert\s*utgave|opprinnelig\s*utgave|rette\s*brev", re.IGNORECASE
+)
 _EDITION_LINKS = "//a[contains(@href, '/opri/') or contains(@href, '/rett/')]"
 _VISIBLE_TEXT = "//body//text()[not(ancestor::script) and not(ancestor::style)]"
 
@@ -170,11 +172,16 @@ def _edition_link(link: html.HtmlElement) -> tuple[str, str]:
 def _require_no_edition_wording(
     root: html.HtmlElement, recognised: tuple[html.HtmlElement, ...] = ()
 ) -> None:
-    """Refuse edition wording or edition links anywhere but in the nodes just read."""
-    for node in root.xpath(_VISIBLE_TEXT):
-        owned = node.is_text and node.getparent() in recognised
-        if _EDITION_WORDING.search(node) and not owned:
-            raise ForarbeiderRefusedError(RefusalReason.EDITION_UNRECOGNIZED, "edition wording")
+    """Refuse edition wording or edition links anywhere but in the nodes just read.
+
+    The page's text is searched as one string, so wording split by inline
+    markup (``Korrigert <em>utgave</em>``) or across a line is still found. Only
+    the own text of a recognised node is left out, never its tail.
+    """
     for link in root.xpath(_EDITION_LINKS):
         if link not in recognised:
             raise ForarbeiderRefusedError(RefusalReason.EDITION_UNRECOGNIZED, "edition link")
+    nodes = root.xpath(_VISIBLE_TEXT)
+    text = "".join(node for node in nodes if not (node.is_text and node.getparent() in recognised))
+    if _EDITION_WORDING.search(text):
+        raise ForarbeiderRefusedError(RefusalReason.EDITION_UNRECOGNIZED, "edition wording")
