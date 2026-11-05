@@ -174,3 +174,16 @@ def check(data: bytes, previous: bytes | None = None, cache: Path | None = None)
 def require_passed(report: CheckReport) -> None:
     if not report.passed:
         raise CrosswalkContractError(report.problems)
+
+
+def fully_reproduced(report: CheckReport) -> bool:
+    """Every current record rebuilt from the capture, raw bytes included."""
+    return not report.unverified and not report.drifted
+
+
+def require_reproduced(report: CheckReport) -> None:
+    """Strict: the gaps the default check only reports become failures."""
+    gaps = [f"{law_id}: not reproduced from the capture" for law_id in report.unverified]
+    gaps += [f"{law_id}: raw bytes not in this capture" for law_id in report.drifted]
+    if gaps:
+        raise CrosswalkContractError(gaps)

@@ -361,6 +361,7 @@ def test_cli_writes_a_research_only_manifest(built: bytes, tmp_path: Path) -> No
     assert written["release_state"] == "research_only"
     assert written["provenance"] == {
         "verified": False,
+        "fully_reproduced": False,
         "note": (
             "research_only: contract, invariants and canonical form checked; the evidence was "
             "not reproduced from a capture"

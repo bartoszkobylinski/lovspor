@@ -22,7 +22,7 @@ now; pass `--cache` outside the checkout.
 |---|---|---|---|
 | Capture | `lovspor ops crosswalk capture --cache DIR --laws FILE --lovverk-commit SHA` | Lovdata publicData, `data.stortinget.no/eksport` only | a new, empty cache directory outside every Git checkout and Lovverk (write-once) |
 | Build | `lovspor ops crosswalk build --cache DIR --output FILE [--previous FILE]` | none | one new canonical JSONL file |
-| Check | `lovspor ops crosswalk check --input FILE [--previous FILE] [--cache DIR]` | none | nothing; exit 1 on any problem |
+| Check | `lovspor ops crosswalk check --input FILE [--previous FILE] [--cache DIR [--strict]]` | none | nothing; exit 1 on any problem |
 | Release candidate | `lovspor ops crosswalk release-candidate --input FILE --approval FILE --cache DIR --output FILE` | none | one new JSONL file |
 | Manifest | `lovspor ops crosswalk manifest --input FILE --output FILE [--cache DIR]` | none | one new manifest file |
 
@@ -55,6 +55,11 @@ now; pass `--cache` outside the checkout.
   this capture's (`with raw bytes not in this capture`). The second is byte-only
   source drift or a made-up digest; it never fails the file, and it is never
   certified or promoted.
+
+  `--strict` (only with `--cache`) turns both weaker outcomes into failures: exit
+  1 and one `problem:` line per act. Use it wherever the file must rest on exactly
+  this capture's bytes; the default stays a report so a research file built from
+  an earlier capture can still be checked against a newer one.
 - **Release candidate** (`lovspor.crosswalk.release`):
   - Needs an approval file that the owner writes for the input's SHA-256:
 
@@ -72,6 +77,12 @@ now; pass `--cache` outside the checkout.
     from that capture, raw bytes included; its `provenance` block names the
     capture manifest's SHA-256. A research manifest written without `--cache`
     carries `"provenance": {"verified": false, ...}` saying so.
+  - `provenance.verified` means checked against the named capture with every
+    current `release_candidate` reproduced from it. `provenance.fully_reproduced`
+    says whether every current record was, raw bytes included: a research file
+    with drift has `verified: true`, `fully_reproduced: false` and names the acts
+    in `not_reproduced` / `raw_bytes_not_in_capture`. Without `--cache` both are
+    `false`.
   - Holds the counts, commits, archive pins, parser versions, source terms (with the date they were read), the provisional attribution and the unresolved rights blockers.
   - Has no wall clock and no `released` state.
 

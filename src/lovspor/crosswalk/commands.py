@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.capture import REAL_SOURCES, Sources, capture
-from lovspor.crosswalk.check import check
+from lovspor.crosswalk.check import check, require_reproduced
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
 from lovspor.crosswalk.manifest import build_manifest, render_manifest
 from lovspor.crosswalk.paths import writable_target
@@ -185,12 +185,22 @@ def read_approval(path: Path) -> Approval:
         raise CrosswalkError(f"approval refused: invalid {', '.join(fields)}") from exc
 
 
-def check_impl(data_path: Path, previous: Path | None, cache: Path | None) -> str:
-    """One line per problem, then a verdict; raises when anything failed."""
+def check_impl(
+    data_path: Path, previous: Path | None, cache: Path | None, strict: bool = False
+) -> str:
+    """One line per problem, then a verdict; raises when anything failed.
+
+    ``strict`` also fails on what the default only reports: an act the capture does
+    not reproduce, and claimed raw bytes that are not the capture's.
+    """
+    if strict and cache is None:
+        raise CrosswalkError("--strict verifies against a capture: give --cache")
     data = read_bounded(data_path, MAX_PREVIOUS_BYTES, "crosswalk file")
     report = check(data, read_previous(previous), cache)
     if not report.passed:
         raise CrosswalkContractError(report.problems)
+    if strict:
+        require_reproduced(report)
     found = f"ok: {len(report.records)} records"
     if cache is None:
         return found
@@ -213,10 +223,17 @@ def check_command(
     data: _Input,
     previous: Annotated[Path | None, typer.Option("--previous", help="Previous release.")] = None,
     cache: Annotated[Path | None, typer.Option("--cache", help="Capture to verify.")] = None,
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help="Also fail on acts not reproduced from --cache or raw bytes not in it.",
+        ),
+    ] = False,
 ) -> None:
     """Fail closed: canonical form, contract, append-only history, provenance."""
     try:
-        typer.echo(check_impl(data, previous, cache))
+        typer.echo(check_impl(data, previous, cache, strict))
     except CrosswalkContractError as error:
         for problem in error.problems:
             typer.echo(f"problem: {problem}", err=True)

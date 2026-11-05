@@ -59,6 +59,7 @@ def test_a_verified_release_candidate_manifest_names_its_capture(
     assert manifest["release_state"] == "release_candidate"
     assert manifest["provenance"] == {
         "verified": True,
+        "fully_reproduced": True,
         "capture_manifest_sha256": sha256((capture_dir / MANIFEST).read_bytes()).hexdigest(),
         "not_reproduced": [],
         "raw_bytes_not_in_capture": [],
@@ -80,6 +81,7 @@ def test_capture_provenance_hashes_exact_bytes_not_reserialized_json(
     after = build_manifest(promoted, "x", capture_dir)
     assert after["provenance"] == {
         "verified": True,
+        "fully_reproduced": True,
         "capture_manifest_sha256": sha256(reformatted).hexdigest(),
         "not_reproduced": [],
         "raw_bytes_not_in_capture": [],
@@ -167,6 +169,7 @@ def test_mixed_manifest_reports_research_drift_without_certifying_that_act(
     assert manifest["counts"]["release_state"] == {"release_candidate": 3, "research_only": 5}
     assert manifest["provenance"] == {
         "verified": True,
+        "fully_reproduced": False,
         "capture_manifest_sha256": sha256((capture_dir / MANIFEST).read_bytes()).hexdigest(),
         "not_reproduced": [],
         "raw_bytes_not_in_capture": [research["amending_lov_id"]],

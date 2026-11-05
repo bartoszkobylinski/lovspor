@@ -7,7 +7,10 @@ until the owner resolves them. There is no `released` state: the file-level
 `release_state` is `release_candidate` only if a current record is one, and
 such a manifest is written only when every current candidate is reproduced from
 the given capture, raw bytes included. A research manifest written without a
-capture says so in its `provenance` block. Nothing here publishes.
+capture says so in its `provenance` block. `verified` means the file was checked
+against the named capture and every current candidate was reproduced from it;
+`fully_reproduced` says whether every current record was, so research drift is
+never hidden behind `verified`. Nothing here publishes.
 """
 
 import json
@@ -18,7 +21,13 @@ from pathlib import Path
 
 from lovspor.crosswalk.cache import MANIFEST
 from lovspor.crosswalk.canonical import Record, canonical_json, canonical_record
-from lovspor.crosswalk.check import CheckReport, check, current_records, require_passed
+from lovspor.crosswalk.check import (
+    CheckReport,
+    check,
+    current_records,
+    fully_reproduced,
+    require_passed,
+)
 from lovspor.crosswalk.contract import SCHEMA_VERSION
 from lovspor.crosswalk.errors import CrosswalkError
 
@@ -61,6 +70,7 @@ BLOCKERS = [
 COVERAGE = "Covers exactly the acts listed in this file; no claim beyond them."
 UNVERIFIED = {
     "verified": False,
+    "fully_reproduced": False,
     "note": (
         "research_only: contract, invariants and canonical form checked; the evidence was "
         "not reproduced from a capture"
@@ -103,6 +113,7 @@ def _provenance(report: CheckReport, cache: Path | None) -> dict[str, object]:
         return UNVERIFIED
     return {
         "verified": True,
+        "fully_reproduced": fully_reproduced(report),
         "capture_manifest_sha256": sha256((cache / MANIFEST).read_bytes()).hexdigest(),
         "not_reproduced": report.unverified,
         "raw_bytes_not_in_capture": report.drifted,
