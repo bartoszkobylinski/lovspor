@@ -108,6 +108,7 @@ the verifier. For help text or a usage error (exit 2) assert through
 `tests.unit.cli_output.said(phrase, result.output)`, plus the exit code and what the
 command left on disk. A plain `typer.echo` line is not wrapped and may be matched as
 text. Three rounds were lost to this alone (PRs #690, #692, #697).
+Help inside an options table is truncated, not wrapped, so `said()` cannot see it: assert it through `tests.unit.cli_output.option_help(app, path, option)`, which reads the Click parameter, never by widening the console (#801).
 
 Classify a survivor as anything other than killable_by_correct_test only after
 the attempt, and name what you tried and why it cannot work:
