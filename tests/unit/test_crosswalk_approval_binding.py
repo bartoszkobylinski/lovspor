@@ -8,6 +8,7 @@ carry a detached SSH signature by a trusted signer, and the gate is replayed:
 """
 
 import json
+import subprocess
 from hashlib import sha256
 from pathlib import Path
 
@@ -310,3 +311,88 @@ def test_cli_manifest_accepts_the_proven_gate_output(
     result = CliRunner().invoke(app, args)
     assert result.exit_code == 0, result.output
     assert json.loads(output.read_text(encoding="utf-8"))["release_state"] == "release_candidate"
+
+
+def test_signed_candidate_manifest_is_byte_deterministic(
+    candidate: bytes, capture_dir: Path, tmp_path: Path, proof: Path
+) -> None:
+    """The manifest has no wall clock, including its new approval block."""
+    data = _write(tmp_path, candidate)
+    first, second = tmp_path / "first.json", tmp_path / "second.json"
+    manifest_impl(data, first, capture_dir, proof)
+    manifest_impl(data, second, capture_dir, proof)
+    assert first.read_bytes() == second.read_bytes()
+
+
+def test_a_missing_approved_input_is_refused(
+    candidate: bytes, capture_dir: Path, tmp_path: Path, proof: Path
+) -> None:
+    (proof / approvals.APPROVED_INPUT_FILE).unlink()
+    assert _refused(_write(tmp_path, candidate), tmp_path, capture_dir, proof).startswith(
+        "approved input unreadable"
+    )
+
+
+def test_an_oversized_signature_is_refused_before_verification(
+    built: bytes,
+    capture_dir: Path,
+    tmp_path: Path,
+    proof: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signature = approvals.signature_path(proof / approvals.APPROVAL_FILE)
+    signature.write_bytes(b"x" * (approvals.MAX_SIGNATURE_BYTES + 1))
+
+    def unexpected_verification(*args: object, **kwargs: object) -> str:
+        pytest.fail("oversized signatures must not reach ssh-keygen")
+
+    monkeypatch.setattr(approvals, "_ssh_keygen", unexpected_verification)
+    output = tmp_path / "out.jsonl"
+    with pytest.raises(CrosswalkError, match="approval signature too large"):
+        release_candidate_impl(
+            _write(tmp_path, built), proof / approvals.APPROVAL_FILE, capture_dir, output
+        )
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("stage", ["find-principals", "verify"])
+@pytest.mark.parametrize("failure", ["missing", "timeout"])
+def test_cli_gate_refuses_when_signature_verifier_cannot_run(
+    built: bytes,
+    capture_dir: Path,
+    tmp_path: Path,
+    proof: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    failure: str,
+) -> None:
+    real_run = subprocess.run
+
+    def unavailable(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if argv[:3] == ["ssh-keygen", "-Y", stage]:
+            if failure == "missing":
+                raise FileNotFoundError("ssh-keygen unavailable")
+            raise subprocess.TimeoutExpired(argv, 30)
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(approvals.subprocess, "run", unavailable)
+    data, output = _write(tmp_path, built), tmp_path / "out.jsonl"
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "crosswalk",
+            "release-candidate",
+            "--input",
+            str(data),
+            "--approval",
+            str(proof / approvals.APPROVAL_FILE),
+            "--cache",
+            str(capture_dir),
+            "--output",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "refused: approval signature could not be checked: ssh-keygen" in result.output
+    assert not output.exists()
