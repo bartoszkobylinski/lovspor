@@ -39,7 +39,11 @@ answers = json.loads((state / f"{key}.json").read_text())
 seen = state / f"{key}.seen"
 done = int(seen.read_text()) if seen.exists() else 0
 seen.write_text(str(done + 1))
-print(answers[min(done, len(answers) - 1)])
+answer = answers[min(done, len(answers) - 1)]
+if answer == "API_ERROR":
+    print("untrusted partial response", end="")
+    sys.exit(1)
+print(answer)
 """
 
 
@@ -130,6 +134,63 @@ def test_a_newer_head_is_left_to_its_own_run(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert _OTHER in result.stdout
     assert len(_run_queries(tmp_path)) == 2
+    assert not (tmp_path / "body").exists()
+
+
+def test_a_run_on_the_final_attempt_prevents_escalation(tmp_path: Path) -> None:
+    env = _sandbox(tmp_path, runs=[0, 0, 0, 1], heads=[_BEFORE])
+
+    result = _run(tmp_path, env, "791", _PUSHED, _BEFORE)
+
+    assert result.returncode == 0, result.stderr
+    assert len(_run_queries(tmp_path)) == 4
+    assert len([call for call in _calls(tmp_path) if call[:2] == ["pr", "view"]]) == 3
+    assert not any(call[:2] == ["pr", "edit"] for call in _calls(tmp_path))
+    assert not (tmp_path / "body").exists()
+
+
+@pytest.mark.parametrize("response", ["API_ERROR", "not-json", ""])
+def test_unavailable_github_state_cannot_silently_clear_the_watchdog(
+    tmp_path: Path, response: str
+) -> None:
+    env = _sandbox(tmp_path, runs=[0], heads=[response])
+    (tmp_path / "runs.json").write_text(json.dumps([response]))
+
+    result = _run(tmp_path, env, "791", _PUSHED, _BEFORE)
+
+    assert result.returncode == 1
+    assert len(_run_queries(tmp_path)) == 4
+    assert len([call for call in _calls(tmp_path) if call[:2] == ["pr", "view"]]) == 4
+    assert ["pr", "edit", "791", "--add-label", "needs-human:pipeline"] in _calls(tmp_path)
+    assert "**BLOCKED" in (tmp_path / "body").read_text()
+
+
+@pytest.mark.parametrize("attempts", [1, 4])
+def test_the_wait_sleeps_only_between_attempts(tmp_path: Path, attempts: int) -> None:
+    env = _sandbox(tmp_path, runs=[0], heads=[_BEFORE]) | {
+        "FOLLOWUP_ATTEMPTS": str(attempts),
+        "FOLLOWUP_INTERVAL_SECONDS": "300",
+    }
+    sleep = tmp_path / "bin" / "sleep"
+    sleep.write_text('#!/bin/sh\necho "$1" >> "$GH_STUB_STATE/sleeps"\n')
+    sleep.chmod(0o755)
+
+    result = _run(tmp_path, env, "791", _PUSHED, _BEFORE)
+
+    assert result.returncode == 1
+    assert len(_run_queries(tmp_path)) == attempts
+    sleeps = tmp_path / "sleeps"
+    assert (sleeps.read_text().splitlines() if sleeps.exists() else []) == ["300"] * (attempts - 1)
+
+
+@pytest.mark.parametrize("interval", ["-1", "301", "x", ""])
+def test_invalid_intervals_are_refused_before_any_query(tmp_path: Path, interval: str) -> None:
+    env = _sandbox(tmp_path, runs=[1], heads=[_BEFORE]) | {"FOLLOWUP_INTERVAL_SECONDS": interval}
+
+    result = _run(tmp_path, env, "791", _PUSHED, _BEFORE)
+
+    assert result.returncode == 2
+    assert _calls(tmp_path) == []
     assert not (tmp_path / "body").exists()
 
 
