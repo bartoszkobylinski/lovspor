@@ -246,7 +246,11 @@ def test_remediation_rejected_push_is_ignored_only_for_a_superseded_head() -> No
     steps = _steps("mutation-remediation.yml", "remediate-verify")
     push = _named_step(steps, "Commit and push, or report BLOCKED")["run"]
 
-    assert 'if ! git push origin "HEAD:$HEAD_BRANCH"; then' in push
+    # #805: the push goes through push_with_retry.sh; the superseded-head check
+    # still judges whatever failure it returns.
+    assert 'push=(scripts/ci/push_with_retry.sh origin "HEAD:$HEAD_BRANCH")' in push
+    assert 'push=(git push origin "HEAD:$HEAD_BRANCH")' in push
+    assert 'if ! "${push[@]}"; then' in push
     assert 'git fetch -q origin "$HEAD_BRANCH"' in push
     assert 'if [ "$(git rev-parse "origin/$HEAD_BRANCH")" != "$HEAD_SHA" ]; then' in push
     assert "abandoning superseded result" in push
