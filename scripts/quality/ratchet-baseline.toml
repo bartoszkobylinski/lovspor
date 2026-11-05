@@ -813,7 +813,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/sync/orchestrator.py"
-value = 2184
+value = 2176
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -856,13 +856,6 @@ rule = "function-lines"
 path = "src/lovspor/sync/orchestrator.py"
 name = "_generate_and_apply_history"
 value = 21
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "function-lines"
-path = "src/lovspor/sync/orchestrator.py"
-name = "_guard_mass_reembed"
-value = 37
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -932,14 +925,14 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 rule = "function-complexity"
 path = "src/lovspor/sync/orchestrator.py"
 name = "run_sync"
-value = 29
+value = 28
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
 rule = "function-lines"
 path = "src/lovspor/sync/orchestrator.py"
 name = "run_sync"
-value = 272
+value = 267
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]

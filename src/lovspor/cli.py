@@ -612,10 +612,10 @@ def sync(
         False,
         "--allow-mass-reembed",
         help=(
-            "Explicitly authorize an embedding-input repair larger than the "
+            "Explicitly authorize an embedding workload larger than the "
             "ADR-0006 mass-re-embed guard allows. Default is fail-closed: a "
-            "keyed sync whose input-identity repair selection exceeds the "
-            "configured document-fraction or token-workload threshold aborts "
+            "keyed sync whose repair selection or changed documents (#790) exceed "
+            "the configured document-fraction or token-workload threshold aborts "
             "BEFORE any provider call. The scheduled workflow never passes "
             "this flag; it is a deliberate operator action for intended "
             "large repairs (unannotated corpus, deliberate pipeline change)."
