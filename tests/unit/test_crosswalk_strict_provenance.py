@@ -251,3 +251,73 @@ def test_strict_cli_reports_all_gaps_without_writing(
     assert {
         p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()
     } == before
+
+
+@pytest.mark.parametrize("invalid", ["noncanonical", "identity"])
+def test_strict_cli_preserves_existing_contract_failures(
+    built: bytes, capture_dir: Path, tmp_path: Path, invalid: str
+) -> None:
+    """Strict adds provenance requirements without bypassing the default contract."""
+    if invalid == "noncanonical":
+        data = built.replace(b"\n", b"\r\n")
+        problem = "file is not in canonical form"
+    else:
+        records = parse_records(built)
+        records[0]["evidence"][0]["parsed_identity_sha256"] = "f" * 64
+        data = serialize_records(records)
+        problem = (
+            f"{records[0]['amending_lov_id']}: "
+            "evidence identities are not reproduced from the capture"
+        )
+    path = _write(tmp_path, data)
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "crosswalk",
+            "check",
+            "--input",
+            str(path),
+            "--cache",
+            str(capture_dir),
+            "--strict",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert result.output.splitlines() == [f"problem: {problem}"]
+    assert {
+        p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()
+    } == before
+
+
+def test_strict_cli_accepts_reproduced_input_without_writing(
+    built: bytes, capture_dir: Path, tmp_path: Path
+) -> None:
+    path = _write(tmp_path, built)
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "crosswalk",
+            "check",
+            "--input",
+            str(path),
+            "--cache",
+            str(capture_dir),
+            "--strict",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.output.splitlines() == [
+        f"ok: {len(parse_records(built))} records, 0 not reproduced from a capture, "
+        "0 with raw bytes not in this capture"
+    ]
+    assert {
+        p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()
+    } == before
