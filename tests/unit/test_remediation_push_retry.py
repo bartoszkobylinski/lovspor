@@ -14,6 +14,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml  # type: ignore[import-untyped]
 
 _ROOT = Path(__file__).parents[2]
@@ -51,7 +52,9 @@ def _push_block() -> str:
     return run[run.index("# Issue #67") : run.index("# Progress, not an escalation")]
 
 
-def _run(tmp_path: Path, answers: list[tuple[int, str, str]]) -> subprocess.CompletedProcess[str]:
+def _run(
+    tmp_path: Path, answers: list[tuple[int, str, str]], *, cwd: Path = _ROOT
+) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     git = bin_dir / "git"
@@ -67,7 +70,7 @@ def _run(tmp_path: Path, answers: list[tuple[int, str, str]]) -> subprocess.Comp
     }
     return subprocess.run(
         ["bash", "-e", "-c", _push_block()],
-        cwd=_ROOT,
+        cwd=cwd,
         env=env,
         capture_output=True,
         text=True,
@@ -109,3 +112,30 @@ def test_server_errors_on_every_attempt_fail_the_job(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert len(_pushes(tmp_path)) == 3
+
+
+@pytest.mark.parametrize("script_present", [False, True], ids=["missing", "not-executable"])
+@pytest.mark.parametrize("outcome", ["success", "same-head", "superseded"])
+def test_without_an_executable_retry_script_pushes_once(
+    tmp_path: Path, script_present: bool, outcome: str
+) -> None:
+    """The workflow promises a one-push fallback for older heads (#381)."""
+    if script_present:
+        script = tmp_path / "scripts" / "ci" / "push_with_retry.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/bin/sh\nexit 99\n")
+        script.chmod(0o644)
+    answers = [_OK]
+    if outcome != "success":
+        remote_head = _OTHER if outcome == "superseded" else _HEAD
+        answers = [_SERVER_502, (0, "", ""), (0, f"{remote_head}\n", "")]
+
+    result = _run(tmp_path, answers, cwd=tmp_path)
+
+    assert result.returncode == (1 if outcome == "same-head" else 0), result.stderr
+    calls = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
+    expected = [["push", "origin", "HEAD:feat/x"]]
+    if outcome != "success":
+        expected += [["fetch", "-q", "origin", "feat/x"], ["rev-parse", "origin/feat/x"]]
+    assert calls == expected
+    assert ("abandoning superseded result" in result.stdout) == (outcome == "superseded")
