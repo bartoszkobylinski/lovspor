@@ -142,6 +142,23 @@ def write_observation(path: Path, text: str) -> bool:
         raise ForarbeiderRefusedError(RefusalReason.OUTPUT_WRITE_FAILED, str(path)) from error
 
 
+def require_replaceable(path: Path) -> None:
+    """Refuse a file at ``path`` unless only its owner could ever have read it.
+
+    A record that may be replaced still must not be replaced quietly when others
+    could reach it: the new file would be private, and the exposure would vanish
+    from view. It is refused, never repaired, as :func:`write_observation` does.
+
+    Raises:
+        ForarbeiderRefusedError: ``observation_unsafe``.
+        OSError: the file could not be inspected.
+    """
+    try:
+        _open_private(path).close()
+    except FileNotFoundError:
+        return
+
+
 def _publish(path: Path, payload: bytes) -> bool:
     descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     staged = Path(name)
