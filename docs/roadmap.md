@@ -354,6 +354,7 @@ New fetcher per source (no Lovdata involvement, no §43 risk). Each source has i
 - Enrichment overlay: which parties voted how on a given act, on what date, with what dissent.
 - **Leverage:** medium. Adds political-context layer to existing acts.
 - **Effort:** 1 sprint.
+- **Proposed annotation (2026-11-02; pending owner ruling D10, lovspor-notebook #162):** superseded in scope by ADR-0017 (votes stay in Politik); see `docs/decisions.md` §2.
 
 **D-DIRECT-5. Specialized administrative tribunals**
 - Datatilsynet, KOFA, Markedsrådet, Konkurransetilsynet, Finanstilsynet — each has its own site, PDFs, varying transparency.

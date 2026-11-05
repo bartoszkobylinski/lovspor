@@ -14,6 +14,7 @@ from typing import Annotated
 
 import typer
 
+from lovspor.crosswalk import commands as _crosswalk_commands  # noqa: F401
 from lovspor.forarbeider import commands as _forarbeider_commands  # noqa: F401
 from lovspor.forarbeider import edition_commands as _forarbeider_edition  # noqa: F401
 from lovspor.forarbeider import reader_cli as _forarbeider_reader  # noqa: F401

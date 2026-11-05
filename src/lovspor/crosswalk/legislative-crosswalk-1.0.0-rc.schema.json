@@ -1,0 +1,779 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lovspor legislative crosswalk record, 1.0.0-rc (release candidate contract; owner rulings D4-D9, D11 pending)",
+  "description": "Structural contract of one machine-produced crosswalk record. Derived from the v0.2 draft (docs/research/schemas/legislative-crosswalk-v0.2-proposal.schema.json) with the item l corrections, raw evidence only, and the session's Lovvedtak publication list mandatory for an attested decision -> case edge. Cross-field and cross-record invariants are enforced by lovspor.crosswalk.contract, not here. It does not replace legislative-crosswalk-v0.schema.json, which Politik PR #178 reads. Structure is not verification of primary-source bytes, origin or rights.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_state",
+    "amending_lov_id",
+    "record_revision",
+    "record_state",
+    "observed_on",
+    "status",
+    "edge_status",
+    "decision",
+    "sak_id",
+    "sanction_events",
+    "evidence",
+    "source_pins"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0-rc"
+    },
+    "release_state": {
+      "description": "No 'released' state exists in this draft. Adding one is an owner decision and a schema version bump.",
+      "enum": [
+        "research_only",
+        "release_candidate"
+      ]
+    },
+    "amending_lov_id": {
+      "$ref": "#/$defs/law_id"
+    },
+    "record_revision": {
+      "description": "Revisions of one amending_lov_id are 1..n without gaps; the highest is current. A revision is never edited after release: supersession is derived, not written back.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "record_state": {
+      "enum": [
+        "active",
+        "withdrawn"
+      ]
+    },
+    "withdrawal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "withdrawn_on",
+        "reason"
+      ],
+      "properties": {
+        "withdrawn_on": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "observed_on": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "status": {
+      "description": "Derived: attested exactly when every edge is attested.",
+      "$ref": "#/$defs/status"
+    },
+    "edge_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "law_identity",
+        "law_decision",
+        "decision_case"
+      ],
+      "properties": {
+        "law_identity": {
+          "$ref": "#/$defs/status"
+        },
+        "law_decision": {
+          "$ref": "#/$defs/status"
+        },
+        "decision_case": {
+          "$ref": "#/$defs/status"
+        }
+      }
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reason_code": {
+      "enum": [
+        "decision_kind_not_supported",
+        "no_decision_citation_in_source",
+        "law_not_in_pinned_archives",
+        "decision_not_in_publication_list",
+        "case_not_found",
+        "multiple_candidates",
+        "source_unreadable",
+        "source_disagreement",
+        "rights_not_established",
+        "withdrawn_by_producer"
+      ]
+    },
+    "decision": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/decision"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sak_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "sanction_events": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/sanction_event"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "source_pins": {
+      "$ref": "#/$defs/source_pins"
+    }
+  },
+  "$defs": {
+    "git_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "utc_timestamp": {
+      "description": "UTC only: the pattern fixes the shape, the format names a real calendar instant (the producer's validator registers its own date-time checker).",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?(?:Z|\\+00:00)$"
+    },
+    "law_id": {
+      "type": "string",
+      "pattern": "^LOV-[0-9]{4}-[0-9]{2}-[0-9]{2}-[1-9][0-9]*$"
+    },
+    "status": {
+      "enum": [
+        "attested",
+        "unresolved",
+        "ambiguous",
+        "contradicted",
+        "unsupported"
+      ]
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "session_id",
+        "number"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "lovvedtak",
+            "besl_o"
+          ]
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{4}$"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "sanction_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "law_id",
+        "kind",
+        "source_url"
+      ],
+      "properties": {
+        "law_id": {
+          "$ref": "#/$defs/law_id"
+        },
+        "kind": {
+          "description": "unclassified_sanction: a source-backed sanction whose initial/corrective role no permitted source states (the default, and the #618 case as read from Lovtidend headers). corrective_resanction only with correction evidence. There is no initial_sanction: no permitted source states that role.",
+          "enum": [
+            "unclassified_sanction",
+            "corrective_resanction"
+          ]
+        },
+        "source_url": {
+          "description": "The Lovtidend archive whose header states the sanction for this decision.",
+          "$ref": "#/$defs/archive_url"
+        },
+        "corrects_law_id": {
+          "$ref": "#/$defs/law_id"
+        }
+      },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "corrective_resanction"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "corrects_law_id"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "corrects_law_id"
+          ]
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "source_url",
+        "capture_level",
+        "upstream_id",
+        "body_sha256",
+        "parsed_identity_sha256",
+        "retrieved_at",
+        "parser_version"
+      ],
+      "properties": {
+        "role": {
+          "description": "decision_publication: the session's Lovvedtak publication list (data.stortinget.no eksport/publikasjoner); mandatory for an attested decision_case edge.",
+          "enum": [
+            "law_identity",
+            "law_decision_pair",
+            "decision_publication",
+            "decision_case",
+            "correction"
+          ]
+        },
+        "source_url": {
+          "type": "string",
+          "description": "Raw bytes come only from the two permitted machine sources; never lovdata.no HTML.",
+          "pattern": "^https://(?:api\\.lovdata\\.no/v1/publicData/|data\\.stortinget\\.no/eksport/)"
+        },
+        "capture_level": {
+          "const": "raw_body_captured"
+        },
+        "upstream_id": {
+          "description": "<archive>!<member> for a Lovdata archive member, sak/<id> for a Stortinget case, publikasjoner/<session> for a Lovvedtak publication list.",
+          "type": "string",
+          "pattern": "^(?:lovtidend-avd1-(?:2001-2025|[0-9]{4})\\.tar\\.bz2![a-z0-9/._-]+\\.xml|sak/[1-9][0-9]*|publikasjoner/[0-9]{4}-[0-9]{4})$"
+        },
+        "body_sha256": {
+          "description": "Provenance: which bytes this run read. Not the comparison key across captures.",
+          "$ref": "#/$defs/sha256"
+        },
+        "parsed_identity_sha256": {
+          "description": "Comparison key: SHA-256 of the canonical JSON of the identity the named parser extracted (fields per parser_version, proposal item g).",
+          "$ref": "#/$defs/sha256"
+        },
+        "retrieved_at": {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        "parser_version": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*-[1-9][0-9]*$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "enum": [
+                  "law_identity",
+                  "law_decision_pair",
+                  "correction"
+                ]
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_url": {
+                "pattern": "^https://api\\.lovdata\\.no/v1/publicData/get/"
+              },
+              "upstream_id": {
+                "pattern": "^lovtidend-avd1-(?:2001-2025|[0-9]{4})\\.tar\\.bz2![a-z0-9/._-]+\\.xml$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "enum": [
+                  "decision_publication"
+                ]
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_url": {
+                "pattern": "^https://data\\.stortinget\\.no/eksport/publikasjoner\\?"
+              },
+              "upstream_id": {
+                "pattern": "^publikasjoner/[0-9]{4}-[0-9]{4}$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "enum": [
+                  "decision_case"
+                ]
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_url": {
+                "pattern": "^https://data\\.stortinget\\.no/eksport/sak\\?"
+              },
+              "upstream_id": {
+                "pattern": "^sak/[1-9][0-9]*$"
+              }
+            }
+          }
+        }
+      ],
+      "description": "Raw evidence only: a machine producer never records a web page review."
+    },
+    "lovdata_archive_pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_url",
+        "sha256",
+        "size_bytes",
+        "last_modified",
+        "retrieved_at",
+        "licence",
+        "licence_basis"
+      ],
+      "properties": {
+        "source_url": {
+          "$ref": "#/$defs/archive_url"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "last_modified": {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        "retrieved_at": {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        "licence": {
+          "const": "NLOD-2.0"
+        },
+        "licence_basis": {
+          "description": "stated_for_file: a Lovdata or data.norge.no statement names this file under NLOD 2.0. stated_for_endpoint: Lovdata's OpenAPI document (https://api.lovdata.no/swagger/api.json) states NLOD 2.0 for the 'Public data' tag, which covers /v1/publicData/get/{filename} for every file it serves. inferred_same_dataset: only the dataset description matches; not sufficient for a release candidate.",
+          "enum": [
+            "stated_for_file",
+            "stated_for_endpoint",
+            "inferred_same_dataset"
+          ]
+        }
+      }
+    },
+    "source_pins": {
+      "description": "Parser versions are pinned per evidence item (parser_version), not here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lovverk_commit",
+        "producer_commit",
+        "lovdata_archives"
+      ],
+      "properties": {
+        "lovverk_commit": {
+          "$ref": "#/$defs/git_sha"
+        },
+        "producer_commit": {
+          "$ref": "#/$defs/git_sha"
+        },
+        "lovdata_archives": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/lovdata_archive_pin"
+          }
+        }
+      }
+    },
+    "archive_url": {
+      "type": "string",
+      "pattern": "^https://api\\.lovdata\\.no/v1/publicData/get/lovtidend-avd1-(?:2001-2025|[0-9]{4})\\.tar\\.bz2$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "record_state": {
+            "const": "withdrawn"
+          }
+        },
+        "required": [
+          "record_state"
+        ]
+      },
+      "then": {
+        "required": [
+          "withdrawal",
+          "reason",
+          "reason_code"
+        ],
+        "properties": {
+          "record_revision": {
+            "minimum": 2
+          },
+          "status": {
+            "not": {
+              "const": "attested"
+            }
+          },
+          "reason_code": {
+            "const": "withdrawn_by_producer"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "withdrawal"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "unresolved",
+              "ambiguous",
+              "contradicted",
+              "unsupported"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason",
+          "reason_code"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "besl_o"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "unsupported"
+          },
+          "reason_code": {
+            "const": "decision_kind_not_supported"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "sanction_events": {
+            "contains": {
+              "properties": {
+                "kind": {
+                  "const": "corrective_resanction"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          }
+        },
+        "required": [
+          "sanction_events"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "contains": {
+              "properties": {
+                "role": {
+                  "const": "correction"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "release_state": {
+            "const": "release_candidate"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_pins": {
+            "properties": {
+              "lovdata_archives": {
+                "items": {
+                  "properties": {
+                    "licence_basis": {
+                      "enum": [
+                        "stated_for_file",
+                        "stated_for_endpoint"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "edge_status": {
+            "properties": {
+              "law_identity": {
+                "const": "attested"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "contains": {
+              "properties": {
+                "role": {
+                  "const": "law_identity"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            }
+          },
+          "source_pins": {
+            "properties": {
+              "lovdata_archives": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "edge_status": {
+            "properties": {
+              "law_decision": {
+                "const": "attested"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "decision": {
+            "$ref": "#/$defs/decision"
+          },
+          "sanction_events": {
+            "minItems": 1
+          },
+          "evidence": {
+            "contains": {
+              "properties": {
+                "role": {
+                  "const": "law_decision_pair"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "edge_status": {
+            "properties": {
+              "decision_case": {
+                "const": "attested"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "sak_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "evidence": {
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "role": {
+                      "const": "decision_case"
+                    }
+                  },
+                  "required": [
+                    "role"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "role": {
+                      "const": "decision_publication"
+                    }
+                  },
+                  "required": [
+                    "role"
+                  ]
+                }
+              }
+            ]
+          },
+          "decision": {
+            "$ref": "#/$defs/decision"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "attested"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "edge_status": {
+            "properties": {
+              "law_identity": {
+                "const": "attested"
+              },
+              "law_decision": {
+                "const": "attested"
+              },
+              "decision_case": {
+                "const": "attested"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "edge_status": {
+            "not": {
+              "properties": {
+                "law_identity": {
+                  "const": "attested"
+                },
+                "law_decision": {
+                  "const": "attested"
+                },
+                "decision_case": {
+                  "const": "attested"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

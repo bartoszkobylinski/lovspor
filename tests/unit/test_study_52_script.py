@@ -16,8 +16,10 @@ import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
-from lovspor.errors import NetworkError, StortingetStatusError
+from lovspor.crosswalk import cache as crosswalk_cache
+from lovspor.errors import LovsporError
 from lovspor.stortinget_case_source import LawDecision
+from tests.unit.crosswalk_support import tar_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
 NS = 'xmlns="http://data.stortinget.no"'
@@ -100,8 +102,9 @@ def _tar(path: Path, members: dict[str, bytes]) -> Path:
 def _archives(cache: Path, old: dict[str, bytes], new: dict[str, bytes]) -> list[dict]:
     records = []
     for name, members in zip(study.ARCHIVES, (old, new), strict=True):
-        _tar(cache / "lovdata" / name, members)
-        records.append({"filename": name, "path": f"lovdata/{name}"})
+        path = _tar(cache / "lovdata" / name, members)
+        digest = sha256(path.read_bytes()).hexdigest()
+        records.append({"filename": name, "path": f"lovdata/{name}", "sha256": digest})
     return records
 
 
@@ -116,7 +119,7 @@ def _archives(cache: Path, old: dict[str, bytes], new: dict[str, bytes]) -> list
     ],
 )
 def test_law_edge_statuses(header: dict, expected: str) -> None:
-    assert study._law_edge(header)["status"] == expected
+    assert crosswalk_cache.law_edge(header)["status"] == expected
 
 
 def test_law_records_cover_both_archives_and_keep_every_outcome(tmp_path: Path) -> None:
@@ -171,7 +174,9 @@ def test_an_act_in_both_archives_is_ambiguous_not_chosen(tmp_path: Path) -> None
 
 
 def test_listing_keys_include_the_session_before() -> None:
-    keys = study.listing_keys([LawDecision("2025-2026", 26), LawDecision("2024-2025", 41)])
+    keys = crosswalk_cache.listing_keys(
+        [LawDecision("2025-2026", 26), LawDecision("2024-2025", 41)]
+    )
     assert keys == [
         ("publikasjoner", "2024-2025"),
         ("publikasjoner", "2025-2026"),
@@ -266,7 +271,7 @@ def test_cross_session_case_is_discovered_from_the_session_before(tmp_path: Path
     )
     assert found["publication_listed"] is True
     assert found["export_id"] == "vedtak-202526-026"
-    assert study.discovery_candidates(tmp_path, manifest, [LATER]) == [103533]
+    assert crosswalk_cache.discovery_candidates(tmp_path, manifest, [LATER]) == [103533]
 
 
 FOUND_CASE = {
@@ -337,7 +342,7 @@ def test_publication_gate_leaves_other_outcomes_alone() -> None:
 
 def test_a_malformed_http_200_saker_listing_is_a_recorded_failure(tmp_path: Path) -> None:
     manifest = _cross_session_cache(tmp_path, previous=b"<saker_oversikt", case=None)
-    assert study.discovery_candidates(tmp_path, manifest, [LATER]) == []
+    assert crosswalk_cache.discovery_candidates(tmp_path, manifest, [LATER]) == []
     found = study.discovery_record(tmp_path, manifest, LATER)
     assert (found["outcome"], found["reason"]) == (
         "incomplete",
@@ -449,7 +454,7 @@ def test_tampered_cache_is_refused(tmp_path: Path) -> None:
     )
     record = manifest["stortinget"][-1]
     (tmp_path / record["path"]).write_bytes(b"changed")
-    with pytest.raises(study.LovsporError, match="do not match the manifest"):
+    with pytest.raises(LovsporError, match="do not match the manifest"):
         study.discovery_record(tmp_path, manifest, LATER)
 
 
@@ -516,54 +521,6 @@ def test_recall_is_not_measured_without_a_single_header_lovvedtak() -> None:
 def test_header_against_label(header: dict, label: tuple[str, int], expected: str) -> None:
     row = {"proceeding_kind": label[0], "session_id": "2011-2012", "decision_number": str(label[1])}
     assert study._header_vs_label({"header": header}, row) == expected
-
-
-# --- capture failures --------------------------------------------------------------
-
-
-def test_refusal_is_recorded_with_its_status(tmp_path: Path) -> None:
-    record = study._failure({"stage": "discovery"}, StortingetStatusError(429, "https://x"))
-    assert (record["http_status"], record["stage"]) == (429, "discovery")
-    assert record["error"] == "StortingetStatusError: Stortinget HTTP 429: https://x"
-    assert study._failure({}, NetworkError("down"))["http_status"] is None
-
-
-def test_capture_records_a_refused_listing_and_keeps_going(
-    tmp_path: Path, httpx_mock: HTTPXMock, monkeypatch
-) -> None:
-    monkeypatch.setattr(study, "RATE_LIMIT_PAUSE_SECONDS", 0.0)
-    url = "https://data.stortinget.no/eksport/saker?sesjonid=2024-2025"
-    httpx_mock.add_response(url=url, status_code=429)
-    httpx_mock.add_response(url=url, status_code=429)
-    pacer = study.Pacer(tmp_path / "progress.log", gap=0.0)
-    with httpx.Client() as client:
-        record = study.capture_listing(client, tmp_path, pacer, ("saker", "2024-2025"))
-    assert (record["http_status"], record["key"]) == (429, "2024-2025")
-    assert len(httpx_mock.get_requests()) == 2
-    assert "FAIL saker 2024-2025" in (tmp_path / "progress.log").read_text()
-
-
-def test_capture_retries_one_429_then_stores_the_bytes(
-    tmp_path: Path, httpx_mock: HTTPXMock, monkeypatch
-) -> None:
-    monkeypatch.setattr(study, "RATE_LIMIT_PAUSE_SECONDS", 0.0)
-    url = "https://data.stortinget.no/eksport/sak?sakid=103533"
-    body = _sak(103533, "2024-2025", ("2025-2026", 26))
-    httpx_mock.add_response(url=url, status_code=429)
-    httpx_mock.add_response(url=url, content=body, headers={"Content-Type": "text/xml"})
-    pacer = study.Pacer(tmp_path / "progress.log", gap=0.0)
-    with httpx.Client() as client:
-        record = study.capture_sak(client, tmp_path, pacer, ("verification", 103533))
-    assert (record["error"], record["sha256"]) == (None, sha256(body).hexdigest())
-    assert (tmp_path / record["path"]).read_bytes() == body
-
-
-def test_pacer_spaces_requests(tmp_path: Path) -> None:
-    pacer = study.Pacer(tmp_path / "log", gap=0.05)
-    pacer.wait()
-    started = study.time.monotonic()
-    pacer.wait()
-    assert study.time.monotonic() - started >= 0.04
 
 
 # --- drift -------------------------------------------------------------------------
@@ -661,3 +618,126 @@ def test_decision_summary_counts_cross_session_and_multi_decision_cases() -> Non
     assert summary["cases_with_several_typed_lovvedtak"] == 1
     assert summary["decision_outcome"] == {"discovered": 2, "incomplete": 1}
     assert summary["candidates_per_decision"] == {"0": 1, "1": 2}
+
+
+# --- cache location (ADR-0017 D2) ----------------------------------------------------
+
+
+@pytest.mark.parametrize("gitdir", ["clone", "worktree"])
+def test_capture_into_a_checkout_is_refused_before_anything_is_written(
+    tmp_path: Path, gitdir: str
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    if gitdir == "clone":
+        (repo / ".git").mkdir()
+    else:
+        (repo / ".git").write_text("gitdir: /elsewhere/.git/worktrees/wt\n")
+    with pytest.raises(LovsporError, match="refusing to write the capture cache inside the Git"):
+        study.capture(repo / "data" / "cache" / "study-52")
+    assert sorted(p.name for p in repo.rglob("*")) == [".git"]
+
+
+def test_the_default_capture_cache_is_inside_this_checkout_and_refused() -> None:
+    """The in-repo default serves `build` over an old cache; a new capture needs --cache."""
+    with pytest.raises(LovsporError, match="inside the Git checkout"):
+        study.capture(ROOT / "data" / "cache" / "study-52-never-created")
+    assert not (ROOT / "data" / "cache" / "study-52-never-created").exists()
+
+
+def test_capture_into_the_lovverk_corpus_is_refused_before_anything_is_written(
+    tmp_path: Path,
+) -> None:
+    corpus = tmp_path / "lovverk"
+    (corpus / "lover").mkdir(parents=True)
+    (corpus / "manifest.json").write_text("{}")
+    with pytest.raises(LovsporError, match="inside the Lovverk corpus"):
+        study.capture(corpus / "crosswalk" / "study-52")
+    assert sorted(p.name for p in corpus.rglob("*")) == ["lover", "manifest.json"]
+
+
+def test_a_symlink_into_a_checkout_cannot_carry_the_capture_cache_write(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "data").mkdir(parents=True)
+    (repo / ".git").mkdir()
+    link = tmp_path / "innocent"
+    link.symlink_to(repo / "data")
+    with pytest.raises(LovsporError, match="inside the Git checkout"):
+        study.capture(link / "study-52")
+    assert sorted(p.name for p in repo.rglob("*")) == [".git", "data"]
+
+
+def test_capture_refuses_the_env_configured_lovverk_corpus(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    corpus = tmp_path / "configured-lovverk"
+    corpus.mkdir()
+    monkeypatch.setenv("LOVVERK_CORPUS_PATH", str(corpus))
+    with pytest.raises(LovsporError, match="inside the Lovverk corpus"):
+        study.capture(corpus / "study-52")
+    assert sorted(p.name for p in corpus.rglob("*")) == []
+
+
+# --- capture happy path (#610, P2 refactor onto lovspor.crosswalk) -------------------
+
+LOVDATA_API = "https://api.lovdata.no/v1/publicData"
+STORTINGET_EKSPORT = "https://data.stortinget.no/eksport"
+
+
+def test_capture_wires_lovdata_then_verification_and_writes_one_manifest(
+    tmp_path: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """study.capture() now delegates to lovspor.crosswalk.capture; this pins the
+    glue that stayed in the script: the scope it writes, and the verification
+    pass over #617's labels that discovery never sees (#768)."""
+    law = "LOV-2022-06-17-63"
+    archive_name = "lovtidend-avd1-2026.tar.bz2"
+    body = tar_bytes({})  # no member claims `law`, so discovery finds no decision to chase.
+    httpx_mock.add_response(
+        url=f"{LOVDATA_API}/list",
+        json=[
+            {
+                "filename": archive_name,
+                "description": "d",
+                "sizeBytes": len(body),
+                "lastModified": "2026-10-01T00:00:00Z",
+            }
+        ],
+    )
+    httpx_mock.add_response(url=f"{LOVDATA_API}/get/{archive_name}", content=body)
+
+    labels = tmp_path / "labels.csv"
+    labels.write_text("sak_id\n103533\n7\n103533\n", encoding="utf-8")
+    monkeypatch.setattr(study, "LABELS_CSV", labels)
+    monkeypatch.setattr(study, "load_inputs", lambda: {"mentions": {law: 1}})
+
+    for sak_id in (7, 103533):
+        httpx_mock.add_response(
+            url=f"{STORTINGET_EKSPORT}/sak?sakid={sak_id}",
+            content=_sak(sak_id, "2021-2022"),
+            headers={"Content-Type": "text/xml"},
+        )
+
+    cache = tmp_path / "run"
+    manifest = study.capture(cache)
+
+    assert manifest == crosswalk_cache.load_manifest(cache)
+    assert manifest["scope"] == {"law_ids": [law], "lovverk_commit": None}
+    assert [a["filename"] for a in manifest["lovdata"]] == [archive_name]
+    keys = [(r["stage"], r["kind"], r["key"]) for r in manifest["stortinget"]]
+    assert keys == [("verification", "sak", 7), ("verification", "sak", 103533)]
+    assert all(r["error"] is None for r in manifest["stortinget"])
+    assert datetime.fromisoformat(manifest["started_at"]) <= datetime.fromisoformat(
+        manifest["finished_at"]
+    )
+    log = (cache / "progress.log").read_text(encoding="utf-8")
+    assert "capture start" in log
+    assert "lovdata done" in log
+    assert "capture done" in log
+    assert not any(
+        httpx.URL(str(r.url)).path.startswith("/eksport/saker")
+        or httpx.URL(str(r.url)).path.startswith("/eksport/publikasjoner")
+        for r in httpx_mock.get_requests()
+    )

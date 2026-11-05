@@ -19,6 +19,7 @@ and in the mutation-testing skill.
 from __future__ import annotations
 
 import os
+import runpy
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -87,16 +88,40 @@ def test_child_imports_original_even_when_parent_resolves_shadow_package(
     assert parent_spec is not None
     assert parent_spec.origin == str(shadow_init)
 
+    # The original is wherever the editable install points, read from a child
+    # started the same way without a mutant. Not a path built from this file:
+    # under mutmut this file itself runs from the `mutants/` copy (#796).
+    original, child = (
+        _child_lovspor_file({k: v for k, v in os.environ.items() if k != "MUTANT_UNDER_TEST"}),
+        _child_lovspor_file({**os.environ, "MUTANT_UNDER_TEST": "lovspor.x_f__mutmut_1"}),
+    )
+
+    assert child == original
+    assert child != shadow_init.resolve()
+    assert child.parts[-3:] == ("src", "lovspor", "__init__.py")
+
+
+def test_child_import_assertion_works_from_a_shadow_test_copy(mutated_tree: Path) -> None:
+    """The #796 regression: the test's own location must not locate the original."""
+    shadow_test = mutated_tree / "mutants" / "tests" / "unit" / Path(__file__).name
+    shadow_test.parent.mkdir(parents=True)
+    shadow_test.write_text(Path(__file__).read_text(encoding="utf-8"), encoding="utf-8")
+
+    copied_module = runpy.run_path(str(shadow_test))
+
+    assert copied_module["_REPO"] == mutated_tree / "mutants"
+    copied_module["test_child_imports_original_even_when_parent_resolves_shadow_package"](
+        mutated_tree
+    )
+
+
+def _child_lovspor_file(env: dict[str, str]) -> Path:
     child = subprocess.run(
         [sys.executable, "-c", "import lovspor; print(lovspor.__file__)"],
         capture_output=True,
         text=True,
         check=True,
         timeout=30,
-        env={**os.environ, "MUTANT_UNDER_TEST": "lovspor.x_f__mutmut_1"},
+        env=env,
     )
-
-    assert (
-        Path(child.stdout.strip()).resolve()
-        == (_REPO / "src" / "lovspor" / "__init__.py").resolve()
-    )
+    return Path(child.stdout.strip()).resolve()
