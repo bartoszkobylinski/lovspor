@@ -648,3 +648,62 @@ def test_integer_contract_fields_refuse_json_booleans(path: tuple, value: bool) 
     assert caught.value.problems == tuple(
         f"{record['amending_lov_id']}@{record['record_revision']}: {p}" for p in problems
     )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("record_revision",),
+        ("sak_id",),
+        ("decision", "number"),
+        ("source_pins", "lovdata_archives", 0, "size_bytes"),
+    ],
+)
+@pytest.mark.parametrize("value", [0, -1])
+def test_positive_integer_fields_reject_zero_and_negative_values(path: tuple, value: int) -> None:
+    """Each of these schema properties explicitly declares minimum: 1."""
+    record = attested()
+    parent = record
+    for part in path[:-1]:
+        parent = parent[part]
+    parent[path[-1]] = value
+
+    prefix = "/" + "/".join(str(part) for part in path) + ": "
+    problems = record_problems(record)
+    assert any(p.startswith(prefix) for p in problems)
+    with pytest.raises(CrosswalkContractError) as caught:
+        validate_records([record])
+    assert caught.value.problems == tuple(
+        f"LOV-2022-06-17-63@{record['record_revision']}: {p}" for p in problems
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        (),
+        ("edge_status",),
+        ("decision",),
+        ("sanction_events", 0),
+        ("evidence", 0),
+        ("source_pins",),
+        ("source_pins", "lovdata_archives", 0),
+    ],
+)
+def test_closed_contract_objects_reject_unknown_properties(path: tuple) -> None:
+    """The RC schema declares additionalProperties: false on each object."""
+    record = attested()
+    assert record_problems(record) == []
+    parent = record
+    for part in path:
+        parent = parent[part]
+    parent["unexpected_field"] = "must not silently enter the contract"
+
+    prefix = "/" + "/".join(str(part) for part in path) + ": "
+    problems = record_problems(record)
+    # decision is wrapped in oneOf, whose top-level diagnostic omits its child errors.
+    assert any(p.startswith(prefix) for p in problems)
+    assert schema_problems(record) == problems
+    with pytest.raises(CrosswalkContractError) as caught:
+        validate_records([record])
+    assert caught.value.problems == tuple(f"LOV-2022-06-17-63@1: {p}" for p in problems)
