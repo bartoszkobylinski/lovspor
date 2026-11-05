@@ -144,9 +144,16 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         # Never fatal: an artifact the helper refuses leaves the message empty,
         # and the verifier falls back to wording that claims no bucket at all.
+        # The same helper writes the agent's work list, every bucket apart: a
+        # timeout-only failure has no survivor, and a prompt that read only
+        # survivors gave the agent nothing to do (#776). A helper that refuses
+        # the artifact, or predates `--brief`, leaves the list empty.
         run: |
           message="$(python3 scripts/ci/mutation_gate.py --no-change "${{ runner.temp }}/mutation/mutation-result.json" || true)"
           echo "message=$message" >> "$GITHUB_OUTPUT"
+          python3 scripts/ci/mutation_gate.py --brief "${{ runner.temp }}/mutation/mutation-result.json" \
+            > "${{ runner.temp }}/remediation-brief.md" 2>/dev/null \
+            || : > "${{ runner.temp }}/remediation-brief.md"
 
       - name: BLOCKED — mutants got no verdict, tests cannot fix an unmeasured surface
         if: steps.gate.outputs.signal_killed == 'true'
@@ -327,6 +334,8 @@ jobs:
               --sandbox workspace-write \
               "$(cat .github/codex/mutation-remediation.md)
 
+              $(cat "${{ runner.temp }}/remediation-brief.md" 2>/dev/null)
+
               mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json" \
             2>&1 | tee "$RUNNER_TEMP/remediation-agent.log"
           status=${PIPESTATUS[0]}
@@ -336,6 +345,8 @@ jobs:
           if [ "$status" -eq 75 ]; then
             {
               cat .github/codex/mutation-remediation.md
+              echo
+              cat "${{ runner.temp }}/remediation-brief.md" 2>/dev/null || true
               echo
               echo "mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
             } > "${{ runner.temp }}/remediation-prompt.md"

@@ -918,14 +918,29 @@ jobs:
           uv run python scripts/ci/mutation_survivors.py \
             --survivors-file survivors.txt \
             --out survivors.jsonl || cp survivors.txt survivors.jsonl
+          # #776: timed-out and suspicious mutants are named the same way, so
+          # remediation and triage read which mutant and what it changed.
+          for bucket in timeout suspicious; do
+            sed -n "s/^    \(.*\): ${bucket}\$/\1/p" mutation-results.txt > "${bucket}.txt"
+            uv run python scripts/ci/mutation_survivors.py \
+              --survivors-file "${bucket}.txt" \
+              --out "${bucket}.jsonl" || cp "${bucket}.txt" "${bucket}.jsonl"
+          done
 
       - name: Build mutation-result.json
         if: always()
         run: |
+          # #776, guarded for one release cycle (#381): a head that predates
+          # the flags still builds its artifact, without the two lists.
+          unverdicted=()
+          if python scripts/ci/mutation_to_json.py --help | grep -q -- '--timeouts-file'; then
+            unverdicted=(--timeouts-file timeout.jsonl --suspicious-file suspicious.jsonl)
+          fi
           python scripts/ci/mutation_to_json.py \
             --commit "${{ github.event.pull_request.head.sha }}" \
             --raw mutation-raw.log \
             --survivors-file survivors.jsonl \
+            "${unverdicted[@]}" \
             --tool-exit-code "${{ steps.mut.outputs.exit_code || '3' }}" \
             --out mutation-result.json
 

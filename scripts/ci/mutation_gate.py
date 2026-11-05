@@ -10,6 +10,7 @@ Usage:
     mutation_gate.py --summary result.json    # markdown job summary, exit 0
     mutation_gate.py --unmeasured result.json # PR comment for a run that measured nothing
     mutation_gate.py --no-change result.json  # PR comment when remediation changed nothing
+    mutation_gate.py --brief result.json      # remediation's work list, bucket by bucket
 """
 
 from __future__ import annotations
@@ -100,7 +101,7 @@ def _survivor_bullet(s: object) -> str | None:
     return bullet + _equivalent_note(s)
 
 
-def _survivor_lines(survivors: object, limit: int = 10) -> list[str]:
+def _survivor_lines(survivors: object, label: str = "Survivors", limit: int = 10) -> list[str]:
     """Triage list for the job summary; the artifact holds the full detail."""
     if not isinstance(survivors, list):
         return []
@@ -110,7 +111,7 @@ def _survivor_lines(survivors: object, limit: int = 10) -> list[str]:
     shown = bullets[:limit]
     if len(bullets) > limit:
         shown.append(f"  - … and {len(bullets) - limit} more (see the artifact)")
-    return ["- Survivors:", *shown]
+    return [f"- {label}:", *shown]
 
 
 def _register_lines(equivalents: object) -> list[str]:
@@ -181,9 +182,12 @@ BLOCKERS = {
     "timeout": (
         "{n} timed-out mutant(s) got no verdict — mutmut stopped them at its per-mutant"
         " time limit, so whether a test kills them was never measured; the artifact"
-        " does not list them, triage them by hand (`mutmut results`)"
+        " names each under `timed_out` (#776)"
     ),
-    "invalid": "{n} suspicious mutant(s) — mutmut could not tell killed from survived",
+    "invalid": (
+        "{n} suspicious mutant(s) — mutmut could not tell killed from survived; the"
+        " artifact names each under `suspicious`"
+    ),
     "no_tests": "{n} mutant(s) no test reaches",
     "unmeasured": "{n} mutant(s) got no verdict — killed by a signal",
 }
@@ -200,6 +204,43 @@ def _tally(counts: dict[str, int]) -> str:
     return " · ".join(f"{counts[key]} {label}" for key, label in NOT_KILLED)
 
 
+# The bucket key in `mutants` and the list in the artifact that names its mutants.
+NAMED_LISTS = {"timeout": "timed_out", "invalid": "suspicious"}
+_NAMED_IN_NO_CHANGE = 3
+
+
+def _clean(value: object, limit: int = 160) -> str:
+    """Artifact text on one line, outside any code span: it is quoted, not trusted."""
+    text = value if isinstance(value, str) else str(value)
+    return " ".join(text.replace("`", "'").split())[:limit]
+
+
+def _entries(listed: object) -> list[dict[str, object]]:
+    if not isinstance(listed, list):
+        return []
+    return [e for e in listed if isinstance(e, dict) and isinstance(e.get("id"), str)]
+
+
+def _where(entry: dict[str, object]) -> str:
+    where = _clean(entry["file"]) if isinstance(entry.get("file"), str) else "file unknown"
+    line = entry.get("symbol_line")
+    return f"{where}:{line}" if _is_count(line) else where
+
+
+def _named(listed: object) -> str:
+    """A few of the bucket's mutants by id and place; the artifact has the rest."""
+    entries = _entries(listed)
+    names = [f"`{_clean(e['id'])}` ({_where(e)})" for e in entries[:_NAMED_IN_NO_CHANGE]]
+    if len(entries) > _NAMED_IN_NO_CHANGE:
+        names.append(f"and {len(entries) - _NAMED_IN_NO_CHANGE} more")
+    return f": {', '.join(names)}" if names else ""
+
+
+def _blocker(r: dict[str, object], key: str, n: int) -> str:
+    named = _named(r.get(NAMED_LISTS[key])) if key in NAMED_LISTS else ""
+    return BLOCKERS[key].format(n=n) + named
+
+
 def _no_change_line(r: dict[str, object], reason: str) -> str:
     """The escalation when remediation changed nothing: it names what blocked.
 
@@ -207,13 +248,101 @@ def _no_change_line(r: dict[str, object], reason: str) -> str:
     on PR #395 it was said over two timeouts and none (#423).
     """
     counts = _not_killed(r)
-    blockers = "; ".join(BLOCKERS[k].format(n=n) for k, n in counts.items() if n)
+    blockers = "; ".join(_blocker(r, k, n) for k, n in counts.items() if n)
     if not blockers:
         blockers = "no mutant outside the killed count is on record, only the gate reason"
     return (
         f"Mutation remediation made no safe test-only change. Gate: FAIL ({reason})."
         f" Not killed: {_tally(counts)}. Blocked by: {blockers}."
     )
+
+
+# What remediation is handed, bucket by bucket (#776). A timed-out or suspicious
+# mutant is not a survivor: no test was seen to pass with it in place, so it is
+# never listed as one, and the work it asks for is different.
+BRIEF_BUCKETS = (
+    (
+        "survived",
+        "survivors",
+        "Survivors",
+        "confirmed: every covering test passed with the mutant in place."
+        " Attempt a killing test for each.",
+    ),
+    (
+        "timeout",
+        "timed_out",
+        "Timed out",
+        "not a survivor: mutmut stopped the covering tests at its per-mutant time"
+        " limit, so no verdict was reached. Investigate the hang before any test.",
+    ),
+    (
+        "invalid",
+        "suspicious",
+        "Suspicious",
+        "not a survivor: the covering tests took unusually long and mutmut could"
+        " not tell killed from survived. Re-run them with the diff applied first.",
+    ),
+)
+_BRIEF_LIMIT = 20
+_DIFF_LINES = 6
+
+
+def _changed_lines(entry: dict[str, object]) -> list[str]:
+    diff = entry.get("diff")
+    if not isinstance(diff, str):
+        source = _clean(entry.get("detail_source") or "no detail collected", 120)
+        return [f"  - no diff recovered ({source}): locate the function from the id"]
+    changed = [
+        line
+        for line in diff.splitlines()
+        if line[:1] in "+-" and not line.startswith(("+++", "---"))
+    ]
+    return [f"  - `{_diff_line(line)}`" for line in changed[:_DIFF_LINES]]
+
+
+def _diff_line(line: str) -> str:
+    """Indentation is kept, unlike `_clean`: in Python it can be the mutation."""
+    return line.replace("`", "'").rstrip()[:160]
+
+
+def _brief_entry(entry: dict[str, object]) -> list[str]:
+    symbol = entry.get("symbol")
+    at = _where(entry) + (f" in {_clean(symbol, 60)}" if isinstance(symbol, str) else "")
+    equivalent = entry.get("equivalent")
+    if isinstance(equivalent, dict):
+        stamp = equivalent.get("registered")
+        stamp = f", {_clean(stamp, 40)}" if isinstance(stamp, str) and stamp else ""
+        at += f" — **equivalent**{stamp} — skip"
+    return [f"- `{_clean(entry['id'])}`", f"  - at {at}", *_changed_lines(entry)]
+
+
+def _brief_bucket(r: dict[str, object], bucket: tuple[str, str, str, str]) -> list[str]:
+    key, listed, heading, meaning = bucket
+    counted = _not_killed(r)[key]
+    lines = ["", f"### {heading} (`{listed}`) — {meaning}"]
+    if listed not in r and counted:
+        return [*lines, f"{counted} counted, none named: this artifact predates the list (#776)."]
+    entries = _entries(r.get(listed))
+    if not entries:
+        return [*lines, f"none named ({counted} counted)" if counted else "none"]
+    for entry in entries[:_BRIEF_LIMIT]:
+        lines += _brief_entry(entry)
+    if len(entries) > _BRIEF_LIMIT:
+        lines.append(f"- … and {len(entries) - _BRIEF_LIMIT} more (see the artifact)")
+    return lines
+
+
+def _brief_lines(r: dict[str, object], extracted: tuple[Any, ...]) -> list[str]:
+    verdict = "PASS" if extracted[2] else "FAIL"
+    lines = [
+        "## Mutants to work on",
+        "",
+        f"Gate: {verdict} ({extracted[3]}). Not killed: {_tally(_not_killed(r))}.",
+        "Read from mutation-result.json. Ids renumber: work from the place and the lines.",
+    ]
+    for bucket in BRIEF_BUCKETS:
+        lines += _brief_bucket(r, bucket)
+    return lines
 
 
 def _hint(r: dict[str, object]) -> str | None:
@@ -237,6 +366,8 @@ def _print_summary(r: dict[str, object], extracted: tuple[Any, ...]) -> None:
         print(f"- Hint: `{hint}`")
     for line in [
         *_survivor_lines(r.get("survivors")),
+        *_survivor_lines(r.get("timed_out"), "Timed out"),
+        *_survivor_lines(r.get("suspicious"), "Suspicious"),
         *_register_lines(r.get("equivalents")),
         *_unmeasured_changed_lines(r.get("unmeasured_changed_lines")),
     ]:
@@ -282,8 +413,30 @@ def _parse_args() -> argparse.Namespace:
     mode.add_argument("--summary", action="store_true")
     mode.add_argument("--unmeasured", action="store_true")
     mode.add_argument("--no-change", action="store_true")
+    mode.add_argument("--brief", action="store_true")
     ap.add_argument("result", type=Path)
     return ap.parse_args()
+
+
+def _print_unmeasured(r: dict[str, object], _extracted: tuple[Any, ...]) -> None:
+    print("\n".join(_unmeasured_lines(r)))
+
+
+def _print_no_change(r: dict[str, object], extracted: tuple[Any, ...]) -> None:
+    print(_no_change_line(r, extracted[3]))
+
+
+def _print_brief(r: dict[str, object], extracted: tuple[Any, ...]) -> None:
+    print("\n".join(_brief_lines(r, extracted)))
+
+
+# Every mode but the verdict prints and exits 0: it reports, it does not judge.
+MODES = {
+    "summary": _print_summary,
+    "unmeasured": _print_unmeasured,
+    "no_change": _print_no_change,
+    "brief": _print_brief,
+}
 
 
 def main() -> int:
@@ -296,16 +449,11 @@ def main() -> int:
     if isinstance(extracted, str):
         print(extracted, file=sys.stderr)
         return 1
-    if args.summary:
-        _print_summary(r, extracted)
-        return 0
-    if args.unmeasured:
-        print("\n".join(_unmeasured_lines(r)))
-        return 0
-    if args.no_change:
-        print(_no_change_line(r, extracted[3]))
-        return 0
-    return _verdict(r, extracted)
+    mode = next((name for name in MODES if getattr(args, name)), None)
+    if mode is None:
+        return _verdict(r, extracted)
+    MODES[mode](r, extracted)
+    return 0
 
 
 if __name__ == "__main__":
