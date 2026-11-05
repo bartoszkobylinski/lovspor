@@ -417,3 +417,44 @@ def test_proof_replay_checks_capture_manifest(
     with pytest.raises(CrosswalkError) as caught:
         approvals.prove_candidates(candidate, built, signed, capture_dir)
     assert str(caught.value) == f"capture manifest unreadable in {capture_dir}"
+
+
+@pytest.mark.parametrize("command", ["manifest", "release-candidate"])
+@pytest.mark.parametrize("damage", ["empty", "garbage", "truncated", "reformatted"])
+def test_cli_requires_the_exact_signed_approval_bytes(
+    built: bytes,
+    candidate: bytes,
+    capture_dir: Path,
+    tmp_path: Path,
+    proof: Path,
+    command: str,
+    damage: str,
+) -> None:
+    """The documented detached signature covers exact bytes, not parsed JSON."""
+    approval = proof / approvals.APPROVAL_FILE
+    signature = approvals.signature_path(approval)
+    if damage == "reformatted":
+        original = json.loads(approval.read_bytes())
+        approval.write_text(json.dumps(original, indent=2), encoding="utf-8")
+        assert json.loads(approval.read_bytes()) == original
+    else:
+        broken = {"empty": b"", "garbage": b"not an SSH signature\n"}
+        signature.write_bytes(broken.get(damage, signature.read_bytes()[:40]))
+
+    data = _write(tmp_path, candidate if command == "manifest" else built)
+    output = tmp_path / "output.json"
+    args = ["ops", "crosswalk", command, "--input", str(data), "--output", str(output)]
+    args += ["--cache", str(capture_dir)]
+    args += (
+        ["--approval-proof", str(proof)]
+        if command == "manifest"
+        else [
+            "--approval",
+            str(approval),
+        ]
+    )
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 1, result.output
+    # This is a plain typer.echo refusal, rather than a Rich usage panel.
+    assert "refused: approval signature refused" in result.output
+    assert not output.exists()
