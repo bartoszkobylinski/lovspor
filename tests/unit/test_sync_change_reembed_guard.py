@@ -273,3 +273,64 @@ def test_a_noop_rerender_keeps_the_prior_record_itself(tmp_path: Path) -> None:
     seeded = orchestrator_module._with_retrieved_at(upstream, record.last_seen)
 
     assert orchestrator_module._noop_rerender_record(record, seeded) is record
+
+
+@pytest.mark.parametrize("max_fraction", [0.02, 0.03])
+def test_new_changed_and_renamed_documents_share_one_fraction_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, max_fraction: float
+) -> None:
+    """The whole-run scope includes all three write loops, including at equality."""
+    settings = _corpus(tmp_path, _CORPUS).model_copy(
+        update={"reembed_guard_max_fraction": max_fraction}
+    )
+    repo = settings.lovverk_repo_path
+    before = _state(repo)
+    manifest_before = (repo / "manifest.json").read_bytes()
+    embedder = _CountingEmbedder()
+    docs = [
+        _doc(0, "Body. Amended."),
+        orchestrator_module._with_slug(_doc(1), "lov-1-renamed"),
+        *[_doc(i) for i in range(2, _CORPUS + 1)],
+    ]
+    _upstream(monkeypatch, docs, embedder)
+
+    if max_fraction == 0.02:
+        with pytest.raises(MassReembedError, match="3 changed document"):
+            run_sync(settings)
+        assert embedder.texts == 0
+        assert _state(repo) == before
+        assert (repo / "manifest.json").read_bytes() == manifest_before
+    else:
+        run_sync(settings)
+        assert embedder.texts == 3
+        manifest = read_manifest(repo / "manifest.json")
+        assert manifest.documents["lov-0"].xml_hash == docs[0].xml_hash
+        assert manifest.documents["lov-1"].slug == "lov-1-renamed"
+        assert "lov-100" in manifest.documents
+
+
+@pytest.mark.parametrize("budget_offset", [0, -1])
+def test_change_token_budget_accepts_equality_and_refuses_one_token_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, budget_offset: int
+) -> None:
+    settings = _corpus(tmp_path, 1)
+    doc = _doc(0, "Body. Amended.")
+    rendered = orchestrator_module.render_full_document(
+        doc.xml_bytes, orchestrator_module._frontmatter_context(doc, _OBSERVED)
+    )
+    tokens = sum(count_input_tokens(item.text) for item in build_embedding_inputs(rendered))
+    assert tokens > 1
+    settings = settings.model_copy(update={"reembed_guard_max_tokens": tokens + budget_offset})
+    before = _state(settings.lovverk_repo_path)
+    embedder = _CountingEmbedder()
+    _upstream(monkeypatch, [doc], embedder)
+
+    if budget_offset == -1:
+        with pytest.raises(MassReembedError, match="token workload"):
+            run_sync(settings)
+        assert embedder.texts == 0
+        assert _state(settings.lovverk_repo_path) == before
+    else:
+        report = run_sync(settings)
+        assert report.changed_count == 1
+        assert embedder.texts == 1
