@@ -199,6 +199,19 @@ move it: counts, score and gate still come from the progress line and the exit b
 The keys are additive within `schema_version: 1`, so an artifact without them is
 still valid.
 
+Remediation reads all three buckets. The agent lane runs `mutation_gate.py --brief`
+(the default-branch helper, before the PR checkout) and appends its work list to the
+prompt for Codex and for the Claude fallback alike: survivors, timed-out and suspicious
+mutants in separate sections, each with id, place and changed lines, at most 20 per
+bucket. A timed-out or suspicious mutant is never listed as a survivor; the prompt has
+the agent reproduce the hang or the slowness under a bound before it writes any test,
+and classify `timeout_hang` or `timeout_slow_tests` when no correct test can fail
+first. An `id_only` entry is reported `detail_missing`, never as a confirmed kill. When
+the round changes nothing, the `--no-change` sticky names up to three timed-out and
+three suspicious mutants by id and place. An artifact without the lists reads as
+"counted, none named". Scope (tests/unit only), the two-cycle limit and the gate are
+unchanged.
+
 ## Anti-loop invariants
 
 - `concurrency: pr-<PR#>` + `cancel-in-progress` — stale runs die on new SHA.

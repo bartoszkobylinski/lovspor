@@ -1,9 +1,28 @@
 You are the independent mutation-test remediation engineer for lovspor.
 
-Read mutation-result.json (path provided below this prompt) and inspect ONLY the listed
-surviving mutants. Each survivor carries `file`, `symbol`, `symbol_line` and the `diff`
-of what the mutation changed — work from that. `uv run mutmut show <id>` adds nothing
-unless the mutmut cache is present, and ids renumber, so quote the diff, not the id.
+Read mutation-result.json (path provided below this prompt) and work on the mutants it
+lists in three buckets, and on nothing else. Keep the buckets apart in everything you do
+and report:
+
+- `survivors` — confirmed: every covering test passed with the mutant in place;
+- `timed_out` — mutmut stopped the covering tests at its per-mutant time limit;
+- `suspicious` — the covering tests took unusually long and mutmut could not tell
+  killed from survived.
+
+A field an older artifact does not carry is an empty bucket. Below this prompt the
+workflow appends `## Mutants to work on`, the same buckets read from the artifact: each
+mutant's id, place and changed lines. When it says a bucket was counted but none named,
+the artifact predates the lists: say so in the report, and do not guess which mutants
+they were.
+
+Each entry carries `file`, `symbol`, `symbol_line` and the `diff` of what the mutation
+changed — work from that. `uv run mutmut show <id>` adds nothing unless the mutmut cache
+is present, and ids renumber, so quote the diff, not the id. When an entry has no `diff`
+(its `detail_source` starts with `id_only`), the id still names the function:
+`lovspor.a.b.x__func__mutmut_N` is `func` in `src/lovspor/a/b.py`, `xǁClassǁmethod` a
+method. You cannot apply that mutation by hand, so do not claim a kill you could not
+confirm: you may add a test that pins the function's behaviour, and you report the
+mutant as BLOCKED, `detail_missing`.
 
 Skip any survivor whose `equivalent` field is set: it is already registered in
 `mutation-equivalents/` as provably equivalent, no test can kill it, and the gate
@@ -29,6 +48,28 @@ default. Write the test, then confirm it kills the mutant: apply the survivor's
 `diff` to the file under src/ by hand, run the test file you touched and see it
 fail, then restore production code with `git checkout -- src/`. Your final diff
 must touch tests/ only.
+
+A timed-out mutant is not a confirmed survivor: no test was seen to pass with it in
+place, so it is neither killed nor a survivor waiting for a test: investigate the hang
+first. Apply its `diff` by hand, run the covering test file under a bound
+(`timeout 300 uv run pytest tests/unit/test_foo.py -x`), time the same file on the
+unmutated code, then `git checkout -- src/`. What you see decides the class:
+
+- the test fails inside the bound — the mutant is killed when run alone, and the
+  timeout was mutmut's limit against a slow or loaded run: `tool_noise`, with both
+  timings;
+- the test hangs because the mutation blocks or loops (a read that lost `O_NONBLOCK`
+  waiting on a FIFO, a loop whose exit was removed) — a test kills it only by failing,
+  never by hanging. Bound a call only where returning promptly is the specified
+  behaviour, and name the line that specifies it; never write a test that only fails by
+  taking longer than a bound nobody specified. With no such line: `timeout_hang`;
+- the unmutated file is itself close to the limit — `timeout_slow_tests`, with the
+  timings. The fix is a faster covering test, not a waiver.
+
+A suspicious mutant is not a confirmed survivor either. Apply its `diff`, run the
+covering test file twice, restore `src/`. Fails both times: killed in practice,
+`tool_noise` with the evidence. Passes both times: treat it as a survivor and attempt a
+killing test. Anything else: `tool_noise`, flaky, with both outcomes.
 
 What looks hard to reach is still killable. On PR #453 all 8 survivors were
 called non-killable and a test-only commit killed every one (issue #455): a
@@ -68,11 +109,14 @@ the attempt, and name what you tried and why it cannot work:
   test would be to write;
 - specification_ambiguous — name the two readings of intended behavior;
 - production_behavior_question — name the behavior you believe is a bug;
-- tool_noise — name the evidence the mutant is a tool artifact.
+- tool_noise — name the evidence the mutant is a tool artifact;
+- timeout_hang, timeout_slow_tests — for a timed-out mutant, as above;
+- detail_missing — an `id_only` entry whose mutation could not be applied.
 
-Report every such survivor as BLOCKED and explain why human review is required.
-For every survivor, report its class and the test that kills it, or the
-equivalence argument (or other stated reason) for why none can.
+Report every such mutant as BLOCKED and explain why human review is required.
+For every listed mutant, in every bucket, report its bucket and its class; for a
+survivor, the test that kills it, or the equivalence argument (or other stated reason)
+for why none can; for a timed-out or suspicious mutant, what you ran and what it showed.
 
 Write that report to `.agent-reports/mutation-remediation-report.md` at the
 repository root (create the directory). The path is gitignored and the workflow
