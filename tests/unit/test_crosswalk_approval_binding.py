@@ -270,9 +270,13 @@ def test_a_proof_for_other_bytes_or_another_capture_is_refused(
     good = approvals.prove_candidates(candidate, built, signed, capture_dir)
     other_bytes = approvals.CandidateProof("0" * 64, good.capture_manifest_sha256, good.block)
     other_capture = approvals.CandidateProof(good.candidate_sha256, "0" * 64, good.block)
-    with pytest.raises(CrosswalkError, match="for other bytes than this file"):
+    with pytest.raises(
+        CrosswalkError, match="^the approval proof is for other bytes than this file$"
+    ):
         build_manifest(candidate, "x", capture_dir, other_bytes)
-    with pytest.raises(CrosswalkError, match="replayed against another capture"):
+    with pytest.raises(
+        CrosswalkError, match="^the approval proof was replayed against another capture$"
+    ):
         build_manifest(candidate, "x", capture_dir, other_capture)
     assert build_manifest(candidate, "x", capture_dir, good)["approval"] == good.block
 
@@ -396,3 +400,20 @@ def test_cli_gate_refuses_when_signature_verifier_cannot_run(
     assert result.exit_code == 1
     assert "refused: approval signature could not be checked: ssh-keygen" in result.output
     assert not output.exists()
+
+
+def test_proof_replay_checks_capture_manifest(
+    built: bytes, candidate: bytes, capture_dir: Path, signer: Signing, proof: Path
+) -> None:
+    approval_file = proof / approvals.APPROVAL_FILE
+    signed = approvals.signed_approval(
+        approval_file.read_bytes(),
+        Approval.model_validate(approval_body(built)),
+        approvals.signature_path(approval_file),
+        signer.signers,
+    )
+    # Replay must read the capture, not merely hash its manifest as opaque bytes.
+    (capture_dir / "capture-manifest.json").write_bytes(b"{")
+    with pytest.raises(CrosswalkError) as caught:
+        approvals.prove_candidates(candidate, built, signed, capture_dir)
+    assert str(caught.value) == f"capture manifest unreadable in {capture_dir}"
