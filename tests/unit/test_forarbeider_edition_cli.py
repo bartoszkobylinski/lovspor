@@ -18,6 +18,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from lovspor.forarbeider.commands import MAX_HTML_BYTES
 from lovspor.forarbeider.edition_models import EditionEvidence, read_edition_evidence
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.models import read_metadata
@@ -314,3 +315,54 @@ def test_the_command_runs_in_a_real_process(tmp_path: Path) -> None:
 
     assert completed.returncode == 0, completed.stderr
     assert isinstance(read_edition_evidence(output), EditionEvidence)
+
+
+@pytest.mark.parametrize("extra", [0, 1], ids=["at-limit", "over-limit"])
+def test_landing_size_limit_is_enforced_before_writing(tmp_path: Path, extra: int) -> None:
+    metadata = _metadata(tmp_path)
+    before = metadata.read_bytes()
+    landing = tmp_path / "landing.html"
+    payload = CORRECTED.read_bytes()
+    with landing.open("wb") as stream:
+        stream.write(payload)
+        stream.write(b" " * (MAX_HTML_BYTES + extra - len(payload)))
+
+    code, output = _run(_argv(landing, metadata))
+
+    assert metadata.read_bytes() == before
+    if extra:
+        assert code == 1
+        assert said("refused: input_too_large", output)
+        assert list(metadata.parent.iterdir()) == [metadata]
+    else:
+        assert code == 0, output
+        evidence = read_edition_evidence(_beside(metadata))
+        assert evidence.landing_sha256 == hashlib.sha256(landing.read_bytes()).hexdigest()
+        assert evidence.edition.kind == "corrected"
+
+
+def test_missing_landing_is_a_typed_refusal_without_output(tmp_path: Path) -> None:
+    metadata = _metadata(tmp_path)
+    before = metadata.read_bytes()
+
+    code, output = _run(_argv(tmp_path / "missing.html", metadata))
+
+    assert code == 1
+    assert said("refused: input_unreadable", output)
+    assert metadata.read_bytes() == before
+    assert list(metadata.parent.iterdir()) == [metadata]
+
+
+def test_symlinked_metadata_is_refused_without_following_it(tmp_path: Path) -> None:
+    metadata = _metadata(tmp_path)
+    before = metadata.read_bytes()
+    alias = metadata.with_name("alias.json")
+    alias.symlink_to(metadata)
+
+    code, output = _run(_argv(CORRECTED, alias))
+
+    assert code == 1
+    assert said("refused: observation_unsafe", output)
+    assert alias.is_symlink()
+    assert metadata.read_bytes() == before
+    assert set(metadata.parent.iterdir()) == {metadata, alias}
