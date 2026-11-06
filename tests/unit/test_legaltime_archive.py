@@ -142,3 +142,43 @@ def test_two_enacting_members_for_one_act_are_refused(tmp_path: Path, archive: P
     twin = make_archive(tmp_path / "twin.tar.bz2", {"lti/2019/nl-20190614-099.xml": "enacting.xml"})
     with pytest.raises(LegalTimeInputError, match="several enacting members"):
         collect("lov/2019-06-14-99", [archive, twin])
+
+
+def test_duplicate_member_names_are_refused_without_writing_an_index(tmp_path: Path) -> None:
+    archive = tmp_path / "duplicate.tar.bz2"
+    body = (FIXTURES / "enacting.xml").read_bytes()
+    with tarfile.open(archive, "w:bz2") as tar:
+        for _ in range(2):
+            member = tarfile.TarInfo("lti/2019/nl-20190614-099.xml")
+            member.size = len(body)
+            tar.addfile(member, io.BytesIO(body))
+    with pytest.raises(LegalTimeInputError, match="duplicate member names"):
+        index_archive(archive)
+    assert not (tmp_path / f"{archive.name}.{INDEX_VERSION}.json").exists()
+
+
+def test_skipped_members_survive_the_index_cache_round_trip(tmp_path: Path) -> None:
+    archive = make_archive(
+        tmp_path / "skipped.tar.bz2",
+        extra={
+            "lti/2020/z.xml": b"<html>",
+            "lti/2020/a.xml": b"<html><body/></html>",
+        },
+    )
+    fresh = index_archive(archive)
+    assert fresh.skipped == ("lti/2020/a.xml", "lti/2020/z.xml")
+    assert len(fresh.members) == 4
+    cache = tmp_path / f"{archive.name}.{INDEX_VERSION}.json"
+    assert json.loads(cache.read_text(encoding="utf-8"))["skipped"] == list(fresh.skipped)
+    assert index_archive(archive) == fresh
+
+
+def test_matching_digest_does_not_reuse_an_obsolete_index_version(archive: Path) -> None:
+    original = index_archive(archive)
+    cache = archive.parent / f"{archive.name}.{INDEX_VERSION}.json"
+    obsolete = original.model_dump(mode="json")
+    obsolete.update(index_version="legaltime-index-1", members=[], skipped=["stale.xml"])
+    cache.write_text(json.dumps(obsolete), encoding="utf-8")
+    rebuilt = index_archive(archive)
+    assert rebuilt == original
+    assert json.loads(cache.read_text(encoding="utf-8"))["index_version"] == INDEX_VERSION
