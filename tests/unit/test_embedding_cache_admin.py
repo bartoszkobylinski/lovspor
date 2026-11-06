@@ -18,6 +18,7 @@ from lovspor.embeddings.cache_format import CachedVectors, EntryKey, ReadPolicy,
 from lovspor.embeddings.cache_store import LocalEntryStore
 from lovspor.embeddings.inputs import EmbeddingInput, hash_embedding_inputs
 from lovspor.errors import EmbeddingCacheError
+from tests.unit.cli_output import said
 
 ESI = "0123456789abcdef0123456789abcdef"
 OTHER_ESI = "fedcba9876543210fedcba9876543210"
@@ -217,3 +218,52 @@ def test_cli_verify_fails_on_an_expired_entry_and_names_it(
     assert result.exit_code == 1
     assert "expired=1" in result.output
     assert _hash("expired")[:12] in result.output
+
+
+def test_cli_invalidate_input_hash_removes_only_that_documents_entries(
+    store: LocalEntryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §10: --input-hash selects one document, including its units."""
+    entries = [_doc("a"), _unit("a", 0), _unit("a", 1), _doc("b"), _doc("a", OTHER_ESI)]
+    for entry in entries:
+        store.put(entry)
+    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(store.root))
+    result = CliRunner().invoke(
+        app,
+        ["ops", "embedding-cache", "invalidate", "--esi", ESI, "--input-hash", _hash("a")],
+    )
+    assert result.exit_code == 0
+    assert said("removed=3", result.output)
+    for entry in entries[:3]:
+        assert store.get(entry.key) is None
+    for entry in entries[3:]:
+        restored = store.get(entry.key)
+        assert restored is not None
+        np.testing.assert_array_equal(restored.vectors, entry.vectors)
+
+
+@pytest.mark.parametrize(
+    "arguments", [["--esi", "x" * 32], ["--esi", ESI, "--input-hash", "../etc"]]
+)
+def test_cli_invalidate_refuses_malformed_keys_without_deleting_entries(
+    store: LocalEntryStore, monkeypatch: pytest.MonkeyPatch, arguments: list[str]
+) -> None:
+    store.put(_doc("a"))
+    before = {path: path.read_bytes() for path in store.root.rglob("*.lsec")}
+    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(store.root))
+    result = CliRunner().invoke(app, ["ops", "embedding-cache", "invalidate", *arguments])
+    assert result.exit_code == 1
+    assert said("invalidate needs a 32-hex ESI and, optionally, a 64-hex hash", result.output)
+    assert {path: path.read_bytes() for path in store.root.rglob("*.lsec")} == before
+
+
+def test_cli_invalidate_requires_esi_without_deleting_entries(
+    store: LocalEntryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store.put(_doc("a"))
+    before = {path: path.read_bytes() for path in store.root.rglob("*.lsec")}
+    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(store.root))
+    result = CliRunner().invoke(app, ["ops", "embedding-cache", "invalidate"])
+    assert result.exit_code == 2
+    assert said("Missing option '--esi'", result.output)
+    assert {path: path.read_bytes() for path in store.root.rglob("*.lsec")} == before
