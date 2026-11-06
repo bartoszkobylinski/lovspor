@@ -9,7 +9,6 @@ resolve. Registered on the ``ops`` group by :mod:`lovspor.ops_cli`, because
 :func:`eli_audit_report`, so the body stays inside the mutation gate.
 """
 
-import json
 import subprocess
 from pathlib import Path
 from typing import Annotated
@@ -18,18 +17,20 @@ import typer
 
 from lovspor.eli import audit_ref_ids
 from lovspor.ops.commands import ops_app
+from lovspor.publish.companion import companion_json_bytes
 from lovspor.publish.inventory import PublishError, build_inventory
 from lovspor.snapshot import CorpusSnapshot
 
 
-def eli_audit_report(corpus: Path, ref: str, sample_size: int) -> str:
-    """The audit of every published document at ``ref``, as sorted JSON."""
+def eli_audit_report(corpus: Path, ref: str, sample_size: int) -> bytes:
+    """The audit of every published document at ``ref``, serialised like every
+    other machine-readable artifact the engine writes (sorted keys, UTF-8)."""
     sha = _resolve_commit(corpus, ref)
     snapshot = CorpusSnapshot(corpus, sha)
     inventory = build_inventory(snapshot.manifest, snapshot.read_text)
     audit = audit_ref_ids((plan.ref_id for plan in inventory.documents), sample_size)
     report = {"corpus_commit": sha, **audit.model_dump()}
-    return json.dumps(report, sort_keys=True, ensure_ascii=False, indent=1)
+    return companion_json_bytes(report)
 
 
 def _resolve_commit(corpus: Path, ref: str) -> str:
@@ -55,7 +56,7 @@ def eli_audit(
 ) -> None:
     """Count published documents whose ref_id maps to an official act ELI."""
     try:
-        typer.echo(eli_audit_report(corpus, ref, samples))
+        typer.echo(eli_audit_report(corpus, ref, samples), nl=False)
     except PublishError as error:
         typer.echo(f"eli audit refused: {error}", err=True)
         raise typer.Exit(code=1) from error

@@ -35,6 +35,20 @@ def test_the_report_audits_every_published_document_at_the_pinned_commit(
     assert "not resolved" in report["note"]
 
 
+def test_the_report_text_is_pinned_byte_for_byte(
+    corpus: tuple[Path, str],  # noqa: F811
+) -> None:
+    """Sorted keys, one-space indent, UTF-8 and a trailing newline: the
+    engine's one deterministic JSON form, so two audits diff cleanly."""
+    repo, sha = corpus
+    text = eli_audit_report(repo, sha, sample_size=1).decode("utf-8")
+    assert text.endswith("}\n")
+    assert text.startswith('{\n "by_reason": {\n  "mapped": 4\n }')
+    assert '\n "corpus_commit": "' + sha + '",\n "distinct": 4,\n' in text
+    keys = [line.split('"')[1] for line in text.splitlines() if line.startswith(' "')]
+    assert keys == sorted(keys)
+
+
 def test_a_symbolic_ref_is_recorded_as_its_full_sha(
     corpus: tuple[Path, str],  # noqa: F811
 ) -> None:
