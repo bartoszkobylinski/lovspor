@@ -14,11 +14,14 @@ from pathlib import Path
 import pytest
 
 import lovspor.sync.orchestrator as orchestrator_module
+from lovspor.embeddings.inputs import build_embedding_inputs
+from lovspor.embeddings.model import count_input_tokens
 from lovspor.errors import MassReembedError, MassRemovalError
 from lovspor.settings import Settings
 from lovspor.sync.orchestrator import run_sync
 from tests.unit.test_sync_change_reembed_guard import (
     _CORPUS,
+    _OBSERVED,
     _corpus,
     _CountingEmbedder,
     _doc,
@@ -48,6 +51,15 @@ def _live_migrations(
         "_collect_upstream",
         lambda *_args: ({doc.doc_id: doc for doc in docs}, ()),
     )
+
+
+def _tokens_of_one() -> str:
+    """The input tokens of one corpus document, formatted as the guard prints them."""
+    doc = _doc(0)
+    rendered = orchestrator_module.render_full_document(
+        doc.xml_bytes, orchestrator_module._frontmatter_context(doc, _OBSERVED)
+    )
+    return f"{sum(count_input_tokens(i.text) for i in build_embedding_inputs(rendered)):,}"
 
 
 def _manifest_bytes(settings: Settings) -> bytes:
@@ -107,6 +119,57 @@ def test_an_ordinary_change_and_the_backfill_both_run(
 
 @pytest.mark.parametrize("allow_mass_reembed", [False, True])
 def test_mass_removal_is_refused_before_the_backfill_pays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, allow_mass_reembed: bool
+) -> None:
+    """The moved removal veto precedes backfill; a re-embed override cannot waive it.
+
+    An empty upstream has no change-path embedding workload, but the missing
+    sidecar still needs paid repair. Keep migrations live to exercise the
+    ordering of the removal guard and that repair in run_sync.
+    """
+    settings = _with_one_stale_sidecar(tmp_path)
+    repo = settings.lovverk_repo_path
+    before, manifest = _state(repo), _manifest_bytes(settings)
+    files_before = {
+        path.relative_to(repo): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(repo).parts
+    }
+    embedder = _CountingEmbedder()
+    _live_migrations(monkeypatch, [], embedder)
+
+    with pytest.raises(MassRemovalError, match="100/100"):
+        run_sync(settings, allow_mass_reembed=allow_mass_reembed)
+
+    assert embedder.texts == 0
+    assert _state(repo) == before
+    assert _manifest_bytes(settings) == manifest
+    assert {
+        path.relative_to(repo): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(repo).parts
+    } == files_before
+
+
+def test_an_override_with_no_change_work_names_only_the_backfill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The change guard has nothing to authorize, so it prints no override notice."""
+    settings = _with_one_stale_sidecar(tmp_path)
+    embedder = _CountingEmbedder()
+    _live_migrations(monkeypatch, [_doc(i) for i in range(_CORPUS)], embedder)
+
+    run_sync(settings, allow_mass_reembed=True)
+
+    notices = [line for line in capsys.readouterr().err.splitlines() if "override active" in line]
+    assert notices == [
+        f"mass-reembed override active: 1 document(s) selected for re-embedding "
+        f"(1.0% of {_CORPUS} current documents), ~{_tokens_of_one()} input tokens"
+    ]
+
+
+@pytest.mark.parametrize("allow_mass_reembed", [False, True])
+def test_a_partial_mass_removal_is_refused_before_the_backfill_pays(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, allow_mass_reembed: bool
 ) -> None:
     """The removal veto precedes paid repair, even with a re-embed override."""
