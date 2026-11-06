@@ -293,20 +293,6 @@ def run_sync(  # noqa: PLR0912, PLR0915
     # documents for backfill, so switching model no longer needs an operator
     # to delete sidecars by hand.
     sprint9_target = space_id_of(sprint9_embedder) if sprint9_embedder is not None else None
-    if sprint9_embedder is not None and _needs_sprint9_embeddings_migration(
-        prior,
-        settings.lovverk_repo_path,
-        sprint9_target,
-    ):
-        prior = _run_sprint9_embeddings_migration(
-            settings,
-            prior,
-            sprint9_embedder,
-            datetime.now(UTC),
-            sprint9_target,
-            allow_mass_reembed=allow_mass_reembed,
-        )
-
     upstream_hashes = {doc_id: u.xml_hash for doc_id, u in upstream.items()}
     changes = detect_changes(upstream_hashes, prior)
 
@@ -331,6 +317,28 @@ def run_sync(  # noqa: PLR0912, PLR0915
     # Docs promoted purely to re-render (stamp/force), not for a real content
     # change: their commit must be the history-exempt migration subject.
     rerender_ids = set(changes.changed) - real_changed
+    # Vetoes before ANY paid call, the Sprint 9 backfill below included (#790);
+    # the backfill stamps only embedding fields, so this classification holds.
+    now = datetime.now(UTC)
+    if sprint9_embedder is not None:
+        plan = _ChangePlan(changes.new, changes.changed, renamed, upstream, prior, now)
+        _guard_change_reembed(settings, plan, allow=allow_mass_reembed)
+    _guard_mass_removal(changes.removed, prior, settings.max_removal_ratio)
+
+    if sprint9_embedder is not None and _needs_sprint9_embeddings_migration(
+        prior,
+        settings.lovverk_repo_path,
+        sprint9_target,
+    ):
+        prior = _run_sprint9_embeddings_migration(
+            settings,
+            prior,
+            sprint9_embedder,
+            datetime.now(UTC),
+            sprint9_target,
+            allow_mass_reembed=allow_mass_reembed,
+        )
+
     if not (changes.new or changes.changed or changes.removed or renamed):
         # A no-op run still ensures the CURRENT head is attested under the
         # CURRENT parser version: a TEMPORAL_PARSER_VERSION bump must earn
@@ -351,18 +359,10 @@ def run_sync(  # noqa: PLR0912, PLR0915
             unknown_archive_fields=drift_fields,
         )
 
-    _guard_mass_removal(changes.removed, prior, settings.max_removal_ratio)
-
-    now = datetime.now(UTC)
     new_records = _carry_unchanged(prior, changes.unchanged)
     new_records.update(_carry_tombstones(prior, set(upstream)))
     actions: list[_DocAction] = []
     embedder = _load_embedder(settings)
-    if embedder is not None:
-        # The backfill's ADR-0006 guard, here for the change path (#790): measured
-        # on the whole run strictly before the first provider call.
-        plan = _ChangePlan(changes.new, changes.changed, renamed, upstream, prior, now)
-        _guard_change_reembed(settings, plan, allow=allow_mass_reembed)
 
     # All paths written by ANY action this sync. The two delete sites
     # below — changed-with-slug-change and the renamed phase 2 —

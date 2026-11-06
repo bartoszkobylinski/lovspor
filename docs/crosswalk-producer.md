@@ -35,6 +35,11 @@ now; pass `--cache` outside the checkout.
   - Stores each object once under its digest.
   - regjeringen.no is never fetched while R4 is open.
 - **Build** (`lovspor.crosswalk.build`):
+  - Reads the scope (law ids, Lovverk commit) the capture recorded. A capture
+    made before scopes were recorded (the 2026-11-02 study cache) is refused
+    with `this capture records no scope`: recapture it with `capture --laws
+    --lovverk-commit` (#793). The library still accepts a scope the caller states
+    in `BuildOptions`; no scope is ever inferred from the cached bytes.
   - Re-hashes every cached object against the manifest.
   - Reads only the `discovery` stage, never a label.
   - Keeps every act in scope, attested or not.

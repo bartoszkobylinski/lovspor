@@ -38,7 +38,7 @@ requires the deliberate `lovspor sync --allow-mass-reembed`. The scheduled workf
 never passes the override, so a tripped guard fails the job before any spend.
 
 The same guard and thresholds cover the change path (#790): before the first
-provider call, a keyed sync renders every new, changed (byte-identical re-renders
+provider call, the Sprint 9 backfill's included, a keyed sync renders every new, changed (byte-identical re-renders
 excluded) and renamed document and sizes the run's embedding workload. When every
 document hashes as changed — as on 2026-10-20/21, when Lovdata added an ELI row to
 every header (#679) — the sync refuses with nothing written and no commit, instead
@@ -2462,6 +2462,8 @@ moving the job's hour means changing both.
 ## Scheduled runs (production)
 
 `.github/workflows/sync.yml` runs daily at **04:00 UTC (~05:00–06:00 CET)** — about 2.5 hours after Lovdata's nightly tarball drop at ~01:30 UTC. Manual reruns are available via the **Actions → Sync legal corpus → Run workflow** button on GitHub.
+
+A run that fails or is cancelled files the issue **Nightly sync did not complete**, with the run link and the `Run lovspor sync` outcome; each repeat comments on the open issue instead of filing another (#790). The sync step stops at 105 minutes, inside the job's 120, so a long run fails its step and the alert still runs. Read the log before re-running: a keyed run that ran long may have spent embedding budget on work it then lost (#802). Close the issue once a run completes.
 
 The workflow:
 

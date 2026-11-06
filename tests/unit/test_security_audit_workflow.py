@@ -40,3 +40,14 @@ def test_audit_delegates_to_commit_pinned_workflow_on_hosted_runner() -> None:
     )
     # The reusable workflow takes its runner as JSON, including string quotes.
     assert json.loads(job["with"]["runner"]) == "ubuntu-latest"
+
+
+# security-audit#3 (lovspor#794): the gitleaks download retries a transient
+# error, bounded, and keeps the pinned version and SHA-256. Its behavioural
+# test runs in that repository; this pins lovspor to the commit that has it.
+_GITLEAKS_RETRY_COMMIT = "f39199771341b1adfaacc02e009fdf3b7502ebec"
+
+
+def test_audit_is_pinned_to_the_gitleaks_download_retry() -> None:
+    (job,) = _workflow()["jobs"].values()
+    assert job["uses"].endswith(f"@{_GITLEAKS_RETRY_COMMIT}")
