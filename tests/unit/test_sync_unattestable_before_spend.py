@@ -137,3 +137,32 @@ def test_the_refusal_also_comes_before_the_paid_backfill(
     assert embedder.texts == 0
     assert _state(repo) == before
     assert _manifest_bytes(settings) == manifest
+
+
+def test_changed_and_renamed_unrenderable_document_refuses_before_backfill_with_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#804 applies to changed XML even when rename classification takes precedence."""
+    settings = _with_one_stale_sidecar(tmp_path)
+    repo = settings.lovverk_repo_path
+    before = _state(repo)
+    published = {
+        path.relative_to(repo): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(repo).parts
+    }
+    embedder = _CountingEmbedder()
+    broken = replace(_doc(1), xml_bytes=b"<html", xml_hash="f" * 64, slug="renamed-law")
+    docs = [_doc(0), broken] + [_doc(i) for i in range(2, 100)]
+    _live_migrations(monkeypatch, docs, embedder)
+
+    with pytest.raises(AttestationError, match="lov-1 changed upstream"):
+        run_sync(settings, allow_mass_reembed=True)
+
+    assert embedder.texts == 0
+    assert _state(repo) == before
+    assert {
+        path.relative_to(repo): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(repo).parts
+    } == published
