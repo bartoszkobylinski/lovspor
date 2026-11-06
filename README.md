@@ -114,6 +114,7 @@ never lives here.
 
 Architecture and design rationale: [`docs/decisions.md`](docs/decisions.md).
 Release process: [`docs/releasing.md`](docs/releasing.md).
+URL contract for lovspor.no pages (what a published address promises): [`docs/url-contract.md`](docs/url-contract.md).
 Offline evals for the MCP surface: [`evals/`](evals/) (repo-only tooling).
 
 ## Install from source
