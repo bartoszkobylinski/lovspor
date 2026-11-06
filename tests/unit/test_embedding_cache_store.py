@@ -8,6 +8,7 @@ writer can never replace the first.
 import errno
 import os
 import stat
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -23,7 +24,11 @@ from lovspor.embeddings.cache_format import (
 )
 from lovspor.embeddings.cache_store import LocalEntryStore
 from lovspor.embeddings.inputs import EmbeddingInput, hash_embedding_inputs
-from lovspor.errors import EmbeddingCacheError, EmbeddingCacheStorageError
+from lovspor.errors import (
+    EmbeddingCacheError,
+    EmbeddingCacheExpiredError,
+    EmbeddingCacheStorageError,
+)
 
 ESI = "0123456789abcdef0123456789abcdef"
 NOW = datetime(2026, 11, 6, 12, 0, tzinfo=UTC)
@@ -386,3 +391,50 @@ def test_temporary_already_removed_after_publishing_does_not_fail_the_write(
     stored = store.get(_key())
     assert stored is not None
     np.testing.assert_array_equal(stored.vectors, _entry().vectors)
+
+
+def test_directory_fsync_failure_reports_error_without_replacing_published_vectors(
+    cache_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §5.2: publication is immutable, and a durability failure stops the run."""
+    store = _open(cache_root)
+    real_fsync = os.fsync
+    synced: list[str] = []
+
+    def fail_directory_sync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            synced.append("directory")
+            raise OSError(errno.EIO, "injected directory sync failure")
+        synced.append("file")
+        real_fsync(descriptor)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", fail_directory_sync)
+        with pytest.raises(EmbeddingCacheStorageError, match="directory sync failure"):
+            store.put(_entry(value=5))
+
+    assert synced == ["file", "directory"]
+    targets = list(cache_root.rglob("*.lsec"))
+    assert len(targets) == 1
+    assert targets[0].read_bytes() == encode_entry(_entry(value=5))
+    assert not [path for path in cache_root.rglob("*") if ".tmp." in path.name]
+    returned = _open(cache_root).put(_entry(value=9))
+    np.testing.assert_array_equal(returned.vectors, _entry(value=5).vectors)
+    assert targets[0].read_bytes() == encode_entry(_entry(value=5))
+
+
+def test_second_writer_refuses_expired_entry_without_refreshing_it(cache_root: Path) -> None:
+    """Design §5.3: an expired entry is a refusal, including a publication collision."""
+    store = _open(cache_root)
+    expired = replace(_entry(value=5), created_at=NOW - timedelta(days=31))
+    store.put(expired)
+    target = next(cache_root.rglob("*.lsec"))
+    original = target.read_bytes()
+
+    with pytest.raises(EmbeddingCacheExpiredError, match="expired"):
+        _open(cache_root).put(_entry(value=9))
+
+    assert target.read_bytes() == original
+    assert not [path for path in cache_root.rglob("*") if ".tmp." in path.name]
+    with pytest.raises(EmbeddingCacheExpiredError):
+        store.get(_key())
