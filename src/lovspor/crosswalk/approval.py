@@ -137,7 +137,7 @@ def signed_approval(
     manifest records is of exactly the signature that was verified.
     """
     signed = _read_signature(signature)
-    with tempfile.TemporaryDirectory(prefix="lovspor-approval-") as scratch:
+    with tempfile.TemporaryDirectory() as scratch:
         copy = Path(scratch) / signature.name
         copy.write_bytes(signed)
         signer = verify_signature(raw, copy, signers)
