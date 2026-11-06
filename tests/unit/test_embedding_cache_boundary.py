@@ -379,3 +379,40 @@ def test_no_checkout_above_an_installed_package(tmp_path: Path) -> None:
     module = tmp_path / "site-packages" / "lovspor" / "embeddings" / "cache.py"
     module.parent.mkdir(parents=True)
     assert engine_checkout_of(module) == ()
+
+
+def test_resume_preserves_batch_sensitive_provider_vectors(cache_dir: Path, tmp_path: Path) -> None:
+    """Design §2.2/§3: checkpoints preserve the uncached request composition."""
+
+    class _BatchSensitive(_Provider):
+        def __init__(self, fail_after: int | None = None) -> None:
+            super().__init__(fail_after=fail_after)
+            self.batches: list[list[str]] = []
+
+        def encode(self, texts: list[str]) -> np.ndarray:
+            parts = []
+            for start, end in self.plan_requests(texts):
+                batch = texts[start:end]
+                vectors = super().encode(batch)
+                self.batches.append(batch)
+                # Companion texts affect every row, as permitted by ADR-0005.
+                offset = hashlib.sha256("\0".join(batch).encode()).digest()[0] / 255
+                parts.append(vectors + offset)
+            return np.vstack(parts)
+
+    settings = _settings(tmp_path)
+    reference_provider = _BatchSensitive()
+    reference = _write(settings, reference_provider)
+    interrupted = _BatchSensitive(fail_after=2)
+    with pytest.raises(RuntimeError, match="job killed"):
+        _write(settings, with_embedding_cache(interrupted, settings))
+    assert interrupted.batches == reference_provider.batches[:2]
+
+    resumed = _BatchSensitive()
+    result = _write(settings, with_embedding_cache(resumed, settings))
+    assert resumed.batches == reference_provider.batches[2:]
+    assert result == reference
+
+    hit = _BatchSensitive(fail_after=0)
+    assert _write(settings, with_embedding_cache(hit, settings)) == reference
+    assert hit.batches == []
