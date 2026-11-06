@@ -17,6 +17,11 @@ from lovspor.storage.manifest import read_manifest
 from lovspor.sync.orchestrator import _ChangePlan, _guard_change_reembed, run_sync
 from lovspor.sync.reembed_guard import rendered_or_refused
 from lovspor.temporal_attestation import AttestationError
+from tests.unit.test_sync_change_guard_before_backfill import (
+    _live_migrations,
+    _manifest_bytes,
+    _with_one_stale_sidecar,
+)
 from tests.unit.test_sync_change_reembed_guard import (
     _OBSERVED,
     _corpus,
@@ -112,3 +117,23 @@ def test_renamed_unrenderable_document_with_unchanged_hash_is_skipped(tmp_path: 
     _guard_change_reembed(settings, plan, allow=False)
 
     assert _state(settings.lovverk_repo_path) == before
+
+
+def test_the_refusal_also_comes_before_the_paid_backfill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With #803's ordering, a stale sidecar is not repaired by a run that is refused."""
+    settings = _with_one_stale_sidecar(tmp_path)
+    repo = settings.lovverk_repo_path
+    before, manifest = _state(repo), _manifest_bytes(settings)
+    embedder = _CountingEmbedder()
+    broken = replace(_doc(1), xml_bytes=b"<html", xml_hash="f" * 64)
+    docs = [_doc(0), broken] + [_doc(i) for i in range(2, 100)]
+    _live_migrations(monkeypatch, docs, embedder)
+
+    with pytest.raises(AttestationError, match="lov-1"):
+        run_sync(settings)
+
+    assert embedder.texts == 0
+    assert _state(repo) == before
+    assert _manifest_bytes(settings) == manifest
