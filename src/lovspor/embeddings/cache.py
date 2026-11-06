@@ -136,12 +136,21 @@ class CachingEmbedder:
         vectors = np.asarray(self._inner.encode(texts), dtype=np.float32)
         self.progress.units_paid += 1
         self.progress.tokens_paid += sum(count_input_tokens(t, self.model_name) for t in texts)
-        if vectors.shape != (len(texts), self.get_dimension()):
+        self._check_response(vectors, len(texts))
+        return vectors
+
+    def _check_response(self, vectors: np.ndarray, count: int) -> None:
+        """Refuse a response the store would refuse to read back, before storing it."""
+        if vectors.shape != (count, self.get_dimension()):
             raise EmbeddingCacheError(
-                f"provider returned shape {vectors.shape} for {len(texts)} inputs "
+                f"provider returned shape {vectors.shape} for {count} inputs "
                 f"at dimension {self.get_dimension()}; nothing was stored",
             )
-        return vectors
+        if not np.isfinite(vectors).all():
+            raise EmbeddingCacheError(
+                "provider returned non-finite vector values; nothing was stored "
+                "and no further request was sent",
+            )
 
     def _count_document(self) -> None:
         self.progress.documents += 1
