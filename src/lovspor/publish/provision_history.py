@@ -105,9 +105,12 @@ def _git_text(corpus: Path, args: list[str]) -> str:
 
 def _blob(corpus: Path, spec: str) -> list[str]:
     """Body lines of ``spec``, empty when the path is absent at that commit
-    (the deleting commit names the path but holds no blob)."""
+    (the deleting commit names the path but holds no blob).
+
+    No ``core.quotePath`` override: it changes how git prints path names,
+    and ``git show <commit>:<path>`` prints only the blob's content."""
     result = subprocess.run(  # noqa: S603
-        ["git", "-c", "core.quotePath=false", "show", spec],  # noqa: S607
+        ["git", "show", spec],  # noqa: S607
         cwd=corpus,
         capture_output=True,
         encoding="utf-8",
