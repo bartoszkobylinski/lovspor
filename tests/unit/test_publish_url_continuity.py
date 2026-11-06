@@ -29,9 +29,10 @@ from typer.testing import CliRunner
 from lovspor.cli import app
 from lovspor.publish.check import check_continuity, check_release
 from lovspor.publish.emit import emit_site
-from lovspor.publish.inventory import PublishError
+from lovspor.publish.inventory import PublishError, PublishInventory, build_inventory
 from lovspor.publish.pages import SITE_ORIGIN
-from lovspor.publish.redirects import RedirectMap, caddy_snippet
+from lovspor.publish.redirects import RedirectMap, caddy_snippet, validate_redirect_targets
+from lovspor.snapshot import CorpusSnapshot
 from tests.unit.cli_output import said
 from tests.unit.test_publish_redirects import _doc, _git, _head, _record, _repo, _write_manifest
 
@@ -450,3 +451,54 @@ def _rebuild_sitemaps_without(root: Path, url: str) -> None:
         for loc in (url, url + "index.json"):
             text = re.sub(rf"<url><loc>{re.escape(SITE_ORIGIN + loc)}</loc>.*?</url>", "", text)
         sitemap.write_text(text, encoding="utf-8")
+
+
+class TestBuildValidationRefusesWrongClaims:
+    """``validate_redirect_targets`` on hand-built maps over a real inventory."""
+
+    @pytest.fixture
+    def inventory(self, repo: Path) -> PublishInventory:
+        (repo / "lover/a.md").write_text(_doc("A", "lov/2020-01-01-1", ("1", "2")))
+        sha = _commit(repo, {"doc-a": _record("lov", "lover/a.md", "a")}, day=1)
+        snapshot = CorpusSnapshot(repo, sha)
+        return build_inventory(snapshot.manifest, snapshot.read_text)
+
+    @pytest.mark.parametrize(
+        ("source", "target"),
+        [
+            ("/lov/gammel/paragraf/1/", "/lov/a/paragraf/2/"),
+            ("/lov/gammel/paragraf/1/", "/lov/a/"),
+            ("/lov/gammel/", "/lov/a/index.json"),
+        ],
+    )
+    def test_a_301_that_changes_pid_or_kind_is_refused(
+        self, inventory: PublishInventory, source: str, target: str
+    ) -> None:
+        redirect_map = RedirectMap(redirects=((source, target),), gone=())
+        with pytest.raises(PublishError, match="changes the entity it names"):
+            validate_redirect_targets(redirect_map, inventory)
+
+    @pytest.mark.parametrize(
+        ("redirects", "gone"),
+        [
+            ((("/lov/a/paragraf/1/", "/lov/a/paragraf/1/"),), ()),
+            ((), ("/lov/a/",)),
+            ((), ("/lov/a/paragraf/2/",)),
+            ((), ("/lov/",)),
+        ],
+    )
+    def test_a_rule_over_an_emitted_url_is_refused(
+        self,
+        inventory: PublishInventory,
+        redirects: tuple[tuple[str, str], ...],
+        gone: tuple[str, ...],
+    ) -> None:
+        redirect_map = RedirectMap(redirects=redirects, gone=gone)
+        with pytest.raises(PublishError, match="is an emitted page, but the redirect map"):
+            validate_redirect_targets(redirect_map, inventory)
+
+    def test_a_gone_entry_beside_but_not_over_an_emitted_url_is_accepted(
+        self, inventory: PublishInventory
+    ) -> None:
+        redirect_map = RedirectMap(redirects=(), gone=("/lov/a/paragraf/3/", "/lov/aa/"))
+        validate_redirect_targets(redirect_map, inventory)

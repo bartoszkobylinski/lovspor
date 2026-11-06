@@ -104,7 +104,7 @@ their own contract.
 - `publish-check --previous` compares two releases. **It is not yet called by `release build`
   or `publish-release.sh`.** Until it is, the cross-release guarantee is checked only when an
   operator runs it, and in tests. Wiring it into the release transaction is an owner decision
-  (#747 follow-up).
+  (#820).
 - A URL no release ever served answers 404.
 
 ## 5. Dates and time axes
@@ -126,4 +126,4 @@ their own contract.
   identifier. Lovspor mints no ELI, and no path imitates an ELI form.
 - `ref_id` is Lovdata's identity for the work, carried verbatim from the source.
 - The JSON carries no official ELI link. The mapping could not be verified from a permitted
-  source: [`docs/research/eli-assessment-2026-11-06.md`](research/eli-assessment-2026-11-06.md).
+  source: [`docs/research/eli-assessment-2026-11-06.md`](research/eli-assessment-2026-11-06.md); the follow-up is #819.
