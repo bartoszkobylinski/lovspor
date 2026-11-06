@@ -263,3 +263,25 @@ def test_written_bytes_are_the_canonical_encoding(cache_root: Path) -> None:
     _open(cache_root).put(_entry())
     target = next(p for p in cache_root.rglob("*.lsec"))
     assert target.read_bytes() == encode_entry(_entry())
+
+
+def test_directory_at_an_entry_path_is_a_typed_refusal(cache_root: Path) -> None:
+    """Linux opens a directory read-only; the refusal must still be typed (#825)."""
+    store = _open(cache_root)
+    store.put(_entry())
+    target = next(cache_root.rglob("*.lsec"))
+    target.unlink()
+    target.mkdir(mode=0o700)
+    with pytest.raises(EmbeddingCacheError, match="regular file"):
+        store.get(_key())
+
+
+def test_fifo_at_an_entry_path_is_refused_without_blocking(cache_root: Path) -> None:
+    """A FIFO would block a plain read-only open forever."""
+    store = _open(cache_root)
+    store.put(_entry())
+    target = next(cache_root.rglob("*.lsec"))
+    target.unlink()
+    os.mkfifo(target, 0o600)
+    with pytest.raises(EmbeddingCacheError, match="regular file"):
+        store.get(_key())
