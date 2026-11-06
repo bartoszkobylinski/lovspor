@@ -175,7 +175,7 @@ def with_embedding_cache(
             "unset LOVSPOR_EMBEDDING_CACHE_DIR to write version 1",
         )
     forbidden = (settings.lovverk_repo_path, *_engine_checkout())
-    store = LocalEntryStore.open(Path(raw_root), forbidden, read_policy_from_env())
+    store = LocalEntryStore.open(Path(raw_root), forbidden, _read_policy())
     return CachingEmbedder(embedder, store, esi)
 
 
@@ -192,6 +192,10 @@ def _known_space(embedder: EmbeddingModel) -> str:
 
 def read_policy_from_env() -> ReadPolicy:
     """Retention from ``LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS``; refuses a non-positive one."""
+    return _read_policy()
+
+
+def _read_policy() -> ReadPolicy:
     raw = os.environ.get(MAX_AGE_VARIABLE)
     try:
         days = DEFAULT_MAX_AGE_DAYS if raw is None else int(raw)
