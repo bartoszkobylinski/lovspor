@@ -79,8 +79,11 @@ def enforce_reembed_guard(
     no provider is consulted. ``allow`` is the explicit operator override
     (``lovspor sync --allow-mass-reembed``); it never comes from the
     environment and the scheduled workflow never passes it, so a tripped
-    guard fails the job before a cent of spend.
+    guard fails the job before a cent of spend. An empty scope has nothing
+    to authorize or refuse, and says nothing.
     """
+    if not scope.documents:
+        return
     current_total = sum(1 for r in prior.documents.values() if r.status == "current")
     fraction = scope.documents / max(current_total, 1)
     summary = (
