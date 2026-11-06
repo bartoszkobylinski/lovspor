@@ -1,180 +1,192 @@
-"""Observable diagnostics and boundary cases from the cache mutation artifact."""
+"""Behavioral regressions for the cache survivors in mutation-result.json."""
 
-import hashlib
-import os
-import struct
+import io
+import sys
 from datetime import timedelta
 from pathlib import Path
 
+import numpy as np
 import pytest
-import typer
 
-from lovspor.embeddings import cache_admin, cache_cli
-from lovspor.embeddings.cache import CACHE_DIR_VARIABLE
-from lovspor.embeddings.cache_format import decode_entry, describe_entry
-from lovspor.embeddings.cache_store import LocalEntryStore, read_entry_bytes
-from lovspor.errors import EmbeddingCacheError, EmbeddingCacheStorageError
-from tests.unit.test_embedding_cache_admin import ESI, NOW, POLICY, _doc, _unit
-
-
-@pytest.fixture
-def store(tmp_path: Path) -> LocalEntryStore:
-    return LocalEntryStore.open(tmp_path / "cache", (), POLICY)
-
-
-def _frame(meta: bytes, length: int | None = None) -> bytes:
-    body = b"LSEC" + struct.pack(">I", len(meta) if length is None else length) + meta
-    return body + hashlib.sha256(body).digest()
-
-
-@pytest.mark.parametrize(
-    ("data", "reason"),
-    [
-        (b"", "torn entry, 0 bytes"),
-        (b"x" * 40, "bad magic"),
-        (b"LSEC" + b"x" * 36, "digest mismatch (torn or modified)"),
-        (_frame(b"", 1), "meta length past the end"),
-        (_frame(b""), "meta is not JSON"),
-        (_frame(b"?"), "meta is not JSON"),
-        (_frame(b"[]"), "meta is not an object"),
-    ],
+from lovspor.embeddings.cache import (
+    CachingEmbedder,
+    _read_policy,
+    quantized_document_vectors,
+    with_embedding_cache,
 )
-def test_decode_diagnostic_names_key_and_exact_reason(data: bytes, reason: str) -> None:
-    key = _doc("a").key
-    with pytest.raises(EmbeddingCacheError) as caught:
-        decode_entry(data, key, POLICY)
-    assert str(caught.value) == f"embedding cache entry refused ({key.label()}): {reason}"
+from lovspor.embeddings.inputs import EmbeddingInput, hash_embedding_inputs
+from lovspor.embeddings.model import count_input_tokens
+from lovspor.embeddings.provider import UNKNOWN_SPACE_ID
+from lovspor.errors import EmbeddingCacheError
+from tests.unit.test_embedding_cache_boundary import _Provider, _settings, cache_dir
+from tests.unit.test_embedding_space_identity import _FakeEmbedder
+
+__all__ = ["cache_dir"]
 
 
-def test_describe_invalid_key_names_file() -> None:
-    with pytest.raises(EmbeddingCacheError) as caught:
-        describe_entry(_frame(b"{}"), "broken.lsec")
-    assert str(caught.value) == (
-        "embedding cache entry refused (broken.lsec): meta does not describe a valid key"
-    )
+def _cached(provider: object, tmp_path: Path) -> CachingEmbedder:
+    cached = with_embedding_cache(provider, _settings(tmp_path))
+    assert isinstance(cached, CachingEmbedder)
+    return cached
 
 
-def test_read_errors_name_entry(tmp_path: Path) -> None:
-    path = tmp_path / "entry.lsec"
-    path.write_bytes(b"x")
-    path.chmod(0o644)
-    with pytest.raises(EmbeddingCacheError) as caught:
-        read_entry_bytes(path)
-    assert str(caught.value) == (
-        "embedding cache refuses entry.lsec: permission must be owner-only "
-        "and owned by the running user"
-    )
-    # ENAMETOOLONG is independent of whether the test process is privileged.
-    path = tmp_path / ("a" * 300)
-    with pytest.raises(EmbeddingCacheStorageError) as storage:
-        read_entry_bytes(path)
-    assert str(storage.value) == f"cannot read {path.name}: {storage.value.__cause__.strerror}"
-
-
-@pytest.mark.parametrize("configured", [False, True])
-def test_open_refusal_uses_stderr(monkeypatch, capsys, configured) -> None:
-    if configured:
-        monkeypatch.setenv(CACHE_DIR_VARIABLE, "relative")
-        message = "embedding cache root must be an absolute path"
-    else:
-        monkeypatch.delenv(CACHE_DIR_VARIABLE, raising=False)
-        message = f"{CACHE_DIR_VARIABLE} is not set; the embedding cache is off."
-    with pytest.raises(typer.Exit) as caught:
-        cache_cli.open_configured_store()
-    assert caught.value.exit_code == (1 if configured else 2)
-    output = capsys.readouterr()
-    assert output.out == ""
-    assert output.err == message + "\n"
-
-
-def test_clean_verify_succeeds(store, monkeypatch, capsys) -> None:
-    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(store.root))
-    assert cache_cli.verify_impl() == 0
-    assert capsys.readouterr().out == "valid=0 expired=0 refused=0\n"
-
-
-@pytest.mark.parametrize("command", ["verify_impl", "prune_impl"])
-def test_corruption_diagnostics_go_to_stderr(store, monkeypatch, capsys, command) -> None:
-    store.put(_doc("a"))
-    path = next(store.root.rglob("*.lsec"))
-    path.write_bytes(b"bad")
-    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(store.root))
-    assert getattr(cache_cli, command)() == (1 if command == "verify_impl" else 0)
-    output = capsys.readouterr()
-    assert output.err == f"embedding cache entry refused ({path.name}): torn entry, 3 bytes\n"
-    assert output.out == (
-        "valid=0 expired=0 refused=1\n"
-        if command == "verify_impl"
-        else "expired=0 superseded_units=0 temporary=0 refused=1\n"
-    )
-    assert path.read_bytes() == b"bad"
-
-
-def test_invalidate_error_goes_to_stderr(store, monkeypatch, capsys) -> None:
-    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(store.root))
-    assert cache_cli.invalidate_impl("bad", None) == 1
-    output = capsys.readouterr()
-    assert output.out == ""
-    assert output.err == "invalidate needs a 32-hex ESI and, optionally, a 64-hex hash\n"
-
-
-def test_status_totals_and_ignores_unrelated_files(store) -> None:
-    for entry in [_doc("a"), _unit("b", 0), _unit("b", 1)]:
-        store.put(entry)
-    paths = list(store.root.rglob("*.lsec"))
-    directory = paths[0].parent
-    (directory / "notes.txt").write_bytes(b"ignored")
-    (directory / ".staged.tmp.1.lsec").write_bytes(b"staged")
-    report = cache_admin.status(store)
-    total = sum(p.stat().st_size for p in paths)
-    assert report.lines() == [f"esi={ESI[:8]} documents=1 units=2 bytes={total}", "temporary=1"]
-
-
-def test_multiple_expired_entries_are_counted(store) -> None:
-    for text in ["a", "b"]:
-        store.put(_doc(text, created_at=NOW - timedelta(days=40)))
-    assert cache_admin.verify(store).expired == 2
-    assert cache_admin.prune(store).expired == 2
-    assert not list(store.root.rglob("*.lsec"))
-
-
-def test_misnamed_unit_retains_impossible_identity_and_diagnostic(store) -> None:
-    entry = _unit("a")
-    store.put(entry)
-    path = next(store.root.rglob("*.lsec"))
-    path = path.rename(path.with_name("invalid.lsec"))
-    records = list(cache_admin.iter_entries(store))
-    assert len(records) == 1
-    assert records[0].unit == (-1, -1, "")
-    report = cache_admin.verify(store)
-    assert report.refused == [
-        f"embedding cache entry refused ({entry.key.label()}): stored under another key"
+def _inputs() -> list[EmbeddingInput]:
+    return [
+        EmbeddingInput(str(i), text)
+        for i, text in enumerate(
+            ["Norwegian law and rules", "hello world", "a longer legal provision", "four"]
+        )
     ]
-    assert path.exists()
 
 
-def test_temporary_at_cutoff_is_removed(store, monkeypatch) -> None:
-    store.put(_doc("a"))
-    path = next(store.root.rglob("*.lsec")).parent / ".entry.tmp.1"
-    path.write_bytes(b"x")
-    os.utime(path, (1000, 1000))
-    monkeypatch.setattr("time.time", lambda: 4600)
-    assert cache_admin.prune(store).temporary == 1
-    assert not path.exists()
+def test_multiple_document_hits_accumulate(cache_dir: Path, tmp_path: Path) -> None:
+    cached = _cached(_Provider(), tmp_path)
+    inputs = _inputs()
+    for _ in range(3):
+        quantized_document_vectors(cached, inputs, hash_embedding_inputs(inputs))
+    assert cached.progress.documents_cached == 2
 
 
-def test_remove_already_absent_file_is_idempotent(tmp_path) -> None:
-    cache_admin._remove(tmp_path / "absent.lsec")
-    assert list(tmp_path.iterdir()) == []
+def test_resume_counts_all_checkpoints_and_paid_tokens(cache_dir: Path, tmp_path: Path) -> None:
+    class Provider(_Provider):
+        model_name = "gpt-4"
+
+    inputs = [*_inputs(), EmbeddingInput("last", "another request")]
+    digest = hash_embedding_inputs(inputs)
+    interrupted = _cached(Provider(fail_after=2), tmp_path)
+    with pytest.raises(RuntimeError, match="job killed"):
+        quantized_document_vectors(interrupted, inputs, digest)
+    assert interrupted.progress.tokens_paid == sum(
+        count_input_tokens(item.text, "gpt-4") for item in inputs[:4]
+    )
+    resumed = _cached(Provider(), tmp_path)
+    quantized_document_vectors(resumed, inputs, digest)
+    assert resumed.progress.units_cached == 2
+    assert resumed.progress.tokens_paid == count_input_tokens(inputs[-1].text, "gpt-4")
 
 
-def test_superseded_units_removed_independent_of_vector_dimensions(store) -> None:
-    store.put(_doc("finished"))
-    store.put(_unit("finished", 0))
-    store.put(_unit("finished", 1))
-    store.put(_unit("pending", 0))
-    assert cache_admin.prune(store).superseded_units == 2
-    assert store.get(_doc("finished").key) is not None
-    assert store.get(_unit("pending", 0).key) is not None
-    assert store.get(_unit("finished", 0).key) is None
-    assert store.get(_unit("finished", 1).key) is None
+def test_paid_vectors_are_float32(cache_dir: Path, tmp_path: Path) -> None:
+    class DoubleProvider(_FakeEmbedder):
+        def encode(self, texts: list[str]) -> np.ndarray:
+            return np.full((len(texts), 4), 0.1, dtype=np.float64)
+
+    cached = _cached(DoubleProvider(), tmp_path)
+    vectors = cached._pay(["hello"])
+    assert vectors.dtype == np.float32
+    np.testing.assert_array_equal(vectors, np.full((1, 4), 0.1, dtype=np.float32))
+
+
+def test_progress_is_periodic_flushed_stderr(
+    cache_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cached = _cached(_Provider(), tmp_path)
+    inputs = _inputs()
+    digest = hash_embedding_inputs(inputs)
+    buffer = io.BytesIO()
+    stream = io.TextIOWrapper(buffer, encoding="utf-8")
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stderr", stream)
+        for _ in range(49):
+            quantized_document_vectors(cached, inputs, digest)
+        assert buffer.getvalue() == b""
+        quantized_document_vectors(cached, inputs, digest)
+        line = buffer.getvalue().decode()
+        assert line == (
+            "embedding-cache: documents=50 documents_cached=48 units_cached=0 "
+            f"units_paid=2 estimated_tokens_paid={cached.progress.tokens_paid}\n"
+        )
+        quantized_document_vectors(cached, inputs, digest)
+        assert buffer.getvalue().decode() == line
+    assert capsys.readouterr().out == ""
+
+
+def test_writer_refusal_explains_recovery(cache_dir: Path, tmp_path: Path) -> None:
+    with pytest.raises(EmbeddingCacheError) as error:
+        with_embedding_cache(_Provider(), _settings(tmp_path, lspe=1))
+    assert str(error.value) == (
+        "the embedding cache serves only the LSPE version-2 writer; "
+        "unset LOVSPOR_EMBEDDING_CACHE_DIR to write version 1"
+    )
+    assert not cache_dir.exists()
+
+
+@pytest.mark.parametrize("descriptor,space", [(42, "a" * 32), ("declared", UNKNOWN_SPACE_ID)])
+def test_invalid_identity_is_refused(
+    cache_dir: Path,
+    tmp_path: Path,
+    descriptor: object,
+    space: str,
+) -> None:
+    class Provider:
+        def get_dimension(self) -> int:
+            return 4
+
+        def encode(self, texts: list[str]) -> np.ndarray:
+            return np.ones((len(texts), 4), dtype=np.float32)
+
+    provider = Provider()
+    provider.descriptor = descriptor
+    provider.space_id = space
+    with pytest.raises(EmbeddingCacheError) as error:
+        with_embedding_cache(provider, _settings(tmp_path))
+    assert str(error.value) == (
+        "the embedding cache needs an embedder that declares its embedding-space "
+        "identity; Unknown is never comparable (ADR-0005)"
+    )
+    assert not cache_dir.exists()
+
+
+def test_one_day_retention_is_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS", "1")
+    assert _read_policy().max_age == timedelta(days=1)
+
+
+def test_adapter_without_request_plan_uses_one_request(cache_dir: Path, tmp_path: Path) -> None:
+    cached = _cached(_FakeEmbedder(), tmp_path)
+    inputs = _inputs()
+    vectors, scale = quantized_document_vectors(cached, inputs, hash_embedding_inputs(inputs))
+    np.testing.assert_array_equal(vectors, np.full((4, 4), 127, dtype=np.int8))
+    assert scale == 1 / 127
+    assert cached.progress.units_paid == 1
+
+
+@pytest.mark.parametrize("bounds", [[(1, 4)], [(0, 1), (2, 4)]])
+def test_broken_request_plan_is_refused(
+    cache_dir: Path,
+    tmp_path: Path,
+    bounds: list[tuple[int, int]],
+) -> None:
+    class Provider(_Provider):
+        def plan_requests(self, texts: list[str]) -> list[tuple[int, int]]:
+            return bounds
+
+    cached = _cached(Provider(), tmp_path)
+    inputs = _inputs()
+    with pytest.raises(EmbeddingCacheError) as error:
+        quantized_document_vectors(cached, inputs, hash_embedding_inputs(inputs))
+    assert str(error.value) == "the adapter's request plan does not cover its inputs in order"
+    assert not list(cache_dir.rglob("*.lsec"))
+
+
+def test_zero_vectors_keep_the_document_scale(cache_dir: Path, tmp_path: Path) -> None:
+    class ZeroProvider(_FakeEmbedder):
+        def encode(self, texts: list[str]) -> np.ndarray:
+            return np.zeros((len(texts), 4), dtype=np.float32)
+
+    cached = _cached(ZeroProvider(), tmp_path)
+    inputs = _inputs()
+    for _ in range(2):
+        vectors, scale = quantized_document_vectors(cached, inputs, hash_embedding_inputs(inputs))
+        assert scale == 1.0
+        assert not vectors.any()
+
+
+def test_new_document_timestamp_is_aware_utc(cache_dir: Path, tmp_path: Path) -> None:
+    cached = _cached(_Provider(), tmp_path)
+    inputs = _inputs()
+    stored = cached.document_vectors(inputs, hash_embedding_inputs(inputs))
+    assert stored.created_at.tzinfo is not None
+    assert stored.created_at.utcoffset() == timedelta(0)

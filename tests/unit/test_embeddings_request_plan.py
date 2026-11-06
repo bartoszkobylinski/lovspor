@@ -37,3 +37,18 @@ def test_embedder_plan_matches_its_own_batches(size: int) -> None:
     texts = [f"tekst {i}" for i in range(11)]
     planned = [texts[start:end] for start, end in model.plan_requests(texts)]
     assert planned == list(model._batches(texts))
+
+
+def test_plan_applies_input_truncation_before_the_request_token_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """plan_requests promises the requests encode sends, after truncation."""
+    monkeypatch.setattr("lovspor.embeddings.model._MAX_INPUT_TOKENS", 4)
+    monkeypatch.setattr("lovspor.embeddings.model._MAX_REQUEST_TOKENS", 8)
+    model = OpenAIEmbedder(api_key="sk-test", dim=3, batch_size=128)
+    texts = [" a" * 12, " b" * 12, " c" * 12]
+    truncated = [model._truncate_to_tokens(text) for text in texts]
+    assert truncated == [" a" * 4, " b" * 4, " c" * 4]
+    bounds = model.plan_requests(texts)
+    assert bounds == [(0, 2), (2, 3)]
+    assert [truncated[start:end] for start, end in bounds] == list(model._batches(truncated))
