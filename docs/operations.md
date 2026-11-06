@@ -93,6 +93,67 @@ OPENAI_API_KEY=sk-... uv run lovspor sync  # Sprint 9 backfill re-embeds exactly
 
 It is idempotent — a no-op with no commit once every embedding matches its sections. When last run (2026-07-07) the affected set was ~2,333 acts (~$0.57 one-time at `text-embedding-3-large` pricing); that backfill has since completed. The churn is `.bin` rewrites only, markdown is untouched.
 
+### Maintenance: the durable embedding cache (#802, off by default)
+
+Design: `docs/proposals/embedding-cache-802.md`. The cache keeps vectors a
+keyed sync has paid for, keyed by ESI and the ADR-0006 input hash, so a rerun
+after a killed sync pays only for what it had not finished. It is **off**
+unless `LOVSPOR_EMBEDDING_CACHE_DIR` is set, and `sync.yml` does not set it.
+
+**Enable (a local or self-hosted sync only).** Choose an absolute directory
+outside the `lovverk` checkout and outside the engine checkout; the sync
+refuses one inside either. It is created `0700` if missing.
+
+```bash
+export LOVSPOR_EMBEDDING_CACHE_DIR=/var/lib/lovspor/embedding-cache
+export LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS=30   # optional, default 30
+uv run lovspor sync
+```
+
+During a keyed sync the cache prints one line every 50 documents to stderr:
+
+```text
+embedding-cache: documents=50 documents_cached=48 units_cached=0 units_paid=2 estimated_tokens_paid=3114
+```
+
+Counts only: no text, key or path. `estimated_tokens_paid` is the tiktoken
+count of what was sent, not a bill; a retried request may be billed again.
+
+**After a killed sync.** Rerun the same command with the same cache
+directory. Documents and long-document requests that were checkpointed cost
+nothing; the request in flight when the run died is paid again (no response
+means nothing was stored). The ADR-0006 guards still count the whole
+workload, so a resumed mass re-embed still needs `--allow-mass-reembed`.
+
+**A sync stopped with `EmbeddingCacheError`.** An entry failed validation (or
+the store cannot be written). The run did not pay over it. Look before
+deleting anything:
+
+```bash
+uv run lovspor ops embedding-cache verify      # exit 1 lists each refused entry
+uv run lovspor ops embedding-cache invalidate --esi <esi> --input-hash <hash>
+uv run lovspor ops embedding-cache invalidate --esi <esi>   # a whole space
+```
+
+An `EmbeddingCacheExpiredError` names an entry past the retention:
+
+```bash
+uv run lovspor ops embedding-cache prune
+```
+
+`prune` removes expired entries, unit checkpoints whose document entry
+exists, and temporary files older than one hour. It never removes an entry it
+refuses: that is evidence, and `invalidate` is the deliberate removal.
+`status` prints entry counts and bytes per space.
+
+**Roll back.** Unset `LOVSPOR_EMBEDDING_CACHE_DIR`. The corpus never depends
+on the cache, so nothing else changes; deleting the directory loses only
+money already spent, never corpus state.
+
+**Not yet:** GitHub-hosted runners discard their disk with the job, so this
+does not protect the scheduled sync. That needs the remote backend the owner
+has not yet chosen (design §8, D1).
+
 ### Renderer versioning and self-healing re-renders
 
 Change detection is driven entirely by the upstream XML hash. A **renderer** fix changes no XML, so every document stays `unchanged` and the corpus keeps serving whatever the renderer produced when it last wrote each file.

@@ -245,7 +245,7 @@ not fall back to a paid call. The reasons:
 * Paying silently on corruption turns a cache defect into an unbounded spend,
   which is the #790 failure mode.
 
-Recovery is an operator action: `lovspor embedding-cache invalidate` for the
+Recovery is an operator action: `lovspor ops embedding-cache invalidate` for the
 key named in the error, or for the whole ESI (§8).
 
 ### 5.5 What the cache refuses to start with
@@ -368,13 +368,13 @@ store that comes from somewhere else is untrusted input.
 
 All commands work on the local store and never call the provider.
 
-* `lovspor embedding-cache status` — entry counts and bytes per ESI, stray temp
+* `lovspor ops embedding-cache status` — entry counts and bytes per ESI, stray temp
   files, expired entries. Counts only.
-* `lovspor embedding-cache verify` — validates every entry (§5.3) and lists the
+* `lovspor ops embedding-cache verify` — validates every entry (§5.3) and lists the
   keys that fail.
-* `lovspor embedding-cache invalidate --esi <esi> [--input-hash <hash>]` —
+* `lovspor ops embedding-cache invalidate --esi <esi> [--input-hash <hash>]` —
   removes entries: one key, or a whole space.
-* `lovspor embedding-cache prune` — removes expired entries, unit entries whose
+* `lovspor ops embedding-cache prune` — removes expired entries, unit entries whose
   document entry exists, and stray temp files older than one hour.
 
 Rollback is turning the cache off: unset `LOVSPOR_EMBEDDING_CACHE_DIR`. The
