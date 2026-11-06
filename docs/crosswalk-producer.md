@@ -116,9 +116,17 @@ now; pass `--cache` outside the checkout.
   - A `release_candidate` revision that is no longer current (a candidate later
     withdrawn or superseded, or a forged revision 1) still claims a past owner
     authorization. The file keeps it as written, append-only, and gets **no
-    manifest** until evidence for that past authorization can be checked
-    (proposed ruling A1.5). Files with no candidate revision anywhere, withdrawals
-    included, are unaffected.
+    manifest** (proposed ruling A1.5, interim and fail-closed). Files with no
+    candidate revision anywhere, withdrawals included, are unaffected.
+  - Not supported for now, by that rule:
+    - a second promotion of a file that already holds a candidate: its approved
+      input carries the first candidate and is refused;
+    - withdrawing or superseding a candidate in a file that is to be described:
+      the file stays valid under `check` but gets no manifest.
+
+    Evidence for past candidates is deferred to #818: proof chains, key rotation
+    and revocation of past approvals, replay under the recorded
+    `producer_commit`, and manifest versioning.
   - `approval.json`, its `.sig` and `approved-input.jsonl` must be regular files:
     a FIFO, device, directory or a symlink to one is refused before anything is
     read, so a proof directory cannot hang the gate. ssh-keygen verifies a
