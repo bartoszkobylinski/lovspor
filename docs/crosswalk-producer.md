@@ -1,10 +1,25 @@
 # Legislative crosswalk producer (ADR-0017, #610)
 
-Status: implementation prepared against the PROPOSED rulings in
-`docs/proposals/legislative-crosswalk-decisions-proposal-2026-11-02.md`; nothing
-here is in force until the owner records them (lovspor-notebook
-`docs/adr/ADR-0017-amendment-1-ruling.md`). Nothing here publishes, tags, pushes,
-or writes into `lovverk`.
+Status: implements the rulings the owner gave on 2026-11-06 on the proposal in
+`docs/proposals/legislative-crosswalk-decisions-proposal-2026-11-02.md` (which
+stays unchanged as the original proposal). They are recorded in lovspor-notebook
+`docs/adr/ADR-0017-amendment-1-ruling.md` (#162) and in lovspor-notebook ADR-0019
+(Accepted 2026-11-06), which refines ADR-0017. In short:
+
+- D1–D11, R1 and A1 (signed approval, replay, key management) are approved.
+  Under D6, history stays append-only with the A1.5 limits below.
+- R2 is rejected for now: the licence statement made for the publicData endpoint
+  is not accepted as confirmation for `lovtidend-avd1-2026.tar.bz2`. An approval
+  must say `"R2": "rejected"`, and records resting on that archive stay
+  `research_only`.
+- A1.5 is in force in its interim, fail-closed form (B): a historical candidate
+  gets no manifest, and a second promotion is unsupported (see "Manifest").
+  Evidence for historical candidates is deferred to #818.
+- R3 (attribution wording) and R4 (regjeringen.no) stay blocked.
+
+A ruling is not a release. No signing key is configured (`approval-signers` is
+empty), and nothing here publishes, tags, pushes, or writes into `lovverk`.
+Publishing a dataset needs a separate owner decision.
 
 All commands sit on the `ops` group (`lovspor.cli` is at its size ratchet).
 
@@ -116,7 +131,7 @@ now; pass `--cache` outside the checkout.
   - A `release_candidate` revision that is no longer current (a candidate later
     withdrawn or superseded, or a forged revision 1) still claims a past owner
     authorization. The file keeps it as written, append-only, and gets **no
-    manifest** (proposed ruling A1.5, interim and fail-closed). Files with no
+    manifest** (ruling A1.5, interim variant B, fail-closed). Files with no
     candidate revision anywhere, withdrawals included, are unaffected.
   - Not supported for now, by that rule:
     - a second promotion of a file that already holds a candidate: its approved

@@ -58,9 +58,10 @@ Build a versioned Markdown corpus of current Norwegian law, auto-updated from Lo
 > This note preserves the original decision and records its limited later
 > exception; it does not rewrite the historical policy.
 
-> **Roadmap reconciliation, ADR-0017 gate 5 (proposed 2026-11-02; approval
-> pending owner ruling D10, [lovspor-notebook #162](https://github.com/bartoszkobylinski/lovspor-notebook/pull/162);
-> not in force until that ruling is recorded):**
+> **Roadmap reconciliation, ADR-0017 gate 5 (proposed 2026-11-02; approved by
+> the owner on 2026-11-06 as ruling D10, recorded in
+> [lovspor-notebook #162](https://github.com/bartoszkobylinski/lovspor-notebook/pull/162) and in
+> lovspor-notebook ADR-0019, Accepted 2026-11-06, which refines ADR-0017):**
 > `docs/roadmap.md` D-DIRECT-4 ("which parties voted how on a given act") is not a
 > Lovspor deliverable: ADR-0017 assigns divisions, votes and speeches to Politik,
 > and Lovspor publishes only the source-backed crosswalk
@@ -87,9 +88,9 @@ Optional later:
 
 **Stortinget open data** (`data.stortinget.no`) — **NOT used as a primary source**. It publishes parliamentary metadata (saker, voteringer, publikasjoner), not consolidated law text. Possible enrichment in a later phase. Rate limit: 100 req/min.
 
-> **Crosswalk evidence sources (proposed 2026-11-02; approval pending owner ruling
-> D10, [lovspor-notebook #162](https://github.com/bartoszkobylinski/lovspor-notebook/pull/162);
-> not in force until that ruling is recorded):** For the ADR-0017 crosswalk only,
+> **Crosswalk evidence sources (proposed 2026-11-02; approved by the owner on
+> 2026-11-06 as ruling D10, recorded in [lovspor-notebook #162](https://github.com/bartoszkobylinski/lovspor-notebook/pull/162)
+> and lovspor-notebook ADR-0019):** For the ADR-0017 crosswalk only,
 > `lovtidend-avd1-{2001-2025,2026}.tar.bz2` from the same publicData API is read as
 > **evidence** for the law → decision edge. It is not ingested into `lovverk` and raw
 > XML stays out of every repository. Stortinget `eksport/sak` (and
@@ -99,7 +100,11 @@ Optional later:
 > per archive is recorded in each release (see
 > `docs/proposals/legislative-crosswalk-decisions-proposal-2026-11-02.md`, items a
 > and k). The "Optional later" and "NOT used as a primary source" lines above stand
-> as written.
+> as written. Licence basis for `lovtidend-avd1-2026.tar.bz2`: the owner rejected
+> ruling R2 for now (2026-11-06). A licence statement made for the endpoint is not
+> yet accepted as confirmation for that specific archive, so crosswalk records
+> resting on it stay `research_only` until further evidence is obtained. R3
+> (attribution wording) and R4 (regjeringen.no) remain blocked.
 
 ## 4. Legal posture — Option A (conservative)
 
