@@ -169,7 +169,9 @@ def test_unsupported_operation_marks_its_target_unresolved_not_guessed() -> None
     assert state.unresolved == (
         ("x#I:0.0", "unsupported instruction: § 2 skal lyde slik Kongen bestemmer"),
     )
-    assert texts(state, "§2") == ["Følgende gjelder: bokstav a bokstav b"]
+    assert texts(state, "§2") == [
+        "Følgende gjelder: bokstav a bokstav b Bokstav b gjelder ikke private."
+    ]
     result = verify(state, load("consolidated.xml"))
     assert {s.key: s.verdict for s in result.sections}["§2"] == "unresolved"
 
@@ -277,7 +279,9 @@ def test_bokstav_replacement_and_move_ledd() -> None:
     move = _op("move_ledd", Address(section="§1", ledd=2), id="x#I:1.0", destination="§3")
     state = _run([_event(bokstav), _event(move, sequence=1)])
     assert state.unresolved == ()
-    assert texts(state, "§2") == ["Følgende gjelder: bokstav a bokstav bravo"]
+    assert texts(state, "§2") == [
+        "Følgende gjelder: bokstav a bokstav bravo Bokstav b gjelder ikke private."
+    ]
     assert texts(state, "§1") == ENACTED_TEXT[:1]
     assert texts(state, "§3") == ["Loven gjelder fra den tid Kongen bestemmer.", ENACTED_TEXT[1]]
 

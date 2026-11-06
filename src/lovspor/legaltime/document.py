@@ -144,11 +144,32 @@ def _ledd(element: etree._Element) -> Ledd:
     return Ledd(xml=inner_xml(element), text=element_text(element))
 
 
+_CONTINUATION = frozenset({"defaultP", "leddfortsettelse"})
+
+
+def _ledd_of(article: etree._Element) -> tuple[Ledd, ...]:
+    """Direct ``legalP`` children; a following ``defaultP`` continues the ledd after a list.
+
+    Lovtidend prints the sentence that follows an enumerated list as a sibling
+    paragraph; the consolidation folds it into the ledd as ``leddfortsettelse``.
+    """
+    ledd: list[Ledd] = []
+    for child in article:
+        if _css(child) in _LEDD_CLASSES:
+            ledd.append(_ledd(child))
+        elif _css(child) in _CONTINUATION and ledd:
+            tail = etree.tostring(child, encoding="unicode", with_tail=False)
+            previous = ledd[-1]
+            ledd[-1] = Ledd(
+                xml=previous.xml + tail, text=collapse(f"{previous.text} {element_text(child)}")
+            )
+    return tuple(ledd)
+
+
 def _provision(article: etree._Element) -> Provision:
     key = article.get("data-name") or ""
     values = [e for e in article.iter("span") if _css(e) == "legalArticleValue"]
     titles = [e for e in article.iter("span") if _css(e) == "legalArticleTitle"]
-    ledd = tuple(_ledd(child) for child in article if _css(child) == "legalP")
     notes = tuple(
         collapse("".join(str(t) for t in c.itertext()))
         for c in article
@@ -158,7 +179,7 @@ def _provision(article: etree._Element) -> Provision:
         key=key,
         label=element_text(values[0]) if values else key,
         heading=element_text(titles[0]) if titles else "",
-        ledd=ledd,
+        ledd=_ledd_of(article),
         notes=notes,
     )
 

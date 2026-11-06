@@ -7,6 +7,7 @@ section lands in exactly one class; no law text leaves this module, only
 section keys, classes and counts.
 """
 
+import re
 from collections import Counter
 from typing import Literal
 
@@ -14,6 +15,7 @@ from lovspor.legaltime.document import Document, Frozen, Provision
 from lovspor.legaltime.replay import ProvisionState, ReplayState
 
 _OMISSION = "\u2013 \u2013 \u2013"  # three en dashes: Lovdata's omitted-text marker
+_AMENDMENT_LIST_HEADING = re.compile(r"endring\w*\s+i\s+andre\s+lover", re.I)
 
 Verdict = Literal[
     "exact_raw",
@@ -73,9 +75,13 @@ def _omitted(replayed: ProvisionState, oracle: Provision) -> bool:
     """Lovdata prints three en dashes where its consolidation leaves announced text out.
 
     The omitted tail may span whole ledd, so the oracle is compared as a prefix of the replay.
+    A closing "Endringer i andre lover" section is omitted without any marker.
     """
     heading, ledd = _texts(oracle)
-    if heading != replayed.heading or not any(_OMISSION in text for text in ledd):
+    marked = any(_OMISSION in text for text in ledd) or bool(
+        _AMENDMENT_LIST_HEADING.search(heading)
+    )
+    if heading != replayed.heading or not marked:
         return False
     stripped = tuple(" ".join(text.replace(_OMISSION, "").split()) for text in ledd)
     mine = tuple(ledd.text for ledd in replayed.ledd)

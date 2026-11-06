@@ -55,8 +55,18 @@ def test_enacting_law_yields_an_ordered_provision_tree() -> None:
 
 def test_ledd_text_keeps_list_items_as_running_text() -> None:
     provisions = {p.key: p for p in load("enacting.xml").provisions}
-    assert provisions["§2"].ledd[0].text == "Følgende gjelder: bokstav a bokstav b"
+    assert provisions["§2"].ledd[0].text == (
+        "Følgende gjelder: bokstav a bokstav b Bokstav b gjelder ikke private."
+    )
     assert "<ul" in provisions["§2"].ledd[0].xml
+    assert provisions["§2"].ledd[0].xml.endswith("Bokstav b gjelder ikke private.</article>")
+    assert len(provisions["§2"].ledd) == 1
+
+
+def test_list_continuation_text_matches_the_consolidated_ledd() -> None:
+    enacted = {p.key: p for p in load("enacting.xml").provisions}["§2"]
+    consolidated = {p.key: p for p in load("consolidated.xml").provisions}["§2"]
+    assert enacted.ledd[0].text == consolidated.ledd[0].text
 
 
 def test_consolidated_text_drops_links_notes_and_footnote_marks() -> None:
