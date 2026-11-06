@@ -19,7 +19,7 @@ OpKind = Literal[
     "move_ledd", "renumber", "replace_heading", "substitute_term", "unsupported",
 ]  # fmt: skip
 
-_SEC = r"§\s*\d+(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?"
+_SEC = r"§\s*\d+(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"  # "i" is the preposition, not a letter
 _ORD = ORDINAL_ALT
 _LEDD = rf"(?P<l1>{_ORD})(?:\s+(?P<lj>og|til)\s+(?P<l2>{_ORD}))?\s+ledd"
 _PUNKT = rf"(?P<p1>{_ORD})(?:\s+(?P<pj>og|til)\s+(?P<p2>{_ORD}))?\s+punktum"
@@ -28,8 +28,12 @@ _LYDE = r"(?:skal\s+)?lyde(?:\s+slik)?:"
 _REPEAL = r"(?:oppheves|opphevast|blir\s+oppheva|vert\s+oppheva|blir\s+opphevet)\.?"
 _INTRO = re.compile(
     r"^(?:\d+\.\s*)?I\s+(?:midlertidig\s+)?(?P<act>lov\s+\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?)\b.*?"
-    r"\s+(?:gjøres|gjerast|blir|vert|skal)\s+(?P<rest>.*)$",
+    r"\s+(?:(?:gjøres|gjerast|blir|vert|skal)\s+(?P<rest>.*)|(?P<repeal>oppheves|opphevast|blir\s+oppheva|vert\s+oppheva)\.?)$",
     re.S,
+)
+_COMMENCEMENT_SHAPED = re.compile(
+    r"\bi\s+kraft\b|\bgjeld(?:er)?\s+fr[aå]\b|\bte[kr]\s+til\s+å\s+gjelde\b|\btar\s+til\s+å\s+gjelde\b",
+    re.I,
 )
 _INTRO_ONLY = re.compile(
     r"^(?:det\s+gjort\s+)?(?:følgende|følgjande|desse)\s+endring(?:er|ar|ane|a)?"
@@ -75,6 +79,7 @@ class Address(Frozen):
     punktum: int | None = None
     punktum_end: int | None = None
     bokstav: str | None = None
+    destination_ledd: int | None = None
 
 
 class Operation(Frozen):
@@ -110,7 +115,7 @@ def _span(
 ) -> tuple[int | None, int | None]:
     start, end = _ord(groups, first), _ord(groups, last)
     if end is not None and groups.get(joiner) == "og" and start is not None and end != start + 1:
-        return start, None  # "første og tredje" is two targets, not a range: refuse
+        return None, None  # "første og tredje" is two targets, not a range: no address
     return start, end
 
 
@@ -120,7 +125,7 @@ def _address(groups: dict[str, str | None]) -> Address:
     return Address(
         section=section_key(groups.get("sec") or "") if groups.get("sec") else None,
         ledd=ledd, ledd_end=ledd_end, punktum=punktum, punktum_end=punktum_end,
-        bokstav=groups.get("b"),
+        bokstav=groups.get("b"), destination_ledd=_ord(groups, "to"),
     )  # fmt: skip
 
 
@@ -131,6 +136,11 @@ def classify(sentence: str) -> tuple[OpKind, dict[str, str | None]]:
         if match is not None:
             return kind, match.groupdict()
     return "unsupported", {}
+
+
+def _part_label(tag: str) -> str:
+    """``"<part index>:<label>:<node>"`` → the label the law prints (``I``, ``II`` …)."""
+    return tag.split(":", maxsplit=2)[1]
 
 
 def _inline_payload(text: str, payload: tuple[Node, ...]) -> tuple[str, tuple[Node, ...]]:
@@ -200,8 +210,8 @@ class _Reader:
         self.pending_item_act: str | None = None
 
     def run(self) -> Interpretation:
-        for part in self.document.parts:
-            self._read_part(part.label, list(part.nodes))
+        for index, part in enumerate(self.document.parts):
+            self._read_part(f"{index}:{part.label}", list(part.nodes))
         clauses = self.clauses or _commencement_provisions(self.document)
         return Interpretation(
             document=self.document.header.refid,
@@ -240,7 +250,7 @@ class _Reader:
         intro = _INTRO.match(text)
         if intro is not None:
             self.substitution, self.act = None, act_refid(intro.group("act"))
-            text = intro.group("rest")
+            text = intro.group("rest") or f"{intro.group('act')} {intro.group('repeal')}"
             if _INTRO_ONLY.match(text):
                 return False
         self._instruction(f"{label}:{index}", text, node.change_part, payload)
@@ -263,7 +273,7 @@ class _Reader:
         return True
 
     def _substitute(self, tag: str, act: str, text: str, terms: tuple[str, str]) -> Operation:
-        part = tag.split(":", maxsplit=1)[0]
+        part = _part_label(tag)
         return Operation(
             id=f"{self.document.header.refid}#{tag}", kind="substitute_term", act=act,
             address=Address(), instruction=text, part=part, term_old=terms[0],
@@ -273,13 +283,16 @@ class _Reader:
     def _instruction(
         self, tag: str, text: str, change_part: tuple[str, ...], payload: tuple[Node, ...]
     ) -> None:
-        label = tag.split(":", maxsplit=1)[0]
+        label = _part_label(tag)
         act = _addressed_act(change_part) or self.act
         text, payload = _inline_payload(text, payload)
         sentences = split_sentences(text)
         for offset, sentence in enumerate(sentences):
             kind, groups = classify(sentence)
             last = offset == len(sentences) - 1
+            if kind == "unsupported" and _COMMENCEMENT_SHAPED.search(sentence):
+                self.clauses.append(sentence)  # a commencement sentence among instructions
+                continue
             if kind == "unsupported" and act is None:
                 continue  # prose outside any act's amendment block: not an operation
             self.operations.append(

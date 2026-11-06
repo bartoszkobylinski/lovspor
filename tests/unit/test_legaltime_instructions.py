@@ -72,7 +72,7 @@ def _xml(refid: str, label: str, inner: str) -> bytes:
         (
             "§ 43 annet ledd blir nytt femte ledd i § 42.",
             "move_ledd",
-            Address(section="§43", ledd=2),
+            Address(section="§43", ledd=2, destination_ledd=5),
         ),
         ("Nåværende tredje punktum blir annet punktum.", "renumber", Address()),
         ("§ 10 overskriften skal lyde:", "replace_heading", Address(section="§10")),
@@ -95,7 +95,7 @@ def test_move_destination_is_read() -> None:
     op = interpret(parse_document(body, "x")).operations[0]
     assert (op.kind, op.address, op.destination) == (
         "move_ledd",
-        Address(section="§43", ledd=2),
+        Address(section="§43", ledd=2, destination_ledd=5),
         "§42",
     )
 
@@ -114,10 +114,10 @@ def test_other_sentences_are_unsupported(sentence: str) -> None:
     assert classify(sentence)[0] == "unsupported"
 
 
-def test_non_adjacent_pair_is_not_a_range() -> None:
+def test_non_adjacent_pair_is_not_a_range_and_carries_no_ledd_address() -> None:
     kind, groups = classify("§ 5 første og tredje ledd skal lyde:")
     assert kind == "replace_ledd"
-    assert _address(groups) == Address(section="§5", ledd=1, ledd_end=None)
+    assert _address(groups) == Address(section="§5", ledd=None, ledd_end=None)
 
 
 def test_amending_fixture_yields_ordered_operations_with_payloads() -> None:
@@ -141,7 +141,7 @@ def test_amending_fixture_yields_ordered_operations_with_payloads() -> None:
     assert fifth.new_provision is not None
     assert len(fifth.new_provision.ledd) == 2
     assert sixth.change_part == ("lov/1967-02-10/§5/ledd/1",)
-    assert first.id == "lov/2020-12-18-999#I:1.0"
+    assert first.id == "lov/2020-12-18-999#1:I:1.0"
     assert result.clauses == (
         "Loven trer i kraft straks. Ny § 2 a i prøveloven trer likevel i kraft fra den tid "
         "Kongen bestemmer.",
@@ -231,9 +231,9 @@ def test_two_sentence_instruction_yields_two_operations_payload_on_the_last() ->
     )
     ops = interpret(parse_document(body, "x")).operations
     assert [(op.kind, op.id) for op in ops] == [
-        ("repeal_ledd", "lov/2025-06-20-97#I:1.0"),
-        ("renumber", "lov/2025-06-20-97#I:1.1"),
-        ("replace_ledd", "lov/2025-06-20-97#I:2.0"),
+        ("repeal_ledd", "lov/2025-06-20-97#0:I:1.0"),
+        ("renumber", "lov/2025-06-20-97#0:I:1.1"),
+        ("replace_ledd", "lov/2025-06-20-97#0:I:2.0"),
     ]
     assert ops[0].ledd == ()
     assert [ledd.text for ledd in ops[2].ledd] == ["Ny tekst."]
@@ -260,6 +260,35 @@ def test_replacement_followed_by_a_shift_renumbering_is_an_insertion() -> None:
     ]
 
 
+def test_whole_act_repeal_is_an_unsupported_operation_naming_the_act() -> None:
+    body = _xml(
+        "lov/2026-06-19-48",
+        "V",
+        '<article class="defaultP">I lov 14. juni 2019 nr. 21 om arv oppheves.</article>',
+    )
+    ops = interpret(parse_document(body, "x")).operations
+    assert [(op.kind, op.act) for op in ops] == [("unsupported", "lov/2019-06-14-21")]
+
+
+def test_commencement_sentence_among_instructions_becomes_a_clause_not_an_operation() -> None:
+    body = _xml(
+        "lov/2022-06-22-81",
+        "I",
+        '<article class="defaultP">I lov 14. juni 2019 nr. 21 om arv skal ny § 88 a lyde:</article>'
+        '<article class="futureLegalArticle" data-name="§88a"><article class="legalP">T.</article>'
+        '</article><article class="defaultP">Loven trer i kraft straks.</article>',
+    )
+    result = interpret(parse_document(body, "x"))
+    assert [op.kind for op in result.operations] == ["insert_section"]
+    assert result.clauses == ("Loven trer i kraft straks.",)
+
+
+def test_preposition_i_is_not_a_section_letter() -> None:
+    kind, groups = classify("§ 5 i loven skal lyde:")
+    assert kind == "unsupported"
+    assert groups == {}
+
+
 def test_act_context_does_not_leak_across_parts() -> None:
     body = _xml(
         "lov/2026-06-19-48",
@@ -271,7 +300,11 @@ def test_act_context_does_not_leak_across_parts() -> None:
         "oppheves.</article>",
     )
     ops = interpret(parse_document(body, "x")).operations
-    assert [(op.kind, op.act) for op in ops] == [("replace_section", "lov/2019-06-14-21")]
+    assert [(op.kind, op.act, op.part) for op in ops] == [
+        ("replace_section", "lov/2019-06-14-21", "IV"),
+        ("unsupported", "lov/2020-05-07-38", "V"),
+    ]
+    assert ops[1].instruction.endswith("oppheves")
 
 
 def test_inline_replacement_text_after_lyde_becomes_the_payload() -> None:

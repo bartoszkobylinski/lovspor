@@ -5,13 +5,15 @@
    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
    "horizon": "2026-06-23T08:35:00",
    "members": 38182,
-   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0",
+   "skipped_members": []
   },
   {
    "archive": "lovtidend-avd1-2026.tar.bz2",
    "horizon": "2026-11-05T14:50:00",
    "members": 1204,
-   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2",
+   "skipped_members": []
   }
  ],
  "baseline_timing": {
@@ -20,7 +22,7 @@
   "proofs": [
    {
     "member": "lti/2021/sf-20210521-1619.xml",
-    "quote": "Ikrafttreden av lov 21. mai 2021 nr. 42 om språk (språklova)",
+    "quote_sha256": "3a017f460debaf77c46a9a29f79d9f59853a5ccf785c084bde62b8a7f2718bd0",
     "refid": "forskrift/2021-05-21-1619",
     "sha256": "b09f1ea750857849bee881e8aabeda35d33fa635277eecc9b411fd55ff0e64dc"
    }
@@ -41,7 +43,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2022-12-20-115#X:0.0",
+    "id": "lov/2022-12-20-115#10:X:0.0",
     "instruction": "§ 3 andre ledd bokstav d lyde:",
     "kind": "replace_bokstav",
     "part": "X",
@@ -57,7 +59,7 @@
     "proofs": [
      {
       "member": "lti/2022/nl-20221220-115.xml",
-      "quote": "Lova tek til å gjelde straks.",
+      "quote_sha256": "7488ff5bb46a953179b25e288f6d271e2dfe7deaad92ca0cc141f2e266d2ad31",
       "refid": "lov/2022-12-20-115",
       "sha256": "6a18f09c47debdbea59495b05f1efec5a841376c23155da3e7b07eca27ba852c"
      }
@@ -79,7 +81,7 @@
      "lov/2021-05-21-42/§3/ledd/2"
     ],
     "destination": null,
-    "id": "lov/2025-06-20-97#I:1.0",
+    "id": "lov/2025-06-20-97#1:I:1.0",
     "instruction": "§ 3 andre ledd skal lyde:",
     "kind": "replace_ledd",
     "part": "I",
@@ -95,7 +97,7 @@
     "proofs": [
      {
       "member": "lti/2025/nl-20250620-097.xml",
-      "quote": "Lova tek til å gjelde 1. juli 2025.",
+      "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
      }
@@ -115,7 +117,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2025-06-20-97#I:3.0",
+    "id": "lov/2025-06-20-97#1:I:3.0",
     "instruction": "§ 3 tredje ledd blir oppheva.",
     "kind": "repeal_ledd",
     "part": "I",
@@ -131,7 +133,7 @@
     "proofs": [
      {
       "member": "lti/2025/nl-20250620-097.xml",
-      "quote": "Lova tek til å gjelde 1. juli 2025.",
+      "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
      }
@@ -148,7 +150,7 @@
     "address": {},
     "change_part": [],
     "destination": null,
-    "id": "lov/2025-06-20-97#I:3.1",
+    "id": "lov/2025-06-20-97#1:I:3.1",
     "instruction": "Noverande fjerde og femte ledd blir tredje og fjerde ledd.",
     "kind": "renumber",
     "part": "I",
@@ -164,7 +166,7 @@
     "proofs": [
      {
       "member": "lti/2025/nl-20250620-097.xml",
-      "quote": "Lova tek til å gjelde 1. juli 2025.",
+      "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
      }
@@ -184,7 +186,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2025-06-20-97#I:4.0",
+    "id": "lov/2025-06-20-97#1:I:4.0",
     "instruction": "§ 13 fjerde ledd skal lyde:",
     "kind": "insert_ledd",
     "part": "I",
@@ -200,7 +202,7 @@
     "proofs": [
      {
       "member": "lti/2025/nl-20250620-097.xml",
-      "quote": "Lova tek til å gjelde 1. juli 2025.",
+      "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
      }
@@ -219,7 +221,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2025-06-20-97#I:6.0",
+    "id": "lov/2025-06-20-97#1:I:6.0",
     "instruction": "§ 13 noverande fjerde ledd blir nytt femte ledd.",
     "kind": "renumber",
     "part": "I",
@@ -235,7 +237,7 @@
     "proofs": [
      {
       "member": "lti/2025/nl-20250620-097.xml",
-      "quote": "Lova tek til å gjelde 1. juli 2025.",
+      "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
      }
@@ -257,7 +259,7 @@
      "lov/2021-05-21-42/§16/ledd/2"
     ],
     "destination": null,
-    "id": "lov/2025-06-20-97#I:7.0",
+    "id": "lov/2025-06-20-97#1:I:7.0",
     "instruction": "§ 16 andre ledd skal lyde:",
     "kind": "replace_ledd",
     "part": "I",
@@ -273,7 +275,7 @@
     "proofs": [
      {
       "member": "lti/2025/nl-20250620-097.xml",
-      "quote": "Lova tek til å gjelde 1. juli 2025.",
+      "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
      }
@@ -294,7 +296,7 @@
      "lov/2021-05-21-42/§17"
     ],
     "destination": null,
-    "id": "lov/2025-06-20-97#I:9.0",
+    "id": "lov/2025-06-20-97#1:I:9.0",
     "instruction": "§ 17 skal lyde:",
     "kind": "replace_section",
     "part": "I",
@@ -310,7 +312,7 @@
     "proofs": [
      {
       "member": "lti/2025/nl-20250620-097.xml",
-      "quote": "Lova tek til å gjelde 1. juli 2025.",
+      "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
      }
@@ -341,7 +343,8 @@
    "refid": "lov/2021-05-21-42",
    "role": "enacting",
    "sha256": "7c99b5cb689cbfac9745ace71348c9b53c1e118d2eb36788590eff9856652efe",
-   "title": "Lov om språk (språklova)"
+   "title": "Lov om språk (språklova)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2022-12-20",
@@ -350,7 +353,8 @@
    "refid": "lov/2022-12-20-115",
    "role": "amending",
    "sha256": "6a18f09c47debdbea59495b05f1efec5a841376c23155da3e7b07eca27ba852c",
-   "title": "Lov om endringar i lovgjevinga som følgje av innføring av ny kjønnsnøytral tittel på Sivilombodsmannen"
+   "title": "Lov om endringar i lovgjevinga som følgje av innføring av ny kjønnsnøytral tittel på Sivilombodsmannen",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2025-07-01",
@@ -359,7 +363,8 @@
    "refid": "lov/2025-06-20-97",
    "role": "amending",
    "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d",
-   "title": "Lov om endringar i lov om språk (språklova)"
+   "title": "Lov om endringar i lov om språk (språklova)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2022-01-01",
@@ -368,7 +373,8 @@
    "refid": "forskrift/2021-05-21-1619",
    "role": "decision",
    "sha256": "b09f1ea750857849bee881e8aabeda35d33fa635277eecc9b411fd55ff0e64dc",
-   "title": "Ikrafttreden av lov 21. mai 2021 nr. 42 om språk (språklova)"
+   "title": "Ikrafttreden av lov 21. mai 2021 nr. 42 om språk (språklova)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2025-07-01",
@@ -377,47 +383,49 @@
    "refid": "forskrift/2025-06-20-1104",
    "role": "decision",
    "sha256": "32b7cc395c1bbbe4e66e1784ae09ce04043f806ca4d94c0e2347bbf92b224c58",
-   "title": "Ikraftsetjing av lov 20. juni 2025 nr. 97 om endringar i lov om språk (språklova)"
+   "title": "Ikraftsetjing av lov 20. juni 2025 nr. 97 om endringar i lov om språk (språklova)",
+   "unattributed_operations": 0
   }
  ],
  "oracle": {
   "member": "nl/nl-20210521-042.xml",
   "sha256": "06421d33de2ebab17e02be68eb7eeba4dce106c796d66bd7f99bfb214bbfc2d7"
  },
- "replay_version": "legaltime-replay-1",
+ "replay_version": "legaltime-replay-2",
  "states": [
   {
    "act_level_problems": [],
    "applied": [],
    "at": "2021-12-31",
    "future": [
-    "lov/2022-12-20-115#X:0.0",
-    "lov/2025-06-20-97#I:1.0",
-    "lov/2025-06-20-97#I:3.0",
-    "lov/2025-06-20-97#I:3.1",
-    "lov/2025-06-20-97#I:4.0",
-    "lov/2025-06-20-97#I:6.0",
-    "lov/2025-06-20-97#I:7.0",
-    "lov/2025-06-20-97#I:9.0"
+    "lov/2022-12-20-115#10:X:0.0",
+    "lov/2025-06-20-97#1:I:1.0",
+    "lov/2025-06-20-97#1:I:3.0",
+    "lov/2025-06-20-97#1:I:3.1",
+    "lov/2025-06-20-97#1:I:4.0",
+    "lov/2025-06-20-97#1:I:6.0",
+    "lov/2025-06-20-97#1:I:7.0",
+    "lov/2025-06-20-97#1:I:9.0"
    ],
    "pending": [],
    "provisions": [],
    "status": "not_yet_in_force",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [],
    "at": "2022-01-01",
    "future": [
-    "lov/2022-12-20-115#X:0.0",
-    "lov/2025-06-20-97#I:1.0",
-    "lov/2025-06-20-97#I:3.0",
-    "lov/2025-06-20-97#I:3.1",
-    "lov/2025-06-20-97#I:4.0",
-    "lov/2025-06-20-97#I:6.0",
-    "lov/2025-06-20-97#I:7.0",
-    "lov/2025-06-20-97#I:9.0"
+    "lov/2022-12-20-115#10:X:0.0",
+    "lov/2025-06-20-97#1:I:1.0",
+    "lov/2025-06-20-97#1:I:3.0",
+    "lov/2025-06-20-97#1:I:3.1",
+    "lov/2025-06-20-97#1:I:4.0",
+    "lov/2025-06-20-97#1:I:6.0",
+    "lov/2025-06-20-97#1:I:7.0",
+    "lov/2025-06-20-97#1:I:9.0"
    ],
    "pending": [],
    "provisions": [
@@ -599,19 +607,20 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2022-12-20-115#X:0.0",
-    "lov/2025-06-20-97#I:1.0",
-    "lov/2025-06-20-97#I:3.0",
-    "lov/2025-06-20-97#I:3.1",
-    "lov/2025-06-20-97#I:4.0",
-    "lov/2025-06-20-97#I:6.0",
-    "lov/2025-06-20-97#I:7.0",
-    "lov/2025-06-20-97#I:9.0"
+    "lov/2022-12-20-115#10:X:0.0",
+    "lov/2025-06-20-97#1:I:1.0",
+    "lov/2025-06-20-97#1:I:3.0",
+    "lov/2025-06-20-97#1:I:3.1",
+    "lov/2025-06-20-97#1:I:4.0",
+    "lov/2025-06-20-97#1:I:6.0",
+    "lov/2025-06-20-97#1:I:7.0",
+    "lov/2025-06-20-97#1:I:9.0"
    ],
    "at": "2025-07-01",
    "future": [],
@@ -635,9 +644,9 @@
     },
     {
      "applied": [
-      "lov/2022-12-20-115#X:0.0",
-      "lov/2025-06-20-97#I:1.0",
-      "lov/2025-06-20-97#I:3.0"
+      "lov/2022-12-20-115#10:X:0.0",
+      "lov/2025-06-20-97#1:I:1.0",
+      "lov/2025-06-20-97#1:I:3.0"
      ],
      "key": "§3",
      "ledd": 4,
@@ -719,8 +728,8 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:4.0",
-      "lov/2025-06-20-97#I:6.0"
+      "lov/2025-06-20-97#1:I:4.0",
+      "lov/2025-06-20-97#1:I:6.0"
      ],
      "key": "§13",
      "ledd": 5,
@@ -746,7 +755,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:7.0"
+      "lov/2025-06-20-97#1:I:7.0"
      ],
      "key": "§16",
      "ledd": 3,
@@ -756,7 +765,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:9.0"
+      "lov/2025-06-20-97#1:I:9.0"
      ],
      "key": "§17",
      "ledd": 1,
@@ -806,19 +815,20 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2022-12-20-115#X:0.0",
-    "lov/2025-06-20-97#I:1.0",
-    "lov/2025-06-20-97#I:3.0",
-    "lov/2025-06-20-97#I:3.1",
-    "lov/2025-06-20-97#I:4.0",
-    "lov/2025-06-20-97#I:6.0",
-    "lov/2025-06-20-97#I:7.0",
-    "lov/2025-06-20-97#I:9.0"
+    "lov/2022-12-20-115#10:X:0.0",
+    "lov/2025-06-20-97#1:I:1.0",
+    "lov/2025-06-20-97#1:I:3.0",
+    "lov/2025-06-20-97#1:I:3.1",
+    "lov/2025-06-20-97#1:I:4.0",
+    "lov/2025-06-20-97#1:I:6.0",
+    "lov/2025-06-20-97#1:I:7.0",
+    "lov/2025-06-20-97#1:I:9.0"
    ],
    "at": "2026-11-06",
    "future": [],
@@ -842,9 +852,9 @@
     },
     {
      "applied": [
-      "lov/2022-12-20-115#X:0.0",
-      "lov/2025-06-20-97#I:1.0",
-      "lov/2025-06-20-97#I:3.0"
+      "lov/2022-12-20-115#10:X:0.0",
+      "lov/2025-06-20-97#1:I:1.0",
+      "lov/2025-06-20-97#1:I:3.0"
      ],
      "key": "§3",
      "ledd": 4,
@@ -926,8 +936,8 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:4.0",
-      "lov/2025-06-20-97#I:6.0"
+      "lov/2025-06-20-97#1:I:4.0",
+      "lov/2025-06-20-97#1:I:6.0"
      ],
      "key": "§13",
      "ledd": 5,
@@ -953,7 +963,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:7.0"
+      "lov/2025-06-20-97#1:I:7.0"
      ],
      "key": "§16",
      "ledd": 3,
@@ -963,7 +973,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:9.0"
+      "lov/2025-06-20-97#1:I:9.0"
      ],
      "key": "§17",
      "ledd": 1,
@@ -1013,226 +1023,11 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   }
  ],
  "verification": [
-  {
-   "act": "lov/2021-05-21-42",
-   "at": "2021-12-31",
-   "counts": {
-    "only_in_oracle": 22
-   },
-   "notes_without_replay_event": [
-    "§13",
-    "§16",
-    "§17",
-    "§3"
-   ],
-   "oracle_member": "nl/nl-20210521-042.xml",
-   "oracle_sha256": "06421d33de2ebab17e02be68eb7eeba4dce106c796d66bd7f99bfb214bbfc2d7",
-   "replay_events_without_note": [],
-   "sections": [
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§1",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§2",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§3",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§4",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§5",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§6",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§7",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§8",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§9",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§10",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§11",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§12",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§13",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§14",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§15",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§16",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§17",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§18",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§19",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§20",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§21",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§22",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    }
-   ]
-  },
   {
    "act": "lov/2021-05-21-42",
    "at": "2022-01-01",
@@ -1485,9 +1280,9 @@
     },
     {
      "applied": [
-      "lov/2022-12-20-115#X:0.0",
-      "lov/2025-06-20-97#I:1.0",
-      "lov/2025-06-20-97#I:3.0"
+      "lov/2022-12-20-115#10:X:0.0",
+      "lov/2025-06-20-97#1:I:1.0",
+      "lov/2025-06-20-97#1:I:3.0"
      ],
      "detail": "",
      "key": "§3",
@@ -1579,8 +1374,8 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:4.0",
-      "lov/2025-06-20-97#I:6.0"
+      "lov/2025-06-20-97#1:I:4.0",
+      "lov/2025-06-20-97#1:I:6.0"
      ],
      "detail": "",
      "key": "§13",
@@ -1609,7 +1404,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:7.0"
+      "lov/2025-06-20-97#1:I:7.0"
      ],
      "detail": "",
      "key": "§16",
@@ -1620,7 +1415,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:9.0"
+      "lov/2025-06-20-97#1:I:9.0"
      ],
      "detail": "",
      "key": "§17",
@@ -1709,9 +1504,9 @@
     },
     {
      "applied": [
-      "lov/2022-12-20-115#X:0.0",
-      "lov/2025-06-20-97#I:1.0",
-      "lov/2025-06-20-97#I:3.0"
+      "lov/2022-12-20-115#10:X:0.0",
+      "lov/2025-06-20-97#1:I:1.0",
+      "lov/2025-06-20-97#1:I:3.0"
      ],
      "detail": "",
      "key": "§3",
@@ -1803,8 +1598,8 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:4.0",
-      "lov/2025-06-20-97#I:6.0"
+      "lov/2025-06-20-97#1:I:4.0",
+      "lov/2025-06-20-97#1:I:6.0"
      ],
      "detail": "",
      "key": "§13",
@@ -1833,7 +1628,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:7.0"
+      "lov/2025-06-20-97#1:I:7.0"
      ],
      "detail": "",
      "key": "§16",
@@ -1844,7 +1639,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-97#I:9.0"
+      "lov/2025-06-20-97#1:I:9.0"
      ],
      "detail": "",
      "key": "§17",

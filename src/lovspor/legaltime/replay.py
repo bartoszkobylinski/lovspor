@@ -18,12 +18,17 @@ from lxml import etree
 from lovspor.legaltime.commencement import Timing
 from lovspor.legaltime.document import Document, Frozen, Ledd, Provision, element_text
 from lovspor.legaltime.instructions import Operation
-from lovspor.legaltime.text import section_sort_key, split_sentences
+from lovspor.legaltime.text import ORDINAL_ALT, ordinal, section_sort_key, split_sentences
 from lovspor.parsing.xml_normalizer import safe_parser
 
 ProvisionStatus = Literal["replayed", "unresolved"]
 StateStatus = Literal["replayed", "not_yet_in_force", "unresolved_baseline"]
-_SECTION_REF = re.compile(r"§\s*(\d+(?:-\d+)?)\s*([a-zæøå](?![a-zæøå]))?")
+_SECTION_REF = re.compile(r"§\s*(\d+(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
+_LEDD_REF = re.compile(
+    rf"\b((?:{ORDINAL_ALT})(?:\s*,\s*(?:{ORDINAL_ALT}))*(?:\s+(?:og|til)\s+(?:{ORDINAL_ALT}))?)\s+ledd\b",
+    re.I,
+)
+_ORDINAL_WORD = re.compile(ORDINAL_ALT, re.I)
 _LIST_MARKUP = re.compile(r"<(?:ul|ol)\b")
 
 
@@ -58,6 +63,7 @@ class ReplayState(Frozen):
     pending: tuple[str, ...]
     unresolved: tuple[tuple[str, str], ...]
     act_level_problems: tuple[str, ...]
+    withheld: tuple[str, ...] = ()
 
 
 class _Provision:
@@ -117,6 +123,8 @@ class _Working:
         target = self._target(op.address.section)
         if target is None or op.new_provision is None:
             return "target provision missing or no replacement text"
+        if op.new_provision.key != op.address.section:
+            return f"replacement text is headed {op.new_provision.key}, not {op.address.section}"
         target.heading, target.ledd, target.repealed = (
             op.new_provision.heading,
             list(op.new_provision.ledd),
@@ -128,6 +136,8 @@ class _Working:
         key = op.address.section
         if key is None or op.new_provision is None or key in self.map:
             return "new provision without key or text, or key already present"
+        if op.new_provision.key != key:
+            return f"new text is headed {op.new_provision.key}, not {key}"
         self.map[key] = _Provision(op.new_provision)
         self.order.insert(_insert_position(self.order, key), key)
         return None
@@ -172,7 +182,10 @@ class _Working:
         if isinstance(found, str):
             return found
         target, index = found
-        del target.ledd[index - 1]
+        end = op.address.ledd_end or index
+        if not index <= end <= len(target.ledd):
+            return f"ledd range {index}-{end} does not exist"
+        del target.ledd[index - 1 : end]
         return None
 
     def apply_move_ledd(self, op: Operation) -> str | None:
@@ -181,8 +194,11 @@ class _Working:
         if isinstance(found, str) or destination is None:
             return "source ledd or destination provision missing"
         target, index = found
+        place = op.address.destination_ledd
+        if place is None or not 1 <= place <= len(destination.ledd) + 1:
+            return f"destination ledd {place} does not fit {len(destination.ledd)} existing"
         moved = target.ledd.pop(index - 1)
-        destination.ledd.append(moved)
+        destination.ledd.insert(place - 1, moved)
         return None
 
     def _sentences(self, op: Operation) -> tuple[_Provision, int, list[str]] | str:
@@ -238,7 +254,8 @@ class _Working:
             return "bokstav target or replacement text missing"
         target, index = found
         letter = re.escape(op.address.bokstav)
-        head = rf'(<li[^>]*data-name="{letter}[.)]"[^>]*>.*?<article class="legalP"[^>]*>)'
+        item = rf'<li[^>]*data-name="{letter}[.)]"[^>]*>(?:(?!<li)[\s\S])*?'
+        head = rf'({item}<article class="legalP"[^>]*>)'
         pattern = re.compile(head + r"(.*?)(</article>)", re.S)
         xml, count = pattern.subn(
             lambda m: m.group(1) + op.ledd[0].xml + m.group(3), target.ledd[index - 1].xml
@@ -249,11 +266,15 @@ class _Working:
         return None
 
     def apply_substitute_term(self, op: Operation) -> str | None:
-        keys = [f"§{n}{letter or ''}" for n, letter in _SECTION_REF.findall(op.locations or "")]
-        missing = [k for k in keys if k not in self.map]
-        if not keys or missing or op.term_old is None or op.term_new is None:
+        places = _locations(op.locations or "")
+        missing = [k for k, _ in places if k not in self.map]
+        if not places or missing or op.term_old is None or op.term_new is None:
             return f"substitution locations unresolved: {missing or 'none listed'}"
-        untouched = [k for k in keys if not _substitute(self.map[k], op.term_old, op.term_new)]
+        untouched = [
+            k
+            for k, ledd in places
+            if not _substitute(self.map[k], ledd, (op.term_old, op.term_new))
+        ]
         return f"term not found in {untouched}" if untouched else None
 
     def apply_renumber(self, op: Operation) -> str | None:
@@ -263,15 +284,53 @@ class _Working:
         return f"unsupported instruction: {op.instruction[:80]}"
 
 
-def _substitute(provision: _Provision, old: str, new: str) -> bool:
-    """Replace ``old`` (and its capitalised form) in every ledd; True if anything changed."""
+def _locations(text: str) -> list[tuple[str, frozenset[int]]]:
+    """``§ 14 andre ledd tredje punktum og sjette ledd, § 15`` → [(§14, {2, 6}), (§15, {})]."""
+    places: list[tuple[str, frozenset[int]]] = []
+    chunks = list(_SECTION_REF.finditer(text))
+    for index, match in enumerate(chunks):
+        tail = text[match.end() : chunks[index + 1].start() if index + 1 < len(chunks) else None]
+        ledd = frozenset(n for phrase in _LEDD_REF.findall(tail) for n in _ledd_numbers(phrase))
+        places.append((f"§{match.group(1)}{match.group(2) or ''}", ledd))
+    return places
+
+
+def _ledd_numbers(phrase: str) -> list[int]:
+    """``tredje og fjerde`` → [3, 4]; ``andre til femte`` → [2, 3, 4, 5]."""
+    numbers = [n for word in _ORDINAL_WORD.findall(phrase) if (n := ordinal(word)) is not None]
+    bounds = 2  # "andre til femte" names the two ends of a range
+    if " til " in phrase and len(numbers) == bounds:
+        return list(range(numbers[0], numbers[1] + 1))
+    return numbers
+
+
+def _word_pattern(word: str) -> re.Pattern[str]:
+    return re.compile(rf"(?<![\wæøåÆØÅ]){re.escape(word)}(?![\wæøåÆØÅ])")
+
+
+def _replace_words(value: str, old: str, new: str) -> str:
+    """Whole-word replacement of ``old`` and its capitalised form, outside markup tags."""
     pairs = ((old, new), (old[:1].upper() + old[1:], new[:1].upper() + new[1:]))
-    changed = False
-    for index, ledd in enumerate(provision.ledd):
-        text, xml = ledd.text, ledd.xml
+    pieces = re.split(r"(<[^>]*>)", value)
+    for index, piece in enumerate(pieces):
+        if piece.startswith("<"):
+            continue
+        replaced = piece
         for before, after in pairs:
-            text, xml = text.replace(before, after), xml.replace(before, after)
-        if text != ledd.text:
+            replaced = _word_pattern(before).sub(after, replaced)
+        pieces[index] = replaced
+    return "".join(pieces)
+
+
+def _substitute(provision: _Provision, ledd: frozenset[int], terms: tuple[str, str]) -> bool:
+    """Replace within the listed ledd (every ledd when none is listed); True if changed."""
+    old, new = terms
+    changed = False
+    for index, current in enumerate(provision.ledd):
+        if ledd and index + 1 not in ledd:
+            continue
+        text, xml = _replace_words(current.text, old, new), _replace_words(current.xml, old, new)
+        if text != current.text:
             provision.ledd[index], changed = Ledd(xml=xml, text=text), True
     return changed
 
@@ -336,6 +395,7 @@ class _Run:
         self.pending: list[str] = []
         self.unresolved: list[tuple[str, str]] = []
         self.act_problems: list[str] = []
+        self.withheld: list[str] = []
 
     def take(self, event: Event, verdict: str) -> None:
         op = event.operation
@@ -366,7 +426,9 @@ def replay(
     run = _Run(working)
     for event in sorted(events, key=_order_key):
         verdict = _classify(event, at)
-        if verdict != "apply" or status == "replayed":
+        if verdict == "apply" and status != "replayed":
+            run.withheld.append(event.operation.id)  # dated, but the act itself is not in force
+        else:
             run.take(event, verdict)
     provisions = (
         tuple(working.map[k].freeze(k) for k in working.order) if status == "replayed" else ()
@@ -375,4 +437,5 @@ def replay(
         act=baseline.header.refid, at=at, status=status, provisions=provisions,
         applied=tuple(run.applied), future=tuple(run.future), pending=tuple(run.pending),
         unresolved=tuple(run.unresolved), act_level_problems=tuple(run.act_problems),
+        withheld=tuple(run.withheld),
     )  # fmt: skip

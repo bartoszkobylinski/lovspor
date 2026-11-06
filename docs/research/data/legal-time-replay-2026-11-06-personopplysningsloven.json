@@ -5,13 +5,15 @@
    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
    "horizon": "2026-06-23T08:35:00",
    "members": 38182,
-   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0",
+   "skipped_members": []
   },
   {
    "archive": "lovtidend-avd1-2026.tar.bz2",
    "horizon": "2026-11-05T14:50:00",
    "members": 1204,
-   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2",
+   "skipped_members": []
   }
  ],
  "baseline_timing": {
@@ -20,7 +22,7 @@
   "proofs": [
    {
     "member": "lti/2018/sf-20180717-1195.xml",
-    "quote": "Meddelelse om ikrafttredelse av lov 15. juni 2018 nr. 38 om behandling av personopplysninger (personopplysningsloven)",
+    "quote_sha256": "e37ba90ee0d0a4e408b8d8c6cc7ddfb4a683badd500d655dca73f26d973c1802",
     "refid": "forskrift/2018-07-17-1195",
     "sha256": "3eb251fd20a1fda61d9241e3971bb24e3a84d465bdb59502e15e5d9477b65fd7"
    }
@@ -39,7 +41,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2018-12-20-116#I:0.0",
+    "id": "lov/2018-12-20-116#1:I:0.0",
     "instruction": "ny § 12 a lyde:",
     "kind": "insert_section",
     "part": "I",
@@ -55,7 +57,7 @@
     "proofs": [
      {
       "member": "lti/2018/sf-20181220-2093.xml",
-      "quote": "Ikraftsetting av lov 20. desember 2018 nr. 116 om endringer i personopplysningsloven (bekjempelse av arbeidslivskriminalitet)",
+      "quote_sha256": "02344cbba4d7053ffd262cf99ffb47cd5fa2fcfa9e26ffcf53850ecfc61a1795",
       "refid": "forskrift/2018-12-20-2093",
       "sha256": "d8a0ce4bd1e3e21e4997766d24b14f3363af6c26f069c5ae855e7e47535577af"
      }
@@ -74,7 +76,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2021-06-18-124#II:0.0",
+    "id": "lov/2021-06-18-124#2:II:0.0",
     "instruction": "§ 3 lyde:",
     "kind": "replace_section",
     "part": "II",
@@ -90,7 +92,7 @@
     "proofs": [
      {
       "member": "lti/2021/sf-20210618-1967.xml",
-      "quote": "Delt ikraftsetting av lov 18. juni 2021 nr. 124 om endringer i personopplysningsloven og offentleglova (ytrings- og informasjonsfrihet mv.): del II",
+      "quote_sha256": "a8b0d20060ede70a106214df042e8f26eaa1fde3202ead1469f94eebce7482b9",
       "refid": "forskrift/2021-06-18-1967",
       "sha256": "757e13eb1bb5ea73d122385fe7e25fecc6c96621e49dbdfcab052b0065e13a6a"
      }
@@ -121,7 +123,8 @@
    "refid": "lov/2018-06-15-38",
    "role": "enacting",
    "sha256": "069f4e1d1153ebe65c4e9f075f2a12193c012df9e880537648400e7d338633ba",
-   "title": "Lov om behandling av personopplysninger (personopplysningsloven)"
+   "title": "Lov om behandling av personopplysninger (personopplysningsloven)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "Kongen bestemmer",
@@ -130,7 +133,8 @@
    "refid": "lov/2018-12-20-116",
    "role": "amending",
    "sha256": "b06dd58dc4f39d355a0b26cf45e0ac0ef39e5361fc22d046480e190774704571",
-   "title": "Lov om endringer i personopplysningsloven (bekjempelse av arbeidslivskriminalitet)"
+   "title": "Lov om endringer i personopplysningsloven (bekjempelse av arbeidslivskriminalitet)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2021-06-18, Kongen bestemmer",
@@ -139,7 +143,8 @@
    "refid": "lov/2021-06-18-124",
    "role": "amending",
    "sha256": "036fbacd01aaef0ef4ecf512c0fd0768f40e5569df638342aba184559d8b856a",
-   "title": "Lov om endringer i personopplysningsloven og offentleglova (ytrings- og informasjonsfrihet mv.)"
+   "title": "Lov om endringer i personopplysningsloven og offentleglova (ytrings- og informasjonsfrihet mv.)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "Når personvernforordningen trer i kraft",
@@ -148,7 +153,8 @@
    "refid": "forskrift/2018-06-15-875",
    "role": "decision",
    "sha256": "130c258ad805decefae056913d0ead84aaf17e460dc2fdc1a83d3b511012a032",
-   "title": "Ikraftsetting av lov 15. juni 2018 nr. 38 om behandling av personopplysninger (personopplysningsloven)"
+   "title": "Ikraftsetting av lov 15. juni 2018 nr. 38 om behandling av personopplysninger (personopplysningsloven)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2018-07-20",
@@ -157,7 +163,8 @@
    "refid": "forskrift/2018-07-17-1195",
    "role": "decision",
    "sha256": "3eb251fd20a1fda61d9241e3971bb24e3a84d465bdb59502e15e5d9477b65fd7",
-   "title": "Meddelelse om ikrafttredelse av lov 15. juni 2018 nr. 38 om behandling av personopplysninger (personopplysningsloven)"
+   "title": "Meddelelse om ikrafttredelse av lov 15. juni 2018 nr. 38 om behandling av personopplysninger (personopplysningsloven)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2018-12-20",
@@ -166,7 +173,8 @@
    "refid": "forskrift/2018-12-20-2093",
    "role": "decision",
    "sha256": "d8a0ce4bd1e3e21e4997766d24b14f3363af6c26f069c5ae855e7e47535577af",
-   "title": "Ikraftsetting av lov 20. desember 2018 nr. 116 om endringer i personopplysningsloven (bekjempelse av arbeidslivskriminalitet)"
+   "title": "Ikraftsetting av lov 20. desember 2018 nr. 116 om endringer i personopplysningsloven (bekjempelse av arbeidslivskriminalitet)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2021-07-01, 2022-01-01",
@@ -175,22 +183,23 @@
    "refid": "forskrift/2021-06-18-1967",
    "role": "decision",
    "sha256": "757e13eb1bb5ea73d122385fe7e25fecc6c96621e49dbdfcab052b0065e13a6a",
-   "title": "Delt ikraftsetting av lov 18. juni 2021 nr. 124 om endringer i personopplysningsloven og offentleglova (ytrings- og informasjonsfrihet mv.)"
+   "title": "Delt ikraftsetting av lov 18. juni 2021 nr. 124 om endringer i personopplysningsloven og offentleglova (ytrings- og informasjonsfrihet mv.)",
+   "unattributed_operations": 0
   }
  ],
  "oracle": {
   "member": "nl/nl-20180615-038.xml",
   "sha256": "dadc8a734fa03f44894648bf13de35d273fe0022bb9f6b9be8f1164a6ba611bb"
  },
- "replay_version": "legaltime-replay-1",
+ "replay_version": "legaltime-replay-2",
  "states": [
   {
    "act_level_problems": [],
    "applied": [],
    "at": "2018-07-20",
    "future": [
-    "lov/2018-12-20-116#I:0.0",
-    "lov/2021-06-18-124#II:0.0"
+    "lov/2018-12-20-116#1:I:0.0",
+    "lov/2021-06-18-124#2:II:0.0"
    ],
    "pending": [],
    "provisions": [
@@ -468,16 +477,17 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2018-12-20-116#I:0.0"
+    "lov/2018-12-20-116#1:I:0.0"
    ],
    "at": "2021-07-01",
    "future": [
-    "lov/2021-06-18-124#II:0.0"
+    "lov/2021-06-18-124#2:II:0.0"
    ],
    "pending": [],
    "provisions": [
@@ -579,7 +589,7 @@
     },
     {
      "applied": [
-      "lov/2018-12-20-116#I:0.0"
+      "lov/2018-12-20-116#1:I:0.0"
      ],
      "key": "§12a",
      "ledd": 2,
@@ -765,13 +775,14 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2018-12-20-116#I:0.0",
-    "lov/2021-06-18-124#II:0.0"
+    "lov/2018-12-20-116#1:I:0.0",
+    "lov/2021-06-18-124#2:II:0.0"
    ],
    "at": "2022-01-01",
    "future": [],
@@ -795,7 +806,7 @@
     },
     {
      "applied": [
-      "lov/2021-06-18-124#II:0.0"
+      "lov/2021-06-18-124#2:II:0.0"
      ],
      "key": "§3",
      "ledd": 3,
@@ -877,7 +888,7 @@
     },
     {
      "applied": [
-      "lov/2018-12-20-116#I:0.0"
+      "lov/2018-12-20-116#1:I:0.0"
      ],
      "key": "§12a",
      "ledd": 2,
@@ -1063,13 +1074,14 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2018-12-20-116#I:0.0",
-    "lov/2021-06-18-124#II:0.0"
+    "lov/2018-12-20-116#1:I:0.0",
+    "lov/2021-06-18-124#2:II:0.0"
    ],
    "at": "2026-11-06",
    "future": [],
@@ -1093,7 +1105,7 @@
     },
     {
      "applied": [
-      "lov/2021-06-18-124#II:0.0"
+      "lov/2021-06-18-124#2:II:0.0"
      ],
      "key": "§3",
      "ledd": 3,
@@ -1175,7 +1187,7 @@
     },
     {
      "applied": [
-      "lov/2018-12-20-116#I:0.0"
+      "lov/2018-12-20-116#1:I:0.0"
      ],
      "key": "§12a",
      "ledd": 2,
@@ -1361,7 +1373,8 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   }
  ],
  "verification": [
@@ -2719,7 +2732,7 @@
     },
     {
      "applied": [
-      "lov/2018-12-20-116#I:0.0"
+      "lov/2018-12-20-116#1:I:0.0"
      ],
      "detail": "",
      "key": "§12a",
@@ -3853,7 +3866,7 @@
     },
     {
      "applied": [
-      "lov/2021-06-18-124#II:0.0"
+      "lov/2021-06-18-124#2:II:0.0"
      ],
      "detail": "",
      "key": "§3",
@@ -3945,7 +3958,7 @@
     },
     {
      "applied": [
-      "lov/2018-12-20-116#I:0.0"
+      "lov/2018-12-20-116#1:I:0.0"
      ],
      "detail": "",
      "key": "§12a",
@@ -5079,7 +5092,7 @@
     },
     {
      "applied": [
-      "lov/2021-06-18-124#II:0.0"
+      "lov/2021-06-18-124#2:II:0.0"
      ],
      "detail": "",
      "key": "§3",
@@ -5171,7 +5184,7 @@
     },
     {
      "applied": [
-      "lov/2018-12-20-116#I:0.0"
+      "lov/2018-12-20-116#1:I:0.0"
      ],
      "detail": "",
      "key": "§12a",

@@ -53,6 +53,8 @@ def test_replay_command_writes_the_report_to_stdout_and_the_summary_to_stderr(
     assert report["act"] == "lov/2019-06-14-99"
     assert [s["at"] for s in report["states"]] == ["2021-01-01", "2022-01-01"]
     assert report["states"][0]["status"] == "replayed"
+    assert [v["at"] for v in report["verification"]] == ["2021-01-01", "2022-01-01"]
+    assert report["archives"][0]["skipped_members"] == []
     assert report["verification"][1]["counts"] == {
         "exact_normalized": 2,
         "exact_raw": 2,
@@ -184,3 +186,34 @@ def test_fetch_command_reports_network_refusals(tmp_path: Path, httpx_mock: HTTP
     result = runner.invoke(app, ["ops", "legal-time", "fetch", "--dest", str(tmp_path / "c")])
     assert result.exit_code == 1
     assert "fetch refused" in result.output
+
+
+def test_report_does_not_depend_on_archive_argument_order(
+    tmp_path: Path, archives: tuple[Path, Path]
+) -> None:
+    lovtidend, _ = archives
+    second = make_archive(
+        tmp_path / "lovtidend-avd1-2026.tar.bz2",
+        {"lti/2026/sf-20260101-0001.xml": "resolution-partial.xml"},
+    )
+    one = ReplayRequest(
+        act="lov/2019-06-14-99",
+        archives=(lovtidend, second),
+        dates=(date(2023, 1, 1),),
+        oracle=None,
+    )
+    other = one.model_copy(update={"archives": (second, lovtidend)})
+    assert replay_impl(one)[0] == replay_impl(other)[0]
+
+
+def test_no_verification_for_a_state_before_commencement(archives: tuple[Path, Path]) -> None:
+    lovtidend, oracle = archives
+    request = ReplayRequest(
+        act="lov/2019-06-14-99",
+        archives=(lovtidend,),
+        dates=(date(2020, 1, 1), date(2023, 1, 1)),
+        oracle=oracle,
+    )
+    report = json.loads(replay_impl(request)[0])
+    assert [s["status"] for s in report["states"]] == ["not_yet_in_force", "replayed"]
+    assert [v["at"] for v in report["verification"]] == ["2023-01-01"]

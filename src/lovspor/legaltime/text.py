@@ -27,7 +27,7 @@ DATE = re.compile(rf"\b(\d{{1,2}})\.\s*({_MONTH_ALT})\s+(\d{{4}})\b", re.I)
 ACT_CITATION = re.compile(
     rf"\blov\s+(\d{{1,2}})\.\s*({_MONTH_ALT})\s+(\d{{4}})(?:\s+nr\.\s*(\d+))?", re.I
 )
-_SECTION_LABEL = re.compile(r"§\s*(\d+(?:-\d+)?)\s*([a-zæøå])?\b")
+_SECTION_LABEL = re.compile(r"§\s*(\d+(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
 _ABBREVIATIONS = frozenset(
     {
         "jf",

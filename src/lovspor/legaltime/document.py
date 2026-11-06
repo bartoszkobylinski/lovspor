@@ -11,6 +11,7 @@ import re
 from datetime import datetime
 from hashlib import sha256
 from typing import Literal
+from xml.sax.saxutils import escape
 
 from lxml import etree
 from pydantic import BaseModel, ConfigDict
@@ -97,7 +98,7 @@ def element_text(element: etree._Element) -> str:
 
 def inner_xml(element: etree._Element) -> str:
     children = "".join(etree.tostring(child, encoding="unicode") for child in element)
-    return (element.text or "") + children
+    return escape(element.text or "") + children
 
 
 def _header_values(root: etree._Element, name: str) -> list[str]:

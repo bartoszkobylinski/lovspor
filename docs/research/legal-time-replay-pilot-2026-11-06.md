@@ -39,7 +39,11 @@ gitignored `data/cache/legaltime/`:
 | `gjeldende-lover.tar.bz2` (oracle only, lastModified 2026-11-04) | `380632d48c82e48bb6fa37c6c6e6f13d55c77defa5f83400c5120ca6989593e9` | 753 acts |
 
 Every evidence file repeats these pins under `inputs`, every member it used under `members` (path,
-sha256), and the replay parser version `legaltime-replay-1`.
+sha256, and for an amending law the count of operations it states without a recognisable act),
+every member the index could not read under `archives[].skipped_members` (none in these archives),
+and the replay parser version `legaltime-replay-2`. A timing's proof names the member and the
+sha256 of the sentence it was read from; the sentence stays in the archive. Instruction addresses
+("§ 89 skal lyde:") are carried verbatim; provision text never is.
 
 ## 3. What the archives hold (measured)
 
@@ -132,6 +136,24 @@ classed and counted. It does not certify any intermediate state. Those are cover
   are re-dated. Open question in ADR-0020.
 - **Reach.** 317 of 753 current acts have no enacting announcement in the archives. For them the
   outcome is `no_baseline`; the replay never approximates from the current text.
+
+## 6a. Independent review before the pipeline verdict
+
+A reviewer with no part in the build read the package and reported 10 red and 24 amber findings.
+The substantive ones were fail-open paths and are fixed in the same PR, each with a test: a ledd
+range repeal deleted one ledd; a moved ledd ignored its destination ordinal; a global term
+substitution ignored the ledd qualifier of a location and replaced inside longer words and inside
+markup; a replacement text headed with another section was applied; a default commencement clause
+with a reservation ("… unntatt § 2 a") dated everything; a dated sentence the grammar did not know
+("Loven får virkning fra …") was treated as prose and the header date used; two default clauses
+overwrote each other; an unparseable archive member vanished from the index; two enacting members
+for one act were chosen between; "I lov … oppheves." was dropped; a commencement sentence among
+instructions became an unsupported operation; dated events before the act's own commencement
+fell in no bucket (now `withheld`); the report order depended on argument order; the preposition
+"i" counted as a section letter; ledd text with `&` or `<` produced ill-formed markup; a
+non-adjacent "første og tredje ledd" was applied to the first ledd only (now refused). Two findings
+were left as documented limits: `editorial_omission` cannot verify the omitted tail against anything,
+and a later partial decision narrowing an earlier full one is not detected (ADR-0020 open question).
 
 ## 7. Reproducibility
 

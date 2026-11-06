@@ -10,12 +10,13 @@ derived: the operation stays ``pending`` (delegated, no decision found) or
 """
 
 import re
-from datetime import date
+from datetime import date, datetime
+from hashlib import sha256
 from typing import Literal
 
 from lovspor.legaltime.document import Document, Frozen
 from lovspor.legaltime.instructions import Operation
-from lovspor.legaltime.text import act_refid, parse_date, section_key, split_sentences
+from lovspor.legaltime.text import ACT_CITATION, act_refid, parse_date, section_key, split_sentences
 
 TimingStatus = Literal["dated", "pending", "unresolved"]
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -35,12 +36,13 @@ _DEFAULT_CLAUSE = re.compile(
     rf"|(?:gjelder\s+loven|gjeld\s+lova)\s+(?:fra|frå)|trer\s+loven\s+i\s+kraft)\b",
     re.I,
 )
-_COMMENCEMENT_PHRASE = re.compile(rf"{_VERB}|\bi\s+kraft\b", re.I)
+_COMMENCEMENT_PHRASE = re.compile(rf"{_VERB}|\bi\s+kraft\b|\bvirkning\s+fr[aå]\b", re.I)
+_RESERVATION = re.compile(r"\b(?:unntatt|bortsett|likevel|med\s+unntak|unnateke|unnatatt)\b", re.I)
 _EXCEPTION_NEW_SECTION = re.compile(
     r"^Ny\s+(?P<sec>§\s*\d+(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?)(?:\s+i\s+\S+)?\s+trer\s+likevel\s+i\s+kraft\b",
     re.I,
 )
-_SEC = r"§\s*\d+(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?"
+_SEC = r"§\s*\d+(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
 _DELT_SENTENCE = re.compile(
     rf"^(?:Endringsloven|Endringslova)\s+del\s+(?P<part>[IVXLC]+)"
     rf"(?:,\s*(?:ny\s+(?P<sec>{_SEC})\s+i\s+lov|(?:endringene|endringane)\s+i\s+lov)(?P<rest>[^,]*))?"
@@ -66,10 +68,16 @@ _INFORMATIONAL = re.compile(
 
 
 class Proof(Frozen):
+    """Where a timing was read: the member, and the sha256 of the sentence it came from.
+
+    The sentence itself stays in the archive; the report carries its digest, so the
+    proof is checkable against the member without moving announced text into Git.
+    """
+
     refid: str
     member: str
     sha256: str
-    quote: str
+    quote_sha256: str
 
 
 class Timing(Frozen):
@@ -83,8 +91,9 @@ class Timing(Frozen):
 
 def _proof(document: Document, quote: str) -> Proof:
     return Proof(
-        refid=document.header.refid, member=document.member, sha256=document.sha256, quote=quote
-    )
+        refid=document.header.refid, member=document.member, sha256=document.sha256,
+        quote_sha256=sha256(quote.encode("utf-8")).hexdigest(),
+    )  # fmt: skip
 
 
 def _known_from(document: Document) -> date | None:
@@ -127,20 +136,27 @@ def _sentences(document: Document, clauses: tuple[str, ...]) -> list[str]:
     return [s for clause in clauses for s in split_sentences(clause)]
 
 
-def _default_timing(document: Document, sentence: str) -> Timing | None:
-    if _DEFAULT_CLAUSE.match(sentence) is None:
-        return None
-    if _STRAKS.search(sentence):
-        first = re.search(r"\d{4}-\d{2}-\d{2}", document.header.date_in_force)
-        if first is None:
-            return _unresolved(document, "straks without a dated header", sentence)
-        return _dated(document, date.fromisoformat(first.group(0)), sentence)
+def _header_date(document: Document) -> date | None:
+    first = re.search(r"\d{4}-\d{2}-\d{2}", document.header.date_in_force)
+    return date.fromisoformat(first.group(0)) if first else None
+
+
+def _dated_or_pending(document: Document, sentence: str) -> Timing:
+    """A default clause's own date: ``straks`` means the header's date, else the date it names."""
     if _PENDING_WORDS.search(sentence):
         return _pending(document, sentence)
-    when = parse_date(sentence)
+    when = _header_date(document) if _STRAKS.search(sentence) else parse_date(sentence)
     if when is None:
         return _unresolved(document, "commencement clause outside the grammar", sentence)
     return _dated(document, when, sentence)
+
+
+def _default_timing(document: Document, sentence: str) -> Timing | None:
+    if _DEFAULT_CLAUSE.match(sentence) is None:
+        return None
+    if _RESERVATION.search(sentence):
+        return _unresolved(document, "default clause carries a reservation", sentence)
+    return _dated_or_pending(document, sentence)
 
 
 def _exception_scope(sentence: str) -> tuple[str, str] | None:
@@ -156,46 +172,60 @@ def _exception_scope(sentence: str) -> tuple[str, str] | None:
 
 
 def _informational(sentence: str) -> bool:
-    """Transitional or conditional prose that states no commencement of its own."""
-    return bool(_INFORMATIONAL.match(sentence)) or _COMMENCEMENT_PHRASE.search(sentence) is None
+    """Transitional or conditional prose that states no commencement of its own.
+
+    A sentence that names a date but no commencement phrase is not informational:
+    it is a commencement statement the grammar does not know, and must refuse.
+    """
+    if _INFORMATIONAL.match(sentence):
+        return True
+    without_citations = ACT_CITATION.sub("", sentence)
+    return _COMMENCEMENT_PHRASE.search(sentence) is None and parse_date(without_citations) is None
 
 
 def _exception_timing(document: Document, sentence: str) -> Timing:
     if _PENDING_WORDS.search(sentence):
         return _pending(document, sentence)
-    if _STRAKS.search(sentence):
-        first = re.search(r"\d{4}-\d{2}-\d{2}", document.header.date_in_force)
-        if first is not None:
-            return _dated(document, date.fromisoformat(first.group(0)), sentence)
+    if _STRAKS.search(sentence) and (header := _header_date(document)) is not None:
+        return _dated(document, header, sentence)
     when = parse_date(sentence)
     if when is not None:
         return _dated(document, when, sentence)
     return _unresolved(document, "exception outside the grammar", sentence)
 
 
+class _ClauseReading:
+    def __init__(self) -> None:
+        self.default: Timing | None = None
+        self.exceptions: dict[tuple[str, str], Timing] = {}
+        self.failure: Timing | None = None
+
+    def read(self, document: Document, sentence: str) -> None:
+        found = _default_timing(document, sentence)
+        if found is not None and self.default is not None:
+            self.failure = _unresolved(document, "two default commencement clauses", sentence)
+        elif found is not None:
+            self.default = found
+        elif not _informational(sentence):
+            scope = _exception_scope(sentence)
+            if scope is None:
+                self.failure = _unresolved(
+                    document, "commencement sentence outside the grammar", sentence
+                )
+            else:
+                self.exceptions[scope] = _exception_timing(document, sentence)
+
+
 def clause_timings(
     document: Document, clauses: tuple[str, ...], operations: tuple[Operation, ...]
 ) -> dict[str, Timing]:
     """Per-operation timing from the law's own clause; header timing when there is none."""
-    base = header_timing(document)
-    default: Timing | None = None
-    exceptions: dict[tuple[str, str], Timing] = {}
-    failure: Timing | None = None
+    reading = _ClauseReading()
     for sentence in _sentences(document, clauses):
-        found = _default_timing(document, sentence)
-        if found is not None:
-            default = found
-        elif not _informational(sentence):
-            scope = _exception_scope(sentence)
-            if scope is None:
-                failure = _unresolved(
-                    document, "commencement sentence outside the grammar", sentence
-                )
-            else:
-                exceptions[scope] = _exception_timing(document, sentence)
-    if failure is not None:
-        return dict.fromkeys((op.id for op in operations), failure)
-    return _assign(operations, default or base, exceptions)
+        reading.read(document, sentence)
+    if reading.failure is not None:
+        return dict.fromkeys((op.id for op in operations), reading.failure)
+    return _assign(operations, reading.default or header_timing(document), reading.exceptions)
 
 
 def _scoped(operation: Operation, exceptions: dict[tuple[str, str], Timing]) -> Timing | None:
@@ -265,7 +295,8 @@ def _apply_partial(
         if scopes is None:
             timings[op.id] = _unresolved(decision, "partial decision outside the grammar", title)
             continue
-        for scope in scopes:
+        # A whole-part scope first, a section-specific scope last: the specific one wins.
+        for scope in sorted(scopes, key=lambda item: item[1] is not None):
             if _covered(op, scope):
                 timings[op.id] = _dated(decision, scope[2], f"{title}: del {scope[0]}")
 
@@ -291,7 +322,7 @@ def resolve_timings(
     """Every operation's timing from the law, its clause, and the decisions citing it."""
     timings = clause_timings(law, clauses, operations)
     for decision in sorted(
-        decisions, key=lambda d: (d.header.published_at or date.min.isoformat(), d.member)
+        decisions, key=lambda d: (d.header.published_at or datetime.min, d.member)
     ):
         if is_decision_for(decision, law.header.refid):
             _apply_decision(decision, operations, timings)

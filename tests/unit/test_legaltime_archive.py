@@ -136,3 +136,9 @@ def test_pins_and_json_are_deterministic(archive: Path) -> None:
         }
     ]
     assert dump_json({"b": 1, "a": [2]}) == '{\n "a": [\n  2\n ],\n "b": 1\n}'
+
+
+def test_two_enacting_members_for_one_act_are_refused(tmp_path: Path, archive: Path) -> None:
+    twin = make_archive(tmp_path / "twin.tar.bz2", {"lti/2019/nl-20190614-099.xml": "enacting.xml"})
+    with pytest.raises(LegalTimeInputError, match="several enacting members"):
+        collect("lov/2019-06-14-99", [archive, twin])

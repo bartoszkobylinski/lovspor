@@ -1,6 +1,7 @@
 """Commencement: dates only from the header, the law's clause, and cited decisions."""
 
 from datetime import date
+from hashlib import sha256
 from pathlib import Path
 
 from lovspor.legaltime.commencement import (
@@ -69,7 +70,8 @@ def test_straks_dates_every_operation_from_the_header_date() -> None:
     ops, timings = _timings(_law("lov/2022-06-22-81", "2022-06-22", "Loven trer i kraft straks."))
     assert {timings[op.id].effective for op in ops} == {date(2022, 6, 22)}
     assert all(timings[op.id].status == "dated" for op in ops)
-    assert timings[ops[0].id].proofs[0].quote == "Loven trer i kraft straks."
+    digest = sha256(b"Loven trer i kraft straks.").hexdigest()
+    assert timings[ops[0].id].proofs[0].quote_sha256 == digest
     assert timings[ops[0].id].known_from == date(2020, 12, 18)
 
 
@@ -241,3 +243,65 @@ def test_clause_timings_without_clauses_falls_back_to_the_header() -> None:
     result = interpret(law)
     timings = clause_timings(law, (), result.operations)
     assert {t.effective for t in timings.values()} == {date(2022, 6, 22)}
+
+
+def test_default_clause_with_a_reservation_is_unresolved() -> None:
+    law = _law("lov/2021-01-01-1", "2021-01-01", "Loven trer i kraft 1. januar 2021 unntatt § 2 a.")
+    ops, timings = _timings(law)
+    assert {timings[op.id].status for op in ops} == {"unresolved"}
+    assert {timings[op.id].reason for op in ops} == {"default clause carries a reservation"}
+
+
+def test_dated_sentence_outside_the_grammar_is_not_informational() -> None:
+    law = _law("lov/2022-01-01-1", "2022-07-01", "Loven får virkning fra 1. juli 2022.")
+    ops, timings = _timings(law)
+    assert {timings[op.id].status for op in ops} == {"unresolved"}
+
+
+def test_two_default_clauses_are_unresolved() -> None:
+    law = _law(
+        "lov/2022-01-01-1",
+        "2022-07-01",
+        "Loven trer i kraft straks. Loven trer i kraft 1. juli 2022.",
+    )
+    ops, timings = _timings(law)
+    assert {timings[op.id].reason for op in ops} == {"two default commencement clauses"}
+
+
+def test_section_specific_partial_scope_wins_over_a_whole_part_scope() -> None:
+    law = _law(
+        "lov/2020-12-18-999", "Kongen bestemmer", "Loven gjelder fra den tid Kongen bestemmer."
+    )
+    decision = parse_document(
+        (
+            '<html><body><header><dl><dd class="refid">forskrift/2021-05-28-9998</dd>'
+            '<dd class="dateInForce">2022-01-01, 2023-01-01</dd>'
+            '<dd class="dateOfPublication">2021-05-31 16:10</dd>'
+            '<dd class="title">Delt ikrafttredelse av lov 18. desember 2020 nr. 999 om endringer'
+            '</dd></dl></header><main><article class="legalP">Endringsloven del I, ny § 2a i lov '
+            "14. juni 2019 nr. 99 om prøving, trer i kraft 1. januar 2023. Endringsloven del I "
+            "trer i kraft 1. januar 2022.</article></main></body></html>"
+        ).encode(),
+        "lti/2021/sf-x.xml",
+    )
+    ops, timings = _timings(law, (decision,))
+    by_key = {(op.part, op.address.section): timings[op.id] for op in ops}
+    assert by_key[("I", "§1")].effective == date(2022, 1, 1)
+    assert by_key[("I", "§2a")].effective == date(2023, 1, 1)
+
+
+def test_undated_decision_does_not_break_ordering() -> None:
+    law = _law(
+        "lov/2020-12-18-999", "Kongen bestemmer", "Loven gjelder fra den tid Kongen bestemmer."
+    )
+    undated = parse_document(
+        (
+            '<html><body><header><dl><dd class="refid">forskrift/2020-01-01-1</dd>'
+            '<dd class="dateInForce">Når forordningen trer i kraft</dd>'
+            '<dd class="title">Ikraftsetting av lov 18. desember 2020 nr. 999 om endringer</dd>'
+            "</dl></header><main/></body></html>"
+        ).encode(),
+        "lti/2020/sf-a.xml",
+    )
+    ops, timings = _timings(law, (undated, load("resolution-partial.xml")))
+    assert {timings[op.id].status for op in ops} <= {"pending", "dated"}

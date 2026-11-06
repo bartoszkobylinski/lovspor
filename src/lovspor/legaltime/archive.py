@@ -21,7 +21,7 @@ from lovspor.legaltime.commencement import is_decision_for
 from lovspor.legaltime.document import Document, Frozen, parse_document
 from lovspor.legaltime.errors import LegalTimeDocumentError, LegalTimeInputError
 
-INDEX_VERSION = "legaltime-index-1"
+INDEX_VERSION = "legaltime-index-2"
 _READ_CHUNK = 1 << 20
 
 
@@ -40,6 +40,7 @@ class ArchiveIndex(Frozen):
     sha256: str
     index_version: str
     members: tuple[MemberRecord, ...]
+    skipped: tuple[str, ...] = ()
 
     @property
     def horizon(self) -> str | None:
@@ -95,6 +96,21 @@ def _cached_index(path: Path, digest: str) -> ArchiveIndex | None:
     return index if index.sha256 == digest and index.index_version == INDEX_VERSION else None
 
 
+def _scan(archive: Path) -> tuple[list[MemberRecord], list[str]]:
+    records: list[MemberRecord] = []
+    skipped: list[str] = []
+    try:
+        for member in iter_tarball_xml(archive):
+            record = _record(member.name, member.content)
+            (records.append(record) if record else skipped.append(member.name))
+    except ExtractionError as exc:
+        raise LegalTimeInputError(f"unreadable archive {archive.name}: {exc}") from exc
+    names = [r.name for r in records]
+    if len(set(names)) != len(names):
+        raise LegalTimeInputError(f"duplicate member names in {archive.name}")
+    return records, sorted(skipped)
+
+
 def index_archive(archive: Path, cache_dir: Path | None = None) -> ArchiveIndex:
     """Header index of every XML member, built once per archive digest."""
     if not archive.is_file():
@@ -104,13 +120,11 @@ def index_archive(archive: Path, cache_dir: Path | None = None) -> ArchiveIndex:
     cached = _cached_index(cache, digest)
     if cached is not None:
         return cached
-    try:
-        records = [r for m in iter_tarball_xml(archive) if (r := _record(m.name, m.content))]
-    except ExtractionError as exc:
-        raise LegalTimeInputError(f"unreadable archive {archive.name}: {exc}") from exc
+    records, skipped = _scan(archive)
     index = ArchiveIndex(
-        archive=archive.name, sha256=digest, index_version=INDEX_VERSION, members=tuple(records)
-    )
+        archive=archive.name, sha256=digest, index_version=INDEX_VERSION,
+        members=tuple(records), skipped=tuple(skipped),
+    )  # fmt: skip
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(index.model_dump_json(indent=1), encoding="utf-8")
     return index
@@ -162,11 +176,16 @@ def _decision_names(index: ArchiveIndex, laws: set[str]) -> list[str]:
 
 
 def _baseline(indexed: Indexed, act: str) -> tuple[Path, str]:
-    for path, index in indexed:
-        for member in index.members:
-            if member.refid == act and _is_law(member):
-                return path, member.name
-    raise LegalTimeInputError(f"no enacting member for {act} in the given archives")
+    """The one enacting member of the act; two claimants are refused, never chosen between."""
+    found = [
+        (path, m.name) for path, index in indexed for m in index.members
+        if m.refid == act and _is_law(m)
+    ]  # fmt: skip
+    if len(found) > 1:
+        raise LegalTimeInputError(f"several enacting members claim {act}: {sorted(found)}")
+    if not found:
+        raise LegalTimeInputError(f"no enacting member for {act} in the given archives")
+    return found[0]
 
 
 def _ordered(documents: Iterable[Document]) -> tuple[Document, ...]:

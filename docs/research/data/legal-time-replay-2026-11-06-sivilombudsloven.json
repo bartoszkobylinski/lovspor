@@ -5,13 +5,15 @@
    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
    "horizon": "2026-06-23T08:35:00",
    "members": 38182,
-   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0",
+   "skipped_members": []
   },
   {
    "archive": "lovtidend-avd1-2026.tar.bz2",
    "horizon": "2026-11-05T14:50:00",
    "members": 1204,
-   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2",
+   "skipped_members": []
   }
  ],
  "baseline_timing": {
@@ -20,7 +22,7 @@
   "proofs": [
    {
     "member": "lti/2021/nl-20210618-121.xml",
-    "quote": "dateInForce: 2021-07-01",
+    "quote_sha256": "b077ba427c27291bd376deecd8bdee7aeb04c2bae1e1b5a3744e0c11c041970c",
     "refid": "lov/2021-06-18-121",
     "sha256": "fc1decc11a1c2c1fc51ecfc6aad5437c3e35436b839b520f8bd0a314ac513a97"
    }
@@ -41,7 +43,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2022-06-10-38#I:1.0",
+    "id": "lov/2022-06-10-38#1:I:1.0",
     "instruction": "§ 20 første ledd annet punktum oppheves.",
     "kind": "repeal_punktum",
     "part": "I",
@@ -57,7 +59,7 @@
     "proofs": [
      {
       "member": "lti/2022/nl-20220610-038.xml",
-      "quote": "Loven trer i kraft straks.",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
       "refid": "lov/2022-06-10-38",
       "sha256": "2c267cb2043459d2fbce0b053f22e559752d9173ffaccc70d90f36139a28316d"
      }
@@ -74,7 +76,7 @@
     "address": {},
     "change_part": [],
     "destination": null,
-    "id": "lov/2022-06-10-38#I:2.0",
+    "id": "lov/2022-06-10-38#1:I:2.0",
     "instruction": "Nåværende tredje punktum blir annet punktum.",
     "kind": "renumber",
     "part": "I",
@@ -90,7 +92,7 @@
     "proofs": [
      {
       "member": "lti/2022/nl-20220610-038.xml",
-      "quote": "Loven trer i kraft straks.",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
       "refid": "lov/2022-06-10-38",
       "sha256": "2c267cb2043459d2fbce0b053f22e559752d9173ffaccc70d90f36139a28316d"
      }
@@ -112,7 +114,7 @@
      "lov/2021-06-18-121/§26/ledd/6"
     ],
     "destination": null,
-    "id": "lov/2025-06-20-96#Kapittel 5. Sluttføresegner:52.0",
+    "id": "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0",
     "instruction": "§ 26 sjette ledd lyde:",
     "kind": "replace_ledd",
     "part": "Kapittel 5. Sluttføresegner",
@@ -128,7 +130,7 @@
     "proofs": [
      {
       "member": "lti/2025/sf-20250620-1103.xml",
-      "quote": "Ikraftsetting av lov 20. juni 2025 nr. 96 om dokumentasjon og arkiv (arkivlova)",
+      "quote_sha256": "a5bf788d5eac045768e8b99205c7727395d5f89853eefc9473e27f1d87e02cbe",
       "refid": "forskrift/2025-06-20-1103",
       "sha256": "9a44024f11329a5a85829a52bf1d7362dae80e4b5a052763a25f958138827ca1"
      }
@@ -159,7 +161,8 @@
    "refid": "lov/2021-06-18-121",
    "role": "enacting",
    "sha256": "fc1decc11a1c2c1fc51ecfc6aad5437c3e35436b839b520f8bd0a314ac513a97",
-   "title": "Lov om Stortingets ombud for kontroll med forvaltningen (sivilombudsloven)"
+   "title": "Lov om Stortingets ombud for kontroll med forvaltningen (sivilombudsloven)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2022-06-10",
@@ -168,7 +171,8 @@
    "refid": "lov/2022-06-10-38",
    "role": "amending",
    "sha256": "2c267cb2043459d2fbce0b053f22e559752d9173ffaccc70d90f36139a28316d",
-   "title": "Lov om endring i sivilombudsloven"
+   "title": "Lov om endring i sivilombudsloven",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "Kongen fastset",
@@ -177,7 +181,8 @@
    "refid": "lov/2025-06-20-96",
    "role": "amending",
    "sha256": "a9a5f56238e1e35dbbf2604c5c9429a92abf6d373e09248d22e7f55a0cef2e67",
-   "title": "Lov om dokumentasjon og arkiv (arkivlova)"
+   "title": "Lov om dokumentasjon og arkiv (arkivlova)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2026-01-01",
@@ -186,7 +191,8 @@
    "refid": "forskrift/2025-06-20-1103",
    "role": "decision",
    "sha256": "9a44024f11329a5a85829a52bf1d7362dae80e4b5a052763a25f958138827ca1",
-   "title": "Ikraftsetting av lov 20. juni 2025 nr. 96 om dokumentasjon og arkiv (arkivlova)"
+   "title": "Ikraftsetting av lov 20. juni 2025 nr. 96 om dokumentasjon og arkiv (arkivlova)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2026-01-01",
@@ -195,23 +201,24 @@
    "refid": "forskrift/2025-12-12-2510",
    "role": "decision",
    "sha256": "02e3678d804f2d40acdf717ae727c0cd31668304076cb0c01ef17c28255f1f07",
-   "title": "Delt iverksetjing av lov 20. juni 2025 nr. 96 om dokumentasjon og arkiv (arkivlova)"
+   "title": "Delt iverksetjing av lov 20. juni 2025 nr. 96 om dokumentasjon og arkiv (arkivlova)",
+   "unattributed_operations": 0
   }
  ],
  "oracle": {
   "member": "nl/nl-20210618-121.xml",
   "sha256": "a347d9ae03859a92f169176b1fc1f2a3623e042afb375fa61531db10d30ca3f3"
  },
- "replay_version": "legaltime-replay-1",
+ "replay_version": "legaltime-replay-2",
  "states": [
   {
    "act_level_problems": [],
    "applied": [],
    "at": "2021-07-01",
    "future": [
-    "lov/2022-06-10-38#I:1.0",
-    "lov/2022-06-10-38#I:2.0",
-    "lov/2025-06-20-96#Kapittel 5. Sluttføresegner:52.0"
+    "lov/2022-06-10-38#1:I:1.0",
+    "lov/2022-06-10-38#1:I:2.0",
+    "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
    ],
    "pending": [],
    "provisions": [
@@ -497,17 +504,18 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2022-06-10-38#I:1.0",
-    "lov/2022-06-10-38#I:2.0"
+    "lov/2022-06-10-38#1:I:1.0",
+    "lov/2022-06-10-38#1:I:2.0"
    ],
    "at": "2022-06-10",
    "future": [
-    "lov/2025-06-20-96#Kapittel 5. Sluttføresegner:52.0"
+    "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
    ],
    "pending": [],
    "provisions": [
@@ -665,7 +673,7 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#I:1.0"
+      "lov/2022-06-10-38#1:I:1.0"
      ],
      "key": "§20",
      "ledd": 3,
@@ -795,14 +803,15 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2022-06-10-38#I:1.0",
-    "lov/2022-06-10-38#I:2.0",
-    "lov/2025-06-20-96#Kapittel 5. Sluttføresegner:52.0"
+    "lov/2022-06-10-38#1:I:1.0",
+    "lov/2022-06-10-38#1:I:2.0",
+    "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
    ],
    "at": "2026-01-01",
    "future": [],
@@ -962,7 +971,7 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#I:1.0"
+      "lov/2022-06-10-38#1:I:1.0"
      ],
      "key": "§20",
      "ledd": 3,
@@ -1012,7 +1021,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-96#Kapittel 5. Sluttføresegner:52.0"
+      "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
      ],
      "key": "§26",
      "ledd": 6,
@@ -1094,14 +1103,15 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2022-06-10-38#I:1.0",
-    "lov/2022-06-10-38#I:2.0",
-    "lov/2025-06-20-96#Kapittel 5. Sluttføresegner:52.0"
+    "lov/2022-06-10-38#1:I:1.0",
+    "lov/2022-06-10-38#1:I:2.0",
+    "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
    ],
    "at": "2026-11-06",
    "future": [],
@@ -1261,7 +1271,7 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#I:1.0"
+      "lov/2022-06-10-38#1:I:1.0"
      ],
      "key": "§20",
      "ledd": 3,
@@ -1311,7 +1321,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-96#Kapittel 5. Sluttføresegner:52.0"
+      "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
      ],
      "key": "§26",
      "ledd": 6,
@@ -1393,7 +1403,8 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   }
  ],
  "verification": [
@@ -1918,7 +1929,7 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#I:1.0"
+      "lov/2022-06-10-38#1:I:1.0"
      ],
      "detail": "",
      "key": "§20",
@@ -2249,7 +2260,7 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#I:1.0"
+      "lov/2022-06-10-38#1:I:1.0"
      ],
      "detail": "",
      "key": "§20",
@@ -2305,7 +2316,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-96#Kapittel 5. Sluttføresegner:52.0"
+      "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
      ],
      "detail": "",
      "key": "§26",
@@ -2582,7 +2593,7 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#I:1.0"
+      "lov/2022-06-10-38#1:I:1.0"
      ],
      "detail": "",
      "key": "§20",
@@ -2638,7 +2649,7 @@
     },
     {
      "applied": [
-      "lov/2025-06-20-96#Kapittel 5. Sluttføresegner:52.0"
+      "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
      ],
      "detail": "",
      "key": "§26",

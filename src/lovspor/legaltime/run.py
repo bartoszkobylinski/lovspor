@@ -1,8 +1,9 @@
 """The pilot end to end: evidence → events → states per date → report.
 
 The report is the pilot's only product. It carries identities, dates,
-verdicts and counts, never provision text, so it can be committed as evidence
-without moving any Lovdata bytes into Git.
+verdicts, counts and the instruction addresses ("§ 89 skal lyde:"); the
+sentences a date was read from are carried as digests. No provision text
+leaves the archive, so a report can be committed as evidence.
 """
 
 from datetime import date, datetime
@@ -16,7 +17,7 @@ from lovspor.legaltime.instructions import Operation, interpret
 from lovspor.legaltime.replay import Event, ReplayState, replay
 from lovspor.legaltime.verify import verify
 
-REPLAY_VERSION = "legaltime-replay-1"
+REPLAY_VERSION = "legaltime-replay-2"
 
 
 def _stamp(value: datetime | None) -> str | None:
@@ -108,8 +109,14 @@ def _state_record(state: ReplayState) -> dict[str, Any]:
         "pending": list(state.pending),
         "unresolved": [list(pair) for pair in state.unresolved],
         "act_level_problems": list(state.act_level_problems),
+        "withheld": list(state.withheld),
         "provisions": _provision_record(state),
     }
+
+
+def _unattributed(document: Document) -> int:
+    """Operations the amending law states without a recognisable act: never silently lost."""
+    return sum(1 for op in interpret(document).operations if op.act is None)
 
 
 def _member_record(document: Document, role: str) -> dict[str, Any]:
@@ -121,6 +128,7 @@ def _member_record(document: Document, role: str) -> dict[str, Any]:
         "title": document.header.title,
         "date_in_force": document.header.date_in_force,
         "published_at": _stamp(document.header.published_at),
+        "unattributed_operations": _unattributed(document) if role == "amending" else 0,
     }
 
 
@@ -134,8 +142,14 @@ def _members(evidence: Evidence) -> list[dict[str, Any]]:
 
 def _archive_records(evidence: Evidence) -> list[dict[str, Any]]:
     return [
-        {"archive": i.archive, "sha256": i.sha256, "members": len(i.members), "horizon": i.horizon}
-        for i in evidence.archives
+        {
+            "archive": i.archive,
+            "sha256": i.sha256,
+            "members": len(i.members),
+            "horizon": i.horizon,
+            "skipped_members": list(i.skipped),
+        }
+        for i in sorted(evidence.archives, key=lambda i: i.archive)
     ]
 
 
@@ -148,7 +162,7 @@ def build_report(
     report: dict[str, Any] = {
         "replay_version": REPLAY_VERSION,
         "act": evidence.act,
-        "inputs": pins(archives),
+        "inputs": pins(sorted(archives, key=lambda p: p.name)),
         "archives": _archive_records(evidence),
         "members": _members(evidence),
         "baseline_timing": baseline_timing(evidence.baseline, evidence.decisions).model_dump(
@@ -159,5 +173,7 @@ def build_report(
     }
     if oracle is not None:
         report["oracle"] = {"member": oracle.member, "sha256": oracle.sha256}
-        report["verification"] = [verify(s, oracle).model_dump(mode="json") for s in states]
+        report["verification"] = [
+            verify(s, oracle).model_dump(mode="json") for s in states if s.status == "replayed"
+        ]
     return report

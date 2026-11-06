@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
-from lovspor.legaltime.document import Document, element_text, parse_document
+from lovspor.legaltime.document import Document, element_text, inner_xml, parse_document
 from lovspor.legaltime.errors import LegalTimeDocumentError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "legaltime"
@@ -167,3 +167,9 @@ def test_invalid_xml_names_the_member_and_preserves_the_parse_error(body: bytes)
     with pytest.raises(LegalTimeDocumentError, match="invalid XML in broken.xml") as error:
         parse_document(body, "broken.xml")
     assert isinstance(error.value.__cause__, etree.XMLSyntaxError)
+
+
+def test_inner_xml_escapes_text_so_it_stays_well_formed() -> None:
+    element = etree.fromstring("<a>Fish &amp; chips &lt; 5<b>x</b></a>")
+    assert inner_xml(element) == "Fish &amp; chips &lt; 5<b>x</b>"
+    etree.fromstring(f"<article>{inner_xml(element)}</article>")

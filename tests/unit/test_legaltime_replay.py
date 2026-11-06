@@ -8,7 +8,7 @@ import pytest
 from lovspor.legaltime.commencement import Timing, resolve_timings
 from lovspor.legaltime.document import Document, Ledd, parse_document
 from lovspor.legaltime.instructions import Address, Operation, OpKind, interpret
-from lovspor.legaltime.replay import Event, ReplayState, replay
+from lovspor.legaltime.replay import Event, ReplayState, _locations, replay
 from lovspor.legaltime.verify import verify
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "legaltime"
@@ -91,10 +91,10 @@ def test_state_at_commencement_carries_the_amendments_already_in_force() -> None
     state = state_at(date(2021, 1, 1))
     assert state.status == "replayed"
     assert state.applied == (
-        "lov/2020-12-18-999#I:1.0",
-        "lov/2020-12-18-999#I:3.0",
-        "lov/2020-12-18-999#I:7.0",
-        "lov/2020-12-18-999#I:8.0",
+        "lov/2020-12-18-999#1:I:1.0",
+        "lov/2020-12-18-999#1:I:3.0",
+        "lov/2020-12-18-999#1:I:7.0",
+        "lov/2020-12-18-999#1:I:8.0",
     )
     assert texts(state, "§1") == [
         "Loven gjelder prøving av fylkesmannen. Den gjelder også retting.",
@@ -104,7 +104,7 @@ def test_state_at_commencement_carries_the_amendments_already_in_force() -> None
     assert [p.key for p in state.provisions] == ["§1", "§2", "§3", "§4"]
     repealed = next(p for p in state.provisions if p.key == "§4")
     assert repealed.repealed and repealed.heading == "(Opphevet)" and repealed.ledd == ()
-    assert state.pending == ("lov/2020-12-18-999#I:5.0",)
+    assert state.pending == ("lov/2020-12-18-999#1:I:5.0",)
     assert state.future == ()
     assert state.unresolved == ()
 
@@ -115,14 +115,17 @@ def test_retroactive_amendment_applies_at_its_legal_date_not_its_publication() -
     )
     assert state.status == "not_yet_in_force"
     state = state_at(date(2021, 1, 1))
-    assert "lov/2020-12-18-999#I:1.0" in state.applied
-    assert state.provisions[0].applied == ("lov/2020-12-18-999#I:1.0", "lov/2020-12-18-999#I:3.0")
+    assert "lov/2020-12-18-999#1:I:1.0" in state.applied
+    assert state.provisions[0].applied == (
+        "lov/2020-12-18-999#1:I:1.0",
+        "lov/2020-12-18-999#1:I:3.0",
+    )
 
 
 def test_partial_decision_dates_the_insertion_and_the_future_is_listed() -> None:
     decisions = (load("resolution-partial.xml"),)
     before = state_at(date(2021, 12, 31), decisions)
-    assert before.future == ("lov/2020-12-18-999#I:5.0",)
+    assert before.future == ("lov/2020-12-18-999#1:I:5.0",)
     assert [p.key for p in before.provisions] == ["§1", "§2", "§3", "§4"]
     after = state_at(date(2022, 1, 1), decisions)
     assert [p.key for p in after.provisions] == ["§1", "§2", "§2a", "§3", "§4"]
@@ -276,14 +279,19 @@ def test_operations_that_do_not_fit_the_text_fail_closed(
 
 def test_bokstav_replacement_and_move_ledd() -> None:
     bokstav = _op("replace_bokstav", Address(section="§2", ledd=1, bokstav="b"), ("bokstav bravo",))
-    move = _op("move_ledd", Address(section="§1", ledd=2), id="x#I:1.0", destination="§3")
+    move = _op(
+        "move_ledd",
+        Address(section="§1", ledd=2, destination_ledd=1),
+        id="x#I:1.0",
+        destination="§3",
+    )
     state = _run([_event(bokstav), _event(move, sequence=1)])
     assert state.unresolved == ()
     assert texts(state, "§2") == [
         "Følgende gjelder: bokstav a bokstav bravo Bokstav b gjelder ikke private."
     ]
     assert texts(state, "§1") == ENACTED_TEXT[:1]
-    assert texts(state, "§3") == ["Loven gjelder fra den tid Kongen bestemmer.", ENACTED_TEXT[1]]
+    assert texts(state, "§3") == [ENACTED_TEXT[1], "Loven gjelder fra den tid Kongen bestemmer."]
 
 
 def test_same_day_events_apply_in_publication_then_document_order() -> None:
@@ -416,3 +424,71 @@ def test_omission_marker_does_not_hide_a_difference_in_retained_text(change: str
     )
     result = verify(_run([]), oracle)
     assert result.sections[0].verdict == "text_differs"
+
+
+def test_repeal_ledd_range_removes_every_addressed_ledd() -> None:
+    state = _run([_event(_op("repeal_ledd", Address(section="§1", ledd=1, ledd_end=2)))])
+    assert state.unresolved == ()
+    assert texts(state, "§1") == []
+
+
+def test_move_ledd_refuses_a_destination_ordinal_that_does_not_fit() -> None:
+    move = _op("move_ledd", Address(section="§1", ledd=2, destination_ledd=4), destination="§3")
+    state = _run([_event(move)])
+    assert state.unresolved == (("x#I:0.0", "destination ledd 4 does not fit 1 existing"),)
+    assert texts(state, "§1") == ENACTED_TEXT
+
+
+def test_replacement_text_headed_with_another_section_is_refused() -> None:
+    other = load("amending.xml")
+    wrong = next(op for op in interpret(other).operations if op.kind == "replace_section")
+    wrong = wrong.model_copy(update={"address": Address(section="§1")})
+    state = _run([_event(wrong)])
+    assert state.unresolved[0][1] == "replacement text is headed §3, not §1"
+
+
+def test_term_substitution_is_scoped_to_listed_ledd_and_whole_words() -> None:
+    sub = _op(
+        "substitute_term", Address(), term_old="ledd", term_new="LEDD", locations="§ 1 annet ledd"
+    )
+    state = _run([_event(sub)])
+    assert state.unresolved == ()
+    assert texts(state, "§1") == [
+        ENACTED_TEXT[0],
+        "Annet LEDD første punktum. Annet LEDD annet punktum.",
+    ]
+    narrow = _op("substitute_term", Address(), term_old="fylke", term_new="X", locations="§ 1")
+    state = _run([_event(narrow)])
+    assert state.unresolved == (("x#I:0.0", "term not found in ['§1']"),)
+    assert texts(state, "§1") == ENACTED_TEXT
+
+
+def test_term_substitution_leaves_markup_alone() -> None:
+    sub = _op("substitute_term", Address(), term_old="a", term_new="Z", locations="§ 2")
+    state = _run([_event(sub)])
+    provision = next(p for p in state.provisions if p.key == "§2")
+    assert "bokstav Z" in provision.ledd[0].text
+    assert 'data-name="a)"' in provision.ledd[0].xml
+
+
+def test_bokstav_pattern_never_crosses_into_the_next_item() -> None:
+    bokstav = _op("replace_bokstav", Address(section="§2", ledd=1, bokstav="a"), ("alpha",))
+    state = _run([_event(bokstav)])
+    assert texts(state, "§2") == [
+        "Følgende gjelder: alpha bokstav b Bokstav b gjelder ikke private."
+    ]
+
+
+@pytest.mark.parametrize(
+    ("locations", "expected"),
+    [
+        ("§ 28 tredje og fjerde ledd", [("§28", frozenset({3, 4}))]),
+        ("§ 5 andre til femte ledd, § 6", [("§5", frozenset({2, 3, 4, 5})), ("§6", frozenset())]),
+        ("§ 14 andre ledd tredje punktum og sjette ledd", [("§14", frozenset({2, 6}))]),
+        ("§ 63 andre ledd andre og tredje punktum", [("§63", frozenset({2}))]),
+    ],
+)
+def test_substitution_locations_read_every_listed_ledd(
+    locations: str, expected: list[tuple[str, frozenset[int]]]
+) -> None:
+    assert _locations(locations) == expected

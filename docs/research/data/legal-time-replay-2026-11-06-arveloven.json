@@ -5,13 +5,15 @@
    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
    "horizon": "2026-06-23T08:35:00",
    "members": 38182,
-   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0",
+   "skipped_members": []
   },
   {
    "archive": "lovtidend-avd1-2026.tar.bz2",
    "horizon": "2026-11-05T14:50:00",
    "members": 1204,
-   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2",
+   "skipped_members": []
   }
  ],
  "baseline_timing": {
@@ -20,7 +22,7 @@
   "proofs": [
    {
     "member": "lti/2020/sf-20200228-0200.xml",
-    "quote": "Ikraftsetjing av lov 14. juni 2019 nr. 21 om arv og dødsboskifte",
+    "quote_sha256": "0f6e733d4722f301b8aed3b314f9f9d93e746707ce004d616c6075c8d6373c11",
     "refid": "forskrift/2020-02-28-200",
     "sha256": "4cef74e55bc11fbe1cf62084594ddb0ff5e74681b65b0537e642a7c2c8fd9543"
    }
@@ -35,12 +37,13 @@
    "member": "lti/2020/nl-20201218-149.xml",
    "operation": {
     "address": {
+     "destination_ledd": 5,
      "ledd": 2,
      "section": "§43"
     },
     "change_part": [],
     "destination": "§42",
-    "id": "lov/2020-12-18-149#I:1.0",
+    "id": "lov/2020-12-18-149#1:I:1.0",
     "instruction": "§ 43 annet ledd blir nytt femte ledd i § 42.",
     "kind": "move_ledd",
     "part": "I",
@@ -56,7 +59,7 @@
     "proofs": [
      {
       "member": "lti/2020/nl-20201218-149.xml",
-      "quote": "Loven trer i kraft straks.",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
       "refid": "lov/2020-12-18-149",
       "sha256": "ac83800619df37f601f58a46852940eaa52b3f67f88353d88eebb2b4a8ba8e61"
      }
@@ -77,7 +80,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2020-12-18-149#I:2.0",
+    "id": "lov/2020-12-18-149#1:I:2.0",
     "instruction": "§ 77 annet og tredje punktum skal lyde:",
     "kind": "replace_punktum",
     "part": "I",
@@ -93,7 +96,7 @@
     "proofs": [
      {
       "member": "lti/2020/nl-20201218-149.xml",
-      "quote": "Loven trer i kraft straks.",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
       "refid": "lov/2020-12-18-149",
       "sha256": "ac83800619df37f601f58a46852940eaa52b3f67f88353d88eebb2b4a8ba8e61"
      }
@@ -112,7 +115,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2020-12-18-149#I:4.0",
+    "id": "lov/2020-12-18-149#1:I:4.0",
     "instruction": "§ 89 skal lyde:",
     "kind": "replace_section",
     "part": "I",
@@ -128,7 +131,7 @@
     "proofs": [
      {
       "member": "lti/2020/nl-20201218-149.xml",
-      "quote": "Loven trer i kraft straks.",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
       "refid": "lov/2020-12-18-149",
       "sha256": "ac83800619df37f601f58a46852940eaa52b3f67f88353d88eebb2b4a8ba8e61"
      }
@@ -149,7 +152,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2020-12-18-149#I:6.0",
+    "id": "lov/2020-12-18-149#1:I:6.0",
     "instruction": "§ 92 første ledd første punktum skal lyde:",
     "kind": "replace_punktum",
     "part": "I",
@@ -165,7 +168,7 @@
     "proofs": [
      {
       "member": "lti/2020/nl-20201218-149.xml",
-      "quote": "Loven trer i kraft straks.",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
       "refid": "lov/2020-12-18-149",
       "sha256": "ac83800619df37f601f58a46852940eaa52b3f67f88353d88eebb2b4a8ba8e61"
      }
@@ -184,7 +187,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2020-12-18-149#I:8.0",
+    "id": "lov/2020-12-18-149#1:I:8.0",
     "instruction": "Ny § 99 a skal lyde:",
     "kind": "insert_section",
     "part": "I",
@@ -200,7 +203,7 @@
     "proofs": [
      {
       "member": "lti/2021/sf-20210528-1698.xml",
-      "quote": "Delt ikrafttredelse av lov 18. desember 2020 nr. 149 om endringer i arveloven (landbrukseiendommer i dødsbo mv.): del I",
+      "quote_sha256": "7aebe2cf649fc29cc29a06cb3c3648df294d14c9007eaaf7f6ccf3c260c7294a",
       "refid": "forskrift/2021-05-28-1698",
       "sha256": "83f41d823f4ace27d6db0072ea5fd992f4e86d39da445838941955bf9d4aa5b0"
      }
@@ -221,7 +224,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2020-12-18-149#I:10.0",
+    "id": "lov/2020-12-18-149#1:I:10.0",
     "instruction": "§ 149 annet ledd første punktum skal lyde:",
     "kind": "replace_punktum",
     "part": "I",
@@ -237,7 +240,7 @@
     "proofs": [
      {
       "member": "lti/2020/nl-20201218-149.xml",
-      "quote": "Loven trer i kraft straks.",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
       "refid": "lov/2020-12-18-149",
       "sha256": "ac83800619df37f601f58a46852940eaa52b3f67f88353d88eebb2b4a8ba8e61"
      }
@@ -256,7 +259,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2020-12-18-149#I:12.0",
+    "id": "lov/2020-12-18-149#1:I:12.0",
     "instruction": "§ 181 skal lyde:",
     "kind": "replace_section",
     "part": "I",
@@ -272,7 +275,7 @@
     "proofs": [
      {
       "member": "lti/2020/nl-20201218-149.xml",
-      "quote": "Loven trer i kraft straks.",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
       "refid": "lov/2020-12-18-149",
       "sha256": "ac83800619df37f601f58a46852940eaa52b3f67f88353d88eebb2b4a8ba8e61"
      }
@@ -289,7 +292,7 @@
     "address": {},
     "change_part": [],
     "destination": null,
-    "id": "lov/2021-05-07-34#I:136.0",
+    "id": "lov/2021-05-07-34#1:I:136.0",
     "instruction": "§ 11, § 14 andre ledd tredje punktum og sjette ledd, § 15 første ledd andre punktum, § 24 første ledd andre punktum, § 28 tredje og fjerde ledd, § 39 første ledd tredje punktum, § 49 andre ledd andre punktum, § 50 andre ledd andre punktum, § 63 andre ledd andre og tredje punktum, § 90 andre ledd tredje punktum, § 96 fjerde ledd første og andre punktum, § 97 første punktum, § 118 sjette ledd andre punktum, § 127 første ledd d), § 130 første ledd andre punktum, § 161 andre ledd og tredje ledd andre punktum",
     "kind": "substitute_term",
     "part": "I",
@@ -305,7 +308,7 @@
     "proofs": [
      {
       "member": "lti/2021/sf-20210507-1416.xml",
-      "quote": "Ikraftsetjing av lov 7. mai 2021 nr. 34 om endringar i lovgjevinga som følgje av innføring av kjønnsnøytral tittel på fylkesmannen",
+      "quote_sha256": "bac85f0dbdcf8af9a9b7e9c49c13e287e0985b783c98332f2078f5074bef0082",
       "refid": "forskrift/2021-05-07-1416",
       "sha256": "0eb4093d5205006b6d1522a67cd4c58c61893e6ed88ba7fe844090d52d06ddc3"
      }
@@ -324,7 +327,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2022-06-22-81#I:0.0",
+    "id": "lov/2022-06-22-81#1:I:0.0",
     "instruction": "ny § 88 a lyde:",
     "kind": "insert_section",
     "part": "I",
@@ -340,7 +343,7 @@
     "proofs": [
      {
       "member": "lti/2022/nl-20220622-081.xml",
-      "quote": "Loven trer i kraft straks.",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
       "refid": "lov/2022-06-22-81",
       "sha256": "b5d9614c7c3bf6171391988162a8489da9fd46cc94357ead4d001b546cd122a1"
      }
@@ -361,7 +364,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2023-03-31-5#II:0.0",
+    "id": "lov/2023-03-31-5#2:II:0.0",
     "instruction": "§ 96 fjerde ledd nytt tredje punktum lyde:",
     "kind": "insert_punktum",
     "part": "II",
@@ -377,7 +380,7 @@
     "proofs": [
      {
       "member": "lti/2023/sf-20230331-0445.xml",
-      "quote": "Ikraftsetting av lov 31. mars 2023 nr. 5 om endringer i vergemålsloven mv. (vergemål som frivillig støttetiltak mv.)",
+      "quote_sha256": "2a2380b3d6affe2e7d84cdb1e9b76c6776cd08f47c133349fc9903b5d529a557",
       "refid": "forskrift/2023-03-31-445",
       "sha256": "acdfc947d28253032e5db6abde02fe8a6db3b567b0dafe3b7289e825f55d8f2b"
      }
@@ -397,7 +400,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2023-06-16-59#I:1.0",
+    "id": "lov/2023-06-16-59#1:I:1.0",
     "instruction": "§ 20 nytt tredje punktum skal lyde:",
     "kind": "insert_punktum",
     "part": "I",
@@ -413,7 +416,7 @@
     "proofs": [
      {
       "member": "lti/2023/sf-20230616-0934.xml",
-      "quote": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+      "quote_sha256": "c3d31a947a6e77460d4f6247fc477c36c4500efeae78e7f583c6ccb83ac4caa3",
       "refid": "forskrift/2023-06-16-934",
       "sha256": "c560f788059f21cfb24d85d585bfa5f95fd5c70d7a08a7033fbbf6d323e96093"
      }
@@ -433,7 +436,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2023-06-16-59#I:3.0",
+    "id": "lov/2023-06-16-59#1:I:3.0",
     "instruction": "§ 35 nytt tredje punktum skal lyde:",
     "kind": "insert_punktum",
     "part": "I",
@@ -449,7 +452,7 @@
     "proofs": [
      {
       "member": "lti/2023/sf-20230616-0934.xml",
-      "quote": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+      "quote_sha256": "c3d31a947a6e77460d4f6247fc477c36c4500efeae78e7f583c6ccb83ac4caa3",
       "refid": "forskrift/2023-06-16-934",
       "sha256": "c560f788059f21cfb24d85d585bfa5f95fd5c70d7a08a7033fbbf6d323e96093"
      }
@@ -469,7 +472,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2023-06-16-59#I:5.0",
+    "id": "lov/2023-06-16-59#1:I:5.0",
     "instruction": "§ 92 nytt annet ledd skal lyde:",
     "kind": "insert_ledd",
     "part": "I",
@@ -485,7 +488,7 @@
     "proofs": [
      {
       "member": "lti/2023/sf-20230616-0934.xml",
-      "quote": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+      "quote_sha256": "c3d31a947a6e77460d4f6247fc477c36c4500efeae78e7f583c6ccb83ac4caa3",
       "refid": "forskrift/2023-06-16-934",
       "sha256": "c560f788059f21cfb24d85d585bfa5f95fd5c70d7a08a7033fbbf6d323e96093"
      }
@@ -502,7 +505,7 @@
     "address": {},
     "change_part": [],
     "destination": null,
-    "id": "lov/2023-06-16-59#I:7.0",
+    "id": "lov/2023-06-16-59#1:I:7.0",
     "instruction": "Nåværende annet og tredje ledd blir tredje og nytt fjerde ledd.",
     "kind": "renumber",
     "part": "I",
@@ -518,7 +521,7 @@
     "proofs": [
      {
       "member": "lti/2023/sf-20230616-0934.xml",
-      "quote": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+      "quote_sha256": "c3d31a947a6e77460d4f6247fc477c36c4500efeae78e7f583c6ccb83ac4caa3",
       "refid": "forskrift/2023-06-16-934",
       "sha256": "c560f788059f21cfb24d85d585bfa5f95fd5c70d7a08a7033fbbf6d323e96093"
      }
@@ -538,7 +541,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2023-06-16-59#I:8.0",
+    "id": "lov/2023-06-16-59#1:I:8.0",
     "instruction": "§ 92 nytt femte ledd skal lyde:",
     "kind": "insert_ledd",
     "part": "I",
@@ -554,7 +557,7 @@
     "proofs": [
      {
       "member": "lti/2023/sf-20230616-0934.xml",
-      "quote": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+      "quote_sha256": "c3d31a947a6e77460d4f6247fc477c36c4500efeae78e7f583c6ccb83ac4caa3",
       "refid": "forskrift/2023-06-16-934",
       "sha256": "c560f788059f21cfb24d85d585bfa5f95fd5c70d7a08a7033fbbf6d323e96093"
      }
@@ -575,7 +578,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2023-06-16-59#I:10.0",
+    "id": "lov/2023-06-16-59#1:I:10.0",
     "instruction": "§ 116 nytt fjerde og femte ledd skal lyde:",
     "kind": "insert_ledd",
     "part": "I",
@@ -591,7 +594,7 @@
     "proofs": [
      {
       "member": "lti/2023/sf-20230616-0934.xml",
-      "quote": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+      "quote_sha256": "c3d31a947a6e77460d4f6247fc477c36c4500efeae78e7f583c6ccb83ac4caa3",
       "refid": "forskrift/2023-06-16-934",
       "sha256": "c560f788059f21cfb24d85d585bfa5f95fd5c70d7a08a7033fbbf6d323e96093"
      }
@@ -611,7 +614,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2023-06-16-59#I:13.0",
+    "id": "lov/2023-06-16-59#1:I:13.0",
     "instruction": "§ 118 syvende ledd skal lyde:",
     "kind": "insert_ledd",
     "part": "I",
@@ -627,7 +630,7 @@
     "proofs": [
      {
       "member": "lti/2023/sf-20230616-0934.xml",
-      "quote": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+      "quote_sha256": "c3d31a947a6e77460d4f6247fc477c36c4500efeae78e7f583c6ccb83ac4caa3",
       "refid": "forskrift/2023-06-16-934",
       "sha256": "c560f788059f21cfb24d85d585bfa5f95fd5c70d7a08a7033fbbf6d323e96093"
      }
@@ -644,7 +647,7 @@
     "address": {},
     "change_part": [],
     "destination": null,
-    "id": "lov/2023-06-16-59#I:15.0",
+    "id": "lov/2023-06-16-59#1:I:15.0",
     "instruction": "Nåværende syvende ledd blir nytt åttende ledd.",
     "kind": "renumber",
     "part": "I",
@@ -660,7 +663,7 @@
     "proofs": [
      {
       "member": "lti/2023/sf-20230616-0934.xml",
-      "quote": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+      "quote_sha256": "c3d31a947a6e77460d4f6247fc477c36c4500efeae78e7f583c6ccb83ac4caa3",
       "refid": "forskrift/2023-06-16-934",
       "sha256": "c560f788059f21cfb24d85d585bfa5f95fd5c70d7a08a7033fbbf6d323e96093"
      }
@@ -681,7 +684,7 @@
     },
     "change_part": [],
     "destination": null,
-    "id": "lov/2023-06-16-59#I:16.0",
+    "id": "lov/2023-06-16-59#1:I:16.0",
     "instruction": "§ 139 annet ledd tredje punktum skal lyde:",
     "kind": "replace_punktum",
     "part": "I",
@@ -697,7 +700,7 @@
     "proofs": [
      {
       "member": "lti/2023/sf-20230616-0934.xml",
-      "quote": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+      "quote_sha256": "c3d31a947a6e77460d4f6247fc477c36c4500efeae78e7f583c6ccb83ac4caa3",
       "refid": "forskrift/2023-06-16-934",
       "sha256": "c560f788059f21cfb24d85d585bfa5f95fd5c70d7a08a7033fbbf6d323e96093"
      }
@@ -724,7 +727,7 @@
      "lov/2019-06-14-21/§178/ledd/7"
     ],
     "destination": null,
-    "id": "lov/2026-06-19-48#IV:0.0",
+    "id": "lov/2026-06-19-48#4:IV:0.0",
     "instruction": "§ 178 tredje til syvende ledd lyde:",
     "kind": "replace_ledd",
     "part": "IV",
@@ -740,7 +743,7 @@
     "proofs": [
      {
       "member": "lti/2026/nl-20260619-048.xml",
-      "quote": "For øvrig gjelder loven fra den tid Kongen bestemmer.",
+      "quote_sha256": "12616922312e3a53412682eeaee159d8f1eadb733399d4a6cde61a71fee52225",
       "refid": "lov/2026-06-19-48",
       "sha256": "d52ca2625e571ef0272fa8c7a130a35f9cedfa9a7e7543400be20448ddd91597"
      }
@@ -757,7 +760,7 @@
     "address": {},
     "change_part": [],
     "destination": null,
-    "id": "lov/2026-06-19-48#VI:25.0",
+    "id": "lov/2026-06-19-48#6:VI:25.0",
     "instruction": "lov 14. juni 2019 nr. 21 om arv og dødsboskifte § 103 første ledd bokstav b",
     "kind": "substitute_term",
     "part": "VI",
@@ -773,7 +776,7 @@
     "proofs": [
      {
       "member": "lti/2026/nl-20260619-048.xml",
-      "quote": "For øvrig gjelder loven fra den tid Kongen bestemmer.",
+      "quote_sha256": "12616922312e3a53412682eeaee159d8f1eadb733399d4a6cde61a71fee52225",
       "refid": "lov/2026-06-19-48",
       "sha256": "d52ca2625e571ef0272fa8c7a130a35f9cedfa9a7e7543400be20448ddd91597"
      }
@@ -790,7 +793,7 @@
     "address": {},
     "change_part": [],
     "destination": null,
-    "id": "lov/2026-06-19-48#VI:25.1",
+    "id": "lov/2026-06-19-48#6:VI:25.1",
     "instruction": "lov 14. juni 2019 nr. 21 om arv og dødsboskifte § 103 første ledd bokstav b",
     "kind": "substitute_term",
     "part": "VI",
@@ -806,7 +809,7 @@
     "proofs": [
      {
       "member": "lti/2026/nl-20260619-048.xml",
-      "quote": "For øvrig gjelder loven fra den tid Kongen bestemmer.",
+      "quote_sha256": "12616922312e3a53412682eeaee159d8f1eadb733399d4a6cde61a71fee52225",
       "refid": "lov/2026-06-19-48",
       "sha256": "d52ca2625e571ef0272fa8c7a130a35f9cedfa9a7e7543400be20448ddd91597"
      }
@@ -837,7 +840,8 @@
    "refid": "lov/2019-06-14-21",
    "role": "enacting",
    "sha256": "4b81ed4ea8fb86e97cccbda048f303def39d14b1c541038710a54752b1172c9e",
-   "title": "Lov om arv og dødsboskifte (arveloven)"
+   "title": "Lov om arv og dødsboskifte (arveloven)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2020-12-18, Kongen bestemmer",
@@ -846,7 +850,8 @@
    "refid": "lov/2020-12-18-149",
    "role": "amending",
    "sha256": "ac83800619df37f601f58a46852940eaa52b3f67f88353d88eebb2b4a8ba8e61",
-   "title": "Lov om endringer i arveloven (landbrukseiendommer i dødsbo mv.)"
+   "title": "Lov om endringer i arveloven (landbrukseiendommer i dødsbo mv.)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "Kongen fastset",
@@ -855,7 +860,8 @@
    "refid": "lov/2021-05-07-34",
    "role": "amending",
    "sha256": "760520a6e176abd5b95e18ae3eac19469e3583123900182ff46f9a19549f1e98",
-   "title": "Lov om endringar i lovgjevinga som følgje av innføring av kjønnsnøytral tittel på fylkesmannen"
+   "title": "Lov om endringar i lovgjevinga som følgje av innføring av kjønnsnøytral tittel på fylkesmannen",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2022-06-22",
@@ -864,7 +870,8 @@
    "refid": "lov/2022-06-22-81",
    "role": "amending",
    "sha256": "b5d9614c7c3bf6171391988162a8489da9fd46cc94357ead4d001b546cd122a1",
-   "title": "Lov om endringer i arveloven (digitalt skifte av dødsbo)"
+   "title": "Lov om endringer i arveloven (digitalt skifte av dødsbo)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "Kongen bestemmer",
@@ -873,7 +880,8 @@
    "refid": "lov/2023-03-31-5",
    "role": "amending",
    "sha256": "4b4fa246a2392bb161dca9b9ef75630af48a95adcc328d5642ad840e829c1f4b",
-   "title": "Lov om endringer i vergemålsloven mv. (vergemål som frivillig støttetiltak mv.)"
+   "title": "Lov om endringer i vergemålsloven mv. (vergemål som frivillig støttetiltak mv.)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "Kongen bestemmer",
@@ -882,7 +890,8 @@
    "refid": "lov/2023-06-16-59",
    "role": "amending",
    "sha256": "73299fc531b91361676e8cac0b1b0a11621a6fd767b709e887378e9d7641a2ad",
-   "title": "Lov om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)"
+   "title": "Lov om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2026-06-19, Kongen bestemmer",
@@ -891,7 +900,8 @@
    "refid": "lov/2026-06-19-48",
    "role": "amending",
    "sha256": "d52ca2625e571ef0272fa8c7a130a35f9cedfa9a7e7543400be20448ddd91597",
-   "title": "Lov om endringer i konkursloven mv. (rekonstruksjonsforhandling)"
+   "title": "Lov om endringer i konkursloven mv. (rekonstruksjonsforhandling)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2021-01-01",
@@ -900,7 +910,8 @@
    "refid": "forskrift/2020-02-28-200",
    "role": "decision",
    "sha256": "4cef74e55bc11fbe1cf62084594ddb0ff5e74681b65b0537e642a7c2c8fd9543",
-   "title": "Ikraftsetjing av lov 14. juni 2019 nr. 21 om arv og dødsboskifte"
+   "title": "Ikraftsetjing av lov 14. juni 2019 nr. 21 om arv og dødsboskifte",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2021-06-01",
@@ -909,7 +920,8 @@
    "refid": "forskrift/2021-05-07-1416",
    "role": "decision",
    "sha256": "0eb4093d5205006b6d1522a67cd4c58c61893e6ed88ba7fe844090d52d06ddc3",
-   "title": "Ikraftsetjing av lov 7. mai 2021 nr. 34 om endringar i lovgjevinga som følgje av innføring av kjønnsnøytral tittel på fylkesmannen"
+   "title": "Ikraftsetjing av lov 7. mai 2021 nr. 34 om endringar i lovgjevinga som følgje av innføring av kjønnsnøytral tittel på fylkesmannen",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2022-01-01",
@@ -918,7 +930,8 @@
    "refid": "forskrift/2021-05-28-1698",
    "role": "decision",
    "sha256": "83f41d823f4ace27d6db0072ea5fd992f4e86d39da445838941955bf9d4aa5b0",
-   "title": "Delt ikrafttredelse av lov 18. desember 2020 nr. 149 om endringer i arveloven (landbrukseiendommer i dødsbo mv.)"
+   "title": "Delt ikrafttredelse av lov 18. desember 2020 nr. 149 om endringer i arveloven (landbrukseiendommer i dødsbo mv.)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2023-04-01",
@@ -927,7 +940,8 @@
    "refid": "forskrift/2023-03-31-445",
    "role": "decision",
    "sha256": "acdfc947d28253032e5db6abde02fe8a6db3b567b0dafe3b7289e825f55d8f2b",
-   "title": "Ikraftsetting av lov 31. mars 2023 nr. 5 om endringer i vergemålsloven mv. (vergemål som frivillig støttetiltak mv.)"
+   "title": "Ikraftsetting av lov 31. mars 2023 nr. 5 om endringer i vergemålsloven mv. (vergemål som frivillig støttetiltak mv.)",
+   "unattributed_operations": 0
   },
   {
    "date_in_force": "2023-10-01",
@@ -936,73 +950,82 @@
    "refid": "forskrift/2023-06-16-934",
    "role": "decision",
    "sha256": "c560f788059f21cfb24d85d585bfa5f95fd5c70d7a08a7033fbbf6d323e96093",
-   "title": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)"
+   "title": "Ikraftsetting av lov 16. juni 2023 nr. 59 om endringer i arveloven mv. (ansvaret for arvelaterens forpliktelser)",
+   "unattributed_operations": 0
   }
  ],
  "oracle": {
   "member": "nl/nl-20190614-021.xml",
   "sha256": "41cfb99846d23497fc1e911b851f735c4abd54c16311ede59a41410a49be7ffb"
  },
- "replay_version": "legaltime-replay-1",
+ "replay_version": "legaltime-replay-2",
  "states": [
   {
    "act_level_problems": [],
    "applied": [],
    "at": "2020-12-31",
    "future": [
-    "lov/2021-05-07-34#I:136.0",
-    "lov/2020-12-18-149#I:8.0",
-    "lov/2022-06-22-81#I:0.0",
-    "lov/2023-03-31-5#II:0.0",
-    "lov/2023-06-16-59#I:1.0",
-    "lov/2023-06-16-59#I:3.0",
-    "lov/2023-06-16-59#I:5.0",
-    "lov/2023-06-16-59#I:7.0",
-    "lov/2023-06-16-59#I:8.0",
-    "lov/2023-06-16-59#I:10.0",
-    "lov/2023-06-16-59#I:13.0",
-    "lov/2023-06-16-59#I:15.0",
-    "lov/2023-06-16-59#I:16.0"
+    "lov/2021-05-07-34#1:I:136.0",
+    "lov/2020-12-18-149#1:I:8.0",
+    "lov/2022-06-22-81#1:I:0.0",
+    "lov/2023-03-31-5#2:II:0.0",
+    "lov/2023-06-16-59#1:I:1.0",
+    "lov/2023-06-16-59#1:I:3.0",
+    "lov/2023-06-16-59#1:I:5.0",
+    "lov/2023-06-16-59#1:I:7.0",
+    "lov/2023-06-16-59#1:I:8.0",
+    "lov/2023-06-16-59#1:I:10.0",
+    "lov/2023-06-16-59#1:I:13.0",
+    "lov/2023-06-16-59#1:I:15.0",
+    "lov/2023-06-16-59#1:I:16.0"
    ],
    "pending": [
-    "lov/2026-06-19-48#IV:0.0",
-    "lov/2026-06-19-48#VI:25.0",
-    "lov/2026-06-19-48#VI:25.1"
+    "lov/2026-06-19-48#4:IV:0.0",
+    "lov/2026-06-19-48#6:VI:25.0",
+    "lov/2026-06-19-48#6:VI:25.1"
    ],
    "provisions": [],
    "status": "not_yet_in_force",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": [
+    "lov/2020-12-18-149#1:I:1.0",
+    "lov/2020-12-18-149#1:I:2.0",
+    "lov/2020-12-18-149#1:I:4.0",
+    "lov/2020-12-18-149#1:I:6.0",
+    "lov/2020-12-18-149#1:I:10.0",
+    "lov/2020-12-18-149#1:I:12.0"
+   ]
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2020-12-18-149#I:1.0",
-    "lov/2020-12-18-149#I:2.0",
-    "lov/2020-12-18-149#I:4.0",
-    "lov/2020-12-18-149#I:6.0",
-    "lov/2020-12-18-149#I:10.0",
-    "lov/2020-12-18-149#I:12.0"
+    "lov/2020-12-18-149#1:I:1.0",
+    "lov/2020-12-18-149#1:I:2.0",
+    "lov/2020-12-18-149#1:I:4.0",
+    "lov/2020-12-18-149#1:I:6.0",
+    "lov/2020-12-18-149#1:I:10.0",
+    "lov/2020-12-18-149#1:I:12.0"
    ],
    "at": "2021-01-01",
    "future": [
-    "lov/2021-05-07-34#I:136.0",
-    "lov/2020-12-18-149#I:8.0",
-    "lov/2022-06-22-81#I:0.0",
-    "lov/2023-03-31-5#II:0.0",
-    "lov/2023-06-16-59#I:1.0",
-    "lov/2023-06-16-59#I:3.0",
-    "lov/2023-06-16-59#I:5.0",
-    "lov/2023-06-16-59#I:7.0",
-    "lov/2023-06-16-59#I:8.0",
-    "lov/2023-06-16-59#I:10.0",
-    "lov/2023-06-16-59#I:13.0",
-    "lov/2023-06-16-59#I:15.0",
-    "lov/2023-06-16-59#I:16.0"
+    "lov/2021-05-07-34#1:I:136.0",
+    "lov/2020-12-18-149#1:I:8.0",
+    "lov/2022-06-22-81#1:I:0.0",
+    "lov/2023-03-31-5#2:II:0.0",
+    "lov/2023-06-16-59#1:I:1.0",
+    "lov/2023-06-16-59#1:I:3.0",
+    "lov/2023-06-16-59#1:I:5.0",
+    "lov/2023-06-16-59#1:I:7.0",
+    "lov/2023-06-16-59#1:I:8.0",
+    "lov/2023-06-16-59#1:I:10.0",
+    "lov/2023-06-16-59#1:I:13.0",
+    "lov/2023-06-16-59#1:I:15.0",
+    "lov/2023-06-16-59#1:I:16.0"
    ],
    "pending": [
-    "lov/2026-06-19-48#IV:0.0",
-    "lov/2026-06-19-48#VI:25.0",
-    "lov/2026-06-19-48#VI:25.1"
+    "lov/2026-06-19-48#4:IV:0.0",
+    "lov/2026-06-19-48#6:VI:25.0",
+    "lov/2026-06-19-48#6:VI:25.1"
    ],
    "provisions": [
     {
@@ -1335,7 +1358,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "key": "§42",
      "ledd": 5,
@@ -1345,7 +1368,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "key": "§43",
      "ledd": 1,
@@ -1619,7 +1642,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:2.0"
+      "lov/2020-12-18-149#1:I:2.0"
      ],
      "key": "§77",
      "ledd": 1,
@@ -1717,7 +1740,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:4.0"
+      "lov/2020-12-18-149#1:I:4.0"
      ],
      "key": "§89",
      "ledd": 3,
@@ -1743,7 +1766,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:6.0"
+      "lov/2020-12-18-149#1:I:6.0"
      ],
      "key": "§92",
      "ledd": 3,
@@ -2201,7 +2224,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:10.0"
+      "lov/2020-12-18-149#1:I:10.0"
      ],
      "key": "§149",
      "ledd": 2,
@@ -2459,7 +2482,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:12.0"
+      "lov/2020-12-18-149#1:I:12.0"
      ],
      "key": "§181",
      "ledd": 1,
@@ -2469,38 +2492,39 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2020-12-18-149#I:1.0",
-    "lov/2020-12-18-149#I:2.0",
-    "lov/2020-12-18-149#I:4.0",
-    "lov/2020-12-18-149#I:6.0",
-    "lov/2020-12-18-149#I:10.0",
-    "lov/2020-12-18-149#I:12.0",
-    "lov/2021-05-07-34#I:136.0"
+    "lov/2020-12-18-149#1:I:1.0",
+    "lov/2020-12-18-149#1:I:2.0",
+    "lov/2020-12-18-149#1:I:4.0",
+    "lov/2020-12-18-149#1:I:6.0",
+    "lov/2020-12-18-149#1:I:10.0",
+    "lov/2020-12-18-149#1:I:12.0",
+    "lov/2021-05-07-34#1:I:136.0"
    ],
    "at": "2021-06-01",
    "future": [
-    "lov/2020-12-18-149#I:8.0",
-    "lov/2022-06-22-81#I:0.0",
-    "lov/2023-03-31-5#II:0.0",
-    "lov/2023-06-16-59#I:1.0",
-    "lov/2023-06-16-59#I:3.0",
-    "lov/2023-06-16-59#I:5.0",
-    "lov/2023-06-16-59#I:7.0",
-    "lov/2023-06-16-59#I:8.0",
-    "lov/2023-06-16-59#I:10.0",
-    "lov/2023-06-16-59#I:13.0",
-    "lov/2023-06-16-59#I:15.0",
-    "lov/2023-06-16-59#I:16.0"
+    "lov/2020-12-18-149#1:I:8.0",
+    "lov/2022-06-22-81#1:I:0.0",
+    "lov/2023-03-31-5#2:II:0.0",
+    "lov/2023-06-16-59#1:I:1.0",
+    "lov/2023-06-16-59#1:I:3.0",
+    "lov/2023-06-16-59#1:I:5.0",
+    "lov/2023-06-16-59#1:I:7.0",
+    "lov/2023-06-16-59#1:I:8.0",
+    "lov/2023-06-16-59#1:I:10.0",
+    "lov/2023-06-16-59#1:I:13.0",
+    "lov/2023-06-16-59#1:I:15.0",
+    "lov/2023-06-16-59#1:I:16.0"
    ],
    "pending": [
-    "lov/2026-06-19-48#IV:0.0",
-    "lov/2026-06-19-48#VI:25.0",
-    "lov/2026-06-19-48#VI:25.1"
+    "lov/2026-06-19-48#4:IV:0.0",
+    "lov/2026-06-19-48#6:VI:25.0",
+    "lov/2026-06-19-48#6:VI:25.1"
    ],
    "provisions": [
     {
@@ -2585,7 +2609,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§11",
      "ledd": 1,
@@ -2611,7 +2635,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§14",
      "ledd": 6,
@@ -2621,7 +2645,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§15",
      "ledd": 2,
@@ -2695,7 +2719,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§24",
      "ledd": 2,
@@ -2729,7 +2753,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§28",
      "ledd": 4,
@@ -2819,7 +2843,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§39",
      "ledd": 3,
@@ -2845,7 +2869,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "key": "§42",
      "ledd": 5,
@@ -2855,7 +2879,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "key": "§43",
      "ledd": 1,
@@ -2905,7 +2929,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§49",
      "ledd": 2,
@@ -2915,7 +2939,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§50",
      "ledd": 2,
@@ -3021,7 +3045,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§63",
      "ledd": 5,
@@ -3135,7 +3159,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:2.0"
+      "lov/2020-12-18-149#1:I:2.0"
      ],
      "key": "§77",
      "ledd": 1,
@@ -3233,7 +3257,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:4.0"
+      "lov/2020-12-18-149#1:I:4.0"
      ],
      "key": "§89",
      "ledd": 3,
@@ -3243,7 +3267,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§90",
      "ledd": 5,
@@ -3261,7 +3285,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:6.0"
+      "lov/2020-12-18-149#1:I:6.0"
      ],
      "key": "§92",
      "ledd": 3,
@@ -3295,7 +3319,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§96",
      "ledd": 5,
@@ -3305,7 +3329,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§97",
      "ledd": 1,
@@ -3475,7 +3499,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§118",
      "ledd": 7,
@@ -3549,7 +3573,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§127",
      "ledd": 3,
@@ -3575,7 +3599,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§130",
      "ledd": 3,
@@ -3729,7 +3753,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:10.0"
+      "lov/2020-12-18-149#1:I:10.0"
      ],
      "key": "§149",
      "ledd": 2,
@@ -3827,7 +3851,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§161",
      "ledd": 4,
@@ -3989,7 +4013,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:12.0"
+      "lov/2020-12-18-149#1:I:12.0"
      ],
      "key": "§181",
      "ledd": 1,
@@ -3999,38 +4023,39 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2020-12-18-149#I:1.0",
-    "lov/2020-12-18-149#I:2.0",
-    "lov/2020-12-18-149#I:4.0",
-    "lov/2020-12-18-149#I:6.0",
-    "lov/2020-12-18-149#I:10.0",
-    "lov/2020-12-18-149#I:12.0",
-    "lov/2021-05-07-34#I:136.0",
-    "lov/2020-12-18-149#I:8.0"
+    "lov/2020-12-18-149#1:I:1.0",
+    "lov/2020-12-18-149#1:I:2.0",
+    "lov/2020-12-18-149#1:I:4.0",
+    "lov/2020-12-18-149#1:I:6.0",
+    "lov/2020-12-18-149#1:I:10.0",
+    "lov/2020-12-18-149#1:I:12.0",
+    "lov/2021-05-07-34#1:I:136.0",
+    "lov/2020-12-18-149#1:I:8.0"
    ],
    "at": "2022-01-01",
    "future": [
-    "lov/2022-06-22-81#I:0.0",
-    "lov/2023-03-31-5#II:0.0",
-    "lov/2023-06-16-59#I:1.0",
-    "lov/2023-06-16-59#I:3.0",
-    "lov/2023-06-16-59#I:5.0",
-    "lov/2023-06-16-59#I:7.0",
-    "lov/2023-06-16-59#I:8.0",
-    "lov/2023-06-16-59#I:10.0",
-    "lov/2023-06-16-59#I:13.0",
-    "lov/2023-06-16-59#I:15.0",
-    "lov/2023-06-16-59#I:16.0"
+    "lov/2022-06-22-81#1:I:0.0",
+    "lov/2023-03-31-5#2:II:0.0",
+    "lov/2023-06-16-59#1:I:1.0",
+    "lov/2023-06-16-59#1:I:3.0",
+    "lov/2023-06-16-59#1:I:5.0",
+    "lov/2023-06-16-59#1:I:7.0",
+    "lov/2023-06-16-59#1:I:8.0",
+    "lov/2023-06-16-59#1:I:10.0",
+    "lov/2023-06-16-59#1:I:13.0",
+    "lov/2023-06-16-59#1:I:15.0",
+    "lov/2023-06-16-59#1:I:16.0"
    ],
    "pending": [
-    "lov/2026-06-19-48#IV:0.0",
-    "lov/2026-06-19-48#VI:25.0",
-    "lov/2026-06-19-48#VI:25.1"
+    "lov/2026-06-19-48#4:IV:0.0",
+    "lov/2026-06-19-48#6:VI:25.0",
+    "lov/2026-06-19-48#6:VI:25.1"
    ],
    "provisions": [
     {
@@ -4115,7 +4140,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§11",
      "ledd": 1,
@@ -4141,7 +4166,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§14",
      "ledd": 6,
@@ -4151,7 +4176,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§15",
      "ledd": 2,
@@ -4225,7 +4250,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§24",
      "ledd": 2,
@@ -4259,7 +4284,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§28",
      "ledd": 4,
@@ -4349,7 +4374,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§39",
      "ledd": 3,
@@ -4375,7 +4400,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "key": "§42",
      "ledd": 5,
@@ -4385,7 +4410,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "key": "§43",
      "ledd": 1,
@@ -4435,7 +4460,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§49",
      "ledd": 2,
@@ -4445,7 +4470,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§50",
      "ledd": 2,
@@ -4551,7 +4576,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§63",
      "ledd": 5,
@@ -4665,7 +4690,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:2.0"
+      "lov/2020-12-18-149#1:I:2.0"
      ],
      "key": "§77",
      "ledd": 1,
@@ -4763,7 +4788,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:4.0"
+      "lov/2020-12-18-149#1:I:4.0"
      ],
      "key": "§89",
      "ledd": 3,
@@ -4773,7 +4798,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§90",
      "ledd": 5,
@@ -4791,7 +4816,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:6.0"
+      "lov/2020-12-18-149#1:I:6.0"
      ],
      "key": "§92",
      "ledd": 3,
@@ -4825,7 +4850,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§96",
      "ledd": 5,
@@ -4835,7 +4860,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§97",
      "ledd": 1,
@@ -4861,7 +4886,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:8.0"
+      "lov/2020-12-18-149#1:I:8.0"
      ],
      "key": "§99a",
      "ledd": 5,
@@ -5015,7 +5040,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§118",
      "ledd": 7,
@@ -5089,7 +5114,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§127",
      "ledd": 3,
@@ -5115,7 +5140,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§130",
      "ledd": 3,
@@ -5269,7 +5294,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:10.0"
+      "lov/2020-12-18-149#1:I:10.0"
      ],
      "key": "§149",
      "ledd": 2,
@@ -5367,7 +5392,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§161",
      "ledd": 4,
@@ -5529,7 +5554,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:12.0"
+      "lov/2020-12-18-149#1:I:12.0"
      ],
      "key": "§181",
      "ledd": 1,
@@ -5539,37 +5564,38 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2020-12-18-149#I:1.0",
-    "lov/2020-12-18-149#I:2.0",
-    "lov/2020-12-18-149#I:4.0",
-    "lov/2020-12-18-149#I:6.0",
-    "lov/2020-12-18-149#I:10.0",
-    "lov/2020-12-18-149#I:12.0",
-    "lov/2021-05-07-34#I:136.0",
-    "lov/2020-12-18-149#I:8.0",
-    "lov/2022-06-22-81#I:0.0",
-    "lov/2023-03-31-5#II:0.0",
-    "lov/2023-06-16-59#I:1.0",
-    "lov/2023-06-16-59#I:3.0",
-    "lov/2023-06-16-59#I:5.0",
-    "lov/2023-06-16-59#I:7.0",
-    "lov/2023-06-16-59#I:8.0",
-    "lov/2023-06-16-59#I:10.0",
-    "lov/2023-06-16-59#I:13.0",
-    "lov/2023-06-16-59#I:15.0",
-    "lov/2023-06-16-59#I:16.0"
+    "lov/2020-12-18-149#1:I:1.0",
+    "lov/2020-12-18-149#1:I:2.0",
+    "lov/2020-12-18-149#1:I:4.0",
+    "lov/2020-12-18-149#1:I:6.0",
+    "lov/2020-12-18-149#1:I:10.0",
+    "lov/2020-12-18-149#1:I:12.0",
+    "lov/2021-05-07-34#1:I:136.0",
+    "lov/2020-12-18-149#1:I:8.0",
+    "lov/2022-06-22-81#1:I:0.0",
+    "lov/2023-03-31-5#2:II:0.0",
+    "lov/2023-06-16-59#1:I:1.0",
+    "lov/2023-06-16-59#1:I:3.0",
+    "lov/2023-06-16-59#1:I:5.0",
+    "lov/2023-06-16-59#1:I:7.0",
+    "lov/2023-06-16-59#1:I:8.0",
+    "lov/2023-06-16-59#1:I:10.0",
+    "lov/2023-06-16-59#1:I:13.0",
+    "lov/2023-06-16-59#1:I:15.0",
+    "lov/2023-06-16-59#1:I:16.0"
    ],
    "at": "2023-10-01",
    "future": [],
    "pending": [
-    "lov/2026-06-19-48#IV:0.0",
-    "lov/2026-06-19-48#VI:25.0",
-    "lov/2026-06-19-48#VI:25.1"
+    "lov/2026-06-19-48#4:IV:0.0",
+    "lov/2026-06-19-48#6:VI:25.0",
+    "lov/2026-06-19-48#6:VI:25.1"
    ],
    "provisions": [
     {
@@ -5654,7 +5680,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§11",
      "ledd": 1,
@@ -5680,7 +5706,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§14",
      "ledd": 6,
@@ -5690,7 +5716,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§15",
      "ledd": 2,
@@ -5732,7 +5758,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:1.0"
+      "lov/2023-06-16-59#1:I:1.0"
      ],
      "key": "§20",
      "ledd": 1,
@@ -5766,7 +5792,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§24",
      "ledd": 2,
@@ -5800,7 +5826,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§28",
      "ledd": 4,
@@ -5858,7 +5884,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:3.0"
+      "lov/2023-06-16-59#1:I:3.0"
      ],
      "key": "§35",
      "ledd": 1,
@@ -5892,7 +5918,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§39",
      "ledd": 3,
@@ -5918,7 +5944,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "key": "§42",
      "ledd": 5,
@@ -5928,7 +5954,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "key": "§43",
      "ledd": 1,
@@ -5978,7 +6004,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§49",
      "ledd": 2,
@@ -5988,7 +6014,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§50",
      "ledd": 2,
@@ -6094,7 +6120,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§63",
      "ledd": 5,
@@ -6208,7 +6234,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:2.0"
+      "lov/2020-12-18-149#1:I:2.0"
      ],
      "key": "§77",
      "ledd": 1,
@@ -6306,7 +6332,7 @@
     },
     {
      "applied": [
-      "lov/2022-06-22-81#I:0.0"
+      "lov/2022-06-22-81#1:I:0.0"
      ],
      "key": "§88a",
      "ledd": 4,
@@ -6316,7 +6342,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:4.0"
+      "lov/2020-12-18-149#1:I:4.0"
      ],
      "key": "§89",
      "ledd": 3,
@@ -6326,7 +6352,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§90",
      "ledd": 5,
@@ -6344,9 +6370,9 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:6.0",
-      "lov/2023-06-16-59#I:5.0",
-      "lov/2023-06-16-59#I:8.0"
+      "lov/2020-12-18-149#1:I:6.0",
+      "lov/2023-06-16-59#1:I:5.0",
+      "lov/2023-06-16-59#1:I:8.0"
      ],
      "key": "§92",
      "ledd": 5,
@@ -6380,8 +6406,8 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0",
-      "lov/2023-03-31-5#II:0.0"
+      "lov/2021-05-07-34#1:I:136.0",
+      "lov/2023-03-31-5#2:II:0.0"
      ],
      "key": "§96",
      "ledd": 5,
@@ -6391,7 +6417,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§97",
      "ledd": 1,
@@ -6417,7 +6443,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:8.0"
+      "lov/2020-12-18-149#1:I:8.0"
      ],
      "key": "§99a",
      "ledd": 5,
@@ -6555,7 +6581,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:10.0"
+      "lov/2023-06-16-59#1:I:10.0"
      ],
      "key": "§116",
      "ledd": 5,
@@ -6573,8 +6599,8 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0",
-      "lov/2023-06-16-59#I:13.0"
+      "lov/2021-05-07-34#1:I:136.0",
+      "lov/2023-06-16-59#1:I:13.0"
      ],
      "key": "§118",
      "ledd": 8,
@@ -6648,7 +6674,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§127",
      "ledd": 3,
@@ -6674,7 +6700,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§130",
      "ledd": 3,
@@ -6748,7 +6774,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:16.0"
+      "lov/2023-06-16-59#1:I:16.0"
      ],
      "key": "§139",
      "ledd": 4,
@@ -6830,7 +6856,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:10.0"
+      "lov/2020-12-18-149#1:I:10.0"
      ],
      "key": "§149",
      "ledd": 2,
@@ -6928,7 +6954,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§161",
      "ledd": 4,
@@ -7090,7 +7116,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:12.0"
+      "lov/2020-12-18-149#1:I:12.0"
      ],
      "key": "§181",
      "ledd": 1,
@@ -7100,37 +7126,38 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   },
   {
    "act_level_problems": [],
    "applied": [
-    "lov/2020-12-18-149#I:1.0",
-    "lov/2020-12-18-149#I:2.0",
-    "lov/2020-12-18-149#I:4.0",
-    "lov/2020-12-18-149#I:6.0",
-    "lov/2020-12-18-149#I:10.0",
-    "lov/2020-12-18-149#I:12.0",
-    "lov/2021-05-07-34#I:136.0",
-    "lov/2020-12-18-149#I:8.0",
-    "lov/2022-06-22-81#I:0.0",
-    "lov/2023-03-31-5#II:0.0",
-    "lov/2023-06-16-59#I:1.0",
-    "lov/2023-06-16-59#I:3.0",
-    "lov/2023-06-16-59#I:5.0",
-    "lov/2023-06-16-59#I:7.0",
-    "lov/2023-06-16-59#I:8.0",
-    "lov/2023-06-16-59#I:10.0",
-    "lov/2023-06-16-59#I:13.0",
-    "lov/2023-06-16-59#I:15.0",
-    "lov/2023-06-16-59#I:16.0"
+    "lov/2020-12-18-149#1:I:1.0",
+    "lov/2020-12-18-149#1:I:2.0",
+    "lov/2020-12-18-149#1:I:4.0",
+    "lov/2020-12-18-149#1:I:6.0",
+    "lov/2020-12-18-149#1:I:10.0",
+    "lov/2020-12-18-149#1:I:12.0",
+    "lov/2021-05-07-34#1:I:136.0",
+    "lov/2020-12-18-149#1:I:8.0",
+    "lov/2022-06-22-81#1:I:0.0",
+    "lov/2023-03-31-5#2:II:0.0",
+    "lov/2023-06-16-59#1:I:1.0",
+    "lov/2023-06-16-59#1:I:3.0",
+    "lov/2023-06-16-59#1:I:5.0",
+    "lov/2023-06-16-59#1:I:7.0",
+    "lov/2023-06-16-59#1:I:8.0",
+    "lov/2023-06-16-59#1:I:10.0",
+    "lov/2023-06-16-59#1:I:13.0",
+    "lov/2023-06-16-59#1:I:15.0",
+    "lov/2023-06-16-59#1:I:16.0"
    ],
    "at": "2026-11-06",
    "future": [],
    "pending": [
-    "lov/2026-06-19-48#IV:0.0",
-    "lov/2026-06-19-48#VI:25.0",
-    "lov/2026-06-19-48#VI:25.1"
+    "lov/2026-06-19-48#4:IV:0.0",
+    "lov/2026-06-19-48#6:VI:25.0",
+    "lov/2026-06-19-48#6:VI:25.1"
    ],
    "provisions": [
     {
@@ -7215,7 +7242,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§11",
      "ledd": 1,
@@ -7241,7 +7268,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§14",
      "ledd": 6,
@@ -7251,7 +7278,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§15",
      "ledd": 2,
@@ -7293,7 +7320,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:1.0"
+      "lov/2023-06-16-59#1:I:1.0"
      ],
      "key": "§20",
      "ledd": 1,
@@ -7327,7 +7354,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§24",
      "ledd": 2,
@@ -7361,7 +7388,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§28",
      "ledd": 4,
@@ -7419,7 +7446,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:3.0"
+      "lov/2023-06-16-59#1:I:3.0"
      ],
      "key": "§35",
      "ledd": 1,
@@ -7453,7 +7480,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§39",
      "ledd": 3,
@@ -7479,7 +7506,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "key": "§42",
      "ledd": 5,
@@ -7489,7 +7516,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "key": "§43",
      "ledd": 1,
@@ -7539,7 +7566,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§49",
      "ledd": 2,
@@ -7549,7 +7576,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§50",
      "ledd": 2,
@@ -7655,7 +7682,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§63",
      "ledd": 5,
@@ -7769,7 +7796,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:2.0"
+      "lov/2020-12-18-149#1:I:2.0"
      ],
      "key": "§77",
      "ledd": 1,
@@ -7867,7 +7894,7 @@
     },
     {
      "applied": [
-      "lov/2022-06-22-81#I:0.0"
+      "lov/2022-06-22-81#1:I:0.0"
      ],
      "key": "§88a",
      "ledd": 4,
@@ -7877,7 +7904,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:4.0"
+      "lov/2020-12-18-149#1:I:4.0"
      ],
      "key": "§89",
      "ledd": 3,
@@ -7887,7 +7914,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§90",
      "ledd": 5,
@@ -7905,9 +7932,9 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:6.0",
-      "lov/2023-06-16-59#I:5.0",
-      "lov/2023-06-16-59#I:8.0"
+      "lov/2020-12-18-149#1:I:6.0",
+      "lov/2023-06-16-59#1:I:5.0",
+      "lov/2023-06-16-59#1:I:8.0"
      ],
      "key": "§92",
      "ledd": 5,
@@ -7941,8 +7968,8 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0",
-      "lov/2023-03-31-5#II:0.0"
+      "lov/2021-05-07-34#1:I:136.0",
+      "lov/2023-03-31-5#2:II:0.0"
      ],
      "key": "§96",
      "ledd": 5,
@@ -7952,7 +7979,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§97",
      "ledd": 1,
@@ -7978,7 +8005,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:8.0"
+      "lov/2020-12-18-149#1:I:8.0"
      ],
      "key": "§99a",
      "ledd": 5,
@@ -8116,7 +8143,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:10.0"
+      "lov/2023-06-16-59#1:I:10.0"
      ],
      "key": "§116",
      "ledd": 5,
@@ -8134,8 +8161,8 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0",
-      "lov/2023-06-16-59#I:13.0"
+      "lov/2021-05-07-34#1:I:136.0",
+      "lov/2023-06-16-59#1:I:13.0"
      ],
      "key": "§118",
      "ledd": 8,
@@ -8209,7 +8236,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§127",
      "ledd": 3,
@@ -8235,7 +8262,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§130",
      "ledd": 3,
@@ -8309,7 +8336,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:16.0"
+      "lov/2023-06-16-59#1:I:16.0"
      ],
      "key": "§139",
      "ledd": 4,
@@ -8391,7 +8418,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:10.0"
+      "lov/2020-12-18-149#1:I:10.0"
      ],
      "key": "§149",
      "ledd": 2,
@@ -8489,7 +8516,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "key": "§161",
      "ledd": 4,
@@ -8651,7 +8678,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:12.0"
+      "lov/2020-12-18-149#1:I:12.0"
      ],
      "key": "§181",
      "ledd": 1,
@@ -8661,1702 +8688,11 @@
     }
    ],
    "status": "replayed",
-   "unresolved": []
+   "unresolved": [],
+   "withheld": []
   }
  ],
  "verification": [
-  {
-   "act": "lov/2019-06-14-21",
-   "at": "2020-12-31",
-   "counts": {
-    "only_in_oracle": 183
-   },
-   "notes_without_replay_event": [
-    "§103",
-    "§11",
-    "§116",
-    "§118",
-    "§127",
-    "§130",
-    "§139",
-    "§14",
-    "§149",
-    "§15",
-    "§161",
-    "§178",
-    "§181",
-    "§20",
-    "§24",
-    "§28",
-    "§35",
-    "§39",
-    "§42",
-    "§43",
-    "§49",
-    "§50",
-    "§63",
-    "§77",
-    "§88a",
-    "§89",
-    "§90",
-    "§92",
-    "§96",
-    "§97",
-    "§99a"
-   ],
-   "oracle_member": "nl/nl-20190614-021.xml",
-   "oracle_sha256": "41cfb99846d23497fc1e911b851f735c4abd54c16311ede59a41410a49be7ffb",
-   "replay_events_without_note": [],
-   "sections": [
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§1",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§2",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§3",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§4",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§5",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§6",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§7",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§8",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§9",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§10",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§11",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§12",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§13",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§14",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§15",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§16",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§17",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§18",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§19",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§20",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§21",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§22",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§23",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§24",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§25",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§26",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§27",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§28",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§29",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§30",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§31",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§32",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§33",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§34",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§35",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§36",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§37",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§38",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§39",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§40",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§41",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§42",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§43",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§44",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§45",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§46",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§47",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§48",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§49",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§50",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§51",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§52",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§53",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§54",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§55",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§56",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§57",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§58",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§59",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§60",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§61",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§62",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§63",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§64",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§65",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§66",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§67",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§68",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§69",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§70",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§71",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§72",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§73",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§74",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§75",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§76",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§77",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§78",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§79",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§80",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§81",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§82",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§83",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§84",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§85",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§86",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§87",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§88",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§88a",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§89",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§90",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§91",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§92",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§93",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§94",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§95",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§96",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§97",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§98",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§99",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§99a",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§100",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§101",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§102",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§103",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§104",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§105",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§106",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§107",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§108",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§109",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§110",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§111",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§112",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§113",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§114",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§115",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§116",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§117",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§118",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§119",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§120",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§121",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§122",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§123",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§124",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§125",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§126",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§127",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§128",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§129",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§130",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§131",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§132",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§133",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§134",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§135",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§136",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§137",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§138",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§139",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§140",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§141",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§142",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§143",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§144",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§145",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§146",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§147",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§148",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§149",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§150",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§151",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§152",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§153",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§154",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§155",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§156",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§157",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§158",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§159",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§160",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§161",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§162",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§163",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§164",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§165",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§166",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§167",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§168",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§169",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§170",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§171",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§172",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§173",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§174",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§175",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§176",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§177",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§178",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§179",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§180",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    },
-    {
-     "applied": [],
-     "detail": "",
-     "key": "§181",
-     "oracle_notes": 0,
-     "pending": [],
-     "problems": [],
-     "verdict": "only_in_oracle"
-    }
-   ]
-  },
   {
    "act": "lov/2019-06-14-21",
    "at": "2021-01-01",
@@ -10766,7 +9102,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "detail": "",
      "key": "§42",
@@ -10777,7 +9113,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "detail": "",
      "key": "§43",
@@ -11085,7 +9421,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:2.0"
+      "lov/2020-12-18-149#1:I:2.0"
      ],
      "detail": "",
      "key": "§77",
@@ -11195,7 +9531,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:4.0"
+      "lov/2020-12-18-149#1:I:4.0"
      ],
      "detail": "",
      "key": "§89",
@@ -11224,7 +9560,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:6.0"
+      "lov/2020-12-18-149#1:I:6.0"
      ],
      "detail": "ledd count 3 vs 5",
      "key": "§92",
@@ -11329,8 +9665,8 @@
      "key": "§103",
      "oracle_notes": 1,
      "pending": [
-      "lov/2026-06-19-48#VI:25.0",
-      "lov/2026-06-19-48#VI:25.1"
+      "lov/2026-06-19-48#6:VI:25.0",
+      "lov/2026-06-19-48#6:VI:25.1"
      ],
      "problems": [],
      "verdict": "exact_normalized"
@@ -11742,7 +10078,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:10.0"
+      "lov/2020-12-18-149#1:I:10.0"
      ],
      "detail": "",
      "key": "§149",
@@ -12009,7 +10345,7 @@
      "key": "§178",
      "oracle_notes": 1,
      "pending": [
-      "lov/2026-06-19-48#IV:0.0"
+      "lov/2026-06-19-48#4:IV:0.0"
      ],
      "problems": [],
      "verdict": "exact_normalized"
@@ -12034,7 +10370,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:12.0"
+      "lov/2020-12-18-149#1:I:12.0"
      ],
      "detail": "",
      "key": "§181",
@@ -12177,7 +10513,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§11",
@@ -12206,7 +10542,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§14",
@@ -12217,7 +10553,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§15",
@@ -12300,7 +10636,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§24",
@@ -12338,7 +10674,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§28",
@@ -12439,7 +10775,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§39",
@@ -12468,7 +10804,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "detail": "",
      "key": "§42",
@@ -12479,7 +10815,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "detail": "",
      "key": "§43",
@@ -12535,7 +10871,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§49",
@@ -12546,7 +10882,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§50",
@@ -12665,7 +11001,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§63",
@@ -12793,7 +11129,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:2.0"
+      "lov/2020-12-18-149#1:I:2.0"
      ],
      "detail": "",
      "key": "§77",
@@ -12903,7 +11239,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:4.0"
+      "lov/2020-12-18-149#1:I:4.0"
      ],
      "detail": "",
      "key": "§89",
@@ -12914,7 +11250,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§90",
@@ -12934,7 +11270,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:6.0"
+      "lov/2020-12-18-149#1:I:6.0"
      ],
      "detail": "ledd count 3 vs 5",
      "key": "§92",
@@ -12972,7 +11308,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "ledd 4 differ",
      "key": "§96",
@@ -12983,7 +11319,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§97",
@@ -13043,8 +11379,8 @@
      "key": "§103",
      "oracle_notes": 1,
      "pending": [
-      "lov/2026-06-19-48#VI:25.0",
-      "lov/2026-06-19-48#VI:25.1"
+      "lov/2026-06-19-48#6:VI:25.0",
+      "lov/2026-06-19-48#6:VI:25.1"
      ],
      "problems": [],
      "verdict": "exact_normalized"
@@ -13177,7 +11513,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "ledd count 7 vs 8",
      "key": "§118",
@@ -13260,7 +11596,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§127",
@@ -13289,7 +11625,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§130",
@@ -13462,7 +11798,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:10.0"
+      "lov/2020-12-18-149#1:I:10.0"
      ],
      "detail": "",
      "key": "§149",
@@ -13572,7 +11908,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§161",
@@ -13731,7 +12067,7 @@
      "key": "§178",
      "oracle_notes": 1,
      "pending": [
-      "lov/2026-06-19-48#IV:0.0"
+      "lov/2026-06-19-48#4:IV:0.0"
      ],
      "problems": [],
      "verdict": "exact_normalized"
@@ -13756,7 +12092,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:12.0"
+      "lov/2020-12-18-149#1:I:12.0"
      ],
      "detail": "",
      "key": "§181",
@@ -13898,7 +12234,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§11",
@@ -13927,7 +12263,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§14",
@@ -13938,7 +12274,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§15",
@@ -14021,7 +12357,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§24",
@@ -14059,7 +12395,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§28",
@@ -14160,7 +12496,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§39",
@@ -14189,7 +12525,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "detail": "",
      "key": "§42",
@@ -14200,7 +12536,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "detail": "",
      "key": "§43",
@@ -14256,7 +12592,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§49",
@@ -14267,7 +12603,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§50",
@@ -14386,7 +12722,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§63",
@@ -14514,7 +12850,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:2.0"
+      "lov/2020-12-18-149#1:I:2.0"
      ],
      "detail": "",
      "key": "§77",
@@ -14624,7 +12960,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:4.0"
+      "lov/2020-12-18-149#1:I:4.0"
      ],
      "detail": "",
      "key": "§89",
@@ -14635,7 +12971,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§90",
@@ -14655,7 +12991,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:6.0"
+      "lov/2020-12-18-149#1:I:6.0"
      ],
      "detail": "ledd count 3 vs 5",
      "key": "§92",
@@ -14693,7 +13029,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "ledd 4 differ",
      "key": "§96",
@@ -14704,7 +13040,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§97",
@@ -14733,7 +13069,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:8.0"
+      "lov/2020-12-18-149#1:I:8.0"
      ],
      "detail": "",
      "key": "§99a",
@@ -14775,8 +13111,8 @@
      "key": "§103",
      "oracle_notes": 1,
      "pending": [
-      "lov/2026-06-19-48#VI:25.0",
-      "lov/2026-06-19-48#VI:25.1"
+      "lov/2026-06-19-48#6:VI:25.0",
+      "lov/2026-06-19-48#6:VI:25.1"
      ],
      "problems": [],
      "verdict": "exact_normalized"
@@ -14909,7 +13245,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "ledd count 7 vs 8",
      "key": "§118",
@@ -14992,7 +13328,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§127",
@@ -15021,7 +13357,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§130",
@@ -15194,7 +13530,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:10.0"
+      "lov/2020-12-18-149#1:I:10.0"
      ],
      "detail": "",
      "key": "§149",
@@ -15304,7 +13640,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§161",
@@ -15463,7 +13799,7 @@
      "key": "§178",
      "oracle_notes": 1,
      "pending": [
-      "lov/2026-06-19-48#IV:0.0"
+      "lov/2026-06-19-48#4:IV:0.0"
      ],
      "problems": [],
      "verdict": "exact_normalized"
@@ -15488,7 +13824,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:12.0"
+      "lov/2020-12-18-149#1:I:12.0"
      ],
      "detail": "",
      "key": "§181",
@@ -15613,7 +13949,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§11",
@@ -15642,7 +13978,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§14",
@@ -15653,7 +13989,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§15",
@@ -15700,7 +14036,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:1.0"
+      "lov/2023-06-16-59#1:I:1.0"
      ],
      "detail": "",
      "key": "§20",
@@ -15738,7 +14074,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§24",
@@ -15776,7 +14112,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§28",
@@ -15841,7 +14177,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:3.0"
+      "lov/2023-06-16-59#1:I:3.0"
      ],
      "detail": "",
      "key": "§35",
@@ -15879,7 +14215,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§39",
@@ -15908,7 +14244,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "detail": "",
      "key": "§42",
@@ -15919,7 +14255,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "detail": "",
      "key": "§43",
@@ -15975,7 +14311,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§49",
@@ -15986,7 +14322,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§50",
@@ -16105,7 +14441,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§63",
@@ -16233,7 +14569,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:2.0"
+      "lov/2020-12-18-149#1:I:2.0"
      ],
      "detail": "",
      "key": "§77",
@@ -16343,7 +14679,7 @@
     },
     {
      "applied": [
-      "lov/2022-06-22-81#I:0.0"
+      "lov/2022-06-22-81#1:I:0.0"
      ],
      "detail": "",
      "key": "§88a",
@@ -16354,7 +14690,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:4.0"
+      "lov/2020-12-18-149#1:I:4.0"
      ],
      "detail": "",
      "key": "§89",
@@ -16365,7 +14701,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§90",
@@ -16385,9 +14721,9 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:6.0",
-      "lov/2023-06-16-59#I:5.0",
-      "lov/2023-06-16-59#I:8.0"
+      "lov/2020-12-18-149#1:I:6.0",
+      "lov/2023-06-16-59#1:I:5.0",
+      "lov/2023-06-16-59#1:I:8.0"
      ],
      "detail": "",
      "key": "§92",
@@ -16425,8 +14761,8 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0",
-      "lov/2023-03-31-5#II:0.0"
+      "lov/2021-05-07-34#1:I:136.0",
+      "lov/2023-03-31-5#2:II:0.0"
      ],
      "detail": "",
      "key": "§96",
@@ -16437,7 +14773,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§97",
@@ -16466,7 +14802,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:8.0"
+      "lov/2020-12-18-149#1:I:8.0"
      ],
      "detail": "",
      "key": "§99a",
@@ -16508,8 +14844,8 @@
      "key": "§103",
      "oracle_notes": 1,
      "pending": [
-      "lov/2026-06-19-48#VI:25.0",
-      "lov/2026-06-19-48#VI:25.1"
+      "lov/2026-06-19-48#6:VI:25.0",
+      "lov/2026-06-19-48#6:VI:25.1"
      ],
      "problems": [],
      "verdict": "exact_normalized"
@@ -16624,7 +14960,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:10.0"
+      "lov/2023-06-16-59#1:I:10.0"
      ],
      "detail": "",
      "key": "§116",
@@ -16644,8 +14980,8 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0",
-      "lov/2023-06-16-59#I:13.0"
+      "lov/2021-05-07-34#1:I:136.0",
+      "lov/2023-06-16-59#1:I:13.0"
      ],
      "detail": "",
      "key": "§118",
@@ -16728,7 +15064,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§127",
@@ -16757,7 +15093,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§130",
@@ -16840,7 +15176,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:16.0"
+      "lov/2023-06-16-59#1:I:16.0"
      ],
      "detail": "",
      "key": "§139",
@@ -16932,7 +15268,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:10.0"
+      "lov/2020-12-18-149#1:I:10.0"
      ],
      "detail": "",
      "key": "§149",
@@ -17042,7 +15378,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§161",
@@ -17201,7 +15537,7 @@
      "key": "§178",
      "oracle_notes": 1,
      "pending": [
-      "lov/2026-06-19-48#IV:0.0"
+      "lov/2026-06-19-48#4:IV:0.0"
      ],
      "problems": [],
      "verdict": "exact_normalized"
@@ -17226,7 +15562,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:12.0"
+      "lov/2020-12-18-149#1:I:12.0"
      ],
      "detail": "",
      "key": "§181",
@@ -17342,7 +15678,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§11",
@@ -17371,7 +15707,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§14",
@@ -17382,7 +15718,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§15",
@@ -17429,7 +15765,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:1.0"
+      "lov/2023-06-16-59#1:I:1.0"
      ],
      "detail": "",
      "key": "§20",
@@ -17467,7 +15803,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§24",
@@ -17505,7 +15841,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§28",
@@ -17570,7 +15906,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:3.0"
+      "lov/2023-06-16-59#1:I:3.0"
      ],
      "detail": "",
      "key": "§35",
@@ -17608,7 +15944,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§39",
@@ -17637,7 +15973,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "detail": "",
      "key": "§42",
@@ -17648,7 +15984,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:1.0"
+      "lov/2020-12-18-149#1:I:1.0"
      ],
      "detail": "",
      "key": "§43",
@@ -17704,7 +16040,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§49",
@@ -17715,7 +16051,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§50",
@@ -17834,7 +16170,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§63",
@@ -17962,7 +16298,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:2.0"
+      "lov/2020-12-18-149#1:I:2.0"
      ],
      "detail": "",
      "key": "§77",
@@ -18072,7 +16408,7 @@
     },
     {
      "applied": [
-      "lov/2022-06-22-81#I:0.0"
+      "lov/2022-06-22-81#1:I:0.0"
      ],
      "detail": "",
      "key": "§88a",
@@ -18083,7 +16419,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:4.0"
+      "lov/2020-12-18-149#1:I:4.0"
      ],
      "detail": "",
      "key": "§89",
@@ -18094,7 +16430,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§90",
@@ -18114,9 +16450,9 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:6.0",
-      "lov/2023-06-16-59#I:5.0",
-      "lov/2023-06-16-59#I:8.0"
+      "lov/2020-12-18-149#1:I:6.0",
+      "lov/2023-06-16-59#1:I:5.0",
+      "lov/2023-06-16-59#1:I:8.0"
      ],
      "detail": "",
      "key": "§92",
@@ -18154,8 +16490,8 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0",
-      "lov/2023-03-31-5#II:0.0"
+      "lov/2021-05-07-34#1:I:136.0",
+      "lov/2023-03-31-5#2:II:0.0"
      ],
      "detail": "",
      "key": "§96",
@@ -18166,7 +16502,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§97",
@@ -18195,7 +16531,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:8.0"
+      "lov/2020-12-18-149#1:I:8.0"
      ],
      "detail": "",
      "key": "§99a",
@@ -18237,8 +16573,8 @@
      "key": "§103",
      "oracle_notes": 1,
      "pending": [
-      "lov/2026-06-19-48#VI:25.0",
-      "lov/2026-06-19-48#VI:25.1"
+      "lov/2026-06-19-48#6:VI:25.0",
+      "lov/2026-06-19-48#6:VI:25.1"
      ],
      "problems": [],
      "verdict": "exact_normalized"
@@ -18353,7 +16689,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:10.0"
+      "lov/2023-06-16-59#1:I:10.0"
      ],
      "detail": "",
      "key": "§116",
@@ -18373,8 +16709,8 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0",
-      "lov/2023-06-16-59#I:13.0"
+      "lov/2021-05-07-34#1:I:136.0",
+      "lov/2023-06-16-59#1:I:13.0"
      ],
      "detail": "",
      "key": "§118",
@@ -18457,7 +16793,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§127",
@@ -18486,7 +16822,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§130",
@@ -18569,7 +16905,7 @@
     },
     {
      "applied": [
-      "lov/2023-06-16-59#I:16.0"
+      "lov/2023-06-16-59#1:I:16.0"
      ],
      "detail": "",
      "key": "§139",
@@ -18661,7 +16997,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:10.0"
+      "lov/2020-12-18-149#1:I:10.0"
      ],
      "detail": "",
      "key": "§149",
@@ -18771,7 +17107,7 @@
     },
     {
      "applied": [
-      "lov/2021-05-07-34#I:136.0"
+      "lov/2021-05-07-34#1:I:136.0"
      ],
      "detail": "",
      "key": "§161",
@@ -18930,7 +17266,7 @@
      "key": "§178",
      "oracle_notes": 1,
      "pending": [
-      "lov/2026-06-19-48#IV:0.0"
+      "lov/2026-06-19-48#4:IV:0.0"
      ],
      "problems": [],
      "verdict": "exact_normalized"
@@ -18955,7 +17291,7 @@
     },
     {
      "applied": [
-      "lov/2020-12-18-149#I:12.0"
+      "lov/2020-12-18-149#1:I:12.0"
      ],
      "detail": "",
      "key": "§181",
