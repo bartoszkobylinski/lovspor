@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from lovspor.errors import LovsporError
 from lovspor.llhb.corpus_pin import git_head_sha, working_tree_clean
+from lovspor.llhb.results import was_resumed
 
 SCHEMA_VERSION = 1
 _SHA256_LEN = 64
@@ -110,6 +111,11 @@ def _read_metadata(runs_root: Path, run_id: str) -> dict[str, Any]:
     missing = [field for field in _METADATA_FIELDS if field not in metadata]
     if missing:
         raise PairManifestError(f"{path} lacks field(s) {missing}; cannot bind the manifest")
+    if was_resumed(metadata):
+        raise PairManifestError(
+            f"run {run_id} was resumed: resumed runs are diagnostic only and no pair "
+            "manifest binds them for a published comparison (#816)"
+        )
     return metadata
 
 

@@ -26,6 +26,9 @@ _FINALIZABLE = frozenset(
     {"finished_at", "cases_total", "cases_completed", "errors_total", "notes", "evaluator_version"}
 )
 _MATCHED_FIELDS = ("run_id", "provider", "model_id", "condition")
+# A resume may start later and finalizes as any run does (#806); every other
+# field must be the stored run's, or it is a different run.
+_RESUME_FREE = _FINALIZABLE | {"started_at"}
 _METADATA_FILE = "run-metadata.json"
 _RECORDS_FILE = "records.jsonl"
 
@@ -34,6 +37,27 @@ _DedupKey = tuple[str, int | None]
 
 class ResultsStoreError(LovsporError):
     """A run artifact violates the results-store contract."""
+
+
+# The note a resumed run's metadata carries (#806); the one marker every
+# primary publication path refuses (#816).
+_RESUMED_NOTE_RE = re.compile(r"(?:\A|; )resumed: \d+ of \d+ cases were already recorded(?:;|\Z)")
+
+
+def resumed_note(recorded: int, total: int) -> str:
+    """The note a resumed run appends to its metadata ``notes``."""
+    return f"resumed: {recorded} of {total} cases were already recorded"
+
+
+def was_resumed(metadata: dict[str, Any]) -> bool:
+    """Whether ``metadata`` is a resumed run's, so diagnostic only (owner decision, #816)."""
+    notes = metadata.get("notes")
+    return isinstance(notes, str) and _RESUMED_NOTE_RE.search(notes) is not None
+
+
+def is_run_id(value: str) -> bool:
+    """Whether ``value`` is a schema-valid llhb-v1 run id."""
+    return _RUN_ID_RE.fullmatch(value) is not None
 
 
 def new_run_id(date_utc: str, suffix: str) -> str:
@@ -64,6 +88,32 @@ class ResultsStore:
         run_dir.mkdir(parents=True)
         _write_metadata(run_dir / _METADATA_FILE, metadata)
         return run_dir
+
+    def resume_run(self, metadata: dict[str, Any]) -> Path:
+        """Reopen the unfinished run ``metadata`` names, when it is that run (#806).
+
+        Raises:
+            ResultsStoreError: the run is unknown or finished, or ``metadata``
+                differs from the stored run in a field other than its start
+                time or the completion fields.
+        """
+        self._check("run metadata", metadata, self._metadata_schema)
+        run_id = str(metadata["run_id"])
+        stored = self.load_metadata(run_id)
+        if stored.get("finished_at") is not None:
+            raise ResultsStoreError(f"run {run_id!r} already finished at {stored['finished_at']}")
+        differ = sorted(
+            key
+            for key in set(stored) | set(metadata)
+            if key not in _RESUME_FREE and stored.get(key) != metadata.get(key)
+        )
+        if differ:
+            raise ResultsStoreError(f"run {run_id!r}: {differ} does not match the stored run")
+        return self._run_dir(run_id)
+
+    def load_metadata(self, run_id: str) -> dict[str, Any]:
+        """The run's stored metadata."""
+        return self._load_metadata(run_id)
 
     def append_record(self, record: dict[str, Any]) -> None:
         """Validate one result record and append it to the run's JSONL."""

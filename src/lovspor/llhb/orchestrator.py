@@ -48,7 +48,7 @@ from lovspor.llhb.openai_chat import (
     parse_chat_completion,
     post_chat,
 )
-from lovspor.llhb.results import ResultsStore
+from lovspor.llhb.results import ResultsStore, resumed_note
 
 # Counts `"type": "tool_use"` in the transcript text without walking events
 # at all. Deliberately dumber than the parser: every undercount so far came
@@ -95,6 +95,8 @@ class RunConfig(BaseModel):
     driver: Literal["claude-cli", "openai-chat"] = "claude-cli"
     chat_endpoint: ChatEndpoint | None = None
     chat_sampling: ChatSampling = ChatSampling()
+    # Continue an interrupted run instead of opening a new one (#806).
+    resume: bool = False
 
     @model_validator(mode="after")
     def _check_driver(self) -> "RunConfig":
@@ -181,23 +183,48 @@ def run_arm(
     metadata: dict[str, Any],
     store: ResultsStore,
 ) -> dict[str, Any]:
-    """Execute every case of one run and finalize its metadata."""
+    """Execute every case of one run and finalize its metadata.
+
+    With ``config.resume`` the run must already exist, unfinished, as this
+    run (#806); a case it already recorded is never run or written again.
+    """
     ids = _checked_case_ids(cases)
     ordered = case_order(ids, config.case_order_seed)
-    run_dir = store.open_run(metadata)
+    run_dir, recorded = _open_run(config, metadata, store)
     by_id = {str(case["case_id"]): case for case in cases}
-    completed_count = 0
     for case_id in ordered:
-        record = _run_case(config, by_id[case_id], run_dir)
-        store.append_record(record)
-        completed_count += 1 if record["completed"] else 0
-    summary = {
-        "finished_at": _utc_now(),
-        "cases_total": len(by_id),
-        "cases_completed": completed_count,
-        "errors_total": len(by_id) - completed_count,
-    }
+        if recorded is None or case_id not in recorded:
+            store.append_record(_run_case(config, by_id[case_id], run_dir))
+    summary = _summary(store, config.identity.run_id, len(by_id), recorded)
     store.finalize_run(config.identity.run_id, summary)
+    return summary
+
+
+def _open_run(
+    config: RunConfig, metadata: dict[str, Any], store: ResultsStore
+) -> tuple[Path, set[str] | None]:
+    """The run directory, and the case ids a resumed run already recorded (None: new run)."""
+    if not config.resume:
+        return store.open_run(metadata), None
+    run_dir = store.resume_run(metadata)
+    return run_dir, {str(r["case_id"]) for r in store.read_records(config.identity.run_id)}
+
+
+def _summary(
+    store: ResultsStore, run_id: str, total: int, recorded: set[str] | None
+) -> dict[str, Any]:
+    """Completion fields counted from every record of the run, resumed or not."""
+    completed = sum(1 for record in store.read_records(run_id) if record["completed"])
+    summary: dict[str, Any] = {
+        "finished_at": _utc_now(),
+        "cases_total": total,
+        "cases_completed": completed,
+        "errors_total": total - completed,
+    }
+    if recorded is not None:
+        note = resumed_note(len(recorded), total)
+        prior = store.load_metadata(run_id).get("notes")
+        summary["notes"] = f"{prior}; {note}" if prior else note
     return summary
 
 

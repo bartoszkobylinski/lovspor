@@ -25,7 +25,7 @@ from lovspor.errors import LovsporError
 from lovspor.llhb.corpus_pin import CorpusPin, verify_pin
 from lovspor.llhb.metrics import PairReport, compute_pair_report
 from lovspor.llhb.reporting import ArmScoring, score_arm
-from lovspor.llhb.results import ResultsStore
+from lovspor.llhb.results import ResultsStore, was_resumed
 from lovspor.llhb.schema import load_cases_jsonl
 from lovspor.llhb.scoring import CaseScorer
 from lovspor.llhb.stability import flipped_cases, summarize_rates
@@ -69,8 +69,14 @@ def load_cases(path: Path, corpus_path: Path) -> dict[str, dict[str, Any]]:
 def score_repeats(
     args: argparse.Namespace,
 ) -> tuple[list[PairReport], list[dict[str, str]], list[dict[str, str]]]:
-    cases_by_id = load_cases(args.cases, args.corpus_path)
     store = ResultsStore(runs_root=args.runs_root, schema_dir=SCHEMA_DIR)
+    for run_id in (*args.control_ids, *args.treatment_ids):
+        if was_resumed(store.load_metadata(run_id)):
+            raise LovsporError(
+                f"{run_id} was resumed: resumed runs are diagnostic only and excluded "
+                "from the published stability report (#816)"
+            )
+    cases_by_id = load_cases(args.cases, args.corpus_path)
     scorer = CaseScorer(CorpusReader(args.corpus_path))
     reports: list[PairReport] = []
     control_outcomes: list[dict[str, str]] = []
