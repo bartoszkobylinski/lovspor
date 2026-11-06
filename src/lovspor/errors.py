@@ -403,3 +403,11 @@ class EmbeddingCacheStorageError(EmbeddingCacheError):
     next request is sent. A store that cannot write breaks that promise, and
     continuing would spend money the next run must spend again.
     """
+
+
+class EmbeddingBudgetError(LovsporError):
+    """A keyed sync reached its embedding token budget and stopped (#790).
+
+    Raised before the request that would cross ``LOVSPOR_EMBEDDING_TOKEN_BUDGET``
+    is sent, so the budget is a ceiling on spend, not a report after it.
+    """

@@ -53,7 +53,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.embeddings.cache import quantized_document_vectors, with_embedding_cache
+from lovspor.embeddings.cache import quantized_document_vectors, sync_embedder
 from lovspor.embeddings.inputs import (
     build_embedding_inputs,
     hash_embedding_inputs,
@@ -1105,7 +1105,7 @@ def _load_embedder(settings: Settings) -> EmbeddingModel | None:
     ``LOVSPOR_EMBEDDING_PROVIDER`` fails the run instead of quietly producing a
     corpus with no embeddings and no explanation.
     """
-    return with_embedding_cache(create_embedder(settings.embedding), settings)
+    return sync_embedder(create_embedder(settings.embedding), settings)
 
 
 def _embedder_identity(embedder: EmbeddingModel) -> tuple[str | None, str | None]:

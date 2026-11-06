@@ -29,6 +29,7 @@ import numpy as np
 from lovspor.embeddings.cache_format import CachedVectors, EntryKey, ReadPolicy, UnitKey
 from lovspor.embeddings.cache_store import LocalEntryStore
 from lovspor.embeddings.inputs import EmbeddingInput, hash_embedding_inputs
+from lovspor.embeddings.meter import with_meter
 from lovspor.embeddings.model import EmbeddingModel, count_input_tokens
 from lovspor.embeddings.provider import DEFAULT_MODEL_NAME, UNKNOWN_SPACE_ID, space_id_of
 from lovspor.embeddings.quantize import quantize_int8
@@ -220,3 +221,8 @@ def _plan(embedder: EmbeddingModel, texts: list[str]) -> list[tuple[int, int]]:
 
 def _entry(key: EntryKey, vectors: np.ndarray, scale: float | None) -> CachedVectors:
     return CachedVectors(key=key, vectors=vectors, scale=scale, created_at=datetime.now(UTC))
+
+
+def sync_embedder(embedder: EmbeddingModel | None, settings: "Settings") -> EmbeddingModel | None:
+    """The sync's adapter: metered (#790), then cached when configured (#802)."""
+    return with_embedding_cache(with_meter(embedder), settings)

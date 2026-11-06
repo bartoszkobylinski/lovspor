@@ -398,3 +398,24 @@ backfill/repair path). Unset, the sync is exactly what it was.
 
 The store is local disk. On a GitHub-hosted runner it does not outlive the
 job, so it does not yet protect the scheduled sync; `sync.yml` does not set it.
+
+## Spend progress and the per-run token budget (#790)
+
+Every paid embedding request of a keyed sync goes through one metered
+adapter (`embeddings/meter.py`), on the change path and the backfill/repair
+path alike.
+
+- Every `LOVSPOR_EMBEDDING_PROGRESS_EVERY` paid requests (default 25) the sync
+  prints `embedding-spend: requests=… inputs=… estimated_tokens=… budget=…` to
+  stderr. Counts only.
+- `LOVSPOR_EMBEDDING_TOKEN_BUDGET` (unset: none) caps the estimated tokens one
+  sync process may send. The request that would cross it is refused **before
+  it is sent**, with `EmbeddingBudgetError`, and the sync exits 1 without a
+  commit. The estimate is the tiktoken count of what is sent, not a bill: a
+  retried request may be billed again.
+- With the durable cache on, a rerun resumes from what the stopped run paid
+  for. With it off, the stopped run keeps nothing, and the budget bounds the
+  loss instead.
+
+The ADR-0006 guards still decide, before any spend, whether a large workload
+may start at all. The budget bounds what an allowed run may spend.
