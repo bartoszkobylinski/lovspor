@@ -111,20 +111,37 @@ def test_fairness_refuses_a_resumed_arm(arm: str) -> None:
     ]
 
 
+@pytest.mark.parametrize("arm", ["control", "treatment"])
 def test_the_stability_report_refuses_a_resumed_repeat_before_scoring(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, arm: str
 ) -> None:
     bin_dir = _interrupted_run(tmp_path, monkeypatch)
     store = _store(tmp_path)
     run_arm(make_config(tmp_path, bin_dir, resume=True), _CASES, make_metadata(), store)
+    clean_id = "llhb-v1-run-20260808-clean1"
+    store.open_run(make_metadata(run_id=clean_id))
     report = _script("stability_report")
     args = argparse.Namespace(
         cases=tmp_path / "absent-cases.jsonl",
         corpus_path=tmp_path / "absent-corpus",
         runs_root=tmp_path / "runs",
-        control_ids=[RUN_ID],
-        treatment_ids=[RUN_ID],
+        control_ids=[clean_id, RUN_ID] if arm == "control" else [clean_id],
+        treatment_ids=[clean_id, RUN_ID] if arm == "treatment" else [clean_id],
     )
 
     with pytest.raises(LovsporError, match=f"{RUN_ID} was resumed"):
         report.score_repeats(args)
+
+
+@pytest.mark.parametrize(
+    "notes",
+    [
+        "resumed: 0 of 4 cases were already recorded",
+        "pilot; resumed: 2 of 4 cases were already recorded",
+        "resumed: 4 of 4 cases were already recorded; diagnostic scoring",
+        "pilot; resumed: 2 of 4 cases were already recorded; diagnostic scoring",
+    ],
+)
+def test_resume_marker_is_recognized_among_operational_notes(notes: str) -> None:
+    """The #816 gate must still recognize a resume after notes are appended."""
+    assert was_resumed({"notes": notes}) is True
