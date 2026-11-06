@@ -64,6 +64,29 @@ def test_twin_mismatch_names_both_actual_fates(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("fate", ["live", "moved", "gone"])
+def test_previous_unpaired_redirect_counts_its_current_fate(tmp_path: Path, fate: str) -> None:
+    # A standalone JSON source has no page source to account for it as a pair.
+    source = "/old/index.json"
+    previous = _tree(tmp_path / "previous", {source: "/lov/base/index.json"}, [])
+    current = _tree(
+        tmp_path / "current",
+        {source: "/lov/base/index.json"} if fate == "moved" else {},
+        ["/old/"] if fate == "gone" else [],
+    )
+    if fate == "live":
+        (current / "old").mkdir()
+        (current / "old/index.json").write_text("{}", encoding="utf-8")
+
+    report = check_continuity(previous, current)
+
+    assert (report.live, report.moved, report.gone) == {
+        "live": (3, 0, 0),
+        "moved": (2, 1, 0),
+        "gone": (2, 0, 1),
+    }[fate]
+
+
 @pytest.mark.parametrize("path", ["lover/a.md ", "lover/aX"])
 def test_removed_heading_preserves_path_characters(path: str) -> None:
     assert parse_removed_pids(f"--- a/{path}\t\n@@ -1 +0,0 @@\n-### § 3. T\n") == {
