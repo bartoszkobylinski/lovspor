@@ -136,6 +136,36 @@ def test_an_anonymous_pipe_as_in_process_substitution_is_read() -> None:
         os.close(read_end)
 
 
+def test_fifo_without_writer_is_refused_at_the_exact_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fifo = _fifo(tmp_path / "pipe")
+    # Advance the clock exactly to the documented writer-wait boundary.
+    ticks = iter((100.0, 100.0 + commands.FIFO_WRITER_WAIT_SECONDS, 103.0))
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+
+    with pytest.raises(CrosswalkError) as caught:
+        read_bounded(fifo, 64, "input")
+
+    assert str(caught.value) == f"input is a pipe with no writer: {fifo}"
+    assert sleeps == [], "the writer wait must not continue once its deadline is reached"
+
+
+def test_nonblocking_probe_consumes_only_the_first_byte() -> None:
+    """The one-byte probe leaves the rest of the input available to its reader."""
+    read_end, write_end = os.pipe()
+    try:
+        os.set_blocking(read_end, False)
+        os.write(write_end, b"abc")
+        assert commands._read_nonblocking(read_end) == b"a"
+        assert os.read(read_end, 2) == b"bc"
+    finally:
+        os.close(write_end)
+        os.close(read_end)
+
+
 def test_a_pipe_byte_counts_toward_the_limit() -> None:
     read_end, write_end = os.pipe()
     try:
