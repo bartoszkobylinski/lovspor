@@ -11,6 +11,7 @@ import pytest
 
 import lovspor.sync.orchestrator as orchestrator_module
 from lovspor.embeddings.cache import CACHE_DIR_VARIABLE, CachingEmbedder, with_embedding_cache
+from lovspor.embeddings.inputs import EmbeddingInput, hash_embedding_inputs
 from lovspor.embeddings.meter import (
     BUDGET_VARIABLE,
     PROGRESS_VARIABLE,
@@ -168,3 +169,36 @@ def test_budget_stop_with_cache_resumes_without_repaying(
     second = _Provider()
     _write(settings, with_embedding_cache(with_meter(second), settings))
     assert first.requests + second.requests == 4
+
+
+def test_document_cache_hit_does_not_spend_the_remaining_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(tmp_path / "cache"))
+    monkeypatch.setenv(BUDGET_VARIABLE, "2")
+    provider = _Provider()
+    metered = with_meter(provider)
+    assert isinstance(metered, MeteredEmbedder)
+    cached = with_embedding_cache(metered, _settings(tmp_path))
+    assert isinstance(cached, CachingEmbedder)
+    inputs = [EmbeddingInput("1", "ord ord")]
+    digest = hash_embedding_inputs(inputs)
+    first = cached.document_vectors(inputs, digest)
+    replay = cached.document_vectors(inputs, digest)
+    assert np.array_equal(first.vectors, replay.vectors)
+    assert first.scale == replay.scale
+    assert (metered.meter.requests, metered.meter.inputs, metered.meter.tokens) == (1, 1, 2)
+    other = [EmbeddingInput("2", "ord")]
+    with pytest.raises(EmbeddingBudgetError):
+        cached.document_vectors(other, hash_embedding_inputs(other))
+    assert provider.requests == 1
+    assert len(list((tmp_path / "cache").rglob("*.lsec"))) == 1
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "often"])
+def test_bad_progress_interval_is_a_config_error(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+    monkeypatch.setenv(PROGRESS_VARIABLE, raw)
+    provider = _Provider()
+    with pytest.raises(ConfigError, match=PROGRESS_VARIABLE):
+        with_meter(provider)
+    assert provider.requests == 0
