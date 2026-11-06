@@ -197,3 +197,53 @@ def test_collect_keeps_the_baseline_when_another_archive_reuses_its_member_path(
     assert evidence.baseline.header.refid == "lov/2019-06-14-99"
     assert evidence.baseline.sha256 == sha256((FIXTURES / "enacting.xml").read_bytes()).hexdigest()
     assert [doc.header.refid for doc in evidence.amenders] == ["lov/2020-12-18-999"]
+
+
+@pytest.mark.parametrize("name", ["../escaped.xml", "/escaped.xml", r"lti\..\escaped.xml"])
+def test_index_refuses_unsafe_member_names_without_caching(tmp_path: Path, name: str) -> None:
+    archive = make_archive(tmp_path / "unsafe.tar.bz2", extra={name: b"<html/>"})
+    with pytest.raises(LegalTimeInputError, match="unreadable archive unsafe.tar.bz2"):
+        index_archive(archive, tmp_path / "index")
+    assert not (tmp_path / "index").exists()
+    assert not (tmp_path / "escaped.xml").exists()
+
+
+def test_index_ignores_links_and_never_extracts_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("legal-time indexing must read members without extracting them")
+
+    monkeypatch.setattr(tarfile.TarFile, "extract", forbidden)
+    monkeypatch.setattr(tarfile.TarFile, "extractall", forbidden)
+    archive = tmp_path / "links.tar.bz2"
+    body = (FIXTURES / "enacting.xml").read_bytes()
+    with tarfile.open(archive, "w:bz2") as tar:
+        regular = tarfile.TarInfo("lti/enacting.xml")
+        regular.size = len(body)
+        tar.addfile(regular, io.BytesIO(body))
+        for name, kind in [
+            ("lti/symlink.xml", tarfile.SYMTYPE),
+            ("lti/hardlink.xml", tarfile.LNKTYPE),
+        ]:
+            link = tarfile.TarInfo(name)
+            link.type = kind
+            link.linkname = "lti/enacting.xml"
+            tar.addfile(link)
+    index = index_archive(archive)
+    assert [member.name for member in index.members] == ["lti/enacting.xml"]
+    assert index.skipped == ()
+    assert not (tmp_path / "lti").exists()
+
+
+def test_empty_archive_has_no_horizon_and_cannot_supply_a_baseline(tmp_path: Path) -> None:
+    archive = tmp_path / "empty.tar.bz2"
+    with tarfile.open(archive, "w:bz2"):
+        pass
+    index = index_archive(archive)
+    assert index.members == ()
+    assert index.skipped == ()
+    assert index.horizon is None
+    assert index_archive(archive) == index
+    with pytest.raises(LegalTimeInputError, match="no enacting member"):
+        collect("lov/2019-06-14-99", [archive])
