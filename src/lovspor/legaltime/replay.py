@@ -45,6 +45,7 @@ class ProvisionState(Frozen):
     status: ProvisionStatus = "replayed"
     problems: tuple[str, ...] = ()
     applied: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
 
 
 class ReplayState(Frozen):
@@ -65,12 +66,13 @@ class _Provision:
         self.repealed = False
         self.problems: list[str] = []
         self.applied: list[str] = []
+        self.pending: list[str] = []
 
     def freeze(self, key: str) -> ProvisionState:
         return ProvisionState(
             key=key, label=self.label, heading=self.heading, ledd=tuple(self.ledd),
             repealed=self.repealed, status="unresolved" if self.problems else "replayed",
-            problems=tuple(self.problems), applied=tuple(self.applied),
+            problems=tuple(self.problems), applied=tuple(self.applied), pending=tuple(self.pending),
         )  # fmt: skip
 
 
@@ -351,6 +353,8 @@ class _Run:
             self.future.append(op.id)
         else:
             self.pending.append(op.id)
+            for target in _targets(op, self.working):
+                target.pending.append(op.id)
 
 
 def replay(

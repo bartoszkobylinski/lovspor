@@ -141,16 +141,70 @@ def test_transitional_sentences_do_not_disturb_commencement() -> None:
     assert {timings[op.id].status for op in ops} == {"pending"}
 
 
+def test_named_section_exception_scopes_one_part_and_section() -> None:
+    law = _law(
+        "lov/2021-06-18-124",
+        "2021-06-18, Kongen bestemmer",
+        "Loven gjelder fra den tiden Kongen bestemmer. Endringene i prøveloven § 1 i del I "
+        "i loven trer likevel i kraft straks.",
+    )
+    ops, timings = _timings(law)
+    by_key = {(op.part, op.address.section): timings[op.id] for op in ops}
+    assert by_key[("I", "§1")].effective == date(2021, 6, 18)
+    assert by_key[("I", "§2a")].status == "pending"
+    assert by_key[("II", "§5")].status == "pending"
+
+
 def test_commencement_sentence_outside_the_grammar_fails_closed() -> None:
     law = _law(
         "lov/2021-06-18-124",
         "2021-06-18, Kongen bestemmer",
-        "Loven gjelder fra den tiden Kongen bestemmer. Endringene i offentleglova § 5 i del I "
-        "i loven trer likevel i kraft straks.",
+        "Loven gjelder fra den tiden Kongen bestemmer. Bestemmelsene om klage trer likevel "
+        "i kraft straks.",
     )
     ops, timings = _timings(law)
     assert {timings[op.id].status for op in ops} == {"unresolved"}
     assert "outside the grammar" in timings[ops[0].id].reason
+
+
+def test_multi_date_partial_decision_dates_each_part() -> None:
+    law = _law(
+        "lov/2021-06-18-124", "Kongen bestemmer", "Loven gjelder fra den tid Kongen bestemmer."
+    )
+    decision = parse_document(
+        (
+            '<html><body><header><dl><dd class="refid">forskrift/2021-06-18-1967</dd>'
+            '<dd class="dateInForce">2021-07-01, 2022-01-01</dd>'
+            '<dd class="dateOfPublication">2021-06-18 16:00</dd>'
+            '<dd class="title">Delt ikraftsetting av lov 18. juni 2021 nr. 124 om endringer</dd>'
+            '</dl></header><main><article class="legalP">Delt ikraftsetting av lov om endringer. '
+            "Endringsloven del I, endringene i lov 14. juni 2019 nr. 99 om prøving § 1, trer i "
+            "kraft 1. juli 2021. Endringsloven del II trer i kraft 1. januar 2022.</article>"
+            "</main></body></html>"
+        ).encode(),
+        "lti/2021/sf-20210618-1967.xml",
+    )
+    ops, timings = _timings(law, (decision,))
+    by_key = {(op.part, op.address.section): timings[op.id] for op in ops}
+    assert by_key[("I", "§1")].effective == date(2021, 7, 1)
+    assert by_key[("I", "§2a")].status == "pending"
+    assert by_key[("II", "§5")].effective == date(2022, 1, 1)
+
+
+def test_meddelelse_and_ikrafttreden_titles_count_as_decisions() -> None:
+    for title in (
+        "Meddelelse om ikrafttredelse av lov 14. juni 2019 nr. 99 om prøving",
+        "Ikrafttreden av lov 14. juni 2019 nr. 99 om prøving (prøveloven)",
+    ):
+        decision = parse_document(
+            (
+                '<html><body><header><dl><dd class="refid">forskrift/2020-01-01-1</dd>'
+                f'<dd class="dateInForce">2022-01-01</dd><dd class="title">{title}</dd>'
+                "</dl></header><main/></body></html>"
+            ).encode(),
+            "x",
+        )
+        assert is_decision_for(decision, "lov/2019-06-14-99")
 
 
 def test_retroactive_date_is_flagged_not_rejected() -> None:

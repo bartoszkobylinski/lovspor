@@ -1,0 +1,230 @@
+"""Evidence for one act, read from pinned publicData archives.
+
+One pass over each archive builds a small header index (refid, title,
+``dateInForce``, ``changesToDocuments``, publication time) that is cached
+beside the archive under the archive's own sha256, so a second run opens
+nothing it does not need. The act's enacting member, every announcing law
+whose header lists the act under ``Endrer``, and every commencement decision
+whose title cites one of those laws are then read in a second pass. Bytes
+never leave the gitignored cache.
+"""
+
+import json
+from collections.abc import Iterable
+from datetime import datetime
+from hashlib import sha256
+from pathlib import Path
+
+from lovspor.errors import ExtractionError
+from lovspor.extraction.tarball import iter_tarball_xml
+from lovspor.legaltime.commencement import is_decision_for
+from lovspor.legaltime.document import Document, Frozen, parse_document
+from lovspor.legaltime.errors import LegalTimeDocumentError, LegalTimeInputError
+
+INDEX_VERSION = "legaltime-index-1"
+_READ_CHUNK = 1 << 20
+
+
+class MemberRecord(Frozen):
+    name: str
+    sha256: str
+    refid: str
+    title: str
+    date_in_force: str
+    published_at: str | None
+    changes_to_documents: tuple[str, ...]
+
+
+class ArchiveIndex(Frozen):
+    archive: str
+    sha256: str
+    index_version: str
+    members: tuple[MemberRecord, ...]
+
+    @property
+    def horizon(self) -> str | None:
+        """The latest publication time any member carries: the archive's knowledge horizon."""
+        stamps = [m.published_at for m in self.members if m.published_at]
+        return max(stamps) if stamps else None
+
+
+class Evidence(Frozen):
+    act: str
+    archives: tuple[ArchiveIndex, ...]
+    baseline: Document
+    amenders: tuple[Document, ...]
+    decisions: tuple[Document, ...]
+
+
+Indexed = list[tuple[Path, ArchiveIndex]]
+
+
+def file_sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(_READ_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _record(name: str, body: bytes) -> MemberRecord | None:
+    try:
+        document = parse_document(body, name)
+    except LegalTimeDocumentError:
+        return None
+    header = document.header
+    return MemberRecord(
+        name=name, sha256=document.sha256, refid=header.refid, title=header.title,
+        date_in_force=header.date_in_force,
+        published_at=header.published_at.isoformat() if header.published_at else None,
+        changes_to_documents=header.changes_to_documents,
+    )  # fmt: skip
+
+
+def _index_path(archive: Path, cache_dir: Path | None) -> Path:
+    return (cache_dir or archive.parent) / f"{archive.name}.{INDEX_VERSION}.json"
+
+
+def _cached_index(path: Path, digest: str) -> ArchiveIndex | None:
+    if not path.exists():
+        return None
+    try:
+        index = ArchiveIndex.model_validate_json(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return None
+    return index if index.sha256 == digest and index.index_version == INDEX_VERSION else None
+
+
+def index_archive(archive: Path, cache_dir: Path | None = None) -> ArchiveIndex:
+    """Header index of every XML member, built once per archive digest."""
+    if not archive.is_file():
+        raise LegalTimeInputError(f"archive not found: {archive}")
+    digest = file_sha256(archive)
+    cache = _index_path(archive, cache_dir)
+    cached = _cached_index(cache, digest)
+    if cached is not None:
+        return cached
+    try:
+        records = [r for m in iter_tarball_xml(archive) if (r := _record(m.name, m.content))]
+    except ExtractionError as exc:
+        raise LegalTimeInputError(f"unreadable archive {archive.name}: {exc}") from exc
+    index = ArchiveIndex(
+        archive=archive.name, sha256=digest, index_version=INDEX_VERSION, members=tuple(records)
+    )
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(index.model_dump_json(indent=1), encoding="utf-8")
+    return index
+
+
+def read_members(archive: Path, names: Iterable[str]) -> dict[str, Document]:
+    """Parse exactly the named members in one pass; a name not found is an input error."""
+    wanted = set(names)
+    found: dict[str, Document] = {}
+    for member in iter_tarball_xml(archive):
+        if member.name in wanted:
+            found[member.name] = parse_document(member.content, member.name)
+    missing = wanted - set(found)
+    if missing:
+        raise LegalTimeInputError(f"members missing from {archive.name}: {sorted(missing)}")
+    return found
+
+
+def _is_law(record: MemberRecord) -> bool:
+    return record.refid.startswith("lov/")
+
+
+def _amender_names(index: ArchiveIndex, act: str) -> list[str]:
+    return [
+        m.name
+        for m in index.members
+        if _is_law(m) and m.refid != act and act in m.changes_to_documents
+    ]
+
+
+def _title_document(record: MemberRecord) -> Document:
+    """A header-only stand-in so the decision test runs on the index, not the bytes."""
+    title = record.title.replace("&", "&amp;").replace("<", "&lt;")
+    body = (
+        f'<html><body><header><dl><dd class="refid">{record.refid}</dd>'
+        f'<dd class="title">{title}</dd></dl></header><main/></body></html>'
+    )
+    return parse_document(body.encode(), record.name)
+
+
+def _decision_names(index: ArchiveIndex, laws: set[str]) -> list[str]:
+    decisions = []
+    for member in index.members:
+        if member.refid.startswith("forskrift/"):
+            stand_in = _title_document(member)
+            if any(is_decision_for(stand_in, law) for law in laws):
+                decisions.append(member.name)
+    return decisions
+
+
+def _baseline(indexed: Indexed, act: str) -> tuple[Path, str]:
+    for path, index in indexed:
+        for member in index.members:
+            if member.refid == act and _is_law(member):
+                return path, member.name
+    raise LegalTimeInputError(f"no enacting member for {act} in the given archives")
+
+
+def _ordered(documents: Iterable[Document]) -> tuple[Document, ...]:
+    return tuple(sorted(documents, key=lambda d: (d.header.published_at or datetime.min, d.member)))
+
+
+def _wanted(indexed: Indexed, act: str) -> dict[Path, tuple[list[str], list[str]]]:
+    """Per archive: the amender member names and the decision member names."""
+    amenders = {path: _amender_names(index, act) for path, index in indexed}
+    laws = {act} | {
+        m.refid for path, index in indexed for m in index.members if m.name in amenders[path]
+    }
+    return {path: (amenders[path], _decision_names(index, laws)) for path, index in indexed}
+
+
+def collect(act: str, archives: list[Path], cache_dir: Path | None = None) -> Evidence:
+    """Everything the archives hold about ``act``: its text, its amenders, their decisions."""
+    indexed: Indexed = [(path, index_archive(path, cache_dir)) for path in archives]
+    baseline_archive, baseline_name = _baseline(indexed, act)
+    wanted = _wanted(indexed, act)
+    amenders: list[Document] = []
+    decisions: list[Document] = []
+    baseline: Document | None = None
+    for path, (amender_names, decision_names) in wanted.items():
+        names = set(amender_names) | set(decision_names)
+        if path == baseline_archive:
+            names.add(baseline_name)
+        documents = read_members(path, names)
+        amenders.extend(documents[n] for n in amender_names)
+        decisions.extend(documents[n] for n in decision_names)
+        baseline = documents.get(baseline_name, baseline)
+    if baseline is None:
+        raise LegalTimeInputError(f"enacting member {baseline_name} could not be read")
+    return Evidence(
+        act=act, archives=tuple(i for _, i in indexed), baseline=baseline,
+        amenders=_ordered(amenders), decisions=_ordered(decisions),
+    )  # fmt: skip
+
+
+def load_oracle(archive: Path, act: str) -> Document:
+    """The consolidated member of ``act`` from a gjeldende-lover archive."""
+    for member in iter_tarball_xml(archive):
+        try:
+            document = parse_document(member.content, member.name)
+        except LegalTimeDocumentError:
+            continue
+        if document.header.refid == act:
+            return document
+    raise LegalTimeInputError(f"no consolidated member for {act} in {archive.name}")
+
+
+def pins(archives: Iterable[Path]) -> list[dict[str, object]]:
+    """Filename, size and sha256 of each input: the identity a report is reproducible from."""
+    return [
+        {"filename": p.name, "size_bytes": p.stat().st_size, "sha256": file_sha256(p)}
+        for p in archives
+    ]
+
+
+def dump_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=1, sort_keys=True)

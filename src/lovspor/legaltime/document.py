@@ -19,7 +19,7 @@ from lovspor.legaltime.text import collapse
 from lovspor.parsing.xml_normalizer import safe_parser
 
 _NOTE_CLASSES = frozenset({"changesToParent", "footnotereference", "footnoteLabel"})
-_TRANSPARENT = frozenset({"document-change", "listArticle"})
+_TRANSPARENT = frozenset({"document-change", "listArticle", "legalArticle"})
 _LIST_TAGS = frozenset({"ul", "ol", "li"})
 _LEDD_CLASSES = frozenset({"legalP", "numberedLegalP"})
 _BLOCK_TAGS = frozenset({"article", "p", "ul", "ol", "li", "div", "section", "h2", "h3", "h4"})

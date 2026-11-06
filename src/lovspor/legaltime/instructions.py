@@ -133,6 +133,35 @@ def classify(sentence: str) -> tuple[OpKind, dict[str, str | None]]:
     return "unsupported", {}
 
 
+def _inline_payload(text: str, payload: tuple[Node, ...]) -> tuple[str, tuple[Node, ...]]:
+    """``… bokstav d lyde: Stortinget, …`` carries its replacement text in the same paragraph."""
+    match = _INLINE_PAYLOAD.match(text)
+    if match is None or payload:
+        return text, payload
+    tail = match.group("tail")
+    node = Node(kind="ledd", css_class="inline", text=tail, ledd=Ledd(xml=tail, text=tail))
+    return match.group("head"), (node,)
+
+
+def _addressed_act(change_part: tuple[str, ...]) -> str | None:
+    """The act a structured change address names, when every address names the same one."""
+    acts = {part.split("/§")[0].split("/del")[0].split("/kap")[0] for part in change_part}
+    return acts.pop() if len(acts) == 1 and next(iter(acts)).startswith("lov/") else None
+
+
+_COMMENCEMENT_HEADING = re.compile(r"ikraft|iverkset|i\s+kraft", re.I)
+
+
+def _commencement_provisions(document: Document) -> list[str]:
+    """An enacting act states its commencement in a provision headed Ikrafttredelse or alike."""
+    return [
+        ledd.text
+        for provision in document.provisions
+        if _COMMENCEMENT_HEADING.search(provision.heading)
+        for ledd in provision.ledd
+    ]
+
+
 def _pairs(groups: dict[str, str | None]) -> tuple[tuple[str, str], ...]:
     """``«a» og «b» … henholdsvis «c» og «d»`` is two substitutions, in order."""
     old, new = groups.get("old") or "", groups.get("new") or ""
@@ -173,14 +202,15 @@ class _Reader:
     def run(self) -> Interpretation:
         for part in self.document.parts:
             self._read_part(part.label, list(part.nodes))
+        clauses = self.clauses or _commencement_provisions(self.document)
         return Interpretation(
             document=self.document.header.refid,
             operations=tuple(self.operations),
-            clauses=tuple(self.clauses),
+            clauses=tuple(clauses),
         )
 
     def _read_part(self, label: str, nodes: list[Node]) -> None:
-        self.substitution, self.pending_item_act = None, None
+        self.substitution, self.pending_item_act, self.act = None, None, None
         seen_instruction, index = False, 0
         while index < len(nodes):
             node = nodes[index]
@@ -195,7 +225,7 @@ class _Reader:
     def _loose(self, node: Node, seen_instruction: bool, label: str, index: int) -> None:
         if self.substitution is not None and node.kind == "ledd":
             self._substitution_item(label, index, node)
-        elif not seen_instruction and node.kind == "ledd":
+        elif not seen_instruction and node.kind == "ledd" and not self.document.provisions:
             self.clauses.append(node.text)
 
     def _paragraph(self, label: str, index: int, node: Node, payload: tuple[Node, ...]) -> bool:
@@ -244,17 +274,19 @@ class _Reader:
         self, tag: str, text: str, change_part: tuple[str, ...], payload: tuple[Node, ...]
     ) -> None:
         label = tag.split(":", maxsplit=1)[0]
+        act = _addressed_act(change_part) or self.act
+        text, payload = _inline_payload(text, payload)
         sentences = split_sentences(text)
         for offset, sentence in enumerate(sentences):
             kind, groups = classify(sentence)
             last = offset == len(sentences) - 1
-            if kind == "unsupported" and self.act is None:
+            if kind == "unsupported" and act is None:
                 continue  # prose outside any act's amendment block: not an operation
             self.operations.append(
                 _operation(
                     f"{self.document.header.refid}#{tag}.{offset}",
                     (kind, groups, sentence),
-                    (self.act, label, change_part),
+                    (act, label, change_part),
                     payload if last else (),
                 )
             )
@@ -279,6 +311,46 @@ def _operation(
     )  # fmt: skip
 
 
+_RENUMBER_SHIFT = re.compile(
+    rf"^(?:(?P<sec>{_SEC})\s+)?(?:Nåværende|Noverande|Gjeldende|nåværende|noverande)\s+"
+    rf"(?P<old>{_ORD})\s+ledd\s+blir\s+(?:nytt\s+|ny\s+)?(?P<new>{_ORD})\s+ledd\.?$"
+)
+_INLINE_PAYLOAD = re.compile(r"^(?P<head>.*?\blyde:)\s*(?P<tail>\S.*)$", re.S)
+
+
+def _shift(sentence: str) -> tuple[str | None, int, int] | None:
+    match = _RENUMBER_SHIFT.match(sentence)
+    if match is None:
+        return None
+    old, new = ordinal(match.group("old")), ordinal(match.group("new"))
+    section = section_key(match.group("sec")) if match.group("sec") else None
+    return (section, old, new) if old is not None and new is not None else None
+
+
+def _as_insertion(previous: Operation, shift: tuple[str | None, int, int]) -> Operation | None:
+    """``§ N X ledd skal lyde`` + ``Nåværende X ledd blir X+1 ledd`` is an insertion."""
+    section, old, new = shift
+    same_section = section is None or section == previous.address.section
+    fits = previous.kind == "replace_ledd" and previous.address.ledd == old and new == old + 1
+    return previous.model_copy(update={"kind": "insert_ledd"}) if fits and same_section else None
+
+
+def _with_renumber_insertions(operations: list[Operation]) -> tuple[Operation, ...]:
+    result = list(operations)
+    for index in range(1, len(result)):
+        current, previous = result[index], result[index - 1]
+        shift = _shift(current.instruction) if current.kind == "renumber" else None
+        if shift is None or current.act != previous.act:
+            continue
+        converted = _as_insertion(previous, shift)
+        if converted is not None:
+            result[index - 1] = converted
+    return tuple(result)
+
+
 def interpret(document: Document) -> Interpretation:
     """Every operation an amending law states, in document order, plus its bare clauses."""
-    return _Reader(document).run()
+    reading = _Reader(document).run()
+    return reading.model_copy(
+        update={"operations": _with_renumber_insertions(list(reading.operations))}
+    )

@@ -237,3 +237,86 @@ def test_two_sentence_instruction_yields_two_operations_payload_on_the_last() ->
     ]
     assert ops[0].ledd == ()
     assert [ledd.text for ledd in ops[2].ledd] == ["Ny tekst."]
+
+
+def test_replacement_followed_by_a_shift_renumbering_is_an_insertion() -> None:
+    body = _xml(
+        "lov/2023-06-16-59",
+        "I",
+        '<article class="defaultP">I lov 14. juni 2019 nr. 21 om arv gjøres følgende endringer:'
+        '</article><article class="defaultP">§ 118 syvende ledd skal lyde:</article>'
+        '<article class="legalP">Nytt syvende.</article>'
+        '<article class="defaultP">Nåværende syvende ledd blir nytt åttende ledd.</article>'
+        '<article class="defaultP">§ 139 annet ledd skal lyde:</article>'
+        '<article class="legalP">Erstattet.</article>'
+        '<article class="defaultP">Nåværende tredje ledd blir fjerde ledd.</article>',
+    )
+    ops = interpret(parse_document(body, "x")).operations
+    assert [(op.kind, op.address.section, op.address.ledd) for op in ops] == [
+        ("insert_ledd", "§118", 7),
+        ("renumber", None, None),
+        ("replace_ledd", "§139", 2),
+        ("renumber", None, None),
+    ]
+
+
+def test_act_context_does_not_leak_across_parts() -> None:
+    body = _xml(
+        "lov/2026-06-19-48",
+        "IV",
+        '<article class="defaultP">I lov 14. juni 2019 nr. 21 om arv skal § 178 lyde:</article>'
+        '<article class="futureLegalArticle" data-name="§178"><article class="legalP">T.</article>'
+        '</article></section><section class="section"><h2>V</h2>'
+        '<article class="defaultP">I midlertidig lov 7. mai 2020 nr. 38 om rekonstruksjon '
+        "oppheves.</article>",
+    )
+    ops = interpret(parse_document(body, "x")).operations
+    assert [(op.kind, op.act) for op in ops] == [("replace_section", "lov/2019-06-14-21")]
+
+
+def test_inline_replacement_text_after_lyde_becomes_the_payload() -> None:
+    body = _xml(
+        "lov/2022-12-20-115",
+        "X",
+        '<article class="defaultP">I lov 21. mai 2021 nr. 42 om språk skal § 3 andre ledd bokstav '
+        "d lyde: Stortinget, Riksrevisjonen og andre organ for Stortinget</article>",
+    )
+    ops = interpret(parse_document(body, "x")).operations
+    assert [(op.kind, op.address.bokstav, op.instruction) for op in ops] == [
+        ("replace_bokstav", "d", "§ 3 andre ledd bokstav d lyde:")
+    ]
+    assert [ledd.text for ledd in ops[0].ledd] == [
+        "Stortinget, Riksrevisjonen og andre organ for Stortinget"
+    ]
+
+
+def test_section_prefixed_renumbering_also_turns_the_replacement_into_an_insertion() -> None:
+    body = _xml(
+        "lov/2025-06-20-97",
+        "I",
+        '<article class="defaultP">I lov 21. mai 2021 nr. 42 om språk skal desse endringane '
+        'gjerast:</article><article class="defaultP">§ 13 fjerde ledd skal lyde:</article>'
+        '<article class="legalP">Nytt.</article>'
+        '<article class="defaultP">§ 13 noverande fjerde ledd blir nytt femte ledd.</article>'
+        '<article class="defaultP">§ 14 fjerde ledd skal lyde:</article>'
+        '<article class="legalP">Erstatning.</article>'
+        '<article class="defaultP">§ 15 noverande fjerde ledd blir nytt femte ledd.</article>',
+    )
+    ops = interpret(parse_document(body, "x")).operations
+    assert [(op.kind, op.address.section) for op in ops] == [
+        ("insert_ledd", "§13"),
+        ("renumber", "§13"),
+        ("replace_ledd", "§14"),
+        ("renumber", "§15"),
+    ]
+
+
+def test_enacting_act_with_embedded_amendments_yields_operations_and_its_own_clause() -> None:
+    document = parse_document((FIXTURES / "enacting-embedded.xml").read_bytes(), "x")
+    result = interpret(document)
+    assert [(op.kind, op.act, op.address.section, op.change_part) for op in result.operations] == [
+        ("replace_ledd", "lov/2021-06-18-121", "§26", ("lov/2021-06-18-121/§26/ledd/6",)),
+        ("replace_section", "lov/2007-12-14-116", "§11", ("lov/2007-12-14-116/§11",)),
+    ]
+    assert result.clauses == ("Lova gjeld frå den tida Kongen fastset.",)
+    assert [p.key for p in document.provisions] == ["§1", "§24", "§25"]

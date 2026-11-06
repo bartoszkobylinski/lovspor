@@ -21,8 +21,8 @@ TimingStatus = Literal["dated", "pending", "unresolved"]
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PENDING_WORDS = re.compile(r"Kongen\s+(?:bestemmer|fastset|fastsett)", re.I)
 _DECISION_TITLE = re.compile(
-    r"^(?:Delt\s+)?(?:Ikraftsetting|Ikraftsetjing|Ikrafttredelse|Ikraftsetjinga|Iverksetjing|"
-    r"Ikraftsettelse|iverksetting|ikraftsetting)\b",
+    r"^(?:Delt\s+|Meddelelse\s+om\s+)?(?:Ikraftsetting|Ikraftsetjing|Ikrafttredelse|Ikrafttreden|"
+    r"Ikraftsetjinga|Iverksetjing|Iverksetting|Ikraftsettelse)\b",
     re.I,
 )
 _PARTIAL_TITLE = re.compile(r"^Delt\b", re.I)
@@ -40,9 +40,17 @@ _EXCEPTION_NEW_SECTION = re.compile(
     r"^Ny\s+(?P<sec>§\s*\d+(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?)(?:\s+i\s+\S+)?\s+trer\s+likevel\s+i\s+kraft\b",
     re.I,
 )
+_SEC = r"§\s*\d+(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?"
 _DELT_SENTENCE = re.compile(
-    r"^(?:Endringsloven|Endringslova)\s+del\s+(?P<part>[IVXLC]+)(?:,\s*ny\s+"
-    r"(?P<sec>§\s*\d+(?:-\d+)?\s*[a-zæøå]?)\s+i\s+lov[^,]*)?,\s*trer\s+i\s+kraft\s+(?P<when>.+)$",
+    rf"^(?:Endringsloven|Endringslova)\s+del\s+(?P<part>[IVXLC]+)"
+    rf"(?:,\s*(?:ny\s+(?P<sec>{_SEC})\s+i\s+lov|(?:endringene|endringane)\s+i\s+lov)(?P<rest>[^,]*))?"
+    r",?\s*trer\s+i\s+kraft\s+(?P<when>.+)$",
+    re.I,
+)
+_SECTION_IN = re.compile(_SEC)
+_EXCEPTION_NAMED_SECTION = re.compile(
+    rf"^(?:Endringene|Endringane|Endringa|Endringen)\s+i\s+\S+\s+(?P<sec>{_SEC})\s+i\s+del\s+"
+    r"(?P<part>[IVXLC]+)\s+i\s+(?:loven|lova)(?:\s+her)?\s+trer\s+(?:likevel\s+)?i\s+kraft\s+(?P<when>.+)$",
     re.I,
 )
 _EXCEPTION_PART = re.compile(
@@ -136,10 +144,13 @@ def _default_timing(document: Document, sentence: str) -> Timing | None:
 
 
 def _exception_scope(sentence: str) -> tuple[str, str] | None:
-    """``("section", "§99a")`` or ``("part", "V")`` for an exception sentence, else None."""
+    """``("section", "§99a")``, ``("part", "V")`` or ``("part-section", "I/§5")``, else None."""
     new_section = _EXCEPTION_NEW_SECTION.match(sentence)
     if new_section is not None:
         return ("section", section_key(new_section.group("sec")) or "")
+    named = _EXCEPTION_NAMED_SECTION.match(sentence)
+    if named is not None:
+        return ("part-section", f"{named.group('part').upper()}/{section_key(named.group('sec'))}")
     part = _EXCEPTION_PART.match(sentence)
     return ("part", part.group("part").upper()) if part else None
 
@@ -191,7 +202,8 @@ def _scoped(operation: Operation, exceptions: dict[tuple[str, str], Timing]) -> 
     section = ("section", operation.address.section or "")
     if operation.kind == "insert_section" and section in exceptions:
         return exceptions[section]
-    return exceptions.get(("part", operation.part.upper()))
+    located = ("part-section", f"{operation.part.upper()}/{operation.address.section}")
+    return exceptions.get(located) or exceptions.get(("part", operation.part.upper()))
 
 
 def _assign(
@@ -218,43 +230,56 @@ def _partial_scopes(decision: Document) -> list[tuple[str, str | None, date]] | 
                 when = parse_date(match.group("when")) if match else None
                 if match is None or when is None:
                     return None
-                section = section_key(match.group("sec")) if match.group("sec") else None
-                scopes.append((match.group("part"), section, when))
+                scopes.append((match.group("part").upper(), _named_section(match), when))
     return scopes
+
+
+def _named_section(match: re.Match[str]) -> str | None:
+    """The one section a ``Delt`` sentence names, from ``ny § X`` or the amended act's clause."""
+    if match.group("sec"):
+        return section_key(match.group("sec"))
+    found = _SECTION_IN.findall(match.group("rest") or "")
+    return section_key(found[-1]) if len(found) == 1 else None
 
 
 def _covered(operation: Operation, scope: tuple[str, str | None, date]) -> bool:
     part, section, _ = scope
-    if operation.part != part:
+    if operation.part.upper() != part:
         return False
-    return section is None or (
-        operation.kind == "insert_section" and operation.address.section == section
-    )
+    return section is None or operation.address.section == section
+
+
+def _apply_full(decision: Document, pending: list[Operation], timings: dict[str, Timing]) -> None:
+    header = header_timing(decision)
+    if header.status == "dated" and header.effective is not None:
+        for op in pending:
+            timings[op.id] = _dated(decision, header.effective, decision.header.title)
+
+
+def _apply_partial(
+    decision: Document, pending: list[Operation], timings: dict[str, Timing]
+) -> None:
+    scopes = _partial_scopes(decision)
+    title = decision.header.title
+    for op in pending:
+        if scopes is None:
+            timings[op.id] = _unresolved(decision, "partial decision outside the grammar", title)
+            continue
+        for scope in scopes:
+            if _covered(op, scope):
+                timings[op.id] = _dated(decision, scope[2], f"{title}: del {scope[0]}")
 
 
 def _apply_decision(
     decision: Document, operations: tuple[Operation, ...], timings: dict[str, Timing]
 ) -> None:
     pending = [op for op in operations if timings[op.id].status == "pending"]
-    header = header_timing(decision)
-    if not pending or header.status != "dated" or header.effective is None:
+    if not pending:
         return
-    if not _PARTIAL_TITLE.match(decision.header.title):
-        for op in pending:
-            timings[op.id] = _dated(decision, header.effective, decision.header.title)
-        return
-    scopes = _partial_scopes(decision)
-    for op in pending:
-        if scopes is None:
-            timings[op.id] = _unresolved(
-                decision, "partial decision outside the grammar", decision.header.title
-            )
-            continue
-        for scope in scopes:
-            if _covered(op, scope):
-                timings[op.id] = _dated(
-                    decision, scope[2], f"{decision.header.title}: del {scope[0]}"
-                )
+    if _PARTIAL_TITLE.match(decision.header.title):
+        _apply_partial(decision, pending, timings)
+    else:
+        _apply_full(decision, pending, timings)
 
 
 def resolve_timings(
@@ -271,3 +296,21 @@ def resolve_timings(
         if is_decision_for(decision, law.header.refid):
             _apply_decision(decision, operations, timings)
     return timings
+
+
+def baseline_timing(act: Document, decisions: tuple[Document, ...]) -> Timing:
+    """When the act itself commenced: its header, else a full decision citing it."""
+    timing = header_timing(act)
+    if timing.status != "pending":
+        return timing
+    for decision in decisions:
+        if not is_decision_for(decision, act.header.refid):
+            continue
+        found = header_timing(decision)
+        if _PARTIAL_TITLE.match(decision.header.title):
+            return _unresolved(
+                decision, "partial commencement of the act itself", decision.header.title
+            )
+        if found.status == "dated" and found.effective is not None:
+            return _dated(decision, found.effective, decision.header.title)
+    return timing

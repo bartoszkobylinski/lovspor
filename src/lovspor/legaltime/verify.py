@@ -13,13 +13,17 @@ from typing import Literal
 from lovspor.legaltime.document import Document, Frozen, Provision
 from lovspor.legaltime.replay import ProvisionState, ReplayState
 
+_OMISSION = "\u2013 \u2013 \u2013"  # three en dashes: Lovdata's omitted-text marker
+
 Verdict = Literal[
     "exact_raw",
     "exact_normalized",
+    "editorial_omission",
     "text_differs",
     "unresolved",
     "only_in_oracle",
     "only_in_replay",
+    "oracle_annex",
 ]
 
 
@@ -28,6 +32,7 @@ class SectionVerdict(Frozen):
     verdict: Verdict
     detail: str = ""
     applied: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
     problems: tuple[str, ...] = ()
     oracle_notes: int = 0
 
@@ -64,19 +69,37 @@ def _difference(replayed: ProvisionState, oracle: Provision) -> str:
     return f"ledd {', '.join(differing)} differ"
 
 
-def _verdict(replayed: ProvisionState, oracle: Provision) -> SectionVerdict:
+def _omitted(replayed: ProvisionState, oracle: Provision) -> bool:
+    """Lovdata prints three en dashes where its consolidation leaves announced text out.
+
+    The omitted tail may span whole ledd, so the oracle is compared as a prefix of the replay.
+    """
+    heading, ledd = _texts(oracle)
+    if heading != replayed.heading or not any(_OMISSION in text for text in ledd):
+        return False
+    stripped = tuple(" ".join(text.replace(_OMISSION, "").split()) for text in ledd)
+    mine = tuple(ledd.text for ledd in replayed.ledd)
+    return stripped == mine[: len(stripped)] and len(mine) >= len(stripped)
+
+
+def _classify(replayed: ProvisionState, oracle: Provision) -> Verdict:
     if replayed.status == "unresolved":
-        verdict: Verdict = "unresolved"
-    elif _raw(replayed) == _raw(oracle):
-        verdict = "exact_raw"
-    elif _texts(replayed) == _texts(oracle):
-        verdict = "exact_normalized"
-    else:
-        verdict = "text_differs"
+        return "unresolved"
+    if _raw(replayed) == _raw(oracle):
+        return "exact_raw"
+    if _texts(replayed) == _texts(oracle):
+        return "exact_normalized"
+    if _omitted(replayed, oracle):
+        return "editorial_omission"
+    return "text_differs"
+
+
+def _verdict(replayed: ProvisionState, oracle: Provision) -> SectionVerdict:
+    verdict = _classify(replayed, oracle)
     detail = _difference(replayed, oracle) if verdict in {"text_differs", "unresolved"} else ""
     return SectionVerdict(
         key=replayed.key, verdict=verdict, detail=detail, applied=replayed.applied,
-        problems=replayed.problems, oracle_notes=len(oracle.notes),
+        pending=replayed.pending, problems=replayed.problems, oracle_notes=len(oracle.notes),
     )  # fmt: skip
 
 
@@ -85,7 +108,7 @@ def _note_checks(
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Each oracle note should meet a replay event on that section, and vice versa."""
     noted = {key for key, provision in oracle.items() if provision.notes}
-    touched = {key for key, state in replayed.items() if state.applied or state.problems}
+    touched = {k for k, s in replayed.items() if s.applied or s.problems or s.pending}
     return tuple(sorted(noted - touched)), tuple(sorted(touched - noted))
 
 
@@ -99,6 +122,8 @@ def verify(state: ReplayState, oracle_document: Document) -> Verification:
             sections.append(_verdict(replayed[key], oracle[key]))
         elif key in replayed:
             sections.append(SectionVerdict(key=key, verdict="only_in_replay"))
+        elif not key.startswith("§"):
+            sections.append(SectionVerdict(key=key, verdict="oracle_annex"))
         else:
             sections.append(SectionVerdict(key=key, verdict="only_in_oracle"))
     missing_events, missing_notes = _note_checks(replayed, oracle)

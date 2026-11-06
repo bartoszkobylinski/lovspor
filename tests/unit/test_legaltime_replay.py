@@ -45,6 +45,7 @@ def texts(state: ReplayState, key: str) -> list[str]:
 
 
 ACT = "lov/2019-06-14-99"
+OMISSION = " \u2013 \u2013 \u2013"
 DATED = Timing(status="dated", effective=date(2022, 1, 1))
 ENACTED_TEXT = [
     "Loven gjelder prøving av fylkesmannen. Den gjelder også retting.",
@@ -298,3 +299,75 @@ def test_replay_is_deterministic() -> None:
     first, second = state_at(date(2024, 1, 1), decisions), state_at(date(2024, 1, 1), decisions)
     assert first == second
     assert first.model_dump() == second.model_dump()
+
+
+def test_pending_operations_are_recorded_on_their_target_provisions() -> None:
+    op = _op("replace_section", Address(section="§2"), instruction="§ 2 skal lyde:")
+    state = _run([_event(op, Timing(status="pending"))])
+    target = next(p for p in state.provisions if p.key == "§2")
+    assert target.status == "replayed"
+    assert target.pending == ("x#I:0.0",)
+    assert state.pending == ("x#I:0.0",)
+    result = verify(state, load("consolidated.xml"))
+    assert {s.key: s.pending for s in result.sections}["§2"] == ("x#I:0.0",)
+
+
+def test_oracle_omission_marker_is_an_editorial_class_not_a_difference() -> None:
+    oracle = load("consolidated.xml")
+    omitted = oracle.model_copy(
+        update={
+            "provisions": tuple(
+                p.model_copy(
+                    update={
+                        "ledd": tuple(
+                            ledd.model_copy(update={"text": ledd.text + OMISSION})
+                            for ledd in p.ledd
+                        )
+                    }
+                )
+                if p.key == "§2"
+                else p
+                for p in oracle.provisions
+            )
+        }
+    )
+    state = _run([], date(2023, 1, 1))
+    verdicts = {s.key: s.verdict for s in verify(state, omitted).sections}
+    assert verdicts["§2"] == "editorial_omission"
+    assert verdicts["§4"] == "text_differs"
+
+
+def test_omitted_tail_spanning_whole_ledd_is_still_editorial() -> None:
+    oracle = load("consolidated.xml")
+    trimmed = oracle.model_copy(
+        update={
+            "provisions": tuple(
+                p.model_copy(
+                    update={
+                        "ledd": (p.ledd[0].model_copy(update={"text": p.ledd[0].text + OMISSION}),)
+                    }
+                )
+                if p.key == "§1"
+                else p
+                for p in oracle.provisions
+            )
+        }
+    )
+    state = _run([_event(_op("insert_ledd", Address(section="§1", ledd=3), ("Ekstra.",)))])
+    assert texts(state, "§1")[0] != trimmed.provisions[0].ledd[0].text
+    sub = _op(
+        "substitute_term", Address(), term_old="fylkesmannen", term_new="statsforvalteren",
+        locations="§ 1",
+    )  # fmt: skip
+    state = _run([_event(sub)])
+    verdicts = {s.key: s.verdict for s in verify(state, trimmed).sections}
+    assert verdicts["§1"] == "editorial_omission"
+
+
+def test_oracle_annex_keys_are_counted_apart_from_missing_sections() -> None:
+    oracle = load("consolidated.xml")
+    annex = oracle.provisions[0].model_copy(update={"key": "gdpr/a1"})
+    extended = oracle.model_copy(update={"provisions": (*oracle.provisions, annex)})
+    result = verify(_run([]), extended)
+    assert result.counts["oracle_annex"] == 1
+    assert {s.key: s.verdict for s in result.sections}["gdpr/a1"] == "oracle_annex"
