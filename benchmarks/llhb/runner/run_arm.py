@@ -54,6 +54,14 @@ Usage:
         --condition control --suffix nmctrl1 --frozen \
         --driver openai-chat --provider norallm --api-key-env SIGMA2_API_KEY \
         --model NorMistral-11b-thinking:latest [--execute]
+
+    # Resume a run that died halfway (#806): the same arguments plus its run id.
+    # The stored metadata must match (model, commits, seed, dataset, tools...);
+    # cases already recorded are not run again, and the run's notes say it was
+    # resumed. A finished run cannot be resumed.
+    uv run python benchmarks/llhb/runner/run_arm.py \
+        --condition control --suffix frozen1 --frozen --model claude-opus-5 \
+        --resume llhb-v1-run-20260808-frozen1 --execute
 """
 
 import argparse
@@ -80,7 +88,7 @@ from lovspor.llhb.mcp_surface import (
 )
 from lovspor.llhb.openai_chat import ChatEndpoint, ChatSampling, build_request
 from lovspor.llhb.orchestrator import RunConfig, run_arm
-from lovspor.llhb.results import ResultsStore, new_run_id
+from lovspor.llhb.results import ResultsStore, is_run_id, new_run_id
 from lovspor.llhb.run_setup import (
     RunSpec,
     compose_run_metadata,
@@ -165,6 +173,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "token (e.g. SIGMA2_API_KEY, BOREALIS_API_KEY); one variable per provider",
     )
     parser.add_argument("--execute", action="store_true", help="actually spawn the CLI")
+    parser.add_argument(
+        "--resume",
+        type=_resumable_run_id,
+        help=(
+            "continue this interrupted run (#806): its stored metadata must match, and "
+            "cases it already recorded are not run again"
+        ),
+    )
     args = parser.parse_args(argv)
     _check_driver_args(parser, args)
     pilot_knobs = args.limit is not None or args.candidates is not None
@@ -179,6 +195,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.candidates is None:
         args.candidates = DEFAULT_CANDIDATES
     return args
+
+
+def _resumable_run_id(value: str) -> str:
+    if not is_run_id(value):
+        raise argparse.ArgumentTypeError(f"not an llhb-v1 run id: {value!r}")
+    return value
 
 
 def _check_driver_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -330,7 +352,7 @@ def compose(
     now = datetime.datetime.now(datetime.UTC)
     head = git_head(REPO_ROOT)
     spec = RunSpec(
-        run_id=new_run_id(now.strftime("%Y%m%d"), args.suffix),
+        run_id=args.resume or new_run_id(now.strftime("%Y%m%d"), args.suffix),
         model_id=args.model,
         condition=args.condition,
         system_prompt_text=PROMPT_PATH.read_text(encoding="utf-8"),
@@ -460,6 +482,7 @@ def execute(
         driver=args.driver,
         chat_endpoint=chat_endpoint(args),
         chat_sampling=ChatSampling(temperature=args.temperature),
+        resume=args.resume is not None,
     )
     store = ResultsStore(runs_root=RUNS_ROOT, schema_dir=LLHB_DIR / "schema")
     print(json.dumps(run_arm(config, cases, metadata, store), indent=2))

@@ -443,3 +443,48 @@ class TestChatDriverArguments:
 
         assert endpoint is not None
         assert endpoint.api_key == "borealis-secret"
+
+
+class TestResume:
+    """#806: `--resume RUN_ID` continues that run, through the store's checks."""
+
+    def test_resume_names_the_run_it_continues(self) -> None:
+        args = args_for(*FROZEN_ARGS, "--frozen", "--resume", "llhb-v1-run-20260808-frozen1")
+        cases, lock = run_arm_script.load_inputs(args)
+
+        metadata = run_arm_script.compose(args, cases, lock, None)
+
+        assert metadata["run_id"] == "llhb-v1-run-20260808-frozen1"
+
+    @pytest.mark.parametrize(
+        "run_id", ["llhb-v1-run-2026088-frozen1", "frozen1", "llhb-v1-run-20260808-frozen1\n"]
+    )
+    def test_a_malformed_run_id_is_refused_by_the_parser(self, run_id: str) -> None:
+        with pytest.raises(SystemExit):
+            args_for(*FROZEN_ARGS, "--frozen", "--resume", run_id)
+
+    def test_execute_hands_the_resume_to_the_orchestrator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[object] = []
+        monkeypatch.setattr(run_arm_script, "RUNS_ROOT", tmp_path)
+        monkeypatch.setattr(run_arm_script, "child_env", lambda _args: {})
+        monkeypatch.setattr(
+            run_arm_script, "run_arm", lambda config, *_rest: seen.append(config) or {}
+        )
+        args = args_for(*FROZEN_ARGS, "--frozen", "--resume", "llhb-v1-run-20260808-frozen1")
+        metadata = {
+            "run_id": "llhb-v1-run-20260808-frozen1",
+            "provider": "anthropic",
+            "model_id": "claude-opus-5",
+            "condition": "control",
+            "case_order_seed": 42,
+        }
+
+        run_arm_script.execute(metadata, [], args, None)
+
+        [config] = seen
+        assert config.resume is True  # type: ignore[attr-defined]
+
+    def test_a_new_run_does_not_resume(self) -> None:
+        assert args_for(*FROZEN_ARGS, "--frozen").resume is None  # type: ignore[attr-defined]
