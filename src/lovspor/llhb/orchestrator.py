@@ -48,7 +48,7 @@ from lovspor.llhb.openai_chat import (
     parse_chat_completion,
     post_chat,
 )
-from lovspor.llhb.results import ResultsStore
+from lovspor.llhb.results import ResultsStore, resumed_note
 
 # Counts `"type": "tool_use"` in the transcript text without walking events
 # at all. Deliberately dumber than the parser: every undercount so far came
@@ -222,7 +222,7 @@ def _summary(
         "errors_total": total - completed,
     }
     if recorded is not None:
-        note = f"resumed: {len(recorded)} of {total} cases were already recorded"
+        note = resumed_note(len(recorded), total)
         prior = store.load_metadata(run_id).get("notes")
         summary["notes"] = f"{prior}; {note}" if prior else note
     return summary

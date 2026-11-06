@@ -39,6 +39,22 @@ class ResultsStoreError(LovsporError):
     """A run artifact violates the results-store contract."""
 
 
+# The note a resumed run's metadata carries (#806); the one marker every
+# primary publication path refuses (#816).
+_RESUMED_NOTE_RE = re.compile(r"(?:\A|; )resumed: \d+ of \d+ cases were already recorded(?:;|\Z)")
+
+
+def resumed_note(recorded: int, total: int) -> str:
+    """The note a resumed run appends to its metadata ``notes``."""
+    return f"resumed: {recorded} of {total} cases were already recorded"
+
+
+def was_resumed(metadata: dict[str, Any]) -> bool:
+    """Whether ``metadata`` is a resumed run's, so diagnostic only (owner decision, #816)."""
+    notes = metadata.get("notes")
+    return isinstance(notes, str) and _RESUMED_NOTE_RE.search(notes) is not None
+
+
 def is_run_id(value: str) -> bool:
     """Whether ``value`` is a schema-valid llhb-v1 run id."""
     return _RUN_ID_RE.fullmatch(value) is not None

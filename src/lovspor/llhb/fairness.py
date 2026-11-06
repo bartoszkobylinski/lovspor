@@ -17,6 +17,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from lovspor.llhb.results import was_resumed
+
 # Fields whose whole purpose is to differ between the two arms, plus the
 # per-run bookkeeping that no design invariant constrains. Everything
 # else must match, including the dataset checksum, the prompt hash, the
@@ -159,6 +161,8 @@ def check_pair(
         *identity_violations(treatment, "treatment"),
         *bookkeeping_violations(control, "control"),
         *bookkeeping_violations(treatment, "treatment"),
+        *resume_violations(control, "control"),
+        *resume_violations(treatment, "treatment"),
         *paired_case_violations(control.records, treatment.records),
         *paired_completion_violations(control.records, treatment.records),
         *control_violations(control.records),
@@ -209,6 +213,21 @@ def coverage_violations(run: RunArtifacts, label: str) -> list[str]:
             f"declares {declared} case(s)"
         ]
     return []
+
+
+def resume_violations(run: RunArtifacts, label: str) -> list[str]:
+    """A resumed arm, which no primary comparison may take (owner decision, #816).
+
+    Its cases ran in two sessions. It may be scored on its own for
+    diagnostics; admitting it here would need an analysis-plan rule that
+    does not exist, so there is no switch to admit it.
+    """
+    if not was_resumed(run.metadata):
+        return []
+    return [
+        f"{label} run was resumed: resumed runs are diagnostic only and excluded from "
+        "primary published comparisons (#816)"
+    ]
 
 
 def bookkeeping_violations(run: RunArtifacts, label: str) -> list[str]:

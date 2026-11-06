@@ -58,7 +58,9 @@ Usage:
     # Resume a run that died halfway (#806): the same arguments plus its run id.
     # The stored metadata must match (model, commits, seed, dataset, tools...);
     # cases already recorded are not run again, and the run's notes say it was
-    # resumed. A finished run cannot be resumed.
+    # resumed. A finished run cannot be resumed. A resumed run is diagnostic
+    # only (#816): the pair manifest, fairness check, confirmatory ceremony
+    # and stability report refuse it; score_arm.py still scores it alone.
     uv run python benchmarks/llhb/runner/run_arm.py \
         --condition control --suffix frozen1 --frozen --model claude-opus-5 \
         --resume llhb-v1-run-20260808-frozen1 --execute
