@@ -146,3 +146,27 @@ def test_an_approved_input_carrying_a_candidate_proves_nothing(
     with pytest.raises(CrosswalkError) as caught:
         manifest_impl(data, tmp_path / "manifest.json", capture_dir, proof)
     assert str(caught.value) == CARRIED
+
+
+def test_historical_refusal_lists_every_revision_in_sorted_order(
+    built: bytes, capture_dir: Path
+) -> None:
+    records = parse_records(built)
+    first = _attested(records)
+    first["release_state"] = "release_candidate"
+    second = {**copy.deepcopy(first), "record_revision": 2}
+    latest = {
+        **copy.deepcopy(first),
+        "record_revision": 3,
+        "release_state": "research_only",
+    }
+    data = serialize_records([*records, second, latest])
+    require_passed(check(data, cache=capture_dir))
+    with pytest.raises(CrosswalkError) as caught:
+        build_manifest(data, "rc.jsonl", cache=capture_dir)
+    law = first["amending_lov_id"]
+    assert str(caught.value) == (
+        "release_candidate revisions that are no longer current claim a past owner "
+        "authorization this tool cannot verify yet (proposed A1.5): no manifest for "
+        f"{law}@1, {law}@2"
+    )
