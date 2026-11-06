@@ -375,3 +375,44 @@ def test_oracle_annex_keys_are_counted_apart_from_missing_sections() -> None:
     result = verify(_run([]), extended)
     assert result.counts["oracle_annex"] == 1
     assert {s.key: s.verdict for s in result.sections}["gdpr/a1"] == "oracle_annex"
+
+
+def test_verification_partitions_sections_and_reports_both_note_mismatches() -> None:
+    baseline = load("enacting.xml")
+    first = baseline.provisions[0].model_copy(update={"notes": ("Amended by law x",)})
+    extra = first.model_copy(update={"key": "§99", "notes": ()})
+    oracle = baseline.model_copy(update={"provisions": (first, baseline.provisions[1], extra)})
+    state = _run([_event(_op("insert_ledd", Address(section="§2", ledd=2), ("New.",)))])
+    result = verify(state, oracle)
+    assert {s.key: s.verdict for s in result.sections} == {
+        "§1": "exact_raw",
+        "§2": "text_differs",
+        "§3": "only_in_replay",
+        "§4": "only_in_replay",
+        "§99": "only_in_oracle",
+    }
+    assert sum(result.counts.values()) == len(result.sections) == 5
+    assert result.notes_without_replay_event == ("§1",)
+    assert result.replay_events_without_note == ("§2",)
+
+
+@pytest.mark.parametrize("change", ["heading", "text", "extra_ledd"])
+def test_omission_marker_does_not_hide_a_difference_in_retained_text(change: str) -> None:
+    baseline = load("enacting.xml")
+    provision = baseline.provisions[0]
+    ledd = provision.ledd[0].model_copy(update={"text": provision.ledd[0].text + OMISSION})
+    heading = provision.heading
+    if change == "heading":
+        heading = "Different heading"
+    elif change == "text":
+        ledd = ledd.model_copy(update={"text": "Different text." + OMISSION})
+    retained = (ledd,)
+    if change == "extra_ledd":
+        retained = (ledd, *provision.ledd[1:], Ledd(text="Extra.", xml="Extra."))
+    oracle = baseline.model_copy(
+        update={
+            "provisions": (provision.model_copy(update={"heading": heading, "ledd": retained}),)
+        }
+    )
+    result = verify(_run([]), oracle)
+    assert result.sections[0].verdict == "text_differs"

@@ -5,6 +5,7 @@ shape; raw Lovdata XML never enters the repository.
 """
 
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -136,3 +137,33 @@ def test_paragraph_after_a_plain_ledd_is_not_a_continuation() -> None:
     closing = provisions["§25"]
     assert len(closing.ledd) == 1
     assert closing.ledd[0].text.endswith("i andre lover:")
+
+
+def test_document_digest_pins_raw_bytes_including_line_endings() -> None:
+    body = (FIXTURES / "enacting.xml").read_bytes()
+    noisy = body.replace(b"><", b">\r\n<")
+    original = parse_document(body, "original.xml")
+    changed = parse_document(noisy, "changed.xml")
+    assert original.sha256 == sha256(body).hexdigest()
+    assert changed.sha256 == sha256(noisy).hexdigest()
+    assert original.sha256 != changed.sha256
+    assert [p.key for p in original.provisions] == [p.key for p in changed.provisions]
+
+
+def test_external_entity_cannot_read_a_local_file(tmp_path: Path) -> None:
+    secret = tmp_path / "private.txt"
+    secret.write_text("PRIVATE_ENTITY_SENTINEL", encoding="utf-8")
+    body = (FIXTURES / "enacting.xml").read_bytes()
+    declaration = f'<!DOCTYPE html [<!ENTITY leak SYSTEM "{secret.as_uri()}">]>'
+    body = body.replace(b"<!DOCTYPE html>", declaration.encode(), 1)
+    assert b"Denne paragrafen" in body
+    body = body.replace(b"Denne paragrafen", b"&leak; Denne paragrafen", 1)
+    document = parse_document(body, "entity.xml")
+    assert "PRIVATE_ENTITY_SENTINEL" not in document.model_dump_json()
+
+
+@pytest.mark.parametrize("body", [b"<html>", b"<html>\xff</html>"])
+def test_invalid_xml_names_the_member_and_preserves_the_parse_error(body: bytes) -> None:
+    with pytest.raises(LegalTimeDocumentError, match="invalid XML in broken.xml") as error:
+        parse_document(body, "broken.xml")
+    assert isinstance(error.value.__cause__, etree.XMLSyntaxError)
