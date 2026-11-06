@@ -1,4 +1,7 @@
-"""Skipped renders do not create paid work in the change-path guard (#790)."""
+"""Skipped renders do not create paid work in the change-path guard (#790).
+
+A changed document that cannot render is refused instead (#804).
+"""
 
 from dataclasses import replace
 from pathlib import Path
@@ -7,6 +10,7 @@ import pytest
 
 from lovspor.storage.manifest import Manifest
 from lovspor.sync.orchestrator import _ChangePlan, _guard_change_reembed, _write_one
+from lovspor.temporal_attestation import AttestationError
 from tests.unit.test_embedding_input_staleness import _settings
 from tests.unit.test_sync_change_reembed_guard import _OBSERVED, _doc
 
@@ -41,7 +45,13 @@ def test_entirely_unrenderable_workload_is_empty_and_silent(
     }
     capsys.readouterr()
 
-    _guard_change_reembed(settings, plan, allow=allow)
+    if action == "changed":
+        # #804/#815: a changed document that cannot render is refused before any
+        # spend, since the attestation would refuse its carried-forward record.
+        with pytest.raises(AttestationError, match="lov-0 changed upstream but cannot render"):
+            _guard_change_reembed(settings, plan, allow=allow)
+    else:
+        _guard_change_reembed(settings, plan, allow=allow)
 
     assert "override active" not in capsys.readouterr().err
     assert {
