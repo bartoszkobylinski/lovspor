@@ -22,6 +22,7 @@ from lovspor.errors import LovsporError
 from lovspor.llhb.fairness import RunArtifacts, check_pair
 from lovspor.llhb.orchestrator import run_arm
 from lovspor.llhb.pair_manifest import PairManifestError, verify_pair_manifest
+from lovspor.llhb.posthoc import PosthocGuardError, verify_frozen_pair
 from lovspor.llhb.results import resumed_note, was_resumed
 from tests.unit.test_llhb_fairness import EXPECTED, metadata, record, treatment_metadata
 from tests.unit.test_llhb_fairness import treatment_record as fair_treatment_record
@@ -149,3 +150,33 @@ def test_the_stability_report_refuses_a_resumed_repeat_before_scoring(
 def test_resume_marker_is_recognized_among_operational_notes(notes: str) -> None:
     """The #816 gate must still recognize a resume after notes are appended."""
     assert was_resumed({"notes": notes}) is True
+
+
+def _completed_resumed_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    bin_dir = _interrupted_run(tmp_path, monkeypatch)
+    store = _store(tmp_path)
+    run_arm(make_config(tmp_path, bin_dir, resume=True), _CASES, make_metadata(), store)
+    return tmp_path / "runs" / RUN_ID
+
+
+def test_the_posthoc_supplementary_takes_only_the_byte_pinned_frozen_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It needs no resume gate of its own: any records but the frozen pair's are refused."""
+    run_dir = _completed_resumed_run(tmp_path, monkeypatch)
+
+    with pytest.raises(PosthocGuardError, match="records.jsonl is"):
+        verify_frozen_pair(run_dir / "records.jsonl", run_dir / "records.jsonl")
+
+
+def test_single_arm_diagnostics_still_read_a_resumed_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Diagnostic use is what the owner allowed: one arm, no comparison, no gate."""
+    run_dir = _completed_resumed_run(tmp_path, monkeypatch)
+
+    metadata = _script("score_arm").read_metadata(run_dir.parent, RUN_ID)
+    records = _script("pilot_summary").load_records(run_dir.parent, RUN_ID)
+
+    assert was_resumed(metadata) is True
+    assert len(records) == len(_CASES)
