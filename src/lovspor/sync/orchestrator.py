@@ -46,6 +46,7 @@ from collections import Counter
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from itertools import islice
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
@@ -112,11 +113,11 @@ from lovspor.sync.git_commit import (
     head_commit_or_none,
 )
 from lovspor.sync.reembed_guard import (
-    OVERRIDE_HINT,
     BackfillItem,
-    ReembedScope,
+    change_scope,
     enforce_reembed_guard,
     guard_mass_reembed,
+    rendered_or_refused,
 )
 from lovspor.temporal import TEMPORAL_PARSER_VERSION
 from lovspor.temporal_attestation import (
@@ -1934,22 +1935,14 @@ def _guard_change_reembed(settings: Settings, plan: _ChangePlan, *, allow: bool)
     """
     documents = tokens = 0
     for doc in _docs_to_embed(settings, plan):
-        try:
-            rendered = render_full_document(doc.xml_bytes, _frontmatter_context(doc, plan.now))
-        except (RenderError, ParseError):
+        render = partial(render_full_document, doc.xml_bytes, _frontmatter_context(doc, plan.now))
+        prior = plan.prior.documents.get(doc.doc_id)
+        rendered = rendered_or_refused(render, doc.doc_id, doc.xml_hash, prior)
+        if rendered is None:
             continue
         documents += 1
         tokens += sum(count_input_tokens(item.text) for item in build_embedding_inputs(rendered))
-    scope = ReembedScope(
-        documents=documents,
-        tokens=tokens,
-        noun="changed document(s) to re-embed",
-        title="the change-driven re-embed",
-        remedy="So many changed documents usually means the upstream format or the "
-        "renderer changed, not the law (#679: an ELI row in every header). Check the "
-        f"hashes before paying; if the re-embed is intended, {OVERRIDE_HINT}",
-    )
-    enforce_reembed_guard(scope, plan.prior, settings, allow)
+    enforce_reembed_guard(change_scope(documents, tokens), plan.prior, settings, allow)
 
 
 def _run_sprint9_embeddings_migration(
