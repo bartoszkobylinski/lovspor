@@ -258,3 +258,71 @@ def test_resume_rejects_added_removed_or_nested_configuration_changes_without_wr
 
     assert metadata_path.read_bytes() == original_bytes
     assert not (run_dir / "records.jsonl").exists()
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"transport": "function-bridge"},
+        {"tools": ["mcp__lovverk__search"]},
+        {"tool_schema_sha256": "d" * 64},
+        {"backend": "different checkout"},
+    ],
+)
+def test_resume_rejects_changed_tool_configuration_without_writes(
+    tmp_path: Path, changed: dict[str, Any]
+) -> None:
+    """The runner's resume contract explicitly requires matching tools."""
+    tools = {
+        "transport": "native-mcp",
+        "tools": ["mcp__lovverk__get_section"],
+        "tool_schema_sha256": "c" * 64,
+        "backend": "local checkout",
+    }
+    store = _store(tmp_path)
+    run_dir = store.open_run(make_metadata(condition="lovspor", tool_config=tools))
+    store.append_record(make_record(condition="lovspor"))
+    original = {path.name: path.read_bytes() for path in run_dir.iterdir()}
+
+    with pytest.raises(ResultsStoreError, match="tool_config.*does not match"):
+        store.resume_run(make_metadata(condition="lovspor", tool_config={**tools, **changed}))
+
+    assert {path.name: path.read_bytes() for path in run_dir.iterdir()} == original
+
+
+def test_resume_validates_requested_metadata_before_reopening(tmp_path: Path) -> None:
+    """Completion fields may differ, but still must satisfy the stored schema."""
+    store = _store(tmp_path)
+    run_dir = store.open_run(make_metadata())
+    metadata_path = run_dir / "run-metadata.json"
+    original = metadata_path.read_bytes()
+
+    with pytest.raises(ResultsStoreError, match="invalid run metadata.*cases_total"):
+        store.resume_run(make_metadata(cases_total=-1))
+
+    assert metadata_path.read_bytes() == original
+    assert not (run_dir / "records.jsonl").exists()
+
+
+def test_resume_accepts_null_finish_and_completion_changes_without_rewriting(
+    tmp_path: Path,
+) -> None:
+    """resume_run exempts start/completion fields and preserves captured metadata."""
+    store = _store(tmp_path)
+    run_dir = store.open_run(make_metadata(finished_at=None, notes="captured notes"))
+    store.append_record(make_record())
+    original = {path.name: path.read_bytes() for path in run_dir.iterdir()}
+
+    reopened = _store(tmp_path).resume_run(
+        make_metadata(
+            started_at="2026-08-09T01:00:00Z",
+            cases_total=4,
+            cases_completed=1,
+            errors_total=0,
+            notes="new invocation",
+            evaluator_version="scorer-v1",
+        )
+    )
+
+    assert reopened == run_dir
+    assert {path.name: path.read_bytes() for path in run_dir.iterdir()} == original
