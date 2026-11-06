@@ -32,12 +32,21 @@ def _tree(root: Path, redirects: dict[str, str], gone: list[str]) -> Path:
 
 
 def test_previous_redirects_are_counted_individually(tmp_path: Path) -> None:
-    previous = _tree(tmp_path / "previous", {"/old-a/": "/new/", "/old-b/": "/new/"}, [])
-    current = _tree(tmp_path / "current", {"/old-a/": "/new/", "/old-b/": "/new/"}, [])
+    # Each page redirect travels with its twin's redirect, as the generator
+    # emits them: URL contract §3 refuses a 301 page whose twin answers 404.
+    redirects = {
+        "/old-a/": "/new/",
+        "/old-a/index.json": "/new/index.json",
+        "/old-b/": "/new/",
+        "/old-b/index.json": "/new/index.json",
+    }
+    previous = _tree(tmp_path / "previous", redirects, [])
+    current = _tree(tmp_path / "current", redirects, [])
     (current / "new").mkdir()
     (current / "new/index.html").write_text("live")
+    (current / "new/index.json").write_text("{}")
     report = check_continuity(previous, current)
-    assert (report.live, report.moved, report.gone) == (2, 2, 0)
+    assert (report.live, report.moved, report.gone) == (2, 4, 0)
 
 
 def test_twin_mismatch_names_both_actual_fates(tmp_path: Path) -> None:
