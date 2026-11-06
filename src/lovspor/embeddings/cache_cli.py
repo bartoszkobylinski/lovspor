@@ -4,7 +4,7 @@ Registered on the ``ops`` group from here, because :mod:`lovspor.cli` sits at
 its size ratchet. Each decorated command only calls an undecorated ``*_impl``
 (decisions.md §9i), so the bodies stay inside the mutation gate.
 
-Exit codes: 0 done; 1 an entry was refused (``verify``) or the store refused
+Exit codes: 0 done; 1 an entry was refused or expired (``verify``) or the store refused
 to open; 2 ``LOVSPOR_EMBEDDING_CACHE_DIR`` is not set. No command calls a
 provider, and output is counts and key prefixes only.
 """
@@ -53,10 +53,10 @@ def status_impl() -> int:
 
 def verify_impl() -> int:
     report = verify(open_configured_store())
-    for reason in report.refused:
+    for reason in (*report.refused, *report.expired_reasons):
         typer.echo(reason, err=True)
     typer.echo(report.line())
-    return EXIT_REFUSED if report.refused else 0
+    return EXIT_REFUSED if report.failed else 0
 
 
 def prune_impl() -> int:

@@ -205,3 +205,15 @@ def test_cli_invalidate_and_prune_run(
     gone = runner.invoke(app, ["ops", "embedding-cache", "invalidate", "--esi", ESI])
     assert gone.exit_code == 0
     assert "removed=1" in gone.output
+
+
+def test_cli_verify_fails_on_an_expired_entry_and_names_it(
+    store: LocalEntryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §5.3: an expired entry fails validation, so verify lists it and exits 1."""
+    store.put(_doc("expired", created_at=datetime(2000, 1, 1, tzinfo=UTC)))
+    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(store.root))
+    result = CliRunner().invoke(app, ["ops", "embedding-cache", "verify"])
+    assert result.exit_code == 1
+    assert "expired=1" in result.output
+    assert _hash("expired")[:12] in result.output

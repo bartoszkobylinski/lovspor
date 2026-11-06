@@ -130,7 +130,7 @@ the store cannot be written). The run did not pay over it. Look before
 deleting anything:
 
 ```bash
-uv run lovspor ops embedding-cache verify      # exit 1 lists each refused entry
+uv run lovspor ops embedding-cache verify      # exit 1 lists each refused or expired entry
 uv run lovspor ops embedding-cache invalidate --esi <esi> --input-hash <hash>
 uv run lovspor ops embedding-cache invalidate --esi <esi>   # a whole space
 ```
