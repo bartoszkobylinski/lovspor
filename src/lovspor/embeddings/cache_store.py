@@ -43,7 +43,8 @@ SCHEMA_DIR = f"schema-{SCHEMA}"
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
 _FOREIGN_BITS = 0o077
-_READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW
+_READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+"""``O_NONBLOCK`` so a FIFO planted at an entry path cannot hang the open."""
 _WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
 
 
@@ -174,11 +175,15 @@ def read_entry_bytes(path: Path) -> bytes | None:
         if exc.errno == errno.ELOOP:
             raise EmbeddingCacheError(f"embedding cache refuses a symlink: {path.name}") from exc
         raise EmbeddingCacheStorageError(f"cannot read {path.name}: {exc.strerror}") from exc
-    with os.fdopen(descriptor, "rb") as handle:
-        info = os.fstat(handle.fileno())
+    try:
+        info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
             raise EmbeddingCacheError(f"embedding cache entry is not a regular file: {path.name}")
         _check_owner_only(info, path.name)
+    except EmbeddingCacheError:
+        os.close(descriptor)
+        raise
+    with os.fdopen(descriptor, "rb") as handle:
         return handle.read()
 
 

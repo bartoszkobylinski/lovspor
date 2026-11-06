@@ -8,6 +8,7 @@ built from the cache is byte-identical to one built without it.
 """
 
 import hashlib
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -20,8 +21,13 @@ from lovspor.embeddings.cache import (
     quantized_document_vectors,
     with_embedding_cache,
 )
+from lovspor.embeddings.cache_format import ReadPolicy
 from lovspor.embeddings.inputs import EmbeddingInput, hash_embedding_inputs
-from lovspor.errors import EmbeddingCacheError, EmbeddingCacheStorageError
+from lovspor.errors import (
+    EmbeddingCacheError,
+    EmbeddingCacheExpiredError,
+    EmbeddingCacheStorageError,
+)
 from lovspor.settings import Settings
 from lovspor.sync.orchestrator import _write_embeddings_for_doc
 from tests.unit.test_embedding_space_identity import _FakeEmbedder, _UnidentifiedEmbedder
@@ -281,3 +287,78 @@ def test_progress_reports_counts_only(
     line = progress.line()
     assert "Tekst" not in line
     assert str(cache_dir) not in line
+
+
+def test_single_request_document_is_reused_without_unit_checkpoints(
+    cache_dir: Path, tmp_path: Path
+) -> None:
+    """Design §6: a one-request document persists the document entry directly."""
+    settings = _settings(tmp_path)
+    inputs = [EmbeddingInput("§ 1", "en"), EmbeddingInput("§ 2", "to")]
+    input_hash = hash_embedding_inputs(inputs)
+    provider = _Provider()
+    cached = with_embedding_cache(provider, settings)
+    assert isinstance(cached, CachingEmbedder)
+    first, scale = quantized_document_vectors(cached, inputs, input_hash)
+    assert provider.requests == 1
+    entries = list(cache_dir.rglob("*.lsec"))
+    assert len(entries) == 1
+    assert entries[0].parent.name == "documents"
+
+    resumed = _Provider(fail_after=0)
+    again = with_embedding_cache(resumed, settings)
+    assert isinstance(again, CachingEmbedder)
+    second, second_scale = quantized_document_vectors(again, inputs, input_hash)
+    np.testing.assert_array_equal(second, first)
+    assert second_scale == scale
+    assert resumed.requests == 0
+
+
+def test_expired_checkpoint_stops_resume_before_any_payment(
+    cache_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §3.4 and §5.3: expired units are refusals, never paid-over misses."""
+    settings = _settings(tmp_path)
+    with pytest.raises(RuntimeError, match="job killed"):
+        _write(settings, with_embedding_cache(_Provider(fail_after=1), settings))
+    before = {p: p.read_bytes() for p in cache_dir.rglob("*.lsec")}
+    assert len(before) == 1
+    future = datetime.now(UTC) + timedelta(days=31)
+    monkeypatch.setattr(
+        "lovspor.embeddings.cache._read_policy",
+        lambda: ReadPolicy(max_age=timedelta(days=30), clock=lambda: future),
+    )
+    provider = _Provider()
+    with pytest.raises(EmbeddingCacheExpiredError):
+        _write(settings, with_embedding_cache(provider, settings))
+    assert provider.requests == 0
+    assert {p: p.read_bytes() for p in cache_dir.rglob("*.lsec")} == before
+    assert not list(settings.lovverk_repo_path.rglob("*.bin"))
+
+
+def test_resumed_units_use_one_document_scale(cache_dir: Path, tmp_path: Path) -> None:
+    """Design §4: early units retain floats until the whole document is available."""
+
+    class _DifferentMagnitudes(_Provider):
+        def encode(self, texts: list[str]) -> np.ndarray:
+            super().encode(texts)  # Keep the interruption and paid-request accounting.
+            return np.array([[float(text), 0, 0, 0] for text in texts], dtype=np.float32)
+
+    settings = _settings(tmp_path)
+    inputs = [EmbeddingInput(f"§ {i}", str(value)) for i, value in enumerate([1, 2, 64, 127])]
+    input_hash = hash_embedding_inputs(inputs)
+    interrupted = with_embedding_cache(_DifferentMagnitudes(fail_after=1), settings)
+    assert isinstance(interrupted, CachingEmbedder)
+    with pytest.raises(RuntimeError, match="job killed"):
+        quantized_document_vectors(interrupted, inputs, input_hash)
+
+    provider = _DifferentMagnitudes()
+    resumed = with_embedding_cache(provider, settings)
+    assert isinstance(resumed, CachingEmbedder)
+    vectors, scale = quantized_document_vectors(resumed, inputs, input_hash)
+    assert provider.requests == 1
+    assert resumed.progress.units_cached == 1
+    assert scale == 1.0
+    np.testing.assert_array_equal(
+        vectors, np.array([[1, 0, 0, 0], [2, 0, 0, 0], [64, 0, 0, 0], [127, 0, 0, 0]], np.int8)
+    )
