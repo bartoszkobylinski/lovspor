@@ -89,6 +89,21 @@ def test_option_help_returns_none_when_option_has_no_help() -> None:
     assert option_help(app, (), "--cache") is None
 
 
+def test_option_help_reads_root_group_option_without_selecting_child_help() -> None:
+    app = typer.Typer()
+
+    @app.callback()
+    def root(cache: Annotated[str, typer.Option("--cache", help="Root cache")] = "") -> None:
+        """Root group."""
+
+    @app.command()
+    def capture(cache: Annotated[str, typer.Option("--cache", help="Child cache")] = "") -> None:
+        """Child command."""
+
+    assert option_help(app, (), "--cache") == "Root cache"
+    assert option_help(app, ("capture",), "--cache") == "Child cache"
+
+
 def test_option_help_selects_nested_command_without_using_parent_or_sibling_help() -> None:
     app = _app()
     nested = typer.Typer()
