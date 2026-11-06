@@ -2463,6 +2463,8 @@ moving the job's hour means changing both.
 
 `.github/workflows/sync.yml` runs daily at **04:00 UTC (~05:00–06:00 CET)** — about 2.5 hours after Lovdata's nightly tarball drop at ~01:30 UTC. Manual reruns are available via the **Actions → Sync legal corpus → Run workflow** button on GitHub.
 
+A run that fails or is cancelled files the issue **Nightly sync did not complete**, with the run link and the `Run lovspor sync` outcome; each repeat comments on the open issue instead of filing another (#790). The sync step stops at 105 minutes, inside the job's 120, so a long run fails its step and the alert still runs. Read the log before re-running: a keyed run that ran long may have spent embedding budget on work it then lost (#802). Close the issue once a run completes.
+
 The workflow:
 
 1. Checks out the engine.

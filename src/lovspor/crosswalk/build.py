@@ -56,8 +56,17 @@ def _agree(given: object, recorded: object, name: str) -> None:
         raise CrosswalkError(f"the build's {name} differ from the capture's recorded scope")
 
 
+NO_SCOPE = (
+    "this capture records no scope (it predates recorded scopes): recapture it with "
+    "`lovspor ops crosswalk capture --laws FILE --lovverk-commit SHA`"
+)
+
+
 def _scope(manifest: Manifest, options: BuildOptions) -> tuple[list[str], str]:
+    """The capture's recorded scope, or the caller's; never one inferred from the bytes."""
     recorded = manifest.get("scope") or {}
+    if not recorded and not options.law_ids:
+        raise CrosswalkError(NO_SCOPE)
     kept_laws, kept_commit = recorded.get("law_ids"), recorded.get("lovverk_commit")
     laws = sorted(set(options.law_ids)) if options.law_ids else None
     _agree(laws, sorted(set(kept_laws)) if kept_laws else None, "law ids")

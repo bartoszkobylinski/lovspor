@@ -394,6 +394,7 @@ jobs:
       BEFORE_SHA: ${{ needs.codex-author.outputs.before_sha }}
     outputs:
       pushed: ${{ steps.push.outputs.pushed }}
+      pushed_sha: ${{ steps.push.outputs.sha }}
     steps:
       # Head branch (not merge ref), with a token that can push and retrigger CI.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -586,6 +587,7 @@ jobs:
             git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
           fi
           echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # Issue #160: an unfixable lint in agent output failed the normalize step
       # before the tests ran. The job went red, the PR got nothing, and the
@@ -861,6 +863,48 @@ jobs:
             } > "$RUNNER_TEMP/lane-escalation.md"
           fi
           scripts/ci/pr_sticky_comment.sh pipeline "$PR" "$RUNNER_TEMP/lane-escalation.md"
+
+  # Issue #798. A push skips mutation and ready for the synchronize run it
+  # fires, and on PR #791 that run never came: no verdict, nothing red. This
+  # waits, bounded, for a run on the exact pushed SHA. When the follow-up run
+  # starts, the concurrency group cancels this run, which is the same success;
+  # when none starts, the PR is labelled needs-human:pipeline and told how to
+  # start it. It never closes, reopens or pushes anything itself.
+  follow-up:
+    needs: codex-tests
+    if: needs.codex-tests.outputs.pushed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      issues: write
+    steps:
+      # The PR head, for the reason `ready` takes it: the PR that adds the
+      # script must be able to run the version it ships.
+      - name: Check out the escalation helpers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+
+      - name: Wait for the run on the pushed head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          FOLLOWUP_ATTEMPTS: "20"
+          FOLLOWUP_INTERVAL_SECONDS: "60"
+        run: |
+          # Guarded for one release cycle (#381): a head that predates the
+          # script cannot run it, and says so instead of failing.
+          if [ -x scripts/ci/await_followup_run.sh ]; then
+            scripts/ci/await_followup_run.sh "${{ github.event.pull_request.number }}" \
+              "${{ needs.codex-tests.outputs.pushed_sha }}" "${{ github.event.pull_request.head.sha }}"
+          else
+            echo "this head predates scripts/ci/await_followup_run.sh (#798); not watched"
+          fi
 
   mutation:
     # Runs only when fast CI is green, Codex finished, and Codex did NOT just push —

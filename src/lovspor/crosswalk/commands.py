@@ -80,6 +80,10 @@ _Cache = Annotated[
     Path,
     typer.Option("--cache", help="A new, empty directory outside every Git checkout and Lovverk."),
 ]
+# build and release-candidate only read a capture (#793).
+_ReadCache = Annotated[
+    Path, typer.Option("--cache", help="An existing capture directory; only read.")
+]
 
 
 @crosswalk_app.command("capture")
@@ -152,7 +156,7 @@ def build_impl(cache: Path, output: Path, options: BuildOptions) -> str:
 
 @crosswalk_app.command("build")
 def build_command(
-    cache: _Cache,
+    cache: _ReadCache,
     output: Annotated[Path, typer.Option("--output", help="New JSONL file; never overwritten.")],
     previous: Annotated[
         Path | None, typer.Option("--previous", help="The previous release's JSONL, if any.")
@@ -247,7 +251,7 @@ def check_command(
 def release_candidate_command(
     data: _Input,
     approval: Annotated[Path, typer.Option("--approval", help="The owner's approval file.")],
-    cache: _Cache,
+    cache: _ReadCache,
     output: Annotated[Path, typer.Option("--output", help="New JSONL file; never overwritten.")],
 ) -> None:
     """Explicit gate: promote eligible records under the owner's approval of these bytes."""
