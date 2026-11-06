@@ -581,3 +581,33 @@ class TestBuildValidationRefusesWrongClaims:
     ) -> None:
         redirect_map = RedirectMap(redirects=(), gone=("/lov/a/paragraf/3/", "/lov/aa/"))
         validate_redirect_targets(redirect_map, inventory)
+
+
+class TestLoneTwinRedirectSources:
+    """A twin redirect source whose page is not itself a redirect source."""
+
+    @staticmethod
+    def _release(root: Path, redirects: dict[str, str], pages: tuple[str, ...]) -> Path:
+        for page in pages:
+            (root / page).mkdir(parents=True)
+            (root / page / "index.html").write_text(page)
+            (root / page / "index.json").write_text("{}")
+        entries = [{"from": k, "to": v} for k, v in redirects.items()]
+        (root / "redirect-map.json").write_text(
+            json.dumps({"redirects": entries, "gone": []}), encoding="utf-8"
+        )
+        return root
+
+    def test_a_lone_twin_source_is_judged_and_counted_by_its_kind(self, tmp_path: Path) -> None:
+        lone = {"/lov/old/index.json": "/lov/ny/index.json"}
+        previous = self._release(tmp_path / "previous", lone, ("lov/base",))
+        current = self._release(tmp_path / "current", lone, ("lov/base", "lov/ny"))
+        report = check_continuity(previous, current)
+        assert (report.live, report.moved, report.gone) == (2, 1, 0)
+
+    def test_a_lone_twin_source_that_would_404_is_refused(self, tmp_path: Path) -> None:
+        lone = {"/lov/old/index.json": "/lov/ny/index.json"}
+        previous = self._release(tmp_path / "previous", lone, ("lov/base",))
+        current = self._release(tmp_path / "current", {}, ("lov/base",))
+        with pytest.raises(PublishError, match="/lov/old/index.json was served .* 404"):
+            check_continuity(previous, current)
