@@ -166,6 +166,39 @@ def test_nonblocking_probe_consumes_only_the_first_byte() -> None:
         os.close(read_end)
 
 
+@pytest.mark.parametrize("limit", [3, 4])
+def test_an_open_writer_can_deliver_fragmented_data_after_the_wait_budget(
+    monkeypatch: pytest.MonkeyPatch, limit: int
+) -> None:
+    """The documented deadline applies to finding a writer, not receiving its data."""
+    read_end, write_end = os.pipe()
+
+    def produce() -> None:
+        try:
+            time.sleep(0.05)
+            os.write(write_end, b"ab")
+            time.sleep(0.05)
+            os.write(write_end, b"cd")
+        finally:
+            os.close(write_end)
+
+    monkeypatch.setattr(commands, "FIFO_WRITER_WAIT_SECONDS", 0.0)
+    writer = threading.Thread(target=produce, daemon=True)
+    writer.start()
+    try:
+        path = Path(f"/dev/fd/{read_end}")
+        result = _outcome(lambda path: read_bounded(path, limit, "input"), path, path)
+        if limit == 4:
+            assert result == b"abcd"
+        else:
+            assert isinstance(result, CrosswalkError)
+            assert str(result) == f"input too large: {path}"
+    finally:
+        writer.join(_DEADLINE)
+        os.close(read_end)
+    assert not writer.is_alive()
+
+
 def test_a_pipe_byte_counts_toward_the_limit() -> None:
     read_end, write_end = os.pipe()
     try:
