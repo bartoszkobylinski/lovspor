@@ -76,22 +76,34 @@ def test_a_signature_that_is_not_a_regular_file_is_refused_unread(
 
 
 @pytest.mark.parametrize("name", [approvals.APPROVAL_FILE, approvals.APPROVED_INPUT_FILE])
-def test_a_fifo_in_the_proof_directory_is_refused_without_hanging(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+@pytest.mark.parametrize("kind", ["fifo", "symlink-to-fifo", "directory", "device"])
+def test_a_non_regular_proof_input_is_refused_without_hanging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, kind: str
 ) -> None:
     """The approved input is read only after a trusted signature, so sign a real one."""
     signer = new_signer(tmp_path / "keys")
     trust(monkeypatch, signer)
     proof = approval_dir(tmp_path / "proof", b"", signer)
     (proof / name).unlink()
-    _fifo(proof / name)
+    path = proof / name
+    if kind == "fifo":
+        _fifo(path)
+    elif kind == "symlink-to-fifo":
+        _link(path, _fifo(tmp_path / "pipe"))
+    elif kind == "directory":
+        path.mkdir()
+    else:
+        _link(path, Path(os.devnull))
     data = tmp_path / "rc.jsonl"
     data.write_bytes(b"")
     cache = tmp_path / "cache"
     cache.mkdir()
-    raised = _outcome(lambda: manifest_impl(data, tmp_path / "m.json", cache, proof))
+    output = tmp_path / "m.json"
+    raised = _outcome(lambda: manifest_impl(data, output, cache, proof))
     assert isinstance(raised, CrosswalkError)
-    assert str(raised).endswith(f"is not a regular file: {proof / name}")
+    what = "approval" if name == approvals.APPROVAL_FILE else "approved input"
+    assert str(raised) == f"{what} is not a regular file: {path}"
+    assert not output.exists()
 
 
 def test_a_cli_signature_fifo_is_refused_without_hanging(tmp_path: Path) -> None:
