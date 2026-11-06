@@ -135,6 +135,27 @@ def _two_releases(
 
 
 class TestEveryPublishedUrlSurvives:
+    def test_retiring_a_pid_does_not_retire_pids_with_the_same_digits(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """URL contract §4 retires the exact provision, not a numeric prefix."""
+        before, after = _two_releases(
+            repo,
+            tmp_path,
+            (
+                {"lover/a.md": _doc("A", "lov/2020-01-01-1", ("2", "20", "21"))},
+                {"lover/a.md": _doc("A", "lov/2020-01-01-1", ("20", "21"))},
+            ),
+        )
+
+        for suffix in ("", "index.json"):
+            assert answer(after, "/lov/a/paragraf/2/" + suffix) == (GONE, None)
+            for pid in ("20", "21"):
+                assert answer(after, f"/lov/a/paragraf/{pid}/" + suffix) == (LIVE, None)
+        check_release(after)
+        report = check_continuity(before, after)
+        assert (report.live, report.moved, report.gone) == (6, 0, 2)
+
     @pytest.mark.parametrize(("folder", "route"), [("lover", "lov"), ("forskrifter", "forskrift")])
     def test_a_restored_pid_is_live_without_a_stale_410(
         self, repo: Path, tmp_path: Path, folder: str, route: str
@@ -479,6 +500,35 @@ class TestTheContinuityGate:
         shutil.copytree(after, current)
         shutil.rmtree(current / "lov/ny/paragraf/1")
         with pytest.raises(PublishError, match="which is not a live page"):
+            check_continuity(before, current)
+
+    @pytest.mark.parametrize("target_answer", ["moved", "gone"])
+    def test_a_redirect_target_must_be_live_even_when_its_file_exists(
+        self, releases: tuple[Path, Path], tmp_path: Path, target_answer: str
+    ) -> None:
+        """URL contract §4 requires one hop to live, using Caddy's rule order."""
+        before, after = releases
+        current = tmp_path / "current"
+        shutil.copytree(after, current)
+        target = "/lov/ny/paragraf/1/"
+        if target_answer == "moved":
+            _rewrite_map(
+                current,
+                lambda m: m["redirects"].extend(
+                    {"from": target + suffix, "to": "/lov/b/paragraf/1/" + suffix}
+                    for suffix in ("", "index.json")
+                ),
+            )
+        else:
+            _rewrite_map(current, lambda m: m["gone"].append(target))
+
+        assert _file_for(current, target).is_file()
+        assert _file_for(current, target + "index.json").is_file()
+        assert answer(current, target)[0] == (MOVED if target_answer == "moved" else GONE)
+        with pytest.raises(
+            PublishError,
+            match=r"/lov/gammel/paragraf/1/ moves to /lov/ny/paragraf/1/, which is not a live page",
+        ):
             check_continuity(before, current)
 
     def test_the_cli_runs_continuity_only_when_asked(self, releases: tuple[Path, Path]) -> None:
