@@ -176,3 +176,82 @@ def test_the_cli_refuses_a_fifo_input_without_hanging(tmp_path: Path) -> None:
         _release(fifo)
     assert done.returncode == 1
     assert f"refused: crosswalk file is a pipe with no writer: {fifo}" in done.stderr
+
+
+@pytest.mark.parametrize(
+    ("limit", "overflow"), [(1, False), (4, False), (0, True), (1, True), (4, True)]
+)
+def test_pipe_size_boundary_matches_regular_files(
+    tmp_path: Path, limit: int, overflow: bool
+) -> None:
+    payload = b"x" * (limit + overflow)
+    regular = tmp_path / "input"
+    regular.write_bytes(payload)
+    read_end, write_end = os.pipe()
+    try:
+        os.write(write_end, payload)
+        os.close(write_end)
+        write_end = -1
+        pipe = Path(f"/dev/fd/{read_end}")
+        for path in (regular, pipe):
+            if overflow:
+                with pytest.raises(CrosswalkError) as caught:
+                    read_bounded(path, limit, "input")
+                assert str(caught.value) == f"input too large: {path}"
+            else:
+                assert read_bounded(path, limit, "input") == payload
+    finally:
+        os.close(read_end)
+        if write_end != -1:
+            os.close(write_end)
+
+
+@pytest.mark.parametrize("target_kind", ["regular", "directory", "device"])
+def test_input_symlink_is_judged_by_its_target(tmp_path: Path, target_kind: str) -> None:
+    target = tmp_path / "target"
+    if target_kind == "regular":
+        target.write_bytes(b"abcd")
+    elif target_kind == "directory":
+        target.mkdir()
+    else:
+        target = Path("/dev/null")
+    link = tmp_path / "input-link"
+    link.symlink_to(target)
+    if target_kind == "regular":
+        assert read_bounded(link, 4, "input") == b"abcd"
+    else:
+        with pytest.raises(CrosswalkError) as caught:
+            read_bounded(link, 4, "input")
+        assert str(caught.value) == f"input is not a regular file or pipe: {link}"
+
+
+def test_a_terminal_is_refused_without_waiting_for_input() -> None:
+    master, slave = os.openpty()
+    try:
+        path = Path(os.ttyname(slave))
+        with pytest.raises(CrosswalkError) as caught:
+            read_bounded(path, 4, "input")
+        assert str(caught.value) == f"input is not a regular file or pipe: {path}"
+    finally:
+        os.close(slave)
+        os.close(master)
+
+
+@pytest.mark.usefixtures("short_wait")
+def test_fifo_timeout_closes_the_input_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fifo = _fifo(tmp_path / "pipe")
+    opened: list[int] = []
+    original = commands._open_input
+
+    def track_open(path: Path, what: str) -> tuple[int, bool]:
+        descriptor, pipe = original(path, what)
+        opened.append(descriptor)
+        return descriptor, pipe
+
+    monkeypatch.setattr(commands, "_open_input", track_open)
+    assert _refusal(_bounded, fifo, fifo) == f"input is a pipe with no writer: {fifo}"
+    (descriptor,) = opened
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
