@@ -193,7 +193,7 @@ def run_arm(
     run_dir, recorded = _open_run(config, metadata, store)
     by_id = {str(case["case_id"]): case for case in cases}
     for case_id in ordered:
-        if case_id not in recorded:
+        if recorded is None or case_id not in recorded:
             store.append_record(_run_case(config, by_id[case_id], run_dir))
     summary = _summary(store, config.identity.run_id, len(by_id), recorded)
     store.finalize_run(config.identity.run_id, summary)
@@ -202,15 +202,17 @@ def run_arm(
 
 def _open_run(
     config: RunConfig, metadata: dict[str, Any], store: ResultsStore
-) -> tuple[Path, set[str]]:
-    """The run directory, and the case ids a resumed run already recorded."""
+) -> tuple[Path, set[str] | None]:
+    """The run directory, and the case ids a resumed run already recorded (None: new run)."""
     if not config.resume:
-        return store.open_run(metadata), set()
+        return store.open_run(metadata), None
     run_dir = store.resume_run(metadata)
     return run_dir, {str(r["case_id"]) for r in store.read_records(config.identity.run_id)}
 
 
-def _summary(store: ResultsStore, run_id: str, total: int, recorded: set[str]) -> dict[str, Any]:
+def _summary(
+    store: ResultsStore, run_id: str, total: int, recorded: set[str] | None
+) -> dict[str, Any]:
     """Completion fields counted from every record of the run, resumed or not."""
     completed = sum(1 for record in store.read_records(run_id) if record["completed"])
     summary: dict[str, Any] = {
@@ -219,7 +221,7 @@ def _summary(store: ResultsStore, run_id: str, total: int, recorded: set[str]) -
         "cases_completed": completed,
         "errors_total": total - completed,
     }
-    if recorded:
+    if recorded is not None:
         note = f"resumed: {len(recorded)} of {total} cases were already recorded"
         prior = store.load_metadata(run_id).get("notes")
         summary["notes"] = f"{prior}; {note}" if prior else note

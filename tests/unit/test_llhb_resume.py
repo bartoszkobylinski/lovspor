@@ -24,6 +24,7 @@ from tests.unit.test_llhb_orchestrator import (
     make_config,
     make_metadata,
 )
+from tests.unit.test_llhb_results import make_record
 
 _CASES = [make_case(f"llhb-v1-C1-00{n}") for n in range(1, 5)]
 
@@ -182,3 +183,78 @@ def test_without_resume_an_existing_run_is_still_refused(
         run_arm(make_config(tmp_path, bin_dir), _CASES, make_metadata(), _store(tmp_path))
 
     assert _calls(tmp_path) == 3
+
+
+@pytest.mark.parametrize("recorded_count", [1, 4])
+def test_resume_preserves_failed_records_and_counts_the_whole_run(
+    tmp_path: Path, recorded_count: int
+) -> None:
+    """A recorded failure is still recorded; it must not be retried on resume."""
+    bin_dir = _counting_cli(tmp_path)
+    store = _store(tmp_path)
+    run_dir = store.open_run(make_metadata())
+    for index, case in enumerate(_CASES[:recorded_count]):
+        store.append_record(
+            make_record(
+                case_id=case["case_id"],
+                completed=index != 0,
+                final_answer=None if index == 0 else "Stored answer",
+            )
+        )
+    records_path = run_dir / "records.jsonl"
+    original_bytes = records_path.read_bytes()
+    original_records = store.read_records(RUN_ID)
+
+    # A fresh store models a different process after the interruption.
+    store = _store(tmp_path)
+    summary = run_arm(make_config(tmp_path, bin_dir, resume=True), _CASES, make_metadata(), store)
+
+    assert _calls(tmp_path) == 4 - recorded_count
+    assert records_path.read_bytes().startswith(original_bytes)
+    assert store.read_records(RUN_ID)[:recorded_count] == original_records
+    assert len(store.read_records(RUN_ID)) == 4
+    assert summary["cases_total"] == 4
+    assert summary["cases_completed"] == 3
+    assert summary["errors_total"] == 1
+    assert store.load_metadata(RUN_ID)["finished_at"] == summary["finished_at"]
+    if recorded_count == 4:
+        assert records_path.read_bytes() == original_bytes
+
+
+def test_resume_before_first_record_still_documents_the_interruption(tmp_path: Path) -> None:
+    """The runner's --resume contract says the run's notes say it was resumed."""
+    bin_dir = _counting_cli(tmp_path)
+    store = _store(tmp_path)
+    store.open_run(make_metadata(notes="original pilot"))
+
+    run_arm(make_config(tmp_path, bin_dir, resume=True), _CASES, make_metadata(), store)
+
+    assert _calls(tmp_path) == 4
+    metadata = store.load_metadata(RUN_ID)
+    assert metadata["cases_completed"] == 4
+    assert metadata["notes"] == "original pilot; resumed: 0 of 4 cases were already recorded"
+
+
+@pytest.mark.parametrize(
+    ("stored_extra", "requested_extra"),
+    [
+        ({}, {"max_turns": 5}),
+        ({"max_turns": 5}, {}),
+        ({}, {"sampling": {"temperature": 0.5}}),
+        ({}, {"system_prompt_sha256": "c" * 64}),
+    ],
+)
+def test_resume_rejects_added_removed_or_nested_configuration_changes_without_writes(
+    tmp_path: Path, stored_extra: dict[str, Any], requested_extra: dict[str, Any]
+) -> None:
+    """Every non-completion field must describe the same stored experiment."""
+    store = _store(tmp_path)
+    run_dir = store.open_run(make_metadata(**stored_extra))
+    metadata_path = run_dir / "run-metadata.json"
+    original_bytes = metadata_path.read_bytes()
+
+    with pytest.raises(ResultsStoreError, match="does not match the stored run"):
+        store.resume_run(make_metadata(**requested_extra))
+
+    assert metadata_path.read_bytes() == original_bytes
+    assert not (run_dir / "records.jsonl").exists()
