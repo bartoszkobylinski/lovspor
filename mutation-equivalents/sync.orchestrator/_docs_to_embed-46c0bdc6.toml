@@ -1,0 +1,27 @@
+[[equivalent]]
+file = "src/lovspor/sync/orchestrator.py"
+symbol = "_docs_to_embed"
+registered = "2026-11-06, PR #803 (issue #790), the one survivor left after two codex-mutation cycles"
+mutation = """
+-        if not _rerender_is_noop(settings, doc, plan.now, prior):
++        if not _rerender_is_noop(settings, doc, None, prior):
+"""
+justification = """
+`now` reaches nothing that `_docs_to_embed` can observe. `_rerender_is_noop`
+uses it only in `_frontmatter_context(upstream, now)`, as
+`retrieved_at=upstream.retrieved_at or now`, and only after its first line
+returned False whenever `upstream.xml_hash != prior.xml_hash`.
+
+The `doc` passed here comes from `_rerender_upstream`. When the hashes differ, it
+returns the document unchanged and `_rerender_is_noop` returns False on that
+first line, before `now` is read: same result. When the hashes are equal, it sets
+`retrieved_at` to `_preserved_observation(...)`, which is
+`_published_retrieved_at(...) or prior.last_seen`. `ManifestRecord.last_seen` is
+a required `datetime`, and a `datetime` is always truthy, so `retrieved_at` is
+never falsy and `upstream.retrieved_at or now` never reaches `now`.
+
+The two branches cover every input, so the rendered bytes, the noop verdict and
+the yielded documents are identical with `None`. Two codex-mutation cycles tried
+it through real rendered files (intact, missing, invalid-timestamp and
+changed-body publications) and could not tell them apart.
+"""
