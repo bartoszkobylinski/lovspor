@@ -141,7 +141,44 @@ def test_the_source_ref_id_is_preserved_unchanged() -> None:
     assert act_eli("lov/2005-05-20-28").ref_id == "lov/2005-05-20-28"
 
 
+@pytest.mark.parametrize(
+    ("day", "valid"),
+    [("2000-02-29", True), ("1900-02-29", False), ("2024-02-29", True), ("2023-02-29", False)],
+)
+def test_mapping_requires_a_real_calendar_date_at_leap_year_boundaries(
+    day: str, valid: bool
+) -> None:
+    """ELI assessment §4 requires a real calendar date, including century rules."""
+    ref_id = f"lov/{day}-1"
+    expected_uri = f"https://lovdata.no/eli/lov/{day.replace('-', '/')}/1" if valid else None
+    assert act_eli(ref_id) == EliOutcome(
+        ref_id=ref_id, uri=expected_uri, reason="mapped" if valid else "invalid_date"
+    )
+
+
 class TestAudit:
+    @pytest.mark.parametrize("sample_size", [0, 1, 10])
+    def test_padding_counts_occurrences_but_samples_distinct_refs(self, sample_size: int) -> None:
+        """Either padded component counts; repeated input affects counts, not examples."""
+        refs = [
+            "lov/2020-10-09-1",  # day only, repeated
+            "lov/2020-10-09-1",
+            "lov/2020-09-10-1",  # month only
+            "lov/2020-10-10-1",  # neither component
+            "lov/2020-02-30-1",  # invalid dates do not count
+        ]
+        audit = audit_ref_ids(iter(refs), sample_size=sample_size)
+
+        assert (audit.total, audit.distinct, audit.padding_sensitive) == (5, 4, 3)
+        assert audit.by_reason == {"invalid_date": 1, "mapped": 4}
+        assert {
+            reason: [outcome.ref_id for outcome in examples]
+            for reason, examples in audit.samples.items()
+        } == {
+            "invalid_date": ["lov/2020-02-30-1"][:sample_size],
+            "mapped": sorted(set(refs[:4]))[:sample_size],
+        }
+
     def test_counts_reasons_and_samples_deterministically(self) -> None:
         refs = [
             "lov/2005-05-20-28",
