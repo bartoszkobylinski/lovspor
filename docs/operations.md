@@ -38,7 +38,7 @@ requires the deliberate `lovspor sync --allow-mass-reembed`. The scheduled workf
 never passes the override, so a tripped guard fails the job before any spend.
 
 The same guard and thresholds cover the change path (#790): before the first
-provider call, a keyed sync renders every new, changed (byte-identical re-renders
+provider call, the Sprint 9 backfill's included, a keyed sync renders every new, changed (byte-identical re-renders
 excluded) and renamed document and sizes the run's embedding workload. When every
 document hashes as changed — as on 2026-10-20/21, when Lovdata added an ELI row to
 every header (#679) — the sync refuses with nothing written and no commit, instead
