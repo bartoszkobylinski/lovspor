@@ -453,6 +453,19 @@ class TestTheContinuityGate:
         assert result.exit_code == 1
         assert said("would answer 404", result.output)
 
+    def test_a_previous_lone_redirect_source_is_still_checked(
+        self, releases: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """A source that is neither a page path nor a paired twin is judged alone."""
+        _, after = releases
+        previous = tmp_path / "previous"
+        shutil.copytree(after, previous)
+        _rewrite_map(
+            previous, lambda m: m["redirects"].append({"from": "/lov/x", "to": "/lov/ny/"})
+        )
+        with pytest.raises(PublishError, match="/lov/x was served .* 404"):
+            check_continuity(previous, after)
+
 
 class TestTheReleaseCheckRefusesShadowing:
     def test_a_gone_prefix_over_a_served_page_is_refused(self, repo: Path, tmp_path: Path) -> None:

@@ -504,13 +504,29 @@ def check_continuity(previous: Path, current: Path) -> ContinuityReport:
     redirects, gone = _redirect_map(current)
     answers = _Answers(current, dict(redirects), gone)
     counts = {"live": 0, "moved": 0, "gone": 0}
-    previous_redirects, _ = _redirect_map(previous)
     for url in sorted({_site_path(previous, page) for page in _pages(previous)}):
         for kind in _page_fates(answers, url):
             counts[kind] += 1
-    for source, _target in sorted(previous_redirects):
-        counts[_required_fate(answers, source)[0]] += 1
+    for kind in _previous_redirect_fates(answers, previous):
+        counts[kind] += 1
     return ContinuityReport(live=counts["live"], moved=counts["moved"], gone=counts["gone"])
+
+
+def _previous_redirect_fates(answers: _Answers, previous: Path) -> list[str]:
+    """Fates of the previous release's redirect sources, a page source and
+    its twin source judged as one pair, so an HTML 301 can never survive
+    while its JSON twin silently drops to 410 (#747)."""
+    previous_redirects, _ = _redirect_map(previous)
+    sources = {source for source, _target in previous_redirects}
+    kinds: list[str] = []
+    for source in sorted(sources):
+        if source.endswith("/"):
+            kinds.extend(_page_fates(answers, source))
+        elif not (
+            source.endswith(COMPANION_NAME) and source.removesuffix(COMPANION_NAME) in sources
+        ):
+            kinds.append(_required_fate(answers, source)[0])
+    return kinds
 
 
 def _required_fate(answers: _Answers, url: str) -> tuple[str, str | None]:
