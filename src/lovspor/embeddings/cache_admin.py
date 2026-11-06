@@ -74,6 +74,12 @@ class VerifyReport:
     valid: int = 0
     expired: int = 0
     refused: list[str] = field(default_factory=list)
+    expired_reasons: list[str] = field(default_factory=list)
+
+    @property
+    def failed(self) -> bool:
+        """Any entry a sync would refuse, expired included (design §5.3)."""
+        return bool(self.refused or self.expired)
 
     def line(self) -> str:
         return f"valid={self.valid} expired={self.expired} refused={len(self.refused)}"
@@ -113,8 +119,9 @@ def verify(store: LocalEntryStore) -> VerifyReport:
     for entry in iter_entries(store):
         try:
             check_entry(store, entry)
-        except EmbeddingCacheExpiredError:
+        except EmbeddingCacheExpiredError as exc:
             report.expired += 1
+            report.expired_reasons.append(str(exc))
         except EmbeddingCacheError as exc:
             report.refused.append(str(exc))
         else:
