@@ -234,7 +234,7 @@ def _remove(path: Path) -> None:
 
 
 def _subdirs(directory: Path) -> Iterator[Path]:
-    if not directory.exists():
+    if not directory.exists(follow_symlinks=False):
         return
     check_private_dir(directory)
     for child in sorted(directory.iterdir()):
@@ -243,7 +243,7 @@ def _subdirs(directory: Path) -> Iterator[Path]:
 
 
 def _all_dirs(directory: Path) -> Iterator[Path]:
-    if not directory.exists():
+    if not directory.exists(follow_symlinks=False):
         return
     check_private_dir(directory)
     yield directory
@@ -253,7 +253,7 @@ def _all_dirs(directory: Path) -> Iterator[Path]:
 
 
 def _entry_files(directory: Path) -> Iterator[Path]:
-    if not directory.exists():
+    if not directory.exists(follow_symlinks=False):
         return
     check_private_dir(directory)
     yield from (
