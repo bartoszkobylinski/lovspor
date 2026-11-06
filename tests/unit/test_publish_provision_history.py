@@ -59,6 +59,32 @@ class TestParseRemovedPids:
 
 
 class TestFromARealRepository:
+    def test_unmerged_provision_versions_are_not_first_parent_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        """URL contract §4 limits retirement evidence to pinned first-parent history."""
+        repo = _repo(tmp_path)
+        path = "lover/a.md"
+        document = repo / path
+        document.write_text(_doc("A", "lov/2020-01-01-1", ("1",)), encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", "original", day=1)
+        _git(repo, "branch", "side")
+        _git(repo, "checkout", "-qb", "published")
+        document.write_text(_doc("A", "lov/2020-01-01-1", ("2",)), encoding="utf-8")
+        _git(repo, "commit", "-qam", "published replacement", day=2)
+        _git(repo, "checkout", "-q", "side")
+        document.write_text(_doc("A", "lov/2020-01-01-1", ("99",)), encoding="utf-8")
+        _git(repo, "commit", "-qam", "unpublished provision", day=3)
+        document.write_text(_doc("A", "lov/2020-01-01-1", ("1",)), encoding="utf-8")
+        _git(repo, "commit", "-qam", "withdraw unpublished provision", day=4)
+        _git(repo, "checkout", "-q", "published")
+        _git(repo, "merge", "--no-ff", "-m", "merge side history", "side", day=5)
+
+        sha = _head(repo)
+        assert removed_pids_by_path(repo, sha) == {path: frozenset({"1"})}
+        assert once_publishable_pids(repo, sha, path) == frozenset({"1", "2"})
+
     @pytest.mark.parametrize("folder", ["lover", "forskrifter"])
     def test_history_is_pinned_and_a_deleting_commit_keeps_earlier_servable_pids(
         self, tmp_path: Path, folder: str

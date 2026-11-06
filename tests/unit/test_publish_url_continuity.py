@@ -290,6 +290,34 @@ class TestMovedUrlsKeepTheirIdentity:
 
 
 class TestNoRuleShadowsALivePage:
+    @pytest.mark.parametrize(
+        ("source", "target", "gone"),
+        [
+            ("/lov/a/", "/lov/a/paragraf/1/", []),
+            ("/lov/a/index.json", "/lov/a/paragraf/1/index.json", []),
+            (None, None, ["/lov/a/"]),
+            (None, None, ["/lov/a/paragraf/1/"]),
+        ],
+    )
+    def test_release_check_refuses_consistent_maps_that_hide_live_files(
+        self,
+        repo: Path,
+        tmp_path: Path,
+        source: str | None,
+        target: str | None,
+        gone: list[str],
+    ) -> None:
+        """URL contract §4: matching JSON and Caddy rules still cannot hide a page."""
+        (repo / "lover/a.md").write_text(_doc("A", "lov/2020-01-01-1", ("1",)))
+        sha = _commit(repo, {"doc-a": _record("lov", "lover/a.md", "a")}, day=1)
+        release = _build(repo, sha, tmp_path / "release")
+        check_release(release)
+        entries = [] if source is None else [{"from": source, "to": target}]
+        _rewrite_map(release, lambda data: data.update(redirects=entries, gone=gone))
+
+        with pytest.raises(PublishError, match="is served, but the redirect map answers it too"):
+            check_release(release)
+
     def test_no_redirect_source_or_gone_prefix_covers_an_emitted_file(
         self, repo: Path, tmp_path: Path
     ) -> None:
