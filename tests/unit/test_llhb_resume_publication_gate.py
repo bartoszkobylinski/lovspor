@@ -73,8 +73,12 @@ def _mark_resumed(repo: Path, run_id: str) -> None:
 def test_a_pair_manifest_is_never_built_on_a_resumed_arm(repo: Path, run_id: str) -> None:
     _mark_resumed(repo, run_id)
 
-    with pytest.raises(PairManifestError, match=f"{run_id} was resumed"):
+    with pytest.raises(PairManifestError) as exc_info:
         _build(repo)
+    assert str(exc_info.value) == (
+        f"run {run_id} was resumed: resumed runs are diagnostic only and no pair "
+        "manifest binds them for a published comparison (#816)"
+    )
 
 
 def test_a_manifest_built_before_an_arm_was_resumed_no_longer_verifies(repo: Path) -> None:
