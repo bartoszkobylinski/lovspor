@@ -5,6 +5,7 @@ foreign permissions refused; writes are temp + fsync + link, so a second
 writer can never replace the first.
 """
 
+import errno
 import os
 import stat
 from datetime import UTC, datetime, timedelta
@@ -285,3 +286,26 @@ def test_fifo_at_an_entry_path_is_refused_without_blocking(cache_root: Path) -> 
     os.mkfifo(target, 0o600)
     with pytest.raises(EmbeddingCacheError, match="regular file"):
         store.get(_key())
+
+
+@pytest.mark.parametrize("operation", ["fsync", "link"])
+def test_failed_publication_leaves_no_entry_and_can_be_retried(
+    cache_root: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    """Design §5.2: a pre-publication failure cannot expose partial vectors."""
+    store = _open(cache_root)
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise OSError(errno.ENOSPC, "injected disk full")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, operation, fail)
+        with pytest.raises(EmbeddingCacheStorageError, match="disk full"):
+            store.put(_entry())
+    assert store.get(_key()) is None
+    assert not list(cache_root.rglob("*.lsec"))
+    assert not [path for path in cache_root.rglob("*") if ".tmp." in path.name]
+    store.put(_entry())
+    found = store.get(_key())
+    assert found is not None
+    assert np.array_equal(found.vectors, _entry().vectors)
