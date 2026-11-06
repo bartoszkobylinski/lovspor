@@ -129,3 +129,10 @@ def test_element_text_skips_editorial_notes_only() -> None:
         '<a>one <b class="changesToParent">note</b> two<sup class="footnotereference">1</sup></a>'
     )
     assert element_text(element) == "one two"
+
+
+def test_paragraph_after_a_plain_ledd_is_not_a_continuation() -> None:
+    provisions = {p.key: p for p in load("enacting-embedded.xml").provisions}
+    closing = provisions["§25"]
+    assert len(closing.ledd) == 1
+    assert closing.ledd[0].text.endswith("i andre lover:")

@@ -7,6 +7,7 @@ an ordered provision tree; an amending law's body into its parts (``I``, ``II``
 interprets. Markup is carried verbatim; only text is normalised.
 """
 
+import re
 from datetime import datetime
 from hashlib import sha256
 from typing import Literal
@@ -145,6 +146,7 @@ def _ledd(element: etree._Element) -> Ledd:
 
 
 _CONTINUATION = frozenset({"defaultP", "leddfortsettelse"})
+_ENDS_WITH_LIST = re.compile(r"</(?:ul|ol)>\s*$")
 
 
 def _ledd_of(article: etree._Element) -> tuple[Ledd, ...]:
@@ -152,12 +154,14 @@ def _ledd_of(article: etree._Element) -> tuple[Ledd, ...]:
 
     Lovtidend prints the sentence that follows an enumerated list as a sibling
     paragraph; the consolidation folds it into the ledd as ``leddfortsettelse``.
+    Only a paragraph right after a list is a continuation: the instructions of a
+    closing "Endringer i andre lover" section are siblings too, and stay apart.
     """
     ledd: list[Ledd] = []
     for child in article:
         if _css(child) in _LEDD_CLASSES:
             ledd.append(_ledd(child))
-        elif _css(child) in _CONTINUATION and ledd:
+        elif _css(child) in _CONTINUATION and ledd and _ENDS_WITH_LIST.search(ledd[-1].xml):
             tail = etree.tostring(child, encoding="unicode", with_tail=False)
             previous = ledd[-1]
             ledd[-1] = Ledd(

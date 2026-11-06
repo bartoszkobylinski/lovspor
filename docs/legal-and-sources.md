@@ -43,6 +43,29 @@ The `lovverk` repo's README contains the full attribution notice.
 - We commit only the rendered Markdown derivative + a manifest of XML hashes for verifiability.
 - We never commit raw XML to a public repo. Conservative posture: sidesteps any argument about Lovdata's editorial markup being copyrightable.
 
+## Norsk Lovtidend avd. I: the announcement source (#744, proposed ADR-0020)
+
+The same publicData API serves the announcement archives `lovtidend-avd1-2001-2025.tar.bz2`
+and `lovtidend-avd1-2026.tar.bz2` ("Norsk Lovtidend avd. I - lover og sentrale forskrifter").
+Read on 2026-11-06: `api.lovdata.no/om-api-tjenesten/` says the avd. I dataset "kan fritt
+benyttes til alle formål uten vederlag. Dataene er lisensiert under NLOD 2.0"; the
+data.norge.no record for "Norsk Lovtidend, Avdeling I" (publisher Stiftelsen Lovdata) names
+the 2001–2025 file under NLOD 2.0 and points at the same `/get/` URL; `api.lovdata.no/publicData`
+describes the series as complete from 2001-01-01 and lists its contents (laws, regulations,
+commencement and delegation decisions). The current-year archive is described but not named
+there, which is why ADR-0019 ruling R2 keeps anything resting on it `research_only`.
+
+- The **legal-time replay pilot** (`src/lovspor/legaltime/`, `lovspor ops legal-time …`) reads
+  these archives as the enacted and amending text of acts and reconstructs an act's provisions
+  at a legal date. It is operator-only: it writes nothing into `lovverk`, adds no MCP tool and
+  changes no public JSON. Its reports carry identities, dates and verdicts, never provision text.
+- The 2001–2025 archive is the replay input (licence basis `stated_for_file`); the current-year
+  archive is read only to detect announced-not-in-force events while R2 stands.
+- Raw XML stays in the gitignored cache (`data/cache/legaltime/`). Anything ever published from
+  this axis carries NLOD 2.0 attribution to Lovdata, like the consolidated datasets.
+- Commencement dates come only from the archives (the amending law's header and clause, and the
+  decisions citing it). lovdata.no HTML is not read; a date with no source stays a recorded gap.
+
 ## Local law: the observatory (ADR-0010)
 
 `Lokale forskrifter` are not in the free Lovdata dataset tier and no permitted bulk
