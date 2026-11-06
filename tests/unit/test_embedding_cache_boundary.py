@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 import lovspor.sync.orchestrator as orchestrator_module
+from lovspor.embeddings import cache_store
 from lovspor.embeddings.cache import (
     CACHE_DIR_VARIABLE,
     CachingEmbedder,
@@ -379,6 +380,62 @@ def test_no_checkout_above_an_installed_package(tmp_path: Path) -> None:
     module = tmp_path / "site-packages" / "lovspor" / "embeddings" / "cache.py"
     module.parent.mkdir(parents=True)
     assert engine_checkout_of(module) == ()
+
+
+def test_document_publish_failure_resumes_from_all_paid_checkpoints(
+    cache_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §5.2/§6: losing the final entry must not lose durable paid units."""
+    settings = _settings(tmp_path)
+    provider = _Provider()
+    publish = cache_store._publish
+
+    def fail_document(directory: Path, final: Path, payload: bytes) -> None:
+        if directory.name == "documents":
+            raise OSError(28, "No space left on device")
+        publish(directory, final, payload)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(cache_store, "_publish", fail_document)
+        with pytest.raises(EmbeddingCacheStorageError):
+            _write(settings, with_embedding_cache(provider, settings))
+
+    assert provider.requests == 4
+    checkpoints = {p: p.read_bytes() for p in cache_dir.rglob("*.lsec")}
+    assert len(checkpoints) == 4
+    assert all("units" in p.parts for p in checkpoints)
+    assert not list(settings.lovverk_repo_path.rglob("*.bin"))
+
+    resumed_provider = _Provider(fail_after=0)
+    resumed = with_embedding_cache(resumed_provider, settings)
+    assert isinstance(resumed, CachingEmbedder)
+    result = _write(settings, resumed)
+    assert resumed_provider.requests == 0
+    assert resumed.progress.units_cached == 4
+    assert {p: p.read_bytes() for p in checkpoints} == checkpoints
+    assert len(list(cache_dir.rglob("*.lsec"))) == 5
+    assert result == _write(settings, _Provider())
+
+
+def test_corrupt_unit_checkpoint_stops_resume_without_repayment(
+    cache_dir: Path, tmp_path: Path
+) -> None:
+    """Design §5.3/§5.4: a refused unit is never treated as a paid-over miss."""
+    settings = _settings(tmp_path)
+    with pytest.raises(RuntimeError, match="job killed"):
+        _write(settings, with_embedding_cache(_Provider(fail_after=1), settings))
+    (checkpoint,) = cache_dir.rglob("*.lsec")
+    damaged = bytearray(checkpoint.read_bytes())
+    damaged[-1] ^= 1
+    checkpoint.write_bytes(damaged)
+    before = {p: p.read_bytes() for p in cache_dir.rglob("*.lsec")}
+
+    provider = _Provider()
+    with pytest.raises(EmbeddingCacheError, match="digest mismatch"):
+        _write(settings, with_embedding_cache(provider, settings))
+    assert provider.requests == 0
+    assert {p: p.read_bytes() for p in cache_dir.rglob("*.lsec")} == before
+    assert not list(settings.lovverk_repo_path.rglob("*.bin"))
 
 
 def test_resume_preserves_batch_sensitive_provider_vectors(cache_dir: Path, tmp_path: Path) -> None:
