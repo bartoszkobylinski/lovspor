@@ -110,6 +110,20 @@ now; pass `--cache` outside the checkout.
     `approval` block names the approved input, approval, signature and trusted
     signers file by SHA-256, plus the signer's principal. Research manifests carry
     no `approval` block and are unchanged.
+  - The approved input must be `research_only` in every revision. A candidate
+    revision it carried would pass through the gate untouched and look proven by
+    an approval that never authorized it.
+  - A `release_candidate` revision that is no longer current (a candidate later
+    withdrawn or superseded, or a forged revision 1) still claims a past owner
+    authorization. The file keeps it as written, append-only, and gets **no
+    manifest** until evidence for that past authorization can be checked
+    (proposed ruling A1.5). Files with no candidate revision anywhere, withdrawals
+    included, are unaffected.
+  - `approval.json`, its `.sig` and `approved-input.jsonl` must be regular files:
+    a FIFO, device, directory or a symlink to one is refused before anything is
+    read, so a proof directory cannot hang the gate. ssh-keygen verifies a
+    private copy of the signature bytes that were read, so the manifest's
+    `signature_sha256` is of exactly the signature that was verified.
   - Holds the counts, commits, archive pins, parser versions, source terms (with the date they were read), the provisional attribution and the unresolved rights blockers.
   - Has no wall clock and no `released` state.
 

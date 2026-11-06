@@ -16,7 +16,7 @@ from lovspor.crosswalk.cache import MANIFEST
 from lovspor.crosswalk.canonical import parse_records, serialize_records
 from lovspor.crosswalk.commands import manifest_impl
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
-from lovspor.crosswalk.manifest import BLOCKERS, build_manifest, render_manifest
+from lovspor.crosswalk.manifest import BLOCKERS, HISTORICAL, build_manifest, render_manifest
 from lovspor.crosswalk.release import Approval, promote
 from tests.unit.crosswalk_support import COMMIT, PRODUCER, attested, besl_o, digest, make_capture
 
@@ -260,8 +260,13 @@ def test_manifest_file_size_limit_is_inclusive(
     assert not output.exists()
 
 
-def test_manifest_state_and_counts_follow_withdrawal_of_a_release_candidate() -> None:
-    """The module contract derives file state from current records, not past promotion."""
+def test_a_withdrawn_release_candidate_gets_no_manifest_without_evidence() -> None:
+    """A superseded candidate still claims a past owner authorization (review of #799).
+
+    It used to read as a research file and got a manifest with no approval
+    evidence, which a forged revision 1 could exploit just as well. The history is
+    kept as written; only the manifest is refused until that claim can be checked.
+    """
     first, withdrawn = attested(), attested()
     first["release_state"] = "release_candidate"
     withdrawn.update(
@@ -273,15 +278,10 @@ def test_manifest_state_and_counts_follow_withdrawal_of_a_release_candidate() ->
         reason_code="withdrawn_by_producer",
         withdrawal={"withdrawn_on": "2026-11-03", "reason": "producer edge was wrong"},
     )
-    manifest = build_manifest(serialize_records([first, withdrawn]), "x")
-    assert manifest["release_state"] == "research_only"
-    assert manifest["counts"] == {
-        "revisions": 2,
-        "acts": 1,
-        "status": {"unresolved": 1},
-        "release_state": {"research_only": 1},
-        "record_state": {"withdrawn": 1},
-    }
+    data = serialize_records([first, withdrawn])
+    with pytest.raises(CrosswalkError) as caught:
+        build_manifest(data, "x")
+    assert str(caught.value) == HISTORICAL.format(f"{first['amending_lov_id']}@1")
 
 
 def test_empty_checked_file_has_an_empty_manifest_scope() -> None:

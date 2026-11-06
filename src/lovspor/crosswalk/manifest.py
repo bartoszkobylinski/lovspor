@@ -8,7 +8,9 @@ until the owner resolves them. There is no `released` state: the file-level
 such a manifest is written only when every current candidate is reproduced from
 the given capture, raw bytes included, and the file is proven to be the gate's
 output under a signed owner approval (`approval.prove_candidates`, #792): a
-hand-edited `release_state` gets no manifest. `build_manifest` takes the proof
+hand-edited `release_state` gets no manifest, and neither does a file holding a
+candidate revision that is no longer current, whose past authorization nothing
+here can check yet (proposed A1.5). `build_manifest` takes the proof
 as given; only `prove_candidates` makes one, so the operator path is the CLI.
 A research manifest written without a capture says so in its `provenance`
 block. `verified` means the file was checked against the named capture and
@@ -130,6 +132,29 @@ def _candidates(report: CheckReport) -> set[str]:
     return {law for law, r in current.items() if r["release_state"] == "release_candidate"}
 
 
+HISTORICAL = (
+    "release_candidate revisions that are no longer current claim a past owner "
+    "authorization this tool cannot verify yet (proposed A1.5): no manifest for {}"
+)
+
+
+def _refuse_historical_candidates(report: CheckReport) -> None:
+    """A superseded candidate claims an authorization as much as a current one does.
+
+    It is neither erased nor blessed: the file keeps it, and gets no manifest until
+    evidence for that past authorization can be checked.
+    """
+    latest = {law: r["record_revision"] for law, r in current_records(report.records).items()}
+    past = [
+        f"{r['amending_lov_id']}@{r['record_revision']}"
+        for r in report.records
+        if r["release_state"] == "release_candidate"
+        and r["record_revision"] < latest[r["amending_lov_id"]]
+    ]
+    if past:
+        raise CrosswalkError(HISTORICAL.format(", ".join(sorted(past))))
+
+
 def _require_verified_candidates(report: CheckReport, cache: Path | None) -> None:
     candidates = _candidates(report)
     if candidates and cache is None:
@@ -176,6 +201,7 @@ def build_manifest(
     report = check(data, cache=cache)
     require_passed(report)
     _require_verified_candidates(report, cache)
+    _refuse_historical_candidates(report)
     approval = _approval_block(data, report, cache, proof)
     records = [canonical_record(r) for r in report.records]
     return {

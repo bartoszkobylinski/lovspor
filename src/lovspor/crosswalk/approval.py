@@ -16,12 +16,16 @@ A hand-edited `release_state`, an altered history or another approval's output
 therefore gets none.
 """
 
+import os
+import stat
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 
 from lovspor.crosswalk.cache import MANIFEST
+from lovspor.crosswalk.canonical import parse_records
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.crosswalk.release import Approval, promote
 
@@ -33,6 +37,10 @@ APPROVED_INPUT_FILE = "approved-input.jsonl"
 NO_SIGNER = "no trusted approval signer is configured: release candidates stay blocked"
 _SSH_KEYGEN_TIMEOUT = 30
 MAX_SIGNATURE_BYTES = 64 * 1024
+CARRIED = (
+    "the approved input carries release_candidate revisions: this approval cannot "
+    "prove an authorization it never gave (proposed A1.5)"
+)
 
 
 def signature_path(approval: Path) -> Path:
@@ -91,23 +99,48 @@ class SignedApproval:
     signer: Signer
 
 
-def _read_signature(signature: Path) -> bytes:
+def _open_regular(path: Path, what: str) -> int:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise CrosswalkError(f"{what} is not a regular file: {path}")
+    return descriptor
+
+
+def read_regular(path: Path, limit: int, what: str) -> bytes:
+    """A regular file of at most ``limit`` bytes; anything else is refused unread.
+
+    O_NONBLOCK keeps the open of a FIFO from waiting for a writer, and the type is
+    judged by fstat on the opened descriptor, so a symlink to a FIFO or a device is
+    refused as well and nothing can swap the file between check and read.
+    """
     try:
-        with signature.open("rb") as stream:
-            data = stream.read(MAX_SIGNATURE_BYTES + 1)
+        with os.fdopen(_open_regular(path, what), "rb") as stream:
+            data = stream.read(limit + 1)
     except OSError as exc:
-        raise CrosswalkError(f"approval signature unreadable: {signature}") from exc
-    if len(data) > MAX_SIGNATURE_BYTES:
-        raise CrosswalkError(f"approval signature too large: {signature}")
+        raise CrosswalkError(f"{what} unreadable: {path}") from exc
+    if len(data) > limit:
+        raise CrosswalkError(f"{what} too large: {path}")
     return data
+
+
+def _read_signature(signature: Path) -> bytes:
+    return read_regular(signature, MAX_SIGNATURE_BYTES, "approval signature")
 
 
 def signed_approval(
     raw: bytes, approval: Approval, signature: Path, signers: Path = TRUSTED_SIGNERS
 ) -> SignedApproval:
-    """``approval`` parsed from ``raw``, whose exact bytes a trusted signer signed."""
+    """``approval`` parsed from ``raw``, whose exact bytes a trusted signer signed.
+
+    ssh-keygen verifies a private copy of the bytes read here, so the digest the
+    manifest records is of exactly the signature that was verified.
+    """
     signed = _read_signature(signature)
-    signer = verify_signature(raw, signature, signers)
+    with tempfile.TemporaryDirectory(prefix="lovspor-approval-") as scratch:
+        copy = Path(scratch) / signature.name
+        copy.write_bytes(signed)
+        signer = verify_signature(raw, copy, signers)
     return SignedApproval(approval, sha256(raw).hexdigest(), sha256(signed).hexdigest(), signer)
 
 
@@ -123,7 +156,14 @@ class CandidateProof:
 def prove_candidates(
     data: bytes, approved_input: bytes, signed: SignedApproval, cache: Path
 ) -> CandidateProof:
-    """Replay the gate: the file must be exactly what this approval makes of the approved input."""
+    """Replay the gate: the file must be exactly what this approval makes of the approved input.
+
+    The approved input must be research_only throughout. A candidate revision it
+    carries would pass through the gate unchanged and so look proven by this
+    approval, which never authorized it.
+    """
+    if any(r["release_state"] != "research_only" for r in parse_records(approved_input)):
+        raise CrosswalkError(CARRIED)
     replayed, _ = promote(approved_input, signed.approval, cache)
     if replayed != data:
         raise CrosswalkError(

@@ -220,7 +220,7 @@ def check_impl(
 
 def read_signed_approval(path: Path) -> SignedApproval:
     """The approval at ``path``, signed in ``<path>.sig`` by a trusted signer (#792)."""
-    raw = read_bounded(path, MAX_APPROVAL_BYTES, "approval")
+    raw = approvals.read_regular(path, MAX_APPROVAL_BYTES, "approval")
     signature = approvals.signature_path(path)
     return approvals.signed_approval(
         raw, _parse_approval(raw), signature, approvals.TRUSTED_SIGNERS
@@ -287,7 +287,7 @@ def read_proof(data: bytes, proof_dir: Path, cache: Path | None) -> CandidatePro
         raise CrosswalkError("--approval-proof replays the gate against a capture: give --cache")
     signed = read_signed_approval(proof_dir / approvals.APPROVAL_FILE)
     approved = proof_dir / approvals.APPROVED_INPUT_FILE
-    approved_input = read_bounded(approved, MAX_PREVIOUS_BYTES, "approved input")
+    approved_input = approvals.read_regular(approved, MAX_PREVIOUS_BYTES, "approved input")
     return approvals.prove_candidates(data, approved_input, signed, cache)
 
 

@@ -212,7 +212,9 @@ def test_the_gate_promotes_under_a_trusted_signed_approval(
 def test_an_approval_for_other_input_bytes_is_refused(
     built: bytes, candidate: bytes, capture_dir: Path, tmp_path: Path, proof: Path
 ) -> None:
-    (proof / approvals.APPROVED_INPUT_FILE).write_bytes(_hand_edited(built))
+    # Another research_only file: the approval binds the bytes, not the shape.
+    other = serialize_records(parse_records(built)[1:])
+    (proof / approvals.APPROVED_INPUT_FILE).write_bytes(other)
     data = _write(tmp_path, candidate)
     assert _refused(data, tmp_path, capture_dir, proof) == (
         "the approval names other bytes than this input"
