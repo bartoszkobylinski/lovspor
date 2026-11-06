@@ -196,16 +196,21 @@ def test_a_path_that_is_neither_a_file_nor_a_pipe_is_refused(tmp_path: Path, spe
     assert str(caught.value) == f"input is not a regular file or pipe: {path}"
 
 
-def test_the_cli_refuses_a_fifo_input_without_hanging(tmp_path: Path) -> None:
+@pytest.mark.parametrize("via_symlink", [False, True], ids=["fifo", "symlink-to-fifo"])
+def test_the_cli_refuses_a_fifo_input_without_hanging(tmp_path: Path, via_symlink: bool) -> None:
     fifo = _fifo(tmp_path / "crosswalk.jsonl")
+    path = fifo
+    if via_symlink:
+        path = tmp_path / "input-link.jsonl"
+        path.symlink_to(fifo)
     code = "from lovspor.cli import app; app()"
-    argv = [sys.executable, "-c", code, "ops", "crosswalk", "check", "--input", str(fifo)]
+    argv = [sys.executable, "-c", code, "ops", "crosswalk", "check", "--input", str(path)]
     try:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=30, check=False)
     finally:
         _release(fifo)
     assert done.returncode == 1
-    assert f"refused: crosswalk file is a pipe with no writer: {fifo}" in done.stderr
+    assert f"refused: crosswalk file is a pipe with no writer: {path}" in done.stderr
 
 
 @pytest.mark.parametrize(
