@@ -59,6 +59,20 @@ class TestParseRemovedPids:
 
 
 class TestFromARealRepository:
+    def test_normalised_pid_collisions_do_not_invent_historical_urls(self, tmp_path: Path) -> None:
+        """URL contract §§2/4: collisions are judged in URL form, not heading spelling."""
+        repo = _repo(tmp_path)
+        path = "lover/a.md"
+        document = repo / path
+        document.write_text(_doc("A", "lov/2020-01-01-1", ("35 a", "35a", "9")), encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", "colliding URL identities", day=1)
+        document.write_text(_doc("A", "lov/2020-01-01-1", ("2",)), encoding="utf-8")
+        _git(repo, "commit", "-qam", "first publishable version", day=2)
+
+        assert removed_pids_by_path(repo, _head(repo)) == {path: frozenset({"35a", "9"})}
+        assert once_publishable_pids(repo, _head(repo), path) == frozenset({"2"})
+
     def test_unmerged_provision_versions_are_not_first_parent_evidence(
         self, tmp_path: Path
     ) -> None:

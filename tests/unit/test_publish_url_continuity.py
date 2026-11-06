@@ -450,6 +450,27 @@ class TestTheContinuityGate:
         with pytest.raises(PublishError, match="/lov/gammel/"):
             check_continuity(after, current)
 
+    @pytest.mark.parametrize("previous_is_redirect", [False, True])
+    def test_moved_twins_must_land_on_the_same_entity(
+        self,
+        releases: tuple[Path, Path],
+        tmp_path: Path,
+        previous_is_redirect: bool,
+    ) -> None:
+        """URL contract §3 requires T/index.json, even when both targets are live."""
+        before, after = releases
+        current = tmp_path / "current"
+        shutil.copytree(after, current)
+        _rewrite_map(
+            current,
+            lambda m: _twin_entry(m).update(to="/lov/b/index.json"),
+        )
+        # Both artifacts agree, both targets exist, and no rule shadows a file.
+        # Only the relationship between the HTML and JSON destinations is broken.
+        check_release(current)
+        with pytest.raises(PublishError, match="must share one fate"):
+            check_continuity(after if previous_is_redirect else before, current)
+
     def test_a_redirect_to_a_page_that_is_not_live_is_refused(
         self, releases: tuple[Path, Path], tmp_path: Path
     ) -> None:
