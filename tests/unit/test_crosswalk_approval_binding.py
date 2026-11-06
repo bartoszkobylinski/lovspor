@@ -18,6 +18,7 @@ from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.crosswalk import approval as approvals
+from lovspor.crosswalk import commands
 from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.canonical import parse_records, serialize_records
 from lovspor.crosswalk.commands import manifest_impl, release_candidate_impl
@@ -460,3 +461,45 @@ def test_cli_requires_the_exact_signed_approval_bytes(
     # This is a plain typer.echo refusal, rather than a Rich usage panel.
     assert "refused: approval signature refused" in result.output
     assert not output.exists()
+
+
+@pytest.mark.parametrize("name", [approvals.APPROVAL_FILE, approvals.APPROVED_INPUT_FILE])
+def test_manifest_bounds_each_proof_input_before_replay(
+    candidate: bytes,
+    capture_dir: Path,
+    tmp_path: Path,
+    proof: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    """The new regular-file reader must retain the command's input size limits."""
+    if name == approvals.APPROVAL_FILE:
+        limit = commands.MAX_APPROVAL_BYTES
+        label = "approval"
+    else:
+        # Keep the candidate readable while bounding the separate approved input.
+        limit = len(candidate)
+        monkeypatch.setattr(commands, "MAX_PREVIOUS_BYTES", limit)
+        label = "approved input"
+    path = proof / name
+    path.write_bytes(b" " * (limit + 1))
+    data = _write(tmp_path, candidate)
+    assert _refused(data, tmp_path, capture_dir, proof) == f"{label} too large: {path}"
+
+
+@pytest.mark.parametrize("raw", [b"{", b"\xff", b"[]", b"{}"])
+def test_a_trusted_signature_does_not_make_an_invalid_approval_valid(
+    candidate: bytes,
+    capture_dir: Path,
+    tmp_path: Path,
+    proof: Path,
+    signer: Signing,
+    raw: bytes,
+) -> None:
+    """Signed proof inputs still obey the existing Approval JSON/schema contract."""
+    approval = proof / approvals.APPROVAL_FILE
+    approval.write_bytes(raw)
+    approvals.signature_path(approval).unlink()
+    sign(signer, approval)
+    error = _refused(_write(tmp_path, candidate), tmp_path, capture_dir, proof)
+    assert error.startswith("approval refused: invalid ")
