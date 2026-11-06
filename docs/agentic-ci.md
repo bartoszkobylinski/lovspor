@@ -64,6 +64,7 @@ PR opened/synchronize
   │     └─ hands its work to the verdict lane as artifact `agent-tests-<head-sha>`
   ├─ codex-tests    (ubuntu: applies that patch, lints, runs the suite, verdict, push)
   │     └─ pushes `[agent:codex-tests]` → fresh synchronize run, old run cancelled
+  │           └─ follow-up (ubuntu): waits ≤20 min for that run, else needs-human:pipeline (#798)
   └─ mutation       (ubuntu, no LLM: scripts/mutmut-pr.sh → mutation-result.json)
         └─ gate FAIL → Mutation Remediation workflow
               ├─ budget_exceeded / tool_failed / baseline_tests_failed
@@ -605,6 +606,18 @@ Two rules follow, and they are pinned by tests:
   cancellation, never on the skipped fork lane), stays silent when the in-job
   escalation already labelled, and otherwise applies `needs-human:pipeline` with
   the run link and a pointer at the runner list.
+- A push that starts **no follow-up run** is escalated (#798). After codex-tests
+  pushes, `mutation` and `ready` are skipped for the `synchronize` run the push
+  fires. On PR #791 (run 42059499913) that run never came: the branch had the
+  pushed SHA, the PR kept the old head for 20 minutes, and every check was green or
+  skipped with no verdict coming. The `follow-up` job (`scripts/ci/await_followup_run.sh`)
+  asks up to 20 times, 60 s apart, whether a pr-pipeline run exists for exactly
+  the pushed SHA. A run that starts cancels it through the concurrency group, and a
+  PR head that moved past both SHAs is left to its own push. Otherwise it labels
+  `needs-human:pipeline`, appends the pipeline sticky comment and fails. The remedy
+  it names, `gh pr close N && gh pr reopen N`, is the owner's: a run started by
+  the per-run token cannot start another workflow run, and the job never closes,
+  reopens or pushes anything itself.
 - A run that ends green **retracts** the labels a blocked round wrote. The `ready`
   job removes `needs-implementation-fix`, `needs-human:mutation` and
   `needs-human:pipeline` before reporting READY TO MERGE. Until 2026-08-26 the

@@ -33,7 +33,11 @@ the verifier. For help text or a usage error (exit 2) assert through
 `tests.unit.cli_output.said(phrase, result.output)`, plus the exit code and what the
 command left on disk. A plain `typer.echo` line is not wrapped and may be matched as
 text. Three rounds were lost to this alone (PRs #690, #692, #697).
-Help inside an options table is truncated, not wrapped, so `said()` cannot see it: assert it through `tests.unit.cli_output.option_help(app, path, option)`, which reads the Click parameter, never by widening the console (#801).
+Option help inside a `--help` options table is truncated with `…` at that width,
+not wrapped, so `said()` cannot find it: assert an option's help through its click
+parameter (`typer.main.get_group(app).commands[name].params`), never through rendered
+`--help` (#801).
+`tests.unit.cli_output.option_help(app, path, option)` reads that parameter for a command at any depth, so use it rather than walking the group by hand.
 
 Two kinds of failing test, and you must say which each one is (issue #248):
 

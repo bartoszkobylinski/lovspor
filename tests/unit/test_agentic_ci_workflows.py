@@ -20,8 +20,8 @@ import yaml  # type: ignore[import-untyped]
 _WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 # Issue #801: rich truncates options-table cells at 20 columns, so said() cannot see them.
 _OPTION_HELP_GUIDANCE = (
-    "Help inside an options table is truncated, not wrapped, so `said()` cannot see it: "
-    "assert it through `tests.unit.cli_output.option_help(app, path, option)`"
+    "`tests.unit.cli_output.option_help(app, path, option)` reads that parameter for a "
+    "command at any depth, so use it rather than walking the group by hand."
 )
 
 
@@ -36,6 +36,26 @@ def test_agents_states_the_cli_output_contract() -> None:
     assert "never `phrase in result.output` against a panel" in instructions
     assert "A plain `typer.echo` line may be matched as text." in instructions
     assert _OPTION_HELP_GUIDANCE in instructions
+
+
+_OPTION_HELP_RULE = (
+    "Option help inside a `--help` options table is truncated with `…` at that width, "
+    "not wrapped, so `said()` cannot find it: assert an option's help through its click "
+    "parameter (`typer.main.get_group(app).commands[name].params`), never through rendered "
+    "`--help` (#801)."
+)
+
+
+@pytest.mark.parametrize(
+    "instructions",
+    ["AGENTS.md", ".github/codex/pr-tests.md", ".github/codex/mutation-remediation.md"],
+)
+def test_test_authors_are_told_option_help_is_truncated(instructions: str) -> None:
+    """A Codex test asserting `--cache` help through `said()` blocked PR #800: rich
+    truncates option-table cells at 20 columns, so no implementation could pass it."""
+    text = " ".join((_WORKFLOWS.parents[1] / instructions).read_text(encoding="utf-8").split())
+
+    assert _OPTION_HELP_RULE in text
 
 
 def _workflow(workflow_name: str) -> dict[str, Any]:
@@ -252,7 +272,11 @@ def test_remediation_rejected_push_is_ignored_only_for_a_superseded_head() -> No
     steps = _steps("mutation-remediation.yml", "remediate-verify")
     push = _named_step(steps, "Commit and push, or report BLOCKED")["run"]
 
-    assert 'if ! git push origin "HEAD:$HEAD_BRANCH"; then' in push
+    # #805: the push goes through push_with_retry.sh; the superseded-head check
+    # still judges whatever failure it returns.
+    assert 'push=(scripts/ci/push_with_retry.sh origin "HEAD:$HEAD_BRANCH")' in push
+    assert 'push=(git push origin "HEAD:$HEAD_BRANCH")' in push
+    assert 'if ! "${push[@]}"; then' in push
     assert 'git fetch -q origin "$HEAD_BRANCH"' in push
     assert 'if [ "$(git rev-parse "origin/$HEAD_BRANCH")" != "$HEAD_SHA" ]; then' in push
     assert "abandoning superseded result" in push

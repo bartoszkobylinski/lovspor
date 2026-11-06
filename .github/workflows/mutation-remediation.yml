@@ -594,8 +594,15 @@ jobs:
           git commit -m "test: kill mutation survivors for PR #${{ needs.remediate.outputs.pr }} [agent:${{ needs.remediate.outputs.author || 'codex' }}-mutation]"
           # Issue #67: the branch can advance during a long Codex run. A rejected
           # push for a superseded head is benign — the new head's own pipeline
-          # owns mutation now. Any other push failure is a real error.
-          if ! git push origin "HEAD:$HEAD_BRANCH"; then
+          # owns mutation now. Any other push failure is a real error. A GitHub
+          # server error is retried first, bounded, as on codex-tests (#782,
+          # #805); a head that predates the script pushes once (#381).
+          if [ -x scripts/ci/push_with_retry.sh ]; then
+            push=(scripts/ci/push_with_retry.sh origin "HEAD:$HEAD_BRANCH")
+          else
+            push=(git push origin "HEAD:$HEAD_BRANCH")
+          fi
+          if ! "${push[@]}"; then
             git fetch -q origin "$HEAD_BRANCH"
             if [ "$(git rev-parse "origin/$HEAD_BRANCH")" != "$HEAD_SHA" ]; then
               echo "branch advanced past $HEAD_SHA while remediating — abandoning superseded result"
