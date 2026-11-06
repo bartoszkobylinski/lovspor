@@ -4,6 +4,7 @@ The budget is a ceiling, not a report: a request that would cross it is
 refused before it is sent. Progress lines carry counts only.
 """
 
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,7 @@ from lovspor.embeddings.meter import (
     BUDGET_VARIABLE,
     PROGRESS_VARIABLE,
     MeteredEmbedder,
+    SpendMeter,
     with_meter,
 )
 from lovspor.errors import ConfigError, EmbeddingBudgetError, LovsporError
@@ -202,3 +204,57 @@ def test_bad_progress_interval_is_a_config_error(monkeypatch: pytest.MonkeyPatch
     with pytest.raises(ConfigError, match=PROGRESS_VARIABLE):
         with_meter(provider)
     assert provider.requests == 0
+
+
+@pytest.mark.parametrize("budget,limit", [(None, "none"), (17, "17")])
+def test_spend_line_reports_budget(budget: int | None, limit: str) -> None:
+    assert SpendMeter(requests=2, inputs=3, tokens=7).line(budget) == (
+        f"embedding-spend: requests=2 inputs=3 estimated_tokens=7 budget={limit}"
+    )
+
+
+def test_progress_is_flushed_and_accumulates_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = tmp_path / "progress.log"
+    metered = MeteredEmbedder(_Provider(), budget=17, every=2)
+    with log.open("w", buffering=8192) as stream:
+        monkeypatch.setattr(sys, "stderr", stream)
+        metered.encode(["ord ord"])
+        metered.encode(["ord"])
+        assert log.read_text() == (
+            "embedding-spend: requests=2 inputs=2 estimated_tokens=3 budget=17\n"
+        )
+    assert metered.meter.tokens == 3
+
+
+@pytest.mark.parametrize("texts", [[], ["a", "b", "c"]])
+def test_request_plan_without_optional_planner(texts: list[str]) -> None:
+    metered = MeteredEmbedder(_UnidentifiedEmbedder(), budget=None, every=25)
+    assert metered.plan_requests(texts) == [(0, len(texts))]
+
+
+def test_budget_error_explains_cache_recovery() -> None:
+    provider = _Provider()
+    metered = MeteredEmbedder(provider, budget=1, every=25)
+    with pytest.raises(EmbeddingBudgetError) as caught:
+        metered.encode(["ord ord"])
+    assert str(caught.value) == (
+        "embedding token budget reached: 0 estimated tokens sent, "
+        "the next request needs 2, budget 1 (LOVSPOR_EMBEDDING_TOKEN_BUDGET). "
+        "Nothing more was sent. With LOVSPOR_EMBEDDING_CACHE_DIR set, a rerun "
+        "resumes from what was paid; without it, this run's vectors are lost."
+    )
+    assert provider.requests == 0
+
+
+@pytest.mark.parametrize("variable", [BUDGET_VARIABLE, PROGRESS_VARIABLE])
+@pytest.mark.parametrize("raw", ["", "1"])
+def test_empty_and_minimum_meter_configuration(
+    monkeypatch: pytest.MonkeyPatch, variable: str, raw: str
+) -> None:
+    monkeypatch.setenv(variable, raw)
+    metered = with_meter(_Provider())
+    assert isinstance(metered, MeteredEmbedder)
+    metered.encode(["ord"])
+    assert metered.meter.tokens == 1
