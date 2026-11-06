@@ -182,3 +182,18 @@ def test_matching_digest_does_not_reuse_an_obsolete_index_version(archive: Path)
     rebuilt = index_archive(archive)
     assert rebuilt == original
     assert json.loads(cache.read_text(encoding="utf-8"))["index_version"] == INDEX_VERSION
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_collect_keeps_the_baseline_when_another_archive_reuses_its_member_path(
+    tmp_path: Path, reverse: bool
+) -> None:
+    """Member paths are archive-local: an amender under the same path is never the act."""
+    name = "lti/2019/nl-20190614-099.xml"
+    enacting = make_archive(tmp_path / "enacting.tar.bz2", {name: "enacting.xml"})
+    amending = make_archive(tmp_path / "amending.tar.bz2", {name: "amending.xml"})
+    paths = [amending, enacting] if reverse else [enacting, amending]
+    evidence = collect("lov/2019-06-14-99", paths)
+    assert evidence.baseline.header.refid == "lov/2019-06-14-99"
+    assert evidence.baseline.sha256 == sha256((FIXTURES / "enacting.xml").read_bytes()).hexdigest()
+    assert [doc.header.refid for doc in evidence.amenders] == ["lov/2020-12-18-999"]

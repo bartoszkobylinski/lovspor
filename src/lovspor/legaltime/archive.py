@@ -201,26 +201,34 @@ def _wanted(indexed: Indexed, act: str) -> dict[Path, tuple[list[str], list[str]
     return {path: (amenders[path], _decision_names(index, laws)) for path, index in indexed}
 
 
-def collect(act: str, archives: list[Path], cache_dir: Path | None = None) -> Evidence:
-    """Everything the archives hold about ``act``: its text, its amenders, their decisions."""
-    indexed: Indexed = [(path, index_archive(path, cache_dir)) for path in archives]
-    baseline_archive, baseline_name = _baseline(indexed, act)
-    wanted = _wanted(indexed, act)
+def _read_evidence(
+    wanted: dict[Path, tuple[list[str], list[str]]], baseline: tuple[Path, str]
+) -> tuple[list[Document], list[Document], Document | None]:
+    """Read every wanted member archive by archive; the act's text only from its own archive."""
     amenders: list[Document] = []
     decisions: list[Document] = []
-    baseline: Document | None = None
+    enacting: Document | None = None
     for path, (amender_names, decision_names) in wanted.items():
         names = set(amender_names) | set(decision_names)
-        if path == baseline_archive:
-            names.add(baseline_name)
+        if path == baseline[0]:
+            names.add(baseline[1])
         documents = read_members(path, names)
         amenders.extend(documents[n] for n in amender_names)
         decisions.extend(documents[n] for n in decision_names)
-        baseline = documents.get(baseline_name, baseline)
-    if baseline is None:
-        raise LegalTimeInputError(f"enacting member {baseline_name} could not be read")
+        if path == baseline[0]:  # member paths are archive-local; never read across
+            enacting = documents[baseline[1]]
+    return amenders, decisions, enacting
+
+
+def collect(act: str, archives: list[Path], cache_dir: Path | None = None) -> Evidence:
+    """Everything the archives hold about ``act``: its text, its amenders, their decisions."""
+    indexed: Indexed = [(path, index_archive(path, cache_dir)) for path in archives]
+    baseline = _baseline(indexed, act)
+    amenders, decisions, enacting = _read_evidence(_wanted(indexed, act), baseline)
+    if enacting is None:
+        raise LegalTimeInputError(f"enacting member {baseline[1]} could not be read")
     return Evidence(
-        act=act, archives=tuple(i for _, i in indexed), baseline=baseline,
+        act=act, archives=tuple(i for _, i in indexed), baseline=enacting,
         amenders=_ordered(amenders), decisions=_ordered(decisions),
     )  # fmt: skip
 
