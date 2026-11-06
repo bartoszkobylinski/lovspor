@@ -2712,6 +2712,30 @@ uv run lovspor ops forarbeider-metadata \
 
 Exit 1 prints `refused: <reason>: <detail>` and writes nothing. The reasons are in `src/lovspor/forarbeider/errors.py`. Keep saved pages out of Git: raw source HTML is never committed.
 
+## Forarbeider: edition evidence from the landing page (issue #784)
+
+The edition notice (corrected edition, original edition, rettebrev) appears only on the landing page, never on a `?ch=N` chapter page. `lovspor ops forarbeider-edition` reads one saved landing page as edition evidence only and writes a sidecar beside the v1 metadata record. The landing page never goes through the chapter reader, and the v1 record is read, never rewritten, so release preflight's reproduction check is unchanged. Contract: `docs/proposals/forarbeider-edition-evidence-contract.md`.
+
+```bash
+uv run lovspor ops forarbeider-edition \
+  --landing-html ~/forarbeider-staging/raw/landing/prop-54-ls-landing.html \
+  --landing-url 'https://www.regjeringen.no/no/dokumenter/prop.-54-ls-20252026/id3154578/' \
+  --retrieved-at 2026-11-05T08:52:12+00:00 \
+  --metadata ~/forarbeider-staging/regjeringen-3154578.json
+```
+
+- **Save the landing page as served:** the page source, from the URL without `?ch=` or tracking parameters. A chapter URL is refused with `landing_page_required`; any other query with `unexpected_query`. The page must state the same document in `og:url`, `DC.Identifier.URL`, the `h1`, `og:title` and `DC.Title`, or it is refused with `conflicting_identity`.
+- **What counts as a correction:** a `data-doc-meta="corrected-edition-date"` notice in the article header reading `(Korrigert utgave per D.M.YYYY)`, together with the `h3.edition` block linking exactly one original edition PDF (`/no/opri/`) and at least one rettebrev PDF (`/no/rett/`). The stated date becomes `edition.corrected_on`. Both parts were read off the real Prop. 54 LS landing page on 2026-11-05.
+- **The page must be whole.** It must close (`</body></html>`) and hold exactly one `footer.page-footer`, a direct child of `body` after `main`, as on the real page. A missing, duplicated, wrapped or misplaced footer is refused with `incomplete_page`, so a cut page never reads as `unknown`.
+- **The edition list is read whole.** The block must be exactly `h3.edition` + `ul.link-list`, and every item exactly `li > a` with nothing else in it. Any other item, wrapper, text or second list is refused with `edition_unrecognized`, never skipped. Several rettebrev links are kept in source order.
+- **`unknown` is the default.** A page with neither part records `unknown`, never `original`: no observed page states that it is the original edition, so the schema refuses `original` until one does. `DC.Date` is the statsråd date and is never read as a correction date.
+- **Fail closed.** One part without the other, two notices, two blocks, two original editions, a link labelled against its target or a heading promising a rettebrev without one is refused with `edition_conflicting`. An unfamiliar notice, date, heading or link, and edition wording or a `/opri/` or `/rett/` link anywhere else on the page, is refused with `edition_unrecognized`: a notice we cannot read must not pass as "no notice".
+- **Association:** `--metadata` must be a private v1 record (`observation_unsafe` otherwise) stating the same document id, type, session, number and canonical URL, or the command is refused with `edition_identity_mismatch`. The evidence names that record's `source_page_url`, `source_sha256` and `retrieved_at`.
+- **`chapter_edition` is always `unknown`.** The landing page and the chapter page are separate captures, so nothing proves which edition the chapter bytes are, or which chapters a correction changed. Only a byte difference between two observations of the same chapter could show that.
+- **Provenance:** `landing_retrieved_at` keeps the operator's offset, and `landing_sha256` covers the saved bytes. Both are the operator's word (`landing_provenance: operator_saved_offline`). The command has no clock and makes no request.
+- **Output** is always beside the record, `<record>.edition.json` (here `~/forarbeider-staging/regjeringen-3154578.edition.json`), under the same path rules as the record: an absolute path outside every Git repository, the engine and the default corpus path, or `unsafe_output_path`. The evidence is an observation: written once, owner-only (0600) whatever the umask, never replaced. A rerun with identical inputs reports `unchanged`, and different evidence at the same path is refused with `observation_exists`. It lands beside the record, never in `chapters/`, where `review candidates` reads every `.json` as a chapter.
+- **No release:** the evidence carries no review, release, licence or publication field, and nothing in release preflight reads it. A v1 reader refuses it with `schema_invalid`.
+
 ## Forarbeider: one held chapter in private staging (issue #738)
 
 `lovspor ops forarbeider-chapter` extracts the one chapter a saved `?ch=N` page holds into a held staging result. It makes no HTTP request, publishes nothing and clears nothing: ADR-0018 PR2. Reviewer decisions are recorded separately, by `ops forarbeider-review` below.

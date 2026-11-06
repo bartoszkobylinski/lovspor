@@ -264,7 +264,7 @@ def test_a_capture_without_scope_needs_it_given(capture_dir: Path) -> None:
     manifest = load_manifest(capture_dir)
     del manifest["scope"]
     write_manifest(capture_dir, manifest)
-    with pytest.raises(CrosswalkError, match="law ids"):
+    with pytest.raises(CrosswalkError, match="records no scope"):
         build(capture_dir, OPTIONS)
     given = BuildOptions(
         producer_commit=PRODUCER, law_ids=tuple(SCENARIO_LAWS), lovverk_commit=COMMIT
