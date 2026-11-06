@@ -14,10 +14,11 @@ import pytest
 
 from lovspor.errors import ParseError, RenderError
 from lovspor.storage.manifest import read_manifest
-from lovspor.sync.orchestrator import run_sync
+from lovspor.sync.orchestrator import _ChangePlan, _guard_change_reembed, run_sync
 from lovspor.sync.reembed_guard import rendered_or_refused
 from lovspor.temporal_attestation import AttestationError
 from tests.unit.test_sync_change_reembed_guard import (
+    _OBSERVED,
     _corpus,
     _CountingEmbedder,
     _doc,
@@ -78,6 +79,11 @@ def test_render_refusal_depends_on_upstream_hash_not_failure_type(
             rendered_or_refused(render, "lov-0", xml_hash, prior)
         assert refused.value.__cause__ is failure
         assert str(failure) in str(refused.value)
+        assert str(refused.value) == (
+            f"lov-0 changed upstream but cannot render ({failure}); its old rendering "
+            "would be carried forward, which the counted-conformance attestation "
+            "refuses, so the sync stops before any embedding is paid for"
+        )
     else:
         assert rendered_or_refused(render, "lov-0", xml_hash, prior) is None
 
@@ -92,3 +98,17 @@ def test_unexpected_renderer_failure_is_not_silently_skipped() -> None:
         rendered_or_refused(render, "lov-0", "f" * 64, None)
 
     assert raised.value is failure
+
+
+def test_renamed_unrenderable_document_with_unchanged_hash_is_skipped(tmp_path: Path) -> None:
+    """A rename alone must not turn a render failure into upstream-change refusal."""
+    settings = _corpus(tmp_path, 1)
+    before = _state(settings.lovverk_repo_path)
+    prior = read_manifest(settings.lovverk_repo_path / "manifest.json")
+    record = prior.documents["lov-0"]
+    doc = replace(_doc(0), xml_bytes=b"<html", xml_hash=record.xml_hash, slug="renamed-law")
+    plan = _ChangePlan([], [], [doc.doc_id], {doc.doc_id: doc}, prior, _OBSERVED)
+
+    _guard_change_reembed(settings, plan, allow=False)
+
+    assert _state(settings.lovverk_repo_path) == before
