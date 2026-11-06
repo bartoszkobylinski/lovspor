@@ -60,8 +60,9 @@ class Settings(BaseModel):
     """
     reembed_guard_max_fraction: float = 0.02
     """ADR-0006 mass-re-embed guard, blast-radius dimension: a keyed sync
-    whose input-hash repair selection exceeds this fraction of current
-    documents fails closed before any provider call. 0.02 = ~117 documents on
+    whose input-hash repair selection, or whose change-path workload (#790),
+    exceeds this fraction of current documents fails closed before any
+    provider call. 0.02 = ~117 documents on
     the 5,880-doc corpus — an order of magnitude above every observed normal
     daily change (0-3 docs) and below every historical broad-drift incident
     that should have stopped (797, 2,336, corpus-wide). Raise deliberately

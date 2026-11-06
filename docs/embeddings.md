@@ -361,7 +361,9 @@ scope fails closed *before any provider call*. Ordinary small repairs proceed
 automatically; a corpus-wide selection (an unannotated corpus, a broad
 pipeline drift, mass field-stripping) stops for an explicit
 `lovspor sync --allow-mass-reembed`. The scheduled workflow never passes the
-override. Provider output has no influence on the input hash, so provider
+override. The change path is sized and guarded the same way before its
+first provider call (#790), so a corpus-wide hash change stops there too.
+Provider output has no influence on the input hash, so provider
 nondeterminism cannot create churn.
 
 The `repair-embeddings` command remains available as diagnostic/recovery

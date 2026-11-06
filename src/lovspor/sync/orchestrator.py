@@ -42,13 +42,13 @@ Commit strategy (decisions.md §12a + §12d):
 
 import logging
 import re
-import sys
 from collections import Counter
-from collections.abc import Collection
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import islice
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -67,7 +67,6 @@ from lovspor.embeddings.store import read_embeddings, write_embeddings
 from lovspor.errors import (
     ConfigError,
     CorpusStateError,
-    MassReembedError,
     MassRemovalError,
     ParseError,
     RenderError,
@@ -112,6 +111,13 @@ from lovspor.sync.git_commit import (
     head_commit,
     head_commit_or_none,
 )
+from lovspor.sync.reembed_guard import (
+    OVERRIDE_HINT,
+    BackfillItem,
+    ReembedScope,
+    enforce_reembed_guard,
+    guard_mass_reembed,
+)
 from lovspor.temporal import TEMPORAL_PARSER_VERSION
 from lovspor.temporal_attestation import (
     AttestationError,
@@ -131,14 +137,6 @@ _TRACKED_DATASETS = (
     "gjeldende-lover",
     "gjeldende-sentrale-forskrifter",
 )
-_REEMBED_GUARD_MIN_DOCS = 100
-"""Corpora below this size skip the guard's FRACTION dimension only.
-
-A tiny corpus backfilling 100% of itself is the ordinary keyless-then-
-keyed bootstrap, not transformation drift; the token-workload dimension
-still applies at every size, so real spend is never waved through.
-"""
-
 _MANIFEST_FILENAME = "manifest.json"
 _EMBEDDINGS_SUBDIR = "embeddings"
 """Per-dataset directory holding ``<slug>.bin`` embedding files.
@@ -294,20 +292,6 @@ def run_sync(  # noqa: PLR0912, PLR0915
     # documents for backfill, so switching model no longer needs an operator
     # to delete sidecars by hand.
     sprint9_target = space_id_of(sprint9_embedder) if sprint9_embedder is not None else None
-    if sprint9_embedder is not None and _needs_sprint9_embeddings_migration(
-        prior,
-        settings.lovverk_repo_path,
-        sprint9_target,
-    ):
-        prior = _run_sprint9_embeddings_migration(
-            settings,
-            prior,
-            sprint9_embedder,
-            datetime.now(UTC),
-            sprint9_target,
-            allow_mass_reembed=allow_mass_reembed,
-        )
-
     upstream_hashes = {doc_id: u.xml_hash for doc_id, u in upstream.items()}
     changes = detect_changes(upstream_hashes, prior)
 
@@ -332,6 +316,28 @@ def run_sync(  # noqa: PLR0912, PLR0915
     # Docs promoted purely to re-render (stamp/force), not for a real content
     # change: their commit must be the history-exempt migration subject.
     rerender_ids = set(changes.changed) - real_changed
+    # Vetoes before ANY paid call, the Sprint 9 backfill below included (#790);
+    # the backfill stamps only embedding fields, so this classification holds.
+    now = datetime.now(UTC)
+    if sprint9_embedder is not None:
+        plan = _ChangePlan(changes.new, changes.changed, renamed, upstream, prior, now)
+        _guard_change_reembed(settings, plan, allow=allow_mass_reembed)
+    _guard_mass_removal(changes.removed, prior, settings.max_removal_ratio)
+
+    if sprint9_embedder is not None and _needs_sprint9_embeddings_migration(
+        prior,
+        settings.lovverk_repo_path,
+        sprint9_target,
+    ):
+        prior = _run_sprint9_embeddings_migration(
+            settings,
+            prior,
+            sprint9_embedder,
+            datetime.now(UTC),
+            sprint9_target,
+            allow_mass_reembed=allow_mass_reembed,
+        )
+
     if not (changes.new or changes.changed or changes.removed or renamed):
         # A no-op run still ensures the CURRENT head is attested under the
         # CURRENT parser version: a TEMPORAL_PARSER_VERSION bump must earn
@@ -352,9 +358,6 @@ def run_sync(  # noqa: PLR0912, PLR0915
             unknown_archive_fields=drift_fields,
         )
 
-    _guard_mass_removal(changes.removed, prior, settings.max_removal_ratio)
-
-    now = datetime.now(UTC)
     new_records = _carry_unchanged(prior, changes.unchanged)
     new_records.update(_carry_tombstones(prior, set(upstream)))
     actions: list[_DocAction] = []
@@ -415,25 +418,7 @@ def run_sync(  # noqa: PLR0912, PLR0915
         prior_record = prior.documents[doc_id]
         upstream_doc = _rerender_upstream(settings, upstream[doc_id], prior_record)
         if _rerender_is_noop(settings, upstream_doc, now, prior_record):
-            # Re-render that reproduces the file byte-for-byte: keep the prior
-            # record so last_seen and embedding_hash are not disturbed. But
-            # refresh the renderer stamp when it is stale — otherwise a
-            # stamp-driven promotion would re-render this doc every sync forever
-            # (a renderer bump that did not touch THIS file). Only when it
-            # differs, so force_rerender of an already-current doc adds no
-            # manifest churn.
-            updates: dict[str, object] = {}
-            if prior_record.renderer_version != RENDERER_VERSION:
-                updates["renderer_version"] = RENDERER_VERSION
-            # Reconcile a historically drifted last_seen to the file's own
-            # observation timestamp (the byte-identical render proves the seed
-            # equals the file value). Manifest-only: no file is rewritten.
-            preserved = upstream_doc.retrieved_at
-            if preserved is not None and prior_record.last_seen != preserved:
-                updates["last_seen"] = preserved
-            new_records[doc_id] = (
-                prior_record.model_copy(update=updates) if updates else prior_record
-            )
+            new_records[doc_id] = _noop_rerender_record(prior_record, upstream_doc)
             rerender_noop_ids.append(doc_id)
             continue
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
@@ -935,6 +920,26 @@ def _rerender_is_noop(
     except (RenderError, ParseError):
         return False
     return path.read_text(encoding="utf-8") == rendered
+
+
+def _noop_rerender_record(prior: ManifestRecord, upstream: _UpstreamDoc) -> ManifestRecord:
+    """The prior record of a byte-identical re-render, with only its stale stamps refreshed.
+
+    The prior record is kept so last_seen and embedding_hash are not disturbed.
+    A stale renderer stamp is refreshed, or a stamp-driven promotion would
+    re-render this doc every sync forever (a renderer bump that did not touch
+    THIS file); only when it differs, so force_rerender of an already-current
+    doc adds no manifest churn. A historically drifted last_seen is reconciled
+    to the file's own observation timestamp (the byte-identical render proves
+    the seed equals the file value). Manifest-only: no file is rewritten.
+    """
+    updates: dict[str, object] = {}
+    if prior.renderer_version != RENDERER_VERSION:
+        updates["renderer_version"] = RENDERER_VERSION
+    preserved = upstream.retrieved_at
+    if preserved is not None and prior.last_seen != preserved:
+        updates["last_seen"] = preserved
+    return prior.model_copy(update=updates) if updates else prior
 
 
 def _pick_archive(
@@ -1827,16 +1832,6 @@ def _needs_sprint9_embeddings_migration(
     return False
 
 
-@dataclass(frozen=True)
-class _BackfillItem:
-    """One document the input-identity/staleness selection chose for repair."""
-
-    doc_id: str
-    record: ManifestRecord
-    rendered: str
-    input_tokens: int
-
-
 def _require_slug(record: ManifestRecord) -> str:
     """Selection only admits slugged records; make that explicit for typing."""
     if record.slug is None:  # pragma: no cover - guarded by selection
@@ -1861,7 +1856,7 @@ def _select_embedding_backfill(
     prior: Manifest,
     repo: Path,
     target_space_id: str | None,
-) -> list[_BackfillItem]:
+) -> list[BackfillItem]:
     """The complete repair population, computed BEFORE any provider call.
 
     Reconstructs each candidate's current embedding inputs once, evaluates the
@@ -1870,7 +1865,7 @@ def _select_embedding_backfill(
     Discover → assess → embed: the embedding loop consumes this list, so the
     guard can see the whole run's scope up front.
     """
-    selection: list[_BackfillItem] = []
+    selection: list[BackfillItem] = []
     for doc_id, record in prior.documents.items():
         if record.status != "current" or record.slug is None:
             continue
@@ -1892,7 +1887,7 @@ def _select_embedding_backfill(
             continue
         tokens = sum(count_input_tokens(item.text) for item in inputs)
         selection.append(
-            _BackfillItem(
+            BackfillItem(
                 doc_id=doc_id,
                 record=record,
                 rendered=rendered,
@@ -1902,62 +1897,59 @@ def _select_embedding_backfill(
     return selection
 
 
-def _guard_mass_reembed(
-    selection: list[_BackfillItem],
-    prior: Manifest,
-    settings: Settings,
-    allow: bool,
-) -> None:
-    """ADR-0006 §7: fail closed on an unexpectedly large repair scope.
+class _ChangePlan(NamedTuple):
+    """The change path's documents, as ``run_sync`` is about to write them."""
 
-    Both dimensions are computed deterministically from the selection alone —
-    no provider is consulted. ``allow`` is the explicit operator override
-    (``lovspor sync --allow-mass-reembed``); it never comes from the
-    environment and the scheduled workflow never passes it, so a tripped
-    guard fails the job before a cent of spend.
+    new: list[str]
+    changed: list[str]
+    renamed: list[str]
+    upstream: dict[str, _UpstreamDoc]
+    prior: Manifest
+    now: datetime
+
+
+def _docs_to_embed(settings: Settings, plan: _ChangePlan) -> Iterator[_UpstreamDoc]:
+    """Each document the write loops will embed.
+
+    A changed document whose re-render reproduces its file is skipped by the
+    write loop with no embedding call, so it is not part of the workload. The
+    observation a renamed document carries lands only in the frontmatter, which
+    is not embedded, so its upstream document is counted as it is.
     """
-    current_total = sum(1 for r in prior.documents.values() if r.status == "current")
-    fraction = len(selection) / max(current_total, 1)
-    # The fraction dimension only means "blast radius" on a corpus big enough
-    # for a fraction to be meaningful — on a bootstrap or test corpus of a
-    # handful of documents, 100% selection is the NORMAL keyless->keyed
-    # lifecycle, not drift. Same floor pattern as the mass-removal guard.
-    # The token dimension below applies unconditionally: spend is spend.
-    fraction_applies = current_total >= _REEMBED_GUARD_MIN_DOCS
-    tokens = sum(item.input_tokens for item in selection)
-    summary = (
-        f"{len(selection)} document(s) selected for re-embedding "
-        f"({fraction:.1%} of {current_total} current documents), "
-        f"~{tokens:,} input tokens"
+    yield from (plan.upstream[doc_id] for doc_id in (*plan.new, *plan.renamed))
+    for doc_id in plan.changed:
+        prior = plan.prior.documents[doc_id]
+        doc = _rerender_upstream(settings, plan.upstream[doc_id], prior)
+        if not _rerender_is_noop(settings, doc, plan.now, prior):
+            yield doc
+
+
+def _guard_change_reembed(settings: Settings, plan: _ChangePlan, *, allow: bool) -> None:
+    """ADR-0006 §7 on the change path: the whole run's workload, before any spend (#790).
+
+    Every document is rendered and its inputs counted with the production
+    tokenizer, the same estimate the backfill guard uses: it is the input
+    the provider is sent, not a bill (a retried request may be billed again).
+    A document that cannot render is skipped by the write loop too.
+    """
+    documents = tokens = 0
+    for doc in _docs_to_embed(settings, plan):
+        try:
+            rendered = render_full_document(doc.xml_bytes, _frontmatter_context(doc, plan.now))
+        except (RenderError, ParseError):
+            continue
+        documents += 1
+        tokens += sum(count_input_tokens(item.text) for item in build_embedding_inputs(rendered))
+    scope = ReembedScope(
+        documents=documents,
+        tokens=tokens,
+        noun="changed document(s) to re-embed",
+        title="the change-driven re-embed",
+        remedy="So many changed documents usually means the upstream format or the "
+        "renderer changed, not the law (#679: an ELI row in every header). Check the "
+        f"hashes before paying; if the re-embed is intended, {OVERRIDE_HINT}",
     )
-    if allow:
-        print(f"mass-reembed override active: {summary}", file=sys.stderr, flush=True)
-        return
-    over_fraction = fraction_applies and fraction > settings.reembed_guard_max_fraction
-    over_tokens = tokens > settings.reembed_guard_max_tokens
-    if not (over_fraction or over_tokens):
-        return
-    fired = " and ".join(
-        name
-        for name, hit in (
-            (
-                f"document fraction {fraction:.1%} > {settings.reembed_guard_max_fraction:.1%}",
-                over_fraction,
-            ),
-            (
-                f"token workload {tokens:,} > {settings.reembed_guard_max_tokens:,}",
-                over_tokens,
-            ),
-        )
-        if hit
-    )
-    raise MassReembedError(
-        f"embedding-input repair scope exceeds the mass-re-embed guard: {summary}. "
-        f"Threshold exceeded: {fired}. No provider call was made and no sidecar was "
-        f"written. If this repair is intended (annotation-less corpus, deliberate "
-        f"pipeline change), re-run with 'lovspor sync --allow-mass-reembed' or raise "
-        f"LOVSPOR_REEMBED_GUARD_MAX_FRACTION / LOVSPOR_REEMBED_GUARD_MAX_TOKENS.",
-    )
+    enforce_reembed_guard(scope, plan.prior, settings, allow)
 
 
 def _run_sprint9_embeddings_migration(
@@ -1988,7 +1980,7 @@ def _run_sprint9_embeddings_migration(
     # ADR-0006 §7: the guard runs on the COMPLETE selection, strictly before
     # the first provider call, so a tripped guard means zero spend, zero new
     # sidecars and zero stamps.
-    _guard_mass_reembed(selection, prior, settings, allow=allow_mass_reembed)
+    guard_mass_reembed(selection, prior, settings, allow=allow_mass_reembed)
     written: list[Path] = []
     new_records = dict(prior.documents)
     descriptor, space_id = _embedder_identity(embedder)

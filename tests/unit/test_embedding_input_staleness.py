@@ -19,11 +19,8 @@ from lovspor.embeddings.store import write_embeddings
 from lovspor.errors import MassReembedError
 from lovspor.settings import Settings
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest, write_manifest
-from lovspor.sync.orchestrator import (
-    _BackfillItem,
-    _embedding_is_stale,
-    _guard_mass_reembed,
-)
+from lovspor.sync.orchestrator import _embedding_is_stale
+from lovspor.sync.reembed_guard import BackfillItem, guard_mass_reembed
 
 _ESI = "738c919fa57385d94c558d93c4b0e588"
 _DOC = "---\ntitle: X\n---\n# X\n\n### § 1. Virkeområde\n\n" + ("ord " * 40) + "\n"
@@ -141,10 +138,10 @@ def _prior(current_count: int) -> Manifest:
     return Manifest(generated_at=datetime(2026, 8, 1, tzinfo=UTC), documents=records)
 
 
-def _selection(count: int, tokens_each: int) -> list[_BackfillItem]:
+def _selection(count: int, tokens_each: int) -> list[BackfillItem]:
     prior = _prior(count)
     return [
-        _BackfillItem(doc_id=doc_id, record=record, rendered="", input_tokens=tokens_each)
+        BackfillItem(doc_id=doc_id, record=record, rendered="", input_tokens=tokens_each)
         for doc_id, record in prior.documents.items()
     ]
 
@@ -158,7 +155,7 @@ def _settings(tmp_path: Path, **overrides: object) -> Settings:
 
 
 def test_ordinary_small_repair_passes_the_guard(tmp_path: Path) -> None:
-    _guard_mass_reembed(
+    guard_mass_reembed(
         _selection(3, tokens_each=500),
         _prior(500),
         _settings(tmp_path),
@@ -169,7 +166,7 @@ def test_ordinary_small_repair_passes_the_guard(tmp_path: Path) -> None:
 def test_the_fraction_dimension_trips(tmp_path: Path) -> None:
     selection = _selection(30, tokens_each=10)
     with pytest.raises(MassReembedError) as exc_info:
-        _guard_mass_reembed(selection, _prior(500), _settings(tmp_path), allow=False)
+        guard_mass_reembed(selection, _prior(500), _settings(tmp_path), allow=False)
     message = str(exc_info.value)
     assert "document fraction" in message
     assert "No provider call was made" in message
@@ -181,7 +178,7 @@ def test_the_token_dimension_trips_independently_of_count(tmp_path: Path) -> Non
     the reason a count-only threshold was rejected at ADR acceptance."""
     selection = _selection(1, tokens_each=2_000_000)
     with pytest.raises(MassReembedError) as exc_info:
-        _guard_mass_reembed(selection, _prior(500), _settings(tmp_path), allow=False)
+        guard_mass_reembed(selection, _prior(500), _settings(tmp_path), allow=False)
     assert "token workload" in str(exc_info.value)
 
 
@@ -189,14 +186,14 @@ def test_the_fraction_dimension_skips_tiny_corpora(tmp_path: Path) -> None:
     """A bootstrap corpus backfilling 100% of itself is the normal keyless-
     then-keyed lifecycle, not drift — the fraction floor mirrors the
     mass-removal guard. The token dimension still applies at every size."""
-    _guard_mass_reembed(
+    guard_mass_reembed(
         _selection(3, tokens_each=100),
         _prior(3),
         _settings(tmp_path),
         allow=False,
     )
     with pytest.raises(MassReembedError):
-        _guard_mass_reembed(
+        guard_mass_reembed(
             _selection(3, tokens_each=2_000_000),
             _prior(3),
             _settings(tmp_path),
@@ -205,7 +202,7 @@ def test_the_fraction_dimension_skips_tiny_corpora(tmp_path: Path) -> None:
 
 
 def test_the_explicit_override_permits_a_large_repair(tmp_path: Path) -> None:
-    _guard_mass_reembed(
+    guard_mass_reembed(
         _selection(30, tokens_each=2_000_000),
         _prior(500),
         _settings(tmp_path),
@@ -219,4 +216,4 @@ def test_thresholds_are_operator_configurable(tmp_path: Path) -> None:
         reembed_guard_max_fraction=0.5,
         reembed_guard_max_tokens=100_000_000,
     )
-    _guard_mass_reembed(_selection(100, tokens_each=200_000), _prior(500), settings, allow=False)
+    guard_mass_reembed(_selection(100, tokens_each=200_000), _prior(500), settings, allow=False)
