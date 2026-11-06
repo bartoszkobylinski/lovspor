@@ -208,6 +208,10 @@ jobs:
 
       - name: Run lovspor sync
         id: sync
+        # Below the job's 120 minutes on purpose (#790): a sync killed by the
+        # job timeout is cancelled with the job, while one killed here fails
+        # its step, and the alert at the end of the job still runs.
+        timeout-minutes: 105
         # OPENAI_API_KEY enables the per-section embedding sidecars
         # (Sprint 9). Without it the engine still syncs Markdown
         # normally but silently skips every .bin write — which is how
@@ -286,3 +290,35 @@ jobs:
             "Run: ${RUN_URL}" \
             > drift-issue.md
           gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file drift-issue.md
+
+      # Issue #790: on 2026-10-20 and 10-21 the keyed sync was killed by the
+      # job timeout, its paid embeddings were lost with the workspace, and
+      # nothing said so, so the next night paid again. A run that fails or is
+      # cancelled files one issue; every repeat comments on it, so the second
+      # paid repeat is visible the morning after the first.
+      - name: Report a sync that did not complete
+        if: failure() || cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYNC_OUTCOME: ${{ steps.sync.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Nightly sync did not complete"
+          printf '%s\n' \
+            "A sync run did not complete. Run: ${RUN_URL}" \
+            "" \
+            "\`Run lovspor sync\` outcome: \`${SYNC_OUTCOME:-not reached}\`. Nothing was pushed if the run" \
+            "stopped before \`Push corpus changes if any\`." \
+            "" \
+            "A keyed sync that ran long may have spent embedding budget on work it then lost" \
+            "(#790, #802). Read the log before re-running or waiting for the next schedule." \
+            > sync-alert.md
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,title \
+            --jq "[.[] | select(.title == \"$title\")][0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file sync-alert.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file sync-alert.md
+          fi
