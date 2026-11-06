@@ -50,6 +50,7 @@ class Provision(Frozen):
     label: str
     heading: str
     ledd: tuple[Ledd, ...]
+    notes: tuple[str, ...] = ()
 
 
 class Node(Frozen):
@@ -148,11 +149,17 @@ def _provision(article: etree._Element) -> Provision:
     values = [e for e in article.iter("span") if _css(e) == "legalArticleValue"]
     titles = [e for e in article.iter("span") if _css(e) == "legalArticleTitle"]
     ledd = tuple(_ledd(child) for child in article if _css(child) == "legalP")
+    notes = tuple(
+        collapse("".join(str(t) for t in c.itertext()))
+        for c in article
+        if _css(c) == "changesToParent"
+    )
     return Provision(
         key=key,
         label=element_text(values[0]) if values else key,
         heading=element_text(titles[0]) if titles else "",
         ledd=ledd,
+        notes=notes,
     )
 
 
