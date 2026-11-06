@@ -49,6 +49,32 @@ def test_the_report_is_byte_identical_across_runs(
     assert eli_audit_report(repo, sha, 2) == eli_audit_report(repo, sha, 2)
 
 
+def test_an_older_commit_is_audited_despite_newer_and_dirty_corpus_content(
+    corpus: tuple[Path, str],  # noqa: F811
+) -> None:
+    """eli_commands promises one pinned commit, read through git only."""
+    repo, sha = corpus
+    older = subprocess.run(
+        ["git", "rev-parse", f"{sha}^"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    # Neither the manifest nor the documents on disk are usable as audit input.
+    (repo / "manifest.json").write_text("not JSON", encoding="utf-8")
+    (repo / "lover/testloven.md").unlink()
+
+    report = json.loads(eli_audit_report(repo, older, sample_size=3))
+
+    assert report["corpus_commit"] == older
+    assert report["total"] == report["distinct"] == 1
+    assert report["by_reason"] == {"mapped": 1}
+    assert [item["ref_id"] for item in report["samples"]["mapped"]] == ["lov/2020-01-01-1"]
+    assert (repo / "manifest.json").read_text(encoding="utf-8") == "not JSON"
+    assert not (repo / "lover/testloven.md").exists()
+
+
 def test_the_audit_writes_nothing_into_the_corpus(
     corpus: tuple[Path, str],  # noqa: F811
 ) -> None:
@@ -84,6 +110,30 @@ def test_a_path_that_is_not_a_repository_is_refused(tmp_path: Path) -> None:
 
 
 class TestTheCommand:
+    def test_zero_samples_keeps_counts_but_omits_examples(
+        self,
+        corpus: tuple[Path, str],  # noqa: F811
+    ) -> None:
+        repo, sha = corpus
+        result = runner.invoke(
+            app, ["ops", "eli-audit", "--corpus", str(repo), "--ref", sha, "--samples", "0"]
+        )
+        assert result.exit_code == 0, result.output
+        report = json.loads(result.stdout)
+        assert report["total"] == report["distinct"] == 4
+        assert report["by_reason"] == {"mapped": 4}
+        assert report["samples"] == {"mapped": []}
+
+    def test_negative_samples_is_a_usage_error_before_reading_the_corpus(
+        self, tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "missing-corpus"
+        result = runner.invoke(app, ["ops", "eli-audit", "--corpus", str(repo), "--samples", "-1"])
+        assert result.exit_code == 2
+        assert said("--samples", result.output)
+        assert said("-1 is not in the range x>=0", result.output)
+        assert not repo.exists()
+
     def test_prints_the_json_report(self, corpus: tuple[Path, str]) -> None:  # noqa: F811
         repo, sha = corpus
         result = runner.invoke(app, ["ops", "eli-audit", "--corpus", str(repo), "--ref", sha])
