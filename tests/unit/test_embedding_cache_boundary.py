@@ -255,6 +255,43 @@ def test_empty_document_pays_nothing_and_stores_nothing(cache_dir: Path, tmp_pat
     assert input_hash == hash_embedding_inputs([])
 
 
+def test_failed_document_publication_reuses_all_completed_requests(
+    cache_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §3.2–3: completed checkpoints survive a final document-write failure."""  # noqa: RUF002
+    settings = _settings(tmp_path)
+    reference = _write(settings, _Provider(), slug="reference")
+    publish = cache_store._publish
+
+    def fail_document(directory: Path, final: Path, payload: bytes) -> None:
+        if directory.name == "documents":
+            raise OSError(28, "No space left on device")
+        publish(directory, final, payload)
+
+    provider = _Provider()
+    with monkeypatch.context() as patch:
+        patch.setattr(cache_store, "_publish", fail_document)
+        with pytest.raises(EmbeddingCacheStorageError):
+            _write(settings, with_embedding_cache(provider, settings))
+
+    assert provider.requests == 4
+    checkpoints = {p: p.read_bytes() for p in cache_dir.rglob("*.lsec")}
+    assert len(checkpoints) == 4
+    assert all("units" in p.parts for p in checkpoints)
+    assert not list(settings.lovverk_repo_path.rglob("lov-1.bin"))
+
+    resumed_provider = _Provider(fail_after=0)
+    resumed = with_embedding_cache(resumed_provider, settings)
+    assert isinstance(resumed, CachingEmbedder)
+    assert _write(settings, resumed) == reference
+    assert resumed_provider.requests == 0
+    assert resumed.progress.units_cached == 4
+    assert resumed.progress.units_paid == 0
+    assert {p: p.read_bytes() for p in checkpoints} == checkpoints
+    documents = [p for p in cache_dir.rglob("*.lsec") if p.parent.name == "documents"]
+    assert len(documents) == 1
+
+
 def test_uncached_boundary_is_todays_encode_then_quantize() -> None:
     provider = _Provider()
     inputs = [EmbeddingInput("§ 1", "a"), EmbeddingInput("§ 2", "b")]

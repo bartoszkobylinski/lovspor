@@ -19,6 +19,7 @@ import importlib.metadata
 import inspect
 import io
 import json
+import os
 import re
 import subprocess
 import tomllib
@@ -787,3 +788,15 @@ def test_assumption_lxml_strip_elements_reads_with_tail_as_a_truth_value() -> No
         root = lxml_html.document_fromstring(b"<p>x<script>y</script>z</p>")
         lxml_etree.strip_elements(root, "script", with_tail=flag)
         assert root.text_content() == "xz", flag
+
+
+def test_assumption_os_link_follow_symlinks_none_does_not_follow(tmp_path: Path) -> None:
+    """Pins mutation-equivalents/embeddings.cache_store/_publish-*.toml: ``None``
+    selects the same no-follow link as ``False``."""
+    target = tmp_path / "target"
+    target.write_bytes(b"x")
+    link = tmp_path / "symlink"
+    link.symlink_to(target)
+    for value, name in ((None, "none"), (False, "false")):
+        os.link(link, tmp_path / name, follow_symlinks=value)  # type: ignore[arg-type]
+        assert (tmp_path / name).is_symlink()
