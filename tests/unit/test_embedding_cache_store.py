@@ -309,3 +309,80 @@ def test_failed_publication_leaves_no_entry_and_can_be_retried(
     found = store.get(_key())
     assert found is not None
     assert np.array_equal(found.vectors, _entry().vectors)
+
+
+def test_temporary_file_is_created_owner_only_before_any_chmod(
+    cache_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §5.1: the entry is 0600 from creation, not only after fchmod.
+
+    With a permissive umask, a temporary file created with the default mode
+    would be world-readable until the fchmod that follows.
+    """
+    created: list[int] = []
+    real_fchmod = os.fchmod
+
+    def record(descriptor: int, mode: int) -> None:
+        created.append(stat.S_IMODE(os.fstat(descriptor).st_mode))
+        real_fchmod(descriptor, mode)
+
+    store = _open(cache_root)
+    monkeypatch.setattr(os, "fchmod", record)
+    previous = os.umask(0)
+    try:
+        store.put(_entry())
+    finally:
+        os.umask(previous)
+    assert created == [0o600]
+
+
+def test_temporary_swapped_for_a_symlink_is_never_published_as_its_target(
+    cache_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §5.1: linking into place never follows a symlink.
+
+    If the temporary name is swapped for a symlink before the link, the
+    published name is that symlink, which every read refuses, and never a
+    hard link to the file it points at.
+    """
+    outside = tmp_path / "outside.lsec"
+    outside.write_bytes(encode_entry(_entry(99)))
+    outside.chmod(0o600)
+    real_fsync = os.fsync
+    swapped: list[Path] = []
+
+    def swap_then_fsync(descriptor: int) -> None:
+        real_fsync(descriptor)
+        for staged in cache_root.rglob("*.tmp.*"):
+            if not swapped:
+                staged.unlink()
+                staged.symlink_to(outside)
+                swapped.append(staged)
+
+    store = _open(cache_root)
+    monkeypatch.setattr(os, "fsync", swap_then_fsync)
+    store.put(_entry())
+    monkeypatch.setattr(os, "fsync", real_fsync)
+    assert swapped
+    with pytest.raises(EmbeddingCacheError, match="symlink"):
+        store.get(_key())
+
+
+def test_temporary_already_removed_after_publishing_does_not_fail_the_write(
+    cache_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §5.2: a temporary removed by someone else (a concurrent prune)
+    once the entry is linked in place is not an error: the entry is durable."""
+    real_link = os.link
+
+    def link_then_lose_temporary(src: Path, dst: Path, **kwargs: bool) -> None:
+        real_link(src, dst, **kwargs)
+        Path(src).unlink()
+
+    store = _open(cache_root)
+    monkeypatch.setattr(os, "link", link_then_lose_temporary)
+    store.put(_entry())
+    monkeypatch.setattr(os, "link", real_link)
+    stored = store.get(_key())
+    assert stored is not None
+    np.testing.assert_array_equal(stored.vectors, _entry().vectors)

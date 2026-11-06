@@ -112,8 +112,8 @@ class CachedVectors:
 def encode_entry(entry: CachedVectors) -> bytes:
     """Serialize ``entry``; refuses vectors that do not match their own key."""
     _check_encodable(entry)
-    meta = json.dumps(_meta_of(entry), sort_keys=True, separators=(",", ":")).encode("utf-8")
-    payload = np.ascontiguousarray(entry.vectors, dtype=_DTYPES[entry.key.dtype]).tobytes()
+    meta = json.dumps(_meta_of(entry), sort_keys=True, separators=(",", ":")).encode()
+    payload = entry.vectors.tobytes()
     body = MAGIC + _LENGTH.pack(len(meta)) + meta + payload
     return body + hashlib.sha256(body).digest()
 
@@ -171,7 +171,7 @@ def _split(data: bytes, expected: EntryKey) -> tuple[dict[str, Any], bytes]:
     if start + length > len(body):
         raise _refuse(expected, "meta length past the end")
     try:
-        meta = json.loads(body[start : start + length].decode("utf-8"))
+        meta = json.loads(body[start : start + length].decode())
     except (UnicodeDecodeError, ValueError) as exc:
         raise _refuse(expected, "meta is not JSON") from exc
     if not isinstance(meta, dict):
