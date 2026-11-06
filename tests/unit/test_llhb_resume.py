@@ -8,6 +8,7 @@ re-runs or rewrites a recorded case, and says in the run's notes that it
 was interrupted.
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -326,3 +327,51 @@ def test_resume_accepts_null_finish_and_completion_changes_without_rewriting(
 
     assert reopened == run_dir
     assert {path.name: path.read_bytes() for path in run_dir.iterdir()} == original
+
+
+def test_resume_after_a_second_interruption_preserves_every_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same unfinished-run contract applies when a resume itself crashes."""
+    bin_dir = _interrupted_run(tmp_path, monkeypatch)
+    store = _store(tmp_path)
+    _die_after(store, 1, monkeypatch)
+    with pytest.raises(_InterruptedError):
+        run_arm(make_config(tmp_path, bin_dir, resume=True), _CASES, make_metadata(), store)
+
+    records_path = tmp_path / "runs" / RUN_ID / "records.jsonl"
+    captured = records_path.read_bytes()
+    assert len(store.read_records(RUN_ID)) == 3
+    assert store.load_metadata(RUN_ID).get("finished_at") is None
+    calls_before = _calls(tmp_path)
+    store = _store(tmp_path)
+
+    summary = run_arm(make_config(tmp_path, bin_dir, resume=True), _CASES, make_metadata(), store)
+
+    assert _calls(tmp_path) == calls_before + 1
+    assert records_path.read_bytes().startswith(captured)
+    assert sorted(r["case_id"] for r in store.read_records(RUN_ID)) == sorted(
+        case["case_id"] for case in _CASES
+    )
+    assert summary["cases_completed"] == 4
+    assert summary["errors_total"] == 0
+    assert store.load_metadata(RUN_ID)["notes"] == ("resumed: 3 of 4 cases were already recorded")
+
+
+def test_resume_refuses_a_partial_record_before_execution_or_writes(tmp_path: Path) -> None:
+    """Append-only capture must not overwrite or silently discard a torn JSONL tail."""
+    bin_dir = _counting_cli(tmp_path)
+    store = _store(tmp_path)
+    run_dir = store.open_run(make_metadata())
+    store.append_record(make_record())
+    with (run_dir / "records.jsonl").open("ab") as handle:
+        handle.write(b'{"case_id":')
+    captured = {path.name: path.read_bytes() for path in run_dir.iterdir()}
+
+    with pytest.raises(json.JSONDecodeError):
+        run_arm(
+            make_config(tmp_path, bin_dir, resume=True), _CASES, make_metadata(), _store(tmp_path)
+        )
+
+    assert _calls(tmp_path) == 0
+    assert {path.name: path.read_bytes() for path in run_dir.iterdir()} == captured
