@@ -371,3 +371,30 @@ tooling during the rollout, superseded as the normal drift detector. The
 one-time metadata migration for the published corpus is
 `lovspor annotate-input-identity` — manifest-only, drift-guarded, idempotent,
 and keyless.
+
+## Durable embedding cache (#802, off by default)
+
+Design: [`docs/proposals/embedding-cache-802.md`](proposals/embedding-cache-802.md)
+(Proposed; the remote backend is an open owner decision).
+
+Setting `LOVSPOR_EMBEDDING_CACHE_DIR` to an absolute directory outside the
+`lovverk` and engine checkouts puts a cache in front of the one paid call
+(`_write_embeddings_for_doc`, shared by the change path and the
+backfill/repair path). Unset, the sync is exactly what it was.
+
+- Entries are keyed by the ESI and the ADR-0006 `embedding_input_hash`. A
+  cached document costs zero provider calls, and the sidecar built from it is
+  byte-identical to the one the paying run wrote.
+- A document longer than one provider request is checkpointed per request: a
+  run killed between requests pays again only for the requests it had not
+  finished. A request in flight when the process dies is lost.
+- Every read is validated (digest, identity, shape, finiteness, retention).
+  A bad entry stops the sync with `EmbeddingCacheError`; it is never paid
+  over silently.
+- `LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS` (default 30) is the retention; an
+  older entry is refused.
+- The cache refuses an embedder without a declared ESI and the LSPE
+  version-1 writer.
+
+The store is local disk. On a GitHub-hosted runner it does not outlive the
+job, so it does not yet protect the scheduled sync; `sync.yml` does not set it.

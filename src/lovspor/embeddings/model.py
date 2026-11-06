@@ -50,6 +50,7 @@ __all__ = [
     "EmbeddingModel",
     "OpenAIEmbedder",
     "count_input_tokens",
+    "request_bounds",
     "split_to_token_chunks",
 ]
 
@@ -245,6 +246,29 @@ def _is_complete_utf8(data: bytes) -> bool:
     return True
 
 
+def request_bounds(
+    costs: list[int], batch_size: int = _DEFAULT_BATCH_SIZE
+) -> list[tuple[int, int]]:
+    """Group consecutive inputs into requests bounded by BOTH limits.
+
+    Item count alone is not enough: the endpoint also caps the tokens summed
+    over a request's inputs, and rejects the excess with a 400 that no retry
+    can fix. Each input is already truncated to ``_MAX_INPUT_TOKENS``, far
+    below the budget, so a single input is never unsendable and every request
+    holds at least one input.
+    """
+    bounds: list[tuple[int, int]] = []
+    start = tokens = 0
+    for index, cost in enumerate(costs):
+        if index > start and (index - start == batch_size or tokens + cost > _MAX_REQUEST_TOKENS):
+            bounds.append((start, index))
+            start, tokens = index, 0
+        tokens += cost
+    if start < len(costs):
+        bounds.append((start, len(costs)))
+    return bounds
+
+
 @runtime_checkable
 class EmbeddingModel(Protocol):
     """Minimal text-to-vector contract used by the engine and MCP server."""
@@ -339,26 +363,22 @@ class OpenAIEmbedder:
         return self._model_name
 
     def _batches(self, texts: list[str]) -> Iterator[list[str]]:
-        """Split ``texts`` into requests bounded by BOTH limits.
+        """Split already-truncated ``texts`` into requests (see :func:`request_bounds`)."""
+        costs = [len(self._encoding.encode(text)) for text in texts]
+        for start, end in request_bounds(costs, self._batch_size):
+            yield texts[start:end]
 
-        Item count alone is not enough: the endpoint also caps the tokens
-        summed over a request's inputs, and rejects the excess with a 400
-        that no retry can fix. Each input is already truncated to
-        ``_MAX_INPUT_TOKENS``, which is far below the budget, so a single
-        input is never unsendable and the loop always makes progress.
+    def plan_requests(self, texts: list[str]) -> list[tuple[int, int]]:
+        """``(start, end)`` of each request ``encode`` would send for ``texts``.
+
+        Public so the durable embedding cache (#802) checkpoints exactly one
+        provider request per unit: batch composition moves the vectors
+        (ADR-0005 Amendment 1), so a unit must be a request the uncached path
+        also sends. ``texts`` are as given to ``encode``; they are truncated
+        first, exactly as ``encode`` does before batching.
         """
-        batch: list[str] = []
-        tokens = 0
-        for text in texts:
-            cost = len(self._encoding.encode(text))
-            over_budget = batch and tokens + cost > _MAX_REQUEST_TOKENS
-            if len(batch) == self._batch_size or over_budget:
-                yield batch
-                batch, tokens = [], 0
-            batch.append(text)
-            tokens += cost
-        if batch:
-            yield batch
+        costs = [len(self._encoding.encode(self._truncate_to_tokens(t))) for t in texts]
+        return request_bounds(costs, self._batch_size)
 
     def _truncate_to_tokens(self, text: str) -> str:
         """Encode, truncate to ``_MAX_INPUT_TOKENS``, decode back.
