@@ -68,7 +68,7 @@ def _difference(replayed: ProvisionState, oracle: Provision) -> str:
         for i, (a, b) in enumerate(zip(replayed.ledd, oracle.ledd, strict=True))
         if a.text != b.text
     ]
-    return f"ledd {', '.join(differing)} differ"
+    return f"ledd {', '.join(differing)} differ" if differing else "text identical"
 
 
 def _omitted(replayed: ProvisionState, oracle: Provision) -> bool:
