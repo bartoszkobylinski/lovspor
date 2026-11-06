@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 import lovspor.sync.orchestrator as orchestrator_module
-from lovspor.errors import MassReembedError
+from lovspor.errors import MassReembedError, MassRemovalError
 from lovspor.settings import Settings
 from lovspor.sync.orchestrator import run_sync
 from tests.unit.test_sync_change_reembed_guard import (
@@ -103,3 +103,34 @@ def test_an_ordinary_change_and_the_backfill_both_run(
 
     assert report.changed_count == 1
     assert embedder.texts == 2
+
+
+@pytest.mark.parametrize("allow_mass_reembed", [False, True])
+def test_mass_removal_is_refused_before_the_backfill_pays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, allow_mass_reembed: bool
+) -> None:
+    """The removal veto precedes paid repair, even with a re-embed override."""
+    settings = _with_one_stale_sidecar(tmp_path)
+    repo = settings.lovverk_repo_path
+    before, manifest = _state(repo), _manifest_bytes(settings)
+    files_before = {
+        path.relative_to(repo): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(repo).parts
+    }
+    embedder = _CountingEmbedder()
+    # Keep the stale doc in the upstream population: without the early veto,
+    # its missing sidecar would be repaired before removal is refused.
+    _live_migrations(monkeypatch, [_doc(i) for i in range(50)], embedder)
+
+    with pytest.raises(MassRemovalError, match="50/100"):
+        run_sync(settings, allow_mass_reembed=allow_mass_reembed)
+
+    assert embedder.texts == 0
+    assert _state(repo) == before
+    assert _manifest_bytes(settings) == manifest
+    assert {
+        path.relative_to(repo): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(repo).parts
+    } == files_before
