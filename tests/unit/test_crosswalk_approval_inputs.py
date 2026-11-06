@@ -138,6 +138,31 @@ def test_read_regular_reports_a_missing_file(tmp_path: Path) -> None:
         approvals.read_regular(missing, 64, "thing")
 
 
+@pytest.mark.parametrize("replacement", [b"different proof bytes", b"x" * 65])
+def test_read_regular_uses_the_descriptor_checked_before_path_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: bytes
+) -> None:
+    """The documented check/read race protection binds the read to the opened file."""
+    path = tmp_path / "proof"
+    original = b"original proof bytes"
+    path.write_bytes(original)
+    substitute = tmp_path / "replacement"
+    substitute.write_bytes(replacement)
+    real_fstat = os.fstat
+    checked: list[int] = []
+
+    def replace_after_check(descriptor: int) -> os.stat_result:
+        result = real_fstat(descriptor)
+        checked.append(descriptor)
+        substitute.replace(path)
+        return result
+
+    monkeypatch.setattr(approvals.os, "fstat", replace_after_check)
+    assert approvals.read_regular(path, 64, "approved input") == original
+    assert len(checked) == 1
+    assert path.read_bytes() == replacement
+
+
 def _open_descriptors() -> int:
     return len(list(Path("/dev/fd").iterdir()))
 
