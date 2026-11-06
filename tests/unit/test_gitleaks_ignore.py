@@ -7,12 +7,20 @@ still reported. A path, a rule, a bare commit or a glob would hide new findings.
 """
 
 import re
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 IGNORE = ROOT / ".gitleaksignore"
 FINGERPRINT = re.compile(r"[0-9a-f]{40}:[^:\s*?]+:[a-z0-9-]+:[1-9][0-9]*")
 ISSUE = re.compile(r"#[1-9][0-9]*\b")
+
+
+def test_ignore_file_is_carried_into_the_test_shadow_tree() -> None:
+    """The fingerprint tests need their input during the clean baseline (#822)."""
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert ".gitleaksignore" in config["tool"]["mutmut"]["also_copy"]
+    assert IGNORE.is_file()
 
 
 def _entries() -> list[tuple[str, list[str]]]:
