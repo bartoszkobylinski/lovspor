@@ -508,3 +508,53 @@ def test_non_finite_provider_response_is_refused_before_storage(
         quantized_document_vectors(cached, inputs, hash_embedding_inputs(inputs))
     assert provider.requests == 1
     assert not list(cache_dir.rglob("*.lsec"))
+
+
+@pytest.mark.parametrize("bad_response", ["shape", "nan", "inf", "-inf"])
+def test_invalid_later_response_preserves_checkpoint_and_resumes(
+    cache_dir: Path, tmp_path: Path, bad_response: str
+) -> None:
+    """Design §5.3/§6: refuse bad responses without losing earlier paid units."""
+
+    class InvalidSecondResponse(_Provider):
+        def encode(self, texts: list[str]) -> np.ndarray:
+            vectors = super().encode(texts)
+            if self.requests == 2:
+                if bad_response == "shape":
+                    return vectors[:-1]
+                vectors[0, 0] = float(bad_response)
+            return vectors
+
+    settings = _settings(tmp_path)
+    inputs = [EmbeddingInput(str(i), f"tekst {i}") for i in range(5)]
+    digest = hash_embedding_inputs(inputs)
+    provider = InvalidSecondResponse()
+    cached = with_embedding_cache(provider, settings)
+    assert isinstance(cached, CachingEmbedder)
+    reason = "shape" if bad_response == "shape" else "non-finite"
+    with pytest.raises(EmbeddingCacheError, match=reason):
+        quantized_document_vectors(cached, inputs, digest)
+    assert provider.requests == 2
+    (checkpoint,) = cache_dir.rglob("*.lsec")
+    checkpoint_bytes = checkpoint.read_bytes()
+    assert checkpoint.parent.parent.name == "units"
+
+    resumed_provider = _Provider()
+    resumed = with_embedding_cache(resumed_provider, settings)
+    assert isinstance(resumed, CachingEmbedder)
+    vectors, scale = quantized_document_vectors(resumed, inputs, digest)
+    reference_vectors, reference_scale = quantized_document_vectors(_Provider(), inputs, digest)
+    np.testing.assert_array_equal(vectors, reference_vectors)
+    assert scale == reference_scale
+    assert resumed_provider.requests == 2
+    assert resumed_provider.texts == 3
+    assert resumed.progress.units_cached == 1
+    assert checkpoint.read_bytes() == checkpoint_bytes
+
+    hit = _Provider(fail_after=0)
+    hit_vectors, hit_scale = quantized_document_vectors(
+        with_embedding_cache(hit, settings), inputs, digest
+    )
+    np.testing.assert_array_equal(hit_vectors, reference_vectors)
+    assert hit_scale == reference_scale
+    assert hit.requests == 0
