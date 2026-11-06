@@ -32,6 +32,26 @@ def test_agents_states_the_cli_output_contract() -> None:
     assert "A plain `typer.echo` line may be matched as text." in instructions
 
 
+_OPTION_HELP_RULE = (
+    "Option help inside a `--help` options table is truncated with `…` at that width, "
+    "not wrapped, so `said()` cannot find it: assert an option's help through its click "
+    "parameter (`typer.main.get_group(app).commands[name].params`), never through rendered "
+    "`--help` (#801)."
+)
+
+
+@pytest.mark.parametrize(
+    "instructions",
+    ["AGENTS.md", ".github/codex/pr-tests.md", ".github/codex/mutation-remediation.md"],
+)
+def test_test_authors_are_told_option_help_is_truncated(instructions: str) -> None:
+    """A Codex test asserting `--cache` help through `said()` blocked PR #800: rich
+    truncates option-table cells at 20 columns, so no implementation could pass it."""
+    text = " ".join((_WORKFLOWS.parents[1] / instructions).read_text(encoding="utf-8").split())
+
+    assert _OPTION_HELP_RULE in text
+
+
 def _workflow(workflow_name: str) -> dict[str, Any]:
     workflow: dict[str, Any] = yaml.safe_load(
         (_WORKFLOWS / workflow_name).read_text(encoding="utf-8")
