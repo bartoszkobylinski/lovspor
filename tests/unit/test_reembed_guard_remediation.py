@@ -74,3 +74,43 @@ def test_selection_skips_only_byte_identical_rerenders(tmp_path: Path, changed_x
     )
     selected = list(_docs_to_embed(settings, plan))
     assert [item.doc_id for item in selected] == ([doc.doc_id] if changed_xml else [])
+
+
+@pytest.mark.parametrize("published", ["intact", "missing", "invalid-timestamp", "changed-body"])
+def test_changed_selection_preserves_observation_before_noop_check(
+    tmp_path: Path, published: str
+) -> None:
+    """Exercise timestamp fallback and differing render bytes without replacing code."""
+    settings = _settings(tmp_path)
+    doc = _doc(0)
+    record, _ = _write_one(settings, doc, _OBSERVED, None)
+    path = settings.lovverk_repo_path / record.markdown_path
+    original = path.read_text(encoding="utf-8")
+    if published == "missing":
+        path.unlink()
+    elif published == "invalid-timestamp":
+        lines = original.splitlines(keepends=True)
+        assert any(line.startswith("retrieved_at:") for line in lines)
+        path.write_text(
+            "".join(
+                'retrieved_at: "invalid"\n' if line.startswith("retrieved_at:") else line
+                for line in lines
+            ),
+            encoding="utf-8",
+        )
+    elif published == "changed-body":
+        path.write_text(original + "\nOutdated rendered body.\n", encoding="utf-8")
+    prior = Manifest(generated_at=_OBSERVED, documents={doc.doc_id: record})
+    plan = _ChangePlan(
+        [], [doc.doc_id], [], {doc.doc_id: doc}, prior, _OBSERVED + timedelta(days=1)
+    )
+
+    selected = list(_docs_to_embed(settings, plan))
+
+    assert [item.doc_id for item in selected] == ([] if published == "intact" else [doc.doc_id])
+    for item in selected:
+        assert item.retrieved_at == _OBSERVED
+    if published == "missing":
+        assert not path.exists()
+    elif published == "intact":
+        assert path.read_text(encoding="utf-8") == original
