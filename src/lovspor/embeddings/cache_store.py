@@ -184,7 +184,7 @@ def _read_entry(path: Path) -> bytes | None:
 
 def _publish(directory: Path, final: Path, payload: bytes) -> None:
     """Write, fsync, link into place (never replacing), fsync the directory."""
-    staged = directory / f".{final.name}.tmp.{os.getpid()}.{secrets.token_hex(8)}"
+    staged = directory / f".{final.name}.tmp.{os.getpid()}.{secrets.token_hex()}"
     descriptor = os.open(staged, _WRITE_FLAGS, _FILE_MODE)
     try:
         with os.fdopen(descriptor, "wb") as handle:
