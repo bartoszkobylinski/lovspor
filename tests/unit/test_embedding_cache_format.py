@@ -310,3 +310,39 @@ def test_refusal_message_carries_no_vector_values() -> None:
         decode_entry(forged, _doc_key(), _policy())
     assert "-127" not in str(caught.value)
     assert INPUT_HASH[:12] in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("created_at", "accepted"),
+    [
+        (NOW - timedelta(days=30), True),
+        (NOW - timedelta(days=30, seconds=1), False),
+        (NOW + timedelta(minutes=5), True),
+        (NOW + timedelta(minutes=5, seconds=1), False),
+    ],
+)
+def test_retention_and_clock_skew_boundaries(created_at: datetime, accepted: bool) -> None:
+    """Design §5.3 permits five minutes skew and refuses ages over retention."""
+    data = encode_entry(_doc_entry(created_at=created_at))
+    if accepted:
+        assert decode_entry(data, _doc_key(), _policy()).created_at == created_at
+    else:
+        error = EmbeddingCacheExpiredError if created_at < NOW else EmbeddingCacheError
+        with pytest.raises(error):
+            decode_entry(data, _doc_key(), _policy())
+
+
+@pytest.mark.parametrize(("field", "value"), [("index", False), ("index", 0.0), ("count", 2.0)])
+@pytest.mark.codex_proposal
+@pytest.mark.xfail(
+    strict=True, reason="Proposal: require exact JSON integer types in unit identity"
+)
+def test_unit_identity_requires_integer_metadata(field: str, value: object) -> None:
+    """Proposal: extend the top-level type check to nested unit identity fields."""
+    unit = _unit_key().unit
+    assert unit is not None
+    metadata = unit.model_dump()
+    metadata[field] = value
+    forged = _with_meta(encode_entry(_unit_entry()), unit=metadata)
+    with pytest.raises(EmbeddingCacheError, match="unit"):
+        decode_entry(forged, _unit_key(), _policy())

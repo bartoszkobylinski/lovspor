@@ -18,6 +18,7 @@ import lovspor.sync.orchestrator as orchestrator_module
 from lovspor.embeddings.cache import (
     CACHE_DIR_VARIABLE,
     CachingEmbedder,
+    engine_checkout_of,
     quantized_document_vectors,
     with_embedding_cache,
 )
@@ -362,3 +363,19 @@ def test_resumed_units_use_one_document_scale(cache_dir: Path, tmp_path: Path) -
     np.testing.assert_array_equal(
         vectors, np.array([[1, 0, 0, 0], [2, 0, 0, 0], [64, 0, 0, 0], [127, 0, 0, 0]], np.int8)
     )
+
+
+def test_engine_checkout_is_found_from_a_shadow_tree_inside_it(tmp_path: Path) -> None:
+    """mutmut runs the package from ``mutants/`` inside the checkout (#826): the
+    checkout must still be found by walking up to the nearest ``.git``."""
+    repo = tmp_path / "repo"
+    module = repo / "mutants" / "src" / "lovspor" / "embeddings" / "cache.py"
+    module.parent.mkdir(parents=True)
+    (repo / ".git").write_text("gitdir: elsewhere\n")
+    assert engine_checkout_of(module) == (repo,)
+
+
+def test_no_checkout_above_an_installed_package(tmp_path: Path) -> None:
+    module = tmp_path / "site-packages" / "lovspor" / "embeddings" / "cache.py"
+    module.parent.mkdir(parents=True)
+    assert engine_checkout_of(module) == ()

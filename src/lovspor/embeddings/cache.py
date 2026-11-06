@@ -41,7 +41,6 @@ CACHE_DIR_VARIABLE = "LOVSPOR_EMBEDDING_CACHE_DIR"
 MAX_AGE_VARIABLE = "LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS"
 DEFAULT_MAX_AGE_DAYS = 30
 _PROGRESS_EVERY = 50
-_ENGINE_CHECKOUT = Path(__file__).resolve().parents[3]
 
 
 @dataclass
@@ -206,10 +205,21 @@ def _read_policy() -> ReadPolicy:
 
 
 def _engine_checkout() -> tuple[Path, ...]:
-    """The engine's own work tree when running from a source checkout."""
-    root = _ENGINE_CHECKOUT
-    is_checkout = (root / "pyproject.toml").is_file() and (root / ".git").exists()
-    return (root,) if is_checkout else ()
+    return engine_checkout_of(Path(__file__).resolve())
+
+
+def engine_checkout_of(module: Path) -> tuple[Path, ...]:
+    """The nearest git work tree above ``module``, if there is one.
+
+    Walks up rather than counting parents: mutmut runs the package from a
+    ``mutants/`` shadow tree inside the checkout, and a virtualenv inside the
+    checkout puts an installed copy below it too. Either way the checkout
+    above must be forbidden (#826).
+    """
+    for parent in module.parents:
+        if (parent / ".git").exists():
+            return (parent,)
+    return ()
 
 
 def _plan(embedder: EmbeddingModel, texts: list[str]) -> list[tuple[int, int]]:
