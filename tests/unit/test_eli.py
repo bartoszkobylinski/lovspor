@@ -105,33 +105,40 @@ def _ref_from_uri(uri: str) -> str:
     return f"{kind}/{year}-{month}-{day}-{number}"
 
 
-class TestProperties:
-    @given(_VALID_REFS)
-    def test_every_valid_ref_maps_and_round_trips(self, ref_id: str) -> None:
-        uri = official_act_eli(ref_id)
-        assert uri is not None
-        assert _ref_from_uri(uri) == ref_id
+# Hypothesis properties stay at module level on purpose: as methods, mutmut's
+# clean-test run hands Hypothesis a second instance and it refuses the test
+# as HealthCheck.differing_executors (precedent: test_release_answers.py:365).
 
-    @given(_VALID_REFS)
-    def test_an_act_uri_never_names_a_provision(self, ref_id: str) -> None:
-        """Exactly type/yyyy/mm/dd/number: no level, language or version segment."""
-        uri = official_act_eli(ref_id)
-        assert uri is not None
-        assert ELI_ACT_PATTERN.fullmatch(uri)
-        assert not re.search(r"§|paragraf|section|chapter|kapittel|/nor\b|#", uri)
 
-    @given(_VALID_REFS, st.text(min_size=1, max_size=12))
-    def test_anything_appended_to_a_ref_is_not_mapped(self, ref_id: str, tail: str) -> None:
-        assert official_act_eli(ref_id + tail) is None or (tail.isdecimal() and tail.isascii())
+@given(_VALID_REFS)
+def test_every_valid_ref_maps_and_round_trips(ref_id: str) -> None:
+    uri = official_act_eli(ref_id)
+    assert uri is not None
+    assert _ref_from_uri(uri) == ref_id
 
-    @given(st.text(max_size=40))
-    def test_arbitrary_text_is_never_a_lovspor_or_pseudo_eli(self, text: str) -> None:
-        uri = official_act_eli(text)
-        assert uri is None or uri.startswith("https://lovdata.no/eli/")
 
-    def test_the_source_ref_id_is_preserved_unchanged(self) -> None:
-        outcome = act_eli("lov/2005-05-20-28")
-        assert outcome.ref_id == "lov/2005-05-20-28"
+@given(_VALID_REFS)
+def test_an_act_uri_never_names_a_provision(ref_id: str) -> None:
+    """Exactly type/yyyy/mm/dd/number: no level, language or version segment."""
+    uri = official_act_eli(ref_id)
+    assert uri is not None
+    assert ELI_ACT_PATTERN.fullmatch(uri)
+    assert not re.search(r"§|paragraf|section|chapter|kapittel|/nor\b|#", uri)
+
+
+@given(_VALID_REFS, st.text(min_size=1, max_size=12))
+def test_anything_appended_to_a_ref_is_not_mapped(ref_id: str, tail: str) -> None:
+    assert official_act_eli(ref_id + tail) is None or (tail.isdecimal() and tail.isascii())
+
+
+@given(st.text(max_size=40))
+def test_arbitrary_text_is_never_a_lovspor_or_pseudo_eli(text: str) -> None:
+    uri = official_act_eli(text)
+    assert uri is None or uri.startswith("https://lovdata.no/eli/")
+
+
+def test_the_source_ref_id_is_preserved_unchanged() -> None:
+    assert act_eli("lov/2005-05-20-28").ref_id == "lov/2005-05-20-28"
 
 
 class TestAudit:
