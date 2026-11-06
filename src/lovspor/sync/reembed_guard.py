@@ -8,11 +8,13 @@ inputs to be sent: an estimate of the request, not a bill.
 """
 
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 
-from lovspor.errors import MassReembedError
+from lovspor.errors import MassReembedError, ParseError, RenderError
 from lovspor.settings import Settings
 from lovspor.storage.manifest import Manifest, ManifestRecord
+from lovspor.temporal_attestation import AttestationError
 
 REEMBED_GUARD_MIN_DOCS = 100
 """Corpora below this size skip the guard's FRACTION dimension only.
@@ -118,3 +120,42 @@ def _thresholds_exceeded(
     if scope.tokens > settings.reembed_guard_max_tokens:
         hits.append(f"token workload {scope.tokens:,} > {settings.reembed_guard_max_tokens:,}")
     return " and ".join(hits)
+
+
+def change_scope(documents: int, tokens: int) -> ReembedScope:
+    """The change path's workload (#790), with the refusal naming its likely cause."""
+    return ReembedScope(
+        documents=documents,
+        tokens=tokens,
+        noun="changed document(s) to re-embed",
+        title="the change-driven re-embed",
+        remedy="So many changed documents usually means the upstream format or the "
+        "renderer changed, not the law (#679: an ELI row in every header). Check the "
+        f"hashes before paying; if the re-embed is intended, {OVERRIDE_HINT}",
+    )
+
+
+def rendered_or_refused(
+    render: Callable[[], str], doc_id: str, xml_hash: str, prior: ManifestRecord | None
+) -> str | None:
+    """``render()``, or None when it cannot render and the write loop would skip it.
+
+    A document that changed upstream (its ``prior`` has another ``xml_hash``)
+    and cannot render keeps that prior record, which the ADR-0012 attestation
+    refuses after the commit and before the push, so every embedding of that
+    run is paid for and lost. Refusing here, before the first provider call,
+    costs nothing (#804).
+
+    Raises:
+        AttestationError: a changed document cannot render.
+    """
+    try:
+        return render()
+    except (RenderError, ParseError) as exc:
+        if prior is not None and prior.xml_hash != xml_hash:
+            raise AttestationError(
+                f"{doc_id} changed upstream but cannot render ({exc}); its old rendering "
+                "would be carried forward, which the counted-conformance attestation "
+                "refuses, so the sync stops before any embedding is paid for"
+            ) from exc
+        return None

@@ -258,8 +258,9 @@ def test_an_unrenderable_document_is_skipped_and_the_rest_still_counted(
 ) -> None:
     settings = _corpus(tmp_path, 2).model_copy(update={"reembed_guard_max_tokens": 1})
     embedder = _CountingEmbedder()
-    broken = replace(_doc(0), xml_bytes=b"<html", xml_hash="f" * 64)
-    _upstream(monkeypatch, [broken, _doc(1, "Body. ELI row.")], embedder)
+    # A NEW document: a changed one that cannot render is refused outright (#804).
+    broken = replace(_doc(9), xml_bytes=b"<html", xml_hash="f" * 64)
+    _upstream(monkeypatch, [_doc(0), broken, _doc(1, "Body. ELI row.")], embedder)
 
     with pytest.raises(MassReembedError, match="1 changed document"):
         run_sync(settings)
