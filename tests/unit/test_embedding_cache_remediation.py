@@ -19,6 +19,7 @@ from lovspor.embeddings.model import count_input_tokens
 from lovspor.embeddings.provider import UNKNOWN_SPACE_ID
 from lovspor.errors import EmbeddingCacheError
 from tests.unit.test_embedding_cache_boundary import _Provider, _settings, cache_dir
+from tests.unit.test_embedding_cache_format import _with_meta
 from tests.unit.test_embedding_space_identity import _FakeEmbedder
 
 __all__ = ["cache_dir"]
@@ -63,6 +64,37 @@ def test_resume_counts_all_checkpoints_and_paid_tokens(cache_dir: Path, tmp_path
     quantized_document_vectors(resumed, inputs, digest)
     assert resumed.progress.units_cached == 2
     assert resumed.progress.tokens_paid == count_input_tokens(inputs[-1].text, "gpt-4")
+
+
+def test_paid_tokens_use_the_providers_tokenizer(cache_dir: Path, tmp_path: Path) -> None:
+    class Provider(_Provider):
+        model_name = "text-davinci-001"
+
+    inputs = [EmbeddingInput("1", "Tekst om norske lover og forskrifter")]
+    digest = hash_embedding_inputs(inputs)
+    assert count_input_tokens(inputs[0].text, Provider.model_name) == 14
+    assert count_input_tokens(inputs[0].text) == 9
+    cached = _cached(Provider(), tmp_path)
+    quantized_document_vectors(cached, inputs, digest)
+    assert cached.progress.tokens_paid == 14
+    quantized_document_vectors(cached, inputs, digest)
+    assert cached.progress.tokens_paid == 14
+    assert cached.progress.documents_cached == 1
+
+
+@pytest.mark.parametrize("scale", [0.0, None])
+def test_falsey_document_scale_is_refused_before_returning_vectors(
+    cache_dir: Path, tmp_path: Path, scale: float | None
+) -> None:
+    cached = _cached(_FakeEmbedder(), tmp_path)
+    inputs = _inputs()
+    digest = hash_embedding_inputs(inputs)
+    quantized_document_vectors(cached, inputs, digest)
+    (entry,) = cache_dir.rglob("*.lsec")
+    entry.write_bytes(_with_meta(entry.read_bytes(), scale=scale))
+    with pytest.raises(EmbeddingCacheError, match="scale is not a finite positive float"):
+        quantized_document_vectors(cached, inputs, digest)
+    assert cached.progress.units_paid == 1
 
 
 def test_paid_vectors_are_float32(cache_dir: Path, tmp_path: Path) -> None:

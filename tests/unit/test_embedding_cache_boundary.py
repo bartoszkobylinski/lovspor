@@ -473,3 +473,38 @@ def test_resume_preserves_batch_sensitive_provider_vectors(cache_dir: Path, tmp_
     hit = _BatchSensitive(fail_after=0)
     assert _write(settings, with_embedding_cache(hit, settings)) == reference
     assert hit.batches == []
+
+
+class _NonFiniteProvider(_Provider):
+    def __init__(self, bad: float) -> None:
+        super().__init__()
+        self._bad = bad
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        vectors = super().encode(texts)
+        vectors[0, 0] = self._bad
+        return vectors
+
+
+@pytest.mark.parametrize("rows", [1, 3], ids=["single-request", "multiple-requests"])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_provider_response_is_refused_before_storage(
+    cache_dir: Path, tmp_path: Path, rows: int, bad: float
+) -> None:
+    """Design §5.3: a paid response is validated before it is stored or paid on.
+
+    A NaN or infinite vector is refused with a typed error: nothing reaches the
+    cache, no further request is sent, and no sidecar is written.
+    """
+    settings = _settings(tmp_path)
+    provider = _NonFiniteProvider(bad)
+    cached = with_embedding_cache(provider, settings)
+    assert isinstance(cached, CachingEmbedder)
+    inputs = [EmbeddingInput(str(i), f"tekst {i}") for i in range(rows)]
+    with (
+        np.errstate(invalid="ignore", divide="ignore"),
+        pytest.raises(EmbeddingCacheError, match="non-finite"),
+    ):
+        quantized_document_vectors(cached, inputs, hash_embedding_inputs(inputs))
+    assert provider.requests == 1
+    assert not list(cache_dir.rglob("*.lsec"))
