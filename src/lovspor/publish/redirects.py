@@ -279,20 +279,20 @@ def _document_redirects(
 def _retired_provision_urls(corpus: Path, sha: str, inventory: PublishInventory) -> set[str]:
     """Exact 410 entries for provision URLs a live document no longer serves.
 
-    Evidence is the pinned history only: a pid whose heading was removed
-    from the document's path, or — for a document now excluded for
-    duplicate pids — a pid of an earlier version without a collision.
-    A pid the history never shows at a servable URL gets no entry, so no
+    A pid is retired when some collision-free version of the document's
+    path carried it (only such a version had provision pages) and the
+    document does not emit it now. The removed-heading scan only selects
+    which paths to read version by version: a pid seen solely in
+    colliding versions was never a servable URL and gets no entry, so no
     URL is invented beneath a duplicate-pid document (ADR-0013 Decision 1).
     """
     removed = removed_pids_by_path(corpus, sha)
     urls: set[str] = set()
     for plan in inventory.documents:
-        candidates = set(removed.get(plan.markdown_path, frozenset()))
-        if plan.duplicate_pids:
-            candidates |= once_publishable_pids(corpus, sha, plan.markdown_path)
         emitted = set() if plan.duplicate_pids else {p.pid for p in plan.provisions}
-        urls.update(provision_url(plan, pid) for pid in candidates - emitted)
+        if plan.duplicate_pids or removed.get(plan.markdown_path, frozenset()) - emitted:
+            servable = once_publishable_pids(corpus, sha, plan.markdown_path)
+            urls.update(provision_url(plan, pid) for pid in servable - emitted)
     return urls
 
 

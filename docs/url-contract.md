@@ -70,7 +70,7 @@ release serves, the build fails, because Caddy answers `redir`/`respond` before 
 | Content edit, same slug | live |
 | Slug rename that git lineage proves (the rename walk) | 301 for the document, and 301 for each pid that **survives in the successor at the pinned snapshot** |
 | Rename, but the pid is absent from the successor | 410, from the old slug's 410 namespace |
-| A pid leaves a document that keeps its slug | 410 for that exact provision URL. The evidence is a removed `### §` heading in the pinned first-parent history |
+| A pid leaves a document that keeps its slug | 410 for that exact provision URL, when a collision-free version of the document's path in the pinned first-parent history carried the pid. A pid seen only in colliding versions was never servable and gets no entry |
 | A document starts colliding on a pid | 410 for each pid of an earlier collision-free version. A pid the history never shows at a servable URL gets no entry |
 | Document removed or repealed (`status != current`, or its file deleted) | 410 for the slug's whole namespace |
 | A slug is reused by a different document | The new document owns the URL. The old document's pids that the new one lacks answer 410 |

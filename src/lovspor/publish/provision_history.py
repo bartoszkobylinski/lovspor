@@ -75,8 +75,9 @@ def once_publishable_pids(corpus: Path, sha: str, path: str) -> frozenset[str]:
 
     A document whose pids collide publishes no provision pages (ADR-0013
     Decision 1), so its provision URLs were servable only in a version
-    without a collision. Called for the few duplicate-pid documents only:
-    it reads one blob per commit that touched the path.
+    without a collision. Called only for duplicate-pid documents and for
+    paths the removed-heading scan names: it reads one blob per commit
+    that touched the path.
     """
     commits = _git_text(
         corpus,

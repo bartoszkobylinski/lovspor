@@ -200,6 +200,21 @@ class TestEveryPublishedUrlSurvives:
         assert answer(after, "/lov/a/paragraf/9/") == (GONE, None)
         assert answer(after, "/lov/a/paragraf/1/") == (LIVE, None)
 
+    def test_a_pid_only_ever_in_colliding_versions_is_not_retired(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """Removed-heading evidence alone is not enough: such a pid never had a page."""
+        _, after = _two_releases(
+            repo,
+            tmp_path,
+            (
+                {"lover/a.md": _doc("A", "lov/2020-01-01-1", ("1", "1", "8"))},
+                {"lover/a.md": _doc("A", "lov/2020-01-01-1", ("1", "2"))},
+            ),
+        )
+        assert answer(after, "/lov/a/paragraf/8/") == (MISSING, None)
+        assert answer(after, "/lov/a/paragraf/2/") == (LIVE, None)
+
 
 class TestMovedUrlsKeepTheirIdentity:
     @pytest.fixture
