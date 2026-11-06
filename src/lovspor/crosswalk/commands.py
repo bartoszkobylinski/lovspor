@@ -7,7 +7,9 @@ publishes, tags, pushes, or writes into ``lovverk``.
 """
 
 import os
+import stat
 import subprocess
+import time
 from pathlib import Path
 from typing import Annotated, BinaryIO
 
@@ -46,10 +48,55 @@ def read_capped(stream: BinaryIO, limit: int) -> bytes:
     return stream.read(limit + 1)
 
 
+FIFO_WRITER_WAIT_SECONDS = 2.0
+_WRITER_POLL_SECONDS = 0.05
+
+
+def _open_input(path: Path, what: str) -> tuple[int, bool]:
+    """A descriptor on a regular file or a pipe, and whether it is a pipe (#817).
+
+    O_NONBLOCK keeps the open of a FIFO from waiting for a writer, and the type is
+    judged by fstat on that descriptor, so a symlink is judged by its target.
+    """
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    mode = os.fstat(descriptor).st_mode
+    if not (stat.S_ISREG(mode) or stat.S_ISFIFO(mode)):
+        os.close(descriptor)
+        raise CrosswalkError(f"{what} is not a regular file or pipe: {path}")
+    return descriptor, stat.S_ISFIFO(mode)
+
+
+def _await_writer(descriptor: int, path: Path, what: str) -> bytes:
+    """The pipe's first byte, or b"" once a writer holds it open; blocking on return.
+
+    A non-blocking read sees end of file while no writer has the pipe open, so a
+    writer opening just after the reader is still met, within the wait.
+    """
+    deadline = time.monotonic() + FIFO_WRITER_WAIT_SECONDS
+    while not (head := _read_nonblocking(descriptor)):
+        if head is None:
+            break
+        if time.monotonic() >= deadline:
+            raise CrosswalkError(f"{what} is a pipe with no writer: {path}")
+        time.sleep(_WRITER_POLL_SECONDS)
+    os.set_blocking(descriptor, True)
+    return head or b""
+
+
+def _read_nonblocking(descriptor: int) -> bytes | None:
+    """One byte; b"" at end of file (no writer); None when a writer has no data yet."""
+    try:
+        return os.read(descriptor, 1)
+    except BlockingIOError:
+        return None
+
+
 def read_bounded(path: Path, limit: int, what: str) -> bytes:
     try:
-        with path.open("rb") as stream:
-            data = read_capped(stream, limit)
+        descriptor, pipe = _open_input(path, what)
+        with os.fdopen(descriptor, "rb") as stream:
+            head = _await_writer(descriptor, path, what) if pipe else b""
+            data = head + read_capped(stream, limit - len(head))
     except OSError as exc:
         raise CrosswalkError(f"{what} unreadable: {path}") from exc
     if len(data) > limit:
