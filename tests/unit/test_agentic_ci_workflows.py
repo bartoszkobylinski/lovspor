@@ -18,6 +18,11 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 
 _WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+# Issue #801: rich truncates options-table cells at 20 columns, so said() cannot see them.
+_OPTION_HELP_GUIDANCE = (
+    "`tests.unit.cli_output.option_help(app, path, option)` reads that parameter for a "
+    "command at any depth, so use it rather than walking the group by hand."
+)
 
 
 def test_agents_states_the_cli_output_contract() -> None:
@@ -30,6 +35,7 @@ def test_agents_states_the_cli_output_contract() -> None:
     assert "the exit code and what the command left on disk" in instructions
     assert "never `phrase in result.output` against a panel" in instructions
     assert "A plain `typer.echo` line may be matched as text." in instructions
+    assert _OPTION_HELP_GUIDANCE in instructions
 
 
 _OPTION_HELP_RULE = (
@@ -1310,6 +1316,7 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
         assert (
             "A plain `typer.echo` line is not wrapped and may be matched as text." in instructions
         )
+        assert _OPTION_HELP_GUIDANCE in instructions
 
     def test_the_suite_runs_on_the_hosted_verdict_lane(self) -> None:
         job = _workflow("pr-pipeline.yml")["jobs"]["codex-tests"]
@@ -1507,6 +1514,7 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
         assert (
             "A plain `typer.echo` line is not wrapped and may be matched as text." in instructions
         )
+        assert _OPTION_HELP_GUIDANCE in instructions
 
     def test_the_suite_runs_on_the_hosted_verifier(self) -> None:
         job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]

@@ -7,9 +7,18 @@ drawing. Stripping ANSI and rejoining lines on a space still leaves the token
 split (#295). What survives every width is the sequence of printed characters,
 so the comparison drops the escapes, the frame and all whitespace on both
 sides and compares what remains.
+
+Help inside an options table is different: rich *truncates* each cell with an
+ellipsis instead of wrapping it, so those characters are never printed and no
+comparison can recover them (#801). Such help is read from the Click
+parameter the table is built from, which does not depend on the width.
 """
 
 import re
+from collections.abc import Sequence
+
+import click
+import typer
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _BOX_DRAWING = re.compile(r"[\u2500-\u257f]")
@@ -24,3 +33,19 @@ def unwrapped(rendered: str) -> str:
 def said(phrase: str, rendered: str) -> bool:
     """Whether ``phrase`` was printed, however rich wrapped or framed it."""
     return unwrapped(phrase) in unwrapped(rendered)
+
+
+def option_help(app: typer.Typer, path: Sequence[str], option: str) -> str | None:
+    """The help of ``option`` on the command at ``path``, from its Click parameter.
+
+    Raises:
+        LookupError: the command has no such option.
+    """
+    command = typer.main.get_command(app)
+    for name in path:
+        assert isinstance(command, click.Group), name
+        command = command.commands[name]
+    for param in command.params:
+        if option in param.opts:
+            return getattr(param, "help", None)
+    raise LookupError(f"{' '.join(path)} has no option {option}")

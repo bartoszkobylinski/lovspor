@@ -37,6 +37,7 @@ Option help inside a `--help` options table is truncated with `…` at that widt
 not wrapped, so `said()` cannot find it: assert an option's help through its click
 parameter (`typer.main.get_group(app).commands[name].params`), never through rendered
 `--help` (#801).
+`tests.unit.cli_output.option_help(app, path, option)` reads that parameter for a command at any depth, so use it rather than walking the group by hand.
 
 Two kinds of failing test, and you must say which each one is (issue #248):
 
