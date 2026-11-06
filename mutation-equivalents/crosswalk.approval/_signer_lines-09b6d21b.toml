@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/crosswalk/approval.py"
+symbol = "_signer_lines"
+registered = "2026-11-05, PR #799 (#792), left after two Codex remediation cycles"
+mutation = '''
+-        text = signers.read_text(encoding="utf-8")
++        text = signers.read_text(encoding="UTF-8")
+'''
+justification = """
+Python looks codec names up case-insensitively: `codecs.lookup` normalises the
+name before searching, so "utf-8" and "UTF-8" resolve to the same `utf_8` codec
+object. The file is decoded by the same codec either way, the same bytes give the
+same text and the same `UnicodeDecodeError`, so the signer lines and every
+refusal are identical.
+"""

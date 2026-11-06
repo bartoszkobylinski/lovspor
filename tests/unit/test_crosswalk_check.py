@@ -31,6 +31,7 @@ from lovspor.crosswalk.release import (
     ineligibility,
     promote,
 )
+from tests.unit.crosswalk_signing import Signing, new_signer, signed_approval_file, trust
 from tests.unit.crosswalk_support import PRODUCER, attested, make_capture
 
 OPTIONS = BuildOptions(producer_commit=PRODUCER)
@@ -45,6 +46,14 @@ def capture_dir(tmp_path: Path, httpx_mock: HTTPXMock) -> Path:
 @pytest.fixture
 def built(capture_dir: Path) -> bytes:
     return build(capture_dir, OPTIONS)
+
+
+@pytest.fixture
+def signer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Signing:
+    """A throwaway trusted signer: the gate refuses approvals nobody trusted signed (#792)."""
+    made = new_signer(tmp_path / "keys")
+    trust(monkeypatch, made)
+    return made
 
 
 def _approval(data: bytes, r2: str = "approved") -> Approval:
@@ -311,11 +320,11 @@ def test_approval_refuses_a_date_that_names_no_calendar_instant(tmp_path: Path) 
 
 
 def test_release_candidate_impl_writes_a_new_file(
-    built: bytes, capture_dir: Path, tmp_path: Path
+    built: bytes, capture_dir: Path, tmp_path: Path, signer: Signing
 ) -> None:
     data, approval, output = tmp_path / "in.jsonl", tmp_path / "ok.json", tmp_path / "rc.jsonl"
     data.write_bytes(built)
-    approval.write_text(_approval(built).model_dump_json(by_alias=True), encoding="utf-8")
+    signed_approval_file(approval, built, signer)
     line = release_candidate_impl(data, approval, capture_dir, output)
     assert line == "not an active attested record: 5; promoted: 3"
     assert output.read_bytes() == promote(built, _approval(built), capture_dir)[0]
@@ -326,7 +335,7 @@ def test_release_candidate_impl_writes_a_new_file(
 
 @pytest.mark.parametrize("source", ["archive", "case", "publication"])
 def test_release_refuses_tampered_capture_without_writing_output(
-    built: bytes, capture_dir: Path, tmp_path: Path, source: str
+    built: bytes, capture_dir: Path, tmp_path: Path, source: str, signer: Signing
 ) -> None:
     """Approval cannot bypass cache digest verification (cache module contract)."""
     manifest = load_manifest(capture_dir)
@@ -345,8 +354,7 @@ def test_release_refuses_tampered_capture_without_writing_output(
     cached.write_bytes(cached.read_bytes() + b"\n")
     data, approval, output = tmp_path / "input", tmp_path / "approval", tmp_path / "output"
     data.write_bytes(built)
-    approval_bytes = _approval(built).model_dump_json(by_alias=True).encode()
-    approval.write_bytes(approval_bytes)
+    approval_bytes = signed_approval_file(approval, built, signer).read_bytes()
 
     with pytest.raises(CrosswalkError, match="do not match the manifest"):
         release_candidate_impl(data, approval, capture_dir, output)
@@ -380,17 +388,14 @@ def test_cli_gate_refuses_without_an_approval(
 
 
 def test_cli_gate_refuses_a_failing_check_without_writing_output(
-    built: bytes, tmp_path: Path
+    built: bytes, tmp_path: Path, signer: Signing
 ) -> None:
     # release_candidate_command has one `except LovsporError` branch, not check_command's
     # two: a CrosswalkContractError from a failing check must still collapse to one
     # "refused: N crosswalk contract problem(s): ..." line, and never reach write_once.
     data = tmp_path / "in.jsonl"
     data.write_bytes(built.replace(b'":', b'": ', 1))
-    approval = tmp_path / "approval.json"
-    approval.write_text(
-        _approval(data.read_bytes()).model_dump_json(by_alias=True), encoding="utf-8"
-    )
+    approval = signed_approval_file(tmp_path / "approval.json", data.read_bytes(), signer)
     output = tmp_path / "rc.jsonl"
     args = [
         "ops",
@@ -652,7 +657,7 @@ def test_approval_digest_mismatch_diagnostic_is_exact(tmp_path: Path) -> None:
 
 
 def test_release_command_does_not_promote_unverified_law(
-    built: bytes, capture_dir: Path, tmp_path: Path
+    built: bytes, capture_dir: Path, tmp_path: Path, signer: Signing
 ) -> None:
     manifest = load_manifest(capture_dir)
     law_id = "LOV-2022-06-17-63"
@@ -660,7 +665,7 @@ def test_release_command_does_not_promote_unverified_law(
     (capture_dir / "capture-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     data, approval, output = tmp_path / "input", tmp_path / "approval", tmp_path / "output"
     data.write_bytes(built)
-    approval.write_text(_approval(built).model_dump_json(by_alias=True), encoding="utf-8")
+    signed_approval_file(approval, built, signer)
     line = release_candidate_impl(data, approval, capture_dir, output)
     assert line == (
         "not an active attested record: 5; not reproduced from the capture: 1; promoted: 2"

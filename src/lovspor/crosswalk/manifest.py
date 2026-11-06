@@ -6,9 +6,15 @@ so the same file always gives the same manifest. The rights blockers stay in it
 until the owner resolves them. There is no `released` state: the file-level
 `release_state` is `release_candidate` only if a current record is one, and
 such a manifest is written only when every current candidate is reproduced from
-the given capture, raw bytes included. A research manifest written without a
-capture says so in its `provenance` block. `verified` means the file was checked
-against the named capture and every current candidate was reproduced from it;
+the given capture, raw bytes included, and the file is proven to be the gate's
+output under a signed owner approval (`approval.prove_candidates`, #792): a
+hand-edited `release_state` gets no manifest, and neither does a file holding a
+candidate revision that is no longer current, whose past authorization nothing
+here can check yet (proposed A1.5). `build_manifest` takes the proof
+as given; only `prove_candidates` makes one, so the operator path is the CLI.
+A research manifest written without a capture says so in its `provenance`
+block. `verified` means the file was checked against the named capture and
+every current candidate was reproduced from it;
 `fully_reproduced` says whether every current record was, so research drift is
 never hidden behind `verified`. Nothing here publishes.
 """
@@ -19,6 +25,7 @@ from functools import partial
 from hashlib import sha256
 from pathlib import Path
 
+from lovspor.crosswalk.approval import CandidateProof
 from lovspor.crosswalk.cache import MANIFEST
 from lovspor.crosswalk.canonical import Record, canonical_json, canonical_record
 from lovspor.crosswalk.check import (
@@ -120,9 +127,36 @@ def _provenance(report: CheckReport, cache: Path | None) -> dict[str, object]:
     }
 
 
-def _require_verified_candidates(report: CheckReport, cache: Path | None) -> None:
+def _candidates(report: CheckReport) -> set[str]:
     current = current_records(report.records)
-    candidates = {law for law, r in current.items() if r["release_state"] == "release_candidate"}
+    return {law for law, r in current.items() if r["release_state"] == "release_candidate"}
+
+
+HISTORICAL = (
+    "release_candidate revisions that are no longer current claim a past owner "
+    "authorization this tool cannot verify yet (proposed A1.5): no manifest for {}"
+)
+
+
+def _refuse_historical_candidates(report: CheckReport) -> None:
+    """A superseded candidate claims an authorization as much as a current one does.
+
+    It is neither erased nor blessed: the file keeps it, and gets no manifest until
+    evidence for that past authorization can be checked.
+    """
+    latest = {law: r["record_revision"] for law, r in current_records(report.records).items()}
+    past = [
+        f"{r['amending_lov_id']}@{r['record_revision']}"
+        for r in report.records
+        if r["release_state"] == "release_candidate"
+        and r["record_revision"] < latest[r["amending_lov_id"]]
+    ]
+    if past:
+        raise CrosswalkError(HISTORICAL.format(", ".join(sorted(past))))
+
+
+def _require_verified_candidates(report: CheckReport, cache: Path | None) -> None:
+    candidates = _candidates(report)
     if candidates and cache is None:
         raise CrosswalkError(
             "a release_candidate manifest needs verified source provenance: give the capture"
@@ -139,18 +173,50 @@ def _require_verified_candidates(report: CheckReport, cache: Path | None) -> Non
         raise CrosswalkError("; ".join(blocked))
 
 
-def build_manifest(data: bytes, filename: str, cache: Path | None = None) -> dict[str, object]:
+NO_PROOF = (
+    "a release_candidate manifest needs the owner's signed approval and the approved input: "
+    "give --approval-proof"
+)
+
+
+def _approval_block(
+    data: bytes, report: CheckReport, cache: Path | None, proof: CandidateProof | None
+) -> dict[str, dict[str, str]]:
+    """The approval a release_candidate file was proven against; nothing for research files."""
+    if not _candidates(report):
+        return {}
+    if proof is None or cache is None:
+        raise CrosswalkError(NO_PROOF)
+    if proof.candidate_sha256 != sha256(data).hexdigest():
+        raise CrosswalkError("the approval proof is for other bytes than this file")
+    if proof.capture_manifest_sha256 != sha256((cache / MANIFEST).read_bytes()).hexdigest():
+        raise CrosswalkError("the approval proof was replayed against another capture")
+    return {"approval": proof.block}
+
+
+def build_manifest(
+    data: bytes, filename: str, cache: Path | None = None, proof: CandidateProof | None = None
+) -> dict[str, object]:
     """The manifest of one checked file; refuses a file that does not pass `check`."""
     report = check(data, cache=cache)
     require_passed(report)
     _require_verified_candidates(report, cache)
+    _refuse_historical_candidates(report)
+    approval = _approval_block(data, report, cache, proof)
     records = [canonical_record(r) for r in report.records]
     return {
+        **approval,
         "manifest_version": MANIFEST_VERSION,
         "schema_version": SCHEMA_VERSION,
         "release_state": _release_state(records),
         "provenance": _provenance(report, cache),
         "files": [{"name": filename, "sha256": sha256(data).hexdigest(), "size_bytes": len(data)}],
+        **_described(records),
+    }
+
+
+def _described(records: list[Record]) -> dict[str, object]:
+    return {
         "counts": _counts(records),
         "producer_commits": _commits(records, "producer_commit"),
         "lovverk_commits": _commits(records, "lovverk_commit"),
