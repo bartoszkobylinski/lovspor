@@ -135,6 +135,29 @@ def _two_releases(
 
 
 class TestEveryPublishedUrlSurvives:
+    @pytest.mark.parametrize(("folder", "route"), [("lover", "lov"), ("forskrifter", "forskrift")])
+    def test_a_restored_pid_is_live_without_a_stale_410(
+        self, repo: Path, tmp_path: Path, folder: str, route: str
+    ) -> None:
+        """A historical retirement must never shadow a provision emitted again (§4)."""
+        path = f"{folder}/a.md"
+        documents = {"doc-a": _record(route, path, "a")}
+        releases = []
+        for day, pids in enumerate((("1", "35 a"), ("1",), ("1", "35 a")), start=1):
+            (repo / path).write_text(_doc("A", f"{route}/2020-01-01-1", pids), encoding="utf-8")
+            sha = _commit(repo, documents, day)
+            releases.append(_build(repo, sha, tmp_path / f"snapshot-{day}"))
+
+        original, retired, restored = releases
+        url = f"/{route}/a/paragraf/35a/"
+        for representation in (url, url + "index.json"):
+            assert answer(retired, representation) == (GONE, None)
+            assert answer(restored, representation) == (LIVE, None)
+        check_release(restored)
+        report = check_continuity(original, restored)
+        assert report.live == len(published(original))
+        assert (report.moved, report.gone) == (0, 0)
+
     def test_a_content_edit_keeps_every_url_live(self, repo: Path, tmp_path: Path) -> None:
         before, after = _two_releases(
             repo,

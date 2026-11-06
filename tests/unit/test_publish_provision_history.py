@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from lovspor.publish.provision_history import (
     once_publishable_pids,
     parse_removed_pids,
@@ -57,6 +59,28 @@ class TestParseRemovedPids:
 
 
 class TestFromARealRepository:
+    @pytest.mark.parametrize("folder", ["lover", "forskrifter"])
+    def test_history_is_pinned_and_a_deleting_commit_keeps_earlier_servable_pids(
+        self, tmp_path: Path, folder: str
+    ) -> None:
+        """The URL contract uses pinned history, including paths absent at its tip."""
+        repo = _repo(tmp_path)
+        path = f"{folder}/a.md"
+        document = repo / path
+        document.write_text(_doc("A", "lov/2020-01-01-1", ("1", "35 a")), encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "original", day=1)
+        pinned = _head(repo)
+        document.write_text(_doc("A", "lov/2020-01-01-1", ("2",)), encoding="utf-8")
+        _git(repo, "commit", "-q", "-am", "replace provisions", day=2)
+        document.unlink()
+        _git(repo, "commit", "-q", "-am", "delete document", day=3)
+
+        assert removed_pids_by_path(repo, pinned) == {}
+        assert once_publishable_pids(repo, pinned, path) == frozenset({"1", "35a"})
+        assert removed_pids_by_path(repo, _head(repo)) == {path: frozenset({"1", "35a", "2"})}
+        assert once_publishable_pids(repo, _head(repo), path) == frozenset({"1", "35a", "2"})
+
     def test_a_deletion_and_a_rename_both_count_against_the_old_path(self, tmp_path: Path) -> None:
         repo = _repo(tmp_path)
         (repo / "lover/a.md").write_text(_doc("A", "lov/2020-01-01-1", ("1", "2")))
