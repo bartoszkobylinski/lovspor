@@ -2226,7 +2226,8 @@ def test_run_sync_with_openai_key_stages_new_and_changed_sidecars_with_markdown(
     update_commit = _git_show_name_status(corpus, "HEAD~1")
     assert "lover/skattie.md" in update_commit
     assert "lover/embeddings/skattie.bin" in update_commit
-    assert api_keys == ["sk-test", "sk-test", "sk-test", "sk-test"]
+    # One adapter per run_sync, shared by the backfill and the change loop (#828).
+    assert api_keys == ["sk-test", "sk-test"]
     assert sum(len(batch) for batch in calls) == 2
 
 
