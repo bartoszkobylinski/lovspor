@@ -267,3 +267,69 @@ def test_cli_invalidate_requires_esi_without_deleting_entries(
     assert result.exit_code == 2
     assert said("Missing option '--esi'", result.output)
     assert {path: path.read_bytes() for path in store.root.rglob("*.lsec")} == before
+
+
+def test_cli_invalidate_one_document_preserves_other_keys_and_spaces(
+    store: LocalEntryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §10: --input-hash limits deletion to one key in the selected ESI."""
+    for entry in (_doc("a"), _unit("a", 0), _unit("a", 1), _doc("b"), _doc("a", OTHER_ESI)):
+        store.put(entry)
+    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(store.root))
+    result = CliRunner().invoke(
+        app,
+        ["ops", "embedding-cache", "invalidate", "--esi", ESI, "--input-hash", _hash("a")],
+    )
+    assert result.exit_code == 0
+    assert "removed=3" in result.output
+    for entry in (_doc("a"), _unit("a", 0), _unit("a", 1)):
+        assert store.get(entry.key) is None
+    for entry in (_doc("b"), _doc("a", OTHER_ESI)):
+        assert store.get(entry.key) is not None
+
+
+def test_invalidate_removes_corrupt_entries_without_decoding(store: LocalEntryStore) -> None:
+    """Design §5.3 recovery: invalidate deliberately removes a refused entry."""
+    store.put(_doc("a"))
+    path = next(store.root.rglob("*.lsec"))
+    path.write_bytes(b"corrupt entry")
+    assert invalidate(store, ESI, _hash("a")) == 1
+    assert not path.exists()
+    assert invalidate(store, ESI, _hash("a")) == 0
+
+
+def test_verify_refuses_symlinked_entry_without_changing_target(
+    store: LocalEntryStore, tmp_path: Path
+) -> None:
+    """Design §5.1: operator validation also refuses symlinked entries."""
+    store.put(_doc("a"))
+    path = next(store.root.rglob("*.lsec"))
+    payload = path.read_bytes()
+    target = tmp_path / "outside.lsec"
+    target.write_bytes(payload)
+    target.chmod(0o600)
+    path.unlink()
+    path.symlink_to(target)
+    report = verify(store)
+    assert report.valid == 0
+    assert report.expired == 0
+    assert len(report.refused) == 1
+    assert "symlink" in report.refused[0]
+    assert path.is_symlink()
+    assert target.read_bytes() == payload
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [["--esi", "../bad"], ["--esi", ESI, "--input-hash", "../bad"]],
+)
+def test_cli_invalidate_invalid_key_preserves_entries(
+    store: LocalEntryStore, monkeypatch: pytest.MonkeyPatch, arguments: list[str]
+) -> None:
+    store.put(_doc("a"))
+    before = {path: path.read_bytes() for path in store.root.rglob("*.lsec")}
+    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(store.root))
+    result = CliRunner().invoke(app, ["ops", "embedding-cache", "invalidate", *arguments])
+    assert result.exit_code == 1
+    assert "invalidate needs a 32-hex ESI" in result.output
+    assert {path: path.read_bytes() for path in store.root.rglob("*.lsec")} == before

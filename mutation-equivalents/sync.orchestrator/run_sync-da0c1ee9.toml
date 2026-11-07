@@ -1,14 +1,14 @@
 [[equivalent]]
 file = "src/lovspor/sync/orchestrator.py"
 symbol = "run_sync"
-registered = "2026-09-30, issue #427 (owner decision 2026-09-29), from PR #422's survivor list"
+registered = "2026-09-30, issue #427 (owner decision 2026-09-29), from PR #422's survivor list; variable renamed from sprint9_embedder in PR #828"
 mutation = """
--    sprint9_target = space_id_of(sprint9_embedder) if sprint9_embedder is not None else None
-+    sprint9_target = space_id_of(sprint9_embedder) if (sprint9_embedder is not None) or True else None
+-    sprint9_target = space_id_of(embedder) if embedder is not None else None
++    sprint9_target = space_id_of(embedder) if (embedder is not None) or True else None
 """
 justification = """
 The mutant always takes the first branch, so it differs from the original only
-when `sprint9_embedder is None`: the original then yields the literal None, the
+when `embedder is None`: the original then yields the literal None, the
 mutant yields `space_id_of(None)`. `space_id_of` opens with
 `if embedder is None: return None` (embeddings/provider.py), so both yield None
 and nothing else in the call can differ — it has no side effect. The two

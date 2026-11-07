@@ -53,7 +53,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.embeddings.cache import quantized_document_vectors, with_embedding_cache
+from lovspor.embeddings.cache import quantized_document_vectors, sync_embedder
 from lovspor.embeddings.inputs import (
     build_embedding_inputs,
     hash_embedding_inputs,
@@ -287,12 +287,12 @@ def run_sync(  # noqa: PLR0912, PLR0915
     # single bulk ``migration: backfill embeddings for N documents``
     # commit BEFORE the regular sync flow runs. Skipped entirely
     # when no OpenAI key is configured.
-    sprint9_embedder = _load_embedder(settings)
+    embedder = _load_embedder(settings)  # one adapter, meter and budget per run (#790)
     # The target space is the identity the configured adapter would produce.
     # Passing it makes an embedding-space change select exactly the affected
     # documents for backfill, so switching model no longer needs an operator
     # to delete sidecars by hand.
-    sprint9_target = space_id_of(sprint9_embedder) if sprint9_embedder is not None else None
+    sprint9_target = space_id_of(embedder) if embedder is not None else None
     upstream_hashes = {doc_id: u.xml_hash for doc_id, u in upstream.items()}
     changes = detect_changes(upstream_hashes, prior)
 
@@ -320,12 +320,12 @@ def run_sync(  # noqa: PLR0912, PLR0915
     # Vetoes before ANY paid call, the Sprint 9 backfill below included (#790);
     # the backfill stamps only embedding fields, so this classification holds.
     now = datetime.now(UTC)
-    if sprint9_embedder is not None:
+    if embedder is not None:
         plan = _ChangePlan(changes.new, changes.changed, renamed, upstream, prior, now)
         _guard_change_reembed(settings, plan, allow=allow_mass_reembed)
     _guard_mass_removal(changes.removed, prior, settings.max_removal_ratio)
 
-    if sprint9_embedder is not None and _needs_sprint9_embeddings_migration(
+    if embedder is not None and _needs_sprint9_embeddings_migration(
         prior,
         settings.lovverk_repo_path,
         sprint9_target,
@@ -333,7 +333,7 @@ def run_sync(  # noqa: PLR0912, PLR0915
         prior = _run_sprint9_embeddings_migration(
             settings,
             prior,
-            sprint9_embedder,
+            embedder,
             datetime.now(UTC),
             sprint9_target,
             allow_mass_reembed=allow_mass_reembed,
@@ -362,7 +362,6 @@ def run_sync(  # noqa: PLR0912, PLR0915
     new_records = _carry_unchanged(prior, changes.unchanged)
     new_records.update(_carry_tombstones(prior, set(upstream)))
     actions: list[_DocAction] = []
-    embedder = _load_embedder(settings)
 
     # All paths written by ANY action this sync. The two delete sites
     # below — changed-with-slug-change and the renamed phase 2 —
@@ -1105,7 +1104,7 @@ def _load_embedder(settings: Settings) -> EmbeddingModel | None:
     ``LOVSPOR_EMBEDDING_PROVIDER`` fails the run instead of quietly producing a
     corpus with no embeddings and no explanation.
     """
-    return with_embedding_cache(create_embedder(settings.embedding), settings)
+    return sync_embedder(create_embedder(settings.embedding), settings)
 
 
 def _embedder_identity(embedder: EmbeddingModel) -> tuple[str | None, str | None]:
