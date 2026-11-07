@@ -88,6 +88,12 @@ _INFORMATIONAL = re.compile(
     r"Forskrifter\s+(?:gitt|gjevne|fastsatt|fastsette)\s)",
     re.I,
 )
+_REFERENCE = re.compile(
+    r"\b(?:etter\s+at|når|før|innen|fra\s+det\s+tidspunkt(?:et)?|på\s+det\s+tidspunkt(?:et)?|frå\s+det\s+tidspunktet)"
+    r"\s+(?:denne\s+)?(?:loven|lova|lovendringen|lovendringa|lovendringene|endringsloven|endringslova)"
+    r"(?:\s+her)?\s+(?:har\s+)?(?:trer|trådte|trådt|tek|tok|teke|tar|tok)\s+(?:i\s+kraft|til\s+å\s+gjelde)",
+    re.I,
+)  # a reference to the commencement, not a statement of it
 _TRANSITIONAL = re.compile(r"\bgjeld(?:er)?\s+(?:bare|berre|også|òg|først|fyrst|for)\b", re.I)
 _CONTINUES = re.compile(
     r"\b(?:held|holder|heldt)\s+fram\s+å\s+gjelde\b|\bfortsetter\s+å\s+gjelde\b", re.I
@@ -214,9 +220,12 @@ def _informational(sentence: str) -> bool:
     without_citations = ACT_CITATION.sub("", sentence)
     if _INFORMATIONAL.match(sentence):
         return True
+    if _PENDING_WORDS.search(sentence):
+        return False  # a delegation is a commencement statement, however it is phrased
     if _CONTINUES.search(sentence) or _TRANSITIONAL.search(sentence):
         return parse_date(without_citations) is None
-    return _COMMENCEMENT_PHRASE.search(sentence) is None and parse_date(without_citations) is None
+    stated = _REFERENCE.sub("", sentence)  # what is left once the references are gone
+    return _COMMENCEMENT_PHRASE.search(stated) is None and parse_date(without_citations) is None
 
 
 def _exception_timing(document: Document, sentence: str) -> Timing:

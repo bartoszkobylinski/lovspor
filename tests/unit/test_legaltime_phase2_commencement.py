@@ -368,3 +368,45 @@ def test_a_part_scope_listing_bare_sections_dates_only_those_sections() -> None:
     assert timings[("II", "§5")].status == "pending"
     other = _by_part(law, _delt("Følgende trer i kraft 1. juli 2021: Endringsloven del II § 7."))
     assert {t.status for t in other.values()} == {"pending"}
+
+
+# ---------------------------------------------------------------- commencement references
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Loven har virkning for søksmål eller anke som tas ut etter at loven har trådt i kraft.",
+        "Overtredelsesgebyr etter § 15-4 kan bare ilegges for lovovertredelser begått etter at loven trådte i kraft.",  # noqa: E501
+        "Lavere bedriftsinterne aldersgrenser enn 70 år kan beholdes inntil ett år etter at loven trer i kraft, dersom de er etablert før dette tidspunktet.",  # noqa: E501
+        "For arbeidsforhold som eksisterer på det tidspunkt loven trer i kraft, skal den skriftlige arbeidsavtalen suppleres.",  # noqa: E501
+        "Etter nytt kapittel 28 A i tvisteloven kan det bare begjæres informasjon når stevningen er inngitt etter at loven har trådt i kraft.",  # noqa: E501
+        "Barnelova § 43 gjelder når kontaktforbud er fastsatt etter at lovendringen trer i kraft.",
+        "Forskrifter gitt med heimel i lova held fram å gjelde til dei blir oppheva.",
+    ],
+)
+def test_a_sentence_that_only_refers_to_the_commencement_states_none(sentence: str) -> None:
+    assert _informational(sentence)
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Loven trer i kraft straks.",
+        "Endring under I trer i kraft straks.",
+        "Loven trer i kraft 1. juli 2021 og gjelder for saker som kommer inn etter at loven har trådt i kraft.",  # noqa: E501
+        "Kongen bestemmer når loven trer i kraft.",
+    ],
+)
+def test_a_sentence_that_states_or_delegates_a_commencement_is_not_informational(
+    sentence: str,
+) -> None:
+    assert not _informational(sentence)
+
+
+def test_a_referring_sentence_beside_the_clause_does_not_unsettle_the_law() -> None:
+    law = _law(
+        "Loven trer i kraft 1. juli 2021. "
+        "Loven har virkning for søksmål som tas ut etter at loven har trådt i kraft."
+    )
+    assert {t.effective for t in _by_part(law).values()} == {date(2021, 7, 1)}
