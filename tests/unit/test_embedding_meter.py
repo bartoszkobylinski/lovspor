@@ -286,3 +286,46 @@ def test_empty_and_minimum_meter_configuration(
     assert isinstance(metered, MeteredEmbedder)
     metered.encode(["ord"])
     assert metered.meter.tokens == 1
+
+
+def test_failed_call_preserves_completed_spend_and_remaining_budget(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """docs/embeddings.md: failed attempts are excluded from completed-call counts."""
+
+    class FailingProvider(_Provider):
+        fail = False
+
+        def encode(self, texts: list[str]) -> np.ndarray:
+            if self.fail:
+                self.requests += 1
+                raise TimeoutError("provider timed out")
+            return super().encode(texts)
+
+    provider = FailingProvider()
+    metered = MeteredEmbedder(provider, budget=4, every=2)
+    metered.encode(["ord"])
+    assert capsys.readouterr().err == ""
+
+    provider.fail = True
+    with pytest.raises(TimeoutError, match="provider timed out"):
+        metered.encode(["ord", "ord ord"])
+    assert provider.requests == 2
+    assert metered.meter == SpendMeter(requests=1, inputs=1, tokens=1)
+    assert capsys.readouterr().err == ""
+
+    # The same request can still consume exactly the remaining three tokens.
+    provider.fail = False
+    vectors = metered.encode(["ord", "ord ord"])
+    assert vectors.shape == (2, provider.get_dimension())
+    assert provider.requests == 3
+    assert metered.meter == SpendMeter(requests=2, inputs=3, tokens=4)
+    assert capsys.readouterr().err == (
+        "embedding-spend: completed_calls=2 inputs=3 estimated_tokens_completed=4 budget=4\n"
+    )
+
+    with pytest.raises(EmbeddingBudgetError, match="the next call needs 1"):
+        metered.encode(["ord"])
+    assert provider.requests == 3
+    assert metered.meter == SpendMeter(requests=2, inputs=3, tokens=4)
+    assert capsys.readouterr().err == ""
