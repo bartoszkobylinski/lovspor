@@ -11,7 +11,7 @@ import pytest
 from lovspor.embeddings import cache_admin
 from lovspor.embeddings.cache_store import LocalEntryStore
 from lovspor.errors import EmbeddingCacheError
-from tests.unit.test_embedding_cache_admin import ESI, POLICY
+from tests.unit.test_embedding_cache_admin import ESI, POLICY, _doc, _unit
 
 
 @pytest.mark.parametrize("command", ["verify", "prune"])
@@ -52,3 +52,25 @@ def test_admin_accepts_absent_schema_directory(tmp_path: Path, command: str) -> 
     assert report.refused == []
     assert report.expired == 0
     assert list(store.root.iterdir()) == []
+
+
+@pytest.mark.parametrize("command", ["status", "verify", "prune", "invalidate"])
+def test_admin_refuses_root_replaced_with_symlink(tmp_path: Path, command: str) -> None:
+    """§5.1: a root swapped for a symlink after open() is refused, and nothing moves."""
+    root = tmp_path / "cache"
+    store = LocalEntryStore.open(root, (), POLICY)
+    store.put(_doc("done"))
+    store.put(_unit("done"))
+    relocated = tmp_path / "relocated"
+    root.rename(relocated)
+    root.symlink_to(relocated, target_is_directory=True)
+    before = {p.relative_to(relocated): p.read_bytes() for p in relocated.rglob("*.lsec")}
+
+    with pytest.raises(EmbeddingCacheError, match="symlink"):
+        if command == "invalidate":
+            cache_admin.invalidate(store, ESI, None)
+        else:
+            getattr(cache_admin, command)(store)
+
+    assert root.is_symlink()
+    assert {p.relative_to(relocated): p.read_bytes() for p in relocated.rglob("*.lsec")} == before
