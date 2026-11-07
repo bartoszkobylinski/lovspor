@@ -374,3 +374,32 @@ class InnsynSendError(InnsynError):
     The run stops at the first such letter and records nothing for it: a
     request is in the ledger only once the server accepted the message.
     """
+
+
+class EmbeddingCacheError(LovsporError):
+    """A durable embedding-cache entry was refused, or the store cannot be used.
+
+    Never a cache miss: a refused entry stops the run (#802 design §5.4).
+    Paying for a replacement silently would hide whatever wrote the bad entry
+    and turn a cache defect into unbounded spend, the #790 failure mode. The
+    message names the key and the failed check, never vector values, document
+    text or credentials. Recovery is an operator action: invalidate the named
+    key, or turn the cache off.
+    """
+
+
+class EmbeddingCacheExpiredError(EmbeddingCacheError):
+    """A cache entry is older than the retention and was refused, not ignored.
+
+    Prune is the supported way to remove expired entries; reading one is a
+    refusal so that retention is enforced in one visible place.
+    """
+
+
+class EmbeddingCacheStorageError(EmbeddingCacheError):
+    """A paid unit could not be persisted, so the run stops before paying again.
+
+    The cache's promise is that a completed paid unit is durable before the
+    next request is sent. A store that cannot write breaks that promise, and
+    continuing would spend money the next run must spend again.
+    """
