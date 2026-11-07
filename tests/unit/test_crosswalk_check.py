@@ -509,24 +509,24 @@ def test_changed_parser_version_is_not_reproduced(built: bytes, capture_dir: Pat
 
 def test_sanction_only_archive_must_have_accepted_rights(built: bytes) -> None:
     record = next(r for r in parse_records(built) if r["amending_lov_id"] == "LOV-2022-06-17-63")
-    endpoint_pin = next(
+    dataset_pin = next(
         p
         for p in record["source_pins"]["lovdata_archives"]
-        if p["licence_basis"] == "stated_for_endpoint"
+        if p["licence_basis"] == "stated_for_dataset"
     )
     record["sanction_events"].append(
         {
             "law_id": "LOV-2026-01-01-1",
             "kind": "unclassified_sanction",
-            "source_url": endpoint_pin["source_url"],
+            "source_url": dataset_pin["source_url"],
         }
     )
     assert check(serialize_records([record])).passed
-    assert all(e["source_url"] != endpoint_pin["source_url"] for e in record["evidence"])
+    assert all(e["source_url"] != dataset_pin["source_url"] for e in record["evidence"])
     assert ineligibility(record, frozenset({"stated_for_file"})) == (
         "rests on an archive whose licence basis is not accepted"
     )
-    assert ineligibility(record, frozenset({"stated_for_file", "stated_for_endpoint"})) is None
+    assert ineligibility(record, frozenset({"stated_for_file", "stated_for_dataset"})) is None
 
 
 def test_equal_revisions_keep_first_record() -> None:
@@ -635,7 +635,7 @@ def test_approval_lists_exact_invalid_fields(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("r2", ["approved", "rejected"])
 def test_approval_controls_accepted_licence_bases(r2: str) -> None:
-    expected = {"stated_for_file"}
+    expected = {"stated_for_file", "stated_for_dataset"}
     if r2 == "approved":
         expected.add("stated_for_endpoint")
     assert accepted_bases(_approval(b"", r2)) == frozenset(expected)

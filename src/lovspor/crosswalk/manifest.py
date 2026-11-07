@@ -40,27 +40,68 @@ from lovspor.crosswalk.errors import CrosswalkError
 
 MANIFEST_VERSION = 1
 _pretty = partial(json.dumps, indent=2, sort_keys=True, ensure_ascii=False)
+LOVDATA_SOURCE = {
+    "source": "Lovdata",
+    "licensor": "Stiftelsen Lovdata",
+    "dataset": "Norsk Lovtidend, Avdeling I",
+    "dataset_url": "https://data.norge.no/datasets/c0c6a87c-f597-3735-965f-650be23426a0",
+    "source_url": "https://api.lovdata.no/v1/publicData/",
+    "licence": "NLOD-2.0",
+    "licence_url": "https://data.norge.no/nlod/no/2.0",
+}
 ATTRIBUTION = {
     "nb": (
-        "Inneholder data under Norsk lisens for offentlige data (NLOD) tilgjengeliggjort av "
-        "Stiftelsen Lovdata (https://api.lovdata.no/v1/publicData/) og Stortinget "
-        "(https://data.stortinget.no/). Lisens: https://data.norge.no/nlod/no/2.0. "
-        "Dataene er bearbeidet av Lovspor: koblingene er utledet fra kildene og gjengir ikke "
-        "kildetekstene."
+        "Kilde: Lovdata. Inneholder data under Norsk lisens for offentlige data (NLOD) 2.0 "
+        "tilgjengeliggjort av Stiftelsen Lovdata, fra datasettet «Norsk Lovtidend, Avdeling I» "
+        "(https://api.lovdata.no/v1/publicData/), og data under NLOD tilgjengeliggjort av "
+        "Stortinget (https://data.stortinget.no/). Lisens: https://data.norge.no/nlod/no/2.0. "
+        "Dataene er endret av Lovspor: koblingene mellom lover, lovvedtak og saker er utledet "
+        "av Lovspor og gjengir ikke kildetekstene. Lovdata og Stortinget har ikke godkjent "
+        "eller anbefalt Lovspor."
     ),
     "en": (
-        "Contains data under the Norwegian Licence for Open Government Data (NLOD) made "
-        "available by Stiftelsen Lovdata and Stortinget. Changed by Lovspor: the links are "
-        "derived from the sources and do not reproduce their texts."
+        "Source: Lovdata. Contains data under the Norwegian Licence for Open Government Data "
+        '(NLOD) 2.0 made available by Stiftelsen Lovdata, from the dataset "Norsk Lovtidend, '
+        'Avdeling I", and data under NLOD made available by Stortinget. Changed by Lovspor: '
+        "the links between acts, decisions and cases are derived by Lovspor and do not "
+        "reproduce the source texts. Lovdata and Stortinget have not approved or endorsed "
+        "Lovspor."
     ),
-    "status": "provisional",
+    "sources": [LOVDATA_SOURCE],
+    "changes": (
+        "Lovspor parsed the announcements and the Stortinget records and derived identifiers, "
+        "dates and links from them; no source text is reproduced"
+    ),
+    "licence_of_source_data": (
+        "Data derived from Lovdata stay under NLOD 2.0; this file grants no other licence for them"
+    ),
+    "basis": "NLOD 2.0 section 5 and Lovdata brukervilkår 2.3, read 2026-11-07 (ADR-0021)",
 }
 SOURCE_TERMS = [
     {
         "source": "Stiftelsen Lovdata, publicData",
         "terms_url": "https://api.lovdata.no/om-api-tjenesten/",
-        "read_on": "2026-11-02",
+        "read_on": "2026-11-07",
         "licence": "NLOD-2.0",
+        "statement": (
+            "Datasettet til Norsk Lovtiden avd. 1 finner du på Data.norge.no. "
+            "Det kan fritt benyttes til alle formål uten vederlag. "
+            "Dataene er lisensiert under NLOD 2.0."
+        ),
+    },
+    {
+        "source": "Stiftelsen Lovdata, data.norge.no dataset Norsk Lovtidend, Avdeling I",
+        "terms_url": "https://data.norge.no/datasets/c0c6a87c-f597-3735-965f-650be23426a0",
+        "read_on": "2026-11-07",
+        "licence": "NLOD-2.0",
+        "statement": "distribution licence NLOD_2_0; fetched by /list then /get/, two parts",
+    },
+    {
+        "source": "Stiftelsen Lovdata, brukervilkår",
+        "terms_url": "https://lovdata.no/info/vilkar",
+        "read_on": "2026-11-07",
+        "licence": "NLOD-2.0",
+        "statement": "2.3: Regelverk i Norsk Lovtidend, if Lovdata is named as source",
     },
     {
         "source": "Stortinget, data.stortinget.no eksport",
@@ -70,7 +111,6 @@ SOURCE_TERMS = [
     },
 ]
 BLOCKERS = [
-    "R3: Lovdata attribution wording unconfirmed; lovdata.no is not read, ask api@lovdata.no",
     "R4: regjeringen.no reuse basis and attribution unruled; no correction is captured",
     "Publication, dataset repository and tags are separate owner steps; none is taken here",
 ]

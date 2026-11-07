@@ -16,7 +16,14 @@ from lovspor.crosswalk.cache import MANIFEST
 from lovspor.crosswalk.canonical import parse_records, serialize_records
 from lovspor.crosswalk.commands import manifest_impl
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
-from lovspor.crosswalk.manifest import BLOCKERS, HISTORICAL, build_manifest, render_manifest
+from lovspor.crosswalk.manifest import (
+    ATTRIBUTION,
+    BLOCKERS,
+    HISTORICAL,
+    SOURCE_TERMS,
+    build_manifest,
+    render_manifest,
+)
 from lovspor.crosswalk.release import Approval, promote
 from tests.unit.crosswalk_support import COMMIT, PRODUCER, attested, besl_o, digest, make_capture
 
@@ -68,30 +75,20 @@ def test_archive_pins_are_listed_once_with_their_basis(built: bytes) -> None:
     pins = build_manifest(built, "x")["lovdata_archives"]
     assert [(p["source_url"].rsplit("/", 1)[1], p["licence_basis"]) for p in pins] == [
         ("lovtidend-avd1-2001-2025.tar.bz2", "stated_for_file"),
-        ("lovtidend-avd1-2026.tar.bz2", "stated_for_endpoint"),
+        ("lovtidend-avd1-2026.tar.bz2", "stated_for_dataset"),
     ]
 
 
 def test_blockers_and_attribution_stay_until_resolved(built: bytes) -> None:
     manifest = build_manifest(built, "x")
-    assert manifest["source_terms"] == [
-        {
-            "source": "Stiftelsen Lovdata, publicData",
-            "terms_url": "https://api.lovdata.no/om-api-tjenesten/",
-            "read_on": "2026-11-02",
-            "licence": "NLOD-2.0",
-        },
-        {
-            "source": "Stortinget, data.stortinget.no eksport",
-            "terms_url": "https://data.stortinget.no/om-datatjenesten/bruksvilkar/",
-            "read_on": "2026-11-02",
-            "licence": "NLOD (current version; the terms name none)",
-        },
-    ]
+    assert manifest["source_terms"] == SOURCE_TERMS
+    assert [t["terms_url"] for t in SOURCE_TERMS][-1] == (
+        "https://data.stortinget.no/om-datatjenesten/bruksvilkar/"
+    )
+    assert manifest["attribution"] == ATTRIBUTION
     assert manifest["unresolved_blockers"] == BLOCKERS
-    assert any(b.startswith("R3:") for b in BLOCKERS)
+    assert not any(b.startswith("R3:") for b in BLOCKERS)
     assert any(b.startswith("R4:") for b in BLOCKERS)
-    assert manifest["attribution"]["status"] == "provisional"
     assert "Stortinget" in manifest["attribution"]["nb"]
     assert "Stiftelsen Lovdata" in manifest["attribution"]["en"]
     assert "released" not in json.dumps(manifest)
