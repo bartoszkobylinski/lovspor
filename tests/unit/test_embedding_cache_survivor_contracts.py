@@ -2,6 +2,7 @@
 
 import os
 import stat
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -64,3 +65,35 @@ def test_wire_round_trip_rejects_byteswapped_float_input(unit: bool) -> None:
         swapped = entry.vectors.astype(np.dtype(">f4"))
         with pytest.raises(ValueError, match="float32 vectors"):
             encode_entry(replace(entry, vectors=swapped))
+
+
+def test_publication_does_not_follow_a_staging_symlink(tmp_path: Path) -> None:
+    """A swapped temporary name must not publish the target's inode (§5.1).
+
+    An audit hook changes only files, immediately before the real link syscall;
+    publication itself runs in this pytest process without patched store code.
+    """
+    target = tmp_path / "outside"
+    target.write_bytes(b"outside content")
+    final = tmp_path / "entry.lsec"
+    active = True
+    swapped: list[Path] = []
+
+    def swap_staging(event: str, args: tuple[object, ...]) -> None:
+        if active and event == "os.link" and args[1] == str(final):
+            staged = Path(str(args[0]))
+            staged.unlink()
+            staged.symlink_to(target)
+            swapped.append(staged)
+
+    sys.addaudithook(swap_staging)
+    try:
+        _publish(tmp_path, final, b"intended content")
+    finally:
+        # Audit hooks cannot be removed; deactivate this one even on failure.
+        active = False
+    assert len(swapped) == 1
+    assert final.is_symlink()
+    assert final.readlink() == target
+    assert target.read_bytes() == b"outside content"
+    assert set(tmp_path.iterdir()) == {target, final}
