@@ -6,7 +6,7 @@ from pathlib import Path
 
 from lovspor.legaltime import replay, verify
 from lovspor.legaltime.commencement import Timing
-from lovspor.legaltime.document import Document, parse_document
+from lovspor.legaltime.document import Document, Ledd, parse_document
 from lovspor.legaltime.instructions import Address, Operation, _Reader
 from lovspor.legaltime.replay import Event, ReplayState, _Working
 
@@ -100,3 +100,24 @@ def test_substitution_operations_carry_their_host_section() -> None:
     reader = _Reader(_load("enacting-embedded.xml"))
     op = reader._substitute(("I", "I:3", "§25"), "lov/2019-06-14-99", "I § 1 og § 2.", ("a", "b"))
     assert op.host_section == "§25" and op.kind == "substitute_term"
+
+
+def test_a_bokstav_replacement_that_breaks_the_markup_is_refused_not_raised() -> None:
+    """utlendingsloven, 2026-11-07: a list item whose text holds a nested article made the
+    regex rewrite cut mid-structure and lxml raise; the replay must refuse, never crash."""
+    working = _Working(_load("enacting.xml"))
+    nested = (
+        'Følgende gjelder:<ol class="defaultList"><li data-name="a."><article class="listArticle">'
+        '<article class="legalP">bokstav a<article class="legalP">indre</article></article>'
+        "</article></li></ol>"
+    )
+    working.map["§2"].ledd[0] = Ledd(xml=nested, text="Følgende gjelder: bokstav a indre")
+    op = _op(
+        "replace_bokstav",
+        Address(section="§2", ledd=1, bokstav="a"),
+        ledd=(Ledd(xml="<b>x", text="x"),),
+    )
+    assert (
+        working.apply_replace_bokstav(op) == "bokstav replacement leaves the ledd markup ill-formed"
+    )
+    assert working.map["§2"].ledd[0].xml == nested

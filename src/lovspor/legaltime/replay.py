@@ -270,7 +270,11 @@ class _Working:
         )
         if count != 1:
             return f"bokstav {op.address.bokstav} matched {count} list items"
-        target.ledd[index - 1] = Ledd(xml=xml, text=_text_of_xml(xml))
+        try:
+            text = _text_of_xml(xml)
+        except etree.XMLSyntaxError:
+            return "bokstav replacement leaves the ledd markup ill-formed"
+        target.ledd[index - 1] = Ledd(xml=xml, text=text)
         return None
 
     def apply_substitute_term(self, op: Operation) -> str | None:
