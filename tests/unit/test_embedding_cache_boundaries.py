@@ -78,3 +78,49 @@ def test_mutating_returned_vectors_cannot_change_persisted_entry(
     assert reread is not None
     np.testing.assert_array_equal(reread.vectors, expected)
     assert target.read_bytes() == original
+
+
+@pytest.mark.parametrize("obstacle", ["dangling_symlink", "directory", "permissions"])
+def test_second_writer_refuses_unsafe_destination_without_replacing_it(
+    tmp_path: Path, obstacle: str
+) -> None:
+    """The store's immutable publication and read validation apply on collision too."""
+    entry = _doc_entry()
+    root = tmp_path / "cache"
+    store = _open(root)
+    store.put(entry)
+    target = next(root.rglob("*.lsec"))
+    original = target.read_bytes()
+    outside = tmp_path / "absent-target"
+    if obstacle == "dangling_symlink":
+        target.unlink()
+        target.symlink_to(outside)
+        reason = "symlink"
+    elif obstacle == "directory":
+        target.unlink()
+        target.mkdir(mode=0o700)
+        reason = "regular file"
+    else:
+        target.chmod(0o640)
+        reason = "owner-only"
+    before = target.lstat()
+
+    with pytest.raises(EmbeddingCacheError, match=reason):
+        store.put(replace(entry, vectors=-entry.vectors))
+
+    after = target.lstat()
+    assert (after.st_dev, after.st_ino, after.st_mode) == (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+    )
+    assert list(target.parent.iterdir()) == [target]
+    assert not outside.exists()
+    if obstacle == "dangling_symlink":
+        assert target.is_symlink()
+        assert target.readlink() == outside
+    elif obstacle == "directory":
+        assert target.is_dir()
+        assert list(target.iterdir()) == []
+    else:
+        assert target.read_bytes() == original
