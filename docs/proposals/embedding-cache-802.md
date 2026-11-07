@@ -368,7 +368,7 @@ would need. **It is not an approval.** No bucket, token, secret, account or
 workflow change exists or is made by this PR, and no production adapter is
 written until the owner approves this section and its cost (D1). Every
 provider claim below was read from the provider's own documentation on
-2026-11-07 and is cited. Where the docs do not settle a question it is marked
+2026-11-07, re-read the same day, and is cited. Where the docs do not settle a question it is marked
 **unverified** and becomes a staging check (G3), not an assumption.
 
 #### Verified provider facts this design relies on
@@ -378,11 +378,11 @@ provider claim below was read from the provider's own documentation on
 | `PutObject` honours `If-None-Match: *` and evaluates it atomically against committed state: of concurrent creators of an absent key, at most one succeeds, the rest get `412 PreconditionFailed` | [R2 S3 API](https://developers.cloudflare.com/r2/api/s3/api/), [S3 extensions](https://developers.cloudflare.com/r2/api/s3/extensions/), [error codes](https://developers.cloudflare.com/r2/api/error-codes/) (10031) |
 | Read-after-write, list-after-write and delete are strongly consistent over the S3 API; a `404` "is not final" with respect to an earlier `PutObject` whose outcome is unknown | [Consistency](https://developers.cloudflare.com/r2/reference/consistency/) |
 | Get, Head, Put, ListObjectsV2, Delete are implemented; endpoint `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, region `auto`; `Content-MD5` is accepted on `PutObject`; `BadDigest` (400) exists | [R2 S3 API](https://developers.cloudflare.com/r2/api/s3/api/), [error codes](https://developers.cloudflare.com/r2/api/error-codes/) |
-| Lifecycle rules expire objects N days after **upload**, by prefix; removal is "typically within 24 hours" of the expiry | [Object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles/) |
+| Lifecycle rules expire objects by prefix after N days (`Expiration: { Days: N }`); removal is "typically within 24 hours" of the `x-amz-expiration` value. The page does not say in words whether the age counts from upload; entries here are written once and never modified, so upload and last modification are the same instant | [Object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles/) |
 | Object Read & Write tokens can be limited to one bucket; tokens can carry an expiration date; there is no "write but not delete" preset | [API tokens](https://developers.cloudflare.com/r2/api/tokens/) |
 | Bucket locks prevent deletion and overwrite for a period, by prefix, and take precedence over lifecycle rules | [Bucket locks](https://developers.cloudflare.com/r2/buckets/bucket-locks/) |
 | Standard: storage $0.015/GB-month, Class A $4.50/M, Class B $0.36/M; free each month 10 GB-month, 1M Class A, 10M Class B; egress and `DeleteObject` free; a `PutObject` answered `412` **is billed as Class A** | [Pricing](https://developers.cloudflare.com/r2/pricing/) |
-| Single PUT up to 5 GiB; keys up to 1,024 bytes; **1 write per second per key** (429 above) | [Limits](https://developers.cloudflare.com/r2/platform/limits/) |
+| Single PUT up to 4.995 GiB (5 GiB less 5 MiB, per the limits footnote); keys up to 1,024 bytes; **1 write per second per key** (429 above) | [Limits](https://developers.cloudflare.com/r2/platform/limits/) |
 | Repository/environment secrets reach the job; a workflow triggered from a fork gets none | [GitHub: using secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets) |
 
 **Unverified, so not relied on:** whether R2 verifies `Content-MD5` server-side;
@@ -454,7 +454,7 @@ own digest.
 
 A lifecycle rule expires `lovspor-embedding-cache/` 30 days after upload. The
 reader's `LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS` is set to **32** for the
-remote store. Age is counted from upload, not last use, and removal happens up
+remote store. Age is counted from the one PUT of a write-once entry, not last use, and removal happens up
 to about a day after expiry. With equal limits, an entry 30–31 days old would
 still be served and refused as expired, stopping the sync. With the bucket
 shorter than the reader, the bucket removes an entry before the reader would
