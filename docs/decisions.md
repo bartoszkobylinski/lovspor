@@ -58,9 +58,10 @@ Build a versioned Markdown corpus of current Norwegian law, auto-updated from Lo
 > This note preserves the original decision and records its limited later
 > exception; it does not rewrite the historical policy.
 
-> **Roadmap reconciliation, ADR-0017 gate 5 (proposed 2026-11-02; approval
-> pending owner ruling D10, [lovspor-notebook #162](https://github.com/bartoszkobylinski/lovspor-notebook/pull/162);
-> not in force until that ruling is recorded):**
+> **Roadmap reconciliation, ADR-0017 gate 5 (proposed 2026-11-02; approved by
+> the owner on 2026-11-06 as ruling D10, recorded in
+> [lovspor-notebook #162](https://github.com/bartoszkobylinski/lovspor-notebook/pull/162) and in
+> lovspor-notebook ADR-0019, Accepted 2026-11-06, which refines ADR-0017):**
 > `docs/roadmap.md` D-DIRECT-4 ("which parties voted how on a given act") is not a
 > Lovspor deliverable: ADR-0017 assigns divisions, votes and speeches to Politik,
 > and Lovspor publishes only the source-backed crosswalk
@@ -87,9 +88,9 @@ Optional later:
 
 **Stortinget open data** (`data.stortinget.no`) — **NOT used as a primary source**. It publishes parliamentary metadata (saker, voteringer, publikasjoner), not consolidated law text. Possible enrichment in a later phase. Rate limit: 100 req/min.
 
-> **Crosswalk evidence sources (proposed 2026-11-02; approval pending owner ruling
-> D10, [lovspor-notebook #162](https://github.com/bartoszkobylinski/lovspor-notebook/pull/162);
-> not in force until that ruling is recorded):** For the ADR-0017 crosswalk only,
+> **Crosswalk evidence sources (proposed 2026-11-02; approved by the owner on
+> 2026-11-06 as ruling D10, recorded in [lovspor-notebook #162](https://github.com/bartoszkobylinski/lovspor-notebook/pull/162)
+> and lovspor-notebook ADR-0019):** For the ADR-0017 crosswalk only,
 > `lovtidend-avd1-{2001-2025,2026}.tar.bz2` from the same publicData API is read as
 > **evidence** for the law → decision edge. It is not ingested into `lovverk` and raw
 > XML stays out of every repository. Stortinget `eksport/sak` (and
@@ -99,7 +100,21 @@ Optional later:
 > per archive is recorded in each release (see
 > `docs/proposals/legislative-crosswalk-decisions-proposal-2026-11-02.md`, items a
 > and k). The "Optional later" and "NOT used as a primary source" lines above stand
-> as written.
+> as written. Licence basis for `lovtidend-avd1-2026.tar.bz2`: the owner rejected
+> ruling R2 for now (2026-11-06). A licence statement made for the endpoint is not
+> yet accepted as confirmation for that specific archive, so crosswalk records
+> resting on it stay `research_only` until further evidence is obtained. R3
+> (attribution wording) and R4 (regjeringen.no) remained blocked on that date.
+> Successor (2026-11-07, lovspor-notebook ADR-0021, on the owner's direction; the
+> ADR holds its own status): the R2 ruling stands, and `stated_for_endpoint` stays
+> unaccepted. The archive gets a separate dataset-level basis,
+> `stated_for_dataset`, as the current-year part of the NLOD 2.0 dataset "Norsk
+> Lovtidend, Avdeling I" (data.norge.no, stated by Lovdata on
+> `api.lovdata.no/om-api-tjenesten/`). R3 is resolved for that dataset's data in
+> the crosswalk manifest, by NLOD 2.0 §5 attribution with Lovdata brukervilkår 2.3
+> ("oppgir Lovdata som kilde"). R4 stays blocked; publication is not granted. The
+> schema stays `1.0.0-rc` (a widening of an unpublished pre-release; ADR-0021,
+> "Contract version").
 
 ## 4. Legal posture — Option A (conservative)
 
@@ -1011,6 +1026,38 @@ under it, so their approvals carry (§19). Two stubs that name a phone number mo
 **Rejected.** Relaxing the shared anchors for both channels: that is a new decision about
 what the observatory accepts at all, with a corpus-wide re-render behind it, for texts
 whose provenance the website cannot vouch for.
+
+## 21. Legal-time replay pilot from Norsk Lovtidend avd. I (proposed 2026-11-06, #744)
+
+**Status:** pilot built, ADR-0020 proposed in lovspor-notebook; nothing accepted, nothing served.
+
+A bounded package `src/lovspor/legaltime/` reconstructs an act's provisions at a legal date by
+applying the announced amendments from the `lovtidend-avd1` archives in legal-effective order:
+`document.py` (one parser for both the announcement and the consolidated dialect), `instructions.py`
+(a closed grammar of operation kinds; everything else is `unsupported` with its target named),
+`commencement.py` (dates only from the amending law's `dateInForce` header, its own commencement
+clause and the decisions citing it; `pending` for an undecided delegation, `unresolved` for
+evidence outside the grammar), `replay.py` (future and pending events listed, never applied; an
+inapplicable or undated operation marks its targets `unresolved`), `verify.py` (per-section verdicts
+against the consolidated member and a two-way check of Lovdata's amendment notes against the
+replay's events), `archive.py` and `run.py` (digest-pinned inputs, deterministic JSON report).
+
+What it does not do, by design (#744, ADR-0002/0003/0009/0011/0012): no `lovverk` write, no commit
+keyed on a legal date, no change to `get_law_at`, `recorded_at` or `valid_at`, no MCP tool, no
+public JSON. The evidence (`docs/research/legal-time-replay-pilot-2026-11-06.md`, data under
+`docs/research/data/legal-time-replay-2026-11-06-*.json`) is regenerated by
+`lovspor ops legal-time replay` from the pinned archives; `tests/integration/test_legaltime_pilot.py`
+reproduces it byte for byte wherever the archives are cached.
+
+Hardening round (2026-11-07, same PR): commencement decisions are folded in publication order with
+no precedence rule — agreement keeps `dated` and cites every source, disagreement or narrowing by a
+later `Delt` decision is `unresolved`, and an unreadable decision unsettles what it could reach
+instead of leaving it `pending`; a renumbering statement is applied only when the operation before
+it already caused exactly that shift (`absorbed_by`), otherwise `unresolved`; an act-level problem
+makes every section of that state `unresolved` in verification; term substitution is atomic. The
+four evidence files were regenerated and every difference traced: added `host_section`,
+`absorbed_by` and `act_level_problems` fields, renumberings now addressed to their section, and
+second proofs where a decision agrees with the law's own clause.
 
 ## How to use this document
 

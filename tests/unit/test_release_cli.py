@@ -1232,6 +1232,33 @@ class TestPublishCheck:
         assert result.exit_code == 0, result.output
         assert result.stdout.startswith(f"envelope ok: release {a[:12]}, release ok: corpus")
 
+    def test_previous_compares_the_corpus_trees_of_two_envelopes(
+        self, envelopes: tuple[Path, str, str]
+    ) -> None:
+        """b renamed a document that a published: every URL of a still answers (#747)."""
+        releases, a, b = envelopes
+
+        result = runner.invoke(
+            app, ["publish-check", str(releases / b), "--previous", str(releases / a)]
+        )
+
+        assert result.exit_code == 0, result.output
+        continuity = result.stdout.splitlines()[-1]
+        assert continuity.startswith("continuity ok: of the previous release's URLs")
+        assert " 0 moved (301)" not in continuity
+
+    def test_previous_refuses_going_back_to_a_release_that_lacks_a_served_url(
+        self, envelopes: tuple[Path, str, str]
+    ) -> None:
+        releases, a, b = envelopes
+
+        result = runner.invoke(
+            app, ["publish-check", str(releases / a), "--previous", str(releases / b)]
+        )
+
+        assert result.exit_code == 1
+        assert said("would answer 404", result.output)
+
     def test_still_checks_a_bare_corpus_tree(self, envelopes: tuple[Path, str, str]) -> None:
         releases, a, _ = envelopes
 

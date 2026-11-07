@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/publish/provision_history.py"
+symbol = "_blob"
+registered = "2026-11-06, PR #821, from run 42212300851"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+`subprocess.run` tests `check` for truth (`if check and retcode:`), so
+None and False both return the CompletedProcess without raising; the
+function then branches on returncode itself, unchanged. Same stdlib
+contract as the ops.unit_facts.run_command entry.
+"""

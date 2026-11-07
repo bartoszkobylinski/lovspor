@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/document.py"
+symbol = "_ledd_of"
+registered = "2026-11-07, PR #833, from the mutation artifact at commit 1e6eb12"
+mutation = """
+-            detached.tail = None
++            detached.tail = ""
+"""
+justification = """
+The copy's tail is cleared so that serialising it adds no text after the
+element. lxml serialises an element whose tail is the empty string exactly as
+one whose tail is None: in both cases no text follows the closing tag
+(`etree.tostring` writes the tail only when it is non-empty). The copy is used
+for nothing else. This argues from lxml's behaviour; the named test pins that
+an empty-string tail serialises like no tail.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_lxml_empty_tail_serialises_like_no_tail"

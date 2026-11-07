@@ -512,14 +512,15 @@ class Witness:
 class TestWhereRIsComparedFrom:
     """#317: Caddy hides the fragment by the path it imported it from, so the pair R is compared
     with is adapted at the active fragment's path once the fragment the reload reads is there;
-    ``.next`` is asked only for its content. The first entry is the triple's own D."""
+    ``.next`` is asked only for its content. A commit's first two entries are the triple's own
+    D, read once for the continuity check and once more just before staging (#820)."""
 
     def test_the_commit_adapts_the_candidate_where_the_reload_reads_it(self, live_a: Host) -> None:
         witness = Witness(live_a)
 
         commit_release(witness.plane(), live_a.b)
 
-        assert witness.seen == [("adapt", "A"), ("adapt", "B"), ("reload", "B")]
+        assert witness.seen == [("adapt", "A"), ("adapt", "A"), ("adapt", "B"), ("reload", "B")]
 
     def test_the_revert_adapts_the_old_fragment_once_it_is_back(self, live_a: Host) -> None:
         witness = Witness(live_a)
@@ -529,6 +530,7 @@ class TestWhereRIsComparedFrom:
             commit_release(witness.plane(), live_a.b)
 
         assert witness.seen == [
+            ("adapt", "A"),
             ("adapt", "A"),
             ("adapt", "B"),
             ("reload", "B"),

@@ -814,3 +814,23 @@ def test_assumption_os_link_follow_symlinks_none_does_not_follow(tmp_path: Path)
     assert (tmp_path / "none").is_symlink()
     assert (tmp_path / "false").is_symlink()
     assert not (tmp_path / "true").is_symlink()
+
+
+def test_lxml_shallow_copy_is_a_detached_subtree_copy() -> None:
+    """legaltime.document._ledd_of: copy.copy of an lxml element equals copy.deepcopy."""
+    root = etree.fromstring('<a><b x="1">t<c/>u</b>tail</a>')
+    child = root[0]
+    shallow, deep = copy.copy(child), copy.deepcopy(child)
+    assert shallow.getparent() is None and deep.getparent() is None
+    assert shallow.tail == deep.tail == "tail"  # both keep the tail; the caller clears it
+    shallow.tail, deep.tail = None, None
+    assert etree.tostring(shallow, encoding=str) == etree.tostring(deep, encoding=str)
+    assert shallow is not child and shallow[0] is not child[0]
+
+
+def test_lxml_empty_tail_serialises_like_no_tail() -> None:
+    """legaltime.document._ledd_of: an empty-string tail adds nothing after the element."""
+    with_none = etree.fromstring("<b>x<c/></b>")
+    with_empty = etree.fromstring("<b>x<c/></b>")
+    with_none.tail, with_empty.tail = None, ""
+    assert etree.tostring(with_none, encoding=str) == etree.tostring(with_empty, encoding=str)

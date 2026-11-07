@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/publish/provision_history.py"
+symbol = "parse_removed_pids"
+registered = "2026-11-06, PR #821, from run 42212300851"
+mutation = """
+-    in_hunk = False
++    in_hunk = None
+"""
+justification = """
+`in_hunk` is only ever read in boolean context (`not in_hunk`,
+`in_hunk and ...`) and is reassigned to a real bool on the first
+`diff --git` or `@@` line. None and False are both falsy, so every
+branch decision is identical on every input.
+"""

@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/commencement.py"
+symbol = "_stated_date"
+registered = "2026-11-07, PR #833, from the mutation artifact at commit 0bb7c4d4"
+mutation = """
+-    return parse_date(ACT_CITATION.sub("", sentence[phrase.end() :]))
++    return parse_date(ACT_CITATION.sub("XXXX", sentence[phrase.end() :]))
+"""
+justification = """
+`ACT_CITATION.sub(...)` removes every act citation ("lov 14. juni 2019 nr. 99")
+from the text after the commencement phrase before `parse_date` looks for the
+stated date. The replacement string only has to contain no date. "XXXX" has no
+digit, so `DATE` (a one- or two-digit day, a dot, a month name and a four-digit
+year) cannot match inside it, and `parse_date` finds exactly the same first
+date outside a citation as with "". Same argument as the registered
+`_informational` entry on the same pattern.
+"""
