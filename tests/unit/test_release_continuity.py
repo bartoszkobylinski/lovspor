@@ -188,6 +188,16 @@ class TestTheLiveReleaseMustBeIntact:
 
         _refused_untouched(live_a, live_a.b, "changed after it went live")
 
+    @pytest.mark.parametrize("payload", [b"{", b"[]"], ids=["not-json", "not-an-object"])
+    def test_live_site_facts_that_do_not_parse_are_refused(
+        self, live_a: Host, payload: bytes
+    ) -> None:
+        (live_a.releases / live_a.a / "site/site-facts.json").write_bytes(payload)
+
+        error = _refused_untouched(live_a, live_a.b, "is unreadable")
+
+        assert isinstance(error.__cause__, ValueError)
+
     def test_a_live_release_missing_its_corpus_is_refused(self, live_a: Host) -> None:
         shutil.rmtree(_corpus(live_a, live_a.a))
 

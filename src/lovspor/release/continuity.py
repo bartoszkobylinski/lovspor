@@ -67,7 +67,7 @@ def _require_intact(releases: Path, live: str) -> Path:
         )
     try:
         found = release_content_id(previous / CORPUS_DIR, previous / SITE_DIR)
-    except OSError as error:
+    except (OSError, ValueError) as error:
         raise ContinuityRefusedError(
             f"the live release {live[:12]} is unreadable: {error}; nothing is committed"
         ) from error
