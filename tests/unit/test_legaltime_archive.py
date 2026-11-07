@@ -1,5 +1,6 @@
 """Evidence collection over a synthetic archive: indexing, member selection, pins."""
 
+import bz2
 import io
 import json
 import tarfile
@@ -282,3 +283,19 @@ def test_replacing_archive_bytes_invalidates_cached_member_records(
     cache = archive.parent / f"{archive.name}.{INDEX_VERSION}.json"
     assert json.loads(cache.read_text(encoding="utf-8")) == rebuilt.model_dump(mode="json")
     assert index_archive(archive) == rebuilt
+
+
+def test_incomplete_member_is_an_input_error_without_a_partial_index(tmp_path: Path) -> None:
+    """An interrupted member must not become a digest-pinned evidence index."""
+    body = (FIXTURES / "enacting.xml").read_bytes()
+    member = tarfile.TarInfo("lti/enacting.xml")
+    member.size = len(body)
+    archive = tmp_path / "partial.tar.bz2"
+    archive.write_bytes(bz2.compress(member.tobuf() + body[: len(body) // 2]))
+    cache_dir = tmp_path / "index"
+
+    with pytest.raises(LegalTimeInputError, match="unreadable archive partial.tar.bz2"):
+        index_archive(archive, cache_dir)
+
+    assert not cache_dir.exists()
+    assert not (tmp_path / "lti").exists()
