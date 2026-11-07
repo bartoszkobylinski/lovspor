@@ -144,6 +144,7 @@ class LocalEntryStore:
         return stored
 
     def _existing_dir(self, parts: tuple[str, ...]) -> Path | None:
+        check_private_dir(self._root)  # it may have been swapped since open()
         directory = self._root
         for part in parts:
             directory = directory / part
@@ -153,6 +154,7 @@ class LocalEntryStore:
         return directory
 
     def _ensure_dir(self, parts: tuple[str, ...]) -> Path:
+        check_private_dir(self._root)  # it may have been swapped since open()
         directory = self._root
         for part in parts:
             directory = directory / part
