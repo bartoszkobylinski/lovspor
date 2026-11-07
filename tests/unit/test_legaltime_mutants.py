@@ -1048,3 +1048,26 @@ def test_named_section_needs_exactly_one_section_and_pairs_need_both_sides() -> 
     assert lopsided is not None and instructions._pairs(lopsided) == ()
     with pytest.raises(ValueError, match="not a section label: 'kap 1'"):
         section_key_of("kap 1")
+
+
+def test_replace_heading_takes_the_title_node_else_the_ledd_text_and_refuses_otherwise() -> None:
+    w = _working()
+    titled = _op("replace_heading", Address(section="§1"), ("ikke tittel",), title="Ny tittel")
+    assert w.apply_replace_heading(titled) is None
+    assert w.map["§1"].heading == "Ny tittel"
+    from_ledd = _op("replace_heading", Address(section="§2"), ("Fra ledd",))
+    assert w.apply_replace_heading(from_ledd) is None
+    assert w.map["§2"].heading == "Fra ledd"
+    assert [item.text for item in w.map["§2"].ledd] == [
+        "Følgende gjelder: bokstav a bokstav b Bokstav b gjelder ikke private."
+    ]
+    assert w.apply_replace_heading(_op("replace_heading", Address(section="§3"))) == (
+        "target provision missing or no heading text"
+    )
+    assert w.map["§3"].heading == "Ikrafttredelse"
+    assert w.apply_replace_heading(_op("replace_heading", Address(section="§9"), ("x",))) == (
+        "target provision missing or no heading text"
+    )
+    state = _run([_event(titled)])
+    assert state.applied == ("x#I:0.0",)
+    assert next(p for p in state.provisions if p.key == "§1").heading == "Ny tittel"
