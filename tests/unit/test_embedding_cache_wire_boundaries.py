@@ -1,7 +1,10 @@
 """Cache design §5.3: exact payload sizes and retention by elapsed time."""
 
+import struct
+from dataclasses import replace
 from datetime import timedelta, timezone
 
+import numpy as np
 import pytest
 
 from lovspor.embeddings.cache_format import decode_entry, encode_entry
@@ -55,3 +58,34 @@ def test_future_timestamp_is_refused_independently_of_offset(offset_hours: int) 
     data = _with_meta(encode_entry(entry), created_at=created.isoformat())
     with pytest.raises(EmbeddingCacheError, match="future"):
         decode_entry(data, entry.key, _policy())
+
+
+def test_unit_checkpoint_preserves_finite_float32_bits_in_little_endian_row_order() -> None:
+    """Design §4: unit payloads retain float32 values before document quantization."""
+    # Positive/negative zero, subnormals, smallest normals and largest finite
+    # values. Numeric equality alone would miss losing the sign of zero.
+    payload = struct.pack(
+        "<8I",
+        0x00000000,
+        0x80000000,
+        0x00000001,
+        0x80000001,
+        0x00800000,
+        0x80800000,
+        0x7F7FFFFF,
+        0xFF7FFFFF,
+    )
+    vectors = np.frombuffer(payload, dtype="<f4").reshape(2, 4)
+    assert np.isfinite(vectors).all()
+    entry = replace(_unit_entry(), vectors=vectors)
+
+    wire = encode_entry(entry)
+    (meta_length,) = struct.unpack(">I", wire[4:8])
+    assert wire[8 + meta_length : -32] == payload
+
+    decoded = decode_entry(wire, entry.key, _policy())
+    assert decoded.vectors.shape == (2, 4)
+    assert decoded.vectors.dtype == np.dtype("<f4")
+    assert decoded.vectors.tobytes() == payload
+    assert decoded.scale is None
+    assert encode_entry(decoded) == wire
