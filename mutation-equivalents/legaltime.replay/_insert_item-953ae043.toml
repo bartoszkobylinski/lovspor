@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/replay.py"
+symbol = "_insert_item"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit 07cc6a24"
+mutation = """
+-    anchors = _items(root, before) if before else []
++    anchors = _items(root, before) if (before) or True else []
+"""
+justification = """
+When `before` is None the mutant calls `_items(root, None)`. `_items` compares each
+item's stripped `data-name` (a str) with the label; a str never equals None, so the
+result is [] — the same as the original's literal []. When `before` is set both
+versions call `_items(root, before)`.
+"""

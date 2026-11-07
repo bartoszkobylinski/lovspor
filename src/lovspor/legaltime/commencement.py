@@ -295,8 +295,10 @@ class _ClauseReading:
         self.failure: Timing | None = None
 
     def read(self, document: Document, sentence: str) -> None:
-        if _INTRO.match(sentence) or classify(sentence)[0] != "unsupported":
-            return  # an amendment instruction sharing the commencement provision, not a clause
+        if _INTRO.match(sentence):
+            return  # an amendment intro sharing the commencement provision, not a clause
+        if classify(sentence)[0] != "unsupported":
+            return  # an amendment instruction there is not a clause either
         found = _default_timing(document, sentence)
         if found is not None and self.default is not None:
             self.failure = _unresolved(document, "two default commencement clauses", sentence)
@@ -387,8 +389,7 @@ def _block_for(decision: Document, law: str) -> _Block | None:
     if titled:
         return None  # every titled block is another law's
     body = [sentence for _, sentences in blocks for sentence in sentences]
-    title = titled[0][0] if titled else decision.header.title
-    return _Block(title=title, sentences=tuple(body), shared=False)
+    return _Block(title=decision.header.title, sentences=tuple(body), shared=False)
 
 
 def _own_date(decision: Document) -> date | None:

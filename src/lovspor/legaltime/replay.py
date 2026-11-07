@@ -396,6 +396,8 @@ def _substitute(provision: _Provision, ledd: frozenset[int], terms: tuple[str, s
 
 
 _LETTERS = "abcdefghijklmnopqrstuvwxyzæøå"
+# Item edits keep the space between two inline elements; the hashing default would fuse the words.
+_FRAGMENT_PARSER = safe_parser(remove_blank_text=False)
 
 
 def _previous_label(label: str) -> str | None:
@@ -412,7 +414,9 @@ def _items(root: etree._Element, label: str) -> list[etree._Element]:
 
 def _insert_item(xml: str, label: str, payload: str) -> Ledd | str:
     """A new ``<li>`` after its predecessor in the ledd's list, in Lovdata's item markup."""
-    root = etree.fromstring(f"<article>{xml}</article>", parser=safe_parser())
+    root = _ledd_root(xml)
+    if root is None:
+        return "ledd markup does not parse"
     if _items(root, label):
         return f"item {label} is already in the ledd"
     before = _previous_label(label)
@@ -438,13 +442,22 @@ def _item_element(label: str, payload: str) -> etree._Element | str:
         f'<article class="legalP">{payload}</article></article></li>'
     )
     try:
-        return etree.fromstring(markup, parser=safe_parser())
+        return etree.fromstring(markup, parser=_FRAGMENT_PARSER)
     except etree.XMLSyntaxError:
         return "item payload markup does not parse"
 
 
+def _ledd_root(xml: str) -> etree._Element | None:
+    try:
+        return etree.fromstring(f"<article>{xml}</article>", parser=_FRAGMENT_PARSER)
+    except etree.XMLSyntaxError:
+        return None
+
+
 def _remove_item(xml: str, label: str) -> Ledd | str:
-    root = etree.fromstring(f"<article>{xml}</article>", parser=safe_parser())
+    root = _ledd_root(xml)
+    if root is None:
+        return "ledd markup does not parse"
     found = _items(root, label)
     if len(found) != 1:
         return f"bokstav {label} matched {len(found)} list items"

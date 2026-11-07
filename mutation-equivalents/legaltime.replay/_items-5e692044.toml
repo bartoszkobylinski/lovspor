@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/replay.py"
+symbol = "_items"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit 07cc6a24"
+mutation = """
+-    return [li for li in root.iter("li") if (li.get("data-name") or "").rstrip(".)") == label]
++    return [li for li in root.iter("li") if (li.get("data-name") or "XXXX").rstrip(".)") == label]
+"""
+justification = """
+The fallback is only used for an `<li>` without `data-name`. `label` is always a
+single item label (a letter or a number), never "XXXX" and never "", so neither
+fallback can equal it: such an item is excluded in both versions.
+"""

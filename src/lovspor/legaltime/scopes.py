@@ -172,7 +172,8 @@ def _part_scopes(match: re.Match[str], sentence: str, own: date | None) -> list[
     if when is None:
         return None
     parts = _part_labels(match.group("parts"))
-    sections = [section_key_of(m) for m in re.findall(_SEC, match.group("secs") or "")]
+    listed = match.group("secs")
+    sections = [section_key_of(m) for m in re.findall(_SEC, listed)] if listed else []
     if sections and len(parts) != 1:
         return None  # sections listed under several parts: which part owns which is unstated
     if not sections:

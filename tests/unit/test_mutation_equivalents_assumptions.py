@@ -807,3 +807,17 @@ def test_lxml_empty_tail_serialises_like_no_tail() -> None:
     with_empty = etree.fromstring("<b>x<c/></b>")
     with_none.tail, with_empty.tail = None, ""
     assert etree.tostring(with_none, encoding=str) == etree.tostring(with_empty, encoding=str)
+
+
+def test_lxml_fragment_without_a_doctype_resolves_no_entity_with_either_parser() -> None:
+    """A fragment wrapped in ``<article>`` cannot carry a DTD, so a custom entity is an error for
+    the hardened parser and for lxml's default parser alike; the only settings that differ between
+    them (entity resolution, network access, tree size) are unreachable from such a fragment."""
+    fragment = "<article><li>&e;</li></article>"
+    for parser in (safe_parser(remove_blank_text=False), None):
+        with pytest.raises(etree.XMLSyntaxError):
+            etree.fromstring(fragment, parser=parser)
+    plain = "<article><li>a &amp; b</li></article>"
+    assert etree.tostring(etree.fromstring(plain, parser=None)) == etree.tostring(
+        etree.fromstring(plain, parser=safe_parser(remove_blank_text=False))
+    )

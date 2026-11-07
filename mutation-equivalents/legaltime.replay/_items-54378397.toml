@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/replay.py"
+symbol = "_items"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit 07cc6a24"
+mutation = """
+-    return [li for li in root.iter("li") if (li.get("data-name") or "").rstrip(".)") == label]
++    return [li for li in root.iter("li") if (li.get("data-name") or "").rstrip("XX.)XX") == label]
+"""
+justification = """
+`str.rstrip` takes a set of characters; "XX.)XX" is the set {X, ., )}. Lovdata item
+names are a label followed by "." or ")" and never end in "X", so stripping the extra
+character removes nothing more, and the comparison with `label` is unchanged.
+"""
