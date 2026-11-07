@@ -17,12 +17,14 @@ from lovspor.embeddings.model import OpenAIEmbedder
 
 
 @pytest.mark.parametrize(("batch_size", "token_budget"), [(2, 100), (128, 8)])
+@pytest.mark.parametrize("failure", ["503", "400", "timeout"])
 def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     httpx_mock: HTTPXMock,
     batch_size: int,
     token_budget: int,
+    failure: str,
 ) -> None:
     """Both batching limits act after truncation; completed HTTP work is reused."""
     monkeypatch.setattr("lovspor.embeddings.model._MAX_INPUT_TOKENS", 4)
@@ -36,7 +38,9 @@ def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
         requests.append(batch)
         assert body["dimensions"] == 3
         if fail_second and len(requests) == 2:
-            return httpx.Response(503)
+            if failure == "timeout":
+                raise httpx.ReadTimeout("response interrupted", request=request)
+            return httpx.Response(int(failure))
         # Batch-dependent, unnormalised and out of order: exercise the real
         # adapter's alignment and normalisation before checkpointing float32.
         return httpx.Response(
@@ -68,10 +72,13 @@ def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
         inner = provider()
         return CachingEmbedder(inner, LocalEntryStore.open(root, (), policy), inner.space_id)
 
-    with pytest.raises(httpx.HTTPStatusError):
+    expected_error = httpx.ReadTimeout if failure == "timeout" else httpx.HTTPStatusError
+    with pytest.raises(expected_error):
         quantized_document_vectors(cached(), inputs, input_hash)
     assert requests == expected_requests
-    assert len(list(root.rglob("*.lsec"))) == 1
+    checkpoints = {path: path.read_bytes() for path in root.rglob("*.lsec")}
+    assert len(checkpoints) == 1
+    assert all("units" in path.parts for path in checkpoints)
 
     fail_second = False
     resumed = cached()
@@ -79,6 +86,7 @@ def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
     assert requests == [*expected_requests, expected_requests[1]]
     assert resumed.progress.units_cached == 1
     assert resumed.progress.units_paid == 1
+    assert {path: path.read_bytes() for path in checkpoints} == checkpoints
     np.testing.assert_array_equal(vectors, expected_vectors)
     assert scale == expected_scale
 
