@@ -380,9 +380,9 @@ def test_temporary_already_removed_after_publishing_does_not_fail_the_write(
     once the entry is linked in place is not an error: the entry is durable."""
     real_link = os.link
 
-    def link_then_lose_temporary(src: Path, dst: Path, **kwargs: bool) -> None:
-        real_link(src, dst, **kwargs)
-        Path(src).unlink()
+    def link_then_lose_temporary(src: str, dst: str, **kwargs: int | bool) -> None:
+        real_link(src, dst, **kwargs)  # type: ignore[arg-type]
+        os.unlink(src, dir_fd=kwargs["src_dir_fd"])  # type: ignore[arg-type]
 
     store = _open(cache_root)
     monkeypatch.setattr(os, "link", link_then_lose_temporary)
