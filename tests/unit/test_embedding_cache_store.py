@@ -480,3 +480,42 @@ def test_hardlinked_entry_under_another_key_is_refused(cache_root: Path) -> None
     os.link(source, target)
     with pytest.raises(EmbeddingCacheError):
         store.get(other)
+
+
+@pytest.mark.parametrize("depth", [1, 2, 3, 4])
+@pytest.mark.parametrize("operation", ["get", "put"])
+@pytest.mark.parametrize("unsafe", ["symlink", "permissions"])
+def test_every_unit_directory_is_checked_before_access(
+    cache_root: Path, depth: int, operation: str, unsafe: str
+) -> None:
+    """Design §5.1 refuses symlinks and foreign permissions at every level."""
+    store = _open(cache_root)
+    entry = _unit()
+    store.put(entry)
+    target = next(cache_root.rglob("*.lsec"))
+    original = target.read_bytes()
+    parts = ("schema-1", ESI, "units", INPUT_HASH)
+    directory = cache_root.joinpath(*parts[:depth])
+    moved = cache_root.parent / "moved-directory"
+    if unsafe == "symlink":
+        directory.rename(moved)
+        directory.symlink_to(moved, target_is_directory=True)
+        preserved = moved.joinpath(*parts[depth:], target.name)
+    else:
+        directory.chmod(0o755)
+        preserved = target
+
+    reason = "symlink" if unsafe == "symlink" else "owner-only"
+    with pytest.raises(EmbeddingCacheError, match=reason):
+        if operation == "get":
+            store.get(entry.key)
+        else:
+            store.put(replace(entry, vectors=-entry.vectors))
+
+    assert preserved.read_bytes() == original
+    if unsafe == "permissions":
+        assert _mode(directory) == 0o755
+    else:
+        assert directory.is_symlink()
+        assert directory.readlink() == moved
+    assert sorted(path.name for path in preserved.parent.iterdir()) == [target.name]
