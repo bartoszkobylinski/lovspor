@@ -8,8 +8,13 @@ Layout under the configured root, every directory ``0700`` and every entry
 
 Every path component is validated hex or an integer (``EntryKey``), never
 document text, so there is nothing to traverse with. Symlinks are refused at
-every level: the root by ``lstat``, directories by ``lstat``, entries by
-``O_NOFOLLOW``.
+every level. Reads and writes never resolve a path twice: the root is opened
+with ``O_DIRECTORY | O_NOFOLLOW`` and checked through its descriptor, every
+directory below it is opened (and created) relative to its parent's
+descriptor, and the entry, its temporary and the link are named relative to
+the last one. A root or directory swapped for a symlink after its check
+therefore cannot redirect the operation (#825 review): the store keeps using
+the directory it checked.
 
 A write is: a unique temporary file in the entry's own directory
 (``O_EXCL | O_NOFOLLOW``), ``fsync``, ``os.link`` to the final name, unlink of
@@ -60,12 +65,32 @@ def entry_location(key: EntryKey) -> tuple[tuple[str, ...], str]:
 
 def check_private_dir(path: Path) -> None:
     """Refuse a symlink, a non-directory, another owner, or group/other bits."""
-    info = path.lstat()
+    _check_dir_info(path.lstat(), path.name)
+
+
+def _check_dir_info(info: os.stat_result, name: str) -> None:
     if stat.S_ISLNK(info.st_mode):
-        raise EmbeddingCacheError(f"embedding cache refuses a symlink: {path.name}")
+        raise EmbeddingCacheError(f"embedding cache refuses a symlink: {name}")
     if not stat.S_ISDIR(info.st_mode):
-        raise EmbeddingCacheError(f"embedding cache path is not a directory: {path.name}")
-    _check_owner_only(info, path.name)
+        raise EmbeddingCacheError(f"embedding cache path is not a directory: {name}")
+    _check_owner_only(info, name)
+
+
+def _open_private_dir(name: Path | str, parent: int | None) -> int:
+    """A descriptor for a private directory, opened without following a symlink."""
+    try:
+        handle = os.open(name, _DIR_FLAGS, dir_fd=parent)
+    except OSError as exc:
+        if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
+            raise
+        _check_dir_info(os.stat(name, dir_fd=parent, follow_symlinks=False), Path(name).name)
+        raise EmbeddingCacheError(f"embedding cache refuses {Path(name).name}") from exc
+    try:
+        _check_owner_only(os.fstat(handle), Path(name).name)
+    except EmbeddingCacheError:
+        os.close(handle)
+        raise
+    return handle
 
 
 def _check_owner_only(info: os.stat_result, name: str) -> None:
@@ -120,10 +145,13 @@ class LocalEntryStore:
     def get(self, key: EntryKey) -> CachedVectors | None:
         """The validated entry for ``key``, ``None`` if absent; refuses a bad one."""
         parts, name = entry_location(key)
-        directory = self._existing_dir(parts)
-        if directory is None:
+        handle = self._existing_dir(parts)
+        if handle is None:
             return None
-        data = read_entry_bytes(directory / name)
+        try:
+            data = read_entry_bytes(Path(name), handle)
+        finally:
+            os.close(handle)
         return None if data is None else decode_entry(data, key, self._policy)
 
     def put(self, entry: CachedVectors) -> CachedVectors:
@@ -131,8 +159,11 @@ class LocalEntryStore:
         parts, name = entry_location(entry.key)
         payload = encode_entry(entry)
         try:
-            directory = self._ensure_dir(parts)
-            _publish(directory, directory / name, payload)
+            handle = self._descend(parts, create=True)
+            try:
+                _publish(handle, name, payload)
+            finally:
+                os.close(handle)
         except FileExistsError:
             return self._existing(entry.key)
         except OSError as exc:
@@ -147,31 +178,36 @@ class LocalEntryStore:
             raise EmbeddingCacheStorageError(f"entry vanished after a write race ({key.label()})")
         return stored
 
-    def _existing_dir(self, parts: tuple[str, ...]) -> Path | None:
-        check_private_dir(self._root)  # it may have been swapped since open()
-        directory = self._root
+    def _existing_dir(self, parts: tuple[str, ...]) -> int | None:
+        handle = _open_private_dir(self._root, None)  # it may have been swapped since open()
+        try:
+            return self._descend(parts, create=False, handle=handle)
+        except FileNotFoundError:
+            return None
+
+    def _descend(self, parts: tuple[str, ...], create: bool, handle: int | None = None) -> int:
+        """Walk ``parts`` below the root by descriptor; the caller closes the result."""
+        if handle is None:
+            handle = _open_private_dir(self._root, None)  # it may have been swapped since open()
         for part in parts:
-            directory = directory / part
-            if not os.path.lexists(directory):
-                return None
-            check_private_dir(directory)
-        return directory
-
-    def _ensure_dir(self, parts: tuple[str, ...]) -> Path:
-        check_private_dir(self._root)  # it may have been swapped since open()
-        directory = self._root
-        for part in parts:
-            directory = directory / part
-            with contextlib.suppress(FileExistsError):
-                directory.mkdir(mode=_DIR_MODE)
-            check_private_dir(directory)
-        return directory
+            try:
+                if create:
+                    with contextlib.suppress(FileExistsError):
+                        os.mkdir(part, _DIR_MODE, dir_fd=handle)
+                child = _open_private_dir(part, handle)
+            finally:
+                os.close(handle)
+            handle = child
+        return handle
 
 
-def read_entry_bytes(path: Path) -> bytes | None:
-    """An entry's bytes through the checks serving uses; None if absent."""
+def read_entry_bytes(path: Path, directory: int | None = None) -> bytes | None:
+    """An entry's bytes through the checks serving uses; None if absent.
+
+    ``path`` is relative to the ``directory`` descriptor when one is given.
+    """
     try:
-        descriptor = os.open(path, _READ_FLAGS)
+        descriptor = os.open(path, _READ_FLAGS, dir_fd=directory)
     except FileNotFoundError:
         return None
     except OSError as exc:
@@ -190,35 +226,35 @@ def read_entry_bytes(path: Path) -> bytes | None:
         return handle.read()
 
 
-def _publish(directory: Path, final: Path, payload: bytes) -> None:
-    """Write, fsync, link into place (never replacing), fsync the directory."""
-    staged = directory / f".{final.name}.tmp.{os.getpid()}.{secrets.token_hex()}"
-    descriptor = os.open(staged, _WRITE_FLAGS, _FILE_MODE)
+def _publish(directory: int, name: str, payload: bytes) -> None:
+    """Write, fsync, link into place (never replacing), fsync the directory.
+
+    Every name is relative to the ``directory`` descriptor.
+    """
+    staged = f".{name}.tmp.{os.getpid()}.{secrets.token_hex()}"
+    descriptor = os.open(staged, _WRITE_FLAGS, _FILE_MODE, dir_fd=directory)
     try:
         with os.fdopen(descriptor, "wb") as handle:
             os.fchmod(handle.fileno(), _FILE_MODE)
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        _link_in(directory, staged.name, final.name)
+        _link_in(directory, staged, name)
     finally:
-        staged.unlink(missing_ok=True)
-    fsync_dir(directory)
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(staged, dir_fd=directory)
+    os.fsync(directory)
 
 
-def _link_in(directory: Path, source: str, target: str) -> None:
-    """Hard-link ``source`` to ``target`` in ``directory``; never follow a symlink.
+def _link_in(handle: int, source: str, target: str) -> None:
+    """Hard-link ``source`` to ``target`` in the ``handle`` directory; never follow a symlink.
 
     Given directory descriptors, CPython calls linkat(2) on every platform and
     version, so ``follow_symlinks=False`` links the name itself everywhere.
     Without them, CPython before 3.14 on Linux calls link(2) and ignores the
     flag, and 3.14 follows by default (#825).
     """
-    handle = os.open(directory, _DIR_FLAGS)
-    try:
-        os.link(source, target, src_dir_fd=handle, dst_dir_fd=handle, follow_symlinks=False)
-    finally:
-        os.close(handle)
+    os.link(source, target, src_dir_fd=handle, dst_dir_fd=handle, follow_symlinks=False)
 
 
 def fsync_dir(directory: Path) -> None:
