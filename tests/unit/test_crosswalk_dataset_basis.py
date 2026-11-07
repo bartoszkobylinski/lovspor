@@ -19,8 +19,9 @@ from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.canonical import parse_records
 from lovspor.crosswalk.contract import schema_problems
 from lovspor.crosswalk.manifest import ATTRIBUTION, BLOCKERS, SOURCE_TERMS
-from lovspor.crosswalk.release import Approval, accepted_bases, ineligibility
+from lovspor.crosswalk.release import Approval, accepted_bases, ineligibility, promote
 from lovspor.crosswalk.rights import licence_basis, within_dataset
+from tests.unit import crosswalk_support
 from tests.unit.crosswalk_support import PRODUCER, archive_pin, attested, make_capture
 
 OLD = "lovtidend-avd1-2001-2025.tar.bz2"
@@ -103,6 +104,53 @@ def test_the_endpoint_basis_stays_rejected(record: dict[str, Any]) -> None:
 def test_a_member_outside_the_avd1_year_is_refused(record: dict[str, Any], year: str) -> None:
     moved = _on_current(record, year)
     assert ineligibility(moved, accepted_bases(_approval("approved"))) == OUTSIDE
+
+
+@pytest.mark.parametrize("role", ["law_identity", "law_decision_pair"])
+def test_every_cited_member_must_be_inside_the_dataset(record: dict[str, Any], role: str) -> None:
+    """The producer contract requires every cited member to lie in the archive's year."""
+    moved = _on_current(record)
+    for item in moved["evidence"]:
+        if item["role"] == role:
+            item["upstream_id"] = item["upstream_id"].replace("lti/2026/", "lti/2025/")
+    assert ineligibility(moved, accepted_bases(_approval("rejected"))) == OUTSIDE
+
+
+def test_captured_current_year_record_is_promoted_under_rejected_r2(
+    tmp_path: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise dataset rights through capture replay and append-only promotion."""
+    archives = crosswalk_support.scenario_archives()
+    archives[CURRENT] = crosswalk_support.tar_bytes(
+        {
+            "lti/2026/nl-20260101-001.xml": crosswalk_support.document(
+                "LOV-2026-01-01-1", "Lovvedtak 85 (2021-2022)"
+            )
+        }
+    )
+    monkeypatch.setattr(crosswalk_support, "scenario_archives", lambda: archives)
+    cache = make_capture(tmp_path, httpx_mock)
+    data = build(cache, BuildOptions(producer_commit=PRODUCER))
+    original = parse_records(data)
+    current = next(r for r in original if r["amending_lov_id"] == "LOV-2026-01-01-1")
+    assert current["status"] == "attested"
+    assert current["release_state"] == "research_only"
+    approval = _approval("rejected").model_copy(update={"input_sha256": sha256(data).hexdigest()})
+
+    promoted, counts = promote(data, approval, cache)
+
+    records = parse_records(promoted)
+    assert [r for r in records if r["record_revision"] == 1] == original
+    assert len(records) == len(original) + 4
+    revisions = [r for r in records if r["amending_lov_id"] == current["amending_lov_id"]]
+    assert revisions == [
+        current,
+        {**current, "record_revision": 2, "release_state": "release_candidate"},
+    ]
+    assert counts["promoted"] == 4
+    again, second_counts = promote(data, approval, cache)
+    assert again == promoted
+    assert second_counts == counts
 
 
 @pytest.mark.parametrize(
