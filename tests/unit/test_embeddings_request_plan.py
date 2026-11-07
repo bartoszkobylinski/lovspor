@@ -50,6 +50,16 @@ def test_zero_token_inputs_still_count_toward_request_item_limit() -> None:
     assert request_bounds([0] * 7, batch_size=3) == [(0, 3), (3, 6), (6, 7)]
 
 
+def test_item_and_token_limits_reset_independently(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A token split must reset the item count and an item split the token sum."""
+    monkeypatch.setattr("lovspor.embeddings.model._MAX_REQUEST_TOKENS", 10)
+    costs = [6, 5, 0, 0, 10, 0]
+    bounds = request_bounds(costs, batch_size=3)
+    assert bounds == [(0, 1), (1, 4), (4, 6)]
+    assert [i for start, end in bounds for i in range(start, end)] == list(range(len(costs)))
+    assert all(end - start <= 3 and sum(costs[start:end]) <= 10 for start, end in bounds)
+
+
 @pytest.mark.parametrize("size", [1, 2, 5])
 def test_embedder_plan_matches_its_own_batches(size: int) -> None:
     model = OpenAIEmbedder(api_key="sk-test", dim=3, batch_size=size)
@@ -94,3 +104,19 @@ def test_plan_matches_sent_requests_after_truncation_and_token_splitting(
     assert bounds == [(0, 31), (31, 33)]
     assert sent == [[truncated] * 31, [truncated, "slutt"]]
     assert vectors.shape == (33, 3)
+
+
+@pytest.mark.parametrize(
+    ("costs", "batch_size", "expected"),
+    [
+        ([125_000, 125_000, 0, 1], 128, [(0, 3), (3, 4)]),
+        ([125_000, 125_000, 0, 1], 2, [(0, 2), (2, 4)]),
+        ([125_000, 125_000, 125_000, 125_000, 1], 2, [(0, 2), (2, 4), (4, 5)]),
+    ],
+    ids=["zero-cost-at-token-cap", "item-cap-at-token-cap", "repeated-simultaneous-caps"],
+)
+def test_exact_request_limits_preserve_zero_cost_inputs_and_reset_both_budgets(
+    costs: list[int], batch_size: int, expected: list[tuple[int, int]]
+) -> None:
+    """Request planning keeps every input while enforcing both documented caps."""
+    assert request_bounds(costs, batch_size=batch_size) == expected
