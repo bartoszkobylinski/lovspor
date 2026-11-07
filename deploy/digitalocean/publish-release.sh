@@ -13,9 +13,10 @@
 #   build    (lovspor)  probe, then the seven steps under .build-<random>/,
 #                       renamed to <release_content_id>/ once finalized; prints
 #                       the id (the live one when the release_key is unchanged)
-#   commit   (root)     stage the release's fragment, validate, commit it,
-#                       reload Caddy, then write the marker; a no-op for the id
-#                       that is already live
+#   commit   (root)     refuse a release that would break a URL the live
+#                       release serves (URL continuity, #820), then stage the
+#                       release's fragment, validate, commit it, reload Caddy,
+#                       then write the marker; a no-op for the id already live
 #   prune    (root)     only when reconciled; never R, D, M.active or M.previous
 #
 # Nothing here ever writes into a tree Caddy is serving, and no symlink exists.

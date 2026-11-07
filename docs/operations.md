@@ -247,9 +247,9 @@ commands and the droplet procedure are in
 ```bash
 uv run lovspor release live                      # the reconciled live id, or 'none'
 uv run lovspor release build --corpus <clone> --live <id|none>   # probe + seven steps; prints the id
-uv run lovspor release commit <id>               # stage, validate, commit the fragment, reload, mark
+uv run lovspor release commit <id>               # URL continuity vs the live release (#820), then stage, validate, commit, reload, mark
 uv run lovspor release reconcile [--complete|--abandon]          # name and resolve a crash state
-uv run lovspor release rollback                  # the marker's previous, same transaction
+uv run lovspor release rollback                  # the marker's previous, same transaction; not judged by URL continuity
 uv run lovspor release prune                     # only when reconciled; never R, D, M or previous
 uv run lovspor release rehearse <id> --unit <unit> …  # walk that migration on a SECOND instance first
 uv run lovspor release rehearse-urls <id>        # …and dry-run what the two configurations ANSWER
