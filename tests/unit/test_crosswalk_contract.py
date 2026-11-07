@@ -288,7 +288,8 @@ def test_release_candidate_refuses_an_inferred_licence_basis() -> None:
 
 @pytest.mark.parametrize("release_state", ["research_only", "release_candidate"])
 @pytest.mark.parametrize(
-    "basis", ["stated_for_file", "stated_for_endpoint", "inferred_same_dataset"]
+    "basis",
+    ["stated_for_file", "stated_for_dataset", "stated_for_endpoint", "inferred_same_dataset"],
 )
 def test_licence_eligibility_checks_every_pin(release_state: str, basis: str) -> None:
     """The RC restriction applies to every archive, including a second pin."""

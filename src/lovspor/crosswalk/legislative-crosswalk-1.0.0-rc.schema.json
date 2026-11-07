@@ -409,9 +409,10 @@
           "const": "NLOD-2.0"
         },
         "licence_basis": {
-          "description": "stated_for_file: a Lovdata or data.norge.no statement names this file under NLOD 2.0. stated_for_endpoint: Lovdata's OpenAPI document (https://api.lovdata.no/swagger/api.json) states NLOD 2.0 for the 'Public data' tag, which covers /v1/publicData/get/{filename} for every file it serves. inferred_same_dataset: only the dataset description matches; not sufficient for a release candidate.",
+          "description": "stated_for_file: a Lovdata or data.norge.no statement names this file under NLOD 2.0. stated_for_dataset: Lovdata states NLOD 2.0 for the data.norge.no dataset this file is a part of, and the file is shown to be that part (lovspor-notebook ADR-0021). stated_for_endpoint: Lovdata's OpenAPI document (https://api.lovdata.no/swagger/api.json) states NLOD 2.0 for the 'Public data' tag, which covers /v1/publicData/get/{filename} for every file it serves. inferred_same_dataset: only the dataset description matches; not sufficient for a release candidate.",
           "enum": [
             "stated_for_file",
+            "stated_for_dataset",
             "stated_for_endpoint",
             "inferred_same_dataset"
           ]
@@ -593,6 +594,7 @@
                     "licence_basis": {
                       "enum": [
                         "stated_for_file",
+                        "stated_for_dataset",
                         "stated_for_endpoint"
                       ]
                     }

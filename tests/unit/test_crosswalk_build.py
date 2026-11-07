@@ -189,7 +189,7 @@ def test_archive_pins_carry_the_recorded_licence_basis(capture_dir: Path) -> Non
     pins = archive_pins(load_manifest(capture_dir))
     assert [(p["source_url"].rsplit("/", 1)[1], p["licence_basis"]) for p in pins] == [
         ("lovtidend-avd1-2001-2025.tar.bz2", "stated_for_file"),
-        ("lovtidend-avd1-2026.tar.bz2", "stated_for_endpoint"),
+        ("lovtidend-avd1-2026.tar.bz2", "stated_for_dataset"),
     ]
     assert licence_basis("lovtidend-avd1-2027.tar.bz2") == "inferred_same_dataset"
 
