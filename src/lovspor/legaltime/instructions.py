@@ -227,16 +227,18 @@ class _Reader:
     def _read_part(self, part: tuple[str, str], nodes: list[Node]) -> None:
         """``part`` is (printed label, unique tag prefix)."""
         self.substitution, self.pending_item_act, self.act = None, None, None
-        seen_instruction, index = False, 0
-        while index < len(nodes):
-            node = nodes[index]
+        seen_instruction, skip_until = False, 0
+        for index, node in enumerate(nodes):  # a for loop: no index arithmetic can stall it
+            if index < skip_until:
+                continue  # consumed as the payload of the instruction before it
             if _instruction_like(node):
                 end = _next_instruction(nodes, index + 1)
                 consumed = self._paragraph(part, index, node, tuple(nodes[index + 1 : end]))
-                seen_instruction, index = True, end if consumed else index + 1
+                seen_instruction = True
+                if consumed:
+                    skip_until = end
             else:
                 self._loose(node, seen_instruction, part, index)
-                index += 1
 
     def _loose(self, node: Node, seen: bool, part: tuple[str, str], index: int) -> None:
         if self.substitution is not None and node.kind == "ledd":
