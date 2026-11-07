@@ -319,6 +319,7 @@ class _Reader:
     ) -> bool:
         """True when ``payload`` was consumed by an instruction."""
         text = node.text
+        quoted: str | tuple[str, str] = text
         substitute = _SUBSTITUTE.match(text)
         if substitute is not None:
             self.substitution = _pairs(substitute)
@@ -331,12 +332,9 @@ class _Reader:
             rest = _intro_rest(intro)
             if _INTRO_ONLY.match(rest):
                 return False
-            where = (part[0], f"{part[1]}:{index}", node.host_section)
             quoted = (rest, node.text) if intro.group("inline") else rest
-            self._instruction(where, quoted, node.change_part, payload)
-            return True
         where = (part[0], f"{part[1]}:{index}", node.host_section)
-        self._instruction(where, text, node.change_part, payload)
+        self._instruction(where, quoted, node.change_part, payload)
         return True
 
     def _substitution_item(self, part: tuple[str, str], index: int, node: Node) -> bool:

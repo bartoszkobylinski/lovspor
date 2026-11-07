@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/replay.py"
+symbol = "_ledd_root"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit ea4524b4"
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_lxml_fragment_without_a_doctype_resolves_no_entity_with_either_parser"
+mutation = """
+-        return etree.fromstring(f"<article>{xml}</article>", parser=_FRAGMENT_PARSER)
++        return etree.fromstring(f"<article>{xml}</article>", )
+"""
+justification = """
+The fragment is wrapped in ``<article>`` (or is one ``<li>``), so it cannot carry a
+DTD; without a DTD neither lxml's default parser nor the hardened one resolves a
+custom entity (both raise on ``&e;``), the standard entities are decoded by both,
+and the default parser keeps whitespace-only text exactly as
+``safe_parser(remove_blank_text=False)`` does. The remaining hardening (no network,
+bounded tree) is unreachable from a ledd-sized fragment. The assumption test pins
+both parsers' behaviour on such fragments.
+"""

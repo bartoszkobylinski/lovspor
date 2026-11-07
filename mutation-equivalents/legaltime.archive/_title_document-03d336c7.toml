@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/archive.py"
+symbol = "_title_document"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit ea4524b4"
+mutation = """
+-    listed = "".join(f"<li>{refid}</li>" for refid in record.changes_to_documents)
++    listed = "XXXX".join(f"<li>{refid}</li>" for refid in record.changes_to_documents)
+"""
+justification = """
+The joined string is placed inside ``<dd class="changesToDocuments"><ul>…</ul></dd>``
+and read back by ``_header_list``, which iterates the ``<li>`` elements of the cell
+and ignores text between them. "XXXX" between two ``<li>`` becomes a text node of
+the ``<ul>`` that the reader never visits, so the parsed list is identical.
+"""

@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/instructions.py"
+symbol = "_span"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit ea4524b4"
+mutation = """
+-    joined = groups.get(joiner) or (groups.get("nj") if first == "l1" else None)
++    joined = groups.get(joiner) or (groups.get("nj") if (first == "l1") or True else None)
+"""
+justification = """
+``joined`` is only consulted when ``end`` is not None. For the punktum span
+(``first == "p1"``) an end exists only when the punktum joiner ``pj`` matched, and
+then ``groups.get(joiner)`` is truthy and the fallback is never evaluated. When
+``pj`` did not match, ``end`` is None and the fallback's value is unused. So reading
+``nj`` for a punktum span changes nothing on any input.
+"""
