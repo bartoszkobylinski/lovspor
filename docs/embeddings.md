@@ -401,21 +401,31 @@ job, so it does not yet protect the scheduled sync; `sync.yml` does not set it.
 
 ## Spend progress and the per-run token budget (#790)
 
-Every paid embedding request of a keyed sync goes through one metered
-adapter (`embeddings/meter.py`), on the change path and the backfill/repair
-path alike.
+Every paid embedding call of a keyed sync goes through one metered adapter
+(`embeddings/meter.py`), and one `run_sync` builds exactly one: the backfill/
+repair phase and the change loop share it, so they share one meter and one
+budget.
 
-- Every `LOVSPOR_EMBEDDING_PROGRESS_EVERY` paid requests (default 25) the sync
-  prints `embedding-spend: requests=… inputs=… estimated_tokens=… budget=…` to
-  stderr. Counts only.
-- `LOVSPOR_EMBEDDING_TOKEN_BUDGET` (unset: none) caps the estimated tokens one
-  sync process may send. The request that would cross it is refused **before
-  it is sent**, with `EmbeddingBudgetError`, and the sync exits 1 without a
-  commit. The estimate is the tiktoken count of what is sent, not a bill: a
-  retried request may be billed again.
-- With the durable cache on, a rerun resumes from what the stopped run paid
-  for. With it off, the stopped run keeps nothing, and the budget bounds the
-  loss instead.
+- Every `LOVSPOR_EMBEDDING_PROGRESS_EVERY` completed calls (default 25) the
+  sync prints `embedding-spend: completed_calls=… inputs=…
+  estimated_tokens_completed=… budget=…` to stderr. Counts only.
+- `LOVSPOR_EMBEDDING_TOKEN_BUDGET` (unset: none) caps the estimated tokens of
+  the calls one sync run completes. The call that would cross it is refused
+  **before it is sent**, with `EmbeddingBudgetError`, and the sync exits 1
+  without committing the refused phase.
+- With the durable cache on, cache hits never reach the meter: they cost
+  nothing against the budget, and a rerun resumes from what the stopped run
+  paid for. With it off, the stopped run keeps nothing.
+
+**What the budget is not.** It is a ceiling on *estimated tokens of completed
+calls*, not a monetary cap. A call is one `encode` on the metered adapter:
+with the cache on, one provider request; with it off, one document, which the
+provider adapter may split into several requests. The counts move only when a
+call returns vectors, and the HTTP attempts inside it are invisible: a retried
+attempt (429, 5xx, transport error) or a call that finally fails may still
+have been billed, and is not counted. The tiktoken estimate is what was
+sent, not what was invoiced. Attempt-level accounting needs a change at the
+provider boundary and is tracked in #835.
 
 The ADR-0006 guards still decide, before any spend, whether a large workload
 may start at all. The budget bounds what an allowed run may spend.

@@ -5,18 +5,24 @@ the change path and the backfill/repair path alike. :class:`MeteredEmbedder`
 wraps that adapter for the whole sync process:
 
 * **progress** — one stderr line every ``LOVSPOR_EMBEDDING_PROGRESS_EVERY``
-  paid requests (default 25), and counts only: requests, inputs and the
-  tiktoken estimate of the tokens sent. Never text, keys or paths, so a long
+  completed calls (default 25), and counts only: completed calls, inputs and
+  the tiktoken estimate of their tokens. Never text, keys or paths, so a long
   run can be diagnosed from the log without leaking the corpus or a secret.
 * **budget** — ``LOVSPOR_EMBEDDING_TOKEN_BUDGET`` (unset: no budget) caps the
-  estimated tokens one process may send. A request that would cross it is
-  refused **before** it is sent, with :class:`EmbeddingBudgetError`, so the
-  ceiling bounds spend rather than reporting it afterwards.
+  estimated tokens of the calls one ``run_sync`` completes, backfill and
+  change loop together (one adapter per run). A call that would cross it is
+  refused **before** it is sent, with :class:`EmbeddingBudgetError`.
 
-The estimate is what is sent, not a bill: a retried request may be billed
-again (#790 audit, S6). With the durable cache on (#802), what a stopped run
-paid for is kept and a rerun resumes; with it off, a stopped run keeps
-nothing, and the budget bounds the loss instead.
+What this counts, and what it does not. A *call* is one ``encode`` on this
+adapter: with the durable cache on (#802) that is exactly one provider
+request; with it off it is one document, which the provider adapter may send
+as several requests. Counts move only when a call returns vectors. The HTTP
+attempts inside a call are invisible here: a retried attempt (429, 5xx,
+transport error) and a failed call may have been billed and are not counted.
+So the budget is a ceiling on estimated tokens of completed calls, not a
+monetary cap (#790 audit, S6; attempt accounting: #835). With the cache on,
+what a stopped run paid for is kept and a rerun resumes; with it off, a
+stopped run keeps nothing.
 """
 
 import os
@@ -36,7 +42,7 @@ DEFAULT_PROGRESS_EVERY = 25
 
 @dataclass
 class SpendMeter:
-    """What this process has sent to the provider, as counts."""
+    """What this run's completed calls sent to the provider, as counts."""
 
     requests: int = 0
     inputs: int = 0
@@ -45,8 +51,8 @@ class SpendMeter:
     def line(self, budget: int | None) -> str:
         limit = "none" if budget is None else str(budget)
         return (
-            f"embedding-spend: requests={self.requests} inputs={self.inputs} "
-            f"estimated_tokens={self.tokens} budget={limit}"
+            f"embedding-spend: completed_calls={self.requests} inputs={self.inputs} "
+            f"estimated_tokens_completed={self.tokens} budget={limit}"
         )
 
 
@@ -94,10 +100,12 @@ class MeteredEmbedder:
         if self._budget is None or self.meter.tokens + tokens <= self._budget:
             return
         raise EmbeddingBudgetError(
-            f"embedding token budget reached: {self.meter.tokens} estimated tokens sent, "
-            f"the next request needs {tokens}, budget {self._budget} ({BUDGET_VARIABLE}). "
-            "Nothing more was sent. With LOVSPOR_EMBEDDING_CACHE_DIR set, a rerun "
-            "resumes from what was paid; without it, this run's vectors are lost.",
+            f"embedding token budget reached: {self.meter.tokens} estimated tokens in "
+            f"completed calls, the next call needs {tokens}, budget {self._budget} "
+            f"({BUDGET_VARIABLE}). It was not sent. The estimate excludes retried and "
+            "failed attempts, which may also be billed. With LOVSPOR_EMBEDDING_CACHE_DIR "
+            "set, a rerun resumes from what was paid; without it, this run's vectors are "
+            "lost.",
         )
 
 

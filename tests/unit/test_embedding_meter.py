@@ -111,7 +111,7 @@ def test_budget_and_spend_use_the_providers_tokenizer(
     provider = Provider()
     metered = MeteredEmbedder(provider, budget=budget, every=1)
     if budget == 13:
-        with pytest.raises(EmbeddingBudgetError, match="the next request needs 14"):
+        with pytest.raises(EmbeddingBudgetError, match="the next call needs 14"):
             metered.encode(texts)
         assert provider.requests == 0
         assert metered.meter == SpendMeter()
@@ -122,7 +122,7 @@ def test_budget_and_spend_use_the_providers_tokenizer(
         assert provider.requests == 1
         assert metered.meter == SpendMeter(requests=1, inputs=1, tokens=14)
         assert capsys.readouterr().err == (
-            "embedding-spend: requests=1 inputs=1 estimated_tokens=14 budget=14\n"
+            "embedding-spend: completed_calls=1 inputs=1 estimated_tokens_completed=14 budget=14\n"
         )
 
 
@@ -143,7 +143,7 @@ def test_progress_line_every_n_requests_counts_only(
     assert capsys.readouterr().err == ""
     metered.encode(["hemmelig tekst"])
     err = capsys.readouterr().err
-    assert "embedding-spend: requests=2 inputs=2" in err
+    assert "embedding-spend: completed_calls=2 inputs=2" in err
     assert "hemmelig" not in err
 
 
@@ -236,7 +236,7 @@ def test_bad_progress_interval_is_a_config_error(monkeypatch: pytest.MonkeyPatch
 @pytest.mark.parametrize("budget,limit", [(None, "none"), (17, "17")])
 def test_spend_line_reports_budget(budget: int | None, limit: str) -> None:
     assert SpendMeter(requests=2, inputs=3, tokens=7).line(budget) == (
-        f"embedding-spend: requests=2 inputs=3 estimated_tokens=7 budget={limit}"
+        f"embedding-spend: completed_calls=2 inputs=3 estimated_tokens_completed=7 budget={limit}"
     )
 
 
@@ -250,7 +250,7 @@ def test_progress_is_flushed_and_accumulates_tokens(
         metered.encode(["ord ord"])
         metered.encode(["ord"])
         assert log.read_text() == (
-            "embedding-spend: requests=2 inputs=2 estimated_tokens=3 budget=17\n"
+            "embedding-spend: completed_calls=2 inputs=2 estimated_tokens_completed=3 budget=17\n"
         )
     assert metered.meter.tokens == 3
 
@@ -267,9 +267,10 @@ def test_budget_error_explains_cache_recovery() -> None:
     with pytest.raises(EmbeddingBudgetError) as caught:
         metered.encode(["ord ord"])
     assert str(caught.value) == (
-        "embedding token budget reached: 0 estimated tokens sent, "
-        "the next request needs 2, budget 1 (LOVSPOR_EMBEDDING_TOKEN_BUDGET). "
-        "Nothing more was sent. With LOVSPOR_EMBEDDING_CACHE_DIR set, a rerun "
+        "embedding token budget reached: 0 estimated tokens in completed calls, "
+        "the next call needs 2, budget 1 (LOVSPOR_EMBEDDING_TOKEN_BUDGET). "
+        "It was not sent. The estimate excludes retried and failed attempts, "
+        "which may also be billed. With LOVSPOR_EMBEDDING_CACHE_DIR set, a rerun "
         "resumes from what was paid; without it, this run's vectors are lost."
     )
     assert provider.requests == 0
