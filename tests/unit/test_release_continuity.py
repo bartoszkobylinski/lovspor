@@ -134,6 +134,37 @@ class TestAcceptedReleases:
 
 
 class TestRefusedCandidates:
+    def test_redirect_sources_of_the_live_release_cannot_disappear(self, live_b: Host) -> None:
+        """URL contract §4 protects redirect sources as well as emitted pages."""
+        candidate = _corpus(live_b, live_b.a)
+        shutil.rmtree(candidate)
+        shutil.copytree(_corpus(live_b, live_b.b), candidate)
+
+        def forget_old_urls(data: dict[str, Any]) -> None:
+            data["redirects"] = []
+            data["gone"] = []
+
+        _edit_map(live_b, live_b.a, forget_old_urls)
+
+        # All B's pages and twins remain; only its historical URLs disappear.
+        error = _refused_untouched(live_b, live_b.a, "would answer 404")
+        assert OLD in str(error)
+
+    def test_a_refusal_preserves_an_existing_next_fragment(self, live_b: Host) -> None:
+        """URL contract §4 explicitly includes .next in the untouched state."""
+        staged = b"# previously staged operator configuration\n"
+        live_b.plane.next_fragment.write_bytes(staged)
+        before = live_b.snapshot()
+        running = live_b.running()
+
+        with pytest.raises(ContinuityRefusedError, match="would answer 404"):
+            commit_release(live_b.plane, live_b.a)
+
+        assert live_b.snapshot() == before
+        assert live_b.plane.next_fragment.read_bytes() == staged
+        assert live_b.running() == running
+        assert live_b.caddy.reloads == 0
+
     def test_a_url_the_live_release_serves_that_would_404(self, live_b: Host) -> None:
         """B live, A committed forward: A neither serves nor redirects /lov/nyloven/."""
         error = _refused_untouched(live_b, live_b.a, "would answer 404")
