@@ -99,6 +99,33 @@ def test_budget_exactly_reached_is_allowed(monkeypatch: pytest.MonkeyPatch) -> N
     assert metered.meter.tokens == 2
 
 
+@pytest.mark.parametrize("budget", [13, 14])
+def test_budget_and_spend_use_the_providers_tokenizer(
+    budget: int, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Provider(_Provider):
+        model_name = "text-davinci-001"
+
+    # This model counts 14 tokens; the default model counts only 9.
+    texts = ["Tekst om norske lover og forskrifter"]
+    provider = Provider()
+    metered = MeteredEmbedder(provider, budget=budget, every=1)
+    if budget == 13:
+        with pytest.raises(EmbeddingBudgetError, match="the next request needs 14"):
+            metered.encode(texts)
+        assert provider.requests == 0
+        assert metered.meter == SpendMeter()
+        assert capsys.readouterr().err == ""
+    else:
+        vectors = metered.encode(texts)
+        assert vectors.shape == (1, provider.get_dimension())
+        assert provider.requests == 1
+        assert metered.meter == SpendMeter(requests=1, inputs=1, tokens=14)
+        assert capsys.readouterr().err == (
+            "embedding-spend: requests=1 inputs=1 estimated_tokens=14 budget=14\n"
+        )
+
+
 @pytest.mark.parametrize("raw", ["0", "-1", "lots"])
 def test_bad_budget_is_a_config_error(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
     monkeypatch.setenv(BUDGET_VARIABLE, raw)
