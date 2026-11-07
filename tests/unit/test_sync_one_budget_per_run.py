@@ -29,6 +29,7 @@ from tests.unit.test_sync_change_reembed_guard import (
     _corpus,
     _CountingEmbedder,
     _doc,
+    _state,
 )
 
 _AMENDED = "Body. Amended."
@@ -181,3 +182,60 @@ def test_cache_hits_cost_nothing_against_the_budget(
 
     assert report.changed_count == 1
     assert provider.requests == 0
+
+
+@pytest.mark.parametrize("cache", [False, True], ids=["cache-off", "cache-on"])
+def test_next_sync_gets_a_fresh_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cache: bool
+) -> None:
+    """docs/embeddings.md: the budget caps one run, not the process lifetime."""
+    settings = _corpus(tmp_path, _CORPUS)
+    if cache:
+        _cache_on(monkeypatch, tmp_path / "cache")
+    provider = _Provider()
+    next_body = "Body. Amended a second time."
+    first_tokens = _tokens(1, _AMENDED)
+    next_tokens = _tokens(1, next_body)
+    budget = max(first_tokens, next_tokens)
+    assert first_tokens + next_tokens > budget
+    monkeypatch.setenv(BUDGET_VARIABLE, str(budget))
+    _provider_for(monkeypatch, _upstream(changed=True), provider)
+    assert run_sync(settings).changed_count == 1
+
+    docs = [_doc(0), _doc(1, next_body), *(_doc(i) for i in range(2, _CORPUS))]
+    _provider_for(monkeypatch, docs, provider)
+    assert run_sync(settings).changed_count == 1
+    assert provider.requests == 2
+
+
+@pytest.mark.parametrize("cache", [False, True], ids=["cache-off", "cache-on"])
+@pytest.mark.codex_proposal
+@pytest.mark.xfail(strict=True, reason="codex proposal: budget refusal leaves corpus unchanged")
+def test_budget_refusal_leaves_changed_corpus_unpublished(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cache: bool
+) -> None:
+    """Proposal: extend no refused-phase commit to an unchanged corpus tree."""
+    settings = _corpus(tmp_path, _CORPUS)
+    repo = settings.lovverk_repo_path
+    before_state = _state(repo)
+    before_files = {
+        str(path.relative_to(repo)): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(repo).parts
+    }
+    if cache:
+        _cache_on(monkeypatch, tmp_path / "cache")
+    provider = _Provider()
+    _provider_for(monkeypatch, _upstream(changed=True), provider)
+    monkeypatch.setenv(BUDGET_VARIABLE, str(_tokens(1, _AMENDED) - 1))
+
+    with pytest.raises(EmbeddingBudgetError):
+        run_sync(settings)
+
+    assert provider.requests == 0
+    assert _state(repo) == before_state
+    assert {
+        str(path.relative_to(repo)): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(repo).parts
+    } == before_files
