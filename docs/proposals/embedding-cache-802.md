@@ -235,6 +235,13 @@ Order of rows is bound by construction: the entry is keyed by the hash of the
 ordered inputs, and rows are stored in input order. A reordered document has a
 different `input_hash` and therefore a different key.
 
+Hard links are not refused as such. `_publish` links the temporary into place
+before it unlinks it, so every fresh entry has two links for a moment, and a
+reader refusing `st_nlink > 1` would stop a concurrent sync on a healthy entry.
+A hard link grants nothing the owner-only mode does not: bytes rewritten
+through another name fail check 2, and a valid entry linked under another key
+fails check 4. Both are pinned by tests.
+
 ### 5.4 Refusal means stop, not pay
 
 A refused entry stops the run with exit code 1 and the failing check. It does
@@ -293,6 +300,11 @@ Amendment 1.
 
 A document of one unit writes only the document entry, with no unit entry.
 
+One `run_sync` builds this adapter once, and the backfill (P2/P3) and the change
+loop (P1) both use it. So a run has one cache wrapper, one progress count and,
+with #790's meter beneath it, one token budget. Building it per phase would
+restart the budget between them (GPT-6 review on #828).
+
 ### 6.1 Progress (M5)
 
 The wrapper counts documents, documents served from cache, units hit, units
@@ -348,11 +360,332 @@ Whatever the backend, it is an adapter behind the same entry format and the
 same validated reads. Downloaded entries are validated like local ones: a
 store that comes from somewhere else is untrusted input.
 
+### 8.1 Amendment: option C on Cloudflare R2 Standard (proposed, not approved)
+
+The owner's preferred direction for C is Cloudflare R2 Standard, a private
+bucket, about 30 days of retention. This section is the design that direction
+would need. **It is not an approval.** No bucket, token, secret, account or
+workflow change exists or is made by this PR, and no production adapter is
+written until the owner approves this section and its cost (D1). Every
+provider claim below was read from the provider's own documentation on
+2026-11-07, re-read the same day, and is cited. Where the docs do not settle a
+question it is marked **unverified** and becomes a staging check (G3), not an
+assumption.
+
+#### Verified provider facts this design relies on
+
+| Fact | Source |
+|---|---|
+| `PutObject` honours `If-None-Match: *` and evaluates it atomically against committed state: of concurrent creators of an absent key, at most one succeeds, the rest get `412 PreconditionFailed` | [R2 S3 API](https://developers.cloudflare.com/r2/api/s3/api/), [S3 extensions](https://developers.cloudflare.com/r2/api/s3/extensions/), [error codes](https://developers.cloudflare.com/r2/api/error-codes/) (10031) |
+| Read-after-write, list-after-write and delete are strongly consistent over the S3 API; a `404` "is not final" with respect to an earlier `PutObject` whose outcome is unknown | [Consistency](https://developers.cloudflare.com/r2/reference/consistency/) |
+| Get, Head, Put, ListObjectsV2, Delete are implemented; endpoint `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, region `auto`; `Content-MD5` is accepted on `PutObject`; `BadDigest` (400) exists | [R2 S3 API](https://developers.cloudflare.com/r2/api/s3/api/), [error codes](https://developers.cloudflare.com/r2/api/error-codes/) |
+| Lifecycle rules expire objects by prefix after N days (`Expiration: { Days: N }`); removal is "typically within 24 hours" of the `x-amz-expiration` value. The page does not say in words whether the age counts from upload; entries here are written once and never modified, so upload and last modification are the same instant | [Object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles/) |
+| Object Read & Write tokens can be limited to one bucket; tokens can carry an expiration date; there is no "write but not delete" preset | [API tokens](https://developers.cloudflare.com/r2/api/tokens/) |
+| Bucket locks prevent deletion and overwrite for a period, by prefix, and take precedence over lifecycle rules | [Bucket locks](https://developers.cloudflare.com/r2/buckets/bucket-locks/) |
+| Standard: storage $0.015/GB-month, Class A $4.50/M, Class B $0.36/M; free each month 10 GB-month, 1M Class A, 10M Class B; egress and `DeleteObject` free; a `PutObject` answered `412` **is billed as Class A** | [Pricing](https://developers.cloudflare.com/r2/pricing/) |
+| Single PUT up to 4.995 GiB (5 GiB less 5 MiB, per the limits footnote); keys up to 1,024 bytes; **1 write per second per key** (429 above) | [Limits](https://developers.cloudflare.com/r2/platform/limits/) |
+| Repository/environment secrets reach the job; a workflow triggered from a fork gets none | [GitHub: using secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets) |
+
+**Unverified, so not relied on:** whether R2 verifies `Content-MD5` server-side;
+whether `x-amz-checksum-sha256` is honoured on a single `PutObject`; whether
+R2 ever answers a conditional race with `409` as AWS can; whether an Object
+Read & Write token can delete (assume it can); how a bucket lock interacts with
+a lifecycle rule of the same age; whether operations are billed rounded up to
+whole millions. **Not available:** GitHub OIDC federation to R2. Neither
+Cloudflare nor GitHub documents it, so the design assumes a stored secret.
+
+#### Keys
+
+One prefix per schema, the local layout unchanged beneath it, so
+`entry_location` (§5.1) names both stores:
+
+```text
+lovspor-embedding-cache/schema-1/<esi:32 hex>/documents/<input_hash:64 hex>.lsec
+lovspor-embedding-cache/schema-1/<esi>/units/<input_hash>/<i>-<n>-<unit_hash:64 hex>.lsec
+```
+
+At most about 210 bytes, inside the 1,024-byte limit. The key is derived only
+from validated identity (32/64 lowercase hex and integers), never from text,
+paths or titles, so a key cannot traverse or collide by construction.
+
+#### Authority: one winner per key, and it is the remote object
+
+ESI has never promised bit-identical provider output (ADR-0005 Amendment 1),
+so two writers of one key can hold two different, equally valid vectors.
+Under the same ESI, input hash and request plan, a retried request, an
+overlapping manual run, or a run on another runner can each get different
+floats. A conditional `PUT` answered `412` therefore proves only that **an**
+object exists under the key. It does not prove that the object holds **this**
+writer's bytes.
+
+With the remote store on, one rule settles every case below: **the first
+object committed under a key in the bucket is that key's only value.** Every
+writer that loses adopts it, and nothing is overwritten to hide a race, local
+or remote. The local store is the runner's copy of remote winners. It never
+holds a value the bucket does not hold or would refuse. A key whose local and
+remote values differ, or whose remote value cannot be validated, stops the sync
+with a typed refusal, before any further paid request and without paying for
+that key again (§5.4).
+
+"Same value" is compared on the decoded entry, not on the file bytes, because
+`created_at` differs between writers. Two entries are the same value when their
+identity (ESI, input hash, unit, dim, rows, dtype), their vector payload bytes
+and their scale are equal. A winner's `created_at` is kept as written.
+
+#### Write protocol, during the step
+
+The remote write sits at the same seam as the local one (§6): after a paid
+request returns and its vectors pass `_check_response`, and **before the next
+paid request is sent**. Nothing is uploaded at exit or in a later step (§8).
+For each entry, unit checkpoint or document, in this order:
+
+1. Encode the entry once (§4).
+2. `PUT` the key with `If-None-Match: *` and `Content-MD5` (a transport check,
+   not the integrity guarantee). **The remote write comes first**, so the local
+   store only ever receives a value the bucket has accepted as the winner.
+3. `200`: this writer won. Publish the same bytes locally (§5.2) and return its
+   own vectors.
+4. `412`: someone holds the key, possibly this writer after an ambiguous
+   attempt (5). `GET` the key and run the full read checks (next section)
+   against the key this writer expected.
+   * Valid: that object is the winner. Publish **its** bytes locally and return
+     **its** vectors, not the ones just paid for. That spend is lost (one
+     request at most, the in-flight bound of §7), but the run continues on the
+     single winning value.
+   * Invalid (corrupt, torn, another identity, another dimension, expired):
+     stop with `EmbeddingCacheError` naming the key's label. Nothing is written
+     locally or remotely, and the corrupt object is never overwritten (the
+     conditional `PUT` could not overwrite it anyway). The owner investigates it
+     and removes it on purpose (§10 tooling, extended to the remote store).
+     There is no paid fallback: a rerun refuses the same key the same way.
+   * `404` (the object was removed between the `412` and the `GET`, by the
+     lifecycle rule or by the owner): repeat from step 2, once. A second `404`
+     stops the sync with `EmbeddingCacheStorageError`.
+5. `429`, `5xx`, a transport error or a timeout: retry the **same** conditional
+   `PUT` with backoff, at most 3 attempts in all. A timeout is ambiguous: the
+   first `PUT` may have committed. A later `200` means it did not and this
+   attempt won. A later `412` is handled exactly as in step 4, and that `GET`
+   tells whether the winner is this writer's value or another writer's.
+   Either way the remote object is adopted, so the outcome does not depend on
+   knowing which. A `HEAD` or `GET` returning `404` after an ambiguous `PUT` is
+   not proof that it failed (consistency caveat above), so a `404` is never
+   read as "safe to pay again".
+6. Retries exhausted: stop with `EmbeddingCacheStorageError` before the next
+   paid request. The vectors just paid for are **not** written locally, because
+   the bucket might still hold a different winner. This is a loss of at most
+   one request, the same bound as a request in flight (§7). Continuing to pay
+   while the bucket cannot be written would make every further response
+   unprotected spend.
+7. Remote `200` or adopted, then the local publish fails (disk full, I/O
+   error): stop with `EmbeddingCacheStorageError` before the next paid request,
+   as §5.2 does today. The bucket holds the winner, so a rerun on any runner
+   reads it and pays 0 for that key.
+
+A document entry is built from the unit values this process actually returned,
+winners included, quantized with one document scale (§6). It then goes through
+steps 1–7 like any entry. The sidecar is written only from the document value
+step 3 or 4 returned. When another writer's document entry won, the sidecar
+carries **its** vectors and scale, never a local assembly that differs from it,
+so the sidecar, the remote entry and the local copy hold one value.
+
+```text
+writer                     R2 bucket                   local store
+  |-- encode (paid) ---------->                            |
+  |-- PUT If-None-Match:* ---->|                           |
+  |<-------- 200 --------------|                           |
+  |-- publish same bytes -------------------------------->|   own value
+  |
+  |-- PUT If-None-Match:* ---->|   (key already held)      |
+  |<-------- 412 --------------|                           |
+  |-- GET -------------------->|                           |
+  |<-------- winner bytes -----|                           |
+  |-- decode_entry against expected key                    |
+  |     valid:   publish winner bytes ------------------->|   winner's value
+  |     invalid: stop, typed refusal, write nothing        |
+  |
+  |-- PUT ... timeout          |   (may have committed)    |
+  |-- PUT If-None-Match:* ---->|                           |
+  |<-------- 412 or 200 -------|   then as above           |
+```
+
+#### Read protocol and integrity
+
+A downloaded entry is untrusted input. It goes through `decode_entry` exactly
+like a local one (§5.3): magic, schema, meta identity against the expected key
+(ESI, input hash, unit, dim, rows, dtype), payload length, SHA-256 trailer,
+finiteness, scale, `created_at`. Any failure is a typed refusal that stops the
+sync without paying (§5.4, D2). It is never a silent re-download or a paid
+fallback. R2's own checksums are not trusted for this: the entry carries its
+own digest.
+
+With the remote store on, a lookup asks the bucket, the authority, and checks
+the local copy against it:
+
+| Remote | Local | Result | Paid |
+|---|---|---|---|
+| valid | absent | publish locally, use the remote value | 0 |
+| valid | valid, same value | use it | 0 |
+| valid | valid, **different value** | stop: `EmbeddingCacheConflictError` (a typed `EmbeddingCacheError`) naming the key's label. Neither copy is changed | 0 |
+| valid | invalid | stop: the local refusal of §5.3, local entry kept as evidence | 0 |
+| invalid | any | stop: typed refusal, remote object kept as evidence | 0 |
+| absent | valid | upload the local bytes (write protocol, steps 2–6, no provider call); if another writer's value wins the `412`, stop as in the conflict row | 0 |
+| absent | absent | miss: pay, then the write protocol | 1 request |
+| absent | invalid | stop: the local refusal | 0 |
+
+The conflict row can only come from a local entry written outside this
+protocol: one written while the remote store was off, or one copied in by hand.
+Resolving it is the owner's choice of which value to keep, made with the admin
+tooling (`invalidate` on one store), never by the sync. Lookups stay one
+`GET` (Class B) per key. A resumed run therefore spends Class B, not Class A,
+on what it already has, and pays the provider only for true misses.
+
+#### Failure matrix
+
+| Case | Outcome | Provider spend on rerun |
+|---|---|---|
+| Two writers, same key, different valid vectors | First commit wins. The loser `GET`s and validates it, adopts it locally and in its sidecar. Its own response is discarded | 0 for the key |
+| `PUT` timeout, retry answered `412` | `GET` + validate. The remote object is adopted whether it is this writer's or not | 0 |
+| Remote winner differs from an existing local entry | Typed conflict refusal. Both kept, owner decides | 0 (no pay while refused) |
+| Remote object corrupt or of another identity | Typed refusal. Kept as evidence. Never overwritten, never re-paid by the sync | 0 until the owner removes it, then 1 request |
+| Remote write succeeds, local publish fails | Storage error before the next paid request. The bucket holds the winner | 0 for the key |
+| Remote unwritable after 3 attempts | Storage error before the next paid request. Nothing stored locally | ≤ 1 request (that response) |
+| Killed between remote `200` and local publish | The bucket holds the winner, the runner's disk is gone | 0 |
+
+Concurrency: `sync.yml`'s `concurrency: sync` already serialises scheduled
+runs. A manual overlap or a retried job is the case above: one winner per key,
+adopted by every other writer, and the winner is what every later reader
+validates and uses. Each key is written once per run, far under the 1 write/s
+per key limit. A writer that adopts a winner pays one extra `GET` (Class B),
+which the cost table already covers.
+
+#### Retention, and why the reader's limit is longer than the bucket's
+
+A lifecycle rule expires `lovspor-embedding-cache/` 30 days after upload. The
+reader's `LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS` is set to **32** for the
+remote store. Age is counted from the one PUT of a write-once entry, not last use, and removal happens up
+to about a day after expiry. With equal limits, an entry 30–31 days old would
+still be served and refused as expired, stopping the sync. With the bucket
+shorter than the reader, the bucket removes an entry before the reader would
+refuse it, and the next run treats it as a miss. An expired entry that is still
+served is then a provider anomaly, and stopping on it is correct.
+
+Optional, staging-verified only: a bucket lock of 29 days on the same prefix
+would make entries non-overwritable and non-deletable even by the CI token,
+without blocking the 30-day expiry. The docs say locks take precedence over
+lifecycle; the behaviour at those ages is unverified, so the lock ships only
+after G3 demonstrates it.
+
+#### Permissions and credentials, the smallest set
+
+* One private bucket, no public access, no `r2.dev` URL, no custom domain.
+* One **Object Read & Write** token scoped to that bucket only, with an
+  expiration date (proposed: 90 days, rotated by the owner), never an Admin
+  token. Lifecycle and lock rules are set once by the owner with their own
+  account. The CI token cannot change them.
+* Stored as secrets of a GitHub **environment** (`embedding-cache`) that only
+  the `sync.yml` job on `main` may use: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+  `R2_SECRET_ACCESS_KEY`. PR and fork workflows never see them.
+* The engine never logs the endpoint, key id, secret or a full URL with a
+  signature. Progress lines stay counts only (§6.1).
+
+#### Cost, worst case and expected
+
+Measured corpus: 5,890 documents, 322.7 MiB of int8 sidecars (§8 table). A full
+re-embed writes about 5,890 document entries, plus unit checkpoints for the
+long documents, removed by prune once their document entry exists.
+
+| Case | Class A (PUT) | Class B (GET) | Storage | Monthly cost |
+|---|---|---|---|---|
+| Nightly syncs, a few changed laws each (normal) | tens to hundreds | same | < 1 GB | $0 (free tier) |
+| One full re-embed, then reruns that read first | ~6,000–10,000 | ~10,000 per rerun | ~0.4 GB | $0 (free tier) |
+| Ceiling: 30 full re-embeds in a month, each into a new ESI, nothing expired yet | ≤ 300,000 | ≤ 300,000 | ≤ 12 GB-month | ≤ $0.03 (storage over 10 GB) |
+| Generic stress bound from the research (60,000 × 20 KB entries, 60,000 PUT incl. 412 + 60,000 GET per run, 30 runs) | 1.8 M | 1.8 M | ≤ 36 GB-month | ≈ $3.61–$4.90 |
+
+So the realistic cost is $0, and the provable ceiling under abuse is a few
+dollars a month. The free tier and prices can change: the owner re-reads the
+pricing page and their account's billing before approving (G0). Reading first
+on reruns matters: without it, every rerun pays one billed `412` per entry.
+
+#### Test strategy
+
+* **Offline (M4, the adapter PR, after G0):** the adapter speaks HTTP through
+  `httpx`, mocked with `pytest-httpx` only (CLAUDE.md). Red first, one test
+  per row of the failure matrix and the lookup table:
+  * `200`: the writer's own value is published locally and used.
+  * `412` with a **different valid** winner: one `GET`, the winner's vectors
+    are returned, published locally and carried by the sidecar; the writer's
+    own response is discarded; no second provider call; the local file's bytes
+    equal the remote object's.
+  * `412` with a winner equal to the writer's value: adopted, same result.
+  * Timeout, then `412` (both for "own bytes committed" and "another writer
+    committed"): `GET` + validate decides, the remote value is adopted, and a
+    `404` after the timeout never leads to a paid retry.
+  * `412`, then a corrupt, torn, swapped-identity, other-dimension or expired
+    `GET`: typed refusal, nothing written locally, no `PUT` that could overwrite,
+    no provider call on the rerun.
+  * `412`, then `404`: one more conditional `PUT`, then a storage error.
+  * `429`/`5xx`/transport retry then succeed; retries exhausted stop before the
+    next paid request with nothing stored locally.
+  * Remote `200`, local publish fails: storage error before the next paid
+    request; a fresh store resumes from the bucket and pays 0.
+  * Local valid, remote different: `EmbeddingCacheConflictError`, both files
+    unchanged, 0 provider calls. Local valid, remote absent: uploaded, no
+    provider call.
+  * A document entry assembled from adopted units, and a document entry lost to
+    another writer: the sidecar equals the remote document value.
+  * The key is derived only from identity; no secret appears in logs or errors;
+    cache off and unset credentials behave exactly as today.
+* **Cross-runner crash test (G3, staging bucket, no paid API):** a
+  `workflow_dispatch` job on a GitHub-hosted runner runs a sync on a synthetic
+  corpus with the fake provider, and kills itself with SIGKILL after k of n
+  checkpoints. A second job, on a fresh runner with an empty disk, runs the same
+  sync and must pay exactly n − k requests, then 0 on a third run, with the
+  sidecars byte-identical to an uncached run. This test, not a local restart, is
+  the evidence #802 needs to close.
+* **Cross-runner race (G3, staging bucket, no paid API):** two jobs start the
+  same synthetic sync together, with fake providers that return **different**
+  valid vectors for the same inputs. Pass: every key has one remote object;
+  each job's local copies and sidecars equal the remote values; no job
+  overwrote an object; a third job pays 0. A variant injects a timeout on one
+  `PUT` that the bucket did commit, and must end the same way.
+* Staging also settles the unverified points above: whether a token deletes,
+  lock vs lifecycle, `Content-MD5` rejection, `409`. A `409` on a conditional
+  race is then handled like `412` (`GET` + validate + adopt), never as success.
+
+#### Rollout gates and rollback
+
+| Gate | What has to be true | Who |
+|---|---|---|
+| G0 | This section and its cost are approved | owner |
+| G1 | Bucket, lifecycle rule (30 d), token (bucket-scoped, expiring) and environment secrets created | owner |
+| G2 | Adapter PR merged, off by default, offline tests green, full PR pipeline | engineering, then owner merge |
+| G3 | Cross-runner crash test green on the staging bucket; unverified points settled | engineering |
+| G4 | One manual `workflow_dispatch` sync with the remote cache on, reviewed | owner |
+| G5 | Scheduled sync uses the remote cache | owner |
+
+Rollback at any gate: remove the environment secrets or unset
+`LOVSPOR_EMBEDDING_CACHE_*` in `sync.yml`. The sync is then exactly today's
+uncached sync. The corpus never depends on the cache, so nothing in `lovverk`
+changes. Deleting the bucket loses only money already spent. Revoking the
+token stops every credential derived from it.
+
+Rollback never resolves a refusal by rewriting a value. A conflict or a
+corrupt remote object that stops a run is investigated first. Turning the
+remote store off then returns the sync to the local-only behaviour of §5,
+where the local entries are values the bucket accepted or ones written before
+it existed. Turning it back on re-checks every key against the bucket (the
+lookup table above), so a value that diverged while it was off is refused, not
+silently uploaded over another.
+
 ## 9. Decisions requested from the owner
 
 * **D1 — remote backend (blocks M4).** A (deadline + artifact), C (object
   storage, which provider, and who holds the key), or none for now (local store
   only, which helps self-hosted reruns and tests but not GitHub-hosted runs).
+  The owner's stated preference is C on Cloudflare R2 Standard. §8.1 is that
+  design, with verified provider facts, cost and gates G0–G5. Approving it (G0)
+  is the decision still open; creating the bucket and token (G1) is the
+  owner's.
   Until D1 is decided, #802 stays open: closing it needs verified cross-job
   recovery, and a local restart is not proof of that.
 * **D2 — refusal policy.** This design stops the sync on any invalid entry
