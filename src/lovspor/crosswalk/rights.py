@@ -36,6 +36,12 @@ def licence_basis(filename: str) -> str:
 
 
 def within_dataset(archive: str, member: str) -> bool:
-    """Whether a cited member lies where the archive's dataset-level basis holds."""
+    """Whether a cited member lies where the archive's dataset-level basis holds.
+
+    The member must name that place, not only spell it: the schema admits `.`,
+    `..` and empty segments, and `lti/2026/../2025/x.xml` is a 2025 path.
+    """
     prefix = DATASET_MEMBERS.get(archive)
-    return prefix is None or member.startswith(prefix)
+    if prefix is None:
+        return True
+    return member.startswith(prefix) and not {"", ".", ".."} & set(member.split("/"))
