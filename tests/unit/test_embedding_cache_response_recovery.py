@@ -5,13 +5,52 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from lovspor.embeddings import cache_store
 from lovspor.embeddings.cache import quantized_document_vectors
 from lovspor.embeddings.inputs import hash_embedding_inputs
-from lovspor.errors import EmbeddingCacheError
+from lovspor.errors import EmbeddingCacheError, EmbeddingCacheStorageError
 from tests.unit.test_embedding_cache_boundary import _Provider, cache_dir
 from tests.unit.test_embedding_cache_remediation import _cached, _inputs
 
 __all__ = ["cache_dir"]
+
+
+@pytest.mark.parametrize("phase", ["unit", "document"])
+def test_directory_sync_failure_stops_payment_and_reuses_published_entries(
+    cache_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    """Design §3.3 and §5.2: reuse visible entries after a failed durability step."""
+    inputs = _inputs()
+    identity = hash_embedding_inputs(inputs)
+    provider = _Provider()
+    cached = _cached(provider, tmp_path)
+    real_sync = cache_store.fsync_dir
+
+    def fail_selected_directory(directory: Path) -> None:
+        is_document = directory.name == "documents"
+        if is_document == (phase == "document"):
+            raise OSError(5, "directory sync failed")
+        real_sync(directory)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(cache_store, "fsync_dir", fail_selected_directory)
+        with pytest.raises(EmbeddingCacheStorageError, match="directory sync failed"):
+            quantized_document_vectors(cached, inputs, identity)
+
+    assert provider.requests == (1 if phase == "unit" else 2)
+    published = {p: p.read_bytes() for p in cache_dir.rglob("*.lsec")}
+    assert len(published) == (1 if phase == "unit" else 3)
+    assert not list(cache_dir.rglob("*.tmp.*"))
+
+    resumed_provider = _Provider()
+    actual, scale = quantized_document_vectors(
+        _cached(resumed_provider, tmp_path), inputs, identity
+    )
+    expected, expected_scale = quantized_document_vectors(_Provider(), inputs, identity)
+    np.testing.assert_array_equal(actual, expected)
+    assert scale == expected_scale
+    assert resumed_provider.requests == (1 if phase == "unit" else 0)
+    assert all(p.read_bytes() == data for p, data in published.items())
 
 
 @pytest.mark.parametrize("invalid", ["shape", "nan", "infinity"])
