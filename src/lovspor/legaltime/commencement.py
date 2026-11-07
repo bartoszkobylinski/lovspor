@@ -451,6 +451,7 @@ class _Decision:
         self.title = decision.header.title
         self.partial = bool(_PARTIAL_TITLE.match(self.title))
         self.scopes = _partial_scopes(decision) if self.partial else None
+        # Only a full decision's header is a date; a partial one may carry anything there.
         self.full_date = None if self.partial else header_timing(decision).dated_on
         raw = decision.header.date_in_force
         self.conditional = not self.partial and bool(_CONDITIONAL.match(raw))

@@ -643,3 +643,136 @@ def test_the_act_s_own_conditional_commencement_resolves_the_same_way() -> None:
     assert (
         baseline_timing(act, (still_unreadable,)).reason == "full decision without a readable date"
     )
+
+
+# ---------------------------------------------------------------- mutation round (2026-11-07)
+
+
+def test_own_section_listing_edges() -> None:
+    assert _own_sections("5 til 5") == frozenset({"§5"})
+    assert _own_sections("1 til 10 unntatt") is None  # trailing residue
+    assert _own_sections("§§") is None  # separators only, no section
+    assert _own_sections("") is None
+
+
+def test_own_section_sentence_with_an_unreadable_date_is_outside_the_grammar() -> None:
+    act, ops, clauses = _embedded()
+    timings = resolve_timings(
+        act, clauses, ops, (_act_delt("Paragrafane 1 til 25 gjeld frå 1. foo 2026."),)
+    )
+    assert {t.reason for t in timings.values()} == {"partial decision outside the grammar"}
+
+
+def test_full_decision_body_scan_skips_informational_sentences_and_reads_to_the_end() -> None:
+    law = _law()
+    fine = _decision(
+        "forskrift/2025-12-12-1",
+        FULL,
+        "2026-01-01",
+        "2025-12-12 10:00",
+        "Loven trer i kraft 1. januar 2026. Kongen kan gjøre unntak i forskrift.",
+    )
+    assert {t.effective for t in _by_part(law, _timings(law, fine)).values()} == {date(2026, 1, 1)}
+    late = _decision(
+        "forskrift/2025-12-12-1",
+        FULL,
+        "2026-01-01",
+        "2025-12-12 10:00",
+        "Departementet kan gi overgangsregler. Loven trer i kraft 1. juli 2026.",
+    )
+    assert {t.reason for t in _by_part(law, _timings(law, late)).values()} == {
+        "full decision body disagrees with its header"
+    }
+
+
+def test_a_full_decision_whose_body_reads_like_a_part_scope_still_dates_by_its_header() -> None:
+    law = _law()
+    full = _decision(
+        "forskrift/2021-01-01-1",
+        FULL,
+        "2021-07-01",
+        "2021-01-01 10:00",
+        "Endringsloven del I trer i kraft 1. juli 2021.",
+    )
+    timings = _by_part(law, _timings(law, full))
+    assert timings[("II", "§5")].status == "dated"
+    assert timings[("II", "§5")].effective == date(2021, 7, 1)
+
+
+def test_unsettling_clears_a_retroactive_flag() -> None:
+    law = _law("Loven trer i kraft 1. juli 2020.")  # published 2020-12-18: retroactive
+    before = _by_part(law, _timings(law))[("I", "§1")]
+    assert before.retroactive is True
+    other = _decision(
+        "forskrift/2021-02-01-2",
+        FULL,
+        "2021-10-01",
+        "2021-02-01 10:00",
+        "Loven trer i kraft 1. oktober 2021.",
+    )
+    after = _by_part(law, _timings(law, other))[("I", "§1")]
+    assert after.status == "unresolved" and after.retroactive is False and after.effective is None
+
+
+def test_two_decisions_both_without_a_publication_time_are_unreadable() -> None:
+    law = _law()
+    a = _decision(
+        "forskrift/2021-01-01-1", FULL, "2021-07-01", "", "Loven trer i kraft 1. juli 2021."
+    )
+    b = _decision(
+        "forskrift/2021-02-01-2", FULL, "2021-07-01", "", "Loven trer i kraft 1. juli 2021."
+    )
+    timings = _by_part(law, _timings(law, a, b))
+    assert {t.reason for t in timings.values()} == {
+        "decision without a publication time among several"
+    }
+
+
+def test_the_undated_decision_unsettles_first_and_the_dated_one_is_then_left_alone() -> None:
+    law = _law()
+    dated = _decision(
+        "forskrift/2021-01-01-1",
+        FULL,
+        "2021-07-01",
+        "2021-01-01 10:00",
+        "Loven trer i kraft 1. juli 2021.",
+    )
+    undated = _decision(
+        "forskrift/2021-03-01-2",
+        DELT,
+        "2021-07-01",
+        "",
+        f"{DELT}. Endringsloven del I trer i kraft 1. juli 2021.",
+    )
+    for order in ((dated, undated), (undated, dated)):
+        timing = _by_part(law, _timings(law, *order))[("I", "§1")]
+        assert _refids(timing) == [LAW, "forskrift/2021-03-01-2"], order
+
+
+def test_baseline_stops_folding_once_unresolved() -> None:
+    act = parse_document((FIXTURES / "enacting.xml").read_bytes(), "lti/x/enacting.xml")
+    title = "Ikraftsetting av lov 14. juni 2019 nr. 99 om prøving"
+    first = _decision(
+        "forskrift/2020-02-28-9999",
+        title,
+        "2021-01-01",
+        "2020-02-28 10:00",
+        "Loven trer i kraft 1. januar 2021.",
+    )
+    other = _decision(
+        "forskrift/2020-06-01-1",
+        title,
+        "2021-03-01",
+        "2020-06-01 10:00",
+        "Loven trer i kraft 1. mars 2021.",
+    )
+    third = _decision(
+        "forskrift/2020-07-01-2",
+        title,
+        "2021-03-01",
+        "2020-07-01 10:00",
+        "Loven trer i kraft 1. mars 2021.",
+    )
+    timing = baseline_timing(act, (first, other, third))
+    assert timing.status == "unresolved"
+    assert _refids(timing) == ["forskrift/2020-02-28-9999", "forskrift/2020-06-01-1"]

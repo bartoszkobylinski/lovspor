@@ -7,7 +7,7 @@ from pathlib import Path
 from lovspor.legaltime import replay, verify
 from lovspor.legaltime.commencement import Timing
 from lovspor.legaltime.document import Document, parse_document
-from lovspor.legaltime.instructions import Address, Operation
+from lovspor.legaltime.instructions import Address, Operation, _Reader
 from lovspor.legaltime.replay import Event, ReplayState, _Working
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "legaltime"
@@ -74,3 +74,29 @@ def test_an_operation_that_fails_marks_only_its_target_and_leaves_the_text() -> 
     assert one.status == "unresolved" and len(one.ledd) == 2
     assert all(p.status == "replayed" for p in state.provisions if p.key != "§1")
     assert state.act_level_problems == ()
+
+
+def test_blanket_detail_joins_every_act_level_problem() -> None:
+    state = _run(
+        _event(_op("renumber", Address())),
+        _event(_op("renumber", Address()).model_copy(update={"id": "x#I:1.0"})),
+    )
+    assert len(state.act_level_problems) == 2
+    verification = verify.verify(state, _load("consolidated.xml"))
+    assert verification.sections[0].detail == (
+        "act-level problem, target unknown: x#I:0.0: renumbering not implied by the operation "
+        "before it; x#I:1.0: renumbering not implied by the operation before it"
+    )
+
+
+def test_every_node_carries_a_tuple_change_part_and_its_host() -> None:
+    document = _load("enacting-embedded.xml")
+    nodes = [node for part in document.parts for node in part.nodes]
+    assert nodes and all(isinstance(node.change_part, tuple) for node in nodes)
+    assert {node.host_section for node in nodes if node.kind == "ledd"} >= {"§25"}
+
+
+def test_substitution_operations_carry_their_host_section() -> None:
+    reader = _Reader(_load("enacting-embedded.xml"))
+    op = reader._substitute(("I", "I:3", "§25"), "lov/2019-06-14-99", "I § 1 og § 2.", ("a", "b"))
+    assert op.host_section == "§25" and op.kind == "substitute_term"

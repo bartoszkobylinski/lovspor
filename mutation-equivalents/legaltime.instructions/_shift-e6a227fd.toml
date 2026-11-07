@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/instructions.py"
+symbol = "_shift"
+registered = "2026-11-07, PR #833, from the mutation artifact at commit 0bb7c4d4"
+mutation = """
+-        section=section, unit=match.group("unit"), pairs=tuple(zip(olds, news, strict=True))
++        section=section, unit=match.group("unit"), pairs=tuple(zip(olds, news, strict=None))
+"""
+justification = """
+`_shift` returns None two lines earlier unless `len(olds) == len(news)`
+(`if not olds or len(olds) != len(news): return None`), so `zip(olds, news, ...)`
+only ever runs on two lists of equal length. Python's `zip` yields the same
+pairs for equal-length inputs whatever `strict` is: the `strict` flag only
+changes behaviour (raising `ValueError`) when one input is exhausted before the
+other, which the preceding check rules out. `strict=True` is kept for ruff
+B905; the mutation (`strict=None`) computes the identical tuple for every input that
+reaches the line.
+"""

@@ -14,7 +14,7 @@ from lovspor.legaltime import replay
 from lovspor.legaltime.commencement import Timing
 from lovspor.legaltime.document import Document, parse_document
 from lovspor.legaltime.instructions import Address, Operation, _shift, interpret
-from lovspor.legaltime.replay import Event, ProvisionState, ReplayState
+from lovspor.legaltime.replay import Event, ProvisionState, ReplayState, _Working
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "legaltime"
 ENACTED = Timing(status="dated", effective=date(2021, 1, 1))
@@ -384,3 +384,69 @@ def test_an_absorbed_punktum_renumbering_checks_the_ledd_has_the_punktum_it_name
     assert [problem for _, problem in state.unresolved] == [
         "renumbering names punktum 3, the ledd has 2"
     ]
+
+
+# ---------------------------------------------------------------- mutation round (2026-11-07)
+
+
+def test_shift_reads_og_as_two_numbers_and_til_as_a_run() -> None:
+    og = _shift("Nåværende annet og fjerde ledd blir tredje og femte ledd.")
+    assert og is not None and og.pairs == ((2, 3), (4, 5))
+    til = _shift("Nåværende første til tredje ledd blir andre til fjerde ledd.")
+    assert til is not None and til.pairs == ((1, 2), (2, 3), (3, 4))
+
+
+def test_a_renumbering_after_a_section_replacement_is_refused_without_crashing() -> None:
+    ops = _ops(
+        _instruction("§ 1 skal lyde:"),
+        '<article class="futureLegalArticle" data-name="§1"><article class="legalP">Ny.</article></article>',  # noqa: E501
+        _instruction("Nåværende annet ledd blir tredje ledd."),
+    )
+    assert [op.kind for op in ops] == ["replace_section", "renumber"]
+    assert ops[1].absorbed_by is None
+
+
+def test_punktum_shift_uses_the_punktum_numbers_not_the_ledd_number() -> None:
+    articles = (
+        _instruction("§ 1 annet ledd nytt første punktum skal lyde:"),
+        _text("Innledning."),
+        _instruction("Nåværende første punktum blir annet punktum."),
+    )
+    ops = _ops(*articles)
+    assert ops[0].address.ledd == 2 and ops[0].address.punktum == 1
+    assert ops[1].absorbed_by == ops[0].id and ops[1].address.ledd == 2
+
+
+def test_a_two_punktum_insertion_absorbs_a_two_step_shift() -> None:
+    ops = _ops(
+        _instruction("§ 1 første ledd nytt første og annet punktum skal lyde:"),
+        _text("En. To."),
+        _instruction("Nåværende første og annet punktum blir tredje og fjerde punktum."),
+    )
+    assert ops[1].absorbed_by == ops[0].id
+    off = _ops(
+        _instruction("§ 1 første ledd nytt første og annet punktum skal lyde:"),
+        _text("En. To."),
+        _instruction("Nåværende første og annet punktum blir annet og tredje punktum."),
+    )
+    assert off[1].absorbed_by is None
+
+
+def test_renumbering_count_messages_name_what_is_missing() -> None:
+    baseline = parse_document((FIXTURES / "enacting.xml").read_bytes(), "lti/x/enacting.xml")
+    working = _Working(baseline)
+    working.done.add("prev")
+    missing = Operation(
+        id="r", kind="renumber", act="lov/2019-06-14-99", address=Address(section="§9"), part="I",
+        instruction="Nåværende annet ledd blir tredje ledd.", absorbed_by="prev",
+    )  # fmt: skip
+    assert working.apply_renumber(missing) == "renumbering names ledd 3, the provision has 0"
+    listed = missing.model_copy(
+        update={
+            "address": Address(section="§2", ledd=1),
+            "instruction": "Nåværende første punktum blir annet punktum.",
+        }
+    )
+    assert working.apply_renumber(listed) == "renumbering names punktum 2, the ledd has 0"
+    garbled = missing.model_copy(update={"instruction": "i"})
+    assert working.apply_renumber(garbled) == "renumbering sentence no longer parses"

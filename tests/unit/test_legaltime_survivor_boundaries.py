@@ -119,10 +119,11 @@ def test_shift_preserves_pairs_and_ranges(sentence, expected):
 @pytest.mark.parametrize(
     "kind,address,unit,expected",
     [
-        ("insert_punktum", Address(ledd=1, punktum=2, punktum_end=4), "punktum", (2, 1, 3)),
+        ("insert_punktum", Address(ledd=1, punktum=2, punktum_end=4), "punktum", (2, 3)),
         ("replace_ledd", Address(ledd=2), "ledd", None),
         ("insert_ledd", Address(), "ledd", None),
-        ("insert_ledd", Address(ledd=2), "ledd", (2, 1, 1)),
+        ("insert_ledd", Address(ledd=2), "ledd", (2, 1)),
+        ("repeal_ledd", Address(ledd=2, ledd_end=3), "ledd", (4, -2)),
     ],
 )
 def test_implied_shift_uses_the_requested_unit(kind, address, unit, expected):

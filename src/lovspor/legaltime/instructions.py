@@ -392,8 +392,8 @@ def _as_insertion(previous: Operation, shift: Shift) -> Operation | None:
     return None
 
 
-def _implied(previous: Operation, unit: str) -> tuple[int, int, int] | None:
-    """(first affected, last removed, delta) the previous operation imposes on ``unit`` numbers."""
+def _implied(previous: Operation, unit: str) -> tuple[int, int] | None:
+    """(first number affected, delta) the previous operation imposes on ``unit`` numbers."""
     address = previous.address
     start = address.ledd if unit == "ledd" else address.punktum
     if start is None or previous.kind not in (f"insert_{unit}", f"repeal_{unit}"):
@@ -401,8 +401,8 @@ def _implied(previous: Operation, unit: str) -> tuple[int, int, int] | None:
     end = (address.ledd_end if unit == "ledd" else address.punktum_end) or start
     count = end - start + 1
     if previous.kind == f"insert_{unit}":
-        return (start, start - 1, count)
-    return (start, end, -count)
+        return (start, count)
+    return (end + 1, -count)  # the repealed numbers themselves are gone, not shifted
 
 
 def _absorbed(previous: Operation, shift: Shift) -> bool:
@@ -412,16 +412,14 @@ def _absorbed(previous: Operation, shift: Shift) -> bool:
     implied = _implied(previous, shift.unit)
     if implied is None:
         return False
-    first, last_removed, delta = implied
-    return all(
-        old > last_removed and old >= first and new == old + delta for old, new in shift.pairs
-    )
+    first, delta = implied
+    return all(old >= first and new == old + delta for old, new in shift.pairs)
 
 
 def _absorb(current: Operation, previous: Operation, shift: Shift) -> Operation:
-    """Address the renumbering to the section it names or, once absorbed, to its predecessor's."""
+    """Once absorbed, address the renumbering to its predecessor's section (and ledd)."""
     if not _absorbed(previous, shift):
-        return current.model_copy(update={"address": Address(section=shift.section)})
+        return current  # its own address already names the section the sentence gave, if any
     ledd = previous.address.ledd if shift.unit == "punktum" else None
     address = Address(section=previous.address.section, ledd=ledd)
     return current.model_copy(update={"address": address, "absorbed_by": previous.id})
