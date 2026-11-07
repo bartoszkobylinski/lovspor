@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/document.py"
+symbol = "_ledd_of"
+registered = "2026-11-07, PR #833, from the mutation artifact at commit 1e6eb12"
+mutation = """
+-            detached = copy.deepcopy(child)
++            detached = copy.copy(child)
+"""
+justification = """
+`copy.copy` on an lxml element calls `_Element.__copy__`, which lxml
+implements as a full copy of the subtree, detached from its parent, exactly
+what `copy.deepcopy` yields through `__deepcopy__` (both keep the tail text,
+and the very next statement sets the copy's tail to None either way). The copy
+is only serialised with `etree.tostring`, so both produce the same string.
+This argues from lxml's behaviour; the named test pins that the shallow copy
+is a detached subtree copy that serialises like the deep one.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_lxml_shallow_copy_is_a_detached_subtree_copy"

@@ -9,6 +9,7 @@ from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from lovspor.crosswalk.approval import CandidateProof
 from lovspor.crosswalk.build import BuildOptions, build
 from lovspor.crosswalk.cache import MANIFEST
 from lovspor.crosswalk.canonical import parse_records, serialize_records
@@ -16,6 +17,7 @@ from lovspor.crosswalk.commands import manifest_impl
 from lovspor.crosswalk.errors import CrosswalkError
 from lovspor.crosswalk.manifest import UNVERIFIED, build_manifest
 from lovspor.crosswalk.release import Approval, promote
+from tests.unit.crosswalk_signing import approval_dir, new_signer, trust
 from tests.unit.crosswalk_support import PRODUCER, make_capture
 
 
@@ -44,6 +46,22 @@ def promoted(built: bytes, capture_dir: Path) -> bytes:
     return data
 
 
+def _stand_in(data: bytes, cache: Path) -> CandidateProof:
+    """A proof object without the replay, so these tests isolate provenance.
+
+    The replay and the signature are tested in test_crosswalk_approval_binding.py;
+    the CLI tests below go through them for real.
+    """
+    capture = sha256((cache / MANIFEST).read_bytes()).hexdigest()
+    return CandidateProof(sha256(data).hexdigest(), capture, {"proof": "stand-in"})
+
+
+def _signed_proof(tmp_path: Path, built: bytes, monkeypatch: pytest.MonkeyPatch) -> Path:
+    signer = new_signer(tmp_path / "keys")
+    trust(monkeypatch, signer)
+    return approval_dir(tmp_path / "proof", built, signer)
+
+
 def test_a_release_candidate_manifest_needs_a_capture(promoted: bytes) -> None:
     with pytest.raises(CrosswalkError) as caught:
         build_manifest(promoted, "x")
@@ -55,7 +73,7 @@ def test_a_release_candidate_manifest_needs_a_capture(promoted: bytes) -> None:
 def test_a_verified_release_candidate_manifest_names_its_capture(
     promoted: bytes, capture_dir: Path
 ) -> None:
-    manifest = build_manifest(promoted, "x", capture_dir)
+    manifest = build_manifest(promoted, "x", capture_dir, _stand_in(promoted, capture_dir))
     assert manifest["release_state"] == "release_candidate"
     assert manifest["provenance"] == {
         "verified": True,
@@ -72,13 +90,13 @@ def test_capture_provenance_hashes_exact_bytes_not_reserialized_json(
     """P5 names the capture manifest's SHA-256, including its byte representation."""
     path = capture_dir / MANIFEST
     original = path.read_bytes()
-    before = build_manifest(promoted, "x", capture_dir)
+    before = build_manifest(promoted, "x", capture_dir, _stand_in(promoted, capture_dir))
     reformatted = json.dumps(json.loads(original), separators=(",", ":")).encode() + b"\r\n"
     assert reformatted != original
     assert json.loads(reformatted) == json.loads(original)
     path.write_bytes(reformatted)
 
-    after = build_manifest(promoted, "x", capture_dir)
+    after = build_manifest(promoted, "x", capture_dir, _stand_in(promoted, capture_dir))
     assert after["provenance"] == {
         "verified": True,
         "fully_reproduced": True,
@@ -143,14 +161,19 @@ def test_a_research_manifest_with_a_capture_reports_what_was_not_verified(
 
 
 def test_manifest_command_refuses_a_candidate_without_capture_and_writes_nothing(
-    promoted: bytes, capture_dir: Path, tmp_path: Path
+    built: bytes,
+    promoted: bytes,
+    capture_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data, output = tmp_path / "rc.jsonl", tmp_path / "manifest.json"
     data.write_bytes(promoted)
     with pytest.raises(CrosswalkError):
         manifest_impl(data, output)
     assert not output.exists()
-    assert manifest_impl(data, output, capture_dir) == (
+    proof = _signed_proof(tmp_path, built, monkeypatch)
+    assert manifest_impl(data, output, capture_dir, proof) == (
         f"wrote the manifest of rc.jsonl (release_candidate) to {output}"
     )
 
@@ -162,8 +185,9 @@ def test_mixed_manifest_reports_research_drift_without_certifying_that_act(
     records = parse_records(promoted)
     research = next(r for r in records if r["status"] == "unsupported")
     research["evidence"][0]["body_sha256"] = "f" * 64
+    data = serialize_records(records)
 
-    manifest = build_manifest(serialize_records(records), "x", capture_dir)
+    manifest = build_manifest(data, "x", capture_dir, _stand_in(data, capture_dir))
 
     assert manifest["release_state"] == "release_candidate"
     assert manifest["counts"]["release_state"] == {"release_candidate": 3, "research_only": 5}
@@ -191,7 +215,7 @@ def test_manifest_checks_current_provenance_without_rejudging_superseded_evidenc
     historical["evidence"][0][field] = "f" * 64
     data = serialize_records(records)
 
-    manifest = build_manifest(data, "x", capture_dir)
+    manifest = build_manifest(data, "x", capture_dir, _stand_in(data, capture_dir))
 
     assert manifest["release_state"] == "release_candidate"
     assert manifest["counts"]["revisions"] == len(records)
@@ -203,15 +227,22 @@ def test_manifest_checks_current_provenance_without_rejudging_superseded_evidenc
 
 
 def test_cli_writes_a_verified_release_candidate_manifest(
-    promoted: bytes, capture_dir: Path, tmp_path: Path
+    built: bytes,
+    promoted: bytes,
+    capture_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ``--cache`` option actually reaches ``build_manifest`` through the CLI."""
+    """``--cache`` and ``--approval-proof`` actually reach ``build_manifest`` through the CLI."""
     data, output = tmp_path / "rc.jsonl", tmp_path / "manifest.json"
     data.write_bytes(promoted)
+    proof = _signed_proof(tmp_path, built, monkeypatch)
     args = [
         "ops",
         "crosswalk",
         "manifest",
+        "--approval-proof",
+        str(proof),
         "--input",
         str(data),
         "--cache",

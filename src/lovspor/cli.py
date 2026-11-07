@@ -29,15 +29,13 @@ from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.observatory.entrypoint import observatory_app
 from lovspor.ops_cli import ops_app
 from lovspor.promotion.app import promote_app
-from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.release.admin_socket import DEFAULT_UNPRIVILEGED_USER, AdminSocket
 from lovspor.release.caddy import DEFAULT_ADMIN, SubprocessRunner
-from lovspor.release.check import check_envelope
+from lovspor.release.check import publish_check_summary
 from lovspor.release.commands import release_app
-from lovspor.release.envelope import CORPUS_DIR, RECORD_NAME, SITE_DIR
 from lovspor.release.errors import AdminSocketError, ControlPlaneError, ReleaseError
 from lovspor.release.migrate import DEFAULT_RELEASE_GROUP
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
@@ -536,17 +534,16 @@ def site_drift_check(
     typer.echo(_drift_line(report, observer))
 
 
-def _is_envelope(release: Path) -> bool:
-    """An envelope has ``corpus/`` and ``site/``; a bare corpus tree has ``lov/`` at its root."""
-    return any((release / name).exists() for name in (CORPUS_DIR, SITE_DIR, RECORD_NAME))
-
-
 @app.command(name="publish-check")
 def publish_check(
     release: Annotated[
         Path,
         typer.Argument(help="A release envelope (corpus/ + site/), or a bare corpus tree."),
     ],
+    previous: Annotated[
+        Path | None,
+        typer.Option(help="The release served now: refuse if one of its URLs would 404."),
+    ] = None,
 ) -> None:
     """Refuse to serve a release that is not complete and self-consistent.
 
@@ -556,14 +553,12 @@ def publish_check(
     envelope records. For a bare corpus tree (ADR-0013 Decision 8): manifest
     present and of this engine's schema, every page's JSON twin hashing to
     its HTML, every sitemap URL and redirect target served by a file in the
-    tree. Exit 1 names the first offending path.
+    tree. With --previous, every page, JSON twin and redirect source the
+    previous release served must stay live, 301 or answer 410 (#747).
+    Exit 1 names the first offending path.
     """
     try:
-        summary = (
-            check_envelope(release).summary()
-            if _is_envelope(release)
-            else check_release(release).summary()
-        )
+        summary = publish_check_summary(release, previous)
     except (PublishError, ReleaseError) as error:
         typer.echo(f"release refused: {error}", err=True)
         raise typer.Exit(code=1) from error

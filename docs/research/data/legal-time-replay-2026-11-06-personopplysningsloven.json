@@ -1,0 +1,6302 @@
+{
+ "act": "lov/2018-06-15-38",
+ "archives": [
+  {
+   "archive": "lovtidend-avd1-2001-2025.tar.bz2",
+   "horizon": "2026-06-23T08:35:00",
+   "members": 38182,
+   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0",
+   "skipped_members": []
+  },
+  {
+   "archive": "lovtidend-avd1-2026.tar.bz2",
+   "horizon": "2026-11-05T14:50:00",
+   "members": 1204,
+   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2",
+   "skipped_members": []
+  }
+ ],
+ "baseline_timing": {
+  "effective": "2018-07-20",
+  "known_from": "2018-07-17",
+  "proofs": [
+   {
+    "member": "lti/2018/sf-20180615-0875.xml",
+    "quote_sha256": "0c845c9ab8995d259c6224f7b1a7e37f8b573ecaec6b2848c3d4c20722c468dd",
+    "refid": "forskrift/2018-06-15-875",
+    "sha256": "130c258ad805decefae056913d0ead84aaf17e460dc2fdc1a83d3b511012a032"
+   },
+   {
+    "member": "lti/2018/sf-20180717-1195.xml",
+    "quote_sha256": "e37ba90ee0d0a4e408b8d8c6cc7ddfb4a683badd500d655dca73f26d973c1802",
+    "refid": "forskrift/2018-07-17-1195",
+    "sha256": "3eb251fd20a1fda61d9241e3971bb24e3a84d465bdb59502e15e5d9477b65fd7"
+   }
+  ],
+  "reason": "",
+  "retroactive": false,
+  "status": "dated"
+ },
+ "events": [
+  {
+   "law": "lov/2018-12-20-116",
+   "member": "lti/2018/nl-20181220-116.xml",
+   "operation": {
+    "absorbed_by": null,
+    "address": {
+     "section": "§12a"
+    },
+    "change_part": [],
+    "destination": null,
+    "host_section": null,
+    "id": "lov/2018-12-20-116#1:I:0.0",
+    "instruction": "ny § 12 a lyde:",
+    "kind": "insert_section",
+    "part": "I",
+    "payload": {
+     "ledd": 0,
+     "provision": "§12a"
+    }
+   },
+   "published_at": "2018-12-20T15:50:00",
+   "timing": {
+    "effective": "2018-12-20",
+    "known_from": "2018-12-20",
+    "proofs": [
+     {
+      "member": "lti/2018/sf-20181220-2093.xml",
+      "quote_sha256": "02344cbba4d7053ffd262cf99ffb47cd5fa2fcfa9e26ffcf53850ecfc61a1795",
+      "refid": "forskrift/2018-12-20-2093",
+      "sha256": "d8a0ce4bd1e3e21e4997766d24b14f3363af6c26f069c5ae855e7e47535577af"
+     }
+    ],
+    "reason": "",
+    "retroactive": false,
+    "status": "dated"
+   }
+  },
+  {
+   "law": "lov/2021-06-18-124",
+   "member": "lti/2021/nl-20210618-124.xml",
+   "operation": {
+    "absorbed_by": null,
+    "address": {
+     "section": "§3"
+    },
+    "change_part": [],
+    "destination": null,
+    "host_section": null,
+    "id": "lov/2021-06-18-124#2:II:0.0",
+    "instruction": "§ 3 lyde:",
+    "kind": "replace_section",
+    "part": "II",
+    "payload": {
+     "ledd": 0,
+     "provision": "§3"
+    }
+   },
+   "published_at": "2021-06-18T12:50:00",
+   "timing": {
+    "effective": "2022-01-01",
+    "known_from": "2021-06-18",
+    "proofs": [
+     {
+      "member": "lti/2021/sf-20210618-1967.xml",
+      "quote_sha256": "b140e8ecc82925fba9829135ab08ab5e06f089bdf9c7041e33ba86ee4d6a65bb",
+      "refid": "forskrift/2021-06-18-1967",
+      "sha256": "757e13eb1bb5ea73d122385fe7e25fecc6c96621e49dbdfcab052b0065e13a6a"
+     }
+    ],
+    "reason": "",
+    "retroactive": false,
+    "status": "dated"
+   }
+  }
+ ],
+ "inputs": [
+  {
+   "filename": "lovtidend-avd1-2001-2025.tar.bz2",
+   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0",
+   "size_bytes": 69320068
+  },
+  {
+   "filename": "lovtidend-avd1-2026.tar.bz2",
+   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2",
+   "size_bytes": 1663298
+  }
+ ],
+ "members": [
+  {
+   "date_in_force": "Kongen bestemmer",
+   "member": "lti/2018/nl-20180615-038.xml",
+   "published_at": "2018-06-15T15:40:00",
+   "refid": "lov/2018-06-15-38",
+   "role": "enacting",
+   "sha256": "069f4e1d1153ebe65c4e9f075f2a12193c012df9e880537648400e7d338633ba",
+   "title": "Lov om behandling av personopplysninger (personopplysningsloven)",
+   "unattributed_operations": 0
+  },
+  {
+   "date_in_force": "Kongen bestemmer",
+   "member": "lti/2018/nl-20181220-116.xml",
+   "published_at": "2018-12-20T15:50:00",
+   "refid": "lov/2018-12-20-116",
+   "role": "amending",
+   "sha256": "b06dd58dc4f39d355a0b26cf45e0ac0ef39e5361fc22d046480e190774704571",
+   "title": "Lov om endringer i personopplysningsloven (bekjempelse av arbeidslivskriminalitet)",
+   "unattributed_operations": 0
+  },
+  {
+   "date_in_force": "2021-06-18, Kongen bestemmer",
+   "member": "lti/2021/nl-20210618-124.xml",
+   "published_at": "2021-06-18T12:50:00",
+   "refid": "lov/2021-06-18-124",
+   "role": "amending",
+   "sha256": "036fbacd01aaef0ef4ecf512c0fd0768f40e5569df638342aba184559d8b856a",
+   "title": "Lov om endringer i personopplysningsloven og offentleglova (ytrings- og informasjonsfrihet mv.)",
+   "unattributed_operations": 0
+  },
+  {
+   "date_in_force": "Når personvernforordningen trer i kraft",
+   "member": "lti/2018/sf-20180615-0875.xml",
+   "published_at": "2018-06-15T15:40:00",
+   "refid": "forskrift/2018-06-15-875",
+   "role": "decision",
+   "sha256": "130c258ad805decefae056913d0ead84aaf17e460dc2fdc1a83d3b511012a032",
+   "title": "Ikraftsetting av lov 15. juni 2018 nr. 38 om behandling av personopplysninger (personopplysningsloven)",
+   "unattributed_operations": 0
+  },
+  {
+   "date_in_force": "2018-07-20",
+   "member": "lti/2018/sf-20180717-1195.xml",
+   "published_at": "2018-07-17T13:45:00",
+   "refid": "forskrift/2018-07-17-1195",
+   "role": "decision",
+   "sha256": "3eb251fd20a1fda61d9241e3971bb24e3a84d465bdb59502e15e5d9477b65fd7",
+   "title": "Meddelelse om ikrafttredelse av lov 15. juni 2018 nr. 38 om behandling av personopplysninger (personopplysningsloven)",
+   "unattributed_operations": 0
+  },
+  {
+   "date_in_force": "2018-12-20",
+   "member": "lti/2018/sf-20181220-2093.xml",
+   "published_at": "2018-12-20T18:15:00",
+   "refid": "forskrift/2018-12-20-2093",
+   "role": "decision",
+   "sha256": "d8a0ce4bd1e3e21e4997766d24b14f3363af6c26f069c5ae855e7e47535577af",
+   "title": "Ikraftsetting av lov 20. desember 2018 nr. 116 om endringer i personopplysningsloven (bekjempelse av arbeidslivskriminalitet)",
+   "unattributed_operations": 0
+  },
+  {
+   "date_in_force": "2021-07-01, 2022-01-01",
+   "member": "lti/2021/sf-20210618-1967.xml",
+   "published_at": "2021-06-18T14:50:00",
+   "refid": "forskrift/2021-06-18-1967",
+   "role": "decision",
+   "sha256": "757e13eb1bb5ea73d122385fe7e25fecc6c96621e49dbdfcab052b0065e13a6a",
+   "title": "Delt ikraftsetting av lov 18. juni 2021 nr. 124 om endringer i personopplysningsloven og offentleglova (ytrings- og informasjonsfrihet mv.)",
+   "unattributed_operations": 0
+  }
+ ],
+ "oracle": {
+  "member": "nl/nl-20180615-038.xml",
+  "sha256": "dadc8a734fa03f44894648bf13de35d273fe0022bb9f6b9be8f1164a6ba611bb"
+ },
+ "replay_version": "legaltime-replay-2",
+ "states": [
+  {
+   "act_level_problems": [],
+   "applied": [],
+   "at": "2018-07-20",
+   "future": [
+    "lov/2018-12-20-116#1:I:0.0",
+    "lov/2021-06-18-124#2:II:0.0"
+   ],
+   "pending": [],
+   "provisions": [
+    {
+     "applied": [],
+     "key": "§1",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§2",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§3",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§4",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§5",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§6",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§7",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§8",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§9",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§10",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§11",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§12",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§13",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§14",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§15",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§16",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§17",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§18",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§19",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§20",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§21",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§22",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§23",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§24",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§25",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§26",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§27",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§28",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§29",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§30",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§31",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§32",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§33",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§34",
+     "ledd": 79,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    }
+   ],
+   "status": "replayed",
+   "unresolved": [],
+   "withheld": []
+  },
+  {
+   "act_level_problems": [],
+   "applied": [
+    "lov/2018-12-20-116#1:I:0.0"
+   ],
+   "at": "2021-07-01",
+   "future": [
+    "lov/2021-06-18-124#2:II:0.0"
+   ],
+   "pending": [],
+   "provisions": [
+    {
+     "applied": [],
+     "key": "§1",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§2",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§3",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§4",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§5",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§6",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§7",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§8",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§9",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§10",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§11",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§12",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [
+      "lov/2018-12-20-116#1:I:0.0"
+     ],
+     "key": "§12a",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§13",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§14",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§15",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§16",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§17",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§18",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§19",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§20",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§21",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§22",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§23",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§24",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§25",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§26",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§27",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§28",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§29",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§30",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§31",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§32",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§33",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§34",
+     "ledd": 79,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    }
+   ],
+   "status": "replayed",
+   "unresolved": [],
+   "withheld": []
+  },
+  {
+   "act_level_problems": [],
+   "applied": [
+    "lov/2018-12-20-116#1:I:0.0",
+    "lov/2021-06-18-124#2:II:0.0"
+   ],
+   "at": "2022-01-01",
+   "future": [],
+   "pending": [],
+   "provisions": [
+    {
+     "applied": [],
+     "key": "§1",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§2",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [
+      "lov/2021-06-18-124#2:II:0.0"
+     ],
+     "key": "§3",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§4",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§5",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§6",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§7",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§8",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§9",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§10",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§11",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§12",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [
+      "lov/2018-12-20-116#1:I:0.0"
+     ],
+     "key": "§12a",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§13",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§14",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§15",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§16",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§17",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§18",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§19",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§20",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§21",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§22",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§23",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§24",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§25",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§26",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§27",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§28",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§29",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§30",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§31",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§32",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§33",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§34",
+     "ledd": 79,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    }
+   ],
+   "status": "replayed",
+   "unresolved": [],
+   "withheld": []
+  },
+  {
+   "act_level_problems": [],
+   "applied": [
+    "lov/2018-12-20-116#1:I:0.0",
+    "lov/2021-06-18-124#2:II:0.0"
+   ],
+   "at": "2026-11-06",
+   "future": [],
+   "pending": [],
+   "provisions": [
+    {
+     "applied": [],
+     "key": "§1",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§2",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [
+      "lov/2021-06-18-124#2:II:0.0"
+     ],
+     "key": "§3",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§4",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§5",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§6",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§7",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§8",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§9",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§10",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§11",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§12",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [
+      "lov/2018-12-20-116#1:I:0.0"
+     ],
+     "key": "§12a",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§13",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§14",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§15",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§16",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§17",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§18",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§19",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§20",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§21",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§22",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§23",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§24",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§25",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§26",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§27",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§28",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§29",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§30",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§31",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§32",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§33",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§34",
+     "ledd": 79,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    }
+   ],
+   "status": "replayed",
+   "unresolved": [],
+   "withheld": []
+  }
+ ],
+ "verification": [
+  {
+   "act": "lov/2018-06-15-38",
+   "act_level_problems": [],
+   "at": "2018-07-20",
+   "counts": {
+    "editorial_omission": 1,
+    "exact_normalized": 22,
+    "exact_raw": 10,
+    "only_in_oracle": 1,
+    "oracle_annex": 99,
+    "text_differs": 1
+   },
+   "notes_without_replay_event": [
+    "§12a",
+    "§3"
+   ],
+   "oracle_member": "nl/nl-20180615-038.xml",
+   "oracle_sha256": "dadc8a734fa03f44894648bf13de35d273fe0022bb9f6b9be8f1164a6ba611bb",
+   "replay_events_without_note": [],
+   "sections": [
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "ledd count 1 vs 3",
+     "key": "§3",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "text_differs"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§20",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§26",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "editorial_omission"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§12a",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "only_in_oracle"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a3",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a20",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a26",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a35",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a36",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a37",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a38",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a39",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a40",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a41",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a42",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a43",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a44",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a45",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a46",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a47",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a48",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a49",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a50",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a51",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a52",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a53",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a54",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a55",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a56",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a57",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a58",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a59",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a60",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a61",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a62",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a63",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a64",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a65",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a66",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a67",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a68",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a69",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a70",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a71",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a72",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a73",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a74",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a75",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a76",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a77",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a78",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a79",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a80",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a81",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a82",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a83",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a84",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a85",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a86",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a87",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a88",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a89",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a90",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a91",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a92",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a93",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a94",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a95",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a96",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a97",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a98",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a99",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    }
+   ]
+  },
+  {
+   "act": "lov/2018-06-15-38",
+   "act_level_problems": [],
+   "at": "2021-07-01",
+   "counts": {
+    "editorial_omission": 1,
+    "exact_normalized": 23,
+    "exact_raw": 10,
+    "oracle_annex": 99,
+    "text_differs": 1
+   },
+   "notes_without_replay_event": [
+    "§3"
+   ],
+   "oracle_member": "nl/nl-20180615-038.xml",
+   "oracle_sha256": "dadc8a734fa03f44894648bf13de35d273fe0022bb9f6b9be8f1164a6ba611bb",
+   "replay_events_without_note": [],
+   "sections": [
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "ledd count 1 vs 3",
+     "key": "§3",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "text_differs"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [
+      "lov/2018-12-20-116#1:I:0.0"
+     ],
+     "detail": "",
+     "key": "§12a",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§20",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§26",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "editorial_omission"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a3",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a20",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a26",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a35",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a36",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a37",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a38",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a39",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a40",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a41",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a42",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a43",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a44",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a45",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a46",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a47",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a48",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a49",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a50",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a51",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a52",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a53",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a54",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a55",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a56",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a57",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a58",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a59",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a60",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a61",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a62",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a63",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a64",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a65",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a66",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a67",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a68",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a69",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a70",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a71",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a72",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a73",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a74",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a75",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a76",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a77",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a78",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a79",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a80",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a81",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a82",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a83",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a84",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a85",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a86",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a87",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a88",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a89",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a90",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a91",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a92",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a93",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a94",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a95",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a96",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a97",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a98",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a99",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    }
+   ]
+  },
+  {
+   "act": "lov/2018-06-15-38",
+   "act_level_problems": [],
+   "at": "2022-01-01",
+   "counts": {
+    "editorial_omission": 1,
+    "exact_normalized": 24,
+    "exact_raw": 10,
+    "oracle_annex": 99
+   },
+   "notes_without_replay_event": [],
+   "oracle_member": "nl/nl-20180615-038.xml",
+   "oracle_sha256": "dadc8a734fa03f44894648bf13de35d273fe0022bb9f6b9be8f1164a6ba611bb",
+   "replay_events_without_note": [],
+   "sections": [
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [
+      "lov/2021-06-18-124#2:II:0.0"
+     ],
+     "detail": "",
+     "key": "§3",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [
+      "lov/2018-12-20-116#1:I:0.0"
+     ],
+     "detail": "",
+     "key": "§12a",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§20",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§26",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "editorial_omission"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a3",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a20",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a26",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a35",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a36",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a37",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a38",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a39",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a40",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a41",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a42",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a43",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a44",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a45",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a46",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a47",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a48",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a49",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a50",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a51",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a52",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a53",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a54",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a55",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a56",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a57",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a58",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a59",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a60",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a61",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a62",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a63",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a64",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a65",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a66",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a67",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a68",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a69",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a70",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a71",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a72",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a73",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a74",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a75",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a76",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a77",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a78",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a79",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a80",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a81",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a82",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a83",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a84",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a85",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a86",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a87",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a88",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a89",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a90",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a91",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a92",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a93",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a94",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a95",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a96",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a97",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a98",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a99",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    }
+   ]
+  },
+  {
+   "act": "lov/2018-06-15-38",
+   "act_level_problems": [],
+   "at": "2026-11-06",
+   "counts": {
+    "editorial_omission": 1,
+    "exact_normalized": 24,
+    "exact_raw": 10,
+    "oracle_annex": 99
+   },
+   "notes_without_replay_event": [],
+   "oracle_member": "nl/nl-20180615-038.xml",
+   "oracle_sha256": "dadc8a734fa03f44894648bf13de35d273fe0022bb9f6b9be8f1164a6ba611bb",
+   "replay_events_without_note": [],
+   "sections": [
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [
+      "lov/2021-06-18-124#2:II:0.0"
+     ],
+     "detail": "",
+     "key": "§3",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [
+      "lov/2018-12-20-116#1:I:0.0"
+     ],
+     "detail": "",
+     "key": "§12a",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§20",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§26",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "editorial_omission"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a3",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a20",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a26",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a35",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a36",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a37",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a38",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a39",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a40",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a41",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a42",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a43",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a44",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a45",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a46",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a47",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a48",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a49",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a50",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a51",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a52",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a53",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a54",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a55",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a56",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a57",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a58",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a59",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a60",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a61",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a62",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a63",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a64",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a65",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a66",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a67",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a68",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a69",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a70",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a71",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a72",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a73",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a74",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a75",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a76",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a77",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a78",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a79",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a80",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a81",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a82",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a83",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a84",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a85",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a86",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a87",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a88",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a89",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a90",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a91",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a92",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a93",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a94",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a95",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a96",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a97",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a98",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "gdpr/a99",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "oracle_annex"
+    }
+   ]
+  }
+ ]
+}

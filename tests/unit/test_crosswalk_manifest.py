@@ -10,11 +10,20 @@ from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.crosswalk import commands
+from lovspor.crosswalk.approval import CandidateProof
 from lovspor.crosswalk.build import BuildOptions, build
+from lovspor.crosswalk.cache import MANIFEST
 from lovspor.crosswalk.canonical import parse_records, serialize_records
 from lovspor.crosswalk.commands import manifest_impl
 from lovspor.crosswalk.errors import CrosswalkContractError, CrosswalkError
-from lovspor.crosswalk.manifest import BLOCKERS, build_manifest, render_manifest
+from lovspor.crosswalk.manifest import (
+    ATTRIBUTION,
+    BLOCKERS,
+    HISTORICAL,
+    SOURCE_TERMS,
+    build_manifest,
+    render_manifest,
+)
 from lovspor.crosswalk.release import Approval, promote
 from tests.unit.crosswalk_support import COMMIT, PRODUCER, attested, besl_o, digest, make_capture
 
@@ -66,30 +75,20 @@ def test_archive_pins_are_listed_once_with_their_basis(built: bytes) -> None:
     pins = build_manifest(built, "x")["lovdata_archives"]
     assert [(p["source_url"].rsplit("/", 1)[1], p["licence_basis"]) for p in pins] == [
         ("lovtidend-avd1-2001-2025.tar.bz2", "stated_for_file"),
-        ("lovtidend-avd1-2026.tar.bz2", "stated_for_endpoint"),
+        ("lovtidend-avd1-2026.tar.bz2", "stated_for_dataset"),
     ]
 
 
 def test_blockers_and_attribution_stay_until_resolved(built: bytes) -> None:
     manifest = build_manifest(built, "x")
-    assert manifest["source_terms"] == [
-        {
-            "source": "Stiftelsen Lovdata, publicData",
-            "terms_url": "https://api.lovdata.no/om-api-tjenesten/",
-            "read_on": "2026-11-02",
-            "licence": "NLOD-2.0",
-        },
-        {
-            "source": "Stortinget, data.stortinget.no eksport",
-            "terms_url": "https://data.stortinget.no/om-datatjenesten/bruksvilkar/",
-            "read_on": "2026-11-02",
-            "licence": "NLOD (current version; the terms name none)",
-        },
-    ]
+    assert manifest["source_terms"] == SOURCE_TERMS
+    assert [t["terms_url"] for t in SOURCE_TERMS][-1] == (
+        "https://data.stortinget.no/om-datatjenesten/bruksvilkar/"
+    )
+    assert manifest["attribution"] == ATTRIBUTION
     assert manifest["unresolved_blockers"] == BLOCKERS
-    assert any(b.startswith("R3:") for b in BLOCKERS)
+    assert not any(b.startswith("R3:") for b in BLOCKERS)
     assert any(b.startswith("R4:") for b in BLOCKERS)
-    assert manifest["attribution"]["status"] == "provisional"
     assert "Stortinget" in manifest["attribution"]["nb"]
     assert "Stiftelsen Lovdata" in manifest["attribution"]["en"]
     assert "released" not in json.dumps(manifest)
@@ -258,8 +257,13 @@ def test_manifest_file_size_limit_is_inclusive(
     assert not output.exists()
 
 
-def test_manifest_state_and_counts_follow_withdrawal_of_a_release_candidate() -> None:
-    """The module contract derives file state from current records, not past promotion."""
+def test_a_withdrawn_release_candidate_gets_no_manifest_without_evidence() -> None:
+    """A superseded candidate still claims a past owner authorization (review of #799).
+
+    It used to read as a research file and got a manifest with no approval
+    evidence, which a forged revision 1 could exploit just as well. The history is
+    kept as written; only the manifest is refused until that claim can be checked.
+    """
     first, withdrawn = attested(), attested()
     first["release_state"] = "release_candidate"
     withdrawn.update(
@@ -271,15 +275,10 @@ def test_manifest_state_and_counts_follow_withdrawal_of_a_release_candidate() ->
         reason_code="withdrawn_by_producer",
         withdrawal={"withdrawn_on": "2026-11-03", "reason": "producer edge was wrong"},
     )
-    manifest = build_manifest(serialize_records([first, withdrawn]), "x")
-    assert manifest["release_state"] == "research_only"
-    assert manifest["counts"] == {
-        "revisions": 2,
-        "acts": 1,
-        "status": {"unresolved": 1},
-        "release_state": {"research_only": 1},
-        "record_state": {"withdrawn": 1},
-    }
+    data = serialize_records([first, withdrawn])
+    with pytest.raises(CrosswalkError) as caught:
+        build_manifest(data, "x")
+    assert str(caught.value) == HISTORICAL.format(f"{first['amending_lov_id']}@1")
 
 
 def test_empty_checked_file_has_an_empty_manifest_scope() -> None:
@@ -310,7 +309,10 @@ def test_release_candidate_file_level_state(built: bytes, capture_dir: Path) -> 
         }
     )
     promoted, _ = promote(built, approval, capture_dir)
-    manifest = build_manifest(promoted, "x", capture_dir)
+    capture = sha256((capture_dir / MANIFEST).read_bytes()).hexdigest()
+    # A stand-in for the replay, which test_crosswalk_approval_binding.py covers.
+    proof = CandidateProof(sha256(promoted).hexdigest(), capture, {"proof": "stand-in"})
+    manifest = build_manifest(promoted, "x", capture_dir, proof)
     assert manifest["release_state"] == "release_candidate"
     assert manifest["counts"]["release_state"] == {"release_candidate": 3, "research_only": 5}
     assert manifest["counts"]["revisions"] == 11

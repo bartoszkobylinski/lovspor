@@ -61,6 +61,15 @@ class CommitRefusedError(ControlPlaneError):
     """The staged fragment did not validate or does not name the candidate."""
 
 
+class ContinuityRefusedError(CommitRefusedError):
+    """The candidate would break a URL the live release serves, or the live
+    release cannot be read to tell (#820); nothing public moved."""
+
+
+class TransactionLockedError(ControlPlaneError):
+    """Another release transaction holds the releases root; nothing was changed."""
+
+
 class ReloadFailedError(ControlPlaneError):
     """Caddy would not load the new configuration; the previous one was put back."""
 

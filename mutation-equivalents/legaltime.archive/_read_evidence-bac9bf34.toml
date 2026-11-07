@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/archive.py"
+symbol = "_read_evidence"
+registered = "2026-11-07, PR #833, from the mutation artifact at commit 1e6eb12"
+mutation = """
+-            base if path == baseline[0] else read_members(path, {*amender_names, *decision_names})
++            base if path == baseline[1] else read_members(path, {*amender_names, *decision_names})
+"""
+justification = """
+`path` is a `Path` and `baseline[1]` is the member name (a `str`), so the
+comparison is always False and the mutant always takes the `read_members`
+branch, which for the baseline archive re-reads the same tarball for the same
+names. As `read_members` is deterministic and the baseline member is returned
+from `base` regardless, every document the loop extends with is identical to
+the one `base` holds. Same evidence, same report; only one extra pass.
+"""

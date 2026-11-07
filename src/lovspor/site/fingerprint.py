@@ -97,7 +97,10 @@ def release_key(
 
 
 def _facts_sha256(raw: bytes) -> str:
-    facts: dict[str, object] = json.loads(raw)
+    """The facts' digest with their own id left out; a non-object is a ``ValueError``."""
+    facts = json.loads(raw)
+    if not isinstance(facts, dict):
+        raise ValueError(f"{_FACTS_NAME} is not a JSON object")
     facts.pop(_ID_FIELD, None)
     canonical = json.dumps(facts, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return _sha256(canonical.encode("utf-8"))

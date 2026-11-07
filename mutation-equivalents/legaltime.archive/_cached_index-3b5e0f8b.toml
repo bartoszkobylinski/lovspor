@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/archive.py"
+symbol = "_cached_index"
+registered = "2026-11-07, PR #833, from the mutation artifact at commit 40b894a"
+mutation = """
+-        index = ArchiveIndex.model_validate_json(path.read_text(encoding="utf-8"))
++        index = ArchiveIndex.model_validate_json(path.read_text(encoding="UTF-8"))
+"""
+justification = """
+The mutated name is passed to a codec lookup and nowhere else. Python's
+codec registry normalises an encoding name before lookup: case is folded and
+hyphens and underscores are interchangeable (`encodings.normalize_encoding`),
+so `codecs.lookup("UTF-8")` and `codecs.lookup("utf-8")` return the same
+CodecInfo and the same bytes are read or written for every input. Documented
+language behaviour of `codecs.lookup`, not a dependency's; the same argument
+is already registered for atomic_io.atomic_write_text.
+"""
