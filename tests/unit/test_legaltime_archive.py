@@ -247,3 +247,38 @@ def test_empty_archive_has_no_horizon_and_cannot_supply_a_baseline(tmp_path: Pat
     assert index_archive(archive) == index
     with pytest.raises(LegalTimeInputError, match="no enacting member"):
         collect("lov/2019-06-14-99", [archive])
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_replacing_archive_bytes_invalidates_cached_member_records(
+    archive: Path, malformed: bool
+) -> None:
+    """archive.py promises an index cached under the archive's own SHA256."""
+    original = index_archive(archive)
+    name = "lti/2019/nl-20190614-099.xml"
+    replacement = (
+        b"<html>"
+        if malformed
+        else (FIXTURES / "enacting.xml")
+        .read_bytes()
+        .replace(b"</main>", b"<!-- updated announcement --> </main>")
+    )
+    make_archive(archive, extra={name: replacement})
+
+    rebuilt = index_archive(archive)
+    assert rebuilt.sha256 == sha256(archive.read_bytes()).hexdigest()
+    assert rebuilt.sha256 != original.sha256
+    assert tuple(m for m in rebuilt.members if m.name != name) == tuple(
+        m for m in original.members if m.name != name
+    )
+    if malformed:
+        assert name not in {m.name for m in rebuilt.members}
+        assert rebuilt.skipped == (name,)
+    else:
+        member = next(m for m in rebuilt.members if m.name == name)
+        assert member.sha256 == sha256(replacement).hexdigest()
+        assert member.sha256 != next(m for m in original.members if m.name == name).sha256
+        assert rebuilt.skipped == ()
+    cache = archive.parent / f"{archive.name}.{INDEX_VERSION}.json"
+    assert json.loads(cache.read_text(encoding="utf-8")) == rebuilt.model_dump(mode="json")
+    assert index_archive(archive) == rebuilt
