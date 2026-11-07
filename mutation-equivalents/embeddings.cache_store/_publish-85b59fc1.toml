@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/cache_store.py"
+symbol = "_publish"
+registered = "2026-11-07, PR #825, from run 42326423416"
+mutation = """
+-        os.link(staged, final, follow_symlinks=False)
++        os.link(staged, final, )
+"""
+justification = """
+Equivalent on Linux, where the mutation job runs, and only there. With
+follow_symlinks omitted and no dir_fd, CPython's os.link calls link(2), and
+Linux link(2) never dereferences a symlink source: it links the symlink
+itself, exactly as linkat without AT_SYMLINK_FOLLOW does for
+follow_symlinks=False. Both spellings publish the same inode. macOS link(2)
+does follow, so the flag is the guard there; it is not waived:
+tests/unit/test_embedding_cache_store.py::test_temporary_swapped_for_a_symlink_is_never_published_as_its_target
+kills this mutant on macOS (checked by hand-applying it). The assumption test
+turns red on Linux the day os.link starts following there.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_os_link_does_not_follow_a_symlink_on_linux"
