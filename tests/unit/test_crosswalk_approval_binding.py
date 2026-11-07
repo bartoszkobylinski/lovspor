@@ -191,9 +191,15 @@ def test_the_shipped_trusted_signers_file_names_no_key(tmp_path: Path) -> None:
 
 
 def test_the_gate_refuses_an_approval_nobody_trusted_signed(
-    built: bytes, capture_dir: Path, tmp_path: Path
+    built: bytes, capture_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With the shipped signers file, release-candidate refuses before promoting anything."""
+    """With no trusted signer, release-candidate refuses before promoting anything.
+
+    The signers file is the test's own, holding comments only: whether the shipped
+    file names the owner's key must not decide this test (#840).
+    """
+    signers = _write(tmp_path, b"# no key\n\n", "no-signers")
+    monkeypatch.setattr(approvals, "TRUSTED_SIGNERS", signers)
     proof = approval_dir(tmp_path / "proof", built, new_signer(tmp_path / "keys"))
     data, output = _write(tmp_path, built, "in.jsonl"), tmp_path / "out.jsonl"
     with pytest.raises(CrosswalkError) as caught:
