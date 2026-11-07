@@ -616,3 +616,40 @@ def test_invalid_later_response_preserves_checkpoint_and_resumes(
     np.testing.assert_array_equal(hit_vectors, reference_vectors)
     assert hit_scale == reference_scale
     assert hit.requests == 0
+
+
+@pytest.mark.parametrize("defect", ["shape", "non-finite"])
+def test_invalid_later_response_preserves_only_valid_checkpoints_for_retry(
+    cache_dir: Path, tmp_path: Path, defect: str
+) -> None:
+    """Design §3.3 and §5.3: validate each response, retaining completed paid work."""
+
+    class _InvalidSecondResponse(_Provider):
+        def encode(self, texts: list[str]) -> np.ndarray:
+            vectors = super().encode(texts)
+            if self.requests == 2:
+                if defect == "shape":
+                    return vectors[:-1]
+                vectors[0, 0] = np.nan
+            return vectors
+
+    settings = _settings(tmp_path)
+    reference = _write(settings, _Provider(), slug="reference")
+    provider = _InvalidSecondResponse()
+    with pytest.raises(EmbeddingCacheError, match=defect):
+        _write(settings, with_embedding_cache(provider, settings))
+
+    assert provider.requests == 2
+    checkpoints = {path: path.read_bytes() for path in cache_dir.rglob("*.lsec")}
+    assert len(checkpoints) == 1
+    assert all("units" in path.parts for path in checkpoints)
+    assert not list(settings.lovverk_repo_path.rglob("lov-1.bin"))
+
+    retry_provider = _Provider()
+    retry = with_embedding_cache(retry_provider, settings)
+    assert isinstance(retry, CachingEmbedder)
+    assert _write(settings, retry) == reference
+    assert retry_provider.requests == 3
+    assert retry_provider.texts == 5
+    assert retry.progress.units_cached == 1
+    assert {path: path.read_bytes() for path in checkpoints} == checkpoints

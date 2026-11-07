@@ -7,10 +7,10 @@ never vector values, document text or the cache path.
 Every file the walk meets is checked the way serving checks it: directories
 by ``check_private_dir`` (symlinks, owner, mode), entries through the store's
 own reader and :func:`decode_entry`. ``prune`` removes only what it can
-classify — expired entries, unit checkpoints whose document entry exists,
-and temporary files older than the grace period. A corrupt entry is reported,
-never silently deleted: it is evidence, and ``invalidate`` is the deliberate
-way to remove it.
+classify — expired entries, unit checkpoints whose document entry is valid
+and of their dimension, and temporary files older than the grace period. A
+corrupt entry is reported, never silently deleted: it is evidence, and
+``invalidate`` is the deliberate way to remove it.
 """
 
 import os
@@ -27,7 +27,6 @@ from lovspor.embeddings.cache_store import (
     SCHEMA_DIR,
     LocalEntryStore,
     check_private_dir,
-    entry_location,
     fsync_dir,
     read_entry_bytes,
 )
@@ -131,19 +130,21 @@ def verify(store: LocalEntryStore) -> VerifyReport:
 
 
 def prune(store: LocalEntryStore, temp_grace: timedelta = DEFAULT_TEMP_GRACE) -> PruneReport:
-    """Remove expired entries, superseded unit checkpoints and old temporary files."""
+    """Remove expired entries, superseded unit checkpoints and old temporary files.
+
+    Everything is classified before anything is removed, so a walk that
+    refuses part of the tree deletes nothing. A unit checkpoint is superseded
+    only by a document entry that itself passed :func:`check_entry` and has
+    the unit's dimension; a document that merely exists proves nothing.
+    """
     report = PruneReport()
-    for entry in list(iter_entries(store)):
-        try:
-            check_entry(store, entry)
-        except EmbeddingCacheExpiredError:
-            _remove(entry.path)
-            report.expired += 1
-        except EmbeddingCacheError as exc:
-            report.refused.append(str(exc))
-        else:
-            report.superseded_units += _drop_if_superseded(store, entry)
-    report.temporary = _remove_temporary(store, temp_grace)
+    expired, documents, units = _classify(store, report)
+    superseded = _superseded(units, documents, report)
+    temporary = _stale_temporary(store, temp_grace)
+    for path in (*expired, *superseded, *temporary):
+        _remove(path)
+    report.expired, report.superseded_units = len(expired), len(superseded)
+    report.temporary = len(temporary)
     return report
 
 
@@ -159,11 +160,14 @@ def invalidate(store: LocalEntryStore, esi: str, input_hash: str | None) -> int:
     return removed
 
 
-def check_entry(store: LocalEntryStore, entry: StoredEntry) -> None:
-    """Decode ``entry`` against the key its location names; raise on any refusal."""
+def check_entry(store: LocalEntryStore, entry: StoredEntry) -> EntryKey | None:
+    """Decode ``entry`` against the key its location names; raise on any refusal.
+
+    Returns the validated key, or ``None`` if the file vanished meanwhile.
+    """
     data = read_entry_bytes(entry.path)
     if data is None:  # pragma: no cover - removed between the walk and the read
-        return
+        return None
     claimed = describe_entry(data, entry.path.name)
     if (claimed.esi, claimed.input_hash, _unit_tuple(claimed.unit)) != (
         entry.esi,
@@ -174,6 +178,7 @@ def check_entry(store: LocalEntryStore, entry: StoredEntry) -> None:
             f"embedding cache entry refused ({claimed.label()}): stored under another key",
         )
     decode_entry(data, claimed, store.policy)
+    return claimed
 
 
 def iter_entries(store: LocalEntryStore) -> Iterator[StoredEntry]:
@@ -209,24 +214,59 @@ def _unit_tuple(unit: UnitKey | None) -> tuple[int, int, str] | None:
     return None if unit is None else (unit.index, unit.count, unit.input_hash)
 
 
-def _drop_if_superseded(store: LocalEntryStore, entry: StoredEntry) -> int:
-    if entry.unit is None:
-        return 0
-    parts, name = entry_location(
-        EntryKey(esi=entry.esi, input_hash=entry.input_hash, dim=1, rows=1)
+def _classify(
+    store: LocalEntryStore, report: PruneReport
+) -> tuple[list[Path], dict[tuple[str, str], int], list[tuple[StoredEntry, int]]]:
+    """Expired paths, validated documents' dimensions, and validated units."""
+    expired: list[Path] = []
+    documents: dict[tuple[str, str], int] = {}
+    units: list[tuple[StoredEntry, int]] = []
+    for entry in iter_entries(store):
+        try:
+            key = check_entry(store, entry)
+        except EmbeddingCacheExpiredError:
+            expired.append(entry.path)
+        except EmbeddingCacheError as exc:
+            report.refused.append(str(exc))
+        else:
+            if key is not None and entry.unit is None:
+                documents[(entry.esi, entry.input_hash)] = key.dim
+            elif key is not None:
+                units.append((entry, key.dim))
+    return expired, documents, units
+
+
+def _superseded(
+    units: list[tuple[StoredEntry, int]],
+    documents: dict[tuple[str, str], int],
+    report: PruneReport,
+) -> list[Path]:
+    """Units whose validated document has their dimension; a mismatch is refused."""
+    superseded: list[Path] = []
+    mismatched: set[tuple[str, str]] = set()
+    for entry, dim in units:
+        document = (entry.esi, entry.input_hash)
+        if document not in documents:
+            continue
+        if documents[document] == dim:
+            superseded.append(entry.path)
+        elif document not in mismatched:
+            mismatched.add(document)
+            report.refused.append(_dimension_refusal(entry, documents[document], dim))
+    return superseded
+
+
+def _dimension_refusal(entry: StoredEntry, document_dim: int, unit_dim: int) -> str:
+    return (
+        f"embedding cache entry refused (document esi={entry.esi[:8]} "
+        f"input_hash={entry.input_hash[:12]}): dimension {document_dim} differs from "
+        f"its unit checkpoints' {unit_dim}; the checkpoints are kept"
     )
-    if not store.root.joinpath(*parts, name).is_file():
-        return 0
-    _remove(entry.path)
-    return 1
 
 
-def _remove_temporary(store: LocalEntryStore, grace: timedelta) -> int:
+def _stale_temporary(store: LocalEntryStore, grace: timedelta) -> list[Path]:
     cutoff = time.time() - grace.total_seconds()
-    stale = [p for p in iter_temporary(store) if p.lstat().st_mtime <= cutoff]
-    for path in stale:
-        _remove(path)
-    return len(stale)
+    return [p for p in iter_temporary(store) if p.lstat().st_mtime <= cutoff]
 
 
 def _remove(path: Path) -> None:
