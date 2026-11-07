@@ -10,7 +10,7 @@ from lovspor.legaltime import replay, scopes
 from lovspor.legaltime.document import Ledd, parse_document
 from lovspor.legaltime.instructions import Address, classify, interpret
 from lovspor.legaltime.replay import _Working
-from tests.unit.test_legaltime_phase2_commencement import _by_part, _decision, _law
+from tests.unit.test_legaltime_phase2_commencement import _by_part, _decision, _delt, _law
 from tests.unit.test_legaltime_phase2_instructions import _amending, _ops, _p, _state, _t
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "legaltime"
@@ -229,3 +229,37 @@ def test_a_chapter_with_text_outside_its_provisions_is_unsupported() -> None:
         '<article class="futureLegalArticle" data-name="§6A-1"><article class="legalP">En.</article></article>',  # noqa: E501
     )
     assert [op.kind for op in ops] == ["unsupported"]
+
+
+# Codex (PR #842, round 1): a comma-delimited Delt clause must not widen an unrepresentable scope
+@pytest.mark.parametrize(
+    "target",
+    ["§ 1 første ledd", "§ 1 første punktum", "§§ 1 og 5", "§ 1 bokstav a", "§ 1 og § 5"],
+)
+def test_a_delt_clause_naming_a_ledd_a_punktum_or_several_sections_is_foreign(target: str) -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    sentence = f"Endringsloven del I, endringene i lov 14. juni 2019 nr. 99 {target}, trer i kraft 1. juli 2021."  # noqa: E501
+    timings = _by_part(law, _delt(sentence))
+    assert {(t.status, t.reason) for t in timings.values()} == {
+        ("unresolved", "partial decision outside the grammar")
+    }
+
+
+def test_a_delt_clause_naming_one_bare_section_or_none_is_still_read() -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    one = _by_part(
+        law,
+        _delt(
+            "Endringsloven del I, endringene i lov 14. juni 2019 nr. 99 § 1, trer i kraft 1. juli 2021."  # noqa: E501
+        ),
+    )
+    assert one[("I", "§1")].effective == date(2021, 7, 1) and one[("II", "§5")].status == "pending"
+    whole = _by_part(
+        law,
+        _delt(
+            "Endringsloven del I, endringene i lov 14. juni 2019 nr. 99, trer i kraft 1. juli 2021."
+        ),
+    )
+    assert (
+        whole[("I", "§1")].effective == date(2021, 7, 1) and whole[("II", "§5")].status == "pending"
+    )

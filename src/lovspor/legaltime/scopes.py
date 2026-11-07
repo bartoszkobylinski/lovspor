@@ -187,7 +187,7 @@ def _scopes_of(sentence: str, own: date | None) -> list[Scope] | None:
     part_match = _DELT_SENTENCE.match(sentence)
     if part_match is not None:
         when = _when(part_match.group("when"), own)
-        if when is None:
+        if when is None or not _representable(part_match):
             return None
         part, section = part_match.group("part").upper(), _named_section(part_match)
         return [Scope(part=part, section=section, when=when, quote=sentence)]
@@ -223,6 +223,24 @@ def _partial_scopes(sentences: list[str], own: date | None = None) -> list[Scope
     if any(scope.remainder for scope in scopes) and all(scope.remainder for scope in scopes):
         return None  # a remainder of nothing
     return scopes
+
+
+_TRAILING_QUALIFIER = re.compile(r"\b(?:ledd|punktum|bokstav|nr\.)\b", re.I)
+
+
+def _representable(match: re.Match[str]) -> bool:
+    """The amended act's clause after ``endringene i lov …`` names nothing, or one bare section.
+
+    ``§ 1 første ledd``, ``§ 1 første punktum`` and ``§§ 1 og 5`` are scopes the model cannot
+    hold (a scope is a part or a whole section), so the sentence is foreign rather than widened.
+    """
+    rest = match.group("rest")
+    if match.group("sec") or not rest or "§" not in rest:
+        return True
+    found = list(_SECTION_IN.finditer(rest))
+    if len(found) != 1 or _TRAILING_QUALIFIER.search(rest) or "§§" in rest:
+        return False
+    return not rest[found[0].end() :].strip()
 
 
 def _named_section(match: re.Match[str]) -> str | None:
