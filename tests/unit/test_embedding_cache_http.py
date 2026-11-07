@@ -17,7 +17,7 @@ from lovspor.embeddings.model import OpenAIEmbedder
 
 
 @pytest.mark.parametrize(("batch_size", "token_budget"), [(2, 100), (128, 8)])
-@pytest.mark.parametrize("failure", ["http-status", "read-timeout", "connection-drop"])
+@pytest.mark.parametrize("failure", ["503", "400", "read-timeout", "connection-drop"])
 def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -42,7 +42,7 @@ def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
                 raise httpx.ReadTimeout("response timed out", request=request)
             if failure == "connection-drop":
                 raise httpx.RemoteProtocolError("incomplete response", request=request)
-            return httpx.Response(503)
+            return httpx.Response(int(failure))
         # Batch-dependent, unnormalised and out of order: exercise the real
         # adapter's alignment and normalisation before checkpointing float32.
         return httpx.Response(
@@ -75,14 +75,15 @@ def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
         return CachingEmbedder(inner, LocalEntryStore.open(root, (), policy), inner.space_id)
 
     expected_error = {
-        "http-status": httpx.HTTPStatusError,
         "read-timeout": httpx.ReadTimeout,
         "connection-drop": httpx.RemoteProtocolError,
-    }[failure]
+    }.get(failure, httpx.HTTPStatusError)
     with pytest.raises(expected_error):
         quantized_document_vectors(cached(), inputs, input_hash)
     assert requests == expected_requests
-    assert len(list(root.rglob("*.lsec"))) == 1
+    checkpoints = {path: path.read_bytes() for path in root.rglob("*.lsec")}
+    assert len(checkpoints) == 1
+    assert all("units" in path.parts for path in checkpoints)
 
     fail_second = False
     resumed = cached()
@@ -90,6 +91,7 @@ def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
     assert requests == [*expected_requests, expected_requests[1]]
     assert resumed.progress.units_cached == 1
     assert resumed.progress.units_paid == 1
+    assert {path: path.read_bytes() for path in checkpoints} == checkpoints
     np.testing.assert_array_equal(vectors, expected_vectors)
     assert scale == expected_scale
 
