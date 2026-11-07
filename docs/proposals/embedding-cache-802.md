@@ -235,6 +235,13 @@ Order of rows is bound by construction: the entry is keyed by the hash of the
 ordered inputs, and rows are stored in input order. A reordered document has a
 different `input_hash` and therefore a different key.
 
+Hard links are not refused as such. `_publish` links the temporary into place
+before it unlinks it, so every fresh entry has two links for a moment, and a
+reader refusing `st_nlink > 1` would stop a concurrent sync on a healthy entry.
+A hard link grants nothing the owner-only mode does not: bytes rewritten
+through another name fail check 2, and a valid entry linked under another key
+fails check 4. Both are pinned by tests.
+
 ### 5.4 Refusal means stop, not pay
 
 A refused entry stops the run with exit code 1 and the failing check. It does
@@ -293,6 +300,11 @@ Amendment 1.
 
 A document of one unit writes only the document entry, with no unit entry.
 
+One `run_sync` builds this adapter once, and the backfill (P2/P3) and the change
+loop (P1) both use it. So a run has one cache wrapper, one progress count and,
+with #790's meter beneath it, one token budget. Building it per phase would
+restart the budget between them (GPT-6 review on #828).
+
 ### 6.1 Progress (M5)
 
 The wrapper counts documents, documents served from cache, units hit, units
@@ -348,11 +360,189 @@ Whatever the backend, it is an adapter behind the same entry format and the
 same validated reads. Downloaded entries are validated like local ones: a
 store that comes from somewhere else is untrusted input.
 
+### 8.1 Amendment: option C on Cloudflare R2 Standard (proposed, not approved)
+
+The owner's preferred direction for C is Cloudflare R2 Standard, a private
+bucket, about 30 days of retention. This section is the design that direction
+would need. **It is not an approval.** No bucket, token, secret, account or
+workflow change exists or is made by this PR, and no production adapter is
+written until the owner approves this section and its cost (D1). Every
+provider claim below was read from the provider's own documentation on
+2026-11-07 and is cited. Where the docs do not settle a question it is marked
+**unverified** and becomes a staging check (G3), not an assumption.
+
+#### Verified provider facts this design relies on
+
+| Fact | Source |
+|---|---|
+| `PutObject` honours `If-None-Match: *` and evaluates it atomically against committed state: of concurrent creators of an absent key, at most one succeeds, the rest get `412 PreconditionFailed` | [R2 S3 API](https://developers.cloudflare.com/r2/api/s3/api/), [S3 extensions](https://developers.cloudflare.com/r2/api/s3/extensions/), [error codes](https://developers.cloudflare.com/r2/api/error-codes/) (10031) |
+| Read-after-write, list-after-write and delete are strongly consistent over the S3 API; a `404` "is not final" with respect to an earlier `PutObject` whose outcome is unknown | [Consistency](https://developers.cloudflare.com/r2/reference/consistency/) |
+| Get, Head, Put, ListObjectsV2, Delete are implemented; endpoint `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, region `auto`; `Content-MD5` is accepted on `PutObject`; `BadDigest` (400) exists | [R2 S3 API](https://developers.cloudflare.com/r2/api/s3/api/), [error codes](https://developers.cloudflare.com/r2/api/error-codes/) |
+| Lifecycle rules expire objects N days after **upload**, by prefix; removal is "typically within 24 hours" of the expiry | [Object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles/) |
+| Object Read & Write tokens can be limited to one bucket; tokens can carry an expiration date; there is no "write but not delete" preset | [API tokens](https://developers.cloudflare.com/r2/api/tokens/) |
+| Bucket locks prevent deletion and overwrite for a period, by prefix, and take precedence over lifecycle rules | [Bucket locks](https://developers.cloudflare.com/r2/buckets/bucket-locks/) |
+| Standard: storage $0.015/GB-month, Class A $4.50/M, Class B $0.36/M; free each month 10 GB-month, 1M Class A, 10M Class B; egress and `DeleteObject` free; a `PutObject` answered `412` **is billed as Class A** | [Pricing](https://developers.cloudflare.com/r2/pricing/) |
+| Single PUT up to 5 GiB; keys up to 1,024 bytes; **1 write per second per key** (429 above) | [Limits](https://developers.cloudflare.com/r2/platform/limits/) |
+| Repository/environment secrets reach the job; a workflow triggered from a fork gets none | [GitHub: using secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets) |
+
+**Unverified, so not relied on:** whether R2 verifies `Content-MD5` server-side;
+whether `x-amz-checksum-sha256` is honoured on a single `PutObject`; whether
+R2 ever answers a conditional race with `409` as AWS can; whether an Object
+Read & Write token can delete (assume it can); how a bucket lock interacts with
+a lifecycle rule of the same age; whether operations are billed rounded up to
+whole millions. **Not available:** GitHub OIDC federation to R2. Neither
+Cloudflare nor GitHub documents it, so the design assumes a stored secret.
+
+#### Keys
+
+One prefix per schema, the local layout unchanged beneath it, so
+`entry_location` (§5.1) names both stores:
+
+```text
+lovspor-embedding-cache/schema-1/<esi:32 hex>/documents/<input_hash:64 hex>.lsec
+lovspor-embedding-cache/schema-1/<esi>/units/<input_hash>/<i>-<n>-<unit_hash:64 hex>.lsec
+```
+
+At most about 210 bytes, inside the 1,024-byte limit. The key is derived only
+from validated identity (32/64 lowercase hex and integers), never from text,
+paths or titles, so a key cannot traverse or collide by construction.
+
+#### Write protocol, during the step
+
+The remote write sits at the same seam as the local one (§6): after a paid
+request returns and its vectors pass `_check_response`, and **before the next
+paid request is sent**. The local store stays the write-ahead copy on the
+runner. Nothing is uploaded at exit or in a later step (§8).
+
+1. Encode the entry once (§4). The bytes uploaded are the bytes stored locally.
+2. `PUT` the key with `If-None-Match: *` and `Content-MD5` (a transport check,
+   not the integrity guarantee).
+3. `200`: stored. `412`: the key already exists, which for an immutable,
+   content-addressed entry is success. It is billed, so a rerun asks first
+   (step 5).
+4. `429`, `5xx`, a transport error or a timeout: retry the **same** conditional
+   `PUT` with backoff, at most 3 attempts. A timeout is ambiguous: the first
+   `PUT` may have committed. The retry settles it, because `412` then means it
+   did. A `HEAD` returning `404` is not proof that it did not (consistency
+   caveat above).
+5. On a rerun, read first: `GET` the key (Class B). A hit is validated (below)
+   and costs no provider call. Only a miss pays, then writes (1–4). So a
+   resumed run spends Class B, not Class A, on what it already has.
+6. Retries exhausted: stop the sync with `EmbeddingCacheStorageError` before
+   the next paid request, the same rule as a local write failure (§5.2). The
+   vectors just paid for are on local disk and named in the error, but a
+   remote store that cannot be written does not protect the run. Continuing to
+   pay would turn every further response into unprotected spend.
+
+Concurrency: `sync.yml`'s `concurrency: sync` already serialises scheduled
+runs. A manual overlap is safe: the conditional `PUT` has one winner, every
+writer of a key writes identical bytes for its own request plan, and the
+reader validates whatever won. Each key is written once per run, far under the
+1 write/s/key limit.
+
+#### Read protocol and integrity
+
+A downloaded entry is untrusted input. It goes through `decode_entry` exactly
+like a local one (§5.3): magic, schema, meta identity against the expected key
+(ESI, input hash, unit, dim, rows, dtype), payload length, SHA-256 trailer,
+finiteness, scale, `created_at`. Any failure is a typed refusal that stops the
+sync without paying (§5.4, D2). It is never a silent re-download or a paid
+fallback. R2's own checksums are not trusted for this: the entry carries its
+own digest.
+
+#### Retention, and why the reader's limit is longer than the bucket's
+
+A lifecycle rule expires `lovspor-embedding-cache/` 30 days after upload. The
+reader's `LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS` is set to **32** for the
+remote store. Age is counted from upload, not last use, and removal happens up
+to about a day after expiry. With equal limits, an entry 30–31 days old would
+still be served and refused as expired, stopping the sync. With the bucket
+shorter than the reader, the bucket removes an entry before the reader would
+refuse it, and the next run treats it as a miss. An expired entry that is still
+served is then a provider anomaly, and stopping on it is correct.
+
+Optional, staging-verified only: a bucket lock of 29 days on the same prefix
+would make entries non-overwritable and non-deletable even by the CI token,
+without blocking the 30-day expiry. The docs say locks take precedence over
+lifecycle; the behaviour at those ages is unverified, so the lock ships only
+after G3 demonstrates it.
+
+#### Permissions and credentials, the smallest set
+
+* One private bucket, no public access, no `r2.dev` URL, no custom domain.
+* One **Object Read & Write** token scoped to that bucket only, with an
+  expiration date (proposed: 90 days, rotated by the owner), never an Admin
+  token. Lifecycle and lock rules are set once by the owner with their own
+  account. The CI token cannot change them.
+* Stored as secrets of a GitHub **environment** (`embedding-cache`) that only
+  the `sync.yml` job on `main` may use: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+  `R2_SECRET_ACCESS_KEY`. PR and fork workflows never see them.
+* The engine never logs the endpoint, key id, secret or a full URL with a
+  signature. Progress lines stay counts only (§6.1).
+
+#### Cost, worst case and expected
+
+Measured corpus: 5,890 documents, 322.7 MiB of int8 sidecars (§8 table). A full
+re-embed writes about 5,890 document entries, plus unit checkpoints for the
+long documents, removed by prune once their document entry exists.
+
+| Case | Class A (PUT) | Class B (GET) | Storage | Monthly cost |
+|---|---|---|---|---|
+| Nightly syncs, a few changed laws each (normal) | tens to hundreds | same | < 1 GB | $0 (free tier) |
+| One full re-embed, then reruns that read first | ~6,000–10,000 | ~10,000 per rerun | ~0.4 GB | $0 (free tier) |
+| Ceiling: 30 full re-embeds in a month, each into a new ESI, nothing expired yet | ≤ 300,000 | ≤ 300,000 | ≤ 12 GB-month | ≤ $0.03 (storage over 10 GB) |
+| Generic stress bound from the research (60,000 × 20 KB entries, 60,000 PUT incl. 412 + 60,000 GET per run, 30 runs) | 1.8 M | 1.8 M | ≤ 36 GB-month | ≈ $3.61–$4.90 |
+
+So the realistic cost is $0, and the provable ceiling under abuse is a few
+dollars a month. The free tier and prices can change: the owner re-reads the
+pricing page and their account's billing before approving (G0). Reading first
+on reruns matters: without it, every rerun pays one billed `412` per entry.
+
+#### Test strategy
+
+* **Offline (the adapter PR, after G0):** the adapter speaks HTTP through
+  `httpx`, mocked with `pytest-httpx` only (CLAUDE.md). Red first: `200`;
+  `412` means present; a timeout then `412` resolves to stored; `429`/`5xx`
+  retry then succeed; retries exhausted stop the sync before the next paid
+  request; a corrupted or swapped download is refused unpaid; the key is
+  derived only from identity; no secret appears in logs or errors; cache off
+  and unset credentials behave exactly as today.
+* **Cross-runner crash test (G3, staging bucket, no paid API):** a
+  `workflow_dispatch` job on a GitHub-hosted runner runs a sync on a synthetic
+  corpus with the fake provider, and kills itself with SIGKILL after k of n
+  checkpoints. A second job, on a fresh runner with an empty disk, runs the same
+  sync and must pay exactly n − k requests, then 0 on a third run, with the
+  sidecars byte-identical to an uncached run. This test, not a local restart, is
+  the evidence #802 needs to close.
+* Staging also settles the unverified points above: whether a token deletes,
+  lock vs lifecycle, `Content-MD5` rejection, `409`.
+
+#### Rollout gates and rollback
+
+| Gate | What has to be true | Who |
+|---|---|---|
+| G0 | This section and its cost are approved | owner |
+| G1 | Bucket, lifecycle rule (30 d), token (bucket-scoped, expiring) and environment secrets created | owner |
+| G2 | Adapter PR merged, off by default, offline tests green, full PR pipeline | engineering, then owner merge |
+| G3 | Cross-runner crash test green on the staging bucket; unverified points settled | engineering |
+| G4 | One manual `workflow_dispatch` sync with the remote cache on, reviewed | owner |
+| G5 | Scheduled sync uses the remote cache | owner |
+
+Rollback at any gate: remove the environment secrets or unset
+`LOVSPOR_EMBEDDING_CACHE_*` in `sync.yml`. The sync is then exactly today's
+uncached sync. The corpus never depends on the cache, so nothing in `lovverk`
+changes. Deleting the bucket loses only money already spent. Revoking the
+token stops every credential derived from it.
+
 ## 9. Decisions requested from the owner
 
 * **D1 — remote backend (blocks M4).** A (deadline + artifact), C (object
   storage, which provider, and who holds the key), or none for now (local store
   only, which helps self-hosted reruns and tests but not GitHub-hosted runs).
+  The owner's stated preference is C on Cloudflare R2 Standard. §8.1 is that
+  design, with verified provider facts, cost and gates G0–G5. Approving it (G0)
+  is the decision still open; creating the bucket and token (G1) is the
+  owner's.
   Until D1 is decided, #802 stays open: closing it needs verified cross-job
   recovery, and a local restart is not proof of that.
 * **D2 — refusal policy.** This design stops the sync on any invalid entry
