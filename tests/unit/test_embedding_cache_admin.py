@@ -333,3 +333,36 @@ def test_cli_invalidate_invalid_key_preserves_entries(
     assert result.exit_code == 1
     assert "invalidate needs a 32-hex ESI" in result.output
     assert {path: path.read_bytes() for path in store.root.rglob("*.lsec")} == before
+
+
+def test_cli_verify_reports_mixed_entries_without_modifying_evidence(
+    store: LocalEntryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §10: verify validates every entry and lists every failed key."""
+    fresh = datetime.now(UTC)
+    entries = [
+        _doc("valid", created_at=fresh),
+        _doc("expired", created_at=datetime(2000, 1, 1, tzinfo=UTC)),
+        _doc("corrupt-one", created_at=fresh),
+        _doc("corrupt-two", esi=OTHER_ESI, created_at=fresh),
+    ]
+    for entry in entries:
+        store.put(entry)
+    for entry in entries[2:]:
+        path = next(store.root.rglob(f"{entry.key.input_hash}.lsec"))
+        data = bytearray(path.read_bytes())
+        data[-40] ^= 1
+        path.write_bytes(data)
+    before = {path: path.read_bytes() for path in store.root.rglob("*.lsec")}
+    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(store.root))
+    monkeypatch.setenv("LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS", "30")
+
+    result = CliRunner().invoke(app, ["ops", "embedding-cache", "verify"])
+
+    assert result.exit_code == 1
+    assert "valid=1 expired=1 refused=2" in result.stdout
+    for entry in entries[1:]:
+        assert entry.key.input_hash[:12] in result.stderr
+    assert entries[0].key.input_hash[:12] not in result.stderr
+    assert str(store.root) not in result.output
+    assert {path: path.read_bytes() for path in store.root.rglob("*.lsec")} == before
