@@ -284,8 +284,23 @@ def _require_unmoved(plane: ControlPlane, triple: Triple) -> None:
         )
 
 
+Judge = Callable[[ControlPlane, Triple, str], None]
+"""What a commit asks of the candidate, against the triple it read, before staging."""
+
+
+def _judge_continuity(plane: ControlPlane, triple: Triple, content_id: str) -> None:
+    """URL continuity against the live release, then the host unchanged since (#820)."""
+    require_continuity(plane.releases, triple.running.release_id, content_id)
+    _require_unmoved(plane, triple)
+
+
+def _restoring_previous(plane: ControlPlane, triple: Triple, content_id: str) -> None:
+    """A rollback restores the release served immediately before: not judged (#820)."""
+    del plane, triple, content_id
+
+
 def _commit_locked(
-    plane: ControlPlane, content_id: str, checkpoint: Checkpoint, *, continuity: bool
+    plane: ControlPlane, content_id: str, checkpoint: Checkpoint, judge: Judge
 ) -> CommitReport:
     """The transaction, the caller holding ``transaction_lock``."""
     triple = read_triple(plane)
@@ -293,9 +308,7 @@ def _commit_locked(
     if triple.running.release_id == content_id:
         return CommitReport(active=content_id, previous=triple.marked, already_live=True)
     _require_candidate(plane, content_id)
-    if continuity:
-        require_continuity(plane.releases, triple.running.release_id, content_id)
-        _require_unmoved(plane, triple)
+    judge(plane, triple, content_id)
     _commit(plane, content_id, triple, checkpoint)
     return CommitReport(active=content_id, previous=triple.marked, already_live=False)
 
@@ -309,7 +322,7 @@ def commit_release(
     reconciled live release serves (#820); a proven bootstrap has none.
     """
     with transaction_lock(plane.releases):
-        return _commit_locked(plane, content_id, checkpoint, continuity=True)
+        return _commit_locked(plane, content_id, checkpoint, _judge_continuity)
 
 
 def rollback(plane: ControlPlane, checkpoint: Checkpoint = _no_checkpoint) -> CommitReport:
@@ -324,4 +337,4 @@ def rollback(plane: ControlPlane, checkpoint: Checkpoint = _no_checkpoint) -> Co
         _require_reconciled(triple)
         if triple.marker is None or triple.marker.previous is None:
             raise ControlPlaneError("no previous release in the marker; nothing to roll back to")
-        return _commit_locked(plane, triple.marker.previous, checkpoint, continuity=False)
+        return _commit_locked(plane, triple.marker.previous, checkpoint, _restoring_previous)
