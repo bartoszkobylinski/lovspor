@@ -85,3 +85,32 @@ def test_refused_numbered_item_edit_keeps_provision_content(instruction, payload
     provision = next(p for p in state.provisions if p.key == "§2")
     assert provision.ledd == original.ledd
     assert provision.status == "unresolved"
+
+
+@pytest.mark.parametrize(
+    "instruction,payload,reason",
+    [
+        ("§ 2 ny nr. 3 skal lyde:", "Ny.", "item 2, the one before 3, is in 2 places"),
+        ("§ 2 nr. 2 oppheves.", None, "bokstav 2 matched 2 list items"),
+        ("§ 2 nr. 2 skal lyde:", "Endret.", "bokstav 2 matched 2 list items"),
+    ],
+)
+def test_ambiguous_numbered_item_edit_is_unresolved_and_preserves_all_text(
+    instruction, payload, reason
+) -> None:
+    # Duplicate labels are ambiguous: replay must never guess which item is addressed.
+    xml = (FIXTURES / "enacting.xml").read_bytes()
+    baseline = parse_document(xml.replace(b"a)", b"2)").replace(b"b)", b"2)"), "duplicate.xml")
+    original = next(p for p in baseline.provisions if p.key == "§2")
+    before = baseline.model_dump_json()
+    event = _event(instruction, payload, 0)
+
+    state = replay.replay(baseline, ENACTED, [event], date(2022, 1, 1))
+
+    assert state.applied == ()
+    assert state.unresolved == ((event.operation.id, reason),)
+    provision = next(p for p in state.provisions if p.key == "§2")
+    assert provision.ledd == original.ledd
+    assert provision.status == "unresolved"
+    assert provision.problems == (f"{event.operation.id}: {reason}",)
+    assert baseline.model_dump_json() == before
