@@ -438,3 +438,45 @@ def test_second_writer_refuses_expired_entry_without_refreshing_it(cache_root: P
     assert not [path for path in cache_root.rglob("*") if ".tmp." in path.name]
     with pytest.raises(EmbeddingCacheExpiredError):
         store.get(_key())
+
+
+def test_hardlinked_entry_rewritten_through_its_other_name_is_refused(
+    cache_root: Path, tmp_path: Path
+) -> None:
+    """Design §5.3: a hard link is not trusted, the bytes are.
+
+    An entry with a second name outside the store can be rewritten in place
+    through that name. Every read re-validates the whole entry, so the
+    rewritten bytes are refused rather than served. Hard links are not
+    refused as such: _publish's link-then-unlink leaves every fresh entry at
+    two links for a moment, and refusing that would stop a concurrent reader.
+    """
+    store = _open(cache_root)
+    store.put(_entry())
+    entry_path = next(cache_root.rglob("*.lsec"))
+    other_name = tmp_path / "other-name.lsec"
+    os.link(entry_path, other_name)
+    data = bytearray(other_name.read_bytes())
+    data[-40] ^= 0x01
+    with other_name.open("r+b") as handle:
+        handle.write(bytes(data))
+    assert entry_path.stat().st_nlink == 2
+    with pytest.raises(EmbeddingCacheError):
+        store.get(_key())
+
+
+def test_hardlinked_entry_under_another_key_is_refused(cache_root: Path) -> None:
+    """Design §5.3: an entry served under a key is checked against that key.
+
+    A valid entry hard-linked to the path of a different key carries the
+    first key's identity, so the read refuses it instead of serving another
+    document's vectors.
+    """
+    store = _open(cache_root)
+    store.put(_entry())
+    source = next(cache_root.rglob("*.lsec"))
+    other = EntryKey(esi=ESI, input_hash=UNIT_HASH, dim=4, rows=1)
+    target = source.with_name(f"{UNIT_HASH}.lsec")
+    os.link(source, target)
+    with pytest.raises(EmbeddingCacheError):
+        store.get(other)
