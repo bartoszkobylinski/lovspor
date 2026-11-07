@@ -30,6 +30,7 @@ from lovspor.release.errors import (
     UnreconciledError,
 )
 from lovspor.release.reconcile import prune, reconcile
+from lovspor.site.fingerprint import release_content_id
 from tests.unit.cli_output import said
 from tests.unit.control_host import Host, make_host, two_envelopes
 from tests.unit.release_fixtures import World, make_world
@@ -139,8 +140,13 @@ class TestRefusedCandidates:
 
         message = str(error)
         assert NEW in message
-        assert live_b.a[:12] in message and live_b.b[:12] in message
-        assert "docs/url-contract.md §4" in message
+        assert message.startswith(
+            f"release {live_b.a[:12]} not committed: against the live release {live_b.b[:12]}, "
+        )
+        assert message.endswith(
+            "Publish a release that keeps the URL live, 301s it to a live page "
+            "or retires it with 410 (docs/url-contract.md §4)"
+        )
 
     def test_a_missing_json_twin_is_refused(self, live_a: Host) -> None:
         (_corpus(live_a, live_a.b) / "lov/nyloven/index.json").unlink()
@@ -186,7 +192,13 @@ class TestTheLiveReleaseMustBeIntact:
         """A truncated previous tree would be compared against fewer URLs; never."""
         (_corpus(live_a, live_a.a) / "lov/testloven/paragraf/1/index.json").unlink()
 
-        _refused_untouched(live_a, live_a.b, "changed after it went live")
+        found = release_content_id(_corpus(live_a, live_a.a), live_a.releases / live_a.a / "site")
+        error = _refused_untouched(live_a, live_a.b, "changed after it went live")
+
+        assert str(error) == (
+            f"the live release's trees hash to {found[:12]}, not {live_a.a[:12]}: it was "
+            "changed after it went live; URL continuity cannot be checked, nothing is committed"
+        )
 
     @pytest.mark.parametrize("payload", [b"{", b"[]"], ids=["not-json", "not-an-object"])
     def test_live_site_facts_that_do_not_parse_are_refused(
@@ -197,11 +209,21 @@ class TestTheLiveReleaseMustBeIntact:
         error = _refused_untouched(live_a, live_a.b, "is unreadable")
 
         assert isinstance(error.__cause__, ValueError)
+        assert str(error) == (
+            f"the live release {live_a.a[:12]} is unreadable: {error.__cause__}; "
+            "nothing is committed"
+        )
 
     def test_a_live_release_missing_its_corpus_is_refused(self, live_a: Host) -> None:
         shutil.rmtree(_corpus(live_a, live_a.a))
 
-        _refused_untouched(live_a, live_a.b, "is not a complete envelope")
+        error = _refused_untouched(live_a, live_a.b, "is not a complete envelope")
+
+        assert str(error) == (
+            f"the live release {live_a.a[:12]} is not a complete envelope at "
+            f"{live_a.releases / live_a.a}; "
+            "URL continuity cannot be checked, so nothing is committed"
+        )
 
     def test_a_marker_that_is_not_json_is_refused(self, live_a: Host) -> None:
         (live_a.releases / MARKER_NAME).write_text("{", encoding="utf-8")
@@ -361,6 +383,8 @@ class TestRollbackAndRecovery:
 
         assert (report.active, report.previous) == (live_b.a, live_b.b)
         assert live_b.running() == live_b.pair_of(live_b.a)
+        assert read_marker(live_b.releases) == Marker(active=live_b.a, previous=live_b.b)
+        assert not live_b.plane.next_fragment.exists()
 
     def test_reconcile_complete_judges_a_hand_staged_fragment(self, live_b: Host) -> None:
         """D = A written by hand beside R = M = B: --complete would make A live unjudged."""
