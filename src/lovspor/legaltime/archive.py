@@ -9,10 +9,10 @@ whose title cites one of those laws are then read in a second pass. Bytes
 never leave the gitignored cache.
 """
 
+import hashlib
 import json
 from collections.abc import Iterable
 from datetime import datetime
-from hashlib import sha256
 from pathlib import Path
 
 from lovspor.errors import ExtractionError
@@ -22,7 +22,6 @@ from lovspor.legaltime.document import Document, Frozen, parse_document
 from lovspor.legaltime.errors import LegalTimeDocumentError, LegalTimeInputError
 
 INDEX_VERSION = "legaltime-index-2"
-_READ_CHUNK = 1 << 20
 
 
 class MemberRecord(Frozen):
@@ -61,11 +60,8 @@ Indexed = list[tuple[Path, ArchiveIndex]]
 
 
 def file_sha256(path: Path) -> str:
-    digest = sha256()
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(_READ_CHUNK), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def _record(name: str, body: bytes) -> MemberRecord | None:
@@ -203,21 +199,23 @@ def _wanted(indexed: Indexed, act: str) -> dict[Path, tuple[list[str], list[str]
 
 def _read_evidence(
     wanted: dict[Path, tuple[list[str], list[str]]], baseline: tuple[Path, str]
-) -> tuple[list[Document], list[Document], Document | None]:
-    """Read every wanted member archive by archive; the act's text only from its own archive."""
+) -> tuple[list[Document], list[Document], Document]:
+    """Read every wanted member archive by archive; the act's text only from its own archive.
+
+    Member paths are archive-local, so the enacting member is read from the
+    archive that claims it and never looked up across the others.
+    """
     amenders: list[Document] = []
     decisions: list[Document] = []
-    enacting: Document | None = None
+    base_amenders, base_decisions = wanted[baseline[0]]
+    base = read_members(baseline[0], {*base_amenders, *base_decisions, baseline[1]})
     for path, (amender_names, decision_names) in wanted.items():
-        names = set(amender_names) | set(decision_names)
-        if path == baseline[0]:
-            names.add(baseline[1])
-        documents = read_members(path, names)
+        documents = (
+            base if path == baseline[0] else read_members(path, {*amender_names, *decision_names})
+        )
         amenders.extend(documents[n] for n in amender_names)
         decisions.extend(documents[n] for n in decision_names)
-        if path == baseline[0]:  # member paths are archive-local; never read across
-            enacting = documents[baseline[1]]
-    return amenders, decisions, enacting
+    return amenders, decisions, base[baseline[1]]
 
 
 def collect(act: str, archives: list[Path], cache_dir: Path | None = None) -> Evidence:
@@ -225,8 +223,6 @@ def collect(act: str, archives: list[Path], cache_dir: Path | None = None) -> Ev
     indexed: Indexed = [(path, index_archive(path, cache_dir)) for path in archives]
     baseline = _baseline(indexed, act)
     amenders, decisions, enacting = _read_evidence(_wanted(indexed, act), baseline)
-    if enacting is None:
-        raise LegalTimeInputError(f"enacting member {baseline[1]} could not be read")
     return Evidence(
         act=act, archives=tuple(i for _, i in indexed), baseline=enacting,
         amenders=_ordered(amenders), decisions=_ordered(decisions),

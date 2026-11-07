@@ -86,6 +86,14 @@ def section_key(label: str) -> str | None:
     return f"§{number}{letter or ''}"
 
 
+def section_key_of(label: str) -> str:
+    """``section_key`` for a label the caller's own grammar already matched."""
+    key = section_key(label)
+    if key is None:
+        raise ValueError(f"not a section label: {label!r}")
+    return key
+
+
 def section_sort_key(key: str) -> tuple[int, int, str]:
     """Order ``§88`` < ``§88a`` < ``§89``; chapter-numbered ``§8-7`` by both parts."""
     match = re.fullmatch(r"§(\d+)(?:-(\d+))?([a-zæøå]?)", key)
@@ -96,7 +104,7 @@ def section_sort_key(key: str) -> tuple[int, int, str]:
 
 
 def _ends_with_abbreviation(sentence: str) -> bool:
-    last = sentence.rstrip(".").rsplit(" ", 1)[-1].lower()
+    last = sentence.rstrip(".").split()[-1].lower()
     return last in _ABBREVIATIONS
 
 

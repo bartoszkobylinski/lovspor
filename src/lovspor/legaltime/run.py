@@ -6,6 +6,7 @@ sentences a date was read from are carried as digests. No provision text
 leaves the archive, so a report can be committed as evidence.
 """
 
+import json
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -173,7 +174,14 @@ def build_report(
     }
     if oracle is not None:
         report["oracle"] = {"member": oracle.member, "sha256": oracle.sha256}
-        report["verification"] = [
-            verify(s, oracle).model_dump(mode="json") for s in states if s.status == "replayed"
-        ]
+        report["verification"] = _verifications(states, oracle)
     return report
+
+
+def _verifications(states: list[ReplayState], oracle: Document) -> list[dict[str, Any]]:
+    """One JSON-native verdict record per replayed state; non-replayed states have none."""
+    return [
+        json.loads(verify(state, oracle).model_dump_json())
+        for state in states
+        if state.status == "replayed"
+    ]

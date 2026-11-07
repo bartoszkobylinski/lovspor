@@ -16,7 +16,14 @@ from typing import Literal
 
 from lovspor.legaltime.document import Document, Frozen
 from lovspor.legaltime.instructions import Operation
-from lovspor.legaltime.text import ACT_CITATION, act_refid, parse_date, section_key, split_sentences
+from lovspor.legaltime.text import (
+    ACT_CITATION,
+    act_refid,
+    parse_date,
+    section_key,
+    section_key_of,
+    split_sentences,
+)
 
 TimingStatus = Literal["dated", "pending", "unresolved"]
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -88,6 +95,11 @@ class Timing(Frozen):
     reason: str = ""
     proofs: tuple[Proof, ...] = ()
 
+    @property
+    def dated_on(self) -> date | None:
+        """The effective date when the timing is proven, else None."""
+        return self.effective if self.status == "dated" else None
+
 
 def _proof(document: Document, quote: str) -> Proof:
     return Proof(
@@ -132,7 +144,7 @@ def header_timing(document: Document) -> Timing:
     return _unresolved(document, "dateInForce outside the grammar", f"dateInForce: {raw}")
 
 
-def _sentences(document: Document, clauses: tuple[str, ...]) -> list[str]:
+def _sentences(clauses: tuple[str, ...]) -> list[str]:
     return [s for clause in clauses for s in split_sentences(clause)]
 
 
@@ -163,7 +175,7 @@ def _exception_scope(sentence: str) -> tuple[str, str] | None:
     """``("section", "§99a")``, ``("part", "V")`` or ``("part-section", "I/§5")``, else None."""
     new_section = _EXCEPTION_NEW_SECTION.match(sentence)
     if new_section is not None:
-        return ("section", section_key(new_section.group("sec")) or "")
+        return ("section", section_key_of(new_section.group("sec")))
     named = _EXCEPTION_NAMED_SECTION.match(sentence)
     if named is not None:
         return ("part-section", f"{named.group('part').upper()}/{section_key(named.group('sec'))}")
@@ -197,7 +209,7 @@ def _exception_timing(document: Document, sentence: str) -> Timing:
 class _ClauseReading:
     def __init__(self) -> None:
         self.default: Timing | None = None
-        self.exceptions: dict[tuple[str, str], Timing] = {}
+        self.exceptions: dict[tuple[str, str | None], Timing] = {}
         self.failure: Timing | None = None
 
     def read(self, document: Document, sentence: str) -> None:
@@ -221,15 +233,17 @@ def clause_timings(
 ) -> dict[str, Timing]:
     """Per-operation timing from the law's own clause; header timing when there is none."""
     reading = _ClauseReading()
-    for sentence in _sentences(document, clauses):
+    for sentence in _sentences(clauses):
         reading.read(document, sentence)
     if reading.failure is not None:
         return dict.fromkeys((op.id for op in operations), reading.failure)
     return _assign(operations, reading.default or header_timing(document), reading.exceptions)
 
 
-def _scoped(operation: Operation, exceptions: dict[tuple[str, str], Timing]) -> Timing | None:
-    section = ("section", operation.address.section or "")
+def _scoped(
+    operation: Operation, exceptions: dict[tuple[str, str | None], Timing]
+) -> Timing | None:
+    section = ("section", operation.address.section)
     if operation.kind == "insert_section" and section in exceptions:
         return exceptions[section]
     located = ("part-section", f"{operation.part.upper()}/{operation.address.section}")
@@ -237,7 +251,9 @@ def _scoped(operation: Operation, exceptions: dict[tuple[str, str], Timing]) -> 
 
 
 def _assign(
-    operations: tuple[Operation, ...], default: Timing, exceptions: dict[tuple[str, str], Timing]
+    operations: tuple[Operation, ...],
+    default: Timing,
+    exceptions: dict[tuple[str, str | None], Timing],
 ) -> dict[str, Timing]:
     return {op.id: _scoped(op, exceptions) or default for op in operations}
 
@@ -267,8 +283,11 @@ def _partial_scopes(decision: Document) -> list[tuple[str, str | None, date]] | 
 def _named_section(match: re.Match[str]) -> str | None:
     """The one section a ``Delt`` sentence names, from ``ny § X`` or the amended act's clause."""
     if match.group("sec"):
-        return section_key(match.group("sec"))
-    found = _SECTION_IN.findall(match.group("rest") or "")
+        return section_key_of(match.group("sec"))
+    rest = match.group("rest")
+    if rest is None:
+        return None
+    found = _SECTION_IN.findall(rest)
     return section_key(found[-1]) if len(found) == 1 else None
 
 
@@ -280,10 +299,10 @@ def _covered(operation: Operation, scope: tuple[str, str | None, date]) -> bool:
 
 
 def _apply_full(decision: Document, pending: list[Operation], timings: dict[str, Timing]) -> None:
-    header = header_timing(decision)
-    if header.status == "dated" and header.effective is not None:
+    when = header_timing(decision).dated_on
+    if when is not None:
         for op in pending:
-            timings[op.id] = _dated(decision, header.effective, decision.header.title)
+            timings[op.id] = _dated(decision, when, decision.header.title)
 
 
 def _apply_partial(

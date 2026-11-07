@@ -64,9 +64,7 @@ def _difference(replayed: ProvisionState, oracle: Provision) -> str:
     if len(replayed.ledd) != len(oracle.ledd):
         return f"ledd count {len(replayed.ledd)} vs {len(oracle.ledd)}"
     differing = [
-        str(i + 1)
-        for i, (a, b) in enumerate(zip(replayed.ledd, oracle.ledd, strict=True))
-        if a.text != b.text
+        str(i + 1) for i in range(len(oracle.ledd)) if replayed.ledd[i].text != oracle.ledd[i].text
     ]
     return f"ledd {', '.join(differing)} differ" if differing else "text identical"
 

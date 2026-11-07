@@ -3,6 +3,7 @@
 import io
 import json
 import locale
+import re
 import tarfile
 from datetime import date
 from hashlib import sha256
@@ -505,8 +506,10 @@ def test_ledd_range_requires_a_start(kind: str) -> None:
     assert getattr(working, f"apply_{kind}")(op) is not None
 
 
-def test_evidence_without_any_requested_archive_has_no_baseline(tmp_path: Path) -> None:
-    assert archive._read_evidence({}, (tmp_path / "a.tar.bz2", "missing")) == ([], [], None)
+def test_evidence_reads_the_baseline_from_its_own_archive_only(tmp_path: Path) -> None:
+    """The baseline archive is always one of the indexed archives; anything else is a bug."""
+    with pytest.raises(KeyError):
+        archive._read_evidence({}, (tmp_path / "a.tar.bz2", "missing"))
 
 
 def test_text_parser_removes_formatting_blank_nodes() -> None:
@@ -596,10 +599,15 @@ def test_digest_across_multiple_read_chunks_and_json_unicode(tmp_path: Path) -> 
 
 
 def test_internal_grammar_contracts() -> None:
-    assert instructions._pairs({"old": "a", "new": "b", "old2": "c"}) == ()
-    assert instructions._pairs({"old": "a", "new": "b"}) == (("a", "b"),)
+    header = instructions._SUBSTITUTE.match
+    paired = header(
+        "I følgende bestemmelser skal ordene «a» og «b» endres til henholdsvis «c» og «d»:"
+    )
+    single = header("I følgende bestemmelser skal ordet «a» endres til «b»:")
+    assert paired is not None and single is not None
+    assert instructions._pairs(paired) == (("a", "c"), ("b", "d"))
+    assert instructions._pairs(single) == (("a", "b"),)
     assert instructions._shift("Nåværende første ledd blir nytt annet ledd.") == (None, 1, 2)
-    assert instructions._part_label("0:VI:1.0") == "VI"
     assert commencement._exception_scope("Ny § 2 trer likevel i kraft straks.") == ("section", "§2")
     assert commencement._informational("Se lov 14. juni 2019 nr. 99.")
 
@@ -644,10 +652,15 @@ def test_citation_removal_does_not_hide_an_adjacent_uncited_date() -> None:
     assert timing.reason == "commencement sentence outside the grammar"
 
 
+def _single_substitution() -> "re.Match[str]":
+    match = instructions._SUBSTITUTE.match("I følgende bestemmelser skal ordet «a» endres til «b»:")
+    assert match is not None
+    return match
+
+
 def test_absent_addresses_and_substitution_terms() -> None:
     assert instructions._address({}) == instructions.Address()
-    assert instructions._pairs({"old": "før", "new": "etter"}) == (("før", "etter"),)
-    assert instructions._part_label("0:VI:1:extra:tail") == "VI"
+    assert instructions._pairs(_single_substitution()) == (("a", "b"),)
     doc = xml_doc(
         '<section><h2>I</h2><article class="defaultP">'
         "Nåværende første ledd blir nytt annet ledd.</article></section>"

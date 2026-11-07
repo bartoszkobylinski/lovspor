@@ -266,7 +266,7 @@ class _Working:
         return None
 
     def apply_substitute_term(self, op: Operation) -> str | None:
-        places = _locations(op.locations or "")
+        places = _locations(op.locations)
         missing = [k for k, _ in places if k not in self.map]
         if not places or missing or op.term_old is None or op.term_new is None:
             return f"substitution locations unresolved: {missing or 'none listed'}"

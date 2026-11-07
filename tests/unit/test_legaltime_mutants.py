@@ -445,15 +445,15 @@ def test_addressed_act_rules() -> None:
     assert instructions._addressed_act(()) is None
 
 
-def test_part_label_pairs_shift_and_init_defaults() -> None:
-    assert (
-        instructions._part_label("3:Kapittel 5. Sluttføresegner:52")
-        == "Kapittel 5. Sluttføresegner"
+def test_pairs_shift_and_init_defaults() -> None:
+    header = instructions._SUBSTITUTE.match
+    paired = header(
+        "I følgende bestemmelser skal ordene «a» og «b» endres til henholdsvis «c» og «d»:"
     )
-    assert instructions._pairs({"old": "a", "new": "b", "old2": "c", "new2": None}) == ()
-    assert instructions._pairs({"old": "a", "new": "b", "old2": None, "new2": None}) == (
-        ("a", "b"),
-    )
+    single = header("I følgende bestemmelser skal ordet «a» endres til «b»:")
+    assert paired is not None and single is not None
+    assert instructions._pairs(paired) == (("a", "c"), ("b", "d"))
+    assert instructions._pairs(single) == (("a", "b"),)
     assert instructions._shift("Nåværende tredje ledd blir nytt fjerde ledd.") == (None, 3, 4)
     assert instructions._shift("Nåværende tredje ledd blir nytt ledd.") is None
     reader = instructions._Reader(load("enacting.xml"))
@@ -933,11 +933,10 @@ def test_nested_sections_and_lists_inside_a_change_keep_their_address() -> None:
     assert [(n.text, n.change_part) for n in document.parts[1].nodes] == [("item", ("lov/1/§5",))]
 
 
-def test_non_adjacent_punktum_pair_has_no_address_and_part_label_is_the_middle_field() -> None:
+def test_non_adjacent_punktum_pair_has_no_address() -> None:
     kind, groups = instructions.classify("§ 1 første og tredje punktum skal lyde:")
     assert kind == "replace_punktum"
     assert instructions._address(groups) == Address(section="§1")
-    assert instructions._part_label("0:a:b:7") == "a"
 
 
 def test_renumber_shift_only_converts_the_operation_right_before_it() -> None:

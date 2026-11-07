@@ -7,6 +7,7 @@ an ordered provision tree; an amending law's body into its parts (``I``, ``II``
 interprets. Markup is carried verbatim; only text is normalised.
 """
 
+import copy
 import re
 from datetime import datetime
 from hashlib import sha256
@@ -24,6 +25,7 @@ _NOTE_CLASSES = frozenset({"changesToParent", "footnotereference", "footnoteLabe
 _TRANSPARENT = frozenset({"document-change", "listArticle", "legalArticle"})
 _LIST_TAGS = frozenset({"ul", "ol", "li"})
 _LEDD_CLASSES = frozenset({"legalP", "numberedLegalP"})
+_DROP_BLANK_TEXT = False  # the renderer's rule: whitespace between inline elements is text
 _BLOCK_TAGS = frozenset({"article", "p", "ul", "ol", "li", "div", "section", "h2", "h3", "h4"})
 NodeKind = Literal["paragraph", "provision", "ledd", "title", "other"]
 
@@ -97,7 +99,7 @@ def element_text(element: etree._Element) -> str:
 
 
 def inner_xml(element: etree._Element) -> str:
-    children = "".join(etree.tostring(child, encoding="unicode") for child in element)
+    children = "".join(etree.tostring(child, encoding=str) for child in element)
     return escape(element.text or "") + children
 
 
@@ -163,7 +165,9 @@ def _ledd_of(article: etree._Element) -> tuple[Ledd, ...]:
         if _css(child) in _LEDD_CLASSES:
             ledd.append(_ledd(child))
         elif _css(child) in _CONTINUATION and ledd and _ENDS_WITH_LIST.search(ledd[-1].xml):
-            tail = etree.tostring(child, encoding="unicode", with_tail=False)
+            detached = copy.deepcopy(child)
+            detached.tail = None
+            tail = etree.tostring(detached, encoding=str)
             previous = ledd[-1]
             ledd[-1] = Ledd(
                 xml=previous.xml + tail, text=collapse(f"{previous.text} {element_text(child)}")
@@ -238,7 +242,7 @@ def _parts(main: etree._Element) -> tuple[Part, ...]:
 def parse_document(body: bytes, member: str) -> Document:
     """Parse one member. Raises ``LegalTimeDocumentError`` on a foreign shape."""
     try:
-        root = etree.fromstring(body, parser=safe_parser(remove_blank_text=False))
+        root = etree.fromstring(body, parser=safe_parser(remove_blank_text=_DROP_BLANK_TEXT))
     except etree.XMLSyntaxError as exc:
         raise LegalTimeDocumentError(f"invalid XML in {member}") from exc
     main = root.find("./body/main")

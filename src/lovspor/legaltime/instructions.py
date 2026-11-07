@@ -11,7 +11,14 @@ import re
 from typing import Literal
 
 from lovspor.legaltime.document import Document, Frozen, Ledd, Node, Provision
-from lovspor.legaltime.text import ORDINAL_ALT, act_refid, ordinal, section_key, split_sentences
+from lovspor.legaltime.text import (
+    ORDINAL_ALT,
+    ORDINALS,
+    act_refid,
+    ordinal,
+    section_key_of,
+    split_sentences,
+)
 
 OpKind = Literal[
     "replace_section", "insert_section", "replace_ledd", "insert_ledd", "replace_punktum",
@@ -95,7 +102,7 @@ class Operation(Frozen):
     title: str | None = None
     term_old: str | None = None
     term_new: str | None = None
-    locations: str | None = None
+    locations: str = ""
     change_part: tuple[str, ...] = ()
 
 
@@ -122,8 +129,9 @@ def _span(
 def _address(groups: dict[str, str | None]) -> Address:
     ledd, ledd_end = _span(groups, "l1", "lj", "l2")
     punktum, punktum_end = _span(groups, "p1", "pj", "p2")
+    section = groups.get("sec")
     return Address(
-        section=section_key(groups.get("sec") or "") if groups.get("sec") else None,
+        section=section_key_of(section) if section is not None else None,
         ledd=ledd, ledd_end=ledd_end, punktum=punktum, punktum_end=punktum_end,
         bokstav=groups.get("b"), destination_ledd=_ord(groups, "to"),
     )  # fmt: skip
@@ -136,11 +144,6 @@ def classify(sentence: str) -> tuple[OpKind, dict[str, str | None]]:
         if match is not None:
             return kind, match.groupdict()
     return "unsupported", {}
-
-
-def _part_label(tag: str) -> str:
-    """``"<part index>:<label>:<node>"`` → the label the law prints (``I``, ``II`` …)."""
-    return tag.split(":", maxsplit=2)[1]
 
 
 def _inline_payload(text: str, payload: tuple[Node, ...]) -> tuple[str, tuple[Node, ...]]:
@@ -172,13 +175,15 @@ def _commencement_provisions(document: Document) -> list[str]:
     ]
 
 
-def _pairs(groups: dict[str, str | None]) -> tuple[tuple[str, str], ...]:
+def _pairs(match: re.Match[str]) -> tuple[tuple[str, str], ...]:
     """``«a» og «b» … henholdsvis «c» og «d»`` is two substitutions, in order."""
-    old, new = groups.get("old") or "", groups.get("new") or ""
-    old2, new2 = groups.get("old2"), groups.get("new2")
-    if (old2 is None) != (new2 is None):
-        return ()
-    return ((old, new),) if old2 is None or new2 is None else ((old, new), (old2, new2))
+    old, new = match.group("old"), match.group("new")
+    old2, new2 = match.group("old2"), match.group("new2")
+    if old2 is None and new2 is None:
+        return ((old, new),)
+    if old2 is None or new2 is None:
+        return ()  # one side lists a pair, the other does not: not a substitution we read
+    return ((old, new), (old2, new2))
 
 
 def _instruction_like(node: Node) -> bool:
@@ -211,7 +216,7 @@ class _Reader:
 
     def run(self) -> Interpretation:
         for index, part in enumerate(self.document.parts):
-            self._read_part(f"{index}:{part.label}", list(part.nodes))
+            self._read_part((part.label, f"{index}:{part.label}"), list(part.nodes))
         clauses = self.clauses or _commencement_provisions(self.document)
         return Interpretation(
             document=self.document.header.refid,
@@ -219,33 +224,36 @@ class _Reader:
             clauses=tuple(clauses),
         )
 
-    def _read_part(self, label: str, nodes: list[Node]) -> None:
+    def _read_part(self, part: tuple[str, str], nodes: list[Node]) -> None:
+        """``part`` is (printed label, unique tag prefix)."""
         self.substitution, self.pending_item_act, self.act = None, None, None
         seen_instruction, index = False, 0
         while index < len(nodes):
             node = nodes[index]
             if _instruction_like(node):
                 end = _next_instruction(nodes, index + 1)
-                consumed = self._paragraph(label, index, node, tuple(nodes[index + 1 : end]))
+                consumed = self._paragraph(part, index, node, tuple(nodes[index + 1 : end]))
                 seen_instruction, index = True, end if consumed else index + 1
             else:
-                self._loose(node, seen_instruction, label, index)
+                self._loose(node, seen_instruction, part, index)
                 index += 1
 
-    def _loose(self, node: Node, seen_instruction: bool, label: str, index: int) -> None:
+    def _loose(self, node: Node, seen: bool, part: tuple[str, str], index: int) -> None:
         if self.substitution is not None and node.kind == "ledd":
-            self._substitution_item(label, index, node)
-        elif not seen_instruction and node.kind == "ledd" and not self.document.provisions:
+            self._substitution_item(part, index, node)
+        elif not seen and node.kind == "ledd" and not self.document.provisions:
             self.clauses.append(node.text)
 
-    def _paragraph(self, label: str, index: int, node: Node, payload: tuple[Node, ...]) -> bool:
+    def _paragraph(
+        self, part: tuple[str, str], index: int, node: Node, payload: tuple[Node, ...]
+    ) -> bool:
         """True when ``payload`` was consumed by an instruction."""
         text = node.text
         substitute = _SUBSTITUTE.match(text)
         if substitute is not None:
-            self.substitution = _pairs(substitute.groupdict())
+            self.substitution = _pairs(substitute)
             return False
-        if self.substitution is not None and self._substitution_item(label, index, node):
+        if self.substitution is not None and self._substitution_item(part, index, node):
             return False
         intro = _INTRO.match(text)
         if intro is not None:
@@ -253,10 +261,10 @@ class _Reader:
             text = intro.group("rest") or f"{intro.group('act')} {intro.group('repeal')}"
             if _INTRO_ONLY.match(text):
                 return False
-        self._instruction(f"{label}:{index}", text, node.change_part, payload)
+        self._instruction((part[0], f"{part[1]}:{index}"), text, node.change_part, payload)
         return True
 
-    def _substitution_item(self, label: str, index: int, node: Node) -> bool:
+    def _substitution_item(self, part: tuple[str, str], index: int, node: Node) -> bool:
         act = act_refid(node.text)
         has_locations = "§" in node.text
         if act is not None and not has_locations:
@@ -264,26 +272,31 @@ class _Reader:
             return True
         if act is None and has_locations and self.pending_item_act is not None:
             act, self.pending_item_act = self.pending_item_act, None
-        if act is None or not has_locations or self.substitution is None:
+        if act is None or not has_locations:
             return False
-        for offset, (old, new) in enumerate(self.substitution):
-            self.operations.append(
-                self._substitute(f"{label}:{index}.{offset}", act, node.text, (old, new))
-            )
+        for offset, terms in enumerate(self.substitution or ()):
+            where = (part[0], f"{part[1]}:{index}.{offset}")
+            self.operations.append(self._substitute(where, act, node.text, terms))
         return True
 
-    def _substitute(self, tag: str, act: str, text: str, terms: tuple[str, str]) -> Operation:
-        part = _part_label(tag)
+    def _substitute(
+        self, where: tuple[str, str], act: str, text: str, terms: tuple[str, str]
+    ) -> Operation:
+        label, tag = where
         return Operation(
             id=f"{self.document.header.refid}#{tag}", kind="substitute_term", act=act,
-            address=Address(), instruction=text, part=part, term_old=terms[0],
+            address=Address(), instruction=text, part=label, term_old=terms[0],
             term_new=terms[1], locations=text[text.index("§") :],
         )  # fmt: skip
 
     def _instruction(
-        self, tag: str, text: str, change_part: tuple[str, ...], payload: tuple[Node, ...]
+        self,
+        where: tuple[str, str],
+        text: str,
+        change_part: tuple[str, ...],
+        payload: tuple[Node, ...],
     ) -> None:
-        label = _part_label(tag)
+        label, tag = where
         act = _addressed_act(change_part) or self.act
         text, payload = _inline_payload(text, payload)
         sentences = split_sentences(text)
@@ -316,7 +329,7 @@ def _operation(
     provisions = [n.provision for n in payload if n.provision is not None]
     return Operation(
         id=op_id, kind=kind, act=act, address=_address(groups), instruction=sentence, part=label,
-        destination=section_key(groups.get("dest") or "") if groups.get("dest") else None,
+        destination=section_key_of(dest) if (dest := groups.get("dest")) is not None else None,
         new_provision=provisions[0] if provisions else None,
         ledd=tuple(n.ledd for n in payload if n.ledd is not None),
         title=next((n.text for n in payload if n.kind == "title"), None),
@@ -335,9 +348,9 @@ def _shift(sentence: str) -> tuple[str | None, int, int] | None:
     match = _RENUMBER_SHIFT.match(sentence)
     if match is None:
         return None
-    old, new = ordinal(match.group("old")), ordinal(match.group("new"))
-    section = section_key(match.group("sec")) if match.group("sec") else None
-    return (section, old, new) if old is not None and new is not None else None
+    old, new = ORDINALS[match.group("old").lower()], ORDINALS[match.group("new").lower()]
+    section = section_key_of(match.group("sec")) if match.group("sec") else None
+    return (section, old, new)
 
 
 def _as_insertion(previous: Operation, shift: tuple[str | None, int, int]) -> Operation | None:
@@ -352,7 +365,7 @@ def _with_renumber_insertions(operations: list[Operation]) -> tuple[Operation, .
     result = list(operations)
     for index in range(1, len(result)):
         current, previous = result[index], result[index - 1]
-        shift = _shift(current.instruction) if current.kind == "renumber" else None
+        shift = _shift(current.instruction)  # only a renumbering sentence matches
         if shift is None or current.act != previous.act:
             continue
         converted = _as_insertion(previous, shift)
