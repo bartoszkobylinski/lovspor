@@ -19,7 +19,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lovspor.cli import app
-from lovspor.release import commands
+from lovspor.release import commands, control
 from lovspor.release.continuity import require_continuity, transaction_lock
 from lovspor.release.control import ControlPlane, commit_release, read_triple, rollback
 from lovspor.release.envelope import CORPUS_DIR, MARKER_NAME, Marker, read_marker
@@ -242,6 +242,24 @@ class _FlipAfterFirstRead:
 
 
 class TestConcurrency:
+    def test_continuity_is_checked_while_the_transaction_lock_is_held(
+        self, live_a: Host, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The URL-contract concurrency promise covers judging, before staging starts."""
+        checked = []
+
+        def judge(releases: Path, live: str | None, candidate: str) -> object:
+            assert not live_a.plane.next_fragment.exists()
+            with pytest.raises(TransactionLockedError), transaction_lock(releases):
+                pytest.fail("the continuity check ran without the transaction lock")
+            checked.append((live, candidate))
+            return require_continuity(releases, live, candidate)
+
+        monkeypatch.setattr(control, "require_continuity", judge)
+
+        assert commit_release(live_a.plane, live_a.b).active == live_a.b
+        assert checked == [(live_a.a, live_a.b)]
+
     def test_a_live_release_changed_during_the_check_is_refused(self, live_a: Host) -> None:
         flip = _FlipAfterFirstRead(live_a)
         plane = ControlPlane(
@@ -294,6 +312,45 @@ class TestConcurrency:
 
 
 class TestRollbackAndRecovery:
+    @pytest.mark.parametrize("tree", ["corpus", "site"])
+    def test_rollback_does_not_depend_on_the_tree_it_leaves(self, live_b: Host, tree: str) -> None:
+        """URL contract §4 exempts emergency rollback from the departing tree's check."""
+        shutil.rmtree(live_b.releases / live_b.b / tree)
+
+        report = rollback(live_b.plane)
+
+        assert (report.active, report.previous) == (live_b.a, live_b.b)
+        assert live_b.running() == live_b.pair_of(live_b.a)
+        assert read_marker(live_b.releases) == Marker(active=live_b.a, previous=live_b.b)
+
+    @pytest.mark.parametrize(
+        "relative",
+        ["corpus/lov/testloven/index.html", "site/site-facts.json"],
+        ids=["corpus", "site"],
+    )
+    def test_reconcile_complete_refuses_a_damaged_previous_tree(
+        self, live_a: Host, relative: str
+    ) -> None:
+        """Recovery applies the same intact-previous-tree check as commit (§4)."""
+        live_a.plane.fragment.write_text(live_a.fragment_of(live_a.b), encoding="utf-8")
+        path = live_a.releases / live_a.a / relative
+        if relative.endswith(".json"):
+            facts = json.loads(path.read_bytes())
+            facts["lovspor_commit"] = "0" * 40
+            path.write_text(json.dumps(facts), encoding="utf-8")
+        else:
+            path.write_bytes(path.read_bytes() + b"\n")
+        before = live_a.snapshot()
+        running = live_a.running()
+
+        with pytest.raises(ContinuityRefusedError, match="changed after it went live"):
+            reconcile(live_a.plane, "complete")
+
+        assert live_a.snapshot() == before
+        assert live_a.running() == running
+        assert live_a.caddy.reloads == 0
+        assert not live_a.plane.next_fragment.exists()
+
     def test_rollback_restores_the_previous_release_without_judging_it(self, live_b: Host) -> None:
         """A cannot pass continuity against B (it 404s /lov/nyloven/), and rollback is the
         documented exception: it restores the release served immediately before."""
