@@ -12,8 +12,9 @@ from lovspor.errors import EmbeddingCacheError
 from tests.unit.test_embedding_cache_admin import POLICY, _doc, _unit
 
 
-@pytest.mark.parametrize(("dim", "rows"), [(1, 1), (2, 1), (1, 2), (4, 3)])
-def test_prune_superseded_checkpoint_with_document_shapes(tmp_path, dim, rows) -> None:
+def _store_with_document_of_shape(
+    tmp_path, dim: int, rows: int
+) -> tuple[LocalEntryStore, CachedVectors, CachedVectors, CachedVectors]:
     store = LocalEntryStore.open(tmp_path / "cache", (), POLICY)
     document = _doc("finished")
     document = CachedVectors(
@@ -26,6 +27,13 @@ def test_prune_superseded_checkpoint_with_document_shapes(tmp_path, dim, rows) -
     pending = _unit("pending")
     for entry in (document, checkpoint, pending):
         store.put(entry)
+    return store, document, checkpoint, pending
+
+
+@pytest.mark.parametrize("rows", [1, 3])
+def test_prune_superseded_checkpoint_with_document_shapes(tmp_path, rows) -> None:
+    """A valid document of the units' dimension (4) supersedes them, whatever its rows."""
+    store, document, checkpoint, pending = _store_with_document_of_shape(tmp_path, 4, rows)
 
     report = cache_admin.prune(store)
 
@@ -36,6 +44,23 @@ def test_prune_superseded_checkpoint_with_document_shapes(tmp_path, dim, rows) -
     restored = store.get(document.key)
     assert restored is not None
     np.testing.assert_array_equal(restored.vectors, document.vectors)
+
+
+@pytest.mark.parametrize(("dim", "rows"), [(1, 1), (2, 1), (1, 2)])
+def test_prune_keeps_checkpoints_behind_a_document_of_another_dimension(
+    tmp_path, dim, rows
+) -> None:
+    """GPT-6 review on #827: a document of another dimension supersedes nothing."""
+    store, document, checkpoint, pending = _store_with_document_of_shape(tmp_path, dim, rows)
+
+    report = cache_admin.prune(store)
+
+    assert report.superseded_units == 0
+    assert len(report.refused) == 1
+    assert "dimension" in report.refused[0]
+    assert store.get(checkpoint.key) is not None
+    assert store.get(pending.key) is not None
+    assert store.get(document.key) is not None
 
 
 @pytest.mark.parametrize("walker", ["_subdirs", "_all_dirs", "_entry_files"])
