@@ -39,6 +39,8 @@ from pydantic import ValidationError
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
+from lovspor.embeddings.cache_format import EntryKey
+from lovspor.embeddings.cache_store import entry_location
 from lovspor.innsyn.sender import Sender
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
@@ -800,3 +802,14 @@ def test_assumption_os_link_follow_symlinks_none_does_not_follow(tmp_path: Path)
     for value, name in ((None, "none"), (False, "false")):
         os.link(link, tmp_path / name, follow_symlinks=value)  # type: ignore[arg-type]
         assert (tmp_path / name).is_symlink()
+
+
+def test_assumption_document_entry_location_ignores_dim_and_rows() -> None:
+    """Pins mutation-equivalents/embeddings.cache_admin/_drop_if_superseded-*.toml:
+    a document entry's location depends only on its ESI and input hash."""
+    esi, input_hash = "0" * 32, "a" * 64
+    locations = {
+        entry_location(EntryKey(esi=esi, input_hash=input_hash, dim=dim, rows=rows))
+        for dim, rows in ((1, 1), (2, 1), (1, 2), (1536, 40))
+    }
+    assert len(locations) == 1
