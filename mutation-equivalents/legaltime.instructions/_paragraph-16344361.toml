@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/instructions.py"
+symbol = "_paragraph"
+registered = "2026-11-07, PR #833, from the mutation artifact at commit 40b894a"
+mutation = """
+-            return False
++            return True
+"""
+justification = """
+After an intro-only paragraph ("I lov ... gjøres følgende endringer:") the
+reader returns whether the nodes up to the next instruction-like node were
+consumed. Those nodes can only be loose ledd or other nodes, and `_loose`
+ignores every ledd once `seen_instruction` is True (which the intro set) unless
+a substitution header is open, which the intro has just reset to None. So
+whether `_read_part` skips those nodes (True) or visits them one by one
+(False), no operation and no clause is produced from them, and the operations
+and clauses returned are identical for every document.
+"""

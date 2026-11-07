@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/archive.py"
+symbol = "dump_json"
+registered = "2026-11-07, PR #833, from the mutation artifact at commit 40b894a"
+mutation = """
+-    return json.dumps(value, ensure_ascii=False, indent=1, sort_keys=True)
++    return json.dumps(value, ensure_ascii=None, indent=1, sort_keys=True)
+"""
+justification = """
+`json.dumps` tests `ensure_ascii` for truthiness only: the C and pure-Python
+encoders both branch on `if ensure_ascii:` (`json.encoder.JSONEncoder.__init__`
+stores it and `iterencode` picks `encode_basestring_ascii` when it is truthy,
+`encode_basestring` otherwise). `None` and `False` are both falsy, so the
+mutant selects the same encoder and emits identical text for every value.
+Standard-library semantics, not a dependency's.
+"""
