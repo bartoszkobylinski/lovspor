@@ -22,7 +22,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -164,7 +164,9 @@ def quantized_document_vectors(
     """Int8 rows and scale for a non-empty document — the one paid boundary."""
     if isinstance(embedder, CachingEmbedder):
         stored = embedder.document_vectors(inputs, input_hash)
-        return stored.vectors, float(stored.scale or 0.0)
+        # A document entry always carries a finite positive scale: encode_entry
+        # refuses one without and decode_entry refuses one that is not.
+        return stored.vectors, cast(float, stored.scale)
     return quantize_int8(embedder.encode([item.text for item in inputs]))
 
 

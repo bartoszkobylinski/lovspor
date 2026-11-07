@@ -22,6 +22,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tomllib
 from datetime import UTC, datetime
 from email.message import EmailMessage
@@ -802,6 +803,21 @@ def test_assumption_os_link_follow_symlinks_none_does_not_follow(tmp_path: Path)
     for value, name in ((None, "none"), (False, "false")):
         os.link(link, tmp_path / name, follow_symlinks=value)  # type: ignore[arg-type]
         assert (tmp_path / name).is_symlink()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="pins Linux link(2); macOS link(2) follows")
+def test_assumption_os_link_does_not_follow_a_symlink_on_linux(tmp_path: Path) -> None:
+    """Pins the two Linux-only os.link entries in
+    mutation-equivalents/embeddings.cache_store/: on Linux, os.link with
+    follow_symlinks True or omitted links the symlink itself, like False."""
+    target = tmp_path / "target"
+    target.write_bytes(b"x")
+    link = tmp_path / "symlink"
+    link.symlink_to(target)
+    os.link(link, tmp_path / "omitted")
+    os.link(link, tmp_path / "true", follow_symlinks=True)
+    assert (tmp_path / "omitted").is_symlink()
+    assert (tmp_path / "true").is_symlink()
 
 
 def test_assumption_document_entry_location_ignores_dim_and_rows() -> None:
