@@ -17,17 +17,19 @@ from hashlib import sha256
 from typing import Literal
 
 from lovspor.legaltime.document import Document, Frozen
-from lovspor.legaltime.instructions import Operation
+from lovspor.legaltime.instructions import _INTRO, Operation, classify
 from lovspor.legaltime.scopes import (
+    _PART_LIST,
     _RESERVATION,
+    _ROMAN,
     _SEC,
     _STRAKS,
     _named_in,
+    _part_labels,
     _partial_scopes,
     _scopes_for,
 )
 from lovspor.legaltime.text import (
-    ACT_CITATION,
     act_refid,
     parse_date,
     section_key,
@@ -60,11 +62,34 @@ _PARTIAL_TITLE = re.compile(r"^(?:(?:Forskrift|Vedtak)\s+om\s+)?(?:Delt|Delvis)\
 _VERB = (
     r"(?:trer\s+i\s+kraft|gjeld\s+frå|gjelder\s+fra|tek\s+til\s+å\s+gjelde|tar\s+til\s+å\s+gjelde)"
 )
+_LAW_VERB = rf"(?:{_VERB}|(?:blir|vert)\s+sett\s+i\s+verk|trer\s+(?:ellers|elles)\s+i\s+kraft)"
 _DEFAULT_CLAUSE = re.compile(
-    rf"^(?:For\s+øvrig\s+|Elles\s+)?(?:(?:Loven|Lova|Endringslova|Endringsloven)\s+{_VERB}"
-    rf"|(?:gjelder\s+loven|gjeld\s+lova)\s+(?:fra|frå)|trer\s+loven\s+i\s+kraft)\b",
+    rf"^(?:For\s+øvrig\s+|Elles\s+|Ellers\s+)?(?:(?:Denne\s+)?(?:Loven|Lova|Endringslova|Endringsloven)"
+    rf"(?:\s+her)?\s+{_LAW_VERB}"
+    rf"|(?:gjelder\s+loven|gjeld\s+lova)\s+(?:fra|frå)|trer\s+(?:loven|lova)\s+i\s+kraft"
+    rf"|(?:tek|tar)\s+(?:lova|loven)\s+til\s+å\s+gjelde)\b",
     re.I,
 )
+_PART_VERB = (
+    r"(?:trer\s+(?:likevel\s+)?i\s+kraft|gjeld(?:er)?\s+fr[aå]|(?:blir|vert)\s+sett\s+i\s+verk"
+    r"|(?:tek|tar)\s+til\s+å\s+gjelde)"
+)
+_PART_CLAUSE = re.compile(
+    rf"^(?:(?:Endringene|Endringane|Endringen|Endringa)\s+(?:under|i)\s+|(?:Loven|Lova|Lovens|Lovas|Romertall)\s+)?"
+    rf"(?:del\s+)?{_PART_LIST}(?:\s+om\s+endring\s+av\s+[^,]*?)?\s+{_PART_VERB}\s+(?P<when>.+?)\.?$",
+    re.I,
+)
+_SECNUM = r"\d+(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
+_SECTIONS_UNDER_PART = re.compile(
+    rf"^(?:Endringen|Endringene|Endringane|Endringa|Opphevingen|Opphevinga|Opphevelsen)\s+(?:av|i)\s+\S+\s+"
+    rf"§§?\s*(?P<secs>{_SECNUM}(?:\s*,\s*(?:§\s*)?{_SECNUM})*(?:\s+og\s+(?:§\s*)?{_SECNUM})?)\s+under\s+del\s+"
+    rf"(?P<part>{_ROMAN})\s+{_PART_VERB}\s+(?P<when>.+?)\.?$",
+    re.I,
+)
+_CITED = re.compile(
+    r"\b[\wæøåÆØÅ-]*(?:lov|lova|loven|lovvedtak|forskrift)\s+(?:av\s+)?\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?",
+    re.I,
+)  # a cited act or regulation by date, also under its short title (``straffeloven 22. mai 1902``)
 _COMMENCEMENT_PHRASE = re.compile(rf"{_VERB}|\bi\s+kraft\b|\bvirkning\s+fr[aå]\b", re.I)
 _EXCEPTION_NEW_SECTION = re.compile(
     r"^Ny\s+(?P<sec>§\s*\d+(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?)(?:\s+i\s+\S+)?\s+trer\s+likevel\s+i\s+kraft\b",
@@ -82,7 +107,8 @@ _EXCEPTION_PART = re.compile(
 )
 _INFORMATIONAL = re.compile(
     r"^(?:Kongen\s+kan|Departementet\s+kan|De\s+enkelte|Dei\s+enkelte|Fra\s+den\s+tid|"
-    r"Frå\s+den\s+tid|Er\s|Dersom\s|Hvis\s|Når\s|Fristen\s|Delt\s+ikraft|Delvis\s+ikraft|"
+    r"Frå\s+den\s+tid|Fra\s+samme\s+tid|Frå\s+same\s+tid|Er\s|Dersom\s|Hvis\s|Når\s|Fristen\s|"
+    r"Delt\s+ikraft|Delvis\s+ikraft|"
     r"(?:De|Dei)\s+(?:ulike|enkelte|forskjellige)\s+\S+(?:\s+i\s+lov\w*)?\s+kan\s|Det\s+kan\s+fastsett|"
     r"(?:Bestemmelsene|Føresegnene|Reglene|Reglane)\s+kan\s|"
     r"Forskrifter\s+(?:gitt|gjevne|fastsatt|fastsette)\s)",
@@ -90,7 +116,7 @@ _INFORMATIONAL = re.compile(
 )
 _REFERENCE = re.compile(
     r"\b(?:etter\s+at|når|før|innen|fra\s+det\s+tidspunkt(?:et)?|på\s+det\s+tidspunkt(?:et)?|frå\s+det\s+tidspunktet)"
-    r"\s+(?:denne\s+)?(?:loven|lova|lovendringen|lovendringa|lovendringene|endringsloven|endringslova)"
+    r"\s+(?:denne\s+)?(?:loven|lova|lov|lovendringen|lovendringa|lovendringene|endringsloven|endringslova)"
     r"(?:\s+her)?\s+(?:har\s+)?(?:trer|trådte|trådt|tek|tok|teke|tar|tok)\s+(?:i\s+kraft|til\s+å\s+gjelde)",
     re.I,
 )  # a reference to the commencement, not a statement of it
@@ -217,7 +243,7 @@ def _informational(sentence: str) -> bool:
     it is a commencement statement the grammar does not know, and must refuse.
     """
     sentence = _NUMBERED.sub("", sentence)
-    without_citations = ACT_CITATION.sub("", sentence)
+    without_citations = _CITED.sub("", sentence)
     if _INFORMATIONAL.match(sentence):
         return True
     if _PENDING_WORDS.search(sentence):
@@ -239,6 +265,20 @@ def _exception_timing(document: Document, sentence: str) -> Timing:
     return _unresolved(document, "exception outside the grammar", sentence)
 
 
+def _clause_scopes(sentence: str) -> list[tuple[str, str | None]] | None:
+    """The part or part-section keys one clause sentence dates, or None when it names none."""
+    parts = _PART_CLAUSE.match(sentence)
+    if parts is not None:
+        return [("part", label) for label in _part_labels(parts.group("parts"))]
+    under = _SECTIONS_UNDER_PART.match(sentence)
+    if under is not None:
+        part = under.group("part").upper()
+        keys = [section_key_of(f"§ {m}") for m in re.findall(_SECNUM, under.group("secs"))]
+        return [("part-section", f"{part}/{key}") for key in keys]
+    scope = _exception_scope(sentence)
+    return [scope] if scope is not None else None
+
+
 class _ClauseReading:
     def __init__(self) -> None:
         self.default: Timing | None = None
@@ -246,19 +286,22 @@ class _ClauseReading:
         self.failure: Timing | None = None
 
     def read(self, document: Document, sentence: str) -> None:
+        if _INTRO.match(sentence) or classify(sentence)[0] != "unsupported":
+            return  # an amendment instruction sharing the commencement provision, not a clause
         found = _default_timing(document, sentence)
         if found is not None and self.default is not None:
             self.failure = _unresolved(document, "two default commencement clauses", sentence)
         elif found is not None:
             self.default = found
         elif not _informational(sentence):
-            scope = _exception_scope(sentence)
-            if scope is None:
+            scopes = _clause_scopes(sentence)
+            if scopes is None:
                 self.failure = _unresolved(
                     document, "commencement sentence outside the grammar", sentence
                 )
             else:
-                self.exceptions[scope] = _exception_timing(document, sentence)
+                timing = _exception_timing(document, sentence)
+                self.exceptions.update(dict.fromkeys(scopes, timing))
 
 
 def clause_timings(
@@ -364,7 +407,7 @@ def _stated_date(sentence: str) -> date | None:
     phrase = _COMMENCEMENT_PHRASE.search(sentence)
     if phrase is None:
         return None
-    return parse_date(ACT_CITATION.sub("", sentence[phrase.end() :]))
+    return parse_date(_CITED.sub("", sentence[phrase.end() :]))
 
 
 def _decision_dated(timing: Timing, law: str) -> bool:

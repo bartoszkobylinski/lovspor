@@ -410,3 +410,155 @@ def test_a_referring_sentence_beside_the_clause_does_not_unsettle_the_law() -> N
         "Loven har virkning for søksmål som tas ut etter at loven har trådt i kraft."
     )
     assert {t.effective for t in _by_part(law).values()} == {date(2021, 7, 1)}
+
+
+# ---------------------------------------------------------------- clause shapes of the harder acts
+
+
+def _law3(clause: str, date_in_force: str = "Kongen bestemmer.") -> Document:
+    """Parts I, II and III each amend a provision; part IV is the commencement clause."""
+    body = (
+        f'<html><body><header><dl><dd class="refid">{LAW}</dd>'
+        f'<dd class="dateInForce">{date_in_force}</dd>'
+        '<dd class="dateOfPublication">2020-12-18 12:10</dd><dd class="title">Lov om endringer</dd>'
+        "</dl></header><main>"
+        + "".join(
+            f'<section class="section"><h2>{part}</h2><article class="defaultP">'
+            f"I lov {cite} gjøres følgende endringer:</article>"
+            f'<article class="defaultP">§ {n} skal lyde:</article>'
+            f'<article class="futureLegalArticle" data-name="§{n}"><article class="legalP">T.</article>'  # noqa: E501
+            "</article></section>"
+            for part, cite, n in (
+                ("I", "14. juni 2019 nr. 99 om prøving", 1),
+                ("II", "10. februar 1967 om behandlingsmåten", 5),
+                ("III", "15. juni 2001 nr. 59 om stiftelser", 9),
+            )
+        )
+        + f'<section class="section"><h2>IV</h2><article class="legalP">{clause}</article></section>'  # noqa: E501
+        "</main></body></html>"
+    )
+    return parse_document(body.encode(), "lti/2020/law.xml")
+
+
+def _parts(law: Document, *decisions: Document) -> dict[str, tuple[str, date | None]]:
+    reading = interpret(law)
+    timings = resolve_timings(law, reading.clauses, reading.operations, decisions)
+    return {op.part: (timings[op.id].status, timings[op.id].effective) for op in reading.operations}
+
+
+@pytest.mark.parametrize(
+    "clause, expected",
+    [
+        (
+            "Endringene under I trer i kraft straks. Endringene under II trer i kraft 1. januar 2015.",  # noqa: E501
+            {
+                "I": ("dated", date(2020, 12, 18)),
+                "II": ("dated", date(2015, 1, 1)),
+                "III": ("unresolved", None),
+            },
+        ),
+        (
+            "Del I og III trer i kraft straks. Del II gjeld frå den tida Kongen fastset.",
+            {
+                "I": ("dated", date(2020, 12, 18)),
+                "II": ("pending", None),
+                "III": ("dated", date(2020, 12, 18)),
+            },
+        ),
+        (
+            "Loven del III trer i kraft straks. Loven del I til II gjelder fra den tiden Kongen bestemmer.",  # noqa: E501
+            {"I": ("pending", None), "II": ("pending", None), "III": ("dated", date(2020, 12, 18))},
+        ),
+        (
+            "Endringene i del I gjelder fra den tid Kongen bestemmer. Endringen i del II trer i kraft straks.",  # noqa: E501
+            {
+                "I": ("pending", None),
+                "II": ("dated", date(2020, 12, 18)),
+                "III": ("unresolved", None),
+            },
+        ),
+        (
+            "Loven trer i kraft 1. juli 2021. Endringene under del III trer likevel i kraft straks.",  # noqa: E501
+            {
+                "I": ("dated", date(2021, 7, 1)),
+                "II": ("dated", date(2021, 7, 1)),
+                "III": ("dated", date(2020, 12, 18)),
+            },
+        ),
+        (
+            "Lovens del II gjelder fra den tiden Kongen fastsetter. Loven trer ellers i kraft 1. januar 2025.",  # noqa: E501
+            {
+                "I": ("dated", date(2025, 1, 1)),
+                "II": ("pending", None),
+                "III": ("dated", date(2025, 1, 1)),
+            },
+        ),
+    ],
+)
+def test_part_scoped_clauses_date_each_part_on_its_own(clause: str, expected: dict) -> None:
+    assert _parts(_law3(clause, "2020-12-18, Kongen bestemmer.")) == expected
+
+
+@pytest.mark.parametrize(
+    "clause, status, when",
+    [
+        ("Denne loven trer i kraft 1. desember 2004.", "dated", date(2004, 12, 1)),
+        ("Denne lova trer i kraft på det tidspunktet Kongen bestemmer.", "pending", None),
+        ("Lova blir sett i verk på det tidspunkt Kongen bestemmer.", "pending", None),
+        (
+            "Loven her trer i kraft straks. Fra samme tid oppheves straffeloven 22. mai 1902 nr. 10.",  # noqa: E501
+            "dated",
+            date(2020, 12, 18),
+        ),
+        (
+            "Elles tek lova til å gjelde på det tidspunkt Kongen fastset, og dei enkelte føresegnene kan setjast i verk til ulik tid.",  # noqa: E501
+            "pending",
+            None,
+        ),
+    ],
+)
+def test_default_clause_spellings(clause: str, status: str, when: date | None) -> None:
+    parts = _parts(_law3(clause, "2020-12-18"))
+    assert set(parts.values()) == {(status, when)}, clause
+
+
+def test_an_amendment_intro_inside_the_commencement_provision_is_not_a_clause() -> None:
+    body = (
+        f'<html><body><header><dl><dd class="refid">{LAW}</dd><dd class="dateInForce">2020-12-18</dd>'  # noqa: E501
+        '<dd class="dateOfPublication">2020-12-18 12:10</dd><dd class="title">Lov om noe</dd></dl></header>'  # noqa: E501
+        '<main><section class="section"><h2>Kapittel 9. Ikrafttredelse og endringer i andre lover</h2>'  # noqa: E501
+        '<article class="legalArticle" data-name="§40"><h4><span class="legalArticleTitle">Ikrafttredelse</span></h4>'  # noqa: E501
+        '<article class="legalP">Loven trer i kraft straks.</article>'
+        '<article class="legalP">I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:</article>'  # noqa: E501
+        '<article class="legalP">§ 262 skal lyde:</article>'
+        '<article class="futureLegalArticle" data-name="§262"><article class="legalP">Ny.</article></article>'  # noqa: E501
+        "</article></section></main></body></html>"
+    )
+    law = parse_document(body.encode(), "lti/2020/act.xml")
+    reading = interpret(law)
+    assert [op.kind for op in reading.operations] == ["replace_section"]
+    timings = resolve_timings(law, reading.clauses, reading.operations, ())
+    assert {t.effective for t in timings.values()} == {date(2020, 12, 18)}
+
+
+def test_short_title_citations_hide_no_dates_and_references_know_denne_lov() -> None:
+    assert _informational("Fra samme tid oppheves straffeloven 22. mai 1902 nr. 10.")
+    assert _informational(
+        "Ikraftsetting av straffeloven 20. mai 2005 nr. 28 reguleres av § 411 i lovvedtaket del I."
+    )
+    assert _informational(
+        "Domfelte skal tilbakeføres senest to år etter at denne lov har trådt i kraft."
+    )
+    assert not _informational("Straffeloven 20. mai 2005 nr. 28 trer i kraft 1. oktober 2015.")
+
+
+def test_a_section_scoped_dated_exception_under_a_part() -> None:
+    law = _law3(
+        "Loven trer i kraft 1. juli 2025. Opphevingen av utlendingsloven §§ 1 og 9 under del I gjelder fra 15. mars 2027."  # noqa: E501
+    )
+    reading = interpret(law)
+    timings = resolve_timings(law, reading.clauses, reading.operations, ())
+    by = {(op.part, op.address.section): timings[op.id].effective for op in reading.operations}
+    assert by[("I", "§1")] == date(2027, 3, 15)
+    assert by[("II", "§5")] == date(2025, 7, 1)
+    assert by[("III", "§9")] == date(2025, 7, 1)  # § 9 is named under del I, not del III

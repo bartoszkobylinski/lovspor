@@ -39,7 +39,11 @@ _SECTION_IN = re.compile(_SEC)
 _ROMAN = r"[IVXLC]+"
 
 
-_PART_LIST = rf"(?P<parts>{_ROMAN}(?:\s*,\s*(?:del\s+)?{_ROMAN})*(?:\s+og\s+(?:del\s+)?{_ROMAN})?)"
+_PART_LIST = (
+    rf"(?P<parts>{_ROMAN}(?:\s*,\s*(?:del\s+)?{_ROMAN})*(?:\s+(?:og|til)\s+(?:del\s+)?{_ROMAN})?)"
+)
+_PARTS_IN_ORDER = ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII")
+_RANGE_ENDS = 2  # ``I til III`` names two ends of a run
 
 
 _SECTION_LIST = rf"(?P<secs>\s+{_SEC}(?:\s*,\s*{_SEC})*(?:\s+og\s+{_SEC})?)?"
@@ -139,12 +143,31 @@ def _when(text: str, own: date | None) -> date | None:
     return own if _STRAKS.search(text) else parse_date(text)
 
 
+def _roman(numeral: str) -> int:
+    values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
+    total = 0
+    for index, char in enumerate(numeral):
+        value = values[char]
+        bigger_follows = index + 1 < len(numeral) and values[numeral[index + 1]] > value
+        total += -value if bigger_follows else value
+    return total
+
+
+def _part_labels(listing: str) -> list[str]:
+    """``I, II og IV`` → the parts named; ``I til III`` → every part of the run."""
+    found = [p.upper() for p in re.findall(_ROMAN, listing)]
+    if " til " in listing and len(found) == _RANGE_ENDS:
+        first, last = _roman(found[0]), _roman(found[1])
+        return [p for p in _PARTS_IN_ORDER if first <= _roman(p) <= last]
+    return found
+
+
 def _part_scopes(match: re.Match[str], sentence: str, own: date | None) -> list[Scope] | None:
     """Scopes for ``Romertall I, II og III``, optionally narrowed to listed bare sections."""
     when = _when(match.group("when"), own)
     if when is None:
         return None
-    parts = [p.upper() for p in re.findall(_ROMAN, match.group("parts"))]
+    parts = _part_labels(match.group("parts"))
     sections = [section_key_of(m) for m in re.findall(_SEC, match.group("secs") or "")]
     if sections and len(parts) != 1:
         return None  # sections listed under several parts: which part owns which is unstated
