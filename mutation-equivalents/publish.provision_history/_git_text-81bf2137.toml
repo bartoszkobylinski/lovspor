@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/publish/provision_history.py"
+symbol = "_git_text"
+registered = "2026-11-06, PR #821, from run 42212300851"
+mutation = """
+-        encoding="utf-8",
++        encoding="UTF-8",
+"""
+justification = """
+Python's codec registry normalises encoding names before lookup, so
+codecs.lookup("UTF-8").name == codecs.lookup("utf-8").name == "utf-8":
+subprocess decodes stdout with the same strict UTF-8 decoder under either
+spelling, producing identical text or the identical UnicodeDecodeError.
+Python's own semantics, as in the snapshot._read_wanted entry.
+"""

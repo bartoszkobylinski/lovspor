@@ -260,6 +260,7 @@ uv run lovspor release migrate --rollback --offline  # the same, dialling nothin
 uv run lovspor release migrate --retire          # list the pre-envelope paths; removes nothing
 uv run lovspor release migrate --retire --yes    # remove them; no way back after
 uv run lovspor publish-check <envelope>          # the final check: both trees, cross-tree, ids
+uv run lovspor publish-check <envelope> --previous <live envelope>  # + no URL the live release served would 404 (docs/url-contract.md)
 ```
 
 Exit codes: `0` done (a `commit` of the live release included), `1` refused
