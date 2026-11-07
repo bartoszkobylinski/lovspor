@@ -22,8 +22,9 @@ from lovspor.legaltime.text import (
 
 OpKind = Literal[
     "replace_section", "insert_section", "replace_ledd", "insert_ledd", "replace_punktum",
-    "insert_punktum", "replace_bokstav", "repeal_section", "repeal_ledd", "repeal_punktum",
-    "move_ledd", "renumber", "replace_heading", "substitute_term", "unsupported",
+    "insert_punktum", "replace_bokstav", "insert_bokstav", "repeal_bokstav", "repeal_section",
+    "repeal_ledd", "repeal_punktum", "move_ledd", "renumber", "replace_heading", "substitute_term",
+    "unsupported",
 ]  # fmt: skip
 
 _SEC = (
@@ -38,6 +39,8 @@ _LEDD = (
 )
 _PUNKT = rf"(?:(?P<p1>{_ORD})(?:\s+(?P<pj>og|til)\s+(?P<p2>{_ORD}))?|(?P<plast>siste))\s+punktum"
 _NEW = r"ny(?:tt|e)?"
+_ITEM = r"(?:bokstav\s+(?P<b>[a-zæøå])|nr\.\s+(?P<bn>\d+))"  # one list item, by letter or number
+_CHAPTER = re.compile(rf"^{_NEW}\s+kapittel\s+\S+\s+(?:skal\s+)?lyde(?:\s+slik)?:$", re.I)
 _LYDE = r"(?:skal\s+)?lyde(?:\s+slik)?:"
 _REPEAL = (
     r"(?:oppheves|opphevast|blir\s+oppheva|vert\s+oppheva|blir\s+opphevet|strykes"
@@ -75,7 +78,10 @@ _RULES: list[tuple[OpKind, re.Pattern[str]]] = [
     ("replace_section", re.compile(rf"^(?P<sec>{_SEC})\s+{_LYDE}$")),
     ("insert_punktum", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_NEW}\s+{_PUNKT}\s+{_LYDE}$")),  # noqa: E501
     ("replace_punktum", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_PUNKT}\s+{_LYDE}$")),
-    ("replace_bokstav", re.compile(rf"^(?P<sec>{_SEC})\s+{_LEDD}\s+bokstav\s+(?P<b>[a-zæøå])\s+{_LYDE}$")),  # noqa: E501
+    ("insert_bokstav", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_NEW}\s+{_ITEM}\s+{_LYDE}$")),  # noqa: E501
+    ("insert_bokstav", re.compile(rf"^I\s+(?P<sec>{_SEC})\s+skal\s+{_NEW}\s+{_ITEM}\s+lyde:$")),
+    ("replace_bokstav", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_ITEM}\s+{_LYDE}$")),
+    ("repeal_bokstav", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_ITEM}\s+{_REPEAL}$")),
     ("insert_ledd", re.compile(rf"^(?P<sec>{_SEC})\s+{_NEW}\s+{_LEDD}\s+{_LYDE}$")),
     ("replace_ledd", re.compile(rf"^(?P<sec>{_SEC})\s+{_LEDD}\s+{_LYDE}$")),
     ("repeal_punktum", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_PUNKT}\s+{_REPEAL}$")),
@@ -160,7 +166,7 @@ def _address(groups: dict[str, str | None]) -> Address:
     return Address(
         section=section_key_of(section) if section is not None else None,
         ledd=ledd, ledd_end=ledd_end, punktum=punktum, punktum_end=punktum_end,
-        bokstav=groups.get("b"), destination_ledd=_ord(groups, "to"),
+        bokstav=groups.get("b") or groups.get("bn"), destination_ledd=_ord(groups, "to"),
         last_punktum=bool(groups.get("plast")),
     )  # fmt: skip
 
@@ -361,25 +367,47 @@ class _Reader:
         payload: tuple[Node, ...],
     ) -> None:
         label, tag, host = where
-        act = _addressed_act(change_part) or self.act
+        context = (_addressed_act(change_part) or self.act, label, change_part, host)
         text, payload = _inline_payload(text, payload)
         sentences = _pieces(text)
         for offset, (tag_offset, sentence) in enumerate(sentences):
-            kind, groups = classify(sentence)
             last = offset == len(sentences) - 1
-            if kind == "unsupported" and _COMMENCEMENT_SHAPED.search(sentence):
-                self.clauses.append(sentence)  # a commencement sentence among instructions
-                continue
-            if kind == "unsupported" and act is None:
-                continue  # prose outside any act's amendment block: not an operation
-            self.operations.append(
-                _operation(
-                    f"{self.document.header.refid}#{tag}.{tag_offset}",
-                    (kind, groups, sentence),
-                    (act, label, change_part, host),
-                    payload if last else (),
-                )
-            )
+            op_id = f"{self.document.header.refid}#{tag}.{tag_offset}"
+            self._sentence(op_id, sentence, context, payload if last else ())
+
+    def _sentence(
+        self,
+        op_id: str,
+        sentence: str,
+        context: tuple[str | None, str, tuple[str, ...], str | None],
+        payload: tuple[Node, ...],
+    ) -> None:
+        kind, groups = classify(sentence)
+        if payload and _CHAPTER.match(sentence) and any(n.provision for n in payload):
+            self.operations.extend(_chapter(op_id, sentence, context, payload))
+        elif kind == "unsupported" and _COMMENCEMENT_SHAPED.search(sentence):
+            self.clauses.append(sentence)  # a commencement sentence among instructions
+        elif kind == "unsupported" and context[0] is None:
+            return  # prose outside any act's amendment block: not an operation
+        else:
+            self.operations.append(_operation(op_id, (kind, groups, sentence), context, payload))
+
+
+def _chapter(
+    base: str,
+    sentence: str,
+    context: tuple[str | None, str, tuple[str, ...], str | None],
+    payload: tuple[Node, ...],
+) -> list[Operation]:
+    """``Nytt kapittel 6A skal lyde:`` inserts every provision the chapter text carries."""
+    provisions = [n for n in payload if n.provision is not None]
+    return [
+        _operation(
+            f"{base}-{k}", ("insert_section", {"sec": n.provision.label}, sentence), context, (n,)
+        )
+        for k, n in enumerate(provisions)
+        if n.provision is not None
+    ]
 
 
 def _operation(

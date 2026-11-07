@@ -110,14 +110,14 @@ class _Working:
     def _target(self, key: str | None) -> _Provision | None:
         return self.map.get(key) if key else None
 
-    def _ledd_at(self, op: Operation) -> tuple[_Provision, int] | str:
+    def _ledd_at(self, op: Operation, unit: str = "punktum") -> tuple[_Provision, int] | str:
         target = self._target(op.address.section)
         if target is None or target.repealed:
             return "target provision missing or repealed"
         index = op.address.ledd
         if index is None:
             if len(target.ledd) != 1:
-                return "punktum without ledd on a provision with several ledd"
+                return f"{unit} without ledd on a provision with several ledd"
             index = 1
         if not 1 <= index <= len(target.ledd):
             return f"ledd {index} does not exist"
@@ -256,10 +256,34 @@ class _Working:
         target.ledd[index - 1] = _ledd_from_text(" ".join(sentences))
         return None
 
+    def apply_insert_bokstav(self, op: Operation) -> str | None:
+        found = self._ledd_at(op, "item")
+        if isinstance(found, str):
+            return found
+        if op.address.bokstav is None or len(op.ledd) != 1:
+            return "item payload is not one text"
+        target, index = found
+        edited = _insert_item(target.ledd[index - 1].xml, op.address.bokstav, op.ledd[0].text)
+        if isinstance(edited, str):
+            return edited
+        target.ledd[index - 1] = edited
+        return None
+
+    def apply_repeal_bokstav(self, op: Operation) -> str | None:
+        found = self._ledd_at(op, "item")
+        if isinstance(found, str):
+            return found
+        target, index = found
+        edited = _remove_item(target.ledd[index - 1].xml, op.address.bokstav or "")
+        if isinstance(edited, str):
+            return edited
+        target.ledd[index - 1] = edited
+        return None
+
     def apply_replace_bokstav(self, op: Operation) -> str | None:
-        found = self._ledd_at(op)
+        found = self._ledd_at(op, "item")
         if isinstance(found, str) or op.address.bokstav is None or len(op.ledd) != 1:
-            return "bokstav target or replacement text missing"
+            return found if isinstance(found, str) else "bokstav target or replacement text missing"
         target, index = found
         letter = re.escape(op.address.bokstav)
         item = rf'<li[^>]*data-name="{letter}[.)]"[^>]*>(?:(?!<li)[\s\S])*?'
@@ -369,6 +393,62 @@ def _substitute(provision: _Provision, ledd: frozenset[int], terms: tuple[str, s
         if text != current.text:
             provision.ledd[index], changed = Ledd(xml=xml, text=text), True
     return changed
+
+
+_LETTERS = "abcdefghijklmnopqrstuvwxyzæøå"
+
+
+def _previous_label(label: str) -> str | None:
+    """The item label before ``label``: ``c`` → ``b``, ``3`` → ``2``; None for the first."""
+    if label.isdigit():
+        return str(int(label) - 1) if int(label) > 1 else None
+    position = _LETTERS.find(label)
+    return _LETTERS[position - 1] if position > 0 else None
+
+
+def _items(root: etree._Element, label: str) -> list[etree._Element]:
+    return [li for li in root.iter("li") if (li.get("data-name") or "").rstrip(".)") == label]
+
+
+def _insert_item(xml: str, label: str, text: str) -> Ledd | str:
+    """A new ``<li>`` after its predecessor in the ledd's list, in Lovdata's item markup."""
+    root = etree.fromstring(f"<article>{xml}</article>", parser=safe_parser())
+    if _items(root, label):
+        return f"item {label} is already in the ledd"
+    before = _previous_label(label)
+    anchor = _items(root, before)[-1:] if before else []
+    lists = root.findall(".//ol") + root.findall(".//ul")
+    if not anchor and (before is not None or not lists):
+        return f"item {before}, the one before {label}, is not in the ledd"
+    holder = anchor[0].getparent() if anchor else lists[0]
+    if holder is None:
+        return f"item {before} has no list around it"
+    new = etree.SubElement(holder, "li", {"data-name": f"{label}."})
+    inner = etree.SubElement(etree.SubElement(new, "article", {"class": "listArticle"}), "article")
+    inner.set("class", "legalP")
+    inner.text = text
+    if anchor:
+        anchor[0].addnext(new)
+    else:
+        lists[0].insert(0, new)
+    return _ledd_from_root(root)
+
+
+def _remove_item(xml: str, label: str) -> Ledd | str:
+    root = etree.fromstring(f"<article>{xml}</article>", parser=safe_parser())
+    found = _items(root, label)
+    if len(found) != 1:
+        return f"bokstav {label} matched {len(found)} list items"
+    parent = found[0].getparent()
+    if parent is None:
+        return f"item {label} has no list around it"
+    parent.remove(found[0])
+    return _ledd_from_root(root)
+
+
+def _ledd_from_root(root: etree._Element) -> Ledd:
+    inner = (root.text or "") + "".join(etree.tostring(child, encoding=str) for child in root)
+    return Ledd(xml=inner, text=element_text(root))
 
 
 def _insert_position(order: list[str], key: str) -> int:
