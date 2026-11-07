@@ -187,6 +187,7 @@ def iter_entries(store: LocalEntryStore) -> Iterator[StoredEntry]:
     A file whose name is not a key is yielded with an impossible key, so the
     caller's check refuses it rather than the walk skipping it.
     """
+    check_private_dir(store.root)  # it may have been swapped since open()
     for space in _subdirs(store.root / SCHEMA_DIR):
         yield from _documents(space)
         for unit_dir in _subdirs(space / "units"):
@@ -194,6 +195,7 @@ def iter_entries(store: LocalEntryStore) -> Iterator[StoredEntry]:
 
 
 def iter_temporary(store: LocalEntryStore) -> Iterator[Path]:
+    check_private_dir(store.root)
     for directory in _all_dirs(store.root / SCHEMA_DIR):
         yield from (p for p in directory.iterdir() if _TEMP_MARK in p.name and p.is_file())
 
