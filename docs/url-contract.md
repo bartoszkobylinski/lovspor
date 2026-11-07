@@ -85,10 +85,28 @@ their own contract.
 
 - At build: `publish.redirects.validate_redirect_targets` checks that every target is emitted,
   that entity and pid are kept, and that no rule shadows a live URL.
-- Across releases: `lovspor publish-check <release> --previous <served release>` refuses a
-  release that would answer 404, a dangling or non-live 301, or a page and twin with different
-  fates for any URL the served release answered. That covers its pages, its twins and its
-  redirect sources.
+- Across releases, in production (#820, fail-closed): `lovspor release commit` refuses to make a
+  release live unless it answers every URL the **live** release serves. The check is
+  `publish.check.check_continuity` over the two `corpus/` trees. It refuses a URL that would
+  answer 404, a dangling or non-live 301, and a page and twin with different fates. That covers
+  the live release's pages, its twins and its redirect sources. `reconcile --complete` applies
+  the same check before it makes a staged fragment live.
+  - **Which release is live** is the reconciled triple: R = D = M.active, read under the
+    transaction lock. A directory listing never decides it. The live release's trees must
+    still hash to its own `release_content_id`. A damaged, truncated or missing previous
+    tree, or an unreadable marker, is a refusal. It is never a comparison against fewer URLs.
+  - **The check runs after** the candidate is found complete and naming itself, and **before**
+    anything is staged. The triple is then read again and must be unchanged, so the release
+    that was compared is the one replaced. A refusal leaves the fragment, `.next`, Caddy's
+    running configuration and the marker untouched.
+  - **Concurrency.** `commit`, `rollback`, `reconcile` and `prune` hold an exclusive,
+    non-blocking `flock(2)` on the releases root. A second one refuses at once, and `prune`
+    can never remove a candidate that is being checked.
+  - **Bootstrap.** Nothing is compared only when the triple proves nothing envelope-based was
+    ever live: no marker, and R and D naming no release. A missing marker beside a release
+    Caddy serves is the `reloaded_marker_missing` row, and it is refused.
+- By hand: `lovspor publish-check <release> --previous <served release>` runs the same check
+  on any two releases.
 - Tests: `tests/unit/test_publish_url_continuity.py` holds the synthetic two-snapshot cases.
 
 **Limits. These are stated, not guaranteed beyond them.**
@@ -101,10 +119,20 @@ their own contract.
   that path. This relies on slug = file stem, which holds for every current record and which
   the rename walk relies on too.
 - Rename proof relies on git rename detection, under the existing walk's limits.
-- `publish-check --previous` compares two releases. **It is not yet called by `release build`
-  or `publish-release.sh`.** Until it is, the cross-release guarantee is checked only when an
-  operator runs it, and in tests. Wiring it into the release transaction is an owner decision
-  (#820).
+- The check compares each release with the one it replaces. The guarantee is transitive only
+  from the first release committed with the check (#820). Earlier transitions were not judged,
+  and URLs served only before then are not protected.
+- **`rollback` is not judged.** It restores the release served immediately before, so a URL
+  that only the rolled-back release introduced answers 404 again. That lasts until a release
+  that serves it is committed. This keeps rollback an emergency restore that never depends on
+  the release it leaves.
+- The first envelope (`release migrate`, and a `commit` on a host where nothing envelope-based
+  was ever live) is not compared with the pre-envelope tree it replaces.
+- The candidate is trusted to be the tree `release build` finalized and checked. The commit
+  does not re-hash it, so a candidate edited after its build is judged as it now stands.
+- A host where an operator hand-loads a configuration into Caddy is outside the transaction.
+  The re-read before staging catches a change made during a commit, and `release live`
+  refuses a configuration that does not match the disk.
 - A URL no release ever served answers 404.
 
 ## 5. Dates and time axes
