@@ -71,6 +71,47 @@ def test_a_normal_member_of_the_year_is_inside_the_dataset() -> None:
     assert within_dataset(CURRENT, "lti/2026/sub/nl-20260123-001.xml") is True
 
 
+@pytest.mark.parametrize(
+    "member",
+    [
+        "",
+        "lti/2026",
+        "lti/2026/",
+        "lti/20260/nl-20260123-001.xml",
+        "/lti/2026/nl-20260123-001.xml",
+        "lti/2026/sub/",
+        "lti/2026/sub/.",
+        "lti/2026/sub/..",
+        "lti/2026/sub//nl-20260123-001.xml",
+    ],
+)
+def test_dataset_member_requires_a_plain_path_inside_the_exact_year(member: str) -> None:
+    """The producer contract excludes empty, dot and parent path segments."""
+    assert within_dataset(CURRENT, member) is False
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        "lti/2025/nl-20251230-001.xml",
+        "ltii/2026/nl-20260123-001.xml",
+        "lti/2026/sub/../nl-20260123-001.xml",
+        "lti/2026/sub//nl-20260123-001.xml",
+    ],
+)
+def test_an_additional_outside_member_bars_an_otherwise_eligible_chain(
+    record: dict[str, Any], member: str
+) -> None:
+    """Every citation must qualify, even when the original chain qualifies."""
+    moved = _moved(record, CURRENT, "2026")
+    bases = _bases("rejected")
+    assert ineligibility(moved, bases) is None
+    citation = next(e for e in moved["evidence"] if e["upstream_id"].startswith(f"{CURRENT}!"))
+    moved["evidence"].append({**citation, "upstream_id": f"{CURRENT}!{member}"})
+
+    assert ineligibility(moved, bases) == "cites a member outside its archive's dataset"
+
+
 def test_a_dotted_member_path_bars_the_record(record: dict[str, Any]) -> None:
     moved = _moved(record, CURRENT, "2026/../2025")
     assert ineligibility(moved, _bases("approved")) == (
