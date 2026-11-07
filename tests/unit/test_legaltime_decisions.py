@@ -425,16 +425,17 @@ def test_a_reservation_inside_a_part_scope_is_outside_the_grammar() -> None:
 
 def test_a_full_decision_whose_body_names_another_date_or_a_reservation_is_unreadable() -> None:
     law = _law()
-    for body in (
-        "Loven trer i kraft 1. januar 2026, med unntak av § 11 som trer i kraft 1. juli 2026.",
-        "Loven trer i kraft 1. juli 2026.",
+    for body, reason in (
+        (
+            "Loven trer i kraft 1. januar 2026, med unntak av § 11 som trer i kraft 1. juli 2026.",
+            "full decision body carries an exception",
+        ),
+        ("Loven trer i kraft 1. juli 2026.", "full decision body disagrees with its header"),
     ):
         full = _decision("forskrift/2025-12-12-1", FULL, "2026-01-01", "2025-12-12 10:00", body)
         timings = _by_part(law, _timings(law, full))
         assert {t.status for t in timings.values()} == {"unresolved"}, body
-        assert {t.reason for t in timings.values()} == {
-            "full decision body disagrees with its header"
-        }, body
+        assert {t.reason for t in timings.values()} == {reason}, body
     for body in (
         "Loven trer i kraft 1. januar 2026. Departementet kan gi overgangsregler.",
         "Europaparlaments- og rådsforordning (EU) 2016/679 av 27. april 2016 om vern av fysiske "
@@ -685,7 +686,7 @@ def test_full_decision_body_scan_skips_informational_sentences_and_reads_to_the_
     }
 
 
-def test_a_full_decision_whose_body_reads_like_a_part_scope_still_dates_by_its_header() -> None:
+def test_a_full_titled_decision_whose_body_only_scopes_one_part_reaches_only_that_part() -> None:
     law = _law()
     full = _decision(
         "forskrift/2021-01-01-1",
@@ -695,8 +696,8 @@ def test_a_full_decision_whose_body_reads_like_a_part_scope_still_dates_by_its_h
         "Endringsloven del I trer i kraft 1. juli 2021.",
     )
     timings = _by_part(law, _timings(law, full))
-    assert timings[("II", "§5")].status == "dated"
-    assert timings[("II", "§5")].effective == date(2021, 7, 1)
+    assert timings[("I", "§1")].effective == date(2021, 7, 1)
+    assert timings[("II", "§5")].status == "pending"  # the body commenced part I, nothing else
 
 
 def test_unsettling_clears_a_retroactive_flag() -> None:

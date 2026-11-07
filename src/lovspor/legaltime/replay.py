@@ -17,7 +17,7 @@ from lxml import etree
 
 from lovspor.legaltime.commencement import Timing
 from lovspor.legaltime.document import Document, Frozen, Ledd, Provision, element_text
-from lovspor.legaltime.instructions import Operation, _shift
+from lovspor.legaltime.instructions import Address, Operation, _shift
 from lovspor.legaltime.text import ORDINAL_ALT, ordinal, section_sort_key, split_sentences
 from lovspor.parsing.xml_normalizer import safe_parser
 
@@ -91,9 +91,12 @@ def _text_of_xml(fragment: str) -> str:
     return element_text(root)
 
 
-def _sentence_slice(address_start: int | None, address_end: int | None) -> tuple[int, int]:
-    start = address_start or 1
-    return start, address_end or start
+def _sentence_slice(address: Address, count: int) -> tuple[int, int]:
+    """1-based inclusive sentence range an address names; ``siste punktum`` is the last one."""
+    if address.last_punktum:
+        return count, count
+    start = address.punktum or 1
+    return start, address.punktum_end or start
 
 
 class _Working:
@@ -220,7 +223,7 @@ class _Working:
         if isinstance(found, str):
             return found
         target, index, sentences = found
-        start, end = _sentence_slice(op.address.punktum, op.address.punktum_end)
+        start, end = _sentence_slice(op.address, len(sentences))
         supplied = split_sentences(" ".join(ledd.text for ledd in op.ledd))
         if not 1 <= start <= end <= len(sentences) or len(supplied) != end - start + 1:
             return f"punktum {start}-{end}: {len(sentences)} existing, {len(supplied)} supplied"
@@ -233,7 +236,7 @@ class _Working:
         if isinstance(found, str):
             return found
         target, index, sentences = found
-        start, end = _sentence_slice(op.address.punktum, op.address.punktum_end)
+        start, end = _sentence_slice(op.address, len(sentences))
         supplied = split_sentences(" ".join(ledd.text for ledd in op.ledd))
         if not 1 <= start <= len(sentences) + 1 or len(supplied) != end - start + 1:
             return f"punktum {start} insertion: {len(sentences)} existing, {len(supplied)} supplied"
@@ -246,7 +249,7 @@ class _Working:
         if isinstance(found, str):
             return found
         target, index, sentences = found
-        start, end = _sentence_slice(op.address.punktum, op.address.punktum_end)
+        start, end = _sentence_slice(op.address, len(sentences))
         if not 1 <= start <= end <= len(sentences):
             return f"punktum {start}-{end} does not exist among {len(sentences)}"
         del sentences[start - 1 : end]

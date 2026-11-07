@@ -38,12 +38,13 @@ def test_scope_requires_both_sections_and_date(sentence):
 
 def test_informational_reservation_is_not_a_body_conflict():
     doc = decision("Departementet kan gi regler unntatt om klage.")
-    assert not c._body_disagrees(doc, date(2022, 1, 1))
+    assert c._blocks(doc) == [(None, [])]  # informational prose is not part of any block
 
 
 def test_body_checks_sentences_after_informational_prose():
     doc = decision("Departementet kan gi regler. Loven trer i kraft 1. januar 2023.")
-    assert c._body_disagrees(doc, date(2022, 1, 1))
+    assert c._blocks(doc) == [(None, ["Loven trer i kraft 1. januar 2023."])]
+    assert c._block_date(doc, ["Loven trer i kraft 1. januar 2023."]) == date(2023, 1, 1)
 
 
 def test_citation_removal_preserves_adjacent_date_boundary():
@@ -58,12 +59,12 @@ def test_unsettled_timing_clears_retroactivity():
     assert result.retroactive is False
 
 
-def test_full_decision_applies_even_with_a_scope_shaped_body():
+def test_full_titled_decision_with_a_scope_shaped_body_reaches_only_that_scope():
     law = _law(ACT, "Kongen bestemmer", "")
     op = _op("replace_ledd", Address(section="§1", ledd=1))
     doc = decision("Endringsloven del II trer i kraft 1. januar 2022.")
     result = c.resolve_timings(law, (), (op,), (doc,))[op.id]
-    assert result.effective == date(2022, 1, 1)
+    assert result.status == "pending"  # the body commenced part II; this operation is in part I
 
 
 def test_multiple_unpublished_decisions_cannot_establish_order():

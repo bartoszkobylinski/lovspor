@@ -1,0 +1,285 @@
+"""Phase 2 (#744): commencement shapes read from the eight harder acts.
+
+Every sentence here is a shape seen in the permitted archives (research note
+2026-11-07, section "failure taxonomy"); none is invented.
+"""
+
+from datetime import date
+
+import pytest
+
+from lovspor.legaltime.commencement import (
+    Scope,
+    _informational,
+    _scope_of,
+    baseline_timing,
+    header_timing,
+    resolve_timings,
+)
+from lovspor.legaltime.document import Document, parse_document
+from lovspor.legaltime.instructions import interpret
+
+LAW = "lov/2020-12-18-999"
+
+
+def _law(clause: str, date_in_force: str = "Kongen bestemmer.") -> Document:
+    body = (
+        f'<html><body><header><dl><dd class="refid">{LAW}</dd>'
+        f'<dd class="dateInForce">{date_in_force}</dd>'
+        '<dd class="dateOfPublication">2020-12-18 12:10</dd><dd class="title">Lov om endringer</dd>'
+        '</dl></header><main><section class="section"><h2>I</h2><article class="defaultP">'
+        "I lov 14. juni 2019 nr. 99 om prøving gjøres følgende endringer:</article>"
+        '<article class="defaultP">§ 1 skal lyde:</article>'
+        '<article class="futureLegalArticle" data-name="§1"><article class="legalP">A.</article>'
+        '</article></section><section class="section"><h2>II</h2><article class="defaultP">'
+        "I lov 10. februar 1967 om behandlingsmåten skal § 5 lyde:</article>"
+        '<article class="futureLegalArticle" data-name="§5"><article class="legalP">C.</article>'
+        f'</article></section><section class="section"><h2>III</h2><article class="legalP">{clause}'
+        "</article></section></main></body></html>"
+    )
+    return parse_document(body.encode(), "lti/2020/law.xml")
+
+
+def _decision(
+    refid: str, title: str, date_in_force: str, body: str, commences: tuple[str, ...] = ()
+) -> Document:
+    listed = "".join(f"<li>{law}</li>" for law in commences)
+    xml = (
+        f'<html><body><header><dl><dd class="refid">{refid}</dd>'
+        f'<dd class="dateInForce">{date_in_force}</dd>'
+        '<dd class="dateOfPublication">2021-01-01 10:00</dd>'
+        f'<dd class="title">{title}</dd><dd class="changesToDocuments"><ul>{listed}</ul></dd>'
+        "</dl></header><main>"
+        + "".join(f'<article class="legalP">{s}</article>' for s in body.split("\n"))
+        + "</main></body></html>"
+    )
+    return parse_document(xml.encode(), f"lti/x/{refid.rsplit('/', maxsplit=1)[-1]}.xml")
+
+
+def _by_part(law: Document, *decisions: Document):
+    reading = interpret(law)
+    timings = resolve_timings(law, reading.clauses, reading.operations, decisions)
+    return {(op.part, op.address.section): timings[op.id] for op in reading.operations}
+
+
+# ---------------------------------------------------------------- header shapes
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Kongen bestemmer.",
+        "Kongen fastsetter.",
+        "Kongen fastset",
+        "Departementet bestemmer.",
+        "Kongen avgjer.",
+    ],
+)
+def test_delegation_headers_with_or_without_a_period_are_pending(raw: str) -> None:
+    assert (
+        header_timing(_law("Loven gjelder fra den tid Kongen bestemmer.", raw)).status == "pending"
+    )
+
+
+def test_a_mixed_header_stays_outside_the_grammar() -> None:
+    assert header_timing(_law("x", "2007-06-29, Kongen fastset.")).status == "unresolved"
+    assert header_timing(_law("x", "Straks")).status == "unresolved"
+
+
+# ---------------------------------------------------------------- clause sentences
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "De ulike bestemmelsene kan settes i kraft til forskjellig tid.",
+        "De ulike endringene kan settes i kraft til ulik tid.",
+        "(2) De enkelte bestemmelsene kan settes i kraft til ulik tid.",
+        "Det kan fastsettes at bestemmelser skal tre i kraft til ulik tid for ulike skyldnere.",
+        "Forskrifter gitt i medhold av straffeloven 1902 gjelder også etter at loven her har trådt i kraft.",  # noqa: E501
+        "Endringene i tvisteloven § 28-3 gjelder bare der innførsel finner sted etter at loven har trådt i kraft.",  # noqa: E501
+        "Loven §§ 59 til 62 gjelder for inngrep som finner sted etter at loven har trådt i kraft.",
+        "Kongen kan sette i kraft og oppheve de enkelte bestemmelsene til forskjellig tid.",
+    ],
+)
+def test_staggering_and_transitional_sentences_state_no_commencement(sentence: str) -> None:
+    assert _informational(sentence)
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Loven gjelder først fra 1. januar 2010.",
+        "Endringene gjelder bare fra 1. juli 2021.",
+        "Loven trer i kraft 1. juli 2021.",
+    ],
+)
+def test_dated_sentences_are_never_informational(sentence: str) -> None:
+    assert not _informational(sentence)
+
+
+def test_nynorsk_delegation_clause_is_pending() -> None:
+    law = _law("Lova gjeld frå den tida Kongen avgjer.")
+    assert {t.status for t in _by_part(law).values()} == {"pending"}
+
+
+def test_a_numbered_clause_sentence_is_read_without_its_number() -> None:
+    law = _law(
+        "(1) Loven trer i kraft 1. juli 2021. (2) De enkelte bestemmelsene kan settes i kraft til ulik tid."  # noqa: E501
+    )
+    assert {t.effective for t in _by_part(law).values()} == {date(2021, 7, 1)}
+
+
+def test_a_staggering_sentence_beside_a_delegation_leaves_everything_pending() -> None:
+    law = _law(
+        "Loven gjelder fra den tid Kongen bestemmer. De ulike bestemmelsene kan settes i kraft til forskjellig tid."  # noqa: E501
+    )
+    assert {t.status for t in _by_part(law).values()} == {"pending"}
+
+
+# ---------------------------------------------------------------- Delt grammar
+
+
+@pytest.mark.parametrize(
+    "head", ["Lovens del I", "Loven del I", "Lova del I", "Endringslova del I"]
+)
+def test_a_part_scope_may_name_the_law_as_loven_or_endringsloven(head: str) -> None:
+    scope = _scope_of(f"{head} trer i kraft 1. januar 2010.")
+    assert scope == Scope(
+        part="I", when=date(2010, 1, 1), quote=f"{head} trer i kraft 1. januar 2010."
+    )
+
+
+def test_delvis_is_a_partial_decision_title() -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    delvis = _decision(
+        "forskrift/2021-03-01-2", "Delvis ikraftsetting av lov 18. desember 2020 nr. 999 om endringer",  # noqa: E501
+        "2021-07-01", "Delvis ikraftsetting av lov 18. desember 2020 nr. 999 om endringer.\nLovens del I trer i kraft 1. juli 2021.",  # noqa: E501
+    )  # fmt: skip
+    timings = _by_part(law, delvis)
+    assert timings[("I", "§1")].effective == date(2021, 7, 1)
+    assert timings[("II", "§5")].status == "pending"
+
+
+# ---------------------------------------------------------------- multi-law decisions
+
+
+MULTI = (
+    "Ikraftsetting av lov 15. mai 2008 nr. 35 om utlendingers adgang til riket (utlendingsloven).\n"
+    "Loven trer i kraft 1. januar 2010.\n"
+    "Ikraftsetting av lov 18. desember 2020 nr. 999 om endringer.\n"
+    "Lovens del I trer i kraft 1. mars 2010.\n"
+    "Delvis ikraftsetting av lov 19. juni 2009 nr. 38 om endringer i utlendingsloven.\n"
+    "Lovens del II trer i kraft 1. januar 2010."
+)
+
+
+def test_a_multi_law_decision_is_read_block_by_block() -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    other = _law("Loven gjelder fra den tid Kongen bestemmer.").model_copy(
+        update={"header": _law("x").header.model_copy(update={"refid": "lov/2008-05-15-35"})}
+    )
+    decision = _decision(
+        "forskrift/2009-10-30-1324",
+        "Ikraftsetting av lov 15. mai 2008 nr. 35 om utlendingers adgang til riket (utlendingsloven)",  # noqa: E501
+        "2010-01-01, 2010-03-01",
+        MULTI,
+    )
+    ours = _by_part(law, decision)
+    assert ours[("I", "§1")].effective == date(2010, 3, 1)
+    assert ours[("II", "§5")].status == "pending"  # the block for our law dates only part I
+    theirs = _by_part(other, decision)
+    assert {t.effective for t in theirs.values()} == {date(2010, 1, 1)}
+
+
+def test_a_multi_law_decision_without_a_block_for_the_law_is_unreadable() -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    body = (
+        "Ikraftsetting av lov 18. desember 2020 nr. 999 om endringer.\n"
+        "Ikraftsetting av lov 15. mai 2008 nr. 35 om utlendingers adgang til riket.\n"
+        "Loven trer i kraft 1. januar 2010."
+    )
+    decision = _decision(
+        "forskrift/2009-10-30-1324",
+        "Ikraftsetting av lov 18. desember 2020 nr. 999 om endringer",
+        "2010-01-01",
+        body,
+    )
+    timings = _by_part(law, decision)
+    assert {t.reason for t in timings.values()} == {
+        "decision body has no commencement sentence for this law"
+    }
+
+
+def test_straks_in_a_decision_block_means_the_decision_s_own_date() -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    body = (
+        "Ikraftsetting av lov 18. desember 2020 nr. 999 om endringer.\nLoven trer i kraft straks.\n"
+        "Ikraftsetting av lov 15. mai 2008 nr. 35 om utlendingers adgang til riket.\nLoven trer i kraft 1. mars 2010."  # noqa: E501
+    )
+    decision = _decision(
+        "forskrift/2010-01-08-3",
+        "Ikraftsetting av lov 18. desember 2020 nr. 999 om endringer",
+        "2010-01-08, 2010-03-01",
+        body,
+    )
+    assert {t.effective for t in _by_part(law, decision).values()} == {date(2010, 1, 8)}
+
+
+def test_a_single_block_decision_still_checks_its_header_against_its_body() -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    decision = _decision(
+        "forskrift/2021-01-01-1",
+        "Ikraftsetting av lov 18. desember 2020 nr. 999 om endringer",
+        "2021-07-01",
+        "Ikraftsetting av lov 18. desember 2020 nr. 999 om endringer.\nLoven trer i kraft 1. oktober 2021.",  # noqa: E501
+    )
+    assert {t.reason for t in _by_part(law, decision).values()} == {
+        "full decision body disagrees with its header"
+    }
+
+
+def test_baseline_reads_its_own_block_of_a_multi_law_decision() -> None:
+    act = _law("Loven gjelder fra den tid Kongen bestemmer.").model_copy(
+        update={"header": _law("x").header.model_copy(update={"refid": "lov/2008-05-15-35"})}
+    )
+    decision = _decision(
+        "forskrift/2009-10-30-1324",
+        "Ikraftsetting av lov 15. mai 2008 nr. 35 om utlendingers adgang til riket (utlendingsloven)",  # noqa: E501
+        "2010-01-01, 2010-03-01",
+        MULTI,
+    )
+    timing = baseline_timing(act, (decision,))
+    assert timing.status == "dated" and timing.effective == date(2010, 1, 1)
+
+
+def test_a_decision_listed_as_touching_the_law_but_with_no_block_for_it_is_not_its_decision() -> (
+    None
+):
+    """A decision commencing another law lists every act that law amends; that is not commencement."""  # noqa: E501
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    body = (
+        "Ikraftsetting av lov 15. mai 2008 nr. 35 om utlendingers adgang til riket.\n"
+        "Loven trer i kraft 1. januar 2010."
+    )
+    decision = _decision(
+        "forskrift/2009-10-30-1324",
+        "Ikraftsetting av lov 15. mai 2008 nr. 35 om utlendingers adgang til riket",
+        "2010-01-01",
+        body,
+        ("lov/2008-05-15-35", LAW),
+    )
+    assert {t.status for t in _by_part(law, decision).values()} == {"pending"}
+
+
+def test_a_multi_law_decision_whose_block_title_cites_the_law_is_its_decision() -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    decision = _decision(
+        "forskrift/2009-10-30-1324",
+        "Ikraftsetting av lov 15. mai 2008 nr. 35 om utlendingers adgang til riket (utlendingsloven)",  # noqa: E501
+        "2010-01-01, 2010-03-01",
+        MULTI,
+    )
+    ours = _by_part(law, decision)
+    assert ours[("I", "§1")].effective == date(2010, 3, 1)
+    assert ours[("II", "§5")].status == "pending"

@@ -154,9 +154,11 @@ def _amender_names(index: ArchiveIndex, act: str) -> list[str]:
 def _title_document(record: MemberRecord) -> Document:
     """A header-only stand-in so the decision test runs on the index, not the bytes."""
     title = record.title.replace("&", "&amp;").replace("<", "&lt;")
+    listed = "".join(f"<li>{refid}</li>" for refid in record.changes_to_documents)
     body = (
         f'<html><body><header><dl><dd class="refid">{record.refid}</dd>'
-        f'<dd class="title">{title}</dd></dl></header><main/></body></html>'
+        f'<dd class="title">{title}</dd><dd class="changesToDocuments"><ul>{listed}</ul></dd>'
+        "</dl></header><main/></body></html>"
     )
     return parse_document(body.encode(), record.name)
 
@@ -166,7 +168,10 @@ def _decision_names(index: ArchiveIndex, laws: set[str]) -> list[str]:
     for member in index.members:
         if member.refid.startswith("forskrift/"):
             stand_in = _title_document(member)
-            if any(is_decision_for(stand_in, law) for law in laws):
+            # Titles name one law; a decision commencing several lists them all as changed, so the
+            # list is the superset read here and the body block titles decide at resolution time.
+            touched = set(member.changes_to_documents)
+            if any(is_decision_for(stand_in, law) or law in touched for law in laws):
                 decisions.append(member.name)
     return decisions
 
