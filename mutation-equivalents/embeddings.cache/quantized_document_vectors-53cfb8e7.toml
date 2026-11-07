@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/cache.py"
+symbol = "quantized_document_vectors"
+registered = "2026-11-07, PR #826, from run 42336528769"
+mutation = """
+-        return stored.vectors, cast(float, stored.scale)
++        return stored.vectors, cast(None, stored.scale)
+"""
+justification = """
+typing.cast(typ, val) is specified to return val unchanged at runtime; the
+first argument is only read by a static type checker. cast(float, s) and
+cast(None, s) therefore return the same object for every s, and the function
+returns the same tuple. Python's own semantics; the assumption test pins it
+anyway, since the argument names a library function.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_typing_cast_returns_its_value_unchanged"
