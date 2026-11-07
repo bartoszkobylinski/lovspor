@@ -199,6 +199,11 @@ def _known_space(embedder: EmbeddingModel) -> str:
     return esi
 
 
+def read_policy_from_env() -> ReadPolicy:
+    """Retention from ``LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS``; refuses a non-positive one."""
+    return _read_policy()
+
+
 def _read_policy() -> ReadPolicy:
     raw = os.environ.get(MAX_AGE_VARIABLE)
     try:

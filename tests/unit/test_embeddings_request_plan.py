@@ -31,6 +31,24 @@ def test_no_items_no_requests() -> None:
     assert request_bounds([], batch_size=128) == []
 
 
+def test_token_and_item_limits_reset_after_each_request() -> None:
+    """Both limits apply afresh after either one ends a request (#802)."""
+    costs = [100_000, 100_000, 60_000, 60_000, 60_000, 60_000, 60_000]
+    bounds = request_bounds(costs, batch_size=3)
+    assert bounds == [(0, 2), (2, 5), (5, 7)]
+    assert [index for start, end in bounds for index in range(start, end)] == list(
+        range(len(costs))
+    )
+    for start, end in bounds:
+        assert 0 < end - start <= 3
+        assert sum(costs[start:end]) <= 250_000
+
+
+def test_zero_token_inputs_still_count_toward_request_item_limit() -> None:
+    """The item cap is independent of token cost, including empty strings."""
+    assert request_bounds([0] * 7, batch_size=3) == [(0, 3), (3, 6), (6, 7)]
+
+
 def test_item_and_token_limits_reset_independently(monkeypatch: pytest.MonkeyPatch) -> None:
     """A token split must reset the item count and an item split the token sum."""
     monkeypatch.setattr("lovspor.embeddings.model._MAX_REQUEST_TOKENS", 10)
@@ -62,3 +80,19 @@ def test_plan_applies_input_truncation_before_the_request_token_budget(
     bounds = model.plan_requests(texts)
     assert bounds == [(0, 2), (2, 3)]
     assert [truncated[start:end] for start, end in bounds] == list(model._batches(truncated))
+
+
+@pytest.mark.parametrize(
+    ("costs", "batch_size", "expected"),
+    [
+        ([125_000, 125_000, 0, 1], 128, [(0, 3), (3, 4)]),
+        ([125_000, 125_000, 0, 1], 2, [(0, 2), (2, 4)]),
+        ([125_000, 125_000, 125_000, 125_000, 1], 2, [(0, 2), (2, 4), (4, 5)]),
+    ],
+    ids=["zero-cost-at-token-cap", "item-cap-at-token-cap", "repeated-simultaneous-caps"],
+)
+def test_exact_request_limits_preserve_zero_cost_inputs_and_reset_both_budgets(
+    costs: list[int], batch_size: int, expected: list[tuple[int, int]]
+) -> None:
+    """Request planning keeps every input while enforcing both documented caps."""
+    assert request_bounds(costs, batch_size=batch_size) == expected
