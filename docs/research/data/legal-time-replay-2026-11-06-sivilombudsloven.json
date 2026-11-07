@@ -36,6 +36,7 @@
    "law": "lov/2022-06-10-38",
    "member": "lti/2022/nl-20220610-038.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 1,
      "punktum": 2,
@@ -43,6 +44,7 @@
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2022-06-10-38#1:I:1.0",
     "instruction": "§ 20 første ledd annet punktum oppheves.",
     "kind": "repeal_punktum",
@@ -73,9 +75,14 @@
    "law": "lov/2022-06-10-38",
    "member": "lti/2022/nl-20220610-038.xml",
    "operation": {
-    "address": {},
+    "absorbed_by": "lov/2022-06-10-38#1:I:1.0",
+    "address": {
+     "ledd": 1,
+     "section": "§20"
+    },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2022-06-10-38#1:I:2.0",
     "instruction": "Nåværende tredje punktum blir annet punktum.",
     "kind": "renumber",
@@ -106,6 +113,7 @@
    "law": "lov/2025-06-20-96",
    "member": "lti/2025/nl-20250620-096.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 6,
      "section": "§26"
@@ -114,6 +122,7 @@
      "lov/2021-06-18-121/§26/ledd/6"
     ],
     "destination": null,
+    "host_section": "§25",
     "id": "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0",
     "instruction": "§ 26 sjette ledd lyde:",
     "kind": "replace_ledd",
@@ -133,6 +142,12 @@
       "quote_sha256": "a5bf788d5eac045768e8b99205c7727395d5f89853eefc9473e27f1d87e02cbe",
       "refid": "forskrift/2025-06-20-1103",
       "sha256": "9a44024f11329a5a85829a52bf1d7362dae80e4b5a052763a25f958138827ca1"
+     },
+     {
+      "member": "lti/2025/sf-20251212-2510.xml",
+      "quote_sha256": "ce4513aecabc412893ae9d800895a43aad140d3e8b2f1fb32549a40ec8fe45a4",
+      "refid": "forskrift/2025-12-12-2510",
+      "sha256": "02e3678d804f2d40acdf717ae727c0cd31668304076cb0c01ef17c28255f1f07"
      }
     ],
     "reason": "",
@@ -673,7 +688,8 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#1:I:1.0"
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
      ],
      "key": "§20",
      "ledd": 3,
@@ -971,7 +987,8 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#1:I:1.0"
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
      ],
      "key": "§20",
      "ledd": 3,
@@ -1271,7 +1288,8 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#1:I:1.0"
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
      ],
      "key": "§20",
      "ledd": 3,
@@ -1410,6 +1428,7 @@
  "verification": [
   {
    "act": "lov/2021-06-18-121",
+   "act_level_problems": [],
    "at": "2021-07-01",
    "counts": {
     "exact_normalized": 17,
@@ -1743,6 +1762,7 @@
   },
   {
    "act": "lov/2021-06-18-121",
+   "act_level_problems": [],
    "at": "2022-06-10",
    "counts": {
     "exact_normalized": 18,
@@ -1929,7 +1949,8 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#1:I:1.0"
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
      ],
      "detail": "",
      "key": "§20",
@@ -2077,6 +2098,7 @@
   },
   {
    "act": "lov/2021-06-18-121",
+   "act_level_problems": [],
    "at": "2026-01-01",
    "counts": {
     "exact_normalized": 19,
@@ -2260,7 +2282,8 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#1:I:1.0"
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
      ],
      "detail": "",
      "key": "§20",
@@ -2410,6 +2433,7 @@
   },
   {
    "act": "lov/2021-06-18-121",
+   "act_level_problems": [],
    "at": "2026-11-06",
    "counts": {
     "exact_normalized": 19,
@@ -2593,7 +2617,8 @@
     },
     {
      "applied": [
-      "lov/2022-06-10-38#1:I:1.0"
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
      ],
      "detail": "",
      "key": "§20",

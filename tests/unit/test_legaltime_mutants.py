@@ -46,7 +46,12 @@ from lovspor.legaltime.document import (
 from lovspor.legaltime.errors import LegalTimeDocumentError, LegalTimeInputError
 from lovspor.legaltime.instructions import Address, Operation, interpret
 from lovspor.legaltime.replay import Event, ProvisionState, ReplayState, _Working
-from lovspor.legaltime.text import _ends_with_abbreviation, section_key_of, section_sort_key
+from lovspor.legaltime.text import (
+    _ends_with_abbreviation,
+    section_key_of,
+    section_sort_key,
+    split_sentences,
+)
 from lovspor.parsing.xml_normalizer import safe_parser
 from lovspor.sources.lovdata import LovdataClient
 from tests.unit.test_legaltime_archive import LAYOUT, make_archive
@@ -113,6 +118,8 @@ def test_operation_record_has_exactly_these_keys_and_values() -> None:
         "address": {"section": "§2a"},
         "destination": None,
         "change_part": [],
+        "host_section": None,
+        "absorbed_by": None,
         "payload": {"provision": "§2a", "ledd": 0},
     }
     bare = _op("renumber", Address())
@@ -295,9 +302,9 @@ def test_baseline_timing_partial_and_undated_decisions() -> None:
     out = commencement.baseline_timing(act, (partial,))
     assert out.status == "unresolved"
     assert out.reason == "partial commencement of the act itself"
-    assert out.proofs[0].refid == "forskrift/2021-05-28-9998"
+    assert [p.refid for p in out.proofs] == ["lov/2019-06-14-99", "forskrift/2021-05-28-9998"]
     assert (
-        out.proofs[0].quote_sha256
+        out.proofs[-1].quote_sha256
         == sha256("Delt ikraftsetjing av lov 14. juni 2019 nr. 99 om prøving".encode()).hexdigest()
     )
     undated = load("resolution-full.xml").model_copy(
@@ -307,10 +314,11 @@ def test_baseline_timing_partial_and_undated_decisions() -> None:
             )
         }
     )
-    assert commencement.baseline_timing(act, (undated,)).status == "pending"
-    assert commencement.baseline_timing(
-        act, (undated, load("resolution-full.xml"))
-    ).effective == date(2021, 1, 1)
+    unreadable = commencement.baseline_timing(act, (undated,))
+    assert unreadable.status == "unresolved"
+    assert unreadable.reason == "full decision without a readable date"
+    both = commencement.baseline_timing(act, (undated, load("resolution-full.xml")))
+    assert both.status == "unresolved"  # the unreadable one sorts first and unsettles the act
     assert commencement.baseline_timing(_law("lov/1", "2021-02-02", "x"), ()).effective == date(
         2021, 2, 2
     )
@@ -326,14 +334,15 @@ def test_partial_scope_and_full_decision_edges() -> None:
         law, result.clauses, ops, (load("resolution-partial.xml"),)
     )
     assert {t.status for t in timings.values()} == {"pending"}  # part I, no § 2a: nothing covered
-    proof_title = "Delt ikrafttredelse av lov 18. desember 2020 nr. 999 om endringer i prøveloven (prøving): del I"  # noqa: E501
     insert = parse_document((FIXTURES / "amending.xml").read_bytes(), "a")
     reading = interpret(insert)
     timings = commencement.resolve_timings(
         insert, reading.clauses, reading.operations, (load("resolution-partial.xml"),)
     )
     dated = next(t for t in timings.values() if t.effective == date(2022, 1, 1))
-    assert dated.proofs[0].quote_sha256 == sha256(proof_title.encode()).hexdigest()
+    scope_sentence = split_sentences(load("resolution-partial.xml").parts[0].nodes[0].text)[1]
+    assert scope_sentence.startswith("Endringsloven del I, ny § 2a")
+    assert dated.proofs[0].quote_sha256 == sha256(scope_sentence.encode()).hexdigest()
     undated_full = load("resolution-full.xml").model_copy(
         update={
             "header": load("resolution-full.xml").header.model_copy(
@@ -345,7 +354,8 @@ def test_partial_scope_and_full_decision_edges() -> None:
         }
     )
     timings = commencement.resolve_timings(law, result.clauses, ops, (undated_full,))
-    assert {t.status for t in timings.values()} == {"pending"}
+    assert {t.status for t in timings.values()} == {"unresolved"}
+    assert {t.reason for t in timings.values()} == {"full decision without a readable date"}
 
 
 def test_informational_and_reservation_rules() -> None:
@@ -454,7 +464,9 @@ def test_pairs_shift_and_init_defaults() -> None:
     assert paired is not None and single is not None
     assert instructions._pairs(paired) == (("a", "c"), ("b", "d"))
     assert instructions._pairs(single) == (("a", "b"),)
-    assert instructions._shift("Nåværende tredje ledd blir nytt fjerde ledd.") == (None, 3, 4)
+    assert instructions._shift(
+        "Nåværende tredje ledd blir nytt fjerde ledd."
+    ) == instructions.Shift(section=None, unit="ledd", pairs=((3, 4),))
     assert instructions._shift("Nåværende tredje ledd blir nytt ledd.") is None
     reader = instructions._Reader(load("enacting.xml"))
     assert reader.act is None and reader.substitution is None and reader.pending_item_act is None
@@ -652,7 +664,8 @@ def test_targets_and_replay_buckets() -> None:
     move = _op("move_ledd", Address(section="§1", ledd=1), destination="§3")
     assert [p.label for p in replay._targets(move, w)] == ["§ 1", "§ 3"]
     state = _run([_event(_op("renumber", Address()))])
-    assert state.applied == ("x#I:0.0",) and state.withheld == () and state.unresolved == ()
+    assert state.applied == () and state.withheld == ()
+    assert state.unresolved == (("x#I:0.0", "renumbering not implied by the operation before it"),)
     early = _event(
         _op("renumber", Address()), commencement.Timing(status="dated", effective=date(2020, 6, 1))
     )

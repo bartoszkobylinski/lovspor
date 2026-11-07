@@ -17,7 +17,7 @@ from lxml import etree
 
 from lovspor.legaltime.commencement import Timing
 from lovspor.legaltime.document import Document, Frozen, Ledd, Provision, element_text
-from lovspor.legaltime.instructions import Operation
+from lovspor.legaltime.instructions import Operation, _shift
 from lovspor.legaltime.text import ORDINAL_ALT, ordinal, section_sort_key, split_sentences
 from lovspor.parsing.xml_normalizer import safe_parser
 
@@ -102,6 +102,7 @@ class _Working:
     def __init__(self, baseline: Document) -> None:
         self.order = [p.key for p in baseline.provisions]
         self.map = {p.key: _Provision(p) for p in baseline.provisions}
+        self.done: set[str] = set()  # ids of operations that applied, for absorbed renumberings
 
     def _target(self, key: str | None) -> _Provision | None:
         return self.map.get(key) if key else None
@@ -274,15 +275,39 @@ class _Working:
         missing = [k for k, _ in places if k not in self.map]
         if not places or missing or op.term_old is None or op.term_new is None:
             return f"substitution locations unresolved: {missing or 'none listed'}"
+        saved = {k: list(self.map[k].ledd) for k, _ in places}
         untouched = [
             k
             for k, ledd in places
             if not _substitute(self.map[k], ledd, (op.term_old, op.term_new))
         ]
-        return f"term not found in {untouched}" if untouched else None
+        if not untouched:
+            return None
+        for k, ledd in saved.items():  # one location missed: the whole instruction is refused
+            self.map[k].ledd = ledd
+        return f"term not found in {untouched}"
 
     def apply_renumber(self, op: Operation) -> str | None:
+        if op.absorbed_by is None:
+            return "renumbering not implied by the operation before it"
+        if op.absorbed_by not in self.done:
+            return "the operation this renumbering follows did not apply"
+        shift = _shift(op.instruction)
+        if shift is None:
+            return "renumbering sentence no longer parses"
+        highest = max(new for _, new in shift.pairs)
+        count = self._renumbered_count(op, shift.unit)
+        if count < highest:
+            holder = "provision" if shift.unit == "ledd" else "ledd"
+            return f"renumbering names {shift.unit} {highest}, the {holder} has {count}"
         return None
+
+    def _renumbered_count(self, op: Operation, unit: str) -> int:
+        if unit == "ledd":
+            target = self._target(op.address.section)
+            return len(target.ledd) if target is not None else 0
+        found = self._sentences(op)
+        return 0 if isinstance(found, str) else len(found[2])
 
     def apply_unsupported(self, op: Operation) -> str | None:
         return f"unsupported instruction: {op.instruction[:80]}"
@@ -373,6 +398,7 @@ def _apply(working: _Working, event: Event, act_problems: list[str]) -> str | No
     problem = handler(op)
     targets = _targets(op, working)
     if problem is None:
+        working.done.add(op.id)
         for target in targets:
             target.applied.append(op.id)
         return None

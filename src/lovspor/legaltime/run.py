@@ -73,6 +73,8 @@ def _operation_record(op: Operation) -> dict[str, Any]:
         "address": op.address.model_dump(exclude_none=True),
         "destination": op.destination,
         "change_part": list(op.change_part),
+        "host_section": op.host_section,
+        "absorbed_by": op.absorbed_by,
         "payload": payload,
     }
 

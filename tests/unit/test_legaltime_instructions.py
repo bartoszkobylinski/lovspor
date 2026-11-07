@@ -254,10 +254,11 @@ def test_replacement_followed_by_a_shift_renumbering_is_an_insertion() -> None:
     ops = interpret(parse_document(body, "x")).operations
     assert [(op.kind, op.address.section, op.address.ledd) for op in ops] == [
         ("insert_ledd", "§118", 7),
-        ("renumber", None, None),
+        ("renumber", "§118", None),
         ("replace_ledd", "§139", 2),
         ("renumber", None, None),
     ]
+    assert [op.absorbed_by for op in ops] == [None, ops[0].id, None, None]
 
 
 def test_whole_act_repeal_is_an_unsupported_operation_naming_the_act() -> None:

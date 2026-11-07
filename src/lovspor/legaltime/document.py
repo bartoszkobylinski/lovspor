@@ -22,7 +22,7 @@ from lovspor.legaltime.text import collapse
 from lovspor.parsing.xml_normalizer import safe_parser
 
 _NOTE_CLASSES = frozenset({"changesToParent", "footnotereference", "footnoteLabel"})
-_TRANSPARENT = frozenset({"document-change", "listArticle", "legalArticle"})
+_TRANSPARENT = frozenset({"document-change", "listArticle"})
 _LIST_TAGS = frozenset({"ul", "ol", "li"})
 _LEDD_CLASSES = frozenset({"legalP", "numberedLegalP"})
 # The renderer's rule: whitespace between inline elements is text, so it is kept.
@@ -65,6 +65,7 @@ class Node(Frozen):
     provision: Provision | None = None
     ledd: Ledd | None = None
     change_part: tuple[str, ...] = ()
+    host_section: str | None = None  # the act's own § this node sits in, for embedded amendments
 
 
 class Part(Frozen):
@@ -211,18 +212,23 @@ def _node(element: etree._Element) -> Node:
     return Node(kind="other", css_class=css or element.tag, text=element_text(element))
 
 
-def _nodes(elements: list[etree._Element], change_part: tuple[str, ...] = ()) -> list[Node]:
+def _nodes(
+    elements: list[etree._Element], change_part: tuple[str, ...] = (), host: str | None = None
+) -> list[Node]:
     nodes: list[Node] = []
     for element in elements:
         if _css(element) == "change":
             parts = tuple((element.get("data-change-part") or "").split())
-            nodes.extend(_nodes(list(element), parts))
+            nodes.extend(_nodes(list(element), parts, host))
+        elif _css(element) == "legalArticle":
+            nodes.extend(_nodes(list(element), change_part, element.get("data-name") or host))
         elif _css(element) in _TRANSPARENT or element.tag in _LIST_TAGS:
-            nodes.extend(_nodes(list(element), change_part))
+            nodes.extend(_nodes(list(element), change_part, host))
         elif element.tag == "section":
             nodes.extend(_part(element).nodes)
         else:
-            nodes.append(_node(element).model_copy(update={"change_part": change_part}))
+            stamped = {"change_part": change_part, "host_section": host}
+            nodes.append(_node(element).model_copy(update=stamped))
     return nodes
 
 

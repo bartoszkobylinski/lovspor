@@ -224,6 +224,26 @@ def test_partial_decision_outside_the_grammar_leaves_operations_unresolved() -> 
     )
     decision = parse_document(
         (
+            b'<html><body><header><dl><dd class="refid">forskrift/2021-05-28-1</dd>'
+            b'<dd class="dateInForce">2022-01-01</dd>'
+            b'<dd class="dateOfPublication">2021-05-31 16:10</dd>'
+            b'<dd class="title">Delt ikrafttredelse av lov 18. desember 2020 nr. 999 om '
+            b'endringer</dd></dl></header><main><article class="legalP">Resten av lova '
+            b"trer i kraft seinare.</article></main></body></html>"
+        ),
+        "lti/2021/sf-x.xml",
+    )
+    ops, timings = _timings(law, (decision,))
+    assert {timings[op.id].status for op in ops} == {"unresolved"}
+    assert {timings[op.id].reason for op in ops} == {"partial decision outside the grammar"}
+
+
+def test_own_section_scope_on_a_law_without_own_sections_is_unreadable() -> None:
+    law = _law(
+        "lov/2020-12-18-999", "Kongen bestemmer", "Loven gjelder fra den tid Kongen bestemmer."
+    )
+    decision = parse_document(
+        (
             '<html><body><header><dl><dd class="refid">forskrift/2021-05-28-1</dd>'
             '<dd class="dateInForce">2022-01-01</dd>'
             '<dd class="dateOfPublication">2021-05-31 16:10</dd>'
@@ -234,8 +254,9 @@ def test_partial_decision_outside_the_grammar_leaves_operations_unresolved() -> 
         "lti/2021/sf-x.xml",
     )
     ops, timings = _timings(law, (decision,))
-    assert {timings[op.id].status for op in ops} == {"unresolved"}
-    assert {timings[op.id].reason for op in ops} == {"partial decision outside the grammar"}
+    assert {timings[op.id].reason for op in ops} == {
+        "partial decision names no part or section of the law"
+    }
 
 
 def test_clause_timings_without_clauses_falls_back_to_the_header() -> None:
@@ -304,4 +325,8 @@ def test_undated_decision_does_not_break_ordering() -> None:
         "lti/2020/sf-a.xml",
     )
     ops, timings = _timings(law, (undated, load("resolution-partial.xml")))
-    assert {timings[op.id].status for op in ops} <= {"pending", "dated"}
+    # A decision that cites the law but whose date cannot be read settles nothing and unsettles all.
+    assert {timings[op.id].status for op in ops} == {"unresolved"}
+    assert {timings[op.id].reason for op in ops} == {
+        "decision without a publication time among several"
+    }

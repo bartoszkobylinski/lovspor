@@ -104,6 +104,8 @@ class Operation(Frozen):
     term_new: str | None = None
     locations: str = ""
     change_part: tuple[str, ...] = ()
+    host_section: str | None = None
+    absorbed_by: str | None = None  # renumber only: the operation whose effect this sentence states
 
 
 class Interpretation(Frozen):
@@ -263,7 +265,8 @@ class _Reader:
             text = intro.group("rest") or f"{intro.group('act')} {intro.group('repeal')}"
             if _INTRO_ONLY.match(text):
                 return False
-        self._instruction((part[0], f"{part[1]}:{index}"), text, node.change_part, payload)
+        where = (part[0], f"{part[1]}:{index}", node.host_section)
+        self._instruction(where, text, node.change_part, payload)
         return True
 
     def _substitution_item(self, part: tuple[str, str], index: int, node: Node) -> bool:
@@ -277,28 +280,28 @@ class _Reader:
         if act is None or not has_locations:
             return False
         for offset, terms in enumerate(self.substitution or ()):
-            where = (part[0], f"{part[1]}:{index}.{offset}")
+            where = (part[0], f"{part[1]}:{index}.{offset}", node.host_section)
             self.operations.append(self._substitute(where, act, node.text, terms))
         return True
 
     def _substitute(
-        self, where: tuple[str, str], act: str, text: str, terms: tuple[str, str]
+        self, where: tuple[str, str, str | None], act: str, text: str, terms: tuple[str, str]
     ) -> Operation:
-        label, tag = where
+        label, tag, host = where
         return Operation(
             id=f"{self.document.header.refid}#{tag}", kind="substitute_term", act=act,
             address=Address(), instruction=text, part=label, term_old=terms[0],
-            term_new=terms[1], locations=text[text.index("§") :],
+            term_new=terms[1], locations=text[text.index("§") :], host_section=host,
         )  # fmt: skip
 
     def _instruction(
         self,
-        where: tuple[str, str],
+        where: tuple[str, str, str | None],
         text: str,
         change_part: tuple[str, ...],
         payload: tuple[Node, ...],
     ) -> None:
-        label, tag = where
+        label, tag, host = where
         act = _addressed_act(change_part) or self.act
         text, payload = _inline_payload(text, payload)
         sentences = split_sentences(text)
@@ -314,7 +317,7 @@ class _Reader:
                 _operation(
                     f"{self.document.header.refid}#{tag}.{offset}",
                     (kind, groups, sentence),
-                    (act, label, change_part),
+                    (act, label, change_part, host),
                     payload if last else (),
                 )
             )
@@ -323,11 +326,11 @@ class _Reader:
 def _operation(
     op_id: str,
     parsed: tuple[OpKind, dict[str, str | None], str],
-    context: tuple[str | None, str, tuple[str, ...]],
+    context: tuple[str | None, str, tuple[str, ...], str | None],
     payload: tuple[Node, ...],
 ) -> Operation:
     kind, groups, sentence = parsed
-    act, label, change_part = context
+    act, label, change_part, host = context
     provisions = [n.provision for n in payload if n.provision is not None]
     return Operation(
         id=op_id, kind=kind, act=act, address=_address(groups), instruction=sentence, part=label,
@@ -335,32 +338,93 @@ def _operation(
         new_provision=provisions[0] if provisions else None,
         ledd=tuple(n.ledd for n in payload if n.ledd is not None),
         title=next((n.text for n in payload if n.kind == "title"), None),
-        change_part=change_part,
+        change_part=change_part, host_section=host,
     )  # fmt: skip
 
 
+_SPAN = rf"(?P<a>{_ORD})(?:\s+(?P<j>og|til)\s+(?:nytt\s+|ny\s+)?(?P<b>{_ORD}))?"
 _RENUMBER_SHIFT = re.compile(
     rf"^(?:(?P<sec>{_SEC})\s+)?(?:Nåværende|Noverande|Gjeldende|nåværende|noverande)\s+"
-    rf"(?P<old>{_ORD})\s+ledd\s+blir\s+(?:nytt\s+|ny\s+)?(?P<new>{_ORD})\s+ledd\.?$"
+    rf"{_SPAN}\s+(?P<unit>ledd|punktum)\s+blir\s+(?:nytt\s+|ny\s+)?"
+    rf"{_SPAN.replace('?P<a>', '?P<c>').replace('?P<j>', '?P<k>').replace('?P<b>', '?P<d>')}"
+    r"\s+(?P<unit2>ledd|punktum)\.?$"
 )
 _INLINE_PAYLOAD = re.compile(r"^(?P<head>.*?\blyde:)\s*(?P<tail>\S.*)$", re.S)
 
 
-def _shift(sentence: str) -> tuple[str | None, int, int] | None:
+class Shift(Frozen):
+    """``Nåværende X [og|til Y] ledd blir A [og|til B] ledd``, read as old→new pairs."""
+
+    section: str | None
+    unit: str
+    pairs: tuple[tuple[int, int], ...]
+
+
+def _ordinals(first: str, joiner: str | None, last: str | None) -> list[int]:
+    a = ORDINALS[first.lower()]
+    if last is None:
+        return [a]
+    b = ORDINALS[last.lower()]
+    return list(range(a, b + 1)) if joiner == "til" else [a, b]
+
+
+def _shift(sentence: str) -> Shift | None:
     match = _RENUMBER_SHIFT.match(sentence)
-    if match is None:
+    if match is None or match.group("unit") != match.group("unit2"):
         return None
-    old, new = ORDINALS[match.group("old").lower()], ORDINALS[match.group("new").lower()]
+    olds = _ordinals(match.group("a"), match.group("j"), match.group("b"))
+    news = _ordinals(match.group("c"), match.group("k"), match.group("d"))
+    if not olds or len(olds) != len(news):
+        return None
     section = section_key_of(match.group("sec")) if match.group("sec") else None
-    return (section, old, new)
+    return Shift(
+        section=section, unit=match.group("unit"), pairs=tuple(zip(olds, news, strict=True))
+    )
 
 
-def _as_insertion(previous: Operation, shift: tuple[str | None, int, int]) -> Operation | None:
+def _as_insertion(previous: Operation, shift: Shift) -> Operation | None:
     """``§ N X ledd skal lyde`` + ``Nåværende X ledd blir X+1 ledd`` is an insertion."""
-    section, old, new = shift
-    same_section = section is None or section == previous.address.section
+    same_section = shift.section is None or shift.section == previous.address.section
+    (old, new), *rest = shift.pairs
     fits = previous.kind == "replace_ledd" and previous.address.ledd == old and new == old + 1
-    return previous.model_copy(update={"kind": "insert_ledd"}) if fits and same_section else None
+    if fits and same_section and shift.unit == "ledd" and not rest:
+        return previous.model_copy(update={"kind": "insert_ledd"})
+    return None
+
+
+def _implied(previous: Operation, unit: str) -> tuple[int, int, int] | None:
+    """(first affected, last removed, delta) the previous operation imposes on ``unit`` numbers."""
+    address = previous.address
+    start = address.ledd if unit == "ledd" else address.punktum
+    if start is None or previous.kind not in (f"insert_{unit}", f"repeal_{unit}"):
+        return None
+    end = (address.ledd_end if unit == "ledd" else address.punktum_end) or start
+    count = end - start + 1
+    if previous.kind == f"insert_{unit}":
+        return (start, start - 1, count)
+    return (start, end, -count)
+
+
+def _absorbed(previous: Operation, shift: Shift) -> bool:
+    """True when every old→new pair is exactly what the previous operation did to the numbers."""
+    if shift.section is not None and shift.section != previous.address.section:
+        return False
+    implied = _implied(previous, shift.unit)
+    if implied is None:
+        return False
+    first, last_removed, delta = implied
+    return all(
+        old > last_removed and old >= first and new == old + delta for old, new in shift.pairs
+    )
+
+
+def _absorb(current: Operation, previous: Operation, shift: Shift) -> Operation:
+    """Address the renumbering to the section it names or, once absorbed, to its predecessor's."""
+    if not _absorbed(previous, shift):
+        return current.model_copy(update={"address": Address(section=shift.section)})
+    ledd = previous.address.ledd if shift.unit == "punktum" else None
+    address = Address(section=previous.address.section, ledd=ledd)
+    return current.model_copy(update={"address": address, "absorbed_by": previous.id})
 
 
 def _with_renumber_insertions(operations: list[Operation]) -> tuple[Operation, ...]:
@@ -372,7 +436,8 @@ def _with_renumber_insertions(operations: list[Operation]) -> tuple[Operation, .
             continue
         converted = _as_insertion(previous, shift)
         if converted is not None:
-            result[index - 1] = converted
+            result[index - 1] = previous = converted
+        result[index] = _absorb(current, previous, shift)
     return tuple(result)
 
 

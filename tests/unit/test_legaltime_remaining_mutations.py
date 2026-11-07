@@ -35,14 +35,15 @@ def test_partial_scope_without_unique_section(rest: str) -> None:
     assert commencement._named_section(match) is None
 
 
-def test_pending_baseline_ignores_undated_decision() -> None:
+def test_pending_baseline_is_unsettled_by_an_undated_decision() -> None:
     law = _law(ACT, "Kongen bestemmer", "")
     decision = xml_doc(
         "",
         '<dd class="dateInForce">ukjent</dd>'
         '<dd class="title">Ikraftsetting av lov 14. juni 2019 nr. 99</dd>',
     )
-    assert commencement.baseline_timing(law, (decision,)).status == "pending"
+    out = commencement.baseline_timing(law, (decision,))
+    assert out.status == "unresolved" and out.reason == "full decision without a readable date"
 
 
 @pytest.mark.parametrize("old,new", [("«a» og «b»", "«c»"), ("«a»", "«c» og «d»")])

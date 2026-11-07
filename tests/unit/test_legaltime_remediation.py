@@ -491,7 +491,14 @@ def test_partial_decision_ignores_informational_text_and_refuses_undated_scope()
         '<article class="legalP">Endringsloven del I trer i kraft 1. januar 2022.'
         "</article></section>"
     )
-    assert commencement._partial_scopes(decision) == [("I", None, date(2022, 1, 1))]
+    assert commencement._partial_scopes(decision) == [
+        commencement.Scope(
+            part="I",
+            section=None,
+            when=date(2022, 1, 1),
+            quote="Endringsloven del I trer i kraft 1. januar 2022.",
+        )
+    ]
     undated = xml_doc(
         '<section><article class="legalP">Endringsloven del I trer i kraft seinare.'
         "</article></section>"
@@ -607,7 +614,9 @@ def test_internal_grammar_contracts() -> None:
     assert paired is not None and single is not None
     assert instructions._pairs(paired) == (("a", "c"), ("b", "d"))
     assert instructions._pairs(single) == (("a", "b"),)
-    assert instructions._shift("Nåværende første ledd blir nytt annet ledd.") == (None, 1, 2)
+    assert instructions._shift("Nåværende første ledd blir nytt annet ledd.") == instructions.Shift(
+        section=None, unit="ledd", pairs=((1, 2),)
+    )
     assert commencement._exception_scope("Ny § 2 trer likevel i kraft straks.") == ("section", "§2")
     assert commencement._informational("Se lov 14. juni 2019 nr. 99.")
 

@@ -1,18 +1,22 @@
 """When an announced amendment took legal effect, proven or left open.
 
-Evidence, in order of precedence, all of it from the publicData archives:
-the amending law's own ``dateInForce`` header, its commencement clause
-(``Loven trer i kraft straks.`` with any ``likevel`` exception), and the
-commencement decisions (``Ikraftsetting av lov …``, ``Delt ikrafttredelse
-…``) whose title cites the law. A date the evidence does not state is never
-derived: the operation stays ``pending`` (delegated, no decision found) or
-``unresolved`` (evidence present but outside the grammar).
+Evidence, all of it from the publicData archives: the amending law's own
+``dateInForce`` header, its commencement clause (``Loven trer i kraft
+straks.`` with any ``likevel`` exception), and the commencement decisions
+(``Ikraftsetting av lov …``, ``Delt ikrafttredelse …``) whose title cites the
+law, folded in publication order. No precedence rule is asserted between
+them: sources that agree are all cited, sources that disagree leave the
+operation ``unresolved``. A date the evidence does not state is never derived:
+the operation stays ``pending`` (delegated, no decision found) or
+``unresolved`` (evidence present but outside the grammar or contradictory).
 """
 
 import re
 from datetime import date, datetime
 from hashlib import sha256
 from typing import Literal
+
+from pydantic import model_validator
 
 from lovspor.legaltime.document import Document, Frozen
 from lovspor.legaltime.instructions import Operation
@@ -28,6 +32,12 @@ from lovspor.legaltime.text import (
 TimingStatus = Literal["dated", "pending", "unresolved"]
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PENDING_WORDS = re.compile(r"Kongen\s+(?:bestemmer|fastset|fastsett)", re.I)
+_CONDITIONAL = re.compile(
+    r"^(?:Når|Frå\s+den\s+tid|Fra\s+den\s+tid|Fra\s+det\s+tidspunkt|Frå\s+det\s+tidspunktet)\b.*"
+    r"\b(?:trer\s+i\s+kraft|tek\s+til\s+å\s+gjelde|tar\s+til\s+å\s+gjelde|gjelder|gjeld)$",
+    re.I,
+)
+CONDITIONAL = "commencement conditional on an event outside the archive"
 _DECISION_TITLE = re.compile(
     r"^(?:Delt\s+|Meddelelse\s+om\s+)?(?:Ikraftsetting|Ikraftsetjing|Ikrafttredelse|Ikrafttreden|"
     r"Ikraftsetjinga|Iverksetjing|Iverksetting|Ikraftsettelse)\b",
@@ -71,6 +81,19 @@ _INFORMATIONAL = re.compile(
     r"^(?:Kongen\s+kan|Departementet\s+kan|De\s+enkelte|Dei\s+enkelte|Fra\s+den\s+tid|"
     r"Frå\s+den\s+tid|Er\s|Dersom\s|Hvis\s|Når\s|Fristen\s|Delt\s+ikraft)",
     re.I,
+)
+_CONTINUES = re.compile(
+    r"\b(?:held|holder|heldt)\s+fram\s+å\s+gjelde\b|\bfortsetter\s+å\s+gjelde\b", re.I
+)
+_OWN_SECTIONS = re.compile(
+    r"^(?:Paragrafane|Paragrafene|Paragrafar|Paragrafer|Paragraf|§§?)\s+(?P<list>.+?)\s+"
+    r"(?:gjeld|gjelder|trer\s+i\s+kraft|tek\s+til\s+å\s+gjelde|tar\s+til\s+å\s+gjelde)\s+"
+    r"(?:frå|fra)?\s*(?P<when>\d.+)$",
+    re.I,
+)
+_LISTING_TOKEN = re.compile(
+    r"\s*(?:(?P<range>(?P<first>\d+)\s+til\s+(?P<last>\d+))|(?P<one>\d+(?:\s*[a-hj-zæøå](?![a-zæøå]))?)"
+    r"|(?P<sep>,|og|§§|§))(?=\s|,|$)"
 )
 
 
@@ -189,9 +212,11 @@ def _informational(sentence: str) -> bool:
     A sentence that names a date but no commencement phrase is not informational:
     it is a commencement statement the grammar does not know, and must refuse.
     """
+    without_citations = ACT_CITATION.sub("", sentence)
     if _INFORMATIONAL.match(sentence):
         return True
-    without_citations = ACT_CITATION.sub("", sentence)
+    if _CONTINUES.search(sentence):
+        return parse_date(without_citations) is None
     return _COMMENCEMENT_PHRASE.search(sentence) is None and parse_date(without_citations) is None
 
 
@@ -264,19 +289,78 @@ def is_decision_for(document: Document, law_refid: str) -> bool:
     return bool(_DECISION_TITLE.match(title)) and act_refid(title) == law_refid
 
 
-def _partial_scopes(decision: Document) -> list[tuple[str, str | None, date]] | None:
-    """(part, new section, date) per sentence of a ``Delt`` decision; None if any is foreign."""
-    scopes: list[tuple[str, str | None, date]] = []
+class Scope(Frozen):
+    """What one sentence of a partial decision puts into force, and when."""
+
+    part: str | None = None
+    section: str | None = None
+    own_sections: frozenset[str] = frozenset()
+    when: date
+    quote: str  # the sentence the scope and date were read from
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> "Scope":
+        if self.own_sections and (self.part is not None or self.section is not None):
+            raise ValueError("a scope names either own_sections or a part, never both")
+        return self
+
+    def covers(self, operation: Operation) -> bool:
+        if self.own_sections:
+            return operation.host_section in self.own_sections
+        if self.part is None or operation.part.upper() != self.part:
+            return False
+        return self.section is None or operation.address.section == self.section
+
+
+def _own_sections(listing: str) -> frozenset[str] | None:
+    """``1 til 10 og §§ 12 til 25`` → the act's own section keys; None on any other token."""
+    keys: set[str] = set()
+    position = 0
+    for match in _LISTING_TOKEN.finditer(listing):
+        if match.start() != position:
+            return None  # a word the listing grammar does not know (``unntatt``, a letter range)
+        position = match.end()
+        if match.group("range"):
+            first, last = int(match.group("first")), int(match.group("last"))
+            if last < first:
+                return None
+            keys.update(f"§{n}" for n in range(first, last + 1))
+        elif match.group("one"):
+            keys.add(f"§{match.group('one').replace(' ', '')}")
+    return frozenset(keys) if position == len(listing) and keys else None
+
+
+def _scope_of(sentence: str) -> Scope | None:
+    if _RESERVATION.search(sentence):
+        return None  # an exception the grammar cannot scope: the whole decision is unreadable
+    part_match = _DELT_SENTENCE.match(sentence)
+    if part_match is not None:
+        when = parse_date(part_match.group("when"))
+        if when is None:
+            return None
+        part, section = part_match.group("part").upper(), _named_section(part_match)
+        return Scope(part=part, section=section, when=when, quote=sentence)
+    own = _OWN_SECTIONS.match(sentence)
+    if own is not None:
+        when = parse_date(own.group("when"))
+        sections = _own_sections(own.group("list"))
+        if when is not None and sections is not None:
+            return Scope(own_sections=sections, when=when, quote=sentence)
+    return None
+
+
+def _partial_scopes(decision: Document) -> list[Scope] | None:
+    """One scope per sentence of a ``Delt`` decision; None when any sentence is foreign."""
+    scopes: list[Scope] = []
     for part in decision.parts:
         for node in part.nodes:
             for sentence in split_sentences(node.text):
                 if _informational(sentence) or _DECISION_TITLE.match(sentence):
                     continue
-                match = _DELT_SENTENCE.match(sentence)
-                when = parse_date(match.group("when")) if match else None
-                if match is None or when is None:
+                scope = _scope_of(sentence)
+                if scope is None:
                     return None
-                scopes.append((match.group("part").upper(), _named_section(match), when))
+                scopes.append(scope)
     return scopes
 
 
@@ -291,45 +375,154 @@ def _named_section(match: re.Match[str]) -> str | None:
     return section_key(found[-1]) if len(found) == 1 else None
 
 
-def _covered(operation: Operation, scope: tuple[str, str | None, date]) -> bool:
-    part, section, _ = scope
-    if operation.part.upper() != part:
-        return False
-    return section is None or operation.address.section == section
+def _scopes_for(operation: Operation, scopes: list[Scope]) -> list[Scope]:
+    """The scopes that reach the operation; the specific ones when any does."""
+    covering = [scope for scope in scopes if scope.covers(operation)]
+    specific = [s for s in covering if s.section is not None or s.own_sections]
+    return specific or covering
 
 
-def _apply_full(decision: Document, pending: list[Operation], timings: dict[str, Timing]) -> None:
-    when = header_timing(decision).dated_on
-    if when is not None:
-        for op in pending:
-            timings[op.id] = _dated(decision, when, decision.header.title)
+def _named_in(law: Document, scope: Scope) -> bool:
+    """Whether the law has the part or own sections the scope names."""
+    if scope.own_sections:
+        return any(p.key in scope.own_sections for p in law.provisions)
+    return scope.part in {part.label.upper() for part in law.parts}
 
 
-def _apply_partial(
-    decision: Document, pending: list[Operation], timings: dict[str, Timing]
-) -> None:
-    scopes = _partial_scopes(decision)
-    title = decision.header.title
-    for op in pending:
-        if scopes is None:
-            timings[op.id] = _unresolved(decision, "partial decision outside the grammar", title)
-            continue
-        # A whole-part scope first, a section-specific scope last: the specific one wins.
-        for scope in sorted(scopes, key=lambda item: item[1] is not None):
-            if _covered(op, scope):
-                timings[op.id] = _dated(decision, scope[2], f"{title}: del {scope[0]}")
+def _body_disagrees(decision: Document, header_date: date) -> bool:
+    """A full decision whose body names another date or an exception is not the header alone."""
+    for part in decision.parts:
+        for node in part.nodes:
+            for sentence in split_sentences(node.text):
+                if _informational(sentence) or _DECISION_TITLE.match(sentence):
+                    continue
+                if _RESERVATION.search(sentence):
+                    return True
+                stated = _stated_date(sentence)
+                if stated is not None and stated != header_date:
+                    return True
+    return False
+
+
+def _stated_date(sentence: str) -> date | None:
+    """The date a sentence puts after its commencement phrase; a cited act's date never counts."""
+    phrase = _COMMENCEMENT_PHRASE.search(sentence)
+    if phrase is None:
+        return None
+    return parse_date(ACT_CITATION.sub("", sentence[phrase.end() :]))
+
+
+def _decision_dated(timing: Timing, law: str) -> bool:
+    """Dated by an earlier decision, so a later partial decision can narrow it."""
+    return timing.status == "dated" and bool(timing.proofs) and timing.proofs[0].refid != law
+
+
+def _with_proof(timing: Timing, decision: Document, quote: str) -> Timing:
+    return timing.model_copy(update={"proofs": (*timing.proofs, _proof(decision, quote))})
+
+
+def _unsettled(current: Timing, decision: Document, reason: str) -> Timing:
+    return _with_proof(current, decision, decision.header.title).model_copy(
+        update={"status": "unresolved", "effective": None, "retroactive": False, "reason": reason}
+    )
+
+
+def _settle(current: Timing, when: date | None, decision: Document, quote: str) -> Timing:
+    """Fold one decision's answer for an operation into its timing. None = not covered."""
+    if when is None:
+        return _unsettled(current, decision, "narrowed by a later partial decision")
+    if current.status == "pending":
+        dated = _dated(decision, when, quote)
+        return dated.model_copy(update={"proofs": (*current.proofs[1:], *dated.proofs)})
+    if current.effective == when:
+        return _with_proof(current, decision, quote)
+    return _unsettled(current, decision, CONFLICT)
+
+
+CONFLICT = "conflicting commencement decisions"
+SEVERAL = 2  # from two decisions on, their order matters
+
+
+class _Decision:
+    """One decision read once: partial scopes or a full date, and what to say when unreadable."""
+
+    def __init__(self, decision: Document, law: Document, ordered: bool) -> None:
+        self.document = decision
+        self.title = decision.header.title
+        self.partial = bool(_PARTIAL_TITLE.match(self.title))
+        self.scopes = _partial_scopes(decision) if self.partial else None
+        self.full_date = None if self.partial else header_timing(decision).dated_on
+        raw = decision.header.date_in_force
+        self.conditional = not self.partial and bool(_CONDITIONAL.match(raw))
+        self.unreadable = self._unreadable(law, ordered)
+
+    def _unreadable(self, law: Document, ordered: bool) -> str | None:
+        if not ordered:
+            return "decision without a publication time among several"
+        return self._partial_unreadable(law) if self.partial else self._full_unreadable()
+
+    def _partial_unreadable(self, law: Document) -> str | None:
+        if not self.scopes:
+            return "partial decision outside the grammar"
+        if not any(_named_in(law, scope) for scope in self.scopes):
+            return "partial decision names no part or section of the law"
+        return None
+
+    def _full_unreadable(self) -> str | None:
+        if self.conditional:
+            return None  # the date waits on an event; a later decision may state it
+        if self.full_date is None:
+            return "full decision without a readable date"
+        if _body_disagrees(self.document, self.full_date):
+            return "full decision body disagrees with its header"
+        return None
+
+    def answer(self, op: Operation) -> tuple[date | None, str] | None:
+        """(date, quote) for the operation, (None, title) when not reached, None on a conflict."""
+        if self.scopes is None:
+            return self.full_date, self.title
+        scopes = _scopes_for(op, self.scopes)
+        if not scopes:
+            return None, self.title
+        if len({scope.when for scope in scopes}) > 1:
+            return None
+        return scopes[-1].when, scopes[-1].quote
+
+
+def _fold(current: Timing, read: _Decision, op: Operation, law: str) -> Timing | None:
+    """The operation's timing after this decision; None when the decision leaves it alone."""
+    if current.status == "unresolved":
+        return None
+    if read.unreadable is not None:
+        return _unsettled(current, read.document, read.unreadable)
+    if read.conditional:
+        return _conditional(current, read.document)
+    answer = read.answer(op)
+    if answer is None:
+        return _unsettled(current, read.document, CONFLICT)
+    when, quote = answer
+    if when is None and not _decision_dated(current, law):
+        return None  # a partial decision that does not reach this operation says nothing about it
+    return _settle(current, when, read.document, quote)
 
 
 def _apply_decision(
-    decision: Document, operations: tuple[Operation, ...], timings: dict[str, Timing]
+    read: _Decision, operations: tuple[Operation, ...], timings: dict[str, Timing], law: str
 ) -> None:
-    pending = [op for op in operations if timings[op.id].status == "pending"]
-    if not pending:
-        return
-    if _PARTIAL_TITLE.match(decision.header.title):
-        _apply_partial(decision, pending, timings)
-    else:
-        _apply_full(decision, pending, timings)
+    for op in operations:
+        folded = _fold(timings[op.id], read, op, law)
+        if folded is not None:
+            timings[op.id] = folded
+
+
+def _citing(law: Document, decisions: tuple[Document, ...]) -> list[_Decision]:
+    """The decisions citing the law, in publication order; unordered ones are marked unreadable."""
+    cited = [d for d in decisions if is_decision_for(d, law.header.refid)]
+    ordered = len(cited) < SEVERAL or all(d.header.published_at is not None for d in cited)
+    return [
+        _Decision(d, law, ordered or d.header.published_at is not None)
+        for d in sorted(cited, key=lambda d: (d.header.published_at or datetime.min, d.member))
+    ]
 
 
 def resolve_timings(
@@ -340,27 +533,38 @@ def resolve_timings(
 ) -> dict[str, Timing]:
     """Every operation's timing from the law, its clause, and the decisions citing it."""
     timings = clause_timings(law, clauses, operations)
-    for decision in sorted(
-        decisions, key=lambda d: (d.header.published_at or datetime.min, d.member)
-    ):
-        if is_decision_for(decision, law.header.refid):
-            _apply_decision(decision, operations, timings)
+    for read in _citing(law, decisions):
+        _apply_decision(read, operations, timings, law.header.refid)
     return timings
 
 
+def _fold_baseline(timing: Timing, read: _Decision) -> Timing:
+    if read.partial:
+        return _unsettled(timing, read.document, "partial commencement of the act itself")
+    if read.unreadable is not None:
+        return _unsettled(timing, read.document, read.unreadable)
+    if read.conditional:
+        return _conditional(timing, read.document)
+    return _settle(timing, read.full_date, read.document, read.title)
+
+
+def _conditional(current: Timing, decision: Document) -> Timing:
+    """A decision that waits on an event: pending stays pending, with the proof; dated conflicts."""
+    if current.status != "pending":
+        return _unsettled(current, decision, CONFLICT)
+    return _with_proof(current, decision, decision.header.title).model_copy(
+        update={"reason": CONDITIONAL}
+    )
+
+
 def baseline_timing(act: Document, decisions: tuple[Document, ...]) -> Timing:
-    """When the act itself commenced: its header, else a full decision citing it."""
+    """When the act itself commenced: its header, folded with every full decision citing it."""
     timing = header_timing(act)
     if timing.status != "pending":
         return timing
-    for decision in decisions:
-        if not is_decision_for(decision, act.header.refid):
-            continue
-        if _PARTIAL_TITLE.match(decision.header.title):
-            return _unresolved(
-                decision, "partial commencement of the act itself", decision.header.title
-            )
-        when = header_timing(decision).dated_on
-        if when is not None:
-            return _dated(decision, when, decision.header.title)
-    return timing
+    folded: Timing = timing
+    for read in _citing(act, decisions):
+        if folded.status == "unresolved":
+            break
+        folded = _fold_baseline(folded, read)
+    return folded

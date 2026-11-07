@@ -21,6 +21,12 @@
   "known_from": "2018-07-17",
   "proofs": [
    {
+    "member": "lti/2018/sf-20180615-0875.xml",
+    "quote_sha256": "0c845c9ab8995d259c6224f7b1a7e37f8b573ecaec6b2848c3d4c20722c468dd",
+    "refid": "forskrift/2018-06-15-875",
+    "sha256": "130c258ad805decefae056913d0ead84aaf17e460dc2fdc1a83d3b511012a032"
+   },
+   {
     "member": "lti/2018/sf-20180717-1195.xml",
     "quote_sha256": "e37ba90ee0d0a4e408b8d8c6cc7ddfb4a683badd500d655dca73f26d973c1802",
     "refid": "forskrift/2018-07-17-1195",
@@ -36,11 +42,13 @@
    "law": "lov/2018-12-20-116",
    "member": "lti/2018/nl-20181220-116.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "section": "§12a"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2018-12-20-116#1:I:0.0",
     "instruction": "ny § 12 a lyde:",
     "kind": "insert_section",
@@ -71,11 +79,13 @@
    "law": "lov/2021-06-18-124",
    "member": "lti/2021/nl-20210618-124.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "section": "§3"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2021-06-18-124#2:II:0.0",
     "instruction": "§ 3 lyde:",
     "kind": "replace_section",
@@ -92,7 +102,7 @@
     "proofs": [
      {
       "member": "lti/2021/sf-20210618-1967.xml",
-      "quote_sha256": "a8b0d20060ede70a106214df042e8f26eaa1fde3202ead1469f94eebce7482b9",
+      "quote_sha256": "b140e8ecc82925fba9829135ab08ab5e06f089bdf9c7041e33ba86ee4d6a65bb",
       "refid": "forskrift/2021-06-18-1967",
       "sha256": "757e13eb1bb5ea73d122385fe7e25fecc6c96621e49dbdfcab052b0065e13a6a"
      }
@@ -1380,6 +1390,7 @@
  "verification": [
   {
    "act": "lov/2018-06-15-38",
+   "act_level_problems": [],
    "at": "2018-07-20",
    "counts": {
     "editorial_omission": 1,
@@ -2607,6 +2618,7 @@
   },
   {
    "act": "lov/2018-06-15-38",
+   "act_level_problems": [],
    "at": "2021-07-01",
    "counts": {
     "editorial_omission": 1,
@@ -3834,6 +3846,7 @@
   },
   {
    "act": "lov/2018-06-15-38",
+   "act_level_problems": [],
    "at": "2022-01-01",
    "counts": {
     "editorial_omission": 1,
@@ -5060,6 +5073,7 @@
   },
   {
    "act": "lov/2018-06-15-38",
+   "act_level_problems": [],
    "at": "2026-11-06",
    "counts": {
     "editorial_omission": 1,

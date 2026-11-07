@@ -36,6 +36,7 @@
    "law": "lov/2022-12-20-115",
    "member": "lti/2022/nl-20221220-115.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "bokstav": "d",
      "ledd": 2,
@@ -43,6 +44,7 @@
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2022-12-20-115#10:X:0.0",
     "instruction": "§ 3 andre ledd bokstav d lyde:",
     "kind": "replace_bokstav",
@@ -73,6 +75,7 @@
    "law": "lov/2025-06-20-97",
    "member": "lti/2025/nl-20250620-097.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 2,
      "section": "§3"
@@ -81,6 +84,7 @@
      "lov/2021-05-21-42/§3/ledd/2"
     ],
     "destination": null,
+    "host_section": null,
     "id": "lov/2025-06-20-97#1:I:1.0",
     "instruction": "§ 3 andre ledd skal lyde:",
     "kind": "replace_ledd",
@@ -100,6 +104,12 @@
       "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
+     },
+     {
+      "member": "lti/2025/sf-20250620-1104.xml",
+      "quote_sha256": "f4d7eea6f814904538c3c4efd1b75d201a581b9f9d4d3dbb1014bcb84c829487",
+      "refid": "forskrift/2025-06-20-1104",
+      "sha256": "32b7cc395c1bbbe4e66e1784ae09ce04043f806ca4d94c0e2347bbf92b224c58"
      }
     ],
     "reason": "",
@@ -111,12 +121,14 @@
    "law": "lov/2025-06-20-97",
    "member": "lti/2025/nl-20250620-097.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 3,
      "section": "§3"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2025-06-20-97#1:I:3.0",
     "instruction": "§ 3 tredje ledd blir oppheva.",
     "kind": "repeal_ledd",
@@ -136,6 +148,12 @@
       "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
+     },
+     {
+      "member": "lti/2025/sf-20250620-1104.xml",
+      "quote_sha256": "f4d7eea6f814904538c3c4efd1b75d201a581b9f9d4d3dbb1014bcb84c829487",
+      "refid": "forskrift/2025-06-20-1104",
+      "sha256": "32b7cc395c1bbbe4e66e1784ae09ce04043f806ca4d94c0e2347bbf92b224c58"
      }
     ],
     "reason": "",
@@ -147,9 +165,13 @@
    "law": "lov/2025-06-20-97",
    "member": "lti/2025/nl-20250620-097.xml",
    "operation": {
-    "address": {},
+    "absorbed_by": "lov/2025-06-20-97#1:I:3.0",
+    "address": {
+     "section": "§3"
+    },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2025-06-20-97#1:I:3.1",
     "instruction": "Noverande fjerde og femte ledd blir tredje og fjerde ledd.",
     "kind": "renumber",
@@ -169,6 +191,12 @@
       "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
+     },
+     {
+      "member": "lti/2025/sf-20250620-1104.xml",
+      "quote_sha256": "f4d7eea6f814904538c3c4efd1b75d201a581b9f9d4d3dbb1014bcb84c829487",
+      "refid": "forskrift/2025-06-20-1104",
+      "sha256": "32b7cc395c1bbbe4e66e1784ae09ce04043f806ca4d94c0e2347bbf92b224c58"
      }
     ],
     "reason": "",
@@ -180,12 +208,14 @@
    "law": "lov/2025-06-20-97",
    "member": "lti/2025/nl-20250620-097.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 4,
      "section": "§13"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2025-06-20-97#1:I:4.0",
     "instruction": "§ 13 fjerde ledd skal lyde:",
     "kind": "insert_ledd",
@@ -205,6 +235,12 @@
       "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
+     },
+     {
+      "member": "lti/2025/sf-20250620-1104.xml",
+      "quote_sha256": "f4d7eea6f814904538c3c4efd1b75d201a581b9f9d4d3dbb1014bcb84c829487",
+      "refid": "forskrift/2025-06-20-1104",
+      "sha256": "32b7cc395c1bbbe4e66e1784ae09ce04043f806ca4d94c0e2347bbf92b224c58"
      }
     ],
     "reason": "",
@@ -216,11 +252,13 @@
    "law": "lov/2025-06-20-97",
    "member": "lti/2025/nl-20250620-097.xml",
    "operation": {
+    "absorbed_by": "lov/2025-06-20-97#1:I:4.0",
     "address": {
      "section": "§13"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2025-06-20-97#1:I:6.0",
     "instruction": "§ 13 noverande fjerde ledd blir nytt femte ledd.",
     "kind": "renumber",
@@ -240,6 +278,12 @@
       "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
+     },
+     {
+      "member": "lti/2025/sf-20250620-1104.xml",
+      "quote_sha256": "f4d7eea6f814904538c3c4efd1b75d201a581b9f9d4d3dbb1014bcb84c829487",
+      "refid": "forskrift/2025-06-20-1104",
+      "sha256": "32b7cc395c1bbbe4e66e1784ae09ce04043f806ca4d94c0e2347bbf92b224c58"
      }
     ],
     "reason": "",
@@ -251,6 +295,7 @@
    "law": "lov/2025-06-20-97",
    "member": "lti/2025/nl-20250620-097.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 2,
      "section": "§16"
@@ -259,6 +304,7 @@
      "lov/2021-05-21-42/§16/ledd/2"
     ],
     "destination": null,
+    "host_section": null,
     "id": "lov/2025-06-20-97#1:I:7.0",
     "instruction": "§ 16 andre ledd skal lyde:",
     "kind": "replace_ledd",
@@ -278,6 +324,12 @@
       "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
+     },
+     {
+      "member": "lti/2025/sf-20250620-1104.xml",
+      "quote_sha256": "f4d7eea6f814904538c3c4efd1b75d201a581b9f9d4d3dbb1014bcb84c829487",
+      "refid": "forskrift/2025-06-20-1104",
+      "sha256": "32b7cc395c1bbbe4e66e1784ae09ce04043f806ca4d94c0e2347bbf92b224c58"
      }
     ],
     "reason": "",
@@ -289,6 +341,7 @@
    "law": "lov/2025-06-20-97",
    "member": "lti/2025/nl-20250620-097.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "section": "§17"
     },
@@ -296,6 +349,7 @@
      "lov/2021-05-21-42/§17"
     ],
     "destination": null,
+    "host_section": null,
     "id": "lov/2025-06-20-97#1:I:9.0",
     "instruction": "§ 17 skal lyde:",
     "kind": "replace_section",
@@ -315,6 +369,12 @@
       "quote_sha256": "2170b07b82c002814e7c3bafbaa6e49ea249394af388255de89cc58519b2a8ae",
       "refid": "lov/2025-06-20-97",
       "sha256": "2c09fcdb3d97b1fa7d0b39c47d1d4a11fbbffe3303cf55c3a9ec0e002af4e92d"
+     },
+     {
+      "member": "lti/2025/sf-20250620-1104.xml",
+      "quote_sha256": "f4d7eea6f814904538c3c4efd1b75d201a581b9f9d4d3dbb1014bcb84c829487",
+      "refid": "forskrift/2025-06-20-1104",
+      "sha256": "32b7cc395c1bbbe4e66e1784ae09ce04043f806ca4d94c0e2347bbf92b224c58"
      }
     ],
     "reason": "",
@@ -646,7 +706,8 @@
      "applied": [
       "lov/2022-12-20-115#10:X:0.0",
       "lov/2025-06-20-97#1:I:1.0",
-      "lov/2025-06-20-97#1:I:3.0"
+      "lov/2025-06-20-97#1:I:3.0",
+      "lov/2025-06-20-97#1:I:3.1"
      ],
      "key": "§3",
      "ledd": 4,
@@ -854,7 +915,8 @@
      "applied": [
       "lov/2022-12-20-115#10:X:0.0",
       "lov/2025-06-20-97#1:I:1.0",
-      "lov/2025-06-20-97#1:I:3.0"
+      "lov/2025-06-20-97#1:I:3.0",
+      "lov/2025-06-20-97#1:I:3.1"
      ],
      "key": "§3",
      "ledd": 4,
@@ -1030,6 +1092,7 @@
  "verification": [
   {
    "act": "lov/2021-05-21-42",
+   "act_level_problems": [],
    "at": "2022-01-01",
    "counts": {
     "editorial_omission": 1,
@@ -1249,6 +1312,7 @@
   },
   {
    "act": "lov/2021-05-21-42",
+   "act_level_problems": [],
    "at": "2025-07-01",
    "counts": {
     "editorial_omission": 1,
@@ -1282,7 +1346,8 @@
      "applied": [
       "lov/2022-12-20-115#10:X:0.0",
       "lov/2025-06-20-97#1:I:1.0",
-      "lov/2025-06-20-97#1:I:3.0"
+      "lov/2025-06-20-97#1:I:3.0",
+      "lov/2025-06-20-97#1:I:3.1"
      ],
      "detail": "",
      "key": "§3",
@@ -1473,6 +1538,7 @@
   },
   {
    "act": "lov/2021-05-21-42",
+   "act_level_problems": [],
    "at": "2026-11-06",
    "counts": {
     "editorial_omission": 1,
@@ -1506,7 +1572,8 @@
      "applied": [
       "lov/2022-12-20-115#10:X:0.0",
       "lov/2025-06-20-97#1:I:1.0",
-      "lov/2025-06-20-97#1:I:3.0"
+      "lov/2025-06-20-97#1:I:3.0",
+      "lov/2025-06-20-97#1:I:3.1"
      ],
      "detail": "",
      "key": "§3",

@@ -48,6 +48,7 @@ class Verification(Frozen):
     sections: tuple[SectionVerdict, ...]
     notes_without_replay_event: tuple[str, ...]
     replay_events_without_note: tuple[str, ...]
+    act_level_problems: tuple[str, ...] = ()
 
 
 def _texts(provision: Provision | ProvisionState) -> tuple[str, tuple[str, ...]]:
@@ -120,21 +121,34 @@ def verify(state: ReplayState, oracle_document: Document) -> Verification:
     """One verdict per section of the replayed state and of the oracle."""
     replayed = {p.key: p for p in state.provisions}
     oracle = {p.key: p for p in oracle_document.provisions}
-    sections: list[SectionVerdict] = []
-    for key in list(replayed) + [k for k in oracle if k not in replayed]:
-        if key in replayed and key in oracle:
-            sections.append(_verdict(replayed[key], oracle[key]))
-        elif key in replayed:
-            sections.append(SectionVerdict(key=key, verdict="only_in_replay"))
-        elif not key.startswith("§"):
-            sections.append(SectionVerdict(key=key, verdict="oracle_annex"))
-        else:
-            sections.append(SectionVerdict(key=key, verdict="only_in_oracle"))
+    sections = [
+        _section_verdict(key, replayed, oracle)
+        for key in list(replayed) + [k for k in oracle if k not in replayed]
+    ]
     missing_events, missing_notes = _note_checks(replayed, oracle)
+    if state.act_level_problems:  # an operation with no known target may have touched any section
+        sections = [_blanket(section, state.act_level_problems) for section in sections]
     return Verification(
         act=state.act, at=state.at.isoformat(), oracle_member=oracle_document.member,
         oracle_sha256=oracle_document.sha256,
         counts=dict(sorted(Counter(s.verdict for s in sections).items())),
         sections=tuple(sections), notes_without_replay_event=missing_events,
-        replay_events_without_note=missing_notes,
+        replay_events_without_note=missing_notes, act_level_problems=state.act_level_problems,
     )  # fmt: skip
+
+
+def _section_verdict(
+    key: str, replayed: dict[str, ProvisionState], oracle: dict[str, Provision]
+) -> SectionVerdict:
+    if key in replayed and key in oracle:
+        return _verdict(replayed[key], oracle[key])
+    if key in replayed:
+        return SectionVerdict(key=key, verdict="only_in_replay")
+    if not key.startswith("§"):
+        return SectionVerdict(key=key, verdict="oracle_annex")
+    return SectionVerdict(key=key, verdict="only_in_oracle")
+
+
+def _blanket(section: SectionVerdict, problems: tuple[str, ...]) -> SectionVerdict:
+    detail = "act-level problem, target unknown: " + "; ".join(problems)
+    return section.model_copy(update={"verdict": "unresolved", "detail": detail})

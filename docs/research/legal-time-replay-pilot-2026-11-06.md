@@ -130,10 +130,53 @@ classed and counted. It does not certify any intermediate state. Those are cover
   ledd that carries a list; any commencement sentence outside the grammar; partial commencement of
   an act's own sections (`unresolved_baseline`). None of these occurred in the four acts' effective
   events; they will on other acts, and the counts will show it.
-- **Decision contradiction not detected.** arkivlova has a full decision (2026-01-01) followed by a
-  `Delt iverksetjing` that lists §§ 1–10 and 12–25; consistent here, but a later partial decision
-  that narrowed an earlier full one would not be noticed because only still-pending operations
-  are re-dated. Open question in ADR-0020.
+- **Decisions that disagree, narrow or cannot be read (hardened 2026-11-07).** Decisions are read
+  in publication order and every one that reaches an operation is folded into its timing: the same
+  day from every source keeps `dated` and cites every source; a different day is
+  `unresolved: conflicting commencement decisions`; a later `Delt` decision that does not reach an
+  operation an earlier decision had dated is `unresolved: narrowed by a later partial decision`;
+  a decision citing the law whose date or scope the grammar cannot read unsettles everything it
+  could have reached (`full decision without a readable date`, `partial decision outside the
+  grammar`) rather than leaving it `pending`, which would assert that no decision exists. A `Delt`
+  decision may also list the act's own sections (`Paragrafane 1 til 10 og §§ 12 til 25 gjeld frå
+  …`, arkivlova's shape), which reaches an operation through the section of the act that hosts it.
+  No precedence rule between decisions is asserted; the arkivlova pair (full decision 2026-01-01,
+  then `Delt iverksetjing` for §§ 1–10 and 12–25) agrees on its face, and a pair that disagrees
+  has not been seen in the archives yet. A second independent review of the hardening added the
+  cases a lenient reading would have dated wrongly, each now refused: an exception inside a
+  section listing (`Paragrafane 1 til 25 unntatt § 11 …`) or a part scope (`… del I trer i kraft
+  …, unntatt § 2 a`); a lettered or reversed range; two sentences of one decision naming different
+  dates for one section (`conflicting commencement decisions`); a full decision whose body names
+  another date or an exception its header does not (`full decision body disagrees with its
+  header`); a partial decision naming no part or own section the law has; a decision without a
+  publication time when several cite the law (its order is unknowable); and the act's own
+  commencement now folds every full decision the same way instead of taking the first. Decisions
+  with the same publication time (one Lovtidend issue) are ordered by member name, which carries
+  the resolution's number. One real shape the strict rule broke on, then modelled:
+  personopplysningsloven's first decision (`FOR-2018-06-15-875`) commences the act "Når
+  personvernforordningen trer i kraft" and a later `Meddelelse om ikrafttredelse`
+  (`FOR-2018-07-17-1195`) states 2018-07-20. A *conditional* decision keeps the operation `pending`
+  with its proof and the reason "commencement conditional on an event outside the archive"; a
+  later dated decision resolves it, and a conditional decision after a dated one is a conflict.
+  Tests: `tests/unit/test_legaltime_decisions.py`.
+- **Renumbering statements (hardened 2026-11-07).** `Nåværende annet ledd blir tredje ledd` is
+  applied only when *absorbed*: it states exactly the shift in ledd or punktum numbers that the
+  operation immediately before it — an insertion or a repeal in the same section — already caused,
+  so it moves no text and carries that operation's id (`absorbed_by`). All five renumberings in the
+  four acts are of that kind. Every other renumbering (standalone, a shift the preceding operation
+  did not cause, a chain, another section or unit, a section renumbering) is `unresolved` with its
+  provision named; applying it as a no-op would have reported a change of legal state as done,
+  which is what the first build did. An absorbed renumbering also checks that the provision has
+  the ledd (or the ledd the punktum) it names, so a baseline that disagrees with the law — a
+  missed earlier amendment — is refused rather than renumbered. A renumbering that is not absorbed
+  and names no section is an act-level problem, which blankets the whole state's verification.
+  Cross-references in other provisions are never rewritten; a chain of renumbering sentences
+  absorbs only the first. Tests: `tests/unit/test_legaltime_renumber.py`.
+- **Act-level problems blanket the verification (hardened 2026-11-07).** An operation that fails
+  with no provision it can be pinned to may have touched any section, so a state carrying one has
+  every section `unresolved` in `verification[]`, with the problem quoted. A global term
+  substitution is atomic: one listed location without the term leaves every location untouched.
+  Tests: `tests/unit/test_legaltime_semantics.py`.
 - **Reach.** 317 of 753 current acts have no enacting announcement in the archives. For them the
   outcome is `no_baseline`; the replay never approximates from the current text.
 

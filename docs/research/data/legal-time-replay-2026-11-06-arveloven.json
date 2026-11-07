@@ -36,6 +36,7 @@
    "law": "lov/2020-12-18-149",
    "member": "lti/2020/nl-20201218-149.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "destination_ledd": 5,
      "ledd": 2,
@@ -43,6 +44,7 @@
     },
     "change_part": [],
     "destination": "§42",
+    "host_section": null,
     "id": "lov/2020-12-18-149#1:I:1.0",
     "instruction": "§ 43 annet ledd blir nytt femte ledd i § 42.",
     "kind": "move_ledd",
@@ -73,6 +75,7 @@
    "law": "lov/2020-12-18-149",
    "member": "lti/2020/nl-20201218-149.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "punktum": 2,
      "punktum_end": 3,
@@ -80,6 +83,7 @@
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2020-12-18-149#1:I:2.0",
     "instruction": "§ 77 annet og tredje punktum skal lyde:",
     "kind": "replace_punktum",
@@ -110,11 +114,13 @@
    "law": "lov/2020-12-18-149",
    "member": "lti/2020/nl-20201218-149.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "section": "§89"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2020-12-18-149#1:I:4.0",
     "instruction": "§ 89 skal lyde:",
     "kind": "replace_section",
@@ -145,6 +151,7 @@
    "law": "lov/2020-12-18-149",
    "member": "lti/2020/nl-20201218-149.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 1,
      "punktum": 1,
@@ -152,6 +159,7 @@
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2020-12-18-149#1:I:6.0",
     "instruction": "§ 92 første ledd første punktum skal lyde:",
     "kind": "replace_punktum",
@@ -182,11 +190,13 @@
    "law": "lov/2020-12-18-149",
    "member": "lti/2020/nl-20201218-149.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "section": "§99a"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2020-12-18-149#1:I:8.0",
     "instruction": "Ny § 99 a skal lyde:",
     "kind": "insert_section",
@@ -203,7 +213,7 @@
     "proofs": [
      {
       "member": "lti/2021/sf-20210528-1698.xml",
-      "quote_sha256": "7aebe2cf649fc29cc29a06cb3c3648df294d14c9007eaaf7f6ccf3c260c7294a",
+      "quote_sha256": "c58bc7d5cd4c42ed9712825eb5c58697b120c8937bfdf6806f821085c62fa3c9",
       "refid": "forskrift/2021-05-28-1698",
       "sha256": "83f41d823f4ace27d6db0072ea5fd992f4e86d39da445838941955bf9d4aa5b0"
      }
@@ -217,6 +227,7 @@
    "law": "lov/2020-12-18-149",
    "member": "lti/2020/nl-20201218-149.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 2,
      "punktum": 1,
@@ -224,6 +235,7 @@
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2020-12-18-149#1:I:10.0",
     "instruction": "§ 149 annet ledd første punktum skal lyde:",
     "kind": "replace_punktum",
@@ -254,11 +266,13 @@
    "law": "lov/2020-12-18-149",
    "member": "lti/2020/nl-20201218-149.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "section": "§181"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2020-12-18-149#1:I:12.0",
     "instruction": "§ 181 skal lyde:",
     "kind": "replace_section",
@@ -289,9 +303,11 @@
    "law": "lov/2021-05-07-34",
    "member": "lti/2021/nl-20210507-034.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {},
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2021-05-07-34#1:I:136.0",
     "instruction": "§ 11, § 14 andre ledd tredje punktum og sjette ledd, § 15 første ledd andre punktum, § 24 første ledd andre punktum, § 28 tredje og fjerde ledd, § 39 første ledd tredje punktum, § 49 andre ledd andre punktum, § 50 andre ledd andre punktum, § 63 andre ledd andre og tredje punktum, § 90 andre ledd tredje punktum, § 96 fjerde ledd første og andre punktum, § 97 første punktum, § 118 sjette ledd andre punktum, § 127 første ledd d), § 130 første ledd andre punktum, § 161 andre ledd og tredje ledd andre punktum",
     "kind": "substitute_term",
@@ -322,11 +338,13 @@
    "law": "lov/2022-06-22-81",
    "member": "lti/2022/nl-20220622-081.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "section": "§88a"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2022-06-22-81#1:I:0.0",
     "instruction": "ny § 88 a lyde:",
     "kind": "insert_section",
@@ -357,6 +375,7 @@
    "law": "lov/2023-03-31-5",
    "member": "lti/2023/nl-20230331-005.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 4,
      "punktum": 3,
@@ -364,6 +383,7 @@
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2023-03-31-5#2:II:0.0",
     "instruction": "§ 96 fjerde ledd nytt tredje punktum lyde:",
     "kind": "insert_punktum",
@@ -394,12 +414,14 @@
    "law": "lov/2023-06-16-59",
    "member": "lti/2023/nl-20230616-059.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "punktum": 3,
      "section": "§20"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2023-06-16-59#1:I:1.0",
     "instruction": "§ 20 nytt tredje punktum skal lyde:",
     "kind": "insert_punktum",
@@ -430,12 +452,14 @@
    "law": "lov/2023-06-16-59",
    "member": "lti/2023/nl-20230616-059.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "punktum": 3,
      "section": "§35"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2023-06-16-59#1:I:3.0",
     "instruction": "§ 35 nytt tredje punktum skal lyde:",
     "kind": "insert_punktum",
@@ -466,12 +490,14 @@
    "law": "lov/2023-06-16-59",
    "member": "lti/2023/nl-20230616-059.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 2,
      "section": "§92"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2023-06-16-59#1:I:5.0",
     "instruction": "§ 92 nytt annet ledd skal lyde:",
     "kind": "insert_ledd",
@@ -502,9 +528,13 @@
    "law": "lov/2023-06-16-59",
    "member": "lti/2023/nl-20230616-059.xml",
    "operation": {
-    "address": {},
+    "absorbed_by": "lov/2023-06-16-59#1:I:5.0",
+    "address": {
+     "section": "§92"
+    },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2023-06-16-59#1:I:7.0",
     "instruction": "Nåværende annet og tredje ledd blir tredje og nytt fjerde ledd.",
     "kind": "renumber",
@@ -535,12 +565,14 @@
    "law": "lov/2023-06-16-59",
    "member": "lti/2023/nl-20230616-059.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 5,
      "section": "§92"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2023-06-16-59#1:I:8.0",
     "instruction": "§ 92 nytt femte ledd skal lyde:",
     "kind": "insert_ledd",
@@ -571,6 +603,7 @@
    "law": "lov/2023-06-16-59",
    "member": "lti/2023/nl-20230616-059.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 4,
      "ledd_end": 5,
@@ -578,6 +611,7 @@
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2023-06-16-59#1:I:10.0",
     "instruction": "§ 116 nytt fjerde og femte ledd skal lyde:",
     "kind": "insert_ledd",
@@ -608,12 +642,14 @@
    "law": "lov/2023-06-16-59",
    "member": "lti/2023/nl-20230616-059.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 7,
      "section": "§118"
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2023-06-16-59#1:I:13.0",
     "instruction": "§ 118 syvende ledd skal lyde:",
     "kind": "insert_ledd",
@@ -644,9 +680,13 @@
    "law": "lov/2023-06-16-59",
    "member": "lti/2023/nl-20230616-059.xml",
    "operation": {
-    "address": {},
+    "absorbed_by": "lov/2023-06-16-59#1:I:13.0",
+    "address": {
+     "section": "§118"
+    },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2023-06-16-59#1:I:15.0",
     "instruction": "Nåværende syvende ledd blir nytt åttende ledd.",
     "kind": "renumber",
@@ -677,6 +717,7 @@
    "law": "lov/2023-06-16-59",
    "member": "lti/2023/nl-20230616-059.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 2,
      "punktum": 3,
@@ -684,6 +725,7 @@
     },
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2023-06-16-59#1:I:16.0",
     "instruction": "§ 139 annet ledd tredje punktum skal lyde:",
     "kind": "replace_punktum",
@@ -714,6 +756,7 @@
    "law": "lov/2026-06-19-48",
    "member": "lti/2026/nl-20260619-048.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {
      "ledd": 3,
      "ledd_end": 7,
@@ -727,6 +770,7 @@
      "lov/2019-06-14-21/§178/ledd/7"
     ],
     "destination": null,
+    "host_section": null,
     "id": "lov/2026-06-19-48#4:IV:0.0",
     "instruction": "§ 178 tredje til syvende ledd lyde:",
     "kind": "replace_ledd",
@@ -757,9 +801,11 @@
    "law": "lov/2026-06-19-48",
    "member": "lti/2026/nl-20260619-048.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {},
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2026-06-19-48#6:VI:25.0",
     "instruction": "lov 14. juni 2019 nr. 21 om arv og dødsboskifte § 103 første ledd bokstav b",
     "kind": "substitute_term",
@@ -790,9 +836,11 @@
    "law": "lov/2026-06-19-48",
    "member": "lti/2026/nl-20260619-048.xml",
    "operation": {
+    "absorbed_by": null,
     "address": {},
     "change_part": [],
     "destination": null,
+    "host_section": null,
     "id": "lov/2026-06-19-48#6:VI:25.1",
     "instruction": "lov 14. juni 2019 nr. 21 om arv og dødsboskifte § 103 første ledd bokstav b",
     "kind": "substitute_term",
@@ -6372,6 +6420,7 @@
      "applied": [
       "lov/2020-12-18-149#1:I:6.0",
       "lov/2023-06-16-59#1:I:5.0",
+      "lov/2023-06-16-59#1:I:7.0",
       "lov/2023-06-16-59#1:I:8.0"
      ],
      "key": "§92",
@@ -6600,7 +6649,8 @@
     {
      "applied": [
       "lov/2021-05-07-34#1:I:136.0",
-      "lov/2023-06-16-59#1:I:13.0"
+      "lov/2023-06-16-59#1:I:13.0",
+      "lov/2023-06-16-59#1:I:15.0"
      ],
      "key": "§118",
      "ledd": 8,
@@ -7934,6 +7984,7 @@
      "applied": [
       "lov/2020-12-18-149#1:I:6.0",
       "lov/2023-06-16-59#1:I:5.0",
+      "lov/2023-06-16-59#1:I:7.0",
       "lov/2023-06-16-59#1:I:8.0"
      ],
      "key": "§92",
@@ -8162,7 +8213,8 @@
     {
      "applied": [
       "lov/2021-05-07-34#1:I:136.0",
-      "lov/2023-06-16-59#1:I:13.0"
+      "lov/2023-06-16-59#1:I:13.0",
+      "lov/2023-06-16-59#1:I:15.0"
      ],
      "key": "§118",
      "ledd": 8,
@@ -8695,6 +8747,7 @@
  "verification": [
   {
    "act": "lov/2019-06-14-21",
+   "act_level_problems": [],
    "at": "2021-01-01",
    "counts": {
     "editorial_omission": 1,
@@ -10401,6 +10454,7 @@
   },
   {
    "act": "lov/2019-06-14-21",
+   "act_level_problems": [],
    "at": "2021-06-01",
    "counts": {
     "editorial_omission": 1,
@@ -12123,6 +12177,7 @@
   },
   {
    "act": "lov/2019-06-14-21",
+   "act_level_problems": [],
    "at": "2022-01-01",
    "counts": {
     "editorial_omission": 1,
@@ -13846,6 +13901,7 @@
   },
   {
    "act": "lov/2019-06-14-21",
+   "act_level_problems": [],
    "at": "2023-10-01",
    "counts": {
     "editorial_omission": 1,
@@ -14723,6 +14779,7 @@
      "applied": [
       "lov/2020-12-18-149#1:I:6.0",
       "lov/2023-06-16-59#1:I:5.0",
+      "lov/2023-06-16-59#1:I:7.0",
       "lov/2023-06-16-59#1:I:8.0"
      ],
      "detail": "",
@@ -14981,7 +15038,8 @@
     {
      "applied": [
       "lov/2021-05-07-34#1:I:136.0",
-      "lov/2023-06-16-59#1:I:13.0"
+      "lov/2023-06-16-59#1:I:13.0",
+      "lov/2023-06-16-59#1:I:15.0"
      ],
      "detail": "",
      "key": "§118",
@@ -15575,6 +15633,7 @@
   },
   {
    "act": "lov/2019-06-14-21",
+   "act_level_problems": [],
    "at": "2026-11-06",
    "counts": {
     "editorial_omission": 1,
@@ -16452,6 +16511,7 @@
      "applied": [
       "lov/2020-12-18-149#1:I:6.0",
       "lov/2023-06-16-59#1:I:5.0",
+      "lov/2023-06-16-59#1:I:7.0",
       "lov/2023-06-16-59#1:I:8.0"
      ],
      "detail": "",
@@ -16710,7 +16770,8 @@
     {
      "applied": [
       "lov/2021-05-07-34#1:I:136.0",
-      "lov/2023-06-16-59#1:I:13.0"
+      "lov/2023-06-16-59#1:I:13.0",
+      "lov/2023-06-16-59#1:I:15.0"
      ],
      "detail": "",
      "key": "§118",

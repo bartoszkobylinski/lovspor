@@ -1039,6 +1039,16 @@ public JSON. The evidence (`docs/research/legal-time-replay-pilot-2026-11-06.md`
 `lovspor ops legal-time replay` from the pinned archives; `tests/integration/test_legaltime_pilot.py`
 reproduces it byte for byte wherever the archives are cached.
 
+Hardening round (2026-11-07, same PR): commencement decisions are folded in publication order with
+no precedence rule — agreement keeps `dated` and cites every source, disagreement or narrowing by a
+later `Delt` decision is `unresolved`, and an unreadable decision unsettles what it could reach
+instead of leaving it `pending`; a renumbering statement is applied only when the operation before
+it already caused exactly that shift (`absorbed_by`), otherwise `unresolved`; an act-level problem
+makes every section of that state `unresolved` in verification; term substitution is atomic. The
+four evidence files were regenerated and every difference traced: added `host_section`,
+`absorbed_by` and `act_level_problems` fields, renumberings now addressed to their section, and
+second proofs where a decision agrees with the law's own clause.
+
 ## How to use this document
 
 - **Before starting a session**: read this + `CLAUDE.md`. Those two together are the full context.
