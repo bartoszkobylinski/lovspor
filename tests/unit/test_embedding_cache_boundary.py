@@ -493,3 +493,20 @@ def test_non_finite_provider_response_is_refused_before_storage(
     )
     assert provider.requests == 1
     assert not list(cache_dir.rglob("*.lsec"))
+
+
+def test_plain_encode_passes_through_uncached(cache_dir: Path, tmp_path: Path) -> None:
+    """Design §6: only quantized_document_vectors is the cached boundary.
+
+    A plain ``encode`` on the wrapper (the EmbeddingModel protocol) is the
+    provider's own answer, paid once per call and never written to the store.
+    """
+    provider = _Provider()
+    cached = with_embedding_cache(provider, _settings(tmp_path))
+    assert isinstance(cached, CachingEmbedder)
+    texts = ["første tekst", "andre tekst", "tredje tekst"]
+    vectors = cached.encode(texts)
+    np.testing.assert_array_equal(vectors, _Provider().encode(texts))
+    cached.encode(texts)
+    assert (provider.requests, provider.texts) == (2, 6)
+    assert not list(cache_dir.rglob("*.lsec"))

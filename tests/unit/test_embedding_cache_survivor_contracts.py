@@ -83,8 +83,9 @@ def test_publication_does_not_follow_a_staging_symlink(tmp_path: Path, target_ex
     staged_inodes: list[int] = []
 
     def swap_staging(event: str, args: tuple[object, ...]) -> None:
-        if active and event == "os.link" and args[1] == str(final):
-            staged = Path(str(args[0]))
+        # _link_in links names relative to the directory's descriptor.
+        if active and event == "os.link" and args[1] == final.name:
+            staged = tmp_path / str(args[0])
             staged.unlink()
             staged.symlink_to(target)
             swapped.append(staged)

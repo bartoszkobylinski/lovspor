@@ -169,6 +169,38 @@ def test_unknown_meta_field_is_refused() -> None:
         decode_entry(forged, _doc_key(), _policy())
 
 
+@pytest.mark.parametrize("unit", [False, True])
+@pytest.mark.parametrize(
+    "field",
+    ["schema", "kind", "esi", "input_hash", "dim", "rows", "dtype", "scale", "unit", "created_at"],
+)
+def test_missing_metadata_field_is_a_typed_refusal(field: str, unit: bool) -> None:
+    """The schema's complete field set is required, including null placeholders."""
+    entry = _unit_entry() if unit else _doc_entry()
+    data = encode_entry(entry)
+    (length,) = struct.unpack(">I", data[4:8])
+    meta = json.loads(data[8 : 8 + length])
+    del meta[field]
+    raw = json.dumps(meta, sort_keys=True, separators=(",", ":")).encode()
+    forged = _reseal(data[:4] + struct.pack(">I", len(raw)) + raw + data[8 + length : -32])
+    with pytest.raises(EmbeddingCacheError, match="fields"):
+        decode_entry(forged, entry.key, _policy())
+
+
+@pytest.mark.parametrize("unit", [False, True])
+@pytest.mark.parametrize(
+    ("field", "value"), [("schema", True), ("schema", 1.0), ("dim", 4.0), ("rows", 2.0)]
+)
+def test_numeric_identity_requires_matching_json_types(
+    field: str, value: object, unit: bool
+) -> None:
+    """Top-level identity requires type equality as well as value equality."""
+    entry = _unit_entry() if unit else _doc_entry()
+    forged = _with_meta(encode_entry(entry), **{field: value})
+    with pytest.raises(EmbeddingCacheError, match=field):
+        decode_entry(forged, entry.key, _policy())
+
+
 @pytest.mark.parametrize(
     "unit",
     [
