@@ -178,3 +178,15 @@ def test_superseded_units_removed_independent_of_vector_dimensions(store) -> Non
     assert store.get(_unit("pending", 0).key) is not None
     assert store.get(_unit("finished", 0).key) is None
     assert store.get(_unit("finished", 1).key) is None
+
+
+@pytest.mark.parametrize("walker", ["_subdirs", "_all_dirs", "_entry_files"])
+def test_cache_walk_refuses_dangling_directory_symlink(tmp_path, walker) -> None:
+    # cache_store.check_private_dir specifies that every symlink is refused,
+    # including one whose target no longer exists.
+    directory = tmp_path / "dangling"
+    directory.symlink_to(tmp_path / "missing", target_is_directory=True)
+    with pytest.raises(EmbeddingCacheError, match="refuses a symlink: dangling"):
+        list(getattr(cache_admin, walker)(directory))
+    assert directory.is_symlink()
+    assert not (tmp_path / "missing").exists()
