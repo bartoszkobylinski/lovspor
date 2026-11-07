@@ -173,3 +173,30 @@ def test_inner_xml_escapes_text_so_it_stays_well_formed() -> None:
     element = etree.fromstring("<a>Fish &amp; chips &lt; 5<b>x</b></a>")
     assert inner_xml(element) == "Fish &amp; chips &lt; 5<b>x</b>"
     etree.fromstring(f"<article>{inner_xml(element)}</article>")
+
+
+def test_entity_amplification_is_refused_with_the_member_name() -> None:
+    # A small input declares exponentially growing replacements. Never construct
+    # the expanded value: the shared hardened parser must reject it first.
+    entities = ['<!ENTITY e0 "sentinel">']
+    for level in range(1, 8):
+        references = f"&e{level - 1};" * 10
+        entities.append(f'<!ENTITY e{level} "{references}">')
+    declaration = f"<!DOCTYPE html [{' '.join(entities)}]>".encode()
+    body = (FIXTURES / "enacting.xml").read_bytes()
+    body = body.replace(b"<!DOCTYPE html>", declaration, 1)
+    body = body.replace(b"Denne paragrafen", b"&e7; Denne paragrafen", 1)
+
+    with pytest.raises(LegalTimeDocumentError, match="invalid XML in amplification.xml") as error:
+        parse_document(body, "amplification.xml")
+    assert isinstance(error.value.__cause__, etree.XMLSyntaxError)
+
+
+def test_excessive_xml_depth_is_refused_before_reading_provisions() -> None:
+    body = (FIXTURES / "enacting.xml").read_bytes()
+    nested = b"<span>" * 300 + b"sentinel" + b"</span>" * 300
+    body = body.replace(b"Denne paragrafen", nested, 1)
+
+    with pytest.raises(LegalTimeDocumentError, match="invalid XML in deep.xml") as error:
+        parse_document(body, "deep.xml")
+    assert isinstance(error.value.__cause__, etree.XMLSyntaxError)
