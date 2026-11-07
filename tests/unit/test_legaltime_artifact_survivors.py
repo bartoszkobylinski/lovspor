@@ -273,24 +273,26 @@ def test_numeric_item_inserted_after_predecessor():
     assert result.text == "First Second Third"
 
 
-def test_item_parsers_remove_formatting_blanks():
+def test_item_parsers_keep_formatting_blanks():
+    """The space between two inline elements is text ("A X", not "AX"): item edits keep it."""
     inserted = replay._insert_item('<ul> <li data-name="b.">B</li> </ul>', "a", "<b>A</b> <i>X</i>")
     assert not isinstance(inserted, str)
     assert inserted.xml == (
-        '<ul><li data-name="a."><article class="listArticle">'
-        '<article class="legalP"><b>A</b><i>X</i></article></article></li>'
-        '<li data-name="b.">B</li></ul>'
+        '<ul> <li data-name="a."><article class="listArticle">'
+        '<article class="legalP"><b>A</b> <i>X</i></article></article></li>'
+        '<li data-name="b.">B</li> </ul>'
     )
+    assert inserted.text == "A X B"
     removed = replay._remove_item(
         '<ul> <li data-name="a.">A</li> <li data-name="b.">B</li> </ul>', "a"
     )
     assert not isinstance(removed, str)
-    assert removed.xml == '<ul><li data-name="b.">B</li></ul>'
+    assert removed.xml == '<ul> <li data-name="b.">B</li> </ul>'
     item = replay._item_element("a", "<b>A</b> <i>X</i>")
     assert not isinstance(item, str)
     assert etree.tostring(item, encoding=str) == (
         '<li data-name="a."><article class="listArticle">'
-        '<article class="legalP"><b>A</b><i>X</i></article></article></li>'
+        '<article class="legalP"><b>A</b> <i>X</i></article></article></li>'
     )
 
 
