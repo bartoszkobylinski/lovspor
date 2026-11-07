@@ -13,7 +13,10 @@ endpoint is *unobservable*, a state of its own, in which nothing can be
 compared and every command refuses with the named precondition.
 
 The transaction (``commit_release``) starts only on a finalized
-``<releases>/<id>/``, never on a ``.build-*``: (1) *stage* the release's
+``<releases>/<id>/``, never on a ``.build-*``, and under
+``continuity.transaction_lock``: (0) *judge* — the candidate must answer
+every URL the reconciled live release serves (``continuity``, #820), and
+the triple is read again and must be unchanged; (1) *stage* the release's
 own fragment as ``<fragment>.next``, ``caddy validate`` the composed
 configuration and ``caddy adapt`` it, asserting its ``release_id`` is
 the candidate's; (2) *commit* — rename ``.next`` over the active
@@ -39,6 +42,7 @@ from lovspor.atomic_io import atomic_write_text
 from lovspor.release.caddy import AdminClient, ConfigPair, Runner, adapt, config_pair
 from lovspor.release.caddy import reload as reload_caddy
 from lovspor.release.caddy import validate as validate_caddy
+from lovspor.release.continuity import require_continuity, transaction_lock
 from lovspor.release.envelope import (
     FRAGMENT_NAME,
     WORLD_READABLE,
@@ -53,6 +57,7 @@ from lovspor.release.envelope import (
 )
 from lovspor.release.errors import (
     CommitRefusedError,
+    ContinuityRefusedError,
     ControlPlaneError,
     IncompleteEnvelopeError,
     ReloadFailedError,
@@ -256,29 +261,67 @@ def _commit(plane: ControlPlane, content_id: str, triple: Triple, checkpoint: Ch
     checkpoint("marked")
 
 
-def commit_release(
-    plane: ControlPlane, content_id: str, checkpoint: Checkpoint = _no_checkpoint
-) -> CommitReport:
-    """Make the finalized ``<releases>/<content_id>/`` live through the transaction."""
-    triple = read_triple(plane)
+def _require_reconciled(triple: Triple) -> None:
     if situation(triple) != Situation.reconciled:
         raise UnreconciledError(f"host is {situation(triple)}: {triple.describe()}")
-    if triple.running.release_id == content_id:
-        return CommitReport(active=content_id, previous=triple.marked, already_live=True)
+
+
+def _require_candidate(plane: ControlPlane, content_id: str) -> None:
     release = release_dir(plane.releases, content_id)
     if not is_complete(release):
         raise IncompleteEnvelopeError(f"{content_id} is not a complete envelope; not staged")
     if fragment_release_id(read_fragment(release)) != content_id:
         raise CommitRefusedError(f"{content_id}/{FRAGMENT_NAME} does not name its release")
+
+
+def _require_unmoved(plane: ControlPlane, triple: Triple) -> None:
+    """The triple the continuity check was judged against is still the host's (#820)."""
+    now = read_triple(plane)
+    if now != triple:
+        raise ContinuityRefusedError(
+            f"the live state changed while continuity was checked: was {triple.describe()}, "
+            f"now {now.describe()}; nothing is committed, run the release again"
+        )
+
+
+def _commit_locked(
+    plane: ControlPlane, content_id: str, checkpoint: Checkpoint, *, continuity: bool
+) -> CommitReport:
+    """The transaction, the caller holding ``transaction_lock``."""
+    triple = read_triple(plane)
+    _require_reconciled(triple)
+    if triple.running.release_id == content_id:
+        return CommitReport(active=content_id, previous=triple.marked, already_live=True)
+    _require_candidate(plane, content_id)
+    if continuity:
+        require_continuity(plane.releases, triple.running.release_id, content_id)
+        _require_unmoved(plane, triple)
     _commit(plane, content_id, triple, checkpoint)
     return CommitReport(active=content_id, previous=triple.marked, already_live=False)
 
 
+def commit_release(
+    plane: ControlPlane, content_id: str, checkpoint: Checkpoint = _no_checkpoint
+) -> CommitReport:
+    """Make the finalized ``<releases>/<content_id>/`` live through the transaction.
+
+    Refused, with nothing moved, unless the candidate answers every URL the
+    reconciled live release serves (#820); a proven bootstrap has none.
+    """
+    with transaction_lock(plane.releases):
+        return _commit_locked(plane, content_id, checkpoint, continuity=True)
+
+
 def rollback(plane: ControlPlane, checkpoint: Checkpoint = _no_checkpoint) -> CommitReport:
-    """The marker's ``previous`` through the same transaction; rolling forward is the same."""
-    triple = read_triple(plane)
-    if situation(triple) != Situation.reconciled:
-        raise UnreconciledError(f"host is {situation(triple)}: {triple.describe()}")
-    if triple.marker is None or triple.marker.previous is None:
-        raise ControlPlaneError("no previous release in the marker; nothing to roll back to")
-    return commit_release(plane, triple.marker.previous, checkpoint)
+    """The marker's ``previous`` through the same transaction; rolling forward is the same.
+
+    The one commit not judged by URL continuity (#820): it restores the
+    release that was served immediately before, so URLs only the current
+    release introduced answer 404 again until a new release is committed.
+    """
+    with transaction_lock(plane.releases):
+        triple = read_triple(plane)
+        _require_reconciled(triple)
+        if triple.marker is None or triple.marker.previous is None:
+            raise ControlPlaneError("no previous release in the marker; nothing to roll back to")
+        return _commit_locked(plane, triple.marker.previous, checkpoint, continuity=False)
