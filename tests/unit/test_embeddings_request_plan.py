@@ -70,3 +70,19 @@ def test_plan_applies_input_truncation_before_the_request_token_budget(
     bounds = model.plan_requests(texts)
     assert bounds == [(0, 2), (2, 3)]
     assert [truncated[start:end] for start, end in bounds] == list(model._batches(truncated))
+
+
+@pytest.mark.parametrize(
+    ("costs", "batch_size", "expected"),
+    [
+        ([125_000, 125_000, 0, 1], 128, [(0, 3), (3, 4)]),
+        ([125_000, 125_000, 0, 1], 2, [(0, 2), (2, 4)]),
+        ([125_000, 125_000, 125_000, 125_000, 1], 2, [(0, 2), (2, 4), (4, 5)]),
+    ],
+    ids=["zero-cost-at-token-cap", "item-cap-at-token-cap", "repeated-simultaneous-caps"],
+)
+def test_exact_request_limits_preserve_zero_cost_inputs_and_reset_both_budgets(
+    costs: list[int], batch_size: int, expected: list[tuple[int, int]]
+) -> None:
+    """Request planning keeps every input while enforcing both documented caps."""
+    assert request_bounds(costs, batch_size=batch_size) == expected
