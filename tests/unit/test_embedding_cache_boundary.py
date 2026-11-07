@@ -484,8 +484,12 @@ def test_non_finite_provider_response_is_refused_before_storage(
     inputs = [EmbeddingInput(str(i), f"tekst {i}") for i in range(rows)]
     with (
         np.errstate(invalid="ignore", divide="ignore"),
-        pytest.raises(EmbeddingCacheError, match="non-finite"),
+        pytest.raises(EmbeddingCacheError, match="non-finite") as error,
     ):
         quantized_document_vectors(cached, inputs, hash_embedding_inputs(inputs))
+    assert str(error.value) == (
+        "provider returned non-finite vector values; nothing was stored "
+        "and no further request was sent"
+    )
     assert provider.requests == 1
     assert not list(cache_dir.rglob("*.lsec"))
