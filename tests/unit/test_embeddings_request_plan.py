@@ -32,6 +32,24 @@ def test_no_items_no_requests() -> None:
     assert request_bounds([], batch_size=128) == []
 
 
+def test_token_and_item_limits_reset_after_each_request() -> None:
+    """Both limits apply afresh after either one ends a request (#802)."""
+    costs = [100_000, 100_000, 60_000, 60_000, 60_000, 60_000, 60_000]
+    bounds = request_bounds(costs, batch_size=3)
+    assert bounds == [(0, 2), (2, 5), (5, 7)]
+    assert [index for start, end in bounds for index in range(start, end)] == list(
+        range(len(costs))
+    )
+    for start, end in bounds:
+        assert 0 < end - start <= 3
+        assert sum(costs[start:end]) <= 250_000
+
+
+def test_zero_token_inputs_still_count_toward_request_item_limit() -> None:
+    """The item cap is independent of token cost, including empty strings."""
+    assert request_bounds([0] * 7, batch_size=3) == [(0, 3), (3, 6), (6, 7)]
+
+
 @pytest.mark.parametrize("size", [1, 2, 5])
 def test_embedder_plan_matches_its_own_batches(size: int) -> None:
     model = OpenAIEmbedder(api_key="sk-test", dim=3, batch_size=size)

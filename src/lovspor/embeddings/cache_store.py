@@ -46,6 +46,7 @@ _FOREIGN_BITS = 0o077
 _READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 """``O_NONBLOCK`` so a FIFO planted at an entry path cannot hang the open."""
 _WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
 def entry_location(key: EntryKey) -> tuple[tuple[str, ...], str]:
@@ -197,15 +198,30 @@ def _publish(directory: Path, final: Path, payload: bytes) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.link(staged, final, follow_symlinks=False)
+        _link_in(directory, staged.name, final.name)
     finally:
         staged.unlink(missing_ok=True)
     fsync_dir(directory)
 
 
+def _link_in(directory: Path, source: str, target: str) -> None:
+    """Hard-link ``source`` to ``target`` in ``directory``; never follow a symlink.
+
+    Given directory descriptors, CPython calls linkat(2) on every platform and
+    version, so ``follow_symlinks=False`` links the name itself everywhere.
+    Without them, CPython before 3.14 on Linux calls link(2) and ignores the
+    flag, and 3.14 follows by default (#825).
+    """
+    handle = os.open(directory, _DIR_FLAGS)
+    try:
+        os.link(source, target, src_dir_fd=handle, dst_dir_fd=handle, follow_symlinks=False)
+    finally:
+        os.close(handle)
+
+
 def fsync_dir(directory: Path) -> None:
     """Make a directory's new or removed names durable."""
-    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    descriptor = os.open(directory, _DIR_FLAGS)
     try:
         os.fsync(descriptor)
     finally:
