@@ -105,6 +105,12 @@ Optional later:
 > yet accepted as confirmation for that specific archive, so crosswalk records
 > resting on it stay `research_only` until further evidence is obtained. R3
 > (attribution wording) and R4 (regjeringen.no) remain blocked.
+> Proposed successor (2026-11-07, lovspor-notebook ADR-0021, on the owner's
+> direction, not yet accepted): the R2 ruling stands, and the archive gets the
+> dataset-level basis `stated_for_dataset` instead, as the current-year part of
+> the NLOD 2.0 dataset "Norsk Lovtidend, Avdeling I" (data.norge.no, stated by
+> Lovdata on `api.lovdata.no/om-api-tjenesten/`). R3 is settled by NLOD 2.0 §5 and
+> Lovdata brukervilkår 2.3 ("oppgir Lovdata som kilde"). R4 stays blocked.
 
 ## 4. Legal posture — Option A (conservative)
 

@@ -17,6 +17,23 @@ stays unchanged as the original proposal). They are recorded in lovspor-notebook
   Evidence for historical candidates is deferred to #818.
 - R3 (attribution wording) and R4 (regjeringen.no) stay blocked.
 
+Proposed refinement (2026-11-07, lovspor-notebook ADR-0021, prepared on the
+owner's direction and in force only once the owner accepts it):
+
+- The R2 ruling stands, and `stated_for_endpoint` is still accepted only when an
+  approval says `"R2": "approved"`.
+- `lovtidend-avd1-2026.tar.bz2` is pinned `stated_for_dataset`: the current-year
+  part of the NLOD 2.0 dataset "Norsk Lovtidend, Avdeling I". Lovdata states
+  NLOD 2.0 for that dataset; its data.norge.no distribution is fetched through
+  `/list` and `/get/` as one of two parts; `/list` describes both avd. I files
+  alike; every member of the pinned file is under `lti/2026/` with an `LTI` dokid.
+  No other file gets that basis: a future year, avd. II and `gjeldende-*` stay
+  `inferred_same_dataset`.
+- R3: the manifest carries the attribution NLOD 2.0 §5 and Lovdata brukervilkår
+  2.3 ask for (Lovdata named as source, licensor, dataset, source and licence
+  links, a change notice, no endorsement, no other licence granted).
+- R4 stays blocked.
+
 A ruling is not a release. No signing key is configured (`approval-signers` is
 empty), and nothing here publishes, tags, pushes, or writes into `lovverk`.
 Publishing a dataset needs a separate owner decision.
@@ -101,7 +118,7 @@ now; pass `--cache` outside the checkout.
     owner adds their own public key, in a change they make and merge. Until then
     every approval is refused (`no trusted approval signer is configured: release
     candidates stay blocked`). No tool or agent creates, chooses or adds a key.
-  - Promotes, as a new revision, only active attested records that the capture reproduces, raw bytes included, and whose cited archives have an accepted licence basis.
+  - Promotes, as a new revision, only active attested records that the capture reproduces, raw bytes included, and whose cited archives have an accepted licence basis: `stated_for_file` and `stated_for_dataset` always, `stated_for_endpoint` only under `"R2": "approved"`, `inferred_same_dataset` never. A record citing a member of a `stated_for_dataset` archive outside that archive's Avdeling I year (`lti/2026/`) stays `research_only`.
   - Corrections stay out while R4 is blocked.
 - **Manifest** (`lovspor.crosswalk.manifest`):
   - Is derived only from the checked file.
@@ -147,7 +164,7 @@ now; pass `--cache` outside the checkout.
     read, so a proof directory cannot hang the gate. ssh-keygen verifies a
     private copy of the signature bytes that were read, so the manifest's
     `signature_sha256` is of exactly the signature that was verified.
-  - Holds the counts, commits, archive pins, parser versions, source terms (with the date they were read), the provisional attribution and the unresolved rights blockers.
+  - Holds the counts, commits, archive pins, parser versions, source terms (with the date they were read and the statement relied on), the attribution (wording in nb and en, plus the structured Lovdata source) and the unresolved blockers (R4, and the separate publication step).
   - Has no wall clock and no `released` state.
 
 The contract is `src/lovspor/crosswalk/legislative-crosswalk-1.0.0-rc.schema.json`
