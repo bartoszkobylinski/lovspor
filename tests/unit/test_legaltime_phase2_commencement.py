@@ -9,15 +9,14 @@ from datetime import date
 import pytest
 
 from lovspor.legaltime.commencement import (
-    Scope,
     _informational,
-    _scope_of,
     baseline_timing,
     header_timing,
     resolve_timings,
 )
 from lovspor.legaltime.document import Document, parse_document
 from lovspor.legaltime.instructions import interpret
+from lovspor.legaltime.scopes import Scope, _scopes_of
 
 LAW = "lov/2020-12-18-999"
 
@@ -144,10 +143,10 @@ def test_a_staggering_sentence_beside_a_delegation_leaves_everything_pending() -
     "head", ["Lovens del I", "Loven del I", "Lova del I", "Endringslova del I"]
 )
 def test_a_part_scope_may_name_the_law_as_loven_or_endringsloven(head: str) -> None:
-    scope = _scope_of(f"{head} trer i kraft 1. januar 2010.")
-    assert scope == Scope(
-        part="I", when=date(2010, 1, 1), quote=f"{head} trer i kraft 1. januar 2010."
-    )
+    scopes = _scopes_of(f"{head} trer i kraft 1. januar 2010.", None)
+    assert scopes == [
+        Scope(part="I", when=date(2010, 1, 1), quote=f"{head} trer i kraft 1. januar 2010.")
+    ]
 
 
 def test_delvis_is_a_partial_decision_title() -> None:
@@ -283,3 +282,89 @@ def test_a_multi_law_decision_whose_block_title_cites_the_law_is_its_decision() 
     ours = _by_part(law, decision)
     assert ours[("I", "§1")].effective == date(2010, 3, 1)
     assert ours[("II", "§5")].status == "pending"
+
+
+# ---------------------------------------------------------------- part lists and remainders
+
+
+def _delt(body: str, when: str = "2021-07-01", refid: str = "forskrift/2021-03-01-2") -> Document:
+    title = "Delt ikraftsetting av lov 18. desember 2020 nr. 999 om endringer"
+    return _decision(refid, title, when, f"{title}.\n{body}")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Romertall I trer i kraft 1. juli 2021.",
+        "Lovens del I trer i kraft 1. juli 2021.",
+        "Følgende trer i kraft 1. juli 2021: Endringsloven del I.",
+        "Følgende trer i kraft 1. juli 2021: Endringsloven del I (prøveloven).",
+        "Følgende endringer trer i kraft 1. juli 2021: Endringsloven del I (lov 14. juni 2019 nr. 99 om prøving).",  # noqa: E501
+        "Endringsloven del I (prøveloven) trer i kraft 1. juli 2021.",
+    ],
+)
+def test_a_single_part_scope_in_its_several_spellings(body: str) -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    timings = _by_part(law, _delt(body))
+    assert timings[("I", "§1")].effective == date(2021, 7, 1), body
+    assert timings[("II", "§5")].status == "pending", body
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Romertall I og II trer i kraft 1. juli 2021.",
+        "Romertall I, II og III trer i kraft 1. juli 2021.",
+        "Lovens del I og del II trer i kraft 1. juli 2021.",
+        "Følgende trer i kraft 1. juli 2021: Endringsloven del I og II.",
+        "Følgjande blir sett i kraft 1. juli 2021: Endringslova del I og II.",
+    ],
+)
+def test_a_list_of_parts_dates_each_part(body: str) -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    timings = _by_part(law, _delt(body))
+    assert {t.effective for t in timings.values()} == {date(2021, 7, 1)}, body
+
+
+def test_straks_in_a_part_scope_is_the_resolution_s_own_date() -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    timings = _by_part(law, _delt("Romertall I trer i kraft straks.", when="2021-03-01"))
+    assert timings[("I", "§1")].effective == date(2021, 3, 1)
+    assert timings[("II", "§5")].status == "pending"
+
+
+def test_the_remainder_covers_what_no_other_scope_of_the_decision_covers() -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    body = (
+        "Romertall I trer i kraft 1. juli 2021.\n"
+        "De andre bestemmelsene i endringsloven trer i kraft 1. oktober 2021."
+    )
+    timings = _by_part(law, _delt(body))
+    assert timings[("I", "§1")].effective == date(2021, 7, 1)
+    assert timings[("II", "§5")].effective == date(2021, 10, 1)
+    alone = _by_part(law, _delt("Loven for øvrig trer i kraft 1. oktober 2021."))
+    assert {t.reason for t in alone.values()} == {"partial decision outside the grammar"}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Romertall I trer i kraft 1. juli 2021, med unntak av endringen i § 1.",
+        "Følgende trer i kraft 1. juli 2021: Endringsloven del I med unntak av ny § 2 a.",
+        "Følgende trer i kraft 1. juli 2021: Endringsloven del I § 1 annet ledd.",
+        "Romertall I § 1 første ledd og II trer i kraft 1. juli 2021.",
+    ],
+)
+def test_part_scopes_with_exceptions_or_ledd_qualifiers_stay_outside_the_grammar(body: str) -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    timings = _by_part(law, _delt(body))
+    assert {t.reason for t in timings.values()} == {"partial decision outside the grammar"}, body
+
+
+def test_a_part_scope_listing_bare_sections_dates_only_those_sections() -> None:
+    law = _law("Loven gjelder fra den tid Kongen bestemmer.")
+    timings = _by_part(law, _delt("Følgende trer i kraft 1. juli 2021: Endringsloven del I § 1."))
+    assert timings[("I", "§1")].effective == date(2021, 7, 1)
+    assert timings[("II", "§5")].status == "pending"
+    other = _by_part(law, _delt("Følgende trer i kraft 1. juli 2021: Endringsloven del II § 7."))
+    assert {t.status for t in other.values()} == {"pending"}

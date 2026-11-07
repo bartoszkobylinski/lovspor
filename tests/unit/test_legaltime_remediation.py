@@ -14,7 +14,16 @@ import typer
 from lxml import etree
 from pytest_httpx import HTTPXMock
 
-from lovspor.legaltime import archive, commencement, document, instructions, replay, run, verify
+from lovspor.legaltime import (
+    archive,
+    commencement,
+    document,
+    instructions,
+    replay,
+    run,
+    scopes,
+    verify,
+)
 from lovspor.legaltime.commands import ReplayRequest, fetch_impl, replay_impl
 from lovspor.legaltime.errors import LegalTimeDocumentError, LegalTimeInputError
 from lovspor.legaltime.text import split_sentences
@@ -493,15 +502,15 @@ def test_partial_decision_ignores_informational_text_and_refuses_undated_scope()
     )
     sentences = [s for _, body in commencement._blocks(decision) for s in body]
     assert sentences == ["Endringsloven del I trer i kraft 1. januar 2022."]
-    assert commencement._partial_scopes(sentences) == [
-        commencement.Scope(
+    assert scopes._partial_scopes(sentences) == [
+        scopes.Scope(
             part="I",
             section=None,
             when=date(2022, 1, 1),
             quote="Endringsloven del I trer i kraft 1. januar 2022.",
         )
     ]
-    assert commencement._partial_scopes(["Endringsloven del I trer i kraft seinare."]) is None
+    assert scopes._partial_scopes(["Endringsloven del I trer i kraft seinare."]) is None
 
 
 @pytest.mark.parametrize("kind", ["replace_ledd", "insert_ledd"])

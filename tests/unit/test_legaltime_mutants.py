@@ -19,7 +19,7 @@ import typer
 from lxml import etree
 from pytest_httpx import HTTPXMock
 
-from lovspor.legaltime import commencement, instructions, replay, run, verify
+from lovspor.legaltime import commencement, instructions, replay, run, scopes, verify
 from lovspor.legaltime.archive import (
     INDEX_VERSION,
     _cached_index,
@@ -1051,11 +1051,11 @@ def test_unattributed_operations_are_counted_for_amenders_only_and_events_do_not
 
 
 def test_named_section_needs_exactly_one_section_and_pairs_need_both_sides() -> None:
-    match = commencement._DELT_SENTENCE.match(
+    match = scopes._DELT_SENTENCE.match(
         "Endringsloven del I, endringene i lov 14. juni 2019 nr. 99 om prøving § 1 og § 2, "
         "trer i kraft 1. juli 2021."
     )
-    assert match is not None and commencement._named_section(match) is None
+    assert match is not None and scopes._named_section(match) is None
     lopsided = instructions._SUBSTITUTE.match(
         "I følgende bestemmelser skal ordene «a» og «b» endres til «c»:"
     )

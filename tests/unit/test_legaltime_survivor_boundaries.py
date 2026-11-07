@@ -6,7 +6,7 @@ import pytest
 
 from lovspor.legaltime import commencement as c
 from lovspor.legaltime import instructions as ins
-from lovspor.legaltime import verify
+from lovspor.legaltime import scopes, verify
 from lovspor.legaltime.instructions import Address
 from tests.unit.test_legaltime_mutants import ACT, _law, _op, _working
 from tests.unit.test_legaltime_remediation import xml_doc
@@ -25,7 +25,7 @@ def decision(body: str = "", published: str = "", raw: str = "2022-01-01"):
     "listing,expected", [("1 til 1", frozenset({"§1"})), ("", None), ("1 !", None)]
 )
 def test_section_listing_requires_complete_nonempty_input(listing, expected):
-    assert c._own_sections(listing) == expected
+    assert scopes._own_sections(listing) == expected
 
 
 @pytest.mark.parametrize(
@@ -33,7 +33,7 @@ def test_section_listing_requires_complete_nonempty_input(listing, expected):
     ["Paragrafane 1 ! gjeld frå 1. januar 2022", "Paragrafane 1 gjeld frå 1. ukjent 2022"],
 )
 def test_scope_requires_both_sections_and_date(sentence):
-    assert c._scope_of(sentence) is None
+    assert scopes._scopes_of(sentence, None) is None
 
 
 def test_informational_reservation_is_not_a_body_conflict():

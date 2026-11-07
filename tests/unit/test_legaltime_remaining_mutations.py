@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
-from lovspor.legaltime import archive, commencement, document, instructions, replay
+from lovspor.legaltime import archive, commencement, document, instructions, replay, scopes
 from lovspor.legaltime.text import section_key_of
 from tests.unit.test_legaltime_archive import make_archive
 from tests.unit.test_legaltime_mutants import ACT, _law, _op, _working
@@ -28,11 +28,11 @@ def test_evidence_baseline_and_amender(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("rest", ["", " § 1 og § 2"])
 def test_partial_scope_without_unique_section(rest: str) -> None:
-    match = commencement._DELT_SENTENCE.fullmatch(
+    match = scopes._DELT_SENTENCE.fullmatch(
         f"Endringsloven del I, endringene i lov om prøving{rest}, trer i kraft 1. januar 2022"
     )
     assert match is not None
-    assert commencement._named_section(match) is None
+    assert scopes._named_section(match) is None
 
 
 def test_pending_baseline_is_unsettled_by_an_undated_decision() -> None:

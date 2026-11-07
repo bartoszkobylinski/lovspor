@@ -14,15 +14,14 @@ from pathlib import Path
 import pytest
 
 from lovspor.legaltime.commencement import (
-    Scope,
     Timing,
     _informational,
-    _own_sections,
     baseline_timing,
     resolve_timings,
 )
 from lovspor.legaltime.document import Document, parse_document
 from lovspor.legaltime.instructions import Operation, interpret
+from lovspor.legaltime.scopes import Scope, _own_sections
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "legaltime"
 LAW = "lov/2020-12-18-999"

@@ -16,10 +16,16 @@ from datetime import date, datetime
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import model_validator
-
 from lovspor.legaltime.document import Document, Frozen
 from lovspor.legaltime.instructions import Operation
+from lovspor.legaltime.scopes import (
+    _RESERVATION,
+    _SEC,
+    _STRAKS,
+    _named_in,
+    _partial_scopes,
+    _scopes_for,
+)
 from lovspor.legaltime.text import (
     ACT_CITATION,
     act_refid,
@@ -51,7 +57,6 @@ _DECISION_TITLE = re.compile(
     re.I,
 )
 _PARTIAL_TITLE = re.compile(r"^(?:(?:Forskrift|Vedtak)\s+om\s+)?(?:Delt|Delvis)\b", re.I)
-_STRAKS = re.compile(r"\b(?:straks|med\s+en\s+gang|omgående)\b", re.I)
 _VERB = (
     r"(?:trer\s+i\s+kraft|gjeld\s+frå|gjelder\s+fra|tek\s+til\s+å\s+gjelde|tar\s+til\s+å\s+gjelde)"
 )
@@ -61,19 +66,10 @@ _DEFAULT_CLAUSE = re.compile(
     re.I,
 )
 _COMMENCEMENT_PHRASE = re.compile(rf"{_VERB}|\bi\s+kraft\b|\bvirkning\s+fr[aå]\b", re.I)
-_RESERVATION = re.compile(r"\b(?:unntatt|bortsett|likevel|med\s+unntak|unnateke|unnatatt)\b", re.I)
 _EXCEPTION_NEW_SECTION = re.compile(
     r"^Ny\s+(?P<sec>§\s*\d+(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?)(?:\s+i\s+\S+)?\s+trer\s+likevel\s+i\s+kraft\b",
     re.I,
 )
-_SEC = r"§\s*\d+(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
-_DELT_SENTENCE = re.compile(
-    rf"^(?:Endringsloven|Endringslova|Lovens|Loven|Lovas|Lova)\s+del\s+(?P<part>[IVXLC]+)"
-    rf"(?:,\s*(?:ny\s+(?P<sec>{_SEC})\s+i\s+lov|(?:endringene|endringane)\s+i\s+lov)(?P<rest>[^,]*))?"
-    r",?\s*trer\s+i\s+kraft\s+(?P<when>.+)$",
-    re.I,
-)
-_SECTION_IN = re.compile(_SEC)
 _EXCEPTION_NAMED_SECTION = re.compile(
     rf"^(?:Endringene|Endringane|Endringa|Endringen)\s+i\s+\S+\s+(?P<sec>{_SEC})\s+i\s+del\s+"
     r"(?P<part>[IVXLC]+)\s+i\s+(?:loven|lova)(?:\s+her)?\s+trer\s+(?:likevel\s+)?i\s+kraft\s+(?P<when>.+)$",
@@ -95,16 +91,6 @@ _INFORMATIONAL = re.compile(
 _TRANSITIONAL = re.compile(r"\bgjeld(?:er)?\s+(?:bare|berre|også|òg|først|fyrst|for)\b", re.I)
 _CONTINUES = re.compile(
     r"\b(?:held|holder|heldt)\s+fram\s+å\s+gjelde\b|\bfortsetter\s+å\s+gjelde\b", re.I
-)
-_OWN_SECTIONS = re.compile(
-    r"^(?:Paragrafane|Paragrafene|Paragrafar|Paragrafer|Paragraf|§§?)\s+(?P<list>.+?)\s+"
-    r"(?:gjeld|gjelder|trer\s+i\s+kraft|tek\s+til\s+å\s+gjelde|tar\s+til\s+å\s+gjelde)\s+"
-    r"(?:frå|fra)?\s*(?P<when>\d.+)$",
-    re.I,
-)
-_LISTING_TOKEN = re.compile(
-    r"\s*(?:(?P<range>(?P<first>\d+)\s+til\s+(?P<last>\d+))|(?P<one>\d+(?:\s*[a-hj-zæøå](?![a-zæøå]))?)"
-    r"|(?P<sep>,|og|§§|§))(?=\s|,|$)"
 )
 
 
@@ -309,102 +295,6 @@ def is_decision_for(document: Document, law_refid: str) -> bool:
     )
 
 
-class Scope(Frozen):
-    """What one sentence of a partial decision puts into force, and when."""
-
-    part: str | None = None
-    section: str | None = None
-    own_sections: frozenset[str] = frozenset()
-    when: date
-    quote: str  # the sentence the scope and date were read from
-
-    @model_validator(mode="after")
-    def _one_kind(self) -> "Scope":
-        if self.own_sections and (self.part is not None or self.section is not None):
-            raise ValueError("a scope names either own_sections or a part, never both")
-        return self
-
-    def covers(self, operation: Operation) -> bool:
-        if self.own_sections:
-            return operation.host_section in self.own_sections
-        if self.part is None or operation.part.upper() != self.part:
-            return False
-        return self.section is None or operation.address.section == self.section
-
-
-def _own_sections(listing: str) -> frozenset[str] | None:
-    """``1 til 10 og §§ 12 til 25`` → the act's own section keys; None on any other token."""
-    keys: set[str] = set()
-    position = 0
-    for match in _LISTING_TOKEN.finditer(listing):
-        if match.start() != position:
-            return None  # a word the listing grammar does not know (``unntatt``, a letter range)
-        position = match.end()
-        if match.group("range"):
-            first, last = int(match.group("first")), int(match.group("last"))
-            if last < first:
-                return None
-            keys.update(f"§{n}" for n in range(first, last + 1))
-        elif match.group("one"):
-            keys.add(f"§{match.group('one').replace(' ', '')}")
-    return frozenset(keys) if position == len(listing) and keys else None
-
-
-def _scope_of(sentence: str) -> Scope | None:
-    if _RESERVATION.search(sentence):
-        return None  # an exception the grammar cannot scope: the whole decision is unreadable
-    part_match = _DELT_SENTENCE.match(sentence)
-    if part_match is not None:
-        when = parse_date(part_match.group("when"))
-        if when is None:
-            return None
-        part, section = part_match.group("part").upper(), _named_section(part_match)
-        return Scope(part=part, section=section, when=when, quote=sentence)
-    own = _OWN_SECTIONS.match(sentence)
-    if own is not None:
-        when = parse_date(own.group("when"))
-        sections = _own_sections(own.group("list"))
-        if when is not None and sections is not None:
-            return Scope(own_sections=sections, when=when, quote=sentence)
-    return None
-
-
-def _partial_scopes(sentences: list[str]) -> list[Scope] | None:
-    """One scope per sentence of a ``Delt`` block; None when any sentence is foreign."""
-    scopes: list[Scope] = []
-    for sentence in sentences:
-        scope = _scope_of(sentence)
-        if scope is None:
-            return None
-        scopes.append(scope)
-    return scopes
-
-
-def _named_section(match: re.Match[str]) -> str | None:
-    """The one section a ``Delt`` sentence names, from ``ny § X`` or the amended act's clause."""
-    if match.group("sec"):
-        return section_key_of(match.group("sec"))
-    rest = match.group("rest")
-    if rest is None:
-        return None
-    found = _SECTION_IN.findall(rest)
-    return section_key(found[-1]) if len(found) == 1 else None
-
-
-def _scopes_for(operation: Operation, scopes: list[Scope]) -> list[Scope]:
-    """The scopes that reach the operation; the specific ones when any does."""
-    covering = [scope for scope in scopes if scope.covers(operation)]
-    specific = [s for s in covering if s.section is not None or s.own_sections]
-    return specific or covering
-
-
-def _named_in(law: Document, scope: Scope) -> bool:
-    """Whether the law has the part or own sections the scope names."""
-    if scope.own_sections:
-        return any(p.key in scope.own_sections for p in law.provisions)
-    return scope.part in {part.label.upper() for part in law.parts}
-
-
 def _blocks(decision: Document) -> list[tuple[str | None, list[str]]]:
     """The decision's sentences grouped under the title sentences that open each law's block."""
     blocks: list[tuple[str | None, list[str]]] = [(None, [])]
@@ -507,7 +397,7 @@ class _Decision:
         self.title = decision.header.title
         self.block_problem: str | None = None
         block = _block_for(decision, law.header.refid)
-        scopes = _partial_scopes(list(block.sentences)) if block else None
+        scopes = _partial_scopes(list(block.sentences), _own_date(decision)) if block else None
         # A block is partial when its title says so, or when every sentence it has is a scope.
         self.partial = block is not None and (
             bool(_PARTIAL_TITLE.match(block.title)) or bool(scopes)
