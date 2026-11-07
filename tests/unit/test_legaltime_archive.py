@@ -299,3 +299,27 @@ def test_incomplete_member_is_an_input_error_without_a_partial_index(tmp_path: P
 
     assert not cache_dir.exists()
     assert not (tmp_path / "lti").exists()
+
+
+@pytest.mark.parametrize("declared_size", [64 * 1024 * 1024 + 1, 2**40])
+def test_oversized_member_is_refused_before_opening_or_caching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declared_size: int
+) -> None:
+    """The new indexer must preserve the extractor's decompression-bomb guard."""
+    member = tarfile.TarInfo("lti/oversized.xml")
+    member.size = declared_size
+    archive = tmp_path / "oversized.tar.bz2"
+    # Only a header is needed: rejection must precede any attempt to read the body.
+    archive.write_bytes(bz2.compress(member.tobuf()))
+    cache_dir = tmp_path / "index"
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("oversized member body must never be opened")
+
+    monkeypatch.setattr(tarfile.TarFile, "extractfile", forbidden)
+    with pytest.raises(LegalTimeInputError, match="unreadable archive oversized.tar.bz2") as error:
+        index_archive(archive, cache_dir)
+
+    assert "exceeding the 67108864-byte per-member cap" in str(error.value)
+    assert str(declared_size) in str(error.value)
+    assert not cache_dir.exists()
