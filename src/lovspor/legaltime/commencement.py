@@ -356,11 +356,11 @@ def baseline_timing(act: Document, decisions: tuple[Document, ...]) -> Timing:
     for decision in decisions:
         if not is_decision_for(decision, act.header.refid):
             continue
-        found = header_timing(decision)
         if _PARTIAL_TITLE.match(decision.header.title):
             return _unresolved(
                 decision, "partial commencement of the act itself", decision.header.title
             )
-        if found.status == "dated" and found.effective is not None:
-            return _dated(decision, found.effective, decision.header.title)
+        when = header_timing(decision).dated_on
+        if when is not None:
+            return _dated(decision, when, decision.header.title)
     return timing

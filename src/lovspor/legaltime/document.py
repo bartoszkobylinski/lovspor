@@ -25,7 +25,8 @@ _NOTE_CLASSES = frozenset({"changesToParent", "footnotereference", "footnoteLabe
 _TRANSPARENT = frozenset({"document-change", "listArticle", "legalArticle"})
 _LIST_TAGS = frozenset({"ul", "ol", "li"})
 _LEDD_CLASSES = frozenset({"legalP", "numberedLegalP"})
-_DROP_BLANK_TEXT = False  # the renderer's rule: whitespace between inline elements is text
+# The renderer's rule: whitespace between inline elements is text, so it is kept.
+_PARSER = safe_parser(remove_blank_text=False)
 _BLOCK_TAGS = frozenset({"article", "p", "ul", "ol", "li", "div", "section", "h2", "h3", "h4"})
 NodeKind = Literal["paragraph", "provision", "ledd", "title", "other"]
 
@@ -242,7 +243,7 @@ def _parts(main: etree._Element) -> tuple[Part, ...]:
 def parse_document(body: bytes, member: str) -> Document:
     """Parse one member. Raises ``LegalTimeDocumentError`` on a foreign shape."""
     try:
-        root = etree.fromstring(body, parser=safe_parser(remove_blank_text=_DROP_BLANK_TEXT))
+        root = etree.fromstring(body, parser=_PARSER)
     except etree.XMLSyntaxError as exc:
         raise LegalTimeDocumentError(f"invalid XML in {member}") from exc
     main = root.find("./body/main")

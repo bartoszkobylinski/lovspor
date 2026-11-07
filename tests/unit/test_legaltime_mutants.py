@@ -46,7 +46,7 @@ from lovspor.legaltime.document import (
 from lovspor.legaltime.errors import LegalTimeDocumentError, LegalTimeInputError
 from lovspor.legaltime.instructions import Address, Operation, interpret
 from lovspor.legaltime.replay import Event, ProvisionState, ReplayState, _Working
-from lovspor.legaltime.text import _ends_with_abbreviation, section_sort_key
+from lovspor.legaltime.text import _ends_with_abbreviation, section_key_of, section_sort_key
 from lovspor.parsing.xml_normalizer import safe_parser
 from lovspor.sources.lovdata import LovdataClient
 from tests.unit.test_legaltime_archive import LAYOUT, make_archive
@@ -1034,3 +1034,17 @@ def test_unattributed_operations_are_counted_for_amenders_only_and_events_do_not
     assert len(run.events_for(evidence)) == 5
     state = _run([_event(_op("repeal_section", Address(section="§9")))])
     assert run._state_record(state)["unresolved"] == [["x#I:0.0", "target provision missing"]]
+
+
+def test_named_section_needs_exactly_one_section_and_pairs_need_both_sides() -> None:
+    match = commencement._DELT_SENTENCE.match(
+        "Endringsloven del I, endringene i lov 14. juni 2019 nr. 99 om prøving § 1 og § 2, "
+        "trer i kraft 1. juli 2021."
+    )
+    assert match is not None and commencement._named_section(match) is None
+    lopsided = instructions._SUBSTITUTE.match(
+        "I følgende bestemmelser skal ordene «a» og «b» endres til «c»:"
+    )
+    assert lopsided is not None and instructions._pairs(lopsided) == ()
+    with pytest.raises(ValueError, match="not a section label: 'kap 1'"):
+        section_key_of("kap 1")

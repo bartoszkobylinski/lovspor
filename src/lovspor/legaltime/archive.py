@@ -61,7 +61,7 @@ Indexed = list[tuple[Path, ArchiveIndex]]
 
 def file_sha256(path: Path) -> str:
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        return hashlib.file_digest(stream, hashlib.sha256).hexdigest()
 
 
 def _record(name: str, body: bytes) -> MemberRecord | None:

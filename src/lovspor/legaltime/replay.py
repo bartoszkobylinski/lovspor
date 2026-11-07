@@ -159,8 +159,11 @@ class _Working:
 
     def apply_replace_ledd(self, op: Operation) -> str | None:
         target = self._target(op.address.section)
-        start, end = op.address.ledd or 0, op.address.ledd_end or op.address.ledd or 0
-        if target is None or not 1 <= start <= end <= len(target.ledd):
+        start = op.address.ledd
+        if target is None or start is None:
+            return "target ledd range does not exist"
+        end = op.address.ledd_end or start
+        if not 1 <= start <= end <= len(target.ledd):
             return "target ledd range does not exist"
         if len(op.ledd) != end - start + 1:
             return f"{len(op.ledd)} ledd supplied for {end - start + 1} addressed"
@@ -169,9 +172,10 @@ class _Working:
 
     def apply_insert_ledd(self, op: Operation) -> str | None:
         target = self._target(op.address.section)
-        start, end = op.address.ledd or 0, op.address.ledd_end or op.address.ledd or 0
-        if target is None or not 1 <= start <= len(target.ledd) + 1:
+        start = op.address.ledd
+        if target is None or start is None or not 1 <= start <= len(target.ledd) + 1:
             return "insertion point does not exist"
+        end = op.address.ledd_end or start
         if len(op.ledd) != end - start + 1:
             return f"{len(op.ledd)} ledd supplied for {end - start + 1} addressed"
         target.ledd[start - 1 : start - 1] = list(op.ledd)
@@ -348,7 +352,7 @@ def _targets(op: Operation, working: _Working) -> list[_Provision]:
     keys = (
         [op.address.section, op.destination]
         if op.kind != "substitute_term"
-        else [f"§{n}{letter or ''}" for n, letter in _SECTION_REF.findall(op.locations or "")]
+        else [k for k, _ in _locations(op.locations)]
     )
     return [working.map[k] for k in keys if k and k in working.map]
 
