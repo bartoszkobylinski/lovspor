@@ -9,7 +9,7 @@ from lovspor.embeddings import cache_admin
 from lovspor.embeddings.cache_format import CachedVectors
 from lovspor.embeddings.cache_store import LocalEntryStore
 from lovspor.errors import EmbeddingCacheError
-from tests.unit.test_embedding_cache_admin import POLICY, _doc, _unit
+from tests.unit.test_embedding_cache_admin import POLICY, _doc, _hash, _unit
 
 
 def _store_with_document_of_shape(
@@ -86,3 +86,41 @@ def test_walk_missing_directory_is_empty(tmp_path: Path, walker: str) -> None:
     missing = tmp_path / "missing"
     assert list(getattr(cache_admin, walker)(missing)) == []
     assert not missing.exists()
+
+
+def test_prune_continues_after_a_checkpoint_without_a_document(tmp_path: Path) -> None:
+    """An unfinished document must not prevent pruning a later finished one."""
+    store = LocalEntryStore.open(tmp_path / "cache", (), POLICY)
+    pending_text, finished_text = sorted(("first", "second"), key=_hash)
+    pending = _unit(pending_text)
+    finished = _unit(finished_text)
+    document = _doc(finished_text)
+    for entry in (pending, finished, document):
+        store.put(entry)
+
+    report = cache_admin.prune(store)
+
+    assert (report.superseded_units, report.refused) == (1, [])
+    assert store.get(pending.key) is not None
+    assert store.get(finished.key) is None
+    assert store.get(document.key) is not None
+
+
+def test_prune_reports_one_dimension_refusal_per_document_with_key_prefixes(
+    tmp_path: Path,
+) -> None:
+    """Keep paid checkpoints; report each mismatched document once with safe prefixes."""
+    store, document, checkpoint, pending = _store_with_document_of_shape(tmp_path, 2, 1)
+    second_checkpoint = _unit("finished", 1)
+    store.put(second_checkpoint)
+
+    report = cache_admin.prune(store)
+
+    assert report.refused == [
+        "embedding cache entry refused (document esi=01234567 "
+        f"input_hash={document.key.input_hash[:12]}): dimension 2 differs from "
+        "its unit checkpoints' 4; the checkpoints are kept"
+    ]
+    assert report.superseded_units == 0
+    for entry in (document, checkpoint, second_checkpoint, pending):
+        assert store.get(entry.key) is not None
