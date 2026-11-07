@@ -1,5 +1,7 @@
 """Design §3: preserve completed requests and never pay over refused checkpoints."""
 
+import os
+import stat
 from pathlib import Path
 
 import numpy as np
@@ -24,16 +26,20 @@ def test_directory_sync_failure_stops_payment_and_reuses_published_entries(
     identity = hash_embedding_inputs(inputs)
     provider = _Provider()
     cached = _cached(provider, tmp_path)
-    real_sync = cache_store.fsync_dir
+    real_sync = os.fsync
 
-    def fail_selected_directory(directory: Path) -> None:
-        is_document = directory.name == "documents"
-        if is_document == (phase == "document"):
-            raise OSError(5, "directory sync failed")
-        real_sync(directory)
+    def fail_selected_directory(descriptor: int) -> None:
+        # The store syncs a directory through the descriptor it walked to.
+        info = os.fstat(descriptor)
+        if stat.S_ISDIR(info.st_mode):
+            documents = (path.stat() for path in cache_dir.rglob("documents"))
+            is_document = any(os.path.samestat(info, other) for other in documents)
+            if is_document == (phase == "document"):
+                raise OSError(5, "directory sync failed")
+        real_sync(descriptor)
 
     with monkeypatch.context() as patch:
-        patch.setattr(cache_store, "fsync_dir", fail_selected_directory)
+        patch.setattr(cache_store.os, "fsync", fail_selected_directory)
         with pytest.raises(EmbeddingCacheStorageError, match="directory sync failed"):
             quantized_document_vectors(cached, inputs, identity)
 

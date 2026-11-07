@@ -51,6 +51,53 @@ def test_partial_checkpoints_are_isolated_by_embedding_space(
     assert resumed.progress.units_cached == 1
 
 
+@pytest.mark.parametrize("split", [1, 3])
+def test_changed_request_slices_do_not_reuse_same_index_checkpoints(
+    cache_dir: Path, tmp_path: Path, split: int
+) -> None:
+    """Design §3: unit identity includes the slice, even at the same index/count."""
+
+    class BatchSensitiveProvider(_Provider):
+        boundary = 2
+
+        def plan_requests(self, texts: list[str]) -> list[tuple[int, int]]:
+            if len(texts) < 4:
+                return [(0, len(texts))]
+            return [(0, self.boundary), (self.boundary, len(texts))]
+
+        def encode(self, texts: list[str]) -> np.ndarray:
+            parts = []
+            for start, end in self.plan_requests(texts):
+                batch = texts[start:end]
+                parts.append(super().encode(batch) + len(batch))
+            return np.vstack(parts)
+
+    inputs = _inputs()
+    digest = hash_embedding_inputs(inputs)
+    with pytest.raises(RuntimeError, match="job killed"):
+        quantized_document_vectors(
+            _cached(BatchSensitiveProvider(fail_after=1), tmp_path), inputs, digest
+        )
+    checkpoint = next(cache_dir.rglob("*.lsec"))
+    original_bytes = checkpoint.read_bytes()
+
+    provider = BatchSensitiveProvider()
+    provider.boundary = split
+    cached = _cached(provider, tmp_path)
+    actual, scale = quantized_document_vectors(cached, inputs, digest)
+    reference = BatchSensitiveProvider()
+    reference.boundary = split
+    expected, expected_scale = quantized_document_vectors(reference, inputs, digest)
+
+    assert provider.requests == 2
+    assert cached.progress.units_cached == 0
+    assert cached.progress.units_paid == 2
+    np.testing.assert_array_equal(actual, expected)
+    assert scale == expected_scale
+    assert checkpoint.read_bytes() == original_bytes
+    assert len(list(cache_dir.glob("schema-1/*/units/**/*.lsec"))) == 3
+
+
 @pytest.mark.parametrize("change", ["order", "section_id"])
 def test_changed_document_identity_does_not_reuse_old_checkpoints(
     cache_dir: Path, tmp_path: Path, change: str

@@ -263,10 +263,10 @@ def test_failed_document_publication_reuses_all_completed_requests(
     reference = _write(settings, _Provider(), slug="reference")
     publish = cache_store._publish
 
-    def fail_document(directory: Path, final: Path, payload: bytes) -> None:
-        if directory.name == "documents":
+    def fail_document(directory: int, name: str, payload: bytes) -> None:
+        if "-" not in name:  # a document entry; unit names are index-count-hash
             raise OSError(28, "No space left on device")
-        publish(directory, final, payload)
+        publish(directory, name, payload)
 
     provider = _Provider()
     with monkeypatch.context() as patch:
@@ -520,10 +520,10 @@ def test_document_publish_failure_resumes_from_all_paid_checkpoints(
     provider = _Provider()
     publish = cache_store._publish
 
-    def fail_document(directory: Path, final: Path, payload: bytes) -> None:
-        if directory.name == "documents":
+    def fail_document(directory: int, name: str, payload: bytes) -> None:
+        if "-" not in name:  # a document entry; unit names are index-count-hash
             raise OSError(28, "No space left on device")
-        publish(directory, final, payload)
+        publish(directory, name, payload)
 
     with monkeypatch.context() as patch:
         patch.setattr(cache_store, "_publish", fail_document)
