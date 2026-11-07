@@ -10,8 +10,17 @@ import numpy as np
 import pytest
 
 from lovspor.embeddings.cache_format import decode_entry, encode_entry
-from lovspor.embeddings.cache_store import _publish
+from lovspor.embeddings.cache_store import _publish as _publish_at
 from tests.unit.test_embedding_cache_format import _doc_entry, _policy, _unit_entry
+
+
+def _publish(directory: Path, final: Path, payload: bytes) -> None:
+    """Publish ``final`` through a descriptor for ``directory``, as the store does."""
+    handle = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        _publish_at(handle, final.name, payload)
+    finally:
+        os.close(handle)
 
 
 @pytest.mark.parametrize("mask", [0o000, 0o077, 0o777])
