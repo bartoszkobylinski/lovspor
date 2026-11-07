@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 import tomllib
+import typing
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from html.parser import HTMLParser
@@ -816,3 +817,10 @@ def test_assumption_os_link_does_not_follow_a_symlink_on_linux(tmp_path: Path) -
     os.link(link, tmp_path / "true", follow_symlinks=True)
     assert (tmp_path / "omitted").is_symlink()
     assert (tmp_path / "true").is_symlink()
+
+
+def test_assumption_typing_cast_returns_its_value_unchanged() -> None:
+    """Pins mutation-equivalents/embeddings.cache/quantized_document_vectors-*.toml."""
+    scale = 0.0123
+    assert typing.cast(float, scale) is scale
+    assert typing.cast(None, scale) is scale
