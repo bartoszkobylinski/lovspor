@@ -6,7 +6,9 @@ are real contracts (the evidence files are read by their keys; an operator
 reads the messages), not decoration.
 """
 
+import io
 import json
+import tarfile
 import tempfile
 from datetime import date, datetime
 from hashlib import sha256
@@ -15,6 +17,7 @@ from pathlib import Path
 import pytest
 import typer
 from lxml import etree
+from pytest_httpx import HTTPXMock
 
 from lovspor.legaltime import commencement, instructions, replay, run, verify
 from lovspor.legaltime.archive import (
@@ -28,7 +31,7 @@ from lovspor.legaltime.archive import (
     index_archive,
     load_oracle,
 )
-from lovspor.legaltime.commands import ReplayRequest, _summary, replay_impl
+from lovspor.legaltime.commands import ReplayRequest, _summary, fetch_impl, replay_impl
 from lovspor.legaltime.document import (
     Document,
     Ledd,
@@ -45,6 +48,7 @@ from lovspor.legaltime.instructions import Address, Operation, interpret
 from lovspor.legaltime.replay import Event, ProvisionState, ReplayState, _Working
 from lovspor.legaltime.text import _ends_with_abbreviation, section_sort_key
 from lovspor.parsing.xml_normalizer import safe_parser
+from lovspor.sources.lovdata import LovdataClient
 from tests.unit.test_legaltime_archive import LAYOUT, make_archive
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "legaltime"
@@ -789,3 +793,245 @@ def test_sort_key_and_abbreviation_edges() -> None:
     assert _ends_with_abbreviation("se  jf.")
     assert not _ends_with_abbreviation("se nr 21.")
     assert _ends_with_abbreviation("a b jf")
+
+
+# ------------------------------------------------- second round: remaining survivors
+
+
+def _tar(path: Path, members: dict[str, bytes]) -> Path:
+    with tarfile.open(path, "w:bz2") as tar:
+        for name, body in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
+    return path
+
+
+def test_fetch_writes_pins_with_the_exact_source_into_a_nested_dest(
+    tmp_path: Path, httpx_mock: object
+) -> None:
+    assert isinstance(httpx_mock, HTTPXMock)
+    body = b"bytes"
+    httpx_mock.add_response(
+        url="https://api.lovdata.no/v1/publicData/list",
+        json=[
+            {
+                "filename": "gjeldende-lover.tar.bz2",
+                "description": "x",
+                "sizeBytes": 5,
+                "lastModified": "2026-11-04T02:32:00Z",
+            }
+        ],
+    )
+    httpx_mock.add_response(
+        url="https://api.lovdata.no/v1/publicData/get/gjeldende-lover.tar.bz2", content=body
+    )
+    dest = tmp_path / "deep" / "er"
+    with LovdataClient() as client:
+        fetch_impl(dest, client)
+    pins = json.loads((dest / "pins.json").read_text(encoding="utf-8"))
+    assert pins["source"] == "https://api.lovdata.no/v1/publicData/"
+    assert (dest / "pins.json").read_text(encoding="utf-8").endswith("}\n")
+    with (
+        LovdataClient() as client,
+        pytest.raises(LegalTimeInputError, match="publicData /list names no pilot archive"),
+    ):
+        httpx_mock.add_response(url="https://api.lovdata.no/v1/publicData/list", json=[])
+        fetch_impl(dest, client)
+
+
+def test_index_cache_lives_in_a_nested_cache_dir_and_is_trusted_under_its_digest(
+    tmp_path: Path,
+) -> None:
+    archive = make_archive(tmp_path / "a.tar.bz2")
+    cache_dir = tmp_path / "idx" / "deep"
+    index = index_archive(archive, cache_dir)
+    cache = cache_dir / f"a.tar.bz2.{INDEX_VERSION}.json"
+    assert cache.exists()
+    tampered = index.model_copy(update={"skipped": ("lti/2020/marker.xml",)})
+    cache.write_text(tampered.model_dump_json(indent=1), encoding="utf-8")
+    assert index_archive(archive, cache_dir).skipped == ("lti/2020/marker.xml",)
+    with pytest.raises(LegalTimeInputError, match="archive not found"):
+        index_archive(tmp_path / "none.tar.bz2", cache_dir)
+    evidence = collect(ACT, [archive], cache_dir / "via-collect")
+    assert (cache_dir / "via-collect" / f"a.tar.bz2.{INDEX_VERSION}.json").exists()
+    assert evidence.act == ACT
+
+
+def test_inputs_sort_by_filename_not_by_path(tmp_path: Path) -> None:
+    first = make_archive(tmp_path / "z" / "a-lovtidend.tar.bz2") if False else None
+    (tmp_path / "z").mkdir()
+    (tmp_path / "a").mkdir()
+    one = make_archive(tmp_path / "z" / "lovtidend-avd1-2001-2025.tar.bz2")
+    two = make_archive(
+        tmp_path / "a" / "lovtidend-avd1-2026.tar.bz2", {"lti/2026/sf-1.xml": "resolution-full.xml"}
+    )
+    evidence = collect(ACT, [two, one])
+    report = run.build_report(evidence, [date(2023, 1, 1)], None, [two, one])
+    assert [p["filename"] for p in report["inputs"]] == [one.name, two.name]
+    assert first is None
+
+
+def test_member_without_publication_date_indexes_with_none() -> None:
+    body = b'<html><body><header><dl><dd class="refid">lov/2020-01-01-1</dd></dl></header><main/></body></html>'  # noqa: E501
+    record = _record("m.xml", body)
+    assert record is not None and record.published_at is None and record.title == ""
+
+
+def test_load_oracle_keeps_scanning_past_other_members(tmp_path: Path) -> None:
+    archive = _tar(
+        tmp_path / "o.tar.bz2",
+        {
+            "nl/a.xml": (FIXTURES / "amending.xml").read_bytes(),
+            "nl/b.xml": (FIXTURES / "consolidated.xml").read_bytes(),
+        },
+    )
+    assert load_oracle(archive, ACT).member == "nl/b.xml"
+
+
+def test_partial_decision_with_an_undated_sentence_is_unresolved() -> None:
+    law = _law(
+        "lov/2020-12-18-999", "Kongen bestemmer", "Loven gjelder fra den tid Kongen bestemmer."
+    )
+    decision = parse_document(
+        (
+            b'<html><body><header><dl><dd class="refid">forskrift/2021-05-28-1</dd>'
+            b'<dd class="dateInForce">2022-01-01</dd><dd class="dateOfPublication">2021-05-31 16:10</dd>'  # noqa: E501
+            b'<dd class="title">Delt ikrafttredelse av lov 18. desember 2020 nr. 999 om endringer</dd>'  # noqa: E501
+            b'</dl></header><main><article class="legalP">Endringsloven del I trer i kraft seinare.'
+            b"</article></main></body></html>"
+        ),
+        "x",
+    )
+    reading = interpret(law)
+    timings = commencement.resolve_timings(law, reading.clauses, reading.operations, (decision,))
+    assert {t.reason for t in timings.values()} == {"partial decision outside the grammar"}
+
+
+def test_ledd_after_a_list_ledd_stays_a_separate_ledd() -> None:
+    article = etree.fromstring(
+        '<article class="legalArticle"><article class="legalP">A<ul><li>x</li></ul></article>'
+        '<article class="legalP">B</article></article>'
+    )
+    assert [item.text for item in _ledd_of(article)] == ["A x", "B"]
+
+
+def test_nested_sections_and_lists_inside_a_change_keep_their_address() -> None:
+    body = (
+        '<html><body><header><dl><dd class="refid">lov/1</dd></dl></header><main>'
+        '<section class="section"><h2>Del I</h2><section class="section"><h3>Kap 1</h3>'
+        '<article class="defaultP">inner</article></section><article class="defaultP">outer</article>'  # noqa: E501
+        '</section><section class="section"><h2>II</h2><article class="change" data-change-part="lov/1/§5">'  # noqa: E501
+        '<ul><li><article class="listArticle"><article class="legalP">item</article></article></li></ul>'  # noqa: E501
+        "</article></section></main></body></html>"
+    )
+    document = parse_document(body.encode(), "x")
+    assert [(n.text, n.change_part) for n in document.parts[0].nodes] == [
+        ("inner", ()),
+        ("outer", ()),
+    ]
+    assert [(n.text, n.change_part) for n in document.parts[1].nodes] == [("item", ("lov/1/§5",))]
+
+
+def test_non_adjacent_punktum_pair_has_no_address_and_part_label_is_the_middle_field() -> None:
+    kind, groups = instructions.classify("§ 1 første og tredje punktum skal lyde:")
+    assert kind == "replace_punktum"
+    assert instructions._address(groups) == Address(section="§1")
+    assert instructions._part_label("0:a:b:7") == "a"
+
+
+def test_renumber_shift_only_converts_the_operation_right_before_it() -> None:
+    body = (
+        '<html><body><header><dl><dd class="refid">lov/1</dd></dl></header><main><section class="section">'  # noqa: E501
+        '<h2>I</h2><article class="defaultP">I lov 14. juni 2019 nr. 99 om x gjøres følgende endringer:'  # noqa: E501
+        '</article><article class="defaultP">Nåværende annet ledd blir nytt tredje ledd.</article>'
+        '<article class="defaultP">§ 1 annet ledd skal lyde:</article><article class="legalP">N.</article>'  # noqa: E501
+        "</section></main></body></html>"
+    )
+    ops = interpret(parse_document(body.encode(), "x")).operations
+    assert [op.kind for op in ops] == ["renumber", "replace_ledd"]
+
+
+def test_intro_followed_by_prose_records_neither_an_operation_nor_a_clause() -> None:
+    body = (
+        '<html><body><header><dl><dd class="refid">lov/1</dd></dl></header><main><section class="section">'  # noqa: E501
+        '<h2>I</h2><article class="defaultP">I lov 14. juni 2019 nr. 99 om x gjøres følgende endringer:'  # noqa: E501
+        '</article><article class="legalP">Departementet kan gi forskrift.</article>'
+        "</section></main></body></html>"
+    )
+    result = interpret(parse_document(body.encode(), "x"))
+    assert result.operations == () and result.clauses == ()
+
+
+def test_locations_with_three_sections_and_apply_on_the_second_ledd() -> None:
+    assert replay._locations("§ 1 annet ledd, § 2 tredje ledd, § 3") == [
+        ("§1", frozenset({2})),
+        ("§2", frozenset({3})),
+        ("§3", frozenset()),
+    ]
+    body = (
+        '<html><body><header><dl><dd class="refid">lov/9</dd></dl></header><main><section class="section">'  # noqa: E501
+        '<article class="legalArticle" data-name="§9"><article class="legalP">Første. Andre.</article>'  # noqa: E501
+        '<article class="legalP">Liste:<ul class="defaultList"><li data-name="a)"><article class="listArticle">'  # noqa: E501
+        '<article class="legalP">alfa</article></article></li></ul></article></article>'
+        "</section></main></body></html>"
+    )
+    working = _Working(parse_document(body.encode(), "x"))
+    punktum = _op("replace_punktum", Address(section="§9", ledd=2, punktum=1), ("X.",))
+    assert (
+        working.apply_replace_punktum(punktum) == "punktum operation on a ledd that carries a list"
+    )
+    bokstav = _op("replace_bokstav", Address(section="§9", ledd=2, bokstav="a"), ("beta",))
+    assert working.apply_replace_bokstav(bokstav) is None
+    assert working.map["§9"].ledd[1].text == "Liste: beta"
+    assert working.map["§9"].ledd[0].text == "Første. Andre."
+
+
+def test_move_destination_at_the_end_and_insert_section_without_key() -> None:
+    w = _working()
+    assert (
+        w.apply_move_ledd(
+            _op("move_ledd", Address(section="§1", ledd=1, destination_ledd=2), destination="§3")
+        )
+        is None
+    )
+    assert [item.text for item in w.map["§3"].ledd][-1] == ENACTED_TEXT_FIRST
+    w = _working()
+    assert (
+        w.apply_move_ledd(
+            _op("move_ledd", Address(section="§1", ledd=1, destination_ledd=3), destination="§3")
+        )
+        == "destination ledd 3 does not fit 1 existing"
+    )
+    provision = load("amending.xml")
+    new = next(o for o in interpret(provision).operations if o.kind == "insert_section")
+    assert (
+        w.apply_insert_section(new.model_copy(update={"address": Address()}))
+        == "new provision without key or text, or key already present"
+    )
+    assert (
+        w.apply_replace_section(_op("replace_section", Address(section="§1")))
+        == "target provision missing or no replacement text"
+    )
+
+
+ENACTED_TEXT_FIRST = "Loven gjelder prøving av fylkesmannen. Den gjelder også retting."
+
+
+def test_unattributed_operations_are_counted_for_amenders_only_and_events_do_not_stop_early() -> (
+    None
+):
+    body = (
+        '<html><body><header><dl><dd class="refid">lov/2020-01-01-1</dd></dl></header><main>'
+        '<section class="section"><h2>I</h2><article class="defaultP">§ 1 skal lyde:</article>'
+        '<article class="futureLegalArticle" data-name="§1"><article class="legalP">T.</article></article>'  # noqa: E501
+        "</section></main></body></html>"
+    )
+    document = parse_document(body.encode(), "x")
+    assert run._unattributed(document) == 1
+    assert run._member_record(document, "amending")["unattributed_operations"] == 1
+    assert run._member_record(document, "decision")["unattributed_operations"] == 0
+    evidence = collect_fixture()
+    assert len(run.events_for(evidence)) == 5
+    state = _run([_event(_op("repeal_section", Address(section="§9")))])
+    assert run._state_record(state)["unresolved"] == [["x#I:0.0", "target provision missing"]]
