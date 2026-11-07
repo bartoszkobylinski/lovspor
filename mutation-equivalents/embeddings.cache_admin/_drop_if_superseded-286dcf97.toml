@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/cache_admin.py"
+symbol = "_drop_if_superseded"
+registered = "2026-11-07, PR #827, from run 42327859037"
+mutation = """
+-        EntryKey(esi=entry.esi, input_hash=entry.input_hash, dim=1, rows=1)
++        EntryKey(esi=entry.esi, input_hash=entry.input_hash, dim=1, rows=2)
+"""
+justification = """
+The key is built only to ask entry_location where the document entry for
+this unit lives. For a key with unit=None, entry_location returns
+(SCHEMA_DIR, key.esi, "documents") and f"{key.input_hash}{ENTRY_SUFFIX}":
+it never reads dim or rows. Any positive dim and rows (EntryKey refuses
+others) name the same path, so the is_file() probe and the removal decision
+are identical. The assumption test fails if entry_location starts using
+either field.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_document_entry_location_ignores_dim_and_rows"

@@ -82,7 +82,7 @@ def test_paid_tokens_use_the_providers_tokenizer(cache_dir: Path, tmp_path: Path
     assert cached.progress.documents_cached == 1
 
 
-@pytest.mark.parametrize("scale", [0.0, None])
+@pytest.mark.parametrize("scale", [0.0, -0.0, None, False])
 def test_falsey_document_scale_is_refused_before_returning_vectors(
     cache_dir: Path, tmp_path: Path, scale: float | None
 ) -> None:
@@ -95,6 +95,10 @@ def test_falsey_document_scale_is_refused_before_returning_vectors(
     with pytest.raises(EmbeddingCacheError, match="scale is not a finite positive float"):
         quantized_document_vectors(cached, inputs, digest)
     assert cached.progress.units_paid == 1
+    reopened = _cached(_FakeEmbedder(), tmp_path)
+    with pytest.raises(EmbeddingCacheError, match="scale is not a finite positive float"):
+        quantized_document_vectors(reopened, inputs, digest)
+    assert reopened.progress.units_paid == 0
 
 
 def test_paid_vectors_are_float32(cache_dir: Path, tmp_path: Path) -> None:
