@@ -125,5 +125,7 @@ their own contract.
 - A Lovspor URL is Lovspor's address for its derived representation. It is **not** an official
   identifier. Lovspor mints no ELI, and no path imitates an ELI form.
 - `ref_id` is Lovdata's identity for the work, carried verbatim from the source.
-- The JSON carries no official ELI link. The mapping could not be verified from a permitted
-  source: [`docs/research/eli-assessment-2026-11-06.md`](research/eli-assessment-2026-11-06.md); the follow-up is #819.
+- The JSON carries no official ELI link yet. The act-level mapping from `ref_id` exists
+  (`lovspor.eli.act_eli`, #819) and its evidence and open questions are in
+  [`docs/research/eli-assessment-2026-11-06.md`](research/eli-assessment-2026-11-06.md); emitting
+  it is an owner decision. When emitted, it names the act, never a provision.

@@ -59,6 +59,7 @@ facade.
 | `mcp.py` | Stdio MCP server exposing 16 read-only tools over a local `lovverk` clone. | `serve()`, `build_server()`, `CorpusReader` |
 | `corpus_fetch.py` | Clone / fast-forward the local `lovverk` cache (`~/.cache/lovverk`) that `lovspor fetch-corpus` populates and `lovspor mcp` reads by default. | `fetch_corpus()`, `default_corpus_path()`, `is_corpus()`, `FetchResult`, `CorpusFetchError` |
 | `corpus_readme.py` | The generated corpus-status block of `lovverk`'s `README.md` (#661): per-dataset counts and the local dataset's state, rendered deterministically from both manifests and spliced between its markers; prose outside them is never touched. Called by sync and every `promote` write. | `refresh_readme()`, `render_block()`, `read_status()`, `splice()` |
+| `eli.py`, `eli_commands.py` | Official act-level ELI (`https://lovdata.no/eli/{lov\|forskrift}/yyyy/mm/dd/n`) from Lovdata's `ref_id`, for the one shape permitted sources attest; `None` with a named reason otherwise. Never a provision identity, never resolved over the network. Not emitted on the site yet (#819; evidence: `docs/research/eli-assessment-2026-11-06.md`). | `act_eli()`, `official_act_eli()`, `audit_ref_ids()`; command `lovspor ops eli-audit` |
 
 ### `sources/` — Lovdata API boundary
 
