@@ -313,6 +313,53 @@ def test_replay_is_deterministic() -> None:
     assert first.model_dump() == second.model_dump()
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("same_effective_date", [False, True])
+def test_replay_orders_by_effective_date_then_document_sequence(
+    reverse: bool, same_effective_date: bool
+) -> None:
+    """Enforce replay.py's effective/publication/document-order contract."""
+    first = _op("replace_ledd", Address(section="§1", ledd=1), ("First.",), id="z#I:0")
+    last = _op("replace_ledd", Address(section="§1", ledd=1), ("Last.",), id="a#I:1")
+    events = [
+        _event(
+            first,
+            Timing(status="dated", effective=date(2022, 1, 1)),
+            sequence=0 if same_effective_date else 9,
+            published=datetime(2021, 12, 20),
+        ),
+        _event(
+            last,
+            Timing(status="dated", effective=date(2022, 1, 1 if same_effective_date else 2)),
+            sequence=1 if same_effective_date else 0,
+            published=datetime(2021, 12, 20 if same_effective_date else 10),
+        ),
+    ]
+    if reverse:
+        events.reverse()
+    state = _run(events)
+    assert state.applied == (first.id, last.id)
+    assert state.provisions[0].applied == (first.id, last.id)
+    assert texts(state, "§1") == ["Last.", ENACTED_TEXT[1]]
+    assert state.unresolved == ()
+
+
+def test_replay_dates_do_not_mutate_inputs_or_previously_returned_states() -> None:
+    baseline = load("enacting.xml")
+    events = events_for(load("amending.xml"), (load("resolution-partial.xml"),))
+    original_baseline = baseline.model_dump_json()
+    original_events = [event.model_dump_json() for event in events]
+    before = replay(baseline, ENACTED, events, date(2021, 12, 31))
+    original_before = before.model_dump_json()
+    after = replay(baseline, ENACTED, events, date(2022, 1, 1))
+    assert "§2a" not in [p.key for p in before.provisions]
+    assert "§2a" in [p.key for p in after.provisions]
+    assert before.model_dump_json() == original_before
+    assert replay(baseline, ENACTED, events, date(2021, 12, 31)) == before
+    assert baseline.model_dump_json() == original_baseline
+    assert [event.model_dump_json() for event in events] == original_events
+
+
 def test_pending_operations_are_recorded_on_their_target_provisions() -> None:
     op = _op("replace_section", Address(section="§2"), instruction="§ 2 skal lyde:")
     state = _run([_event(op, Timing(status="pending"))])
