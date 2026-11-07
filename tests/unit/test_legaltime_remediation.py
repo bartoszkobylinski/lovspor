@@ -185,7 +185,7 @@ def test_report_keys_and_filename_order(tmp_path: Path) -> None:
     assert report["members"]
     assert report["events"]
     assert report["baseline_timing"]["status"] == "dated"
-    json.dumps(report)
+    assert json.loads(json.dumps(report)) == report
 
 
 def test_unattributed_operation_count_and_role() -> None:
@@ -631,3 +631,36 @@ def test_single_introductory_paragraph_finishes_without_revisiting_it() -> None:
         "I lov 14. juni 2019 nr. 99 gjøres følgende endringer:</article></section>"
     )
     assert instructions.interpret(doc).operations == ()
+
+
+def test_citation_removal_does_not_hide_an_adjacent_uncited_date() -> None:
+    # Even malformed citation prose with an extra digit must not silently become
+    # informational when removing the cited act exposes a separate date.
+    sentence = "Se lov 1. januar 20201. juli 2022."
+    law = _law("lov/2020-01-01-1", "2020-01-01", sentence)
+    op = instructions.interpret(law).operations[0]
+    timing = commencement.clause_timings(law, (sentence,), (op,))[op.id]
+    assert timing.status == "unresolved"
+    assert timing.reason == "commencement sentence outside the grammar"
+
+
+def test_absent_addresses_and_substitution_terms() -> None:
+    assert instructions._address({}) == instructions.Address()
+    assert instructions._pairs({"old": "før", "new": "etter"}) == (("før", "etter"),)
+    assert instructions._part_label("0:VI:1:extra:tail") == "VI"
+    doc = xml_doc(
+        '<section><h2>I</h2><article class="defaultP">'
+        "Nåværende første ledd blir nytt annet ledd.</article></section>"
+    )
+    op = instructions.interpret(doc).operations[0]
+    assert op.address.section is None
+    assert op.destination is None
+
+
+def test_substitution_without_locations_leaves_corpus_unchanged() -> None:
+    working = _working()
+    before = [(key, list(p.ledd)) for key, p in working.map.items()]
+    op = _op("substitute_term", instructions.Address(), term_old="old", term_new="new")
+    assert working.apply_substitute_term(op) == "substitution locations unresolved: none listed"
+    assert replay._targets(op, working) == []
+    assert [(key, list(p.ledd)) for key, p in working.map.items()] == before
