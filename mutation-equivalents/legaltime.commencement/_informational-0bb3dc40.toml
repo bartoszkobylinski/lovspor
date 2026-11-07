@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/commencement.py"
+symbol = "_informational"
+registered = "2026-11-07, PR #833, from the mutation artifact at commit 40b894a"
+mutation = """
+-    without_citations = ACT_CITATION.sub("", sentence)
++    without_citations = ACT_CITATION.sub("XXXX", sentence)
+"""
+justification = """
+`ACT_CITATION.sub(...)` removes every act citation ("lov 14. juni 2019 nr. 99")
+from the sentence before `parse_date` looks for a date outside a citation. The
+replacement string only has to contain no date. "XXXX" contains no digit, so
+`DATE` (which requires a one- or two-digit day, a dot, a month name and a
+four-digit year) cannot match inside it,
+and every date that `parse_date` finds after the substitution is one that was
+outside a citation in the original sentence, exactly as with "". The result is
+the same boolean for every input.
+"""

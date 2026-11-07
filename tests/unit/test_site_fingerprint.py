@@ -124,6 +124,17 @@ def _release(root: Path, facts: dict[str, object] | None = None) -> tuple[Path, 
 
 
 class TestReleaseContentId:
+    @pytest.mark.parametrize("payload", [b"[]", b'"facts"', b"1"])
+    def test_facts_that_are_not_an_object_are_a_value_error(
+        self, tmp_path: Path, payload: bytes
+    ) -> None:
+        """A damaged live release is named by the continuity check, not a traceback (#820)."""
+        corpus, site = _release(tmp_path)
+        (site / "site-facts.json").write_bytes(payload)
+
+        with pytest.raises(ValueError, match=r"^site/site-facts\.json is not a JSON object$"):
+            release_content_id(corpus, site)
+
     def test_equal_trees_give_equal_ids(self, tmp_path: Path) -> None:
         one = _release(tmp_path / "one")
         two = _release(tmp_path / "two")

@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/publish/provision_history.py"
+symbol = "_blob"
+registered = "2026-11-06, PR #821, from run 42212300851"
+mutation = """
+-        check=False,
+-    )
++        )
+"""
+justification = """
+Removing the `check=False,` keyword leaves subprocess.run's default,
+which is check=False: the same CompletedProcess is returned and nothing
+raises. The explicit keyword stays because ruff PLW1510 requires it.
+"""

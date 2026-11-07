@@ -93,6 +93,7 @@ def check_release(root: Path) -> ReleaseReport:
     _check_companions(root, pages)
     redirects = _check_redirects(root)
     _check_caddy_map(root)
+    _check_no_shadow(root, pages)
     return ReleaseReport(
         corpus_commit=corpus_commit,
         documents=len(documents),
@@ -431,3 +432,123 @@ def _check_caddy_map(root: Path) -> None:
             f"{len(served_redirects)} vs {len(expected_redirects)} redirects, "
             f"{len(served_gone)} vs {len(expected_gone)} gone prefixes"
         )
+
+
+def _site_path(root: Path, page: Path) -> str:
+    """``root/lov/x/index.html`` -> ``/lov/x/``."""
+    return "/" + page.parent.relative_to(root).as_posix() + "/"
+
+
+def _slash_prefixes(url: str) -> list[str]:
+    """Every ``/``-terminated prefix of ``url``: the shapes a gone entry takes."""
+    return [url[: index + 1] for index, char in enumerate(url) if char == "/"]
+
+
+def _check_no_shadow(root: Path, pages: list[Path]) -> None:
+    """No redirect source or 410 prefix may cover a page or twin the tree serves.
+
+    Caddy runs ``redir`` and ``respond`` before the file server, so such a
+    rule hides a live page behind a 301 or a 410 (#747).
+    """
+    redirects, gone = _redirect_map(root)
+    sources = {source for source, _ in redirects}
+    for page in pages:
+        url = _site_path(root, page)
+        for served in (url, url + COMPANION_NAME):
+            if served in sources or not gone.isdisjoint(_slash_prefixes(served)):
+                raise PublishError(f"{served} is served, but the redirect map answers it too")
+
+
+@dataclass(frozen=True)
+class ContinuityReport:
+    """How the current release answers every URL the previous one served."""
+
+    live: int
+    moved: int
+    gone: int
+
+    def summary(self) -> str:
+        return (
+            f"continuity ok: of the previous release's URLs, {self.live} live, "
+            f"{self.moved} moved (301), {self.gone} gone (410), none missing"
+        )
+
+
+@dataclass(frozen=True)
+class _Answers:
+    """The current release as Caddy would answer it."""
+
+    root: Path
+    redirects: dict[str, str]
+    gone: set[str]
+
+    def fate(self, url: str) -> tuple[str, str | None] | None:
+        """``("moved", target)``, ``("gone", None)``, ``("live", None)`` or None (404)."""
+        if url in self.redirects:
+            return "moved", self.redirects[url]
+        if not self.gone.isdisjoint(_slash_prefixes(url)):
+            return "gone", None
+        if _served_file(self.root, _relative_file(url)) is not None:
+            return "live", None
+        return None
+
+
+def check_continuity(previous: Path, current: Path) -> ContinuityReport:
+    """Every URL ``previous`` served stays live, 301s or answers 410 in ``current``.
+
+    Both arguments are bare corpus release trees, each already passed by
+    :func:`check_release`. A URL is each page, its JSON twin and each redirect
+    source of the previous release; a page and its twin must share one fate.
+    A 410 says the URL is retired, never that its text is archived anywhere.
+    """
+    redirects, gone = _redirect_map(current)
+    answers = _Answers(current, dict(redirects), gone)
+    counts = {"live": 0, "moved": 0, "gone": 0}
+    for url in sorted({_site_path(previous, page) for page in _pages(previous)}):
+        for kind in _page_fates(answers, url):
+            counts[kind] += 1
+    for kind in _previous_redirect_fates(answers, previous):
+        counts[kind] += 1
+    return ContinuityReport(live=counts["live"], moved=counts["moved"], gone=counts["gone"])
+
+
+def _previous_redirect_fates(answers: _Answers, previous: Path) -> list[str]:
+    """Fates of the previous release's redirect sources, a page source and
+    its twin source judged as one pair, so an HTML 301 can never survive
+    while its JSON twin silently drops to 410 (#747)."""
+    previous_redirects, _ = _redirect_map(previous)
+    sources = {source for source, _target in previous_redirects}
+    kinds: list[str] = []
+    for source in sorted(sources):
+        if source.endswith("/"):
+            kinds.extend(_page_fates(answers, source))
+        elif not (
+            source.endswith(COMPANION_NAME) and source.removesuffix(COMPANION_NAME) in sources
+        ):
+            kinds.append(_required_fate(answers, source)[0])
+    return kinds
+
+
+def _required_fate(answers: _Answers, url: str) -> tuple[str, str | None]:
+    fate = answers.fate(url)
+    if fate is None:
+        raise PublishError(
+            f"{url} was served by the previous release and is neither live, "
+            f"a 301 nor a 410 in this one: it would answer 404"
+        )
+    if fate[0] == "moved" and answers.fate(fate[1] or "") != ("live", None):
+        raise PublishError(f"{url} moves to {fate[1]}, which is not a live page")
+    return fate
+
+
+def _page_fates(answers: _Answers, url: str) -> tuple[str, str]:
+    """The fates of a page and its twin, refused unless they agree."""
+    page = _required_fate(answers, url)
+    twin = _required_fate(answers, url + COMPANION_NAME)
+    expected = (page[0], None if page[1] is None else page[1] + COMPANION_NAME)
+    if twin != expected:
+        raise PublishError(
+            f"{url} answers {page[0]} but its JSON twin answers {twin[0]}: "
+            f"HTML and JSON name one entity and must share one fate"
+        )
+    return page[0], twin[0]
