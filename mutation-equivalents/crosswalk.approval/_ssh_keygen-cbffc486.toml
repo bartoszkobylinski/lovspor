@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/crosswalk/approval.py"
+symbol = "_ssh_keygen"
+registered = "2026-11-05, PR #799 (#792), left after two Codex remediation cycles"
+mutation = '''
+-            check=False,
++            check=None,
+'''
+justification = """
+`subprocess.run` raises `CalledProcessError` only when `check` is truthy and the
+exit status is nonzero (`if check and retcode:`). `None` and `False` are both
+falsy, so neither raises; the nonzero exit reaches the explicit
+`done.returncode != 0` refusal below in both cases, with the same message.
+"""
+assumption_test = "tests/unit/test_crosswalk_approval_assumptions.py::test_assumption_subprocess_run_raises_only_for_a_truthy_check"

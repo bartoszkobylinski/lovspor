@@ -63,6 +63,7 @@ from pydantic import BaseModel, ConfigDict
 from lovspor.atomic_io import atomic_write_text
 from lovspor.release.caddy import adapt
 from lovspor.release.caddy import validate as validate_caddy
+from lovspor.release.continuity import require_continuity, transaction_lock
 from lovspor.release.control import (
     ControlPlane,
     Situation,
@@ -122,9 +123,16 @@ class PruneReport(BaseModel):
 
 
 def _complete(plane: ControlPlane, triple: Triple) -> ReconcileReport:
-    """D becomes the truth: validate, reload, M = D."""
+    """D becomes the truth: validate, reload, M = D.
+
+    D is judged against M by URL continuity first (#820), as the commit that
+    staged it was: a fragment written by hand cannot reach production through
+    ``--complete``. A refusal moves nothing; ``--abandon`` restores M.
+    """
     if triple.disk.release_id is None:
         raise CommitRefusedError("the configuration on disk names no release; cannot complete")
+    if triple.disk.release_id != triple.marked:
+        require_continuity(plane.releases, triple.marked, triple.disk.release_id)
     validate_caddy(plane.runner, plane.caddyfile, plane.fragment)
     failure = reload_expecting(plane, triple.disk)
     if failure is not None:
@@ -349,13 +357,23 @@ def reconcile(
     With ``host`` and no marker, the first migration's window is read on
     whichever address answers and resolved by the migration's own rows.
     """
-    if host is not None and read_marker(plane.releases) is None:
-        return _reconcile_unmarked(plane, host, action)
-    return _resolve(plane, read_triple(plane), action)
+    with transaction_lock(plane.releases):
+        if host is not None and read_marker(plane.releases) is None:
+            return _reconcile_unmarked(plane, host, action)
+        return _resolve(plane, read_triple(plane), action)
 
 
 def prune(plane: ControlPlane, keep_build: Path | None = None) -> PruneReport:
-    """Only when reconciled; never R, D, M.active or M.previous; stale builds go."""
+    """Only when reconciled; never R, D, M.active or M.previous; stale builds go.
+
+    Under ``transaction_lock``, so it never removes a candidate a concurrent
+    commit is checking or staging (#820).
+    """
+    with transaction_lock(plane.releases):
+        return _prune_locked(plane, keep_build)
+
+
+def _prune_locked(plane: ControlPlane, keep_build: Path | None) -> PruneReport:
     triple = read_triple(plane)
     if situation(triple) != Situation.reconciled:
         raise UnreconciledError(f"host is {situation(triple)}: {triple.describe()}; not pruning")

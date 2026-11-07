@@ -1,0 +1,2770 @@
+{
+ "act": "lov/2021-06-18-121",
+ "archives": [
+  {
+   "archive": "lovtidend-avd1-2001-2025.tar.bz2",
+   "horizon": "2026-06-23T08:35:00",
+   "members": 38182,
+   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0",
+   "skipped_members": []
+  },
+  {
+   "archive": "lovtidend-avd1-2026.tar.bz2",
+   "horizon": "2026-11-05T14:50:00",
+   "members": 1204,
+   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2",
+   "skipped_members": []
+  }
+ ],
+ "baseline_timing": {
+  "effective": "2021-07-01",
+  "known_from": "2021-06-18",
+  "proofs": [
+   {
+    "member": "lti/2021/nl-20210618-121.xml",
+    "quote_sha256": "b077ba427c27291bd376deecd8bdee7aeb04c2bae1e1b5a3744e0c11c041970c",
+    "refid": "lov/2021-06-18-121",
+    "sha256": "fc1decc11a1c2c1fc51ecfc6aad5437c3e35436b839b520f8bd0a314ac513a97"
+   }
+  ],
+  "reason": "",
+  "retroactive": false,
+  "status": "dated"
+ },
+ "events": [
+  {
+   "law": "lov/2022-06-10-38",
+   "member": "lti/2022/nl-20220610-038.xml",
+   "operation": {
+    "absorbed_by": null,
+    "address": {
+     "ledd": 1,
+     "punktum": 2,
+     "section": "§20"
+    },
+    "change_part": [],
+    "destination": null,
+    "host_section": null,
+    "id": "lov/2022-06-10-38#1:I:1.0",
+    "instruction": "§ 20 første ledd annet punktum oppheves.",
+    "kind": "repeal_punktum",
+    "part": "I",
+    "payload": {
+     "ledd": 0,
+     "provision": null
+    }
+   },
+   "published_at": "2022-06-10T11:50:00",
+   "timing": {
+    "effective": "2022-06-10",
+    "known_from": "2022-06-10",
+    "proofs": [
+     {
+      "member": "lti/2022/nl-20220610-038.xml",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
+      "refid": "lov/2022-06-10-38",
+      "sha256": "2c267cb2043459d2fbce0b053f22e559752d9173ffaccc70d90f36139a28316d"
+     }
+    ],
+    "reason": "",
+    "retroactive": false,
+    "status": "dated"
+   }
+  },
+  {
+   "law": "lov/2022-06-10-38",
+   "member": "lti/2022/nl-20220610-038.xml",
+   "operation": {
+    "absorbed_by": "lov/2022-06-10-38#1:I:1.0",
+    "address": {
+     "ledd": 1,
+     "section": "§20"
+    },
+    "change_part": [],
+    "destination": null,
+    "host_section": null,
+    "id": "lov/2022-06-10-38#1:I:2.0",
+    "instruction": "Nåværende tredje punktum blir annet punktum.",
+    "kind": "renumber",
+    "part": "I",
+    "payload": {
+     "ledd": 0,
+     "provision": null
+    }
+   },
+   "published_at": "2022-06-10T11:50:00",
+   "timing": {
+    "effective": "2022-06-10",
+    "known_from": "2022-06-10",
+    "proofs": [
+     {
+      "member": "lti/2022/nl-20220610-038.xml",
+      "quote_sha256": "d36ed5560b000b71562e1c534cba75bdbc97e62eaa45e425909b46c737754b68",
+      "refid": "lov/2022-06-10-38",
+      "sha256": "2c267cb2043459d2fbce0b053f22e559752d9173ffaccc70d90f36139a28316d"
+     }
+    ],
+    "reason": "",
+    "retroactive": false,
+    "status": "dated"
+   }
+  },
+  {
+   "law": "lov/2025-06-20-96",
+   "member": "lti/2025/nl-20250620-096.xml",
+   "operation": {
+    "absorbed_by": null,
+    "address": {
+     "ledd": 6,
+     "section": "§26"
+    },
+    "change_part": [
+     "lov/2021-06-18-121/§26/ledd/6"
+    ],
+    "destination": null,
+    "host_section": "§25",
+    "id": "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0",
+    "instruction": "§ 26 sjette ledd lyde:",
+    "kind": "replace_ledd",
+    "part": "Kapittel 5. Sluttføresegner",
+    "payload": {
+     "ledd": 1,
+     "provision": null
+    }
+   },
+   "published_at": "2025-06-20T12:45:00",
+   "timing": {
+    "effective": "2026-01-01",
+    "known_from": "2025-06-20",
+    "proofs": [
+     {
+      "member": "lti/2025/sf-20250620-1103.xml",
+      "quote_sha256": "a5bf788d5eac045768e8b99205c7727395d5f89853eefc9473e27f1d87e02cbe",
+      "refid": "forskrift/2025-06-20-1103",
+      "sha256": "9a44024f11329a5a85829a52bf1d7362dae80e4b5a052763a25f958138827ca1"
+     },
+     {
+      "member": "lti/2025/sf-20251212-2510.xml",
+      "quote_sha256": "ce4513aecabc412893ae9d800895a43aad140d3e8b2f1fb32549a40ec8fe45a4",
+      "refid": "forskrift/2025-12-12-2510",
+      "sha256": "02e3678d804f2d40acdf717ae727c0cd31668304076cb0c01ef17c28255f1f07"
+     }
+    ],
+    "reason": "",
+    "retroactive": false,
+    "status": "dated"
+   }
+  }
+ ],
+ "inputs": [
+  {
+   "filename": "lovtidend-avd1-2001-2025.tar.bz2",
+   "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0",
+   "size_bytes": 69320068
+  },
+  {
+   "filename": "lovtidend-avd1-2026.tar.bz2",
+   "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2",
+   "size_bytes": 1663298
+  }
+ ],
+ "members": [
+  {
+   "date_in_force": "2021-07-01",
+   "member": "lti/2021/nl-20210618-121.xml",
+   "published_at": "2021-06-18T12:50:00",
+   "refid": "lov/2021-06-18-121",
+   "role": "enacting",
+   "sha256": "fc1decc11a1c2c1fc51ecfc6aad5437c3e35436b839b520f8bd0a314ac513a97",
+   "title": "Lov om Stortingets ombud for kontroll med forvaltningen (sivilombudsloven)",
+   "unattributed_operations": 0
+  },
+  {
+   "date_in_force": "2022-06-10",
+   "member": "lti/2022/nl-20220610-038.xml",
+   "published_at": "2022-06-10T11:50:00",
+   "refid": "lov/2022-06-10-38",
+   "role": "amending",
+   "sha256": "2c267cb2043459d2fbce0b053f22e559752d9173ffaccc70d90f36139a28316d",
+   "title": "Lov om endring i sivilombudsloven",
+   "unattributed_operations": 0
+  },
+  {
+   "date_in_force": "Kongen fastset",
+   "member": "lti/2025/nl-20250620-096.xml",
+   "published_at": "2025-06-20T12:45:00",
+   "refid": "lov/2025-06-20-96",
+   "role": "amending",
+   "sha256": "a9a5f56238e1e35dbbf2604c5c9429a92abf6d373e09248d22e7f55a0cef2e67",
+   "title": "Lov om dokumentasjon og arkiv (arkivlova)",
+   "unattributed_operations": 0
+  },
+  {
+   "date_in_force": "2026-01-01",
+   "member": "lti/2025/sf-20250620-1103.xml",
+   "published_at": "2025-06-20T16:40:00",
+   "refid": "forskrift/2025-06-20-1103",
+   "role": "decision",
+   "sha256": "9a44024f11329a5a85829a52bf1d7362dae80e4b5a052763a25f958138827ca1",
+   "title": "Ikraftsetting av lov 20. juni 2025 nr. 96 om dokumentasjon og arkiv (arkivlova)",
+   "unattributed_operations": 0
+  },
+  {
+   "date_in_force": "2026-01-01",
+   "member": "lti/2025/sf-20251212-2510.xml",
+   "published_at": "2025-12-12T14:50:00",
+   "refid": "forskrift/2025-12-12-2510",
+   "role": "decision",
+   "sha256": "02e3678d804f2d40acdf717ae727c0cd31668304076cb0c01ef17c28255f1f07",
+   "title": "Delt iverksetjing av lov 20. juni 2025 nr. 96 om dokumentasjon og arkiv (arkivlova)",
+   "unattributed_operations": 0
+  }
+ ],
+ "oracle": {
+  "member": "nl/nl-20210618-121.xml",
+  "sha256": "a347d9ae03859a92f169176b1fc1f2a3623e042afb375fa61531db10d30ca3f3"
+ },
+ "replay_version": "legaltime-replay-2",
+ "states": [
+  {
+   "act_level_problems": [],
+   "applied": [],
+   "at": "2021-07-01",
+   "future": [
+    "lov/2022-06-10-38#1:I:1.0",
+    "lov/2022-06-10-38#1:I:2.0",
+    "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
+   ],
+   "pending": [],
+   "provisions": [
+    {
+     "applied": [],
+     "key": "§1",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§2",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§3",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§4",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§5",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§6",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§7",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§8",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§9",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§10",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§11",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§12",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§13",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§14",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§15",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§16",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§17",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§18",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§19",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§20",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§21",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§22",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§23",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§24",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§25",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§26",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§27",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§28",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§29",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§30",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§31",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§32",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§33",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§34",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§35",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    }
+   ],
+   "status": "replayed",
+   "unresolved": [],
+   "withheld": []
+  },
+  {
+   "act_level_problems": [],
+   "applied": [
+    "lov/2022-06-10-38#1:I:1.0",
+    "lov/2022-06-10-38#1:I:2.0"
+   ],
+   "at": "2022-06-10",
+   "future": [
+    "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
+   ],
+   "pending": [],
+   "provisions": [
+    {
+     "applied": [],
+     "key": "§1",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§2",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§3",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§4",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§5",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§6",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§7",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§8",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§9",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§10",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§11",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§12",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§13",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§14",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§15",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§16",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§17",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§18",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§19",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
+     ],
+     "key": "§20",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§21",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§22",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§23",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§24",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§25",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§26",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§27",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§28",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§29",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§30",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§31",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§32",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§33",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§34",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§35",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    }
+   ],
+   "status": "replayed",
+   "unresolved": [],
+   "withheld": []
+  },
+  {
+   "act_level_problems": [],
+   "applied": [
+    "lov/2022-06-10-38#1:I:1.0",
+    "lov/2022-06-10-38#1:I:2.0",
+    "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
+   ],
+   "at": "2026-01-01",
+   "future": [],
+   "pending": [],
+   "provisions": [
+    {
+     "applied": [],
+     "key": "§1",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§2",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§3",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§4",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§5",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§6",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§7",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§8",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§9",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§10",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§11",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§12",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§13",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§14",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§15",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§16",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§17",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§18",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§19",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
+     ],
+     "key": "§20",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§21",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§22",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§23",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§24",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§25",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [
+      "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
+     ],
+     "key": "§26",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§27",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§28",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§29",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§30",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§31",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§32",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§33",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§34",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§35",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    }
+   ],
+   "status": "replayed",
+   "unresolved": [],
+   "withheld": []
+  },
+  {
+   "act_level_problems": [],
+   "applied": [
+    "lov/2022-06-10-38#1:I:1.0",
+    "lov/2022-06-10-38#1:I:2.0",
+    "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
+   ],
+   "at": "2026-11-06",
+   "future": [],
+   "pending": [],
+   "provisions": [
+    {
+     "applied": [],
+     "key": "§1",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§2",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§3",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§4",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§5",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§6",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§7",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§8",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§9",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§10",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§11",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§12",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§13",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§14",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§15",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§16",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§17",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§18",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§19",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
+     ],
+     "key": "§20",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§21",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§22",
+     "ledd": 4,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§23",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§24",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§25",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [
+      "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
+     ],
+     "key": "§26",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§27",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§28",
+     "ledd": 6,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§29",
+     "ledd": 5,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§30",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§31",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§32",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§33",
+     "ledd": 1,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§34",
+     "ledd": 3,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    },
+    {
+     "applied": [],
+     "key": "§35",
+     "ledd": 2,
+     "problems": [],
+     "repealed": false,
+     "status": "replayed"
+    }
+   ],
+   "status": "replayed",
+   "unresolved": [],
+   "withheld": []
+  }
+ ],
+ "verification": [
+  {
+   "act": "lov/2021-06-18-121",
+   "act_level_problems": [],
+   "at": "2021-07-01",
+   "counts": {
+    "exact_normalized": 17,
+    "exact_raw": 16,
+    "text_differs": 2
+   },
+   "notes_without_replay_event": [
+    "§20",
+    "§26"
+   ],
+   "oracle_member": "nl/nl-20210618-121.xml",
+   "oracle_sha256": "a347d9ae03859a92f169176b1fc1f2a3623e042afb375fa61531db10d30ca3f3",
+   "replay_events_without_note": [],
+   "sections": [
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§3",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "ledd 1 differ",
+     "key": "§20",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "text_differs"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "ledd 6 differ",
+     "key": "§26",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "text_differs"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§35",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    }
+   ]
+  },
+  {
+   "act": "lov/2021-06-18-121",
+   "act_level_problems": [],
+   "at": "2022-06-10",
+   "counts": {
+    "exact_normalized": 18,
+    "exact_raw": 16,
+    "text_differs": 1
+   },
+   "notes_without_replay_event": [
+    "§26"
+   ],
+   "oracle_member": "nl/nl-20210618-121.xml",
+   "oracle_sha256": "a347d9ae03859a92f169176b1fc1f2a3623e042afb375fa61531db10d30ca3f3",
+   "replay_events_without_note": [],
+   "sections": [
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§3",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
+     ],
+     "detail": "",
+     "key": "§20",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "ledd 6 differ",
+     "key": "§26",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "text_differs"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§35",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    }
+   ]
+  },
+  {
+   "act": "lov/2021-06-18-121",
+   "act_level_problems": [],
+   "at": "2026-01-01",
+   "counts": {
+    "exact_normalized": 19,
+    "exact_raw": 16
+   },
+   "notes_without_replay_event": [],
+   "oracle_member": "nl/nl-20210618-121.xml",
+   "oracle_sha256": "a347d9ae03859a92f169176b1fc1f2a3623e042afb375fa61531db10d30ca3f3",
+   "replay_events_without_note": [],
+   "sections": [
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§3",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
+     ],
+     "detail": "",
+     "key": "§20",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [
+      "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
+     ],
+     "detail": "",
+     "key": "§26",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§35",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    }
+   ]
+  },
+  {
+   "act": "lov/2021-06-18-121",
+   "act_level_problems": [],
+   "at": "2026-11-06",
+   "counts": {
+    "exact_normalized": 19,
+    "exact_raw": 16
+   },
+   "notes_without_replay_event": [],
+   "oracle_member": "nl/nl-20210618-121.xml",
+   "oracle_sha256": "a347d9ae03859a92f169176b1fc1f2a3623e042afb375fa61531db10d30ca3f3",
+   "replay_events_without_note": [],
+   "sections": [
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§1",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§2",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§3",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§4",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§5",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§6",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§7",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§8",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§9",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§10",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§11",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§12",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§13",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§14",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§15",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§16",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§17",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§18",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§19",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [
+      "lov/2022-06-10-38#1:I:1.0",
+      "lov/2022-06-10-38#1:I:2.0"
+     ],
+     "detail": "",
+     "key": "§20",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§21",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§22",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§23",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§24",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§25",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [
+      "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
+     ],
+     "detail": "",
+     "key": "§26",
+     "oracle_notes": 1,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§27",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§28",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§29",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§30",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_raw"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§31",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§32",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§33",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§34",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    },
+    {
+     "applied": [],
+     "detail": "",
+     "key": "§35",
+     "oracle_notes": 0,
+     "pending": [],
+     "problems": [],
+     "verdict": "exact_normalized"
+    }
+   ]
+  }
+ ]
+}

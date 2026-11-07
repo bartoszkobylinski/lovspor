@@ -29,10 +29,11 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from lovspor.publish.check import ReleaseReport, check_release
+from lovspor.publish.check import ReleaseReport, check_continuity, check_release
 from lovspor.publish.inventory import PublishError
 from lovspor.release.envelope import (
     CORPUS_DIR,
+    RECORD_NAME,
     SITE_DIR,
     CorpusSummary,
     ReleaseRecord,
@@ -300,3 +301,24 @@ def check_envelope(root: Path) -> EnvelopeReport:
     _check_record(record, structure)
     content_id = _check_ids(root, record, structure.facts)
     return EnvelopeReport(release_content_id=content_id, corpus=corpus, site_pages=site_pages)
+
+
+def is_envelope(release: Path) -> bool:
+    """An envelope has ``corpus/`` and ``site/``; a bare corpus tree has ``lov/`` at its root."""
+    return any((release / name).exists() for name in (CORPUS_DIR, SITE_DIR, RECORD_NAME))
+
+
+def publish_check_summary(release: Path, previous: Path | None) -> str:
+    """``publish-check``: the envelope or bare-tree check, then, given the
+    release now served, the URL continuity check of the corpus trees (#747)."""
+    summary = (
+        check_envelope(release).summary()
+        if is_envelope(release)
+        else check_release(release).summary()
+    )
+    if previous is None:
+        return summary
+    corpus_trees = [
+        root / CORPUS_DIR if is_envelope(root) else root for root in (previous, release)
+    ]
+    return summary + "\n" + check_continuity(*corpus_trees).summary()

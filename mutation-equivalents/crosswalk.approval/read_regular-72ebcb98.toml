@@ -1,0 +1,24 @@
+[[equivalent]]
+file = "src/lovspor/crosswalk/approval.py"
+symbol = "read_regular"
+registered = "2026-11-06, PR #799 (#792); replaces the _read_signature entry an independent review refuted"
+mutation = '''
+-            data = stream.read(limit + 1)
++            data = stream.read(limit + 2)
+'''
+justification = """
+The read only has to tell "at most limit bytes" from "more". It is reached only
+through `_open_regular`, which refuses before any read every descriptor whose
+fstat type is not a regular file, so FIFOs, sockets, devices, directories and
+symlinks to any of them never get here.
+
+The earlier `_read_signature` entry made the same argument without that guard,
+and a review refuted it: on an open FIFO `read(limit + 1)` and `read(limit + 2)`
+can block differently, so the mutant was not equivalent there.
+
+On a regular file `BufferedReader.read(n)` returns min(n, bytes up to EOF) at
+the moment it reads. A file of at most `limit` bytes is returned whole by either
+bound: the same bytes. A longer file yields more than `limit` bytes under either
+bound, so both are refused as too large with the same message. That holds even
+if the file grows while it is read. The result and the refusal never differ.
+"""

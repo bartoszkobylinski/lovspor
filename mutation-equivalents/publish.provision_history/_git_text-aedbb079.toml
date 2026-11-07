@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/publish/provision_history.py"
+symbol = "_git_text"
+registered = "2026-11-06, PR #821, from run 42212300851"
+mutation = """
+-        ["git", "-c", "core.quotePath=false", *args],  # noqa: S607
++        ["git", "-c", "core.quotepath=false", *args],  # noqa: S607
+"""
+justification = """
+git config section and variable names, and boolean values, are
+case-insensitive, so both spellings select the same path quoting for
+the log and ls-tree output this helper returns. Pinned by the same
+real-git assumption test as the other quotePath entries.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"

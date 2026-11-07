@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/crosswalk/approval.py"
+symbol = "_ssh_keygen"
+registered = "2026-11-05, PR #799 (#792), left after two Codex remediation cycles"
+mutation = '''
+-            check=False,
+-        )
++            )
+'''
+justification = """
+The mutant drops the `check=False` argument. `subprocess.run`'s `check` defaults
+to false, so the call is the one the original makes: no `CalledProcessError`, and
+a nonzero exit is refused by the explicit `done.returncode != 0` check below with
+the same message. The argument is written out only because ruff PLW1510 requires
+it to be explicit.
+"""
+assumption_test = "tests/unit/test_crosswalk_approval_assumptions.py::test_assumption_subprocess_run_raises_only_for_a_truthy_check"

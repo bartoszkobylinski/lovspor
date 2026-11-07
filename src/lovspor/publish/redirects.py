@@ -35,7 +35,8 @@ from lovspor.publish.inventory import (
     body_lines,
     normalise_pid,
 )
-from lovspor.publish.pages import document_url, provision_url
+from lovspor.publish.pages import COMPANION_NAME, document_url, provision_url
+from lovspor.publish.provision_history import once_publishable_pids, removed_pids_by_path
 from lovspor.storage.manifest import Manifest
 
 _FOLDER_ROUTES: dict[str, Route] = {"lover": "lov", "forskrifter": "forskrift"}
@@ -89,6 +90,7 @@ def build_redirect_map(
         if plan is not None:
             redirects.extend(_document_redirects(corpus, edge, plan, f"/{key[0]}/{key[1]}/"))
     gone.update(_removed_record_prefixes(manifest, live))
+    gone.update(_retired_provision_urls(corpus, sha, inventory))
     redirect_map = RedirectMap(redirects=tuple(sorted(redirects)), gone=tuple(sorted(gone)))
     validate_redirect_targets(redirect_map, inventory)
     return redirect_map
@@ -98,7 +100,8 @@ def validate_redirect_targets(
     redirect_map: RedirectMap,
     inventory: PublishInventory,
 ) -> None:
-    """Every emitted 301 must resolve to an emitted canonical page."""
+    """Every emitted 301 must resolve to an emitted canonical page or its
+    twin, keep the entity's kind and pid, and no rule may shadow a live URL."""
     emitted = _emitted_urls(inventory)
     for source, target in redirect_map.redirects:
         if target not in emitted:
@@ -106,6 +109,36 @@ def validate_redirect_targets(
                 f"dangling redirect target: {source} -> {target} does not "
                 f"resolve to an emitted canonical page (ADR-0013 Decision 6)",
             )
+        if _below_slug(source) != _below_slug(target):
+            raise PublishError(
+                f"redirect {source} -> {target} changes the entity it names: "
+                f"a 301 keeps the provision id and the representation (#747)",
+            )
+    _refuse_shadowing(redirect_map, emitted)
+
+
+def _refuse_shadowing(redirect_map: RedirectMap, emitted: set[str]) -> None:
+    """Caddy runs ``redir`` and ``respond`` before the file server, so a
+    redirect source or a 410 prefix covering an emitted URL would hide a
+    live page behind a 301 or a 410."""
+    sources = {source for source, _ in redirect_map.redirects}
+    gone = set(redirect_map.gone)
+    for url in sorted(emitted):
+        if url in sources or not gone.isdisjoint(_slash_prefixes(url)):
+            raise PublishError(
+                f"{url} is an emitted page, but the redirect map would answer "
+                f"it with a 301 or a 410 (#747)",
+            )
+
+
+def _below_slug(url: str) -> list[str]:
+    """``/route/slug/paragraf/3/index.json`` -> ``['paragraf', '3', 'index.json']``."""
+    return url.split("/")[3:]
+
+
+def _slash_prefixes(url: str) -> list[str]:
+    """Every ``/``-terminated prefix of ``url``, the shapes a gone entry takes."""
+    return [url[: index + 1] for index, char in enumerate(url) if char == "/"]
 
 
 def redirect_map_json(redirect_map: RedirectMap) -> bytes:
@@ -231,14 +264,36 @@ def _document_redirects(
     plan: DocumentPlan,
     prefix: str,
 ) -> list[tuple[str, str]]:
-    """The document 301 plus one 301 per pid surviving in the successor."""
-    redirects = [(prefix, document_url(plan))]
-    if plan.duplicate_pids:
-        return redirects
-    emitted_pids = {provision.pid for provision in plan.provisions}
-    for pid in sorted(_retired_pids(corpus, edge) & emitted_pids):
-        redirects.append((f"{prefix}paragraf/{pid}/", provision_url(plan, pid)))
-    return redirects
+    """The document 301 plus one 301 per pid surviving in the successor,
+    each paired with the same 301 for its JSON twin: HTML and JSON name one
+    entity, so they share one fate (#747)."""
+    pages = [(prefix, document_url(plan))]
+    if not plan.duplicate_pids:
+        emitted_pids = {provision.pid for provision in plan.provisions}
+        for pid in sorted(_retired_pids(corpus, edge) & emitted_pids):
+            pages.append((f"{prefix}paragraf/{pid}/", provision_url(plan, pid)))
+    twins = [(source + COMPANION_NAME, target + COMPANION_NAME) for source, target in pages]
+    return pages + twins
+
+
+def _retired_provision_urls(corpus: Path, sha: str, inventory: PublishInventory) -> set[str]:
+    """Exact 410 entries for provision URLs a live document no longer serves.
+
+    A pid is retired when some collision-free version of the document's
+    path carried it (only such a version had provision pages) and the
+    document does not emit it now. The removed-heading scan only selects
+    which paths to read version by version: a pid seen solely in
+    colliding versions was never a servable URL and gets no entry, so no
+    URL is invented beneath a duplicate-pid document (ADR-0013 Decision 1).
+    """
+    removed = removed_pids_by_path(corpus, sha)
+    urls: set[str] = set()
+    for plan in inventory.documents:
+        emitted = set() if plan.duplicate_pids else {p.pid for p in plan.provisions}
+        if plan.duplicate_pids or removed.get(plan.markdown_path, frozenset()) - emitted:
+            servable = once_publishable_pids(corpus, sha, plan.markdown_path)
+            urls.update(provision_url(plan, pid) for pid in servable - emitted)
+    return urls
 
 
 def _retired_pids(corpus: Path, edge: _Edge) -> set[str]:
@@ -294,9 +349,10 @@ def _path_stem(path: str) -> str | None:
 
 
 def _emitted_urls(inventory: PublishInventory) -> set[str]:
+    """Every emitted page URL and its JSON twin's URL."""
     urls = {document_url(plan) for plan in inventory.documents}
     for plan in inventory.documents:
         if plan.duplicate_pids:
             continue
         urls.update(provision_url(plan, provision.pid) for provision in plan.provisions)
-    return urls
+    return urls | {url + COMPANION_NAME for url in urls}
