@@ -234,7 +234,13 @@ the live release (old mtimes, truthful `ETag`/`Last-Modified`), computes
 final `lovspor publish-check` on the temporary directory, and only then
 renames it to `/var/www/lovspor-releases/<release_content_id>/` — so nothing
 under an id name is ever incomplete. `lovspor release commit <id>` (root)
-stages the release's fragment as `/etc/caddy/lovspor-release.caddy.next`,
+first refuses a release that would break a URL the live release serves
+(`docs/url-contract.md` §4, #820): every page, JSON twin and redirect source
+of the live release's `corpus/` must stay live, 301 to a live page, or answer
+410. The live release is the reconciled one, and its trees must still hash to
+its id. The host is read again before anything moves, under an exclusive lock
+on `/var/www/lovspor-releases`. A refusal prints `release refused: …` naming
+the URL, exits 1 and changes nothing. Then the commit stages the release's fragment as `/etc/caddy/lovspor-release.caddy.next`,
 runs `caddy validate` and `caddy adapt` on the composed configuration,
 renames the fragment into place, `systemctl reload caddy`, reads the running
 configuration back, and only then writes the marker. A reload failure puts
@@ -244,7 +250,9 @@ hash of every page.
 
 Rollback is the previous release's own fragment through the same transaction
 — the marker's `previous` is kept for exactly this; run it twice to roll
-forward. A release keeps the fragment it was built with, so rolling back to
+forward. It is the one switch not judged by URL continuity: URLs that only
+the release being left introduced answer 404 until a newer release is
+committed. A release keeps the fragment it was built with, so rolling back to
 one built before the framed 404 page (#662) serves Caddy's empty 404 again
 until a newer release is committed:
 
