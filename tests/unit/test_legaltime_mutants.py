@@ -301,7 +301,7 @@ def test_baseline_timing_partial_and_undated_decisions() -> None:
     )
     out = commencement.baseline_timing(act, (partial,))
     assert out.status == "unresolved"
-    assert out.reason == "partial commencement of the act itself"
+    assert out.reason == "decision body has no commencement sentence for this law"
     assert [p.refid for p in out.proofs] == ["lov/2019-06-14-99", "forskrift/2021-05-28-9998"]
     assert (
         out.proofs[-1].quote_sha256
@@ -354,7 +354,7 @@ def test_partial_scope_and_full_decision_edges() -> None:
         }
     )
     timings = commencement.resolve_timings(law, result.clauses, ops, (undated_full,))
-    assert {t.effective for t in timings.values()} == {date(2021, 1, 1)}  # dated by the body
+    assert {t.reason for t in timings.values()} == {"dateInForce outside the grammar"}
 
 
 def test_informational_and_reservation_rules() -> None:

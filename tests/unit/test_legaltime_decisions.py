@@ -640,9 +640,7 @@ def test_the_act_s_own_conditional_commencement_resolves_the_same_way() -> None:
     still_unreadable = _decision(
         "forskrift/2020-02-28-9999", title, "snart", "2020-02-28 10:00", "Loven trer i kraft snart."
     )
-    assert (
-        baseline_timing(act, (still_unreadable,)).reason == "full decision without a readable date"
-    )
+    assert baseline_timing(act, (still_unreadable,)).reason == "dateInForce outside the grammar"
 
 
 # ---------------------------------------------------------------- mutation round (2026-11-07)

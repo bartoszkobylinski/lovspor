@@ -16,6 +16,7 @@ from lovspor.legaltime.text import (
     ORDINALS,
     act_refid,
     ordinal,
+    section_key,
     section_key_of,
     split_sentences,
 )
@@ -96,7 +97,7 @@ _RULES: list[tuple[OpKind, re.Pattern[str]]] = [
     (
         "renumber",
         re.compile(
-            rf"^(?:(?P<sec>{_SEC})\s+)?(?:Nåværende|Noverande|Gjeldende|Tidlegare|Tidligere|nåværende|noverande|tidlegare|tidligere)\s+.*\bblir\b.*$"
+            rf"^(?:(?P<sec>{_SEC})\s+)?(?:Nåværende|Noverande|Gjeldende|Tidlegare|Tidligere|nåværende|noverande|tidlegare|tidligere)\s+.*(?:\b(?:ledd|punktum)|§\s*\d+\w*(?:\s+[a-zæøå])?)\s+blir\b.*$"
         ),
     ),
 ]  # fmt: skip
@@ -213,13 +214,13 @@ def _expand(sentence: str) -> list[str]:
     return [f"§ {n} oppheves." for n in range(int(first), int(last) + 1)]
 
 
-def _pieces(text: str) -> list[tuple[str, str]]:
-    """(id suffix, sentence) per instruction sentence, a multi-section repeal expanded."""
-    pieces: list[tuple[str, str]] = []
+def _pieces(text: str) -> list[tuple[str, str, str]]:
+    """(id suffix, sentence to classify, announced sentence) per instruction sentence."""
+    pieces: list[tuple[str, str, str]] = []
     for offset, sentence in enumerate(split_sentences(text)):
         expanded = _expand(sentence)
         for k, piece in enumerate(expanded):
-            pieces.append((f"{offset}" if len(expanded) == 1 else f"{offset}-{k}", piece))
+            pieces.append((f"{offset}" if len(expanded) == 1 else f"{offset}-{k}", piece, sentence))
     return pieces
 
 
@@ -327,9 +328,13 @@ class _Reader:
         intro = _INTRO.match(text)
         if intro is not None:
             self.substitution, self.act = None, act_refid(f"lov {intro.group('date')}")
-            text = _intro_rest(intro)
-            if _INTRO_ONLY.match(text):
+            rest = _intro_rest(intro)
+            if _INTRO_ONLY.match(rest):
                 return False
+            where = (part[0], f"{part[1]}:{index}", node.host_section)
+            quoted = (rest, node.text) if intro.group("inline") else rest
+            self._instruction(where, quoted, node.change_part, payload)
+            return True
         where = (part[0], f"{part[1]}:{index}", node.host_section)
         self._instruction(where, text, node.change_part, payload)
         return True
@@ -362,35 +367,37 @@ class _Reader:
     def _instruction(
         self,
         where: tuple[str, str, str | None],
-        text: str,
+        text: str | tuple[str, str],
         change_part: tuple[str, ...],
         payload: tuple[Node, ...],
     ) -> None:
         label, tag, host = where
         context = (_addressed_act(change_part) or self.act, label, change_part, host)
+        text, quote = (text, None) if isinstance(text, str) else text
         text, payload = _inline_payload(text, payload)
         sentences = _pieces(text)
-        for offset, (tag_offset, sentence) in enumerate(sentences):
+        for offset, (tag_offset, sentence, announced) in enumerate(sentences):
             last = offset == len(sentences) - 1
             op_id = f"{self.document.header.refid}#{tag}.{tag_offset}"
-            self._sentence(op_id, sentence, context, payload if last else ())
+            self._sentence(op_id, (sentence, quote or announced), context, payload if last else ())
 
     def _sentence(
         self,
         op_id: str,
-        sentence: str,
+        sentence: tuple[str, str],
         context: tuple[str | None, str, tuple[str, ...], str | None],
         payload: tuple[Node, ...],
     ) -> None:
-        kind, groups = classify(sentence)
-        if payload and _CHAPTER.match(sentence) and any(n.provision for n in payload):
-            self.operations.extend(_chapter(op_id, sentence, context, payload))
-        elif kind == "unsupported" and _COMMENCEMENT_SHAPED.search(sentence):
-            self.clauses.append(sentence)  # a commencement sentence among instructions
+        read, quote = sentence  # the sentence as classified, and as the member announced it
+        kind, groups = classify(read)
+        if payload and _CHAPTER.match(read) and any(n.provision for n in payload):
+            self.operations.extend(_chapter(op_id, quote, context, payload))
+        elif kind == "unsupported" and _COMMENCEMENT_SHAPED.search(read):
+            self.clauses.append(read)  # a commencement sentence among instructions
         elif kind == "unsupported" and context[0] is None:
             return  # prose outside any act's amendment block: not an operation
         else:
-            self.operations.append(_operation(op_id, (kind, groups, sentence), context, payload))
+            self.operations.append(_operation(op_id, (kind, groups, quote), context, payload))
 
 
 def _chapter(
@@ -400,12 +407,15 @@ def _chapter(
     payload: tuple[Node, ...],
 ) -> list[Operation]:
     """``Nytt kapittel 6A skal lyde:`` inserts every provision the chapter text carries."""
-    provisions = [n for n in payload if n.provision is not None]
+    carried = [n for n in payload if n.provision is not None]
+    labelled = all(section_key(n.provision.label) is not None for n in carried if n.provision)
+    if not labelled or any(n.kind == "ledd" for n in payload):
+        return [_operation(base, ("unsupported", {}, sentence), context, ())]
     return [
         _operation(
             f"{base}-{k}", ("insert_section", {"sec": n.provision.label}, sentence), context, (n,)
         )
-        for k, n in enumerate(provisions)
+        for k, n in enumerate(carried)
         if n.provision is not None
     ]
 

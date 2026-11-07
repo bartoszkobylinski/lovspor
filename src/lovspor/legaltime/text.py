@@ -97,11 +97,11 @@ def section_key_of(label: str) -> str:
 
 def section_sort_key(key: str) -> tuple[int, int, str]:
     """Order ``§88`` < ``§88a`` < ``§89``; chapter-numbered ``§8-7`` by both parts."""
-    match = re.fullmatch(r"§(\d+)(?:-(\d+))?([a-zæøå]?)", key)
+    match = re.fullmatch(r"§(\d+)([A-Z]?)(?:-(\d+))?([a-zæøå]?)", key)
     if match is None:
         return (10**9, 0, key)
-    first, second, letter = match.groups()
-    return (int(first), int(second or 0), letter)
+    first, capital, second, letter = match.groups()
+    return (int(first), int(second or 0), f"{capital}{letter}")
 
 
 def _ends_with_abbreviation(sentence: str) -> bool:

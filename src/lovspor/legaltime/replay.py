@@ -23,7 +23,7 @@ from lovspor.parsing.xml_normalizer import safe_parser
 
 ProvisionStatus = Literal["replayed", "unresolved"]
 StateStatus = Literal["replayed", "not_yet_in_force", "unresolved_baseline"]
-_SECTION_REF = re.compile(r"§\s*(\d+(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
+_SECTION_REF = re.compile(r"§\s*(\d+[A-Z]?(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
 _LEDD_REF = re.compile(
     rf"\b((?:{ORDINAL_ALT})(?:\s*,\s*(?:{ORDINAL_ALT}))*(?:\s+(?:og|til)\s+(?:{ORDINAL_ALT}))?)\s+ledd\b",
     re.I,
@@ -236,7 +236,7 @@ class _Working:
         if isinstance(found, str):
             return found
         target, index, sentences = found
-        start, end = _sentence_slice(op.address, len(sentences))
+        start, end = _sentence_slice(op.address, len(sentences) + 1)  # may follow the last
         supplied = split_sentences(" ".join(ledd.text for ledd in op.ledd))
         if not 1 <= start <= len(sentences) + 1 or len(supplied) != end - start + 1:
             return f"punktum {start} insertion: {len(sentences)} existing, {len(supplied)} supplied"
@@ -263,7 +263,7 @@ class _Working:
         if op.address.bokstav is None or len(op.ledd) != 1:
             return "item payload is not one text"
         target, index = found
-        edited = _insert_item(target.ledd[index - 1].xml, op.address.bokstav, op.ledd[0].text)
+        edited = _insert_item(target.ledd[index - 1].xml, op.address.bokstav, op.ledd[0].xml)
         if isinstance(edited, str):
             return edited
         target.ledd[index - 1] = edited
@@ -410,28 +410,37 @@ def _items(root: etree._Element, label: str) -> list[etree._Element]:
     return [li for li in root.iter("li") if (li.get("data-name") or "").rstrip(".)") == label]
 
 
-def _insert_item(xml: str, label: str, text: str) -> Ledd | str:
+def _insert_item(xml: str, label: str, payload: str) -> Ledd | str:
     """A new ``<li>`` after its predecessor in the ledd's list, in Lovdata's item markup."""
     root = etree.fromstring(f"<article>{xml}</article>", parser=safe_parser())
     if _items(root, label):
         return f"item {label} is already in the ledd"
     before = _previous_label(label)
-    anchor = _items(root, before)[-1:] if before else []
+    anchors = _items(root, before) if before else []
     lists = root.findall(".//ol") + root.findall(".//ul")
-    if not anchor and (before is not None or not lists):
-        return f"item {before}, the one before {label}, is not in the ledd"
-    holder = anchor[0].getparent() if anchor else lists[0]
-    if holder is None:
-        return f"item {before} has no list around it"
-    new = etree.SubElement(holder, "li", {"data-name": f"{label}."})
-    inner = etree.SubElement(etree.SubElement(new, "article", {"class": "listArticle"}), "article")
-    inner.set("class", "legalP")
-    inner.text = text
-    if anchor:
-        anchor[0].addnext(new)
+    if before is not None and len(anchors) != 1:
+        return f"item {before}, the one before {label}, is {'not in the ledd' if not anchors else f'in {len(anchors)} places'}"  # noqa: E501
+    if before is None and len(lists) != 1:
+        return f"the ledd carries {len(lists)} lists"
+    new = _item_element(label, payload)
+    if isinstance(new, str):
+        return new
+    if anchors:
+        anchors[0].addnext(new)
     else:
         lists[0].insert(0, new)
     return _ledd_from_root(root)
+
+
+def _item_element(label: str, payload: str) -> etree._Element | str:
+    markup = (
+        f'<li data-name="{label}."><article class="listArticle">'
+        f'<article class="legalP">{payload}</article></article></li>'
+    )
+    try:
+        return etree.fromstring(markup, parser=safe_parser())
+    except etree.XMLSyntaxError:
+        return "item payload markup does not parse"
 
 
 def _remove_item(xml: str, label: str) -> Ledd | str:

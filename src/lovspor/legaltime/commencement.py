@@ -46,6 +46,7 @@ _PENDING_HEADER = re.compile(
     r"(?:Kongen|Departementet)\s+(?:bestemmer|fastset|fastsett|fastsetter|avgjer)\.?", re.I
 )
 _NUMBERED = re.compile(r"^\(\d+\)\s*")
+_DELEGATES = re.compile(r"^(?:Kongen|Departementet)\b", re.I)
 _CONDITIONAL = re.compile(
     r"^(?:Når|Frå\s+den\s+tid|Fra\s+den\s+tid|Fra\s+det\s+tidspunkt|Frå\s+det\s+tidspunktet)\b.*"
     r"\b(?:trer\s+i\s+kraft|tek\s+til\s+å\s+gjelde|tar\s+til\s+å\s+gjelde|gjelder|gjeld)$",
@@ -92,7 +93,7 @@ _CITED = re.compile(
 )  # a cited act or regulation by date, also under its short title (``straffeloven 22. mai 1902``)
 _COMMENCEMENT_PHRASE = re.compile(rf"{_VERB}|\bi\s+kraft\b|\bvirkning\s+fr[aå]\b", re.I)
 _EXCEPTION_NEW_SECTION = re.compile(
-    r"^Ny\s+(?P<sec>§\s*\d+(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?)(?:\s+i\s+\S+)?\s+trer\s+likevel\s+i\s+kraft\b",
+    r"^Ny\s+(?P<sec>§\s*\d+[A-Z]?(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?)(?:\s+i\s+\S+)?\s+trer\s+likevel\s+i\s+kraft\b",
     re.I,
 )
 _EXCEPTION_NAMED_SECTION = re.compile(
@@ -210,10 +211,18 @@ def _dated_or_pending(document: Document, sentence: str) -> Timing:
     """A default clause's own date: ``straks`` means the header's date, else the date it names."""
     if _PENDING_WORDS.search(sentence):
         return _pending(document, sentence)
-    when = _header_date(document) if _STRAKS.search(sentence) else parse_date(sentence)
+    when = _clause_date(document, sentence)
     if when is None:
         return _unresolved(document, "commencement clause outside the grammar", sentence)
     return _dated(document, when, sentence)
+
+
+def _clause_date(document: Document, sentence: str) -> date | None:
+    """``straks`` is the header's date and an explicit date is itself; both at once is neither."""
+    explicit = parse_date(_CITED.sub("", sentence))
+    if _STRAKS.search(sentence):
+        return None if explicit is not None else _header_date(document)
+    return explicit
 
 
 def _default_timing(document: Document, sentence: str) -> Timing | None:
@@ -246,8 +255,10 @@ def _informational(sentence: str) -> bool:
     without_citations = _CITED.sub("", sentence)
     if _INFORMATIONAL.match(sentence):
         return True
-    if _PENDING_WORDS.search(sentence):
-        return False  # a delegation is a commencement statement, however it is phrased
+    if _DELEGATES.match(sentence) and _COMMENCEMENT_PHRASE.search(sentence):
+        return False  # "Kongen bestemmer når loven trer i kraft": a delegation, however phrased
+    if _PENDING_WORDS.search(sentence) and _COMMENCEMENT_PHRASE.search(sentence):
+        return False
     if _CONTINUES.search(sentence) or _TRANSITIONAL.search(sentence):
         return parse_date(without_citations) is None
     stated = _REFERENCE.sub("", sentence)  # what is left once the references are gone
@@ -257,9 +268,7 @@ def _informational(sentence: str) -> bool:
 def _exception_timing(document: Document, sentence: str) -> Timing:
     if _PENDING_WORDS.search(sentence):
         return _pending(document, sentence)
-    if _STRAKS.search(sentence) and (header := _header_date(document)) is not None:
-        return _dated(document, header, sentence)
-    when = parse_date(sentence)
+    when = _clause_date(document, sentence)
     if when is not None:
         return _dated(document, when, sentence)
     return _unresolved(document, "exception outside the grammar", sentence)
@@ -353,7 +362,7 @@ def _blocks(decision: Document) -> list[tuple[str | None, list[str]]]:
     for part in decision.parts:
         for node in part.nodes:
             for sentence in split_sentences(node.text):
-                if _DECISION_TITLE.match(sentence):
+                if _DECISION_TITLE.match(sentence) and act_refid(sentence) is not None:
                     blocks.append((sentence, []))
                 elif not _informational(sentence):
                     blocks[-1][1].append(sentence)
@@ -375,8 +384,8 @@ def _block_for(decision: Document, law: str) -> _Block | None:
     for title, body in titled:
         if act_refid(title) == law:
             return _Block(title=title, sentences=tuple(body), shared=len(titled) > 1)
-    if len(titled) > 1:
-        return None
+    if titled:
+        return None  # every titled block is another law's
     body = [sentence for _, sentences in blocks for sentence in sentences]
     title = titled[0][0] if titled else decision.header.title
     return _Block(title=title, sentences=tuple(body), shared=False)
@@ -394,7 +403,10 @@ def _block_date(decision: Document, sentences: list[str]) -> date | None | str:
     for sentence in sentences:
         if _RESERVATION.search(sentence):
             return "full decision body carries an exception"
-        when = _own_date(decision) if _STRAKS.search(sentence) else _stated_date(sentence)
+        explicit = _stated_date(sentence)
+        if _STRAKS.search(sentence) and explicit is not None:
+            return "full decision body names several dates"
+        when = _own_date(decision) if _STRAKS.search(sentence) else explicit
         if when is not None:
             stated.add(when)
     if len(stated) > 1:
@@ -452,20 +464,27 @@ class _Decision:
         scopes = _partial_scopes(list(block.sentences), _own_date(decision)) if block else None
         # A block is partial when its title says so, or when every sentence it has is a scope.
         self.partial = block is not None and (
-            bool(_PARTIAL_TITLE.match(block.title)) or bool(scopes)
+            bool(_PARTIAL_TITLE.match(self.title))
+            or bool(_PARTIAL_TITLE.match(block.title))
+            or bool(scopes)
         )
         self.scopes = scopes if self.partial else None
-        self.full_date = self._full_date(block) if block and not self.partial else None
         raw = decision.header.date_in_force
         self.conditional = not self.partial and bool(_CONDITIONAL.match(raw))
+        self.full_date = self._full_date(block) if block and not self.partial else None
         self.unreadable = self._unreadable(law, ordered, block)
 
     def _full_date(self, block: _Block) -> date | None:
         """The header's date when the block agrees with it; the block's own date when shared."""
-        header = header_timing(self.document).dated_on
+        header_read = header_timing(self.document)
+        header = header_read.dated_on
         stated = _block_date(self.document, list(block.sentences))
         if isinstance(stated, str):
             self.block_problem = stated
+            return None
+        raw = self.document.header.date_in_force.strip()
+        if header_read.status == "unresolved" and not block.shared and raw and not self.conditional:
+            self.block_problem = "dateInForce outside the grammar"
             return None
         if block.shared and stated is None:
             self.block_problem = "decision body has no commencement sentence for this law"

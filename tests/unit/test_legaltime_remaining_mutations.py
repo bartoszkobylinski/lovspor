@@ -43,7 +43,7 @@ def test_pending_baseline_is_unsettled_by_an_undated_decision() -> None:
         '<dd class="title">Ikraftsetting av lov 14. juni 2019 nr. 99</dd>',
     )
     out = commencement.baseline_timing(law, (decision,))
-    assert out.status == "unresolved" and out.reason == "full decision without a readable date"
+    assert out.status == "unresolved" and out.reason == "dateInForce outside the grammar"
 
 
 @pytest.mark.parametrize("old,new", [("«a» og «b»", "«c»"), ("«a»", "«c» og «d»")])

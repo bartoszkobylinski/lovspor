@@ -85,7 +85,7 @@ def test_baseline_stops_at_first_unresolved_evidence():
     first = decision(published="2021-01-01 12:00", raw="unknown")
     later = decision(published="2021-01-02 12:00")
     result = c.baseline_timing(law, (first, later))
-    assert result.reason == "full decision without a readable date"
+    assert result.reason == "dateInForce outside the grammar"
     assert len(result.proofs) == 2
 
 

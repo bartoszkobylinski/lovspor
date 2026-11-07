@@ -22,7 +22,7 @@ _STRAKS = re.compile(r"\b(?:straks|med\s+en\s+gang|omgående)\b", re.I)
 _RESERVATION = re.compile(r"\b(?:unntatt|bortsett|likevel|med\s+unntak|unnateke|unnatatt)\b", re.I)
 
 
-_SEC = r"§\s*\d+(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
+_SEC = r"§\s*\d+[A-Z]?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
 
 
 _DELT_SENTENCE = re.compile(
@@ -49,7 +49,7 @@ _RANGE_ENDS = 2  # ``I til III`` names two ends of a run
 _SECTION_LIST = rf"(?P<secs>\s+{_SEC}(?:\s*,\s*{_SEC})*(?:\s+og\s+{_SEC})?)?"
 
 
-_PAREN = r"(?P<paren>\s*\([^()]*\))?"
+_PAREN = r"(?P<paren>\s*\([^()§]*\))?"  # an act name; a § inside the parenthesis is a scope
 
 
 _PART_HEAD = r"(?:Romertall|(?:Lovens|Loven|Lova|Lovas|Endringsloven|Endringslova)\s+del)"
@@ -88,7 +88,8 @@ _OWN_SECTIONS = re.compile(
 
 
 _LISTING_TOKEN = re.compile(
-    r"\s*(?:(?P<range>(?P<first>\d+)\s+til\s+(?P<last>\d+))|(?P<one>\d+(?:\s*[a-hj-zæøå](?![a-zæøå]))?)"
+    r"\s*(?:(?P<range>(?P<first>\d+)\s+til\s+(?P<last>\d+))"
+    r"|(?P<one>\d+[A-Z]?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?)"
     r"|(?P<sep>,|og|§§|§))(?=\s|,|$)"
 )
 
@@ -139,8 +140,11 @@ def _own_sections(listing: str) -> frozenset[str] | None:
 
 
 def _when(text: str, own: date | None) -> date | None:
-    """The date a scope sentence states; ``straks`` is the resolution's own day."""
-    return own if _STRAKS.search(text) else parse_date(text)
+    """The date a scope sentence states; ``straks`` is the resolution's own day, never both."""
+    stated = parse_date(text)
+    if _STRAKS.search(text):
+        return None if stated is not None else own
+    return stated
 
 
 def _roman(numeral: str) -> int:
@@ -181,8 +185,8 @@ def _scopes_of(sentence: str, own: date | None) -> list[Scope] | None:
     if _RESERVATION.search(sentence):
         return None  # an exception the grammar cannot scope: the whole decision is unreadable
     part_match = _DELT_SENTENCE.match(sentence)
-    if part_match is not None and _named_section(part_match) is not None:
-        when = parse_date(part_match.group("when"))
+    if part_match is not None:
+        when = _when(part_match.group("when"), own)
         if when is None:
             return None
         part, section = part_match.group("part").upper(), _named_section(part_match)
@@ -242,9 +246,9 @@ def _scopes_for(operation: Operation, scopes: list[Scope]) -> list[Scope]:
 
 
 def _named_in(law: Document, scope: Scope) -> bool:
-    """Whether the law has the part or own sections the scope names."""
+    """Whether the law has the part or own sections the scope names; a remainder names none."""
     if scope.remainder:
-        return True
+        return False
     if scope.own_sections:
         return any(p.key in scope.own_sections for p in law.provisions)
     return scope.part in {part.label.upper() for part in law.parts}
