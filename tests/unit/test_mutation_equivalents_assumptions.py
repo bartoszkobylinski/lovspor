@@ -22,7 +22,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tomllib
 import typing
 from datetime import UTC, datetime
@@ -793,30 +792,29 @@ def test_assumption_lxml_strip_elements_reads_with_tail_as_a_truth_value() -> No
 
 
 def test_assumption_os_link_follow_symlinks_none_does_not_follow(tmp_path: Path) -> None:
-    """Pins mutation-equivalents/embeddings.cache_store/_publish-*.toml: ``None``
-    selects the same no-follow link as ``False``."""
-    target = tmp_path / "target"
-    target.write_bytes(b"x")
-    link = tmp_path / "symlink"
-    link.symlink_to(target)
-    for value, name in ((None, "none"), (False, "false")):
-        os.link(link, tmp_path / name, follow_symlinks=value)  # type: ignore[arg-type]
-        assert (tmp_path / name).is_symlink()
+    """Pins mutation-equivalents/embeddings.cache_store/_link_in-*.toml.
 
-
-@pytest.mark.skipif(sys.platform != "linux", reason="pins Linux link(2); macOS link(2) follows")
-def test_assumption_os_link_does_not_follow_a_symlink_on_linux(tmp_path: Path) -> None:
-    """Pins the two Linux-only os.link entries in
-    mutation-equivalents/embeddings.cache_store/: on Linux, os.link with
-    follow_symlinks True or omitted links the symlink itself, like False."""
-    target = tmp_path / "target"
-    target.write_bytes(b"x")
-    link = tmp_path / "symlink"
-    link.symlink_to(target)
-    os.link(link, tmp_path / "omitted")
-    os.link(link, tmp_path / "true", follow_symlinks=True)
-    assert (tmp_path / "omitted").is_symlink()
-    assert (tmp_path / "true").is_symlink()
+    Called the way ``_link_in`` calls it, with directory descriptors, ``None``
+    links the symlink itself exactly as ``False`` does, and ``True`` follows
+    it: the flag is honoured, so only ``None`` is equivalent.
+    """
+    (tmp_path / "target").write_bytes(b"x")
+    (tmp_path / "symlink").symlink_to(tmp_path / "target")
+    handle = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for value, name in ((None, "none"), (False, "false"), (True, "true")):
+            os.link(
+                "symlink",
+                name,
+                src_dir_fd=handle,
+                dst_dir_fd=handle,
+                follow_symlinks=value,  # type: ignore[arg-type]
+            )
+    finally:
+        os.close(handle)
+    assert (tmp_path / "none").is_symlink()
+    assert (tmp_path / "false").is_symlink()
+    assert not (tmp_path / "true").is_symlink()
 
 
 def test_assumption_typing_cast_returns_its_value_unchanged() -> None:
