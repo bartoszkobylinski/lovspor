@@ -15,26 +15,38 @@ stays unchanged as the original proposal). They are recorded in lovspor-notebook
 - A1.5 is in force in its interim, fail-closed form (B): a historical candidate
   gets no manifest, and a second promotion is unsupported (see "Manifest").
   Evidence for historical candidates is deferred to #818.
-- R3 (attribution wording) and R4 (regjeringen.no) stay blocked.
+- On 2026-11-06, R3 (attribution wording) and R4 (regjeringen.no) stayed
+  blocked. R3 is resolved by ADR-0021, below; R4 is still blocked.
 
-Proposed refinement (2026-11-07, lovspor-notebook ADR-0021, prepared on the
-owner's direction and in force only once the owner accepts it):
+This code also implements lovspor-notebook ADR-0021 (2026-11-07), which refines
+ADR-0019 without changing it. The ADR holds its own status: this code is meant
+to merge only after the owner has accepted it.
 
-- The R2 ruling stands, and `stated_for_endpoint` is still accepted only when an
-  approval says `"R2": "approved"`.
-- `lovtidend-avd1-2026.tar.bz2` is pinned `stated_for_dataset`: the current-year
-  part of the NLOD 2.0 dataset "Norsk Lovtidend, Avdeling I". Lovdata states
-  NLOD 2.0 for that dataset; its data.norge.no distribution is fetched through
-  `/list` and `/get/` as one of two parts; `/list` describes both avd. I files
-  alike; every member of the pinned file is under `lti/2026/` with an `LTI` dokid.
-  No other file gets that basis: a future year, avd. II and `gjeldende-*` stay
-  `inferred_same_dataset`.
-- R3: the manifest carries the attribution NLOD 2.0 §5 and Lovdata brukervilkår
-  2.3 ask for (Lovdata named as source, licensor, dataset, source and licence
-  links, a change notice, no endorsement, no other licence granted).
-- R4 stays blocked.
+- **R2's historical rejection stands.** The endpoint-level statement was
+  insufficient on 2026-11-06 and still is: `stated_for_endpoint` is accepted only
+  when an approval says `"R2": "approved"`, and approvals say `"R2": "rejected"`.
+- **A separate, dataset-level basis.** `lovtidend-avd1-2026.tar.bz2` is pinned
+  `stated_for_dataset`: the current-year part of the NLOD 2.0 dataset "Norsk
+  Lovtidend, Avdeling I". This rests on different evidence, not on the endpoint
+  sentence:
+  - Lovdata states NLOD 2.0 for that dataset;
+  - its data.norge.no distribution is fetched through `/list` and `/get/` as one
+    of two parts;
+  - `/list` describes both avd. I files alike;
+  - every member of the pinned file is under `lti/2026/` with an `LTI` dokid.
+- **Fail closed around it.** No other file gets that basis: a future year, avd. II
+  and `gjeldende-*` stay `inferred_same_dataset`. A cited member of the 2026
+  archive must be a plain path under `lti/2026/`, with no `.`, `..` or empty
+  segment.
+- **R3, exact scope.** The manifest carries the attribution NLOD 2.0 §5 asks for,
+  with the source name Lovdata brukervilkår 2.3 asks for: Lovdata named as
+  source, the licensor, the dataset, source and licence links, a change notice,
+  no endorsement and no other licence granted. This covers data derived from
+  Lovtidend avd. I, in the crosswalk manifest only. It does not cover another
+  dataset, Stortinget (R1, unchanged) or any publication.
+- **R4 stays blocked.** Corrections are never promoted.
 
-A ruling is not a release. No signing key is configured (`approval-signers` is
+A ruling is not a release. Publication stays NO-GO. No signing key is configured (`approval-signers` is
 empty), and nothing here publishes, tags, pushes, or writes into `lovverk`.
 Publishing a dataset needs a separate owner decision.
 
@@ -171,3 +183,12 @@ The contract is `src/lovspor/crosswalk/legislative-crosswalk-1.0.0-rc.schema.jso
 plus the producer invariants in `lovspor.crosswalk.contract`. The v0 schema
 Politik #178 reads (`docs/research/schemas/legislative-crosswalk-v0.schema.json`)
 is unchanged.
+
+`stated_for_dataset` widened the `licence_basis` enum without a version change.
+That is allowed only because `1.0.0-rc` is an unpublished pre-release: every
+earlier record still validates, and no `1.0.0-rc` file has left the private
+workspace. A strict `1.0.0-rc` reader written before the change rejects the new
+value, fail-closed; Politik's open research reader (#185 there) is one, and it
+needs the value before it merges. Once a `1.0.0-rc` file is published or a
+strict reader merges, a further enum change needs a version bump (ADR-0021,
+"Contract version").
