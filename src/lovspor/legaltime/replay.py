@@ -17,13 +17,13 @@ from lxml import etree
 
 from lovspor.legaltime.commencement import Timing
 from lovspor.legaltime.document import Document, Frozen, Ledd, Provision, element_text
-from lovspor.legaltime.instructions import Operation, _shift
+from lovspor.legaltime.instructions import Address, Operation, _shift
 from lovspor.legaltime.text import ORDINAL_ALT, ordinal, section_sort_key, split_sentences
 from lovspor.parsing.xml_normalizer import safe_parser
 
 ProvisionStatus = Literal["replayed", "unresolved"]
 StateStatus = Literal["replayed", "not_yet_in_force", "unresolved_baseline"]
-_SECTION_REF = re.compile(r"§\s*(\d+(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
+_SECTION_REF = re.compile(r"§\s*(\d+[A-Z]?(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
 _LEDD_REF = re.compile(
     rf"\b((?:{ORDINAL_ALT})(?:\s*,\s*(?:{ORDINAL_ALT}))*(?:\s+(?:og|til)\s+(?:{ORDINAL_ALT}))?)\s+ledd\b",
     re.I,
@@ -91,9 +91,12 @@ def _text_of_xml(fragment: str) -> str:
     return element_text(root)
 
 
-def _sentence_slice(address_start: int | None, address_end: int | None) -> tuple[int, int]:
-    start = address_start or 1
-    return start, address_end or start
+def _sentence_slice(address: Address, count: int) -> tuple[int, int]:
+    """1-based inclusive sentence range an address names; ``siste punktum`` is the last one."""
+    if address.last_punktum:
+        return count, count
+    start = address.punktum or 1
+    return start, address.punktum_end or start
 
 
 class _Working:
@@ -107,14 +110,14 @@ class _Working:
     def _target(self, key: str | None) -> _Provision | None:
         return self.map.get(key) if key else None
 
-    def _ledd_at(self, op: Operation) -> tuple[_Provision, int] | str:
+    def _ledd_at(self, op: Operation, unit: str = "punktum") -> tuple[_Provision, int] | str:
         target = self._target(op.address.section)
         if target is None or target.repealed:
             return "target provision missing or repealed"
         index = op.address.ledd
         if index is None:
             if len(target.ledd) != 1:
-                return "punktum without ledd on a provision with several ledd"
+                return f"{unit} without ledd on a provision with several ledd"
             index = 1
         if not 1 <= index <= len(target.ledd):
             return f"ledd {index} does not exist"
@@ -220,7 +223,7 @@ class _Working:
         if isinstance(found, str):
             return found
         target, index, sentences = found
-        start, end = _sentence_slice(op.address.punktum, op.address.punktum_end)
+        start, end = _sentence_slice(op.address, len(sentences))
         supplied = split_sentences(" ".join(ledd.text for ledd in op.ledd))
         if not 1 <= start <= end <= len(sentences) or len(supplied) != end - start + 1:
             return f"punktum {start}-{end}: {len(sentences)} existing, {len(supplied)} supplied"
@@ -233,7 +236,7 @@ class _Working:
         if isinstance(found, str):
             return found
         target, index, sentences = found
-        start, end = _sentence_slice(op.address.punktum, op.address.punktum_end)
+        start, end = _sentence_slice(op.address, len(sentences) + 1)  # may follow the last
         supplied = split_sentences(" ".join(ledd.text for ledd in op.ledd))
         if not 1 <= start <= len(sentences) + 1 or len(supplied) != end - start + 1:
             return f"punktum {start} insertion: {len(sentences)} existing, {len(supplied)} supplied"
@@ -246,17 +249,41 @@ class _Working:
         if isinstance(found, str):
             return found
         target, index, sentences = found
-        start, end = _sentence_slice(op.address.punktum, op.address.punktum_end)
+        start, end = _sentence_slice(op.address, len(sentences))
         if not 1 <= start <= end <= len(sentences):
             return f"punktum {start}-{end} does not exist among {len(sentences)}"
         del sentences[start - 1 : end]
         target.ledd[index - 1] = _ledd_from_text(" ".join(sentences))
         return None
 
+    def apply_insert_bokstav(self, op: Operation) -> str | None:
+        found = self._ledd_at(op, "item")
+        if isinstance(found, str):
+            return found
+        if op.address.bokstav is None or len(op.ledd) != 1:
+            return "item payload is not one text"
+        target, index = found
+        edited = _insert_item(target.ledd[index - 1].xml, op.address.bokstav, op.ledd[0].xml)
+        if isinstance(edited, str):
+            return edited
+        target.ledd[index - 1] = edited
+        return None
+
+    def apply_repeal_bokstav(self, op: Operation) -> str | None:
+        found = self._ledd_at(op, "item")
+        if isinstance(found, str):
+            return found
+        target, index = found
+        edited = _remove_item(target.ledd[index - 1].xml, op.address.bokstav or "")
+        if isinstance(edited, str):
+            return edited
+        target.ledd[index - 1] = edited
+        return None
+
     def apply_replace_bokstav(self, op: Operation) -> str | None:
-        found = self._ledd_at(op)
+        found = self._ledd_at(op, "item")
         if isinstance(found, str) or op.address.bokstav is None or len(op.ledd) != 1:
-            return "bokstav target or replacement text missing"
+            return found if isinstance(found, str) else "bokstav target or replacement text missing"
         target, index = found
         letter = re.escape(op.address.bokstav)
         item = rf'<li[^>]*data-name="{letter}[.)]"[^>]*>(?:(?!<li)[\s\S])*?'
@@ -267,7 +294,11 @@ class _Working:
         )
         if count != 1:
             return f"bokstav {op.address.bokstav} matched {count} list items"
-        target.ledd[index - 1] = Ledd(xml=xml, text=_text_of_xml(xml))
+        try:
+            text = _text_of_xml(xml)
+        except etree.XMLSyntaxError:
+            return "bokstav replacement leaves the ledd markup ill-formed"
+        target.ledd[index - 1] = Ledd(xml=xml, text=text)
         return None
 
     def apply_substitute_term(self, op: Operation) -> str | None:
@@ -362,6 +393,84 @@ def _substitute(provision: _Provision, ledd: frozenset[int], terms: tuple[str, s
         if text != current.text:
             provision.ledd[index], changed = Ledd(xml=xml, text=text), True
     return changed
+
+
+_LETTERS = "abcdefghijklmnopqrstuvwxyzæøå"
+# Item edits keep the space between two inline elements; the hashing default would fuse the words.
+_FRAGMENT_PARSER = safe_parser(remove_blank_text=False)
+
+
+def _previous_label(label: str) -> str | None:
+    """The item label before ``label``: ``c`` → ``b``, ``3`` → ``2``; None for the first."""
+    if label.isdigit():
+        return str(int(label) - 1) if int(label) > 1 else None
+    position = _LETTERS.find(label)
+    return _LETTERS[position - 1] if position > 0 else None
+
+
+def _items(root: etree._Element, label: str) -> list[etree._Element]:
+    return [li for li in root.iter("li") if (li.get("data-name") or "").rstrip(".)") == label]
+
+
+def _insert_item(xml: str, label: str, payload: str) -> Ledd | str:
+    """A new ``<li>`` after its predecessor in the ledd's list, in Lovdata's item markup."""
+    root = _ledd_root(xml)
+    if root is None:
+        return "ledd markup does not parse"
+    if _items(root, label):
+        return f"item {label} is already in the ledd"
+    before = _previous_label(label)
+    anchors = _items(root, before) if before else []
+    lists = root.findall(".//ol") + root.findall(".//ul")
+    if before is not None and len(anchors) != 1:
+        return f"item {before}, the one before {label}, is {'not in the ledd' if not anchors else f'in {len(anchors)} places'}"  # noqa: E501
+    if before is None and len(lists) != 1:
+        return f"the ledd carries {len(lists)} lists"
+    new = _item_element(label, payload)
+    if isinstance(new, str):
+        return new
+    if anchors:
+        anchors[0].addnext(new)
+    else:
+        lists[0].insert(0, new)
+    return _ledd_from_root(root)
+
+
+def _item_element(label: str, payload: str) -> etree._Element | str:
+    markup = (
+        f'<li data-name="{label}."><article class="listArticle">'
+        f'<article class="legalP">{payload}</article></article></li>'
+    )
+    try:
+        return etree.fromstring(markup, parser=_FRAGMENT_PARSER)
+    except etree.XMLSyntaxError:
+        return "item payload markup does not parse"
+
+
+def _ledd_root(xml: str) -> etree._Element | None:
+    try:
+        return etree.fromstring(f"<article>{xml}</article>", parser=_FRAGMENT_PARSER)
+    except etree.XMLSyntaxError:
+        return None
+
+
+def _remove_item(xml: str, label: str) -> Ledd | str:
+    root = _ledd_root(xml)
+    if root is None:
+        return "ledd markup does not parse"
+    found = _items(root, label)
+    if len(found) != 1:
+        return f"bokstav {label} matched {len(found)} list items"
+    parent = found[0].getparent()
+    if parent is None:
+        return f"item {label} has no list around it"
+    parent.remove(found[0])
+    return _ledd_from_root(root)
+
+
+def _ledd_from_root(root: etree._Element) -> Ledd:
+    inner = (root.text or "") + "".join(etree.tostring(child, encoding=str) for child in root)
+    return Ledd(xml=inner, text=element_text(root))
 
 
 def _insert_position(order: list[str], key: str) -> int:

@@ -6,7 +6,7 @@ import pytest
 
 from lovspor.legaltime import commencement as c
 from lovspor.legaltime import instructions as ins
-from lovspor.legaltime import verify
+from lovspor.legaltime import scopes, verify
 from lovspor.legaltime.instructions import Address
 from tests.unit.test_legaltime_mutants import ACT, _law, _op, _working
 from tests.unit.test_legaltime_remediation import xml_doc
@@ -25,7 +25,7 @@ def decision(body: str = "", published: str = "", raw: str = "2022-01-01"):
     "listing,expected", [("1 til 1", frozenset({"§1"})), ("", None), ("1 !", None)]
 )
 def test_section_listing_requires_complete_nonempty_input(listing, expected):
-    assert c._own_sections(listing) == expected
+    assert scopes._own_sections(listing) == expected
 
 
 @pytest.mark.parametrize(
@@ -33,17 +33,18 @@ def test_section_listing_requires_complete_nonempty_input(listing, expected):
     ["Paragrafane 1 ! gjeld frå 1. januar 2022", "Paragrafane 1 gjeld frå 1. ukjent 2022"],
 )
 def test_scope_requires_both_sections_and_date(sentence):
-    assert c._scope_of(sentence) is None
+    assert scopes._scopes_of(sentence, None) is None
 
 
 def test_informational_reservation_is_not_a_body_conflict():
     doc = decision("Departementet kan gi regler unntatt om klage.")
-    assert not c._body_disagrees(doc, date(2022, 1, 1))
+    assert c._blocks(doc) == [(None, [])]  # informational prose is not part of any block
 
 
 def test_body_checks_sentences_after_informational_prose():
     doc = decision("Departementet kan gi regler. Loven trer i kraft 1. januar 2023.")
-    assert c._body_disagrees(doc, date(2022, 1, 1))
+    assert c._blocks(doc) == [(None, ["Loven trer i kraft 1. januar 2023."])]
+    assert c._block_date(doc, ["Loven trer i kraft 1. januar 2023."]) == date(2023, 1, 1)
 
 
 def test_citation_removal_preserves_adjacent_date_boundary():
@@ -58,12 +59,12 @@ def test_unsettled_timing_clears_retroactivity():
     assert result.retroactive is False
 
 
-def test_full_decision_applies_even_with_a_scope_shaped_body():
+def test_full_titled_decision_with_a_scope_shaped_body_reaches_only_that_scope():
     law = _law(ACT, "Kongen bestemmer", "")
     op = _op("replace_ledd", Address(section="§1", ledd=1))
     doc = decision("Endringsloven del II trer i kraft 1. januar 2022.")
     result = c.resolve_timings(law, (), (op,), (doc,))[op.id]
-    assert result.effective == date(2022, 1, 1)
+    assert result.status == "pending"  # the body commenced part II; this operation is in part I
 
 
 def test_multiple_unpublished_decisions_cannot_establish_order():
@@ -84,7 +85,7 @@ def test_baseline_stops_at_first_unresolved_evidence():
     first = decision(published="2021-01-01 12:00", raw="unknown")
     later = decision(published="2021-01-02 12:00")
     result = c.baseline_timing(law, (first, later))
-    assert result.reason == "full decision without a readable date"
+    assert result.reason == "dateInForce outside the grammar"
     assert len(result.proofs) == 2
 
 
