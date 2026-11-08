@@ -72,10 +72,11 @@ class Commencement(Frozen):
         ``parts`` are the labels under which the section may be reached by a part qualifier:
         the act's own part data-name (``del1``) and the amending part that inserted it (``I``).
         """
+        own = [e.timing for e in self.units if e.unit.section == key and _whole_section(e.unit)]
+        if own:
+            return own[0]  # the section's own unit, whatever position it holds in the list
         for entry in self.units:
             unit = entry.unit
-            if unit.section == key and _whole_section(unit):
-                return entry.timing
             in_chapter = unit.chapter is not None and unit.chapter == chapter and not unit.heading
             reached = entry.part is None or _part_name(entry.part) in parts or entry.part in parts
             if in_chapter and reached:
@@ -230,6 +231,7 @@ class _Fold:
 
     def __init__(self, act: Document, chapter_of: dict[str, str]) -> None:
         self.act = act
+        self.chapter_of = {**chapter_of, **{p.key: p.chapter for p in act.provisions if p.chapter}}
         self.chapters = set(chapter_of.values()) | {
             p.chapter for p in act.provisions if p.chapter is not None
         }
@@ -247,14 +249,26 @@ class _Fold:
         return Commencement(default=self.default, units=tuple(units))
 
     def _reconciled(self, key: tuple[Unit, str | None], timing: Timing) -> Timing:
-        """A unit the default statement also reaches must agree with it (Decision 6)."""
-        if key in self.excluded or self.default.status != "dated" or timing.status != "dated":
+        """A unit every wider statement also reaches must agree with each (Decision 6).
+
+        Wider statements are the act-wide default and, for a section, a dated chapter unit
+        that holds the section; an excepted unit is reached by none of them.
+        """
+        if key in self.excluded or timing.status != "dated":
             return timing
-        if timing.effective == self.default.effective:
+        wider = [self.default] if self.default.status == "dated" else []
+        chapter = self.chapter_of.get(key[0].section or "")
+        wider.extend(
+            t for (unit, _), t in self.units.items()
+            if unit.chapter is not None and unit.chapter == chapter and t.status == "dated"
+        )  # fmt: skip
+        disagreeing = [t for t in wider if t.effective != timing.effective]
+        if not disagreeing:
             return timing
+        proofs = tuple(p for t in disagreeing for p in t.proofs)
         return timing.model_copy(
             update={"status": "unresolved", "effective": None, "retroactive": False,
-                    "reason": CONFLICT, "proofs": (*timing.proofs, *self.default.proofs)}
+                    "reason": CONFLICT, "proofs": (*timing.proofs, *proofs)}
         )  # fmt: skip
 
     def unsettle_all(self, decision: Document, reason: str) -> None:

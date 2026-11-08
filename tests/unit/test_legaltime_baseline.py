@@ -12,6 +12,7 @@ from lovspor.legaltime.baseline import (
     INSTRUMENT_UNDATED,
     NAMES_NOTHING,
     Commencement,
+    UnitTiming,
     baseline_commencement,
 )
 from lovspor.legaltime.commencement import CONFLICT, Decisions, Timing
@@ -273,6 +274,58 @@ def test_a_chapter_the_act_does_not_hold_names_nothing() -> None:
         "unresolved",
         NAMES_NOTHING,
     )
+
+
+def test_a_section_s_own_unit_precedes_its_chapter_s_whatever_the_list_order() -> None:
+    """An excepted section keeps its state inside a dated chapter; the rest of the chapter dates."""
+    chapter = UnitTiming(unit=Unit(chapter="kap2"), timing=_dated_timing(date(2023, 1, 1)))
+    section = UnitTiming(unit=Unit(section="§2-6"), timing=Timing(status="pending"))
+    for units in ((section, chapter), (chapter, section)):
+        commencement = Commencement(default=_dated_timing(date(2022, 1, 1)), units=units)
+        assert commencement.section_timing("§2-6", "kap2", ()) == section.timing
+        assert commencement.section_timing("§2-1", "kap2", ()) == chapter.timing
+
+
+def test_a_section_and_its_chapter_dated_on_different_days_conflict() -> None:
+    chapter = _decision(
+        "forskrift/2022-01-01-1",
+        "Delt ikraftsetting av lov 18. juni 2021 nr. 97 om barnevern (barnevernsloven)",
+        "2023-01-01",
+        "Loven kapittel 2 trer i kraft 1. januar 2023.",
+        "2022-01-01 10:00",
+    )
+    section = _decision(
+        "forskrift/2022-02-01-2",
+        "Delt ikraftsetting av lov 18. juni 2021 nr. 97 om barnevern (barnevernsloven)",
+        "2023-03-01",
+        "Loven § 2-1 trer i kraft 1. mars 2023.",
+        "2022-02-01 10:00",
+    )
+    commencement = baseline_commencement(_act(), (chapter, section), [])
+    by_unit = {e.unit: e.timing for e in commencement.units}
+    assert by_unit[Unit(chapter="kap2")].effective == date(2023, 1, 1)
+    conflicted = by_unit[Unit(section="§2-1")]
+    assert (conflicted.status, conflicted.reason) == ("unresolved", CONFLICT)
+    assert {p.refid for p in conflicted.proofs} >= {
+        "forskrift/2022-01-01-1",
+        "forskrift/2022-02-01-2",
+    }
+    same_day = _decision(
+        "forskrift/2022-02-01-2",
+        "Delt ikraftsetting av lov 18. juni 2021 nr. 97 om barnevern (barnevernsloven)",
+        "2023-01-01",
+        "Loven § 2-1 trer i kraft 1. januar 2023.",
+        "2022-02-01 10:00",
+    )
+    settled = baseline_commencement(_act(), (chapter, same_day), [])
+    assert {e.unit: e.timing.status for e in settled.units} == {
+        Unit(chapter="kap2"): "dated",
+        Unit(section="§2-1"): "dated",
+    }
+
+
+def _dated_timing(when: date) -> Timing:
+    return Timing(status="dated", effective=when)
 
 
 def test_a_commencement_is_a_timing_plus_units() -> None:
