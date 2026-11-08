@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/cache_remote.py"
+symbol = "with_remote"
+registered = "2026-11-08, PR #844, from run 42496403404"
+mutation = """
+-    backend = os.environ.get(REMOTE_VARIABLE, "")
++    backend = os.environ.get(REMOTE_VARIABLE, None)
+"""
+justification = """
+os.environ.get(name, default) returns the variable's string when it is set and
+`default` otherwise; with no default, or default None, an unset variable gives
+None instead of "". The value's only uses here are its truthiness (`if not
+backend`, `if not value`) and, when truthy, the value itself. None and "" are
+both falsy, so an unset variable takes the same branch either way (local store
+returned / variable named as missing), and a set variable is the same string.
+Python's own semantics; no dependency involved.
+"""

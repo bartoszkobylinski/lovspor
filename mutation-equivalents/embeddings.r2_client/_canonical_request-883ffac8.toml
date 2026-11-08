@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/r2_client.py"
+symbol = "_canonical_request"
+registered = "2026-11-08, PR #844, from run 42496403404"
+mutation = """
+-            quote(request.url.path, safe="/-_.~"),
++            quote(request.url.path, ),
+"""
+justification = """
+urllib.parse.quote never encodes ASCII letters, digits or "-_.~" whatever
+`safe` says (they are always safe), and `safe` defaults to "/". So adding the
+letter X to `safe`, or dropping "-_.~" from it (leaving the default "/" for the
+path), encodes every string exactly as the original does. The assumption test
+pins it on a string mixing every class of character.
+"""
+assumption_test = "tests/unit/test_r2_client_equivalence_assumptions.py::test_assumption_quote_always_keeps_unreserved_characters"
