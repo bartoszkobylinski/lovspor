@@ -321,6 +321,49 @@ def test_remote_success_then_local_failure_stops_and_a_fresh_runner_reads_the_bu
 # --- lookup table ------------------------------------------------------------
 
 
+@pytest.mark.parametrize("plant", _INVALID.values(), ids=_INVALID.keys())
+@pytest.mark.parametrize("existing", [False, True], ids=["absent", "existing"])
+def test_publish_validates_downloaded_bytes_before_touching_local_state(
+    remote: Callable[[str], RemoteEntryStore],
+    plant: Callable[[CachedVectors], bytes],
+    existing: bool,
+) -> None:
+    """publish's stated validate-first contract applies even when a key exists."""
+    store, entry = remote("runner-1"), _doc("a")
+    if existing:
+        store.local.put(entry)
+    before = _local_bytes(store, entry.key)
+
+    with pytest.raises(EmbeddingCacheError):
+        store.local.publish(entry.key, plant(entry))
+
+    assert _local_bytes(store, entry.key) == before
+
+
+@pytest.mark.parametrize("held", [False, True], ids=["created", "held"])
+def test_put_preserves_divergent_local_evidence_when_adopting_remote_winner(
+    bucket: r2_fakes.FakeBucket,
+    remote: Callable[[str], RemoteEntryStore],
+    held: bool,
+) -> None:
+    """_adopt promises a conflict rather than replacing a different local value."""
+    store, mine = remote("runner-1"), _unit("a")
+    winner = _other_value(mine)
+    store.local.put(mine)
+    payload = encode_entry(winner)
+    if held:
+        bucket.objects[remote_key(mine.key)] = payload
+
+    with pytest.raises(EmbeddingCacheConflictError):
+        store.put(winner)
+
+    assert _local_bytes(store, mine.key) == encode_entry(mine)
+    assert bucket.objects == {remote_key(mine.key): payload}
+    assert bucket.calls == [("PUT", remote_key(mine.key))] + (
+        [("GET", remote_key(mine.key))] if held else []
+    )
+
+
 def test_remote_valid_local_absent_publishes_the_remote_value(
     bucket: r2_fakes.FakeBucket, remote: Callable[[str], RemoteEntryStore]
 ) -> None:
