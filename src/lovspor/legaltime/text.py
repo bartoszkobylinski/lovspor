@@ -28,6 +28,7 @@ ACT_CITATION = re.compile(
     rf"\blov\s+(\d{{1,2}})\.\s*({_MONTH_ALT})\s+(\d{{4}})(?:\s+nr\.\s*(\d+))?", re.I
 )
 _SECTION_LABEL = re.compile(r"§\s*(\d+[A-Z]?(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
+_CHAPTER_LABEL = re.compile(r"\b[Kk]apit(?:te)?l\s+(\d+)\s*([A-Za-z])?(?![\wæøå])")
 _ABBREVIATIONS = frozenset(
     {
         "jf",
@@ -93,6 +94,15 @@ def section_key_of(label: str) -> str:
     if key is None:
         raise ValueError(f"not a section label: {label!r}")
     return key
+
+
+def chapter_key(text: str) -> str | None:
+    """``"Kapittel 9 A. Ettervern"`` → ``"kap9a"``, the ``data-name`` form of a chapter section."""
+    match = _CHAPTER_LABEL.search(text)
+    if match is None:
+        return None
+    number, letter = match.groups()
+    return f"kap{number}{(letter or '').lower()}"
 
 
 def section_sort_key(key: str) -> tuple[int, int, str]:

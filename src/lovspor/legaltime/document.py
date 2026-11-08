@@ -56,6 +56,8 @@ class Provision(Frozen):
     heading: str
     ledd: tuple[Ledd, ...]
     notes: tuple[str, ...] = ()
+    chapter: str | None = None  # the enclosing chapter section's data-name (``kap16``)
+    part: str | None = None  # the enclosing top-level part's data-name (``del1``)
 
 
 class Node(Frozen):
@@ -177,8 +179,25 @@ def _ledd_of(article: etree._Element) -> tuple[Ledd, ...]:
     return tuple(ledd)
 
 
+_CHAPTER_NAME = re.compile(r"kap\d+[a-z]?")
+_PART_NAME = re.compile(r"del\d+")
+
+
+def _enclosing(article: etree._Element) -> tuple[str | None, str | None]:
+    """(chapter, part) data-names of the nearest enclosing sections so named."""
+    chapter = part = None
+    for ancestor in article.iterancestors("section"):
+        name = (ancestor.get("data-name") or "").lower()
+        if chapter is None and _CHAPTER_NAME.fullmatch(name):
+            chapter = name
+        elif part is None and _PART_NAME.fullmatch(name):
+            part = name
+    return chapter, part
+
+
 def _provision(article: etree._Element) -> Provision:
     key = article.get("data-name") or ""
+    chapter, part = _enclosing(article)
     values = [e for e in article.iter("span") if _css(e) == "legalArticleValue"]
     titles = [e for e in article.iter("span") if _css(e) == "legalArticleTitle"]
     notes = tuple(
@@ -192,6 +211,8 @@ def _provision(article: etree._Element) -> Provision:
         heading=element_text(titles[0]) if titles else "",
         ledd=_ledd_of(article),
         notes=notes,
+        chapter=chapter,
+        part=part,
     )
 
 
