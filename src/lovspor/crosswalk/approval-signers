@@ -9,3 +9,4 @@
 # No tool, agent or script writes, generates or chooses this key. While no
 # line is present every approval is refused, so no release candidate can be
 # made or described.
+lovspor-owner namespaces="lovspor-crosswalk-approval" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGmyL1J2V65BHcLVHCuh8Nfo7ENEKeYhiLV7LwnVXv9Z
