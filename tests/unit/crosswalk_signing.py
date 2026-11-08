@@ -64,7 +64,7 @@ def approval_dir(directory: Path, approved_input: bytes, signer: Signing) -> Pat
 
 
 def trust(monkeypatch: pytest.MonkeyPatch, signer: Signing) -> None:
-    """Make the CLI trust this throwaway signer instead of the shipped (empty) file."""
+    """Make the CLI trust this throwaway signer instead of the shipped signers file."""
     monkeypatch.setattr(approvals, "TRUSTED_SIGNERS", signer.signers)
 
 
