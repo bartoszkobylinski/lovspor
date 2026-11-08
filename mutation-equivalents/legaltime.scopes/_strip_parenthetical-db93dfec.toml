@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/scopes.py"
+symbol = "_strip_parenthetical"
+registered = "2026-11-08, PR #847, from the mutation artifact at commit a2197fe9"
+mutation = """
+-        depth += (char == "(") - (char == ")")
++        depth -= (char == "(") - (char == ")")
+"""
+justification = """
+The loop reads ``depth`` only through ``depth == 0``. Negating every step mirrors the
+counter around zero: the mutant reaches 0 on exactly the same character as the
+original (the first closing parenthesis that balances the opening ones), because
+``-x == 0`` iff ``x == 0`` for every integer x; so the same index is chosen, the same
+tail returned, and the same None on an unbalanced text.
+"""

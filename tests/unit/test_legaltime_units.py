@@ -132,3 +132,20 @@ def test_units_describe_themselves_for_reports() -> None:
         Unit(section="§2", ledd=2, punktum=2, bokstav="a").describe()
         == "§2 ledd 2 punktum 2 bokstav a"
     )
+
+
+def test_an_item_unit_covers_its_item_is_disjoint_beside_and_spanned_above() -> None:
+    unit = Unit(section="§16-3", ledd=3, bokstav="c")
+    assert relation(unit, _op("replace_bokstav", section="§16-3", ledd=3, bokstav="c")) == "covers"
+    assert (
+        relation(unit, _op("replace_bokstav", section="§16-3", ledd=3, bokstav="d")) == "disjoint"
+    )
+    assert relation(unit, _op("replace_ledd", section="§16-3", ledd=3)) == "spans"
+    assert relation(unit, _op("replace_ledd", section="§16-3", ledd=2)) == "disjoint"
+    numbered = Unit(section="§37", ledd=1, bokstav="3")
+    assert (
+        relation(numbered, _op("replace_bokstav", section="§37", ledd=1, bokstav="3")) == "covers"
+    )
+    assert (
+        relation(numbered, _op("replace_bokstav", section="§37", ledd=1, bokstav="4")) == "disjoint"
+    )

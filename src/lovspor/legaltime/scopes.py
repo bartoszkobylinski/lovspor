@@ -433,8 +433,8 @@ def _named_in(law: Document, scope: Scope) -> bool:
     A scope of the whole act names the law. A bare unit or chapter scope without a part is
     a statement about an enacted act's own structure, which only the baseline reading checks.
     """
-    if scope.remainder or (scope.part is None and not scope.whole and not scope.own_sections):
-        return False
     if scope.own_sections:
         return any(p.key in scope.own_sections for p in law.provisions)
-    return scope.whole or scope.part in {part.label.upper() for part in law.parts}
+    if scope.whole:
+        return True
+    return scope.part is not None and scope.part in {part.label.upper() for part in law.parts}

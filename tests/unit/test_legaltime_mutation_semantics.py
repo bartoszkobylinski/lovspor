@@ -67,9 +67,10 @@ def test_item_relation_distinguishes_equal_and_unequal_items(item: str | None) -
         id="item", kind="replace_bokstav", act="lov/2020-01-01-1",
         address=Address(section="§1", ledd=1, bokstav=item), instruction="", part="I",
     )  # fmt: skip
-    assert relation(Unit(section="§1", ledd=1, bokstav="a"), operation) == (
-        "covers" if item == "a" else "disjoint"
-    )
+    # An operation that names no item rewrites the whole ledd, which contains the item:
+    # it spans the unit (units.py, ``relation``), it is not beside it.
+    expected = "covers" if item == "a" else ("spans" if item is None else "disjoint")
+    assert relation(Unit(section="§1", ledd=1, bokstav="a"), operation) == expected
 
 
 @pytest.mark.parametrize(

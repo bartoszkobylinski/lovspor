@@ -101,12 +101,12 @@ def _tokens(listing: str) -> list[str]:
 def parse_units(listing: str) -> tuple[Unit, ...] | None:
     """Every unit a listing names, or None when any token is outside the grammar."""
     units: list[Unit] = []
-    for token in _tokens(listing):
+    for token in _tokens(listing):  # an empty listing yields one empty token, refused above
         unit = _unit(token)
         if unit is None:
             return None
         units.append(unit)
-    return tuple(units) if units else None
+    return tuple(units)
 
 
 ChapterOf = Mapping[str, str]  # section key → chapter data-name, read from the act's structure
@@ -126,7 +126,7 @@ def _chapter_relation(unit: Unit, operation: Operation, chapter_of: ChapterOf) -
     return "covers" if chapter == unit.chapter else "disjoint"
 
 
-def _heading_relation(unit: Unit, operation: Operation) -> Relation:
+def _heading_relation(operation: Operation) -> Relation:
     if operation.kind == "replace_heading":
         return "covers"
     return "spans" if operation.kind in {"replace_section", "repeal_section"} else "disjoint"
@@ -143,6 +143,15 @@ def _level(unit_value: int | None, op_value: int | None, op_end: int | None) -> 
     return None if op_value == unit_value else "disjoint"
 
 
+def _item_level(unit_item: str | None, op_item: str | None) -> Relation | None:
+    """Compare the item (bokstav or nummer) level; None means equal or unnamed, go on."""
+    if unit_item is None:
+        return None
+    if op_item is None:
+        return "spans"
+    return None if op_item == unit_item else "disjoint"
+
+
 def relation(unit: Unit, operation: Operation, chapter_of: ChapterOf | None = None) -> Relation:
     """How the unit stands to the operation's address: covers, spans, disjoint or unknown.
 
@@ -154,15 +163,13 @@ def relation(unit: Unit, operation: Operation, chapter_of: ChapterOf | None = No
     if unit.section != address.section:
         return "disjoint"
     if unit.heading:
-        return _heading_relation(unit, operation)
+        return _heading_relation(operation)
     if operation.kind == "replace_heading":
         return "covers" if unit.ledd is None and unit.punktum is None else "disjoint"
     levels = (
         _level(unit.ledd, address.ledd, address.ledd_end),
         _level(unit.punktum, address.punktum, address.punktum_end),
-        None
-        if unit.bokstav is None
-        else _level(1, 1 if address.bokstav == unit.bokstav else 2, None),
+        _item_level(unit.bokstav, address.bokstav),
     )
     skips_ledd = unit.ledd is None and (unit.punktum is not None or unit.bokstav is not None)
     if skips_ledd and address.ledd is not None:
