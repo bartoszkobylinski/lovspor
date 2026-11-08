@@ -495,6 +495,58 @@ def test_a_transient_get_failure_is_retried(
     assert remote("runner-1").get(entry.key) is not None
 
 
+@pytest.mark.parametrize("fault", [403, 503, r2_fakes.TIMEOUT, r2_fakes.DROP])
+def test_unreachable_remote_never_falls_back_to_a_valid_local_copy(
+    bucket: r2_fakes.FakeBucket,
+    remote: Callable[[str], RemoteEntryStore],
+    sleeps: Sleeps,
+    fault: int | str,
+) -> None:
+    """§8.1: an unreachable authority is a refusal, even with a usable local copy."""
+    store, entry = remote("runner-1"), _doc("a")
+    payload = encode_entry(entry)
+    store.local.publish(entry.key, payload)
+    bucket.objects[remote_key(entry.key)] = payload
+    attempts = 1 if fault == 403 else 3
+    bucket.fail("GET", *([fault] * attempts))
+
+    with pytest.raises(EmbeddingCacheStorageError):
+        store.get(entry.key)
+
+    assert bucket.calls == [("GET", remote_key(entry.key))] * attempts
+    assert sleeps == ([] if attempts == 1 else [1.0, 2.0])
+    assert _local_bytes(store, entry.key) == payload
+    assert bucket.objects == {remote_key(entry.key): payload}
+
+
+@pytest.mark.parametrize("held", [409, 412])
+@pytest.mark.parametrize("existing", [False, True], ids=["local-absent", "local-present"])
+def test_unreadable_winner_after_held_put_preserves_both_copies(
+    bucket: r2_fakes.FakeBucket,
+    remote: Callable[[str], RemoteEntryStore],
+    sleeps: Sleeps,
+    held: int,
+    existing: bool,
+) -> None:
+    """§8.1 steps 4–6: a failed winner lookup cannot publish the losing value."""  # noqa: RUF002
+    store, mine = remote("runner-1"), _doc("a")
+    winner = encode_entry(_other_value(mine))
+    bucket.objects[remote_key(mine.key)] = winner
+    if existing:
+        store.local.put(mine)
+    before = _local_bytes(store, mine.key)
+    bucket.fail("PUT", held)
+    bucket.fail("GET", 503, r2_fakes.TIMEOUT, r2_fakes.DROP)
+
+    with pytest.raises(EmbeddingCacheStorageError, match="3 attempts"):
+        store.put(mine)
+
+    assert bucket.calls == [("PUT", remote_key(mine.key))] + [("GET", remote_key(mine.key))] * 3
+    assert sleeps == [1.0, 2.0]
+    assert _local_bytes(store, mine.key) == before
+    assert bucket.objects == {remote_key(mine.key): winner}
+
+
 @pytest.mark.parametrize("status", [400, 403])
 def test_a_refused_get_is_a_storage_error(
     bucket: r2_fakes.FakeBucket, remote: Callable[[str], RemoteEntryStore], status: int
