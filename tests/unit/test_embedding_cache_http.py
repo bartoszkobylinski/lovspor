@@ -17,7 +17,7 @@ from lovspor.embeddings.model import OpenAIEmbedder
 
 
 @pytest.mark.parametrize(("batch_size", "token_budget"), [(2, 100), (128, 8)])
-@pytest.mark.parametrize("failure", ["503", "400", "timeout"])
+@pytest.mark.parametrize("failure", ["503", "400", "read-timeout", "connection-drop"])
 def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -38,8 +38,10 @@ def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
         requests.append(batch)
         assert body["dimensions"] == 3
         if fail_second and len(requests) == 2:
-            if failure == "timeout":
-                raise httpx.ReadTimeout("response interrupted", request=request)
+            if failure == "read-timeout":
+                raise httpx.ReadTimeout("response timed out", request=request)
+            if failure == "connection-drop":
+                raise httpx.RemoteProtocolError("incomplete response", request=request)
             return httpx.Response(int(failure))
         # Batch-dependent, unnormalised and out of order: exercise the real
         # adapter's alignment and normalisation before checkpointing float32.
@@ -72,7 +74,10 @@ def test_real_adapter_resume_preserves_requests_and_quantized_vectors(
         inner = provider()
         return CachingEmbedder(inner, LocalEntryStore.open(root, (), policy), inner.space_id)
 
-    expected_error = httpx.ReadTimeout if failure == "timeout" else httpx.HTTPStatusError
+    expected_error = {
+        "read-timeout": httpx.ReadTimeout,
+        "connection-drop": httpx.RemoteProtocolError,
+    }.get(failure, httpx.HTTPStatusError)
     with pytest.raises(expected_error):
         quantized_document_vectors(cached(), inputs, input_hash)
     assert requests == expected_requests

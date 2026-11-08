@@ -512,6 +512,112 @@ def test_plain_encode_passes_through_uncached(cache_dir: Path, tmp_path: Path) -
     assert not list(cache_dir.rglob("*.lsec"))
 
 
+def test_document_publish_failure_resumes_from_all_paid_checkpoints(
+    cache_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design §5.2/§6: losing the final entry must not lose durable paid units."""
+    settings = _settings(tmp_path)
+    provider = _Provider()
+    publish = cache_store._publish
+
+    def fail_document(directory: int, name: str, payload: bytes) -> None:
+        if "-" not in name:  # a document entry; unit names are index-count-hash
+            raise OSError(28, "No space left on device")
+        publish(directory, name, payload)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(cache_store, "_publish", fail_document)
+        with pytest.raises(EmbeddingCacheStorageError):
+            _write(settings, with_embedding_cache(provider, settings))
+
+    assert provider.requests == 4
+    checkpoints = {p: p.read_bytes() for p in cache_dir.rglob("*.lsec")}
+    assert len(checkpoints) == 4
+    assert all("units" in p.parts for p in checkpoints)
+    assert not list(settings.lovverk_repo_path.rglob("*.bin"))
+
+    resumed_provider = _Provider(fail_after=0)
+    resumed = with_embedding_cache(resumed_provider, settings)
+    assert isinstance(resumed, CachingEmbedder)
+    result = _write(settings, resumed)
+    assert resumed_provider.requests == 0
+    assert resumed.progress.units_cached == 4
+    assert {p: p.read_bytes() for p in checkpoints} == checkpoints
+    assert len(list(cache_dir.rglob("*.lsec"))) == 5
+    assert result == _write(settings, _Provider())
+
+
+def test_corrupt_unit_checkpoint_stops_resume_without_repayment(
+    cache_dir: Path, tmp_path: Path
+) -> None:
+    """Design §5.3/§5.4: a refused unit is never treated as a paid-over miss."""
+    settings = _settings(tmp_path)
+    with pytest.raises(RuntimeError, match="job killed"):
+        _write(settings, with_embedding_cache(_Provider(fail_after=1), settings))
+    (checkpoint,) = cache_dir.rglob("*.lsec")
+    damaged = bytearray(checkpoint.read_bytes())
+    damaged[-1] ^= 1
+    checkpoint.write_bytes(damaged)
+    before = {p: p.read_bytes() for p in cache_dir.rglob("*.lsec")}
+
+    provider = _Provider()
+    with pytest.raises(EmbeddingCacheError, match="digest mismatch"):
+        _write(settings, with_embedding_cache(provider, settings))
+    assert provider.requests == 0
+    assert {p: p.read_bytes() for p in cache_dir.rglob("*.lsec")} == before
+    assert not list(settings.lovverk_repo_path.rglob("*.bin"))
+
+
+@pytest.mark.parametrize("bad_response", ["shape", "nan", "inf", "-inf"])
+def test_invalid_later_response_preserves_checkpoint_and_resumes(
+    cache_dir: Path, tmp_path: Path, bad_response: str
+) -> None:
+    """Design §5.3/§6: refuse bad responses without losing earlier paid units."""
+
+    class InvalidSecondResponse(_Provider):
+        def encode(self, texts: list[str]) -> np.ndarray:
+            vectors = super().encode(texts)
+            if self.requests == 2:
+                if bad_response == "shape":
+                    return vectors[:-1]
+                vectors[0, 0] = float(bad_response)
+            return vectors
+
+    settings = _settings(tmp_path)
+    inputs = [EmbeddingInput(str(i), f"tekst {i}") for i in range(5)]
+    digest = hash_embedding_inputs(inputs)
+    provider = InvalidSecondResponse()
+    cached = with_embedding_cache(provider, settings)
+    assert isinstance(cached, CachingEmbedder)
+    reason = "shape" if bad_response == "shape" else "non-finite"
+    with pytest.raises(EmbeddingCacheError, match=reason):
+        quantized_document_vectors(cached, inputs, digest)
+    assert provider.requests == 2
+    (checkpoint,) = cache_dir.rglob("*.lsec")
+    checkpoint_bytes = checkpoint.read_bytes()
+    assert checkpoint.parent.parent.name == "units"
+
+    resumed_provider = _Provider()
+    resumed = with_embedding_cache(resumed_provider, settings)
+    assert isinstance(resumed, CachingEmbedder)
+    vectors, scale = quantized_document_vectors(resumed, inputs, digest)
+    reference_vectors, reference_scale = quantized_document_vectors(_Provider(), inputs, digest)
+    np.testing.assert_array_equal(vectors, reference_vectors)
+    assert scale == reference_scale
+    assert resumed_provider.requests == 2
+    assert resumed_provider.texts == 3
+    assert resumed.progress.units_cached == 1
+    assert checkpoint.read_bytes() == checkpoint_bytes
+
+    hit = _Provider(fail_after=0)
+    hit_vectors, hit_scale = quantized_document_vectors(
+        with_embedding_cache(hit, settings), inputs, digest
+    )
+    np.testing.assert_array_equal(hit_vectors, reference_vectors)
+    assert hit_scale == reference_scale
+    assert hit.requests == 0
+
+
 @pytest.mark.parametrize("defect", ["shape", "non-finite"])
 def test_invalid_later_response_preserves_only_valid_checkpoints_for_retry(
     cache_dir: Path, tmp_path: Path, defect: str

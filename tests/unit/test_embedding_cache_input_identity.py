@@ -13,6 +13,44 @@ from tests.unit.test_embedding_cache_remediation import _cached, _inputs
 __all__ = ["cache_dir"]
 
 
+def test_partial_checkpoints_are_isolated_by_embedding_space(
+    cache_dir: Path, tmp_path: Path
+) -> None:
+    """ADR-0005: equal dimensions never make two spaces compatible (§3.1)."""
+    inputs = _inputs()
+    digest = hash_embedding_inputs(inputs)
+    with pytest.raises(RuntimeError, match="job killed"):
+        quantized_document_vectors(_cached(_Provider(fail_after=1), tmp_path), inputs, digest)
+    checkpoints = {path: path.read_bytes() for path in cache_dir.rglob("*.lsec")}
+    assert len(checkpoints) == 1
+
+    class OtherSpace(_Provider):
+        def __init__(self) -> None:
+            super().__init__(descriptor="provider=openai;model=other;dim=4;endpoint=default")
+
+        def encode(self, texts: list[str]) -> np.ndarray:
+            return -super().encode(texts)
+
+    provider = OtherSpace()
+    cached = _cached(provider, tmp_path)
+    actual, scale = quantized_document_vectors(cached, inputs, digest)
+    expected, expected_scale = quantized_document_vectors(OtherSpace(), inputs, digest)
+    np.testing.assert_array_equal(actual, expected)
+    assert scale == expected_scale
+    assert provider.requests == 2
+    assert cached.progress.units_cached == 0
+    assert all(path.read_bytes() == data for path, data in checkpoints.items())
+
+    original_provider = _Provider()
+    resumed = _cached(original_provider, tmp_path)
+    actual, scale = quantized_document_vectors(resumed, inputs, digest)
+    expected, expected_scale = quantized_document_vectors(_Provider(), inputs, digest)
+    np.testing.assert_array_equal(actual, expected)
+    assert scale == expected_scale
+    assert original_provider.requests == 1
+    assert resumed.progress.units_cached == 1
+
+
 @pytest.mark.parametrize("split", [1, 3])
 def test_changed_request_slices_do_not_reuse_same_index_checkpoints(
     cache_dir: Path, tmp_path: Path, split: int

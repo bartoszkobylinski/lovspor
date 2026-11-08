@@ -5,6 +5,7 @@ composition moves provider vectors (ADR-0005 Amendment 1), so a cache unit
 that straddled two requests would store vectors no uncached run produces.
 """
 
+import httpx
 import pytest
 
 from lovspor.embeddings.model import OpenAIEmbedder, request_bounds
@@ -80,6 +81,29 @@ def test_plan_applies_input_truncation_before_the_request_token_budget(
     bounds = model.plan_requests(texts)
     assert bounds == [(0, 2), (2, 3)]
     assert [truncated[start:end] for start, end in bounds] == list(model._batches(truncated))
+
+
+def test_plan_matches_sent_requests_after_truncation_and_token_splitting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = OpenAIEmbedder(api_key="sk-test", dim=3, batch_size=128)
+    # 32 capped inputs exceed the 250,000-token request ceiling, even
+    # though their item count fits; the last input exercises the tail.
+    texts = [" ord" * 8100] * 32 + ["slutt"]
+    sent: list[list[str]] = []
+
+    def record(_client: httpx.Client, batch: list[str]) -> list[list[float]]:
+        sent.append(batch)
+        return [[1.0, 0.0, 0.0] for _ in batch]
+
+    monkeypatch.setattr(model, "_encode_batch", record)
+    bounds = model.plan_requests(texts)
+    vectors = model.encode(texts)
+    truncated = model._truncate_to_tokens(texts[0])
+    assert truncated != texts[0]
+    assert bounds == [(0, 31), (31, 33)]
+    assert sent == [[truncated] * 31, [truncated, "slutt"]]
+    assert vectors.shape == (33, 3)
 
 
 @pytest.mark.parametrize(
