@@ -177,6 +177,75 @@ def test_the_racing_client_records_a_held_put() -> None:
     assert client.get(_TARGET).body == b"winner"
 
 
+@pytest.mark.parametrize("status", [403, 409, 412, 503])
+def test_failed_readiness_publication_never_sends_the_cache_put(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    bucket, clock = Memory(), Clock()
+
+    def refuse(key: str, data: bytes) -> Reply:
+        bucket.calls.append(("PUT", key))
+        return Reply(status=status, body=b"")
+
+    monkeypatch.setattr(bucket, "put_if_absent", refuse)
+    client = race.RacingClient(bucket, _barrier(bucket, clock=clock))
+
+    with pytest.raises(
+        race.RaceError, match="coordination object already exists|advertise readiness"
+    ):
+        client.put_if_absent(_TARGET, b"candidate")
+
+    assert bucket.calls == [("PUT", client.barrier.key(_TARGET, "a"))]
+    assert bucket.objects == {}
+    assert clock.slept == []
+    assert client.attempt.target is None
+    assert client.attempt.put_status is None
+
+
+@pytest.mark.parametrize("status", [403, 503])
+def test_failed_peer_read_never_sends_the_cache_put(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    bucket, clock = Memory(), Clock()
+
+    def refuse(key: str) -> Reply:
+        bucket.calls.append(("GET", key))
+        return Reply(status=status, body=b"")
+
+    monkeypatch.setattr(bucket, "get", refuse)
+    client = race.RacingClient(bucket, _barrier(bucket, clock=clock))
+
+    with pytest.raises(race.RaceError, match=f"GET answered {status}"):
+        client.put_if_absent(_TARGET, b"candidate")
+
+    assert bucket.calls == [
+        ("PUT", client.barrier.key(_TARGET, "a")),
+        ("GET", client.barrier.key(_TARGET, "b")),
+    ]
+    assert _TARGET not in bucket.objects
+    assert clock.slept == []
+    assert client.attempt.target is None
+    assert client.attempt.put_status is None
+
+
+@pytest.mark.parametrize("body", [b"\xff", b"{", b"null", b"[]", b'"text"'])
+def test_corrupt_peer_bytes_stop_the_client_before_cache_publication(body: bytes) -> None:
+    bucket = Memory()
+    client = race.RacingClient(bucket, _barrier(bucket))
+    bucket.objects[client.barrier.key(_TARGET, "b")] = body
+
+    with pytest.raises(race.RaceError, match="peer's coordination object is corrupt"):
+        client.put_if_absent(_TARGET, b"candidate")
+
+    assert bucket.calls == [
+        ("PUT", client.barrier.key(_TARGET, "a")),
+        ("GET", client.barrier.key(_TARGET, "b")),
+    ]
+    assert _TARGET not in bucket.objects
+    assert client.attempt.target is None
+    assert client.attempt.put_status is None
+
+
 def _evidence(**changes: object) -> tuple[dict[str, object], dict[str, object]]:
     a = {
         "writer": "a",
