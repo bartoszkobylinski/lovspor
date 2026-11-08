@@ -122,3 +122,61 @@ def test_document_hit_does_not_read_obsolete_corrupt_unit_checkpoints(
     assert cached.progress.documents_cached == 1
     assert cached.progress.units_cached == 0
     assert all(unit.read_bytes() == b"obsolete torn checkpoint" for unit in units)
+
+
+@pytest.mark.parametrize(
+    ("bounds", "reused", "paid_texts"),
+    [
+        ([(0, 2), (2, 6)], 0, [2, 4]),
+        ([(0, 2), (2, 3), (3, 6)], 1, [1, 3]),
+    ],
+)
+def test_resume_after_request_plan_change_respects_unit_identity(
+    cache_dir: Path,
+    tmp_path: Path,
+    bounds: list[tuple[int, int]],
+    reused: int,
+    paid_texts: list[int],
+) -> None:
+    """Design §3.1 binds checkpoints to unit count, index and slice hash."""
+    inputs = [*_inputs(), EmbeddingInput("4", "fifth"), EmbeddingInput("5", "sixth")]
+    digest = hash_embedding_inputs(inputs)
+    with pytest.raises(RuntimeError, match="job killed"):
+        quantized_document_vectors(_cached(_Provider(fail_after=1), tmp_path), inputs, digest)
+    checkpoints = {path: path.read_bytes() for path in cache_dir.rglob("*.lsec")}
+    assert len(checkpoints) == 1
+
+    class ReplannedProvider(_Provider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.sent: list[list[str]] = []
+
+        def plan_requests(self, texts: list[str]) -> list[tuple[int, int]]:
+            return bounds
+
+        def encode(self, texts: list[str]) -> np.ndarray:
+            self.sent.append(list(texts))
+            return super().encode(texts)
+
+    provider = ReplannedProvider()
+    resumed = _cached(provider, tmp_path)
+    actual, scale = quantized_document_vectors(resumed, inputs, digest)
+    expected, expected_scale = quantized_document_vectors(_Provider(), inputs, digest)
+    np.testing.assert_array_equal(actual, expected)
+    assert scale == expected_scale
+    assert resumed.progress.units_cached == reused
+    assert resumed.progress.units_paid == len(bounds) - reused
+    assert [len(request) for request in provider.sent] == paid_texts
+    assert provider.sent == [
+        [item.text for item in inputs[start:end]] for start, end in bounds[reused:]
+    ]
+    assert all(path.read_bytes() == data for path, data in checkpoints.items())
+
+    # Once the complete document exists, another plan change cannot cause payment.
+    hit_provider = _Provider(fail_after=0)
+    hit = _cached(hit_provider, tmp_path)
+    again, again_scale = quantized_document_vectors(hit, inputs, digest)
+    np.testing.assert_array_equal(again, actual)
+    assert again_scale == scale
+    assert hit_provider.requests == 0
+    assert hit.progress.documents_cached == 1

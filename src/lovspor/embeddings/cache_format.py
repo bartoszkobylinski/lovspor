@@ -128,6 +128,22 @@ def decode_entry(data: bytes, expected: EntryKey, policy: ReadPolicy) -> CachedV
     return CachedVectors(key=expected, vectors=vectors, scale=scale, created_at=created_at)
 
 
+def describe_entry(data: bytes, name: str) -> EntryKey:
+    """The key an entry claims, once its digest and meta parse; for audits.
+
+    Serving never trusts this: :func:`decode_entry` compares the entry with
+    the key the caller derived. ``verify`` uses it to check a stored file
+    against the name it is stored under.
+    """
+    meta, _payload = _split(data, name)
+    try:
+        unit = None if meta.get("unit") is None else UnitKey.model_validate(meta["unit"])
+        fields = {field: meta[field] for field in ("esi", "input_hash", "dim", "rows")}
+        return EntryKey.model_validate({**fields, "unit": unit})
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _refuse(name, "meta does not describe a valid key") from exc
+
+
 def _check_encodable(entry: CachedVectors) -> None:
     key = entry.key
     if entry.vectors.shape != (key.rows, key.dim):
@@ -154,11 +170,12 @@ def _meta_of(entry: CachedVectors) -> dict[str, Any]:
     }
 
 
-def _refuse(expected: EntryKey, reason: str) -> EmbeddingCacheError:
-    return EmbeddingCacheError(f"embedding cache entry refused ({expected.label()}): {reason}")
+def _refuse(expected: EntryKey | str, reason: str) -> EmbeddingCacheError:
+    label = expected if isinstance(expected, str) else expected.label()
+    return EmbeddingCacheError(f"embedding cache entry refused ({label}): {reason}")
 
 
-def _split(data: bytes, expected: EntryKey) -> tuple[dict[str, Any], bytes]:
+def _split(data: bytes, expected: EntryKey | str) -> tuple[dict[str, Any], bytes]:
     if len(data) < _FIXED_SIZE:
         raise _refuse(expected, f"torn entry, {len(data)} bytes")
     if data[: len(MAGIC)] != MAGIC:

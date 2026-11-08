@@ -139,6 +139,10 @@ class LocalEntryStore:
     def root(self) -> Path:
         return self._root
 
+    @property
+    def policy(self) -> ReadPolicy:
+        return self._policy
+
     def get(self, key: EntryKey) -> CachedVectors | None:
         """The validated entry for ``key``, ``None`` if absent; refuses a bad one."""
         parts, name = entry_location(key)
@@ -146,7 +150,7 @@ class LocalEntryStore:
         if handle is None:
             return None
         try:
-            data = _read_entry(Path(name), handle)
+            data = read_entry_bytes(Path(name), handle)
         finally:
             os.close(handle)
         return None if data is None else decode_entry(data, key, self._policy)
@@ -204,8 +208,11 @@ def _descend(handle: int, parts: tuple[str, ...], create: bool = False) -> int:
     return handle
 
 
-def _read_entry(path: Path, directory: int | None = None) -> bytes | None:
-    """An entry's bytes, ``path`` relative to ``directory`` when given; None if absent."""
+def read_entry_bytes(path: Path, directory: int | None = None) -> bytes | None:
+    """An entry's bytes through the checks serving uses; None if absent.
+
+    ``path`` is relative to the ``directory`` descriptor when one is given.
+    """
     try:
         descriptor = os.open(path, _READ_FLAGS, dir_fd=directory)
     except FileNotFoundError:
