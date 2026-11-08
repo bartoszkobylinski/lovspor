@@ -50,8 +50,10 @@ uv run python scripts/legal_time_coverage.py legal-time-replay-2026-11-08-*.json
   > docs/research/data/legal-time-coverage-2026-11-08.json
 ```
 
-`tests/integration/test_legaltime_phase3.py` reproduces the barnevernsloven file byte for byte and
-asserts the commencement facts of §2 and §3 directly from the archives;
+`tests/integration/test_legaltime_phase3.py` rebuilds the barnevernsloven file from the archives and
+compares it byte for byte with the committed one, and asserts the commencement facts of sections 2
+and 3 of this note (the default days, § 2-6 pending, § 15-7 fjerde ledd, chapter 16 and its proofs,
+the states before and after each day) directly from the archives;
 `tests/integration/test_legaltime_pilot.py` still reproduces the four phase-1 files (9/9).
 
 ## 2. Target A — barnevernsloven (lov 18. juni 2021 nr. 97), staged commencement

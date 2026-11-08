@@ -95,6 +95,24 @@ def test_new_chapters_placed_in_a_part_carry_chapter_and_part() -> None:
     ]
 
 
+def test_several_new_chapters_without_titles_stamp_no_chapter() -> None:
+    """``Nye kapitler 6 til 8`` names a run, not one chapter: unplaced until a title names one."""
+    body = (
+        '<section class="section"><h2>I</h2>'
+        '<article class="legalP">Lov 20. mai 2005 nr. 28 om straff endres slik:</article>'
+        + _p("Nye kapitler 6 til 8 plasseres i annen del, og skal lyde:")
+        + _future("§61")
+        + _title("Kapittel 7. B")
+        + _future("§71")
+        + "</section>"
+    )
+    operations = interpret(parse_document(_law(body).encode(), "lti/x.xml")).operations
+    assert [(op.new_provision.chapter, op.new_provision.part) for op in operations] == [
+        (None, "del2"),
+        ("kap7", "del2"),
+    ]
+
+
 def test_a_single_new_chapter_takes_its_chapter_from_the_sentence() -> None:
     body = (
         '<section class="section"><h2>I</h2>'
