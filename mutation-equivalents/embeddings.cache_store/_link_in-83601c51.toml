@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/cache_store.py"
+symbol = "_link_in"
+registered = "2026-11-07, PR #825, from run 42299738173 (moved from _publish when the link gained directory descriptors)"
+mutation = """
+-        os.link(source, target, src_dir_fd=handle, dst_dir_fd=handle, follow_symlinks=False)
++        os.link(source, target, src_dir_fd=handle, dst_dir_fd=handle, follow_symlinks=None)
+"""
+justification = """
+`os.link` converts `follow_symlinks` with the argument-clinic `bool`
+converter (truth value), so `None` is falsy and selects exactly the
+`follow_symlinks=False` path: linkat(2) without AT_SYMLINK_FOLLOW, which links
+a symlink itself rather than its target. Both spellings publish the same name
+to the same inode on every platform and Python version, because _link_in
+passes directory descriptors and CPython then always calls linkat(2). The
+non-equivalent mutants (`True`, omitted) follow the symlink and are killed by
+test_temporary_swapped_for_a_symlink_is_never_published_as_its_target; the
+assumption test pins None == False and True != False on this call shape.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_os_link_follow_symlinks_none_does_not_follow"
