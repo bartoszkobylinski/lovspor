@@ -31,6 +31,24 @@
   "retroactive": false,
   "status": "dated"
  },
+ "commencement": {
+  "default": {
+   "effective": "2021-01-01",
+   "known_from": "2020-03-02",
+   "proofs": [
+    {
+     "member": "lti/2020/sf-20200228-0200.xml",
+     "quote_sha256": "0f6e733d4722f301b8aed3b314f9f9d93e746707ce004d616c6075c8d6373c11",
+     "refid": "forskrift/2020-02-28-200",
+     "sha256": "4cef74e55bc11fbe1cf62084594ddb0ff5e74681b65b0537e642a7c2c8fd9543"
+    }
+   ],
+   "reason": "",
+   "retroactive": false,
+   "status": "dated"
+  },
+  "units": []
+ },
  "events": [
   {
    "law": "lov/2020-12-18-149",
@@ -1006,7 +1024,7 @@
   "member": "nl/nl-20190614-021.xml",
   "sha256": "41cfb99846d23497fc1e911b851f735c4abd54c16311ede59a41410a49be7ffb"
  },
- "replay_version": "legaltime-replay-2",
+ "replay_version": "legaltime-replay-3",
  "states": [
   {
    "act_level_problems": [],
@@ -1027,14 +1045,17 @@
     "lov/2023-06-16-59#1:I:15.0",
     "lov/2023-06-16-59#1:I:16.0"
    ],
+   "not_in_force": [],
    "pending": [
     "lov/2026-06-19-48#4:IV:0.0",
     "lov/2026-06-19-48#6:VI:25.0",
     "lov/2026-06-19-48#6:VI:25.1"
    ],
+   "pending_commencement": [],
    "provisions": [],
    "status": "not_yet_in_force",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": [
     "lov/2020-12-18-149#1:I:1.0",
     "lov/2020-12-18-149#1:I:2.0",
@@ -1070,11 +1091,13 @@
     "lov/2023-06-16-59#1:I:15.0",
     "lov/2023-06-16-59#1:I:16.0"
    ],
+   "not_in_force": [],
    "pending": [
     "lov/2026-06-19-48#4:IV:0.0",
     "lov/2026-06-19-48#6:VI:25.0",
     "lov/2026-06-19-48#6:VI:25.1"
    ],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -2541,6 +2564,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   },
   {
@@ -2569,11 +2593,13 @@
     "lov/2023-06-16-59#1:I:15.0",
     "lov/2023-06-16-59#1:I:16.0"
    ],
+   "not_in_force": [],
    "pending": [
     "lov/2026-06-19-48#4:IV:0.0",
     "lov/2026-06-19-48#6:VI:25.0",
     "lov/2026-06-19-48#6:VI:25.1"
    ],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -4072,6 +4098,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   },
   {
@@ -4100,11 +4127,13 @@
     "lov/2023-06-16-59#1:I:15.0",
     "lov/2023-06-16-59#1:I:16.0"
    ],
+   "not_in_force": [],
    "pending": [
     "lov/2026-06-19-48#4:IV:0.0",
     "lov/2026-06-19-48#6:VI:25.0",
     "lov/2026-06-19-48#6:VI:25.1"
    ],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -5613,6 +5642,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   },
   {
@@ -5640,11 +5670,13 @@
    ],
    "at": "2023-10-01",
    "future": [],
+   "not_in_force": [],
    "pending": [
     "lov/2026-06-19-48#4:IV:0.0",
     "lov/2026-06-19-48#6:VI:25.0",
     "lov/2026-06-19-48#6:VI:25.1"
    ],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -7177,6 +7209,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   },
   {
@@ -7204,11 +7237,13 @@
    ],
    "at": "2026-11-06",
    "future": [],
+   "not_in_force": [],
    "pending": [
     "lov/2026-06-19-48#4:IV:0.0",
     "lov/2026-06-19-48#6:VI:25.0",
     "lov/2026-06-19-48#6:VI:25.1"
    ],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -8741,6 +8776,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   }
  ],
@@ -8755,6 +8791,13 @@
     "exact_raw": 52,
     "only_in_oracle": 2,
     "text_differs": 21
+   },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 383,
+    "ledd_text_differs": 72,
+    "oracle_ledd": 455
    },
    "notes_without_replay_event": [
     "§11",
@@ -10462,6 +10505,13 @@
     "exact_raw": 55,
     "only_in_oracle": 2,
     "text_differs": 7
+   },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 426,
+    "ledd_text_differs": 29,
+    "oracle_ledd": 455
    },
    "notes_without_replay_event": [
     "§116",
@@ -12186,6 +12236,13 @@
     "only_in_oracle": 1,
     "text_differs": 7
    },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 431,
+    "ledd_text_differs": 29,
+    "oracle_ledd": 460
+   },
    "notes_without_replay_event": [
     "§116",
     "§139",
@@ -13907,6 +13964,12 @@
     "editorial_omission": 1,
     "exact_normalized": 127,
     "exact_raw": 55
+   },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 464,
+    "oracle_ledd": 464
    },
    "notes_without_replay_event": [],
    "oracle_member": "nl/nl-20190614-021.xml",
@@ -15639,6 +15702,12 @@
     "editorial_omission": 1,
     "exact_normalized": 127,
     "exact_raw": 55
+   },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 464,
+    "oracle_ledd": 464
    },
    "notes_without_replay_event": [],
    "oracle_member": "nl/nl-20190614-021.xml",

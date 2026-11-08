@@ -37,6 +37,30 @@
   "retroactive": false,
   "status": "dated"
  },
+ "commencement": {
+  "default": {
+   "effective": "2018-07-20",
+   "known_from": "2018-07-17",
+   "proofs": [
+    {
+     "member": "lti/2018/sf-20180615-0875.xml",
+     "quote_sha256": "0c845c9ab8995d259c6224f7b1a7e37f8b573ecaec6b2848c3d4c20722c468dd",
+     "refid": "forskrift/2018-06-15-875",
+     "sha256": "130c258ad805decefae056913d0ead84aaf17e460dc2fdc1a83d3b511012a032"
+    },
+    {
+     "member": "lti/2018/sf-20180717-1195.xml",
+     "quote_sha256": "e37ba90ee0d0a4e408b8d8c6cc7ddfb4a683badd500d655dca73f26d973c1802",
+     "refid": "forskrift/2018-07-17-1195",
+     "sha256": "3eb251fd20a1fda61d9241e3971bb24e3a84d465bdb59502e15e5d9477b65fd7"
+    }
+   ],
+   "reason": "",
+   "retroactive": false,
+   "status": "dated"
+  },
+  "units": []
+ },
  "events": [
   {
    "law": "lov/2018-12-20-116",
@@ -201,7 +225,7 @@
   "member": "nl/nl-20180615-038.xml",
   "sha256": "dadc8a734fa03f44894648bf13de35d273fe0022bb9f6b9be8f1164a6ba611bb"
  },
- "replay_version": "legaltime-replay-2",
+ "replay_version": "legaltime-replay-3",
  "states": [
   {
    "act_level_problems": [],
@@ -211,7 +235,9 @@
     "lov/2018-12-20-116#1:I:0.0",
     "lov/2021-06-18-124#2:II:0.0"
    ],
+   "not_in_force": [],
    "pending": [],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -488,6 +514,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   },
   {
@@ -499,7 +526,9 @@
    "future": [
     "lov/2021-06-18-124#2:II:0.0"
    ],
+   "not_in_force": [],
    "pending": [],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -786,6 +815,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   },
   {
@@ -796,7 +826,9 @@
    ],
    "at": "2022-01-01",
    "future": [],
+   "not_in_force": [],
    "pending": [],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -1085,6 +1117,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   },
   {
@@ -1095,7 +1128,9 @@
    ],
    "at": "2026-11-06",
    "future": [],
+   "not_in_force": [],
    "pending": [],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -1384,6 +1419,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   }
  ],
@@ -1399,6 +1435,13 @@
     "only_in_oracle": 1,
     "oracle_annex": 99,
     "text_differs": 1
+   },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 71,
+    "ledd_text_differs": 3,
+    "oracle_ledd": 74
    },
    "notes_without_replay_event": [
     "§12a",
@@ -2627,6 +2670,13 @@
     "oracle_annex": 99,
     "text_differs": 1
    },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 73,
+    "ledd_text_differs": 3,
+    "oracle_ledd": 76
+   },
    "notes_without_replay_event": [
     "§3"
    ],
@@ -3854,6 +3904,12 @@
     "exact_raw": 10,
     "oracle_annex": 99
    },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 76,
+    "oracle_ledd": 76
+   },
    "notes_without_replay_event": [],
    "oracle_member": "nl/nl-20180615-038.xml",
    "oracle_sha256": "dadc8a734fa03f44894648bf13de35d273fe0022bb9f6b9be8f1164a6ba611bb",
@@ -5080,6 +5136,12 @@
     "exact_normalized": 24,
     "exact_raw": 10,
     "oracle_annex": 99
+   },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 76,
+    "oracle_ledd": 76
    },
    "notes_without_replay_event": [],
    "oracle_member": "nl/nl-20180615-038.xml",

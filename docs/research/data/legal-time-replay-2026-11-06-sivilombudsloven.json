@@ -31,6 +31,24 @@
   "retroactive": false,
   "status": "dated"
  },
+ "commencement": {
+  "default": {
+   "effective": "2021-07-01",
+   "known_from": "2021-06-18",
+   "proofs": [
+    {
+     "member": "lti/2021/nl-20210618-121.xml",
+     "quote_sha256": "b077ba427c27291bd376deecd8bdee7aeb04c2bae1e1b5a3744e0c11c041970c",
+     "refid": "lov/2021-06-18-121",
+     "sha256": "fc1decc11a1c2c1fc51ecfc6aad5437c3e35436b839b520f8bd0a314ac513a97"
+    }
+   ],
+   "reason": "",
+   "retroactive": false,
+   "status": "dated"
+  },
+  "units": []
+ },
  "events": [
   {
    "law": "lov/2022-06-10-38",
@@ -224,7 +242,7 @@
   "member": "nl/nl-20210618-121.xml",
   "sha256": "a347d9ae03859a92f169176b1fc1f2a3623e042afb375fa61531db10d30ca3f3"
  },
- "replay_version": "legaltime-replay-2",
+ "replay_version": "legaltime-replay-3",
  "states": [
   {
    "act_level_problems": [],
@@ -235,7 +253,9 @@
     "lov/2022-06-10-38#1:I:2.0",
     "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
    ],
+   "not_in_force": [],
    "pending": [],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -520,6 +540,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   },
   {
@@ -532,7 +553,9 @@
    "future": [
     "lov/2025-06-20-96#5:Kapittel 5. Sluttføresegner:52.0"
    ],
+   "not_in_force": [],
    "pending": [],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -820,6 +843,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   },
   {
@@ -831,7 +855,9 @@
    ],
    "at": "2026-01-01",
    "future": [],
+   "not_in_force": [],
    "pending": [],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -1121,6 +1147,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   },
   {
@@ -1132,7 +1159,9 @@
    ],
    "at": "2026-11-06",
    "future": [],
+   "not_in_force": [],
    "pending": [],
+   "pending_commencement": [],
    "provisions": [
     {
      "applied": [],
@@ -1422,6 +1451,7 @@
    ],
    "status": "replayed",
    "unresolved": [],
+   "unresolved_commencement": [],
    "withheld": []
   }
  ],
@@ -1434,6 +1464,13 @@
     "exact_normalized": 17,
     "exact_raw": 16,
     "text_differs": 2
+   },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 85,
+    "ledd_text_differs": 9,
+    "oracle_ledd": 94
    },
    "notes_without_replay_event": [
     "§20",
@@ -1769,6 +1806,13 @@
     "exact_raw": 16,
     "text_differs": 1
    },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 88,
+    "ledd_text_differs": 6,
+    "oracle_ledd": 94
+   },
    "notes_without_replay_event": [
     "§26"
    ],
@@ -2104,6 +2148,12 @@
     "exact_normalized": 19,
     "exact_raw": 16
    },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 94,
+    "oracle_ledd": 94
+   },
    "notes_without_replay_event": [],
    "oracle_member": "nl/nl-20210618-121.xml",
    "oracle_sha256": "a347d9ae03859a92f169176b1fc1f2a3623e042afb375fa61531db10d30ca3f3",
@@ -2438,6 +2488,12 @@
    "counts": {
     "exact_normalized": 19,
     "exact_raw": 16
+   },
+   "counts_before_blanket": {},
+   "ledd_counts": {
+    "ledd_not_in_force": 0,
+    "ledd_proven": 94,
+    "oracle_ledd": 94
    },
    "notes_without_replay_event": [],
    "oracle_member": "nl/nl-20210618-121.xml",
