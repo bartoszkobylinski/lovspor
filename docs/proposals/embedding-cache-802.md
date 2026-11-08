@@ -1,8 +1,11 @@
 # Durable embedding cache outside the published corpus (#802) — design
 
-* **Status:** Proposed (design for owner approval). Not an accepted ADR: once
-  approved, it is filed in `lovspor-notebook/docs/adr/` under the next free
-  number, and this file points there.
+* **Status:** Accepted by the owner on 2026-11-08 for G0 and D1–D3 only:
+  architecture and offline development. The decision is recorded in
+  `lovspor-notebook/docs/adr/ADR-0022-durable-embedding-cache-on-cloudflare-r2.md`
+  (lovspor-notebook #167). G1–G5 are not approved. The text below is the
+  design as accepted and is not rewritten. The §8.1 heading still says
+  "proposed, not approved", because that was true when it was written.
 * **Date:** 2026-11-06
 * **Issue:** #802 (follow-up of #790, Task 1 "do not lose paid work")
 * **Owner decision it implements:** #802, 2026-11-06: *option 3, a durable
@@ -722,7 +725,7 @@ loses only money already spent, never corpus state.
 | M1 | `embeddings/cache.py`: format, local store, validation, typed errors. Not wired, off | After M0 is reviewed |
 | M2 | `quantized_document_vectors` boundary, `CachingEmbedder`, `LOVSPOR_EMBEDDING_CACHE_DIR` setting, shared batching plan. Off by default | After M1 |
 | M3 | Crash and security regressions with a fake provider: SIGKILL after a checkpoint and a restart in a new process and workspace, torn, swapped and expired entries, concurrent writers, symlinks | With M1 and M2 (red first) |
-| M4 | Remote adapter | **Owner-blocked on D1** |
+| M4 | Remote adapter on R2 (§8.1), off by default; runbook and an inert G3 staging workflow | D1 accepted 2026-11-08 (ADR-0022); lovspor #844 and its follow-up; G1–G5 not approved |
 | M5 | Progress line, `embedding-cache` commands, runbook section | After M2 |
 
 No PR in this plan enables the cache in `sync.yml`, uploads anything, or runs a
