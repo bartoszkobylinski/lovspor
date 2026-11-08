@@ -20,6 +20,7 @@ from typing import Literal
 
 from lovspor.legaltime.commencement import (
     _DEFAULT_CLAUSE,
+    _PENDING_WORDS,
     CONFLICT,
     Decisions,
     DecisionsLike,
@@ -155,28 +156,34 @@ def _member_sha(event: Event) -> str | None:
     )
 
 
+def _statement_proof(event: Event, sentence: str) -> Proof | None:
+    digest = _member_sha(event)
+    if digest is None:
+        return None
+    return Proof(
+        refid=event.law, member=event.member, sha256=digest,
+        quote_sha256=sha256(sentence.encode("utf-8")).hexdigest(),
+    )  # fmt: skip
+
+
 def _statement(event: Event, sentence: str) -> _Statement | None:
     """The statement an operation's payload makes about the act's commencement, if any."""
     if _DEFAULT_CLAUSE.match(sentence) is None or _RESERVATION.search(sentence):
         return None
-    digest = _member_sha(event)
-    if digest is None:
+    if _PENDING_WORDS.search(sentence):
+        return None  # a delegation written into the act dates nothing: the act stays as it was
+    proof = _statement_proof(event, sentence)
+    if proof is None:
         return None
-    proof = Proof(
-        refid=event.law, member=event.member, sha256=digest,
-        quote_sha256=sha256(sentence.encode("utf-8")).hexdigest(),
-    )  # fmt: skip
     known = event.published_at.date() if event.published_at else None
-    if event.timing.status != "dated":
-        return _Statement(
-            when=None, known_from=known, published_at=event.published_at, proof=proof,
-            problem=INSTRUMENT_UNDATED,
-        )  # fmt: skip
     explicit = parse_date(_CITED.sub("", sentence))
     when = event.timing.effective if _STRAKS.search(sentence) and explicit is None else explicit
     problem = None if when is not None else "commencement statement without a readable date"
-    return _Statement(when=when, known_from=known, published_at=event.published_at, proof=proof,
-                      problem=problem)  # fmt: skip
+    if event.timing.status != "dated":
+        when, problem = None, INSTRUMENT_UNDATED
+    return _Statement(
+        when=when, known_from=known, published_at=event.published_at, proof=proof, problem=problem
+    )
 
 
 def instrument_statements(act: str, events: list[Event]) -> list[_Statement]:

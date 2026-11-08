@@ -11,6 +11,8 @@ import re
 from collections import Counter
 from typing import Literal
 
+from pydantic import Field
+
 from lovspor.legaltime.document import Document, Frozen, Provision
 from lovspor.legaltime.replay import ProvisionState, ReplayState
 
@@ -23,10 +25,12 @@ Verdict = Literal[
     "editorial_omission",
     "text_differs",
     "unresolved",
+    "not_in_force",
     "only_in_oracle",
     "only_in_replay",
     "oracle_annex",
 ]
+PROVEN = frozenset({"exact_raw", "exact_normalized", "editorial_omission"})
 
 
 class SectionVerdict(Frozen):
@@ -49,6 +53,7 @@ class Verification(Frozen):
     notes_without_replay_event: tuple[str, ...]
     replay_events_without_note: tuple[str, ...]
     act_level_problems: tuple[str, ...] = ()
+    ledd_counts: dict[str, int] = Field(default_factory=dict)  # subunits (ledd) by class
 
 
 def _texts(provision: Provision | ProvisionState) -> tuple[str, tuple[str, ...]]:
@@ -90,6 +95,8 @@ def _omitted(replayed: ProvisionState, oracle: Provision) -> bool:
 def _classify(replayed: ProvisionState, oracle: Provision) -> Verdict:
     if replayed.status == "unresolved":
         return "unresolved"
+    if replayed.in_force != "in_force":
+        return "not_in_force"  # text exists at D, the unit does not yet have legal effect
     if _raw(replayed) == _raw(oracle):
         return "exact_raw"
     if _texts(replayed) == _texts(oracle):
@@ -102,6 +109,8 @@ def _classify(replayed: ProvisionState, oracle: Provision) -> Verdict:
 def _verdict(replayed: ProvisionState, oracle: Provision) -> SectionVerdict:
     verdict = _classify(replayed, oracle)
     detail = _difference(replayed, oracle) if verdict in {"text_differs", "unresolved"} else ""
+    if verdict == "not_in_force":
+        detail = f"{replayed.in_force}; commencement {replayed.effective or 'undated'}"
     return SectionVerdict(
         key=replayed.key, verdict=verdict, detail=detail, applied=replayed.applied,
         pending=replayed.pending, problems=replayed.problems, oracle_notes=len(oracle.notes),
@@ -115,6 +124,28 @@ def _note_checks(
     noted = {key for key, provision in oracle.items() if provision.notes}
     touched = {k for k, s in replayed.items() if s.applied or s.problems or s.pending}
     return tuple(sorted(noted - touched)), tuple(sorted(touched - noted))
+
+
+def _ledd_counts(
+    sections: list[SectionVerdict],
+    replayed: dict[str, ProvisionState],
+    oracle: dict[str, Provision],
+) -> dict[str, int]:
+    """Ledd of every section both sides hold, each in one class; the oracle's ledd are the total."""
+    counts: Counter[str] = Counter()
+    for section in sections:
+        mine, theirs = replayed.get(section.key), oracle.get(section.key)
+        if mine is None or theirs is None:
+            continue
+        counts["oracle_ledd"] += len(theirs.ledd)
+        if section.verdict not in PROVEN:
+            counts[f"ledd_{section.verdict}"] += len(theirs.ledd)
+            continue
+        flagged = set(mine.ledd_not_in_force)
+        proven = sum(1 for i in range(len(theirs.ledd)) if i + 1 not in flagged)
+        counts["ledd_proven"] += proven
+        counts["ledd_not_in_force"] += len(theirs.ledd) - proven
+    return dict(sorted(counts.items()))
 
 
 def verify(state: ReplayState, oracle_document: Document) -> Verification:
@@ -134,6 +165,7 @@ def verify(state: ReplayState, oracle_document: Document) -> Verification:
         counts=dict(sorted(Counter(s.verdict for s in sections).items())),
         sections=tuple(sections), notes_without_replay_event=missing_events,
         replay_events_without_note=missing_notes, act_level_problems=state.act_level_problems,
+        ledd_counts=_ledd_counts(sections, replayed, oracle),
     )  # fmt: skip
 
 
