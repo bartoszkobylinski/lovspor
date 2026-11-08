@@ -6,6 +6,8 @@ staged commencement, on a synthetic act with the decision's own sentences.
 
 from datetime import date, datetime
 
+import pytest
+
 from lovspor.legaltime.baseline import Commencement, UnitTiming, baseline_commencement
 from lovspor.legaltime.commencement import Event, Timing
 from lovspor.legaltime.document import Ledd, Provision
@@ -183,3 +185,56 @@ def test_a_term_substitution_reaching_a_ledd_not_in_force_waits_for_it() -> None
     )
     state = replay(ACT_DOC, COMMENCEMENT, [INSERT_LEDD_4, beside], date(2023, 6, 30))
     assert "op11" not in state.withheld  # a ledd in force beside the flagged one
+
+
+@pytest.mark.parametrize("locations", ["§ 2-1, § 15-7", "§ 15-7, § 2-1"])
+@pytest.mark.parametrize("pending", [False, True])
+def test_multi_section_substitution_waits_atomically_for_every_target(
+    locations: str, pending: bool
+) -> None:
+    """Decision 4 gates the whole operation, regardless of location order."""
+    day = date(2023, 7, 1)
+    commencement = Commencement(
+        default=_dated(date(2023, 1, 1)),
+        units=(
+            UnitTiming(
+                unit=Unit(section="§15-7"),
+                timing=Timing(status="pending") if pending else _dated(day),
+            ),
+        ),
+    )
+    baseline = ACT_DOC.model_copy(
+        update={
+            "provisions": tuple(
+                p.model_copy(update={"ledd": (_ledd("Felles ord."),)}) for p in ACT_DOC.provisions
+            )
+        }
+    )
+    event = _event(
+        12,
+        _op(12, "substitute_term", locations=locations, term_old="ord", term_new="tekst"),
+        date(2023, 3, 1),
+    )
+    before = replay(baseline, commencement, [event], date(2023, 6, 30))
+    assert before.withheld == ("op12",)
+    assert before.applied == () and before.unresolved == ()
+    assert all(p.ledd == (_ledd("Felles ord."),) and p.applied == () for p in before.provisions)
+    assert before.pending_commencement == (("§15-7",) if pending else ())
+    assert before.not_in_force == (() if pending else ("§15-7",))
+
+    on_day = replay(baseline, commencement, [event], day)
+    assert on_day.withheld == (("op12",) if pending else ())
+    assert on_day.applied == (() if pending else ("op12",))
+    expected = "Felles ord." if pending else "Felles tekst."
+    assert all(p.ledd == (_ledd(expected),) for p in on_day.provisions)
+
+
+def test_staged_replay_is_repeatable_without_mutating_inputs() -> None:
+    """A later query must not leak applied edits or cleared flags into an earlier date."""
+    documents = ACT_DOC.model_dump_json(), COMMENCEMENT.model_dump_json()
+    events = [e.model_dump_json() for e in EVENTS]
+    before = replay(ACT_DOC, COMMENCEMENT, EVENTS, date(2023, 6, 30)).model_dump_json()
+    replay(ACT_DOC, COMMENCEMENT, EVENTS, date(2023, 7, 1))
+    assert replay(ACT_DOC, COMMENCEMENT, EVENTS, date(2023, 6, 30)).model_dump_json() == before
+    assert (ACT_DOC.model_dump_json(), COMMENCEMENT.model_dump_json()) == documents
+    assert [e.model_dump_json() for e in EVENTS] == events
