@@ -193,7 +193,11 @@ is unchanged.
 That is allowed only because `1.0.0-rc` is an unpublished pre-release: every
 earlier record still validates, and no `1.0.0-rc` file has left the private
 workspace. A strict `1.0.0-rc` reader written before the change rejects the new
-value, fail-closed; Politik's open research reader (#185 there) is one, and it
-needs the value before it merges. Once a `1.0.0-rc` file is published or a
-strict reader merges, a further enum change needs a version bump (ADR-0021,
-"Contract version").
+value, fail-closed. Politik's open research reader (#185 there, a draft) took the
+value on 2026-11-08: it accepts `stated_for_dataset` only on
+`lovtidend-avd1-2026.tar.bz2`, binds each cited member to its archive's year, and
+requires the manifest's NLOD 2.0 attribution for such a file. It still refuses
+every `release_candidate`; an opt-in reader that verifies the owner's signed
+approval itself is a separate draft (#186 there). Once a `1.0.0-rc` file is
+published or a strict reader merges, a further enum change needs a version bump
+(ADR-0021, "Contract version").
