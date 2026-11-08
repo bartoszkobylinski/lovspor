@@ -149,3 +149,42 @@ def test_an_item_unit_covers_its_item_is_disjoint_beside_and_spanned_above() -> 
     assert (
         relation(numbered, _op("replace_bokstav", section="§37", ledd=1, bokstav="4")) == "disjoint"
     )
+
+
+@pytest.mark.parametrize("bad", ["ukjent enhet", "§ 5 første og annet ledd", ""])
+@pytest.mark.parametrize("position", [0, 1, 2])
+def test_one_unreadable_unit_refuses_even_a_partly_readable_listing(
+    bad: str, position: int
+) -> None:
+    """units.py's contract refuses the whole listing, never just its unreadable token."""
+    tokens = ["§ 1", "kapittel 2"]
+    tokens.insert(position, bad)
+    assert parse_units(", ".join(tokens)) is None
+
+
+@pytest.mark.parametrize(
+    "ledd, punktum, expected",
+    [
+        (2, 1, "disjoint"),
+        (2, 2, "spans"),
+        (2, 4, "spans"),
+        (2, 5, "disjoint"),
+        (1, 3, "disjoint"),
+        (3, 3, "disjoint"),
+    ],
+)
+def test_punktum_range_is_compared_only_inside_the_same_ledd(
+    ledd: int, punktum: int, expected: str
+) -> None:
+    operation = _op("replace_punktum", section="§1", ledd=2, punktum=2, punktum_end=4)
+    assert relation(Unit(section="§1", ledd=ledd, punktum=punktum), operation) == expected
+
+
+def test_inserted_chapter_placement_takes_precedence_over_existing_section_map() -> None:
+    """A stamped insertion is placed by its payload, as units.py documents."""
+    provision = Provision(key="§1", label="§ 1", heading="", ledd=(), chapter="kap9")
+    operation = _op("insert_section", section="§1").model_copy(update={"new_provision": provision})
+    chapters = {"§1": "kap1"}
+    assert relation(Unit(chapter="kap9"), operation, chapters) == "covers"
+    assert relation(Unit(chapter="kap1"), operation, chapters) == "disjoint"
+    assert chapters == {"§1": "kap1"}
