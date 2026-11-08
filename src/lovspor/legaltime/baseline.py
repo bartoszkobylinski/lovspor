@@ -16,12 +16,14 @@ date it was excepted from.
 import re
 from datetime import date, datetime
 from hashlib import sha256
+from typing import Literal
 
 from lovspor.legaltime.commencement import (
     _DEFAULT_CLAUSE,
     CONFLICT,
     Decisions,
     DecisionsLike,
+    Event,
     Proof,
     Timing,
     _citing,
@@ -33,7 +35,7 @@ from lovspor.legaltime.commencement import (
     header_timing,
 )
 from lovspor.legaltime.document import Document, Frozen
-from lovspor.legaltime.replay import Event
+from lovspor.legaltime.instructions import Operation
 from lovspor.legaltime.scopes import _RESERVATION, _STRAKS, Scope
 from lovspor.legaltime.text import parse_date, split_sentences
 from lovspor.legaltime.units import Unit
@@ -44,6 +46,9 @@ OUTSIDE = "partial decision outside the grammar"
 BELOW_LEDD = "commencement stated below ledd level"
 _ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
 _CITED = re.compile(r"\blov\s+\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?", re.I)
+
+
+InForce = Literal["in_force", "not_yet_in_force", "pending", "unresolved"]
 
 
 class UnitTiming(Frozen):
@@ -344,3 +349,72 @@ def baseline_commencement(
         else:
             fold.statement(item)
     return fold.result()
+
+
+# ----------------------------------------------------------- the state of a unit at D
+
+
+class UnitState(Frozen):
+    """What the commencement evidence says about one section at D."""
+
+    in_force: InForce
+    effective: date | None
+    flagged: tuple[int, ...]  # ledd not in force at D
+    problems: tuple[str, ...]
+
+
+def _in_force(timing: Timing, at: date) -> tuple[InForce, date | None]:
+    if timing.status == "dated" and timing.effective is not None:
+        return ("in_force" if timing.effective <= at else "not_yet_in_force"), timing.effective
+    return ("pending" if timing.status == "pending" else "unresolved"), None
+
+
+def unit_state(
+    commencement: Commencement, key: str, where: tuple[str | None, tuple[str, ...]], at: date
+) -> UnitState:
+    """The section's legal effectiveness at D, and its ledd dated apart not yet in force."""
+    chapter, parts = where
+    timing = commencement.section_timing(key, chapter, parts)
+    in_force, effective = _in_force(timing, at)
+    problems = [f"commencement {timing.reason}"] if in_force == "unresolved" else []
+    if commencement.finer_than_ledd(key):
+        in_force, problems = "unresolved", [*problems, f"commencement {BELOW_LEDD}"]
+    flagged: list[int] = []
+    for index, ledd_timing in sorted(commencement.ledd_timings(key).items()):
+        state, _ = _in_force(ledd_timing, at)
+        if state == "unresolved":
+            problems.append(f"ledd {index} commencement {ledd_timing.reason}")
+        elif state != "in_force":
+            flagged.append(index)
+    return UnitState(
+        in_force=in_force, effective=effective, flagged=tuple(flagged), problems=tuple(problems)
+    )
+
+
+def addresses_flagged(op: Operation, flagged: tuple[int, ...], count: int) -> bool:
+    """The operation names a ledd that exists and is not in force at D."""
+    start = op.address.ledd
+    if start is None:
+        return False
+    end = op.address.ledd_end or start
+    return any(start <= index <= end for index in flagged if index <= count)
+
+
+def restructures(op: Operation, flagged: tuple[int, ...], count: int) -> bool:
+    """The operation would move a ledd that is flagged not in force out of its number."""
+    present = [index for index in flagged if index <= count]
+    if not present:
+        return False
+    start = op.address.ledd
+    if op.kind in {"insert_ledd", "repeal_ledd", "move_ledd"}:
+        return start is None or start <= max(present)
+    if op.kind == "replace_section":
+        return op.new_provision is None or len(op.new_provision.ledd) != count
+    return False
+
+
+def state_gate(unit: UnitState) -> str | None:
+    """``withheld`` when the unit is not in force at D; its problems when unresolved; else None."""
+    if unit.in_force == "unresolved":
+        return "; ".join(unit.problems)
+    return None if unit.in_force == "in_force" else "withheld"
