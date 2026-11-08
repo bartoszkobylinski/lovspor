@@ -11,10 +11,16 @@ Steps, each on its own runner with an empty disk:
   checkpoints. Asserts it was killed and paid exactly k.
 * ``resume``: on a fresh runner, pays exactly n - k. A third sync pays 0. The
   sidecar equals an uncached run's.
-* ``race --writer a|b``: two runners sync together with providers that return
-  **different** valid vectors. Each prints its sidecar digest.
-* ``race-check``: both digests are equal, and a third runner pays 0 and writes
-  the same sidecar.
+* ``race --writer a|b``: two runners sync the same new keys with providers
+  that return **different** valid vectors. Each holds its first cache-entry
+  ``PUT`` at a barrier until the other has advertised its own candidate for the
+  same key (``embedding_cache_g3_race.py``), then sends it. Each prints its
+  evidence: the key, both candidates' digests, its ``PUT`` status, the bucket's
+  and its local copy's digests, its sidecar's digest. A writer whose peer never
+  arrives fails at ``LOVSPOR_G3_BARRIER_TIMEOUT_SECONDS`` (default 600).
+* ``race-check``: the evidence shows one ``PUT`` answered 200 and one 412/409,
+  the loser holding the winner's bytes and both the same sidecar; a third
+  runner then pays 0 and writes that sidecar. Equal sidecars alone are refused.
 
 Credentials come from the ``LOVSPOR_EMBEDDING_CACHE_*`` environment, exactly as
 a sync reads them. ``--endpoint`` points the store at a loopback fake. It exists
@@ -29,12 +35,22 @@ import signal
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
+from embedding_cache_g3_race import (
+    CREATED,
+    WRITERS,
+    Barrier,
+    RaceError,
+    RacingClient,
+    judge,
+    sha256,
+)
 
 from lovspor.embeddings.cache import CachingEmbedder, read_policy_from_env
-from lovspor.embeddings.cache_remote import RemoteEntryStore, with_remote
+from lovspor.embeddings.cache_remote import REMOTE_PREFIX, RemoteEntryStore, with_remote
 from lovspor.embeddings.cache_store import LocalEntryStore
 from lovspor.embeddings.model import EmbeddingModel
 from lovspor.embeddings.provider import esi_for_descriptor
@@ -44,7 +60,9 @@ from lovspor.sync.orchestrator import _write_embeddings_for_doc
 REQUESTS = 4  # SECTIONS inputs, two per request
 SECTIONS = 7
 KILL_AFTER = 2
-WRITERS = 2  # race a and race b
+BARRIER_TIMEOUT = ("LOVSPOR_G3_BARRIER_TIMEOUT_SECONDS", 600.0)
+BARRIER_POLL = ("LOVSPOR_G3_BARRIER_POLL_SECONDS", 1.0)
+MAX_WAIT = 3600.0
 _RENDERED = "---\ntitle: g3\n---\n\n" + "".join(
     f"### § {i}. Overskrift\n\nSyntetisk tekst nummer {i}.\n\n" for i in range(1, SECTIONS + 1)
 )
@@ -78,27 +96,34 @@ class FakeProvider:
         return matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
 
 
-def pay(args: argparse.Namespace) -> dict[str, object]:
+def pay(args: argparse.Namespace, wrap: "Wrap | None" = None) -> dict[str, object]:
     """One synthetic sync of one document on an empty runner disk; its cost and sidecar."""
     work = Path(tempfile.mkdtemp(prefix="g3-"))
     ledger = work / "ledger"
     provider = FakeProvider(args.run_id, args.noise, ledger, args.kill_at)
     corpus = work / "lovverk"
     corpus.mkdir()
-    embedder = _cached(provider, work / "cache", args.endpoint) if args.cached else provider
+    embedder = _cached(provider, work / "cache", args.endpoint, wrap) if args.cached else provider
     path, _ = _write_embeddings_for_doc(corpus, "gjeldende-lover", "g3", _RENDERED, embedder)
     paid = len(ledger.read_text().splitlines()) if ledger.exists() else 0
-    return {"paid": paid, "sidecar_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {"paid": paid, "sidecar_sha256": sha256(path.read_bytes()), "cache": str(work / "cache")}
 
 
-def _cached(provider: FakeProvider, root: Path, endpoint: str | None) -> EmbeddingModel:
+Wrap = Callable[[R2Client], object]
+
+
+def _cached(
+    provider: FakeProvider, root: Path, endpoint: str | None, wrap: Wrap | None
+) -> EmbeddingModel:
     local = LocalEntryStore.open(root, (), read_policy_from_env())
     store = with_remote(local)
     if not isinstance(store, RemoteEntryStore):
         raise SystemExit("G3 needs LOVSPOR_EMBEDDING_CACHE_REMOTE=r2 and the R2 credentials")
+    client = store.client
     if endpoint is not None:
-        store = RemoteEntryStore(local, R2Client(store.client.credentials, endpoint=endpoint))
-    return CachingEmbedder(provider, store, provider.space_id)
+        client = R2Client(client.credentials, endpoint=endpoint)
+    wrapped = client if wrap is None else wrap(client)
+    return CachingEmbedder(provider, RemoteEntryStore(local, wrapped), provider.space_id)  # type: ignore[arg-type]
 
 
 def _child(args: argparse.Namespace, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -135,23 +160,84 @@ def resume(args: argparse.Namespace) -> None:
 
 
 def race(args: argparse.Namespace) -> None:
-    result = _sync(args, "--noise", args.writer)
-    print(f"race {args.writer}: paid {result['paid']}, sidecar {result['sidecar_sha256']}")
+    """One writer of the race; its evidence on stdout and in ``--github-output``."""
+    racing: list[RacingClient] = []
+
+    def wrap(client: R2Client) -> RacingClient:
+        barrier = Barrier(client, args.run_id, args.writer, _seconds(BARRIER_TIMEOUT))
+        barrier.poll = _seconds(BARRIER_POLL)
+        racing.append(RacingClient(client, barrier))
+        return racing[0]
+
+    args.noise = args.writer
+    try:
+        result = pay(args, wrap)
+    except RaceError as exc:
+        raise SystemExit(f"G3 race failed (writer {args.writer}): {exc}") from None
+    evidence = _evidence(args, racing[0], result)
+    print(f"race {args.writer}: paid {result['paid']}; evidence {json.dumps(evidence)}")
     if args.github_output:
         with Path(args.github_output).open("a") as handle:
-            handle.write(f"digest={result['sidecar_sha256']}\n")
+            handle.write(f"evidence={json.dumps(evidence, sort_keys=True)}\n")
+
+
+def _evidence(
+    args: argparse.Namespace, racing: RacingClient, result: dict[str, object]
+) -> dict[str, object]:
+    attempt = racing.attempt
+    _expect(attempt.target is not None, "this writer never sent a cache PUT")
+    target = str(attempt.target)
+    remote = racing.inner.get(target)
+    _expect(remote.status == CREATED, f"the target key could not be read back ({remote.status})")
+    local = Path(str(result["cache"])) / target.removeprefix(f"{REMOTE_PREFIX}/")
+    return {
+        "writer": args.writer,
+        "run_id": args.run_id,
+        "target": target,
+        "candidate_sha256": attempt.candidate_sha256,
+        "peer_candidate_sha256": attempt.peer_candidate_sha256,
+        "put_status": attempt.put_status,
+        "remote_sha256": sha256(remote.body),
+        "local_sha256": sha256(local.read_bytes()),
+        "sidecar_sha256": result["sidecar_sha256"],
+        "paid": result["paid"],
+    }
 
 
 def race_check(args: argparse.Namespace) -> None:
-    digests = set(args.digests)
-    _expect(
-        len(args.digests) == WRITERS and len(digests) == 1,
-        "the two writers wrote different sidecars",
-    )
+    a, b = _parsed(args.evidence)
+    failures = judge(a, b)
+    if failures:
+        raise SystemExit("G3 race evidence refused:\n" + "\n".join(f"- {f}" for f in failures))
     third = _sync(args, "--noise", "c")
     _expect(third["paid"] == 0, f"third runner paid {third['paid']}")
-    _expect({third["sidecar_sha256"]} == digests, "third runner's sidecar differs")
-    print("race: one value per key; both writers and a third runner agree; third paid 0")
+    _expect(third["sidecar_sha256"] == a["sidecar_sha256"], "third runner's sidecar differs")
+    winner = a["writer"] if a["put_status"] == CREATED else b["writer"]
+    print(
+        f"race: writer {winner}'s PUT won, the other was answered 412/409 and adopted it; "
+        "both wrote the same sidecar; third paid 0"
+    )
+
+
+def _parsed(evidence: list[str]) -> tuple[dict[str, object], dict[str, object]]:
+    _expect(len(evidence) == len(WRITERS), "race-check needs the evidence of writer a and writer b")
+    try:
+        a, b = (json.loads(text) for text in evidence)
+    except ValueError:
+        raise SystemExit("G3 race evidence refused:\n- evidence is not JSON") from None
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        raise SystemExit("G3 race evidence refused:\n- evidence is not a JSON object")
+    return a, b
+
+
+def _seconds(setting: tuple[str, float]) -> float:
+    name, default = setting
+    try:
+        value = float(os.environ.get(name, default))
+    except ValueError:
+        raise SystemExit(f"{name} must be a number of seconds") from None
+    _expect(0 < value <= MAX_WAIT, f"{name} must be between 0 and {MAX_WAIT:g} seconds")
+    return value
 
 
 def _expect(condition: bool, failure: str) -> None:
@@ -167,7 +253,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--noise", default="")
     parser.add_argument("--kill-at", type=int, default=-1)
     parser.add_argument("--uncached", dest="cached", action="store_false")
-    parser.add_argument("--digests", nargs="*", default=[])
+    parser.add_argument("--evidence", nargs="*", default=[])
     parser.add_argument("--github-output", default=None)
     parser.add_argument("--endpoint", default=None)
     return parser
