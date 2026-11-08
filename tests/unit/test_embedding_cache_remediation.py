@@ -8,7 +8,7 @@ from types import FrameType
 import pytest
 
 from lovspor.embeddings.cache_store import _open_private_dir, fsync_dir
-from lovspor.errors import EmbeddingCacheError
+from lovspor.errors import EmbeddingCacheError, EmbeddingCacheStorageError
 from tests.unit.test_embedding_cache_store import _key, _open
 
 
@@ -77,7 +77,7 @@ def test_missing_root_is_an_error_rather_than_an_entry_miss(tmp_path: Path) -> N
     root = tmp_path / "cache"
     store = _open(root)
     root.rmdir()
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(EmbeddingCacheStorageError, match="root is gone"):
         store.get(_key())
     assert not root.exists()
 
