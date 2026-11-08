@@ -130,6 +130,12 @@ def test_the_shipped_file_names_exactly_the_approved_owner_key() -> None:
     assert signer_problems(SHIPPED) == []
 
 
+def test_the_shipped_namespace_is_pinned_independently_of_the_verifier() -> None:
+    """The exact namespace promised in crosswalk-producer.md cannot drift with NAMESPACE."""
+    assert _shipped_line().split()[1] == 'namespaces="lovspor-crosswalk-approval"'
+    assert approvals.NAMESPACE == "lovspor-crosswalk-approval"
+
+
 def test_the_pinned_fingerprint_is_the_one_ssh_keygen_prints(tmp_path: Path) -> None:
     """The owner compares the pin with `ssh-keygen -lf` on their .pub file: both agree."""
     public = tmp_path / "owner.pub"
@@ -233,11 +239,17 @@ def _message(tmp_path: Path) -> Path:
     return message
 
 
-def test_the_shipped_file_refuses_a_signature_by_any_other_key(tmp_path: Path) -> None:
+@pytest.mark.parametrize("use_default", [False, True], ids=["explicit-file", "default-file"])
+def test_the_shipped_file_refuses_a_signature_by_any_other_key(
+    tmp_path: Path, use_default: bool
+) -> None:
     stranger = new_signer(tmp_path / "stranger", "stranger", "lovspor-owner")
     signature = sign(stranger, _message(tmp_path))
     with pytest.raises(CrosswalkError) as caught:
-        approvals.verify_signature(b"{}", signature, SHIPPED)
+        if use_default:
+            approvals.verify_signature(b"{}", signature)
+        else:
+            approvals.verify_signature(b"{}", signature, SHIPPED)
     assert str(caught.value) == "approval signature refused: not by a trusted signer"
 
 
