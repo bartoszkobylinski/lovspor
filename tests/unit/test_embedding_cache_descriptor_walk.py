@@ -1,10 +1,12 @@
 """The store's descriptor walk through get and put: refusals by name, a vanished root (#825)."""
 
 import shutil
+import stat
 from pathlib import Path
 
 import pytest
 
+from lovspor.embeddings.cache_format import encode_entry
 from lovspor.embeddings.cache_store import entry_location
 from lovspor.errors import EmbeddingCacheError, EmbeddingCacheStorageError
 from tests.unit.test_embedding_cache_store import _entry, _key, _open, _unit
@@ -56,3 +58,34 @@ def test_a_root_removed_after_open_is_a_storage_error_not_a_miss(
     with pytest.raises(EmbeddingCacheStorageError, match="root is gone"):
         store.get(_key()) if operation == "get" else store.put(_unit())
     assert not root.exists()
+
+
+@pytest.mark.parametrize("depth", [1, 2, 3, 4])
+def test_missing_unit_directory_is_a_read_only_miss_then_recreated_on_write(
+    tmp_path: Path, depth: int
+) -> None:
+    """get's absent-entry contract applies at every step of the descriptor walk."""
+    root = tmp_path / "cache"
+    store = _open(root)
+    entry = _unit()
+    store.put(entry)
+    parts, name = entry_location(entry.key)
+    missing = root.joinpath(*parts[:depth])
+    shutil.rmtree(missing)
+    before = set(root.rglob("*"))
+
+    assert store.get(entry.key) is None
+    assert set(root.rglob("*")) == before
+    assert not missing.exists()
+
+    store.put(entry)
+
+    target = root.joinpath(*parts, name)
+    assert target.read_bytes() == encode_entry(entry)
+    for level in range(1, len(parts) + 1):
+        assert stat.S_IMODE(root.joinpath(*parts[:level]).stat().st_mode) == 0o700
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert not list(root.rglob("*.tmp.*"))
+    found = _open(root).get(entry.key)
+    assert found is not None
+    assert encode_entry(found) == encode_entry(entry)
