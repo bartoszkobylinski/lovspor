@@ -471,3 +471,79 @@ def test_errors_never_carry_the_endpoint_or_credentials(
     for secret in (r2_fakes.ACCOUNT_ID, r2_fakes.KEY_ID, r2_fakes.SECRET, "cloudflarestorage"):
         assert secret not in shown
     assert refused.value.__cause__ is None
+
+
+@pytest.mark.parametrize("operation", ["get", "put"])
+def test_a_local_writer_racing_remote_adoption_is_a_conflict_without_overwrite(
+    bucket: r2_fakes.FakeBucket,
+    remote: Callable[[str], RemoteEntryStore],
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    """The no-overwrite contract also holds after the initial local lookup."""
+    store, winner = remote("runner-1"), _unit("a")
+    local_winner = _other_value(winner)
+    payload = encode_entry(winner)
+    bucket.objects[remote_key(winner.key)] = payload
+    publish = store.local.publish
+
+    def racing_publish(key: EntryKey, data: bytes) -> CachedVectors:
+        store.local.put(local_winner)
+        return publish(key, data)
+
+    monkeypatch.setattr(store.local, "publish", racing_publish)
+    with pytest.raises(EmbeddingCacheConflictError):
+        if operation == "get":
+            store.get(winner.key)
+        else:
+            store.put(winner)
+
+    assert _local_bytes(store, winner.key) == encode_entry(local_winner)
+    assert bucket.objects[remote_key(winner.key)] == payload
+    assert bucket.calls == (
+        [("GET", remote_key(winner.key))]
+        if operation == "get"
+        else [("PUT", remote_key(winner.key)), ("GET", remote_key(winner.key))]
+    )
+
+
+@pytest.mark.parametrize("plant", _INVALID.values(), ids=_INVALID.keys())
+@pytest.mark.parametrize("existing", [False, True], ids=["absent", "existing"])
+def test_local_publish_validates_downloaded_bytes_before_writing(
+    remote: Callable[[str], RemoteEntryStore],
+    plant: Callable[[CachedVectors], bytes],
+    existing: bool,
+) -> None:
+    """publish() must validate even when a previously stored entry could be returned."""
+    store, entry = remote("runner-1"), _doc("a")
+    if existing:
+        store.local.put(entry)
+    before = _local_bytes(store, entry.key)
+
+    with pytest.raises(EmbeddingCacheError):
+        store.local.publish(entry.key, plant(entry))
+
+    assert _local_bytes(store, entry.key) == before
+    assert not list(store.local.root.rglob("*.tmp.*"))
+
+
+@pytest.mark.parametrize("status", [403, 503])
+def test_an_unreadable_remote_never_falls_back_to_a_valid_local_copy(
+    bucket: r2_fakes.FakeBucket,
+    remote: Callable[[str], RemoteEntryStore],
+    sleeps: Sleeps,
+    status: int,
+) -> None:
+    """An unreachable authority is a refusal even on a runner with warm local state."""
+    store, entry = remote("runner-1"), _doc("a")
+    store.local.put(entry)
+    attempts = 1 if status == 403 else 3
+    bucket.fail("GET", *([status] * attempts))
+
+    with pytest.raises(EmbeddingCacheStorageError):
+        store.get(entry.key)
+
+    assert bucket.calls == [("GET", remote_key(entry.key))] * attempts
+    assert sleeps == ([] if status == 403 else [1.0, 2.0])
+    assert _local_bytes(store, entry.key) == encode_entry(entry)
+    assert bucket.objects == {}
