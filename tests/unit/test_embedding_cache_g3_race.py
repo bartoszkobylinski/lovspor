@@ -161,6 +161,43 @@ def test_the_racing_client_records_a_held_put() -> None:
     assert client.get(_TARGET).body == b"winner"
 
 
+@pytest.mark.parametrize(
+    ("run_id", "target"),
+    [("another-run", _TARGET), ("r1", _TARGET + "-other")],
+    ids=["another-run", "another-key"],
+)
+def test_misdirected_peer_readiness_never_sends_the_cache_put(run_id: str, target: str) -> None:
+    """The G3 runbook requires another run or key to stop the writer."""
+    bucket, clock = Memory(), Clock()
+    client = race.RacingClient(bucket, _barrier(bucket, clock=clock))
+    peer_key = client.barrier.key(_TARGET, "b")
+    bucket.objects[peer_key] = race.Readiness(run_id, "b", target, "b" * 64).encode()
+
+    with pytest.raises(race.RaceError, match="another run, writer or key"):
+        client.put_if_absent(_TARGET, b"candidate")
+
+    assert bucket.calls == [("PUT", client.barrier.key(_TARGET, "a")), ("GET", peer_key)]
+    assert _TARGET not in bucket.objects
+    assert client.attempt == race.Attempt()
+    assert clock.slept == []
+
+
+def test_peer_timeout_never_sends_the_cache_put() -> None:
+    """A sequential schedule must fail before publishing the candidate entry."""
+    bucket, clock = Memory(), Clock()
+    client = race.RacingClient(bucket, _barrier(bucket, clock=clock))
+
+    with pytest.raises(race.RaceError, match="no competing PUT was sent"):
+        client.put_if_absent(_TARGET, b"candidate")
+
+    assert clock.now == 3.0
+    assert [call for call in bucket.calls if call[0] == "PUT"] == [
+        ("PUT", client.barrier.key(_TARGET, "a"))
+    ]
+    assert _TARGET not in bucket.objects
+    assert client.attempt == race.Attempt()
+
+
 @pytest.mark.parametrize("status", [403, 409, 412, 503])
 def test_failed_readiness_publication_never_sends_the_cache_put(
     monkeypatch: pytest.MonkeyPatch, status: int
