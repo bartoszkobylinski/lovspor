@@ -9,12 +9,14 @@ the sentence foreign, and a foreign sentence makes the whole block unreadable.
 
 import re
 from datetime import date
+from typing import Literal
 
 from pydantic import model_validator
 
 from lovspor.legaltime.document import Document, Frozen
 from lovspor.legaltime.instructions import Operation
-from lovspor.legaltime.text import parse_date, section_key, section_key_of
+from lovspor.legaltime.text import chapter_key, parse_date, section_key, section_key_of
+from lovspor.legaltime.units import Relation, Unit, parse_units, relation
 
 _STRAKS = re.compile(r"\b(?:straks|med\s+en\s+gang|omgående)\b", re.I)
 
@@ -87,6 +89,31 @@ _OWN_SECTIONS = re.compile(
 )
 
 
+_WHOLE_WITH_EXCEPTIONS = re.compile(
+    r"^(?:Loven|Lova)\s+trer\s+i\s+kraft\s+(?P<when>.+?),?\s+med\s+unntak\s+av\s+(?P<units>.+?)\.?$",
+    re.I,
+)
+_UNITS_OF_THE_ACT = re.compile(
+    r"^(?:Loven|Lova)\s+(?P<units>(?:ny\s+|nytt\s+)?§.+?)\s+trer\s+i\s+kraft\s+(?P<when>.+?)\.?$",
+    re.I,
+)
+_CHAPTER_OF_THE_ACT = re.compile(
+    rf"^(?:Lovvedtaket|Lovens|Lovas|Loven|Lova)(?:\s+del\s+(?P<part>{_ROMAN}))?\s+"
+    r"(?P<chapter>kapit(?:te)?l\s+\d+\s*[A-Za-z]?)\s+trer\s+i\s+kraft\s+(?P<when>.+?)\.?$",
+    re.I,
+)
+_LISTED_ITEM = re.compile(
+    r"^(?:Følgende|Følgjande)(?:\s+endringer|\s+endringar)?\s+"
+    r"(?:trer\s+i\s+kraft|blir\s+sett\s+i\s+kraft|vert\s+sett\s+i\s+kraft)\s+(?P<when>.+?):?\s+"
+    rf"(?:Endringsloven|Endringslova|Loven|Lova)\s+del\s+(?P<part>{_ROMAN})(?P<rest>.*?)\.?$",
+    re.I,
+)
+_EXCEPTIONS = re.compile(r"^med\s+unntak\s+av\s+(?P<units>.+)$", re.I)
+_UNIT_START = re.compile(
+    r"^(?:ny\s+|nytt\s+|nye\s+)?(?:§|kapit(?:te)?l\b|overskriften\s+til\s+kapit)"
+)
+
+
 _LISTING_TOKEN = re.compile(
     r"\s*(?:(?P<range>(?P<first>\d+)\s+til\s+(?P<last>\d+))"
     r"|(?P<one>\d+[A-Z]?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?)"
@@ -94,31 +121,76 @@ _LISTING_TOKEN = re.compile(
 )
 
 
+Reach = Literal[Relation, "excluded"]
+SPANS = "operation spans a unit the decision excepts"
+UNPLACED = "a unit the decision names cannot be placed against the operation"
+
+
 class Scope(Frozen):
-    """What one sentence of a partial decision puts into force, and when."""
+    """What one sentence of a partial decision puts into force, and when.
+
+    A scope is the whole act, a part of the amending law, the act's own sections, or
+    the remainder; ``units`` narrow it to the units listed, ``excluded`` carve units out.
+    """
 
     part: str | None = None
     section: str | None = None
     own_sections: frozenset[str] = frozenset()
     remainder: bool = False  # "De andre bestemmelsene …": whatever no other scope covers
+    whole: bool = False  # "Loven trer i kraft D, med unntak av …": the act, less the exceptions
+    units: tuple[Unit, ...] = ()  # narrowed to these units of the act
+    excluded: tuple[Unit, ...] = ()  # these units are not reached by this scope
     when: date
     quote: str  # the sentence the scope and date were read from
 
     @model_validator(mode="after")
     def _one_kind(self) -> "Scope":
-        kinds = sum((bool(self.own_sections), self.part is not None, self.remainder))
-        if kinds > 1 or (self.section is not None and self.part is None):
-            raise ValueError("a scope names own_sections, a part or the remainder, never two")
+        bare_units = bool(self.units) and self.part is None
+        kinds = sum((bool(self.own_sections), self.part is not None, self.remainder, self.whole))
+        if kinds + bare_units > 1 or (self.section is not None and self.part is None):
+            raise ValueError(
+                "a scope names own_sections, a part, the act or the remainder, never two"
+            )
+        if self.units and self.excluded:
+            raise ValueError("a scope narrows to units or excludes units, never both")
         return self
 
-    def covers(self, operation: Operation) -> bool:
+    @property
+    def specific(self) -> bool:
+        return self.section is not None or bool(self.own_sections) or bool(self.units)
+
+    def _placed(self, operation: Operation) -> bool:
         if self.remainder:
             return False  # decided by _scopes_for, against the decision's other scopes
         if self.own_sections:
             return operation.host_section in self.own_sections
+        if self.whole:
+            return True
         if self.part is None or operation.part.upper() != self.part:
             return False
         return self.section is None or operation.address.section == self.section
+
+    def reach(self, operation: Operation) -> Reach:
+        """How this scope stands to the operation, once exceptions and narrowing are read."""
+        if not self._placed(operation):
+            return "disjoint"
+        if self.units:
+            return _narrowed(self.units, operation)
+        found = {relation(unit, operation) for unit in self.excluded}
+        if "spans" in found or "unknown" in found:
+            return "spans" if "spans" in found else "unknown"
+        return "excluded" if "covers" in found else "covers"
+
+    def covers(self, operation: Operation) -> bool:
+        return self.reach(operation) == "covers"
+
+
+def _narrowed(units: tuple[Unit, ...], operation: Operation) -> Relation:
+    found = {relation(unit, operation) for unit in units}
+    for answer in ("covers", "spans", "unknown"):
+        if answer in found:
+            return answer
+    return "disjoint"
 
 
 def _own_sections(listing: str) -> frozenset[str] | None:
@@ -181,17 +253,87 @@ def _part_scopes(match: re.Match[str], sentence: str, own: date | None) -> list[
     return [Scope(part=parts[0], section=sec, when=when, quote=sentence) for sec in sections]
 
 
+def _strip_parenthetical(rest: str) -> str | None:
+    """Drop one leading balanced ``(…)`` act name; None when the parentheses do not balance."""
+    text = rest.strip()
+    if not text.startswith("("):
+        return text
+    depth = 0
+    for index, char in enumerate(text):
+        depth += (char == "(") - (char == ")")
+        if depth == 0:
+            name = text[1:index]
+            return None if "§" in name else text[index + 1 :].strip()  # ``(§ 3)`` is a scope
+    return None
+
+
+def _item_units(rest: str) -> tuple[tuple[Unit, ...], tuple[Unit, ...]] | None:
+    """(units, excluded) an item names after ``del R``; None when outside the grammar."""
+    tail = _strip_parenthetical(rest)
+    if tail is None:
+        return None
+    if not tail:
+        return (), ()
+    exceptions = _EXCEPTIONS.match(tail)
+    if exceptions is not None:
+        excluded = parse_units(exceptions.group("units"))
+        return ((), excluded) if excluded is not None else None
+    if not _UNIT_START.match(tail):
+        if not tail.lower().startswith("lov ") or "§" not in tail:
+            return None  # neither a unit listing nor an inline act citation before one
+        tail = tail[tail.index("§") :]  # ``lov 6. juni 2014 nr. 19 om … § 2 …``: the act's name
+    units = parse_units(tail)
+    return (units, ()) if units is not None else None
+
+
+def _listed_item(sentence: str, own: date | None) -> list[Scope] | None:
+    match = _LISTED_ITEM.match(sentence)
+    if match is None:
+        return None
+    when = _when(match.group("when"), own)
+    read = _item_units(match.group("rest"))
+    if when is None or read is None:
+        return None  # not one part with units: the part-list grammar below may still read it
+    units, excluded = read
+    part = match.group("part").upper()
+    return [Scope(part=part, units=units, excluded=excluded, when=when, quote=sentence)]
+
+
+def _act_scopes(sentence: str, own: date | None) -> list[Scope] | None:
+    """Scopes naming the act itself: a date with exceptions, a unit, or a chapter under a part."""
+    whole = _WHOLE_WITH_EXCEPTIONS.match(sentence)
+    if whole is not None:
+        when, excluded = _when(whole.group("when"), own), parse_units(whole.group("units"))
+        if when is None or excluded is None:
+            return []
+        return [Scope(whole=True, excluded=excluded, when=when, quote=sentence)]
+    chapter = _CHAPTER_OF_THE_ACT.match(sentence)
+    if chapter is not None:
+        when, part = _when(chapter.group("when"), own), chapter.group("part")
+        unit = Unit(chapter=chapter_key(chapter.group("chapter")))
+        if when is None:
+            return []
+        return [
+            Scope(part=part.upper() if part else None, units=(unit,), when=when, quote=sentence)
+        ]
+    units_match = _UNITS_OF_THE_ACT.match(sentence)
+    if units_match is not None:
+        when, units = _when(units_match.group("when"), own), parse_units(units_match.group("units"))
+        return [Scope(units=units, when=when, quote=sentence)] if when and units else []
+    return None
+
+
 def _scopes_of(sentence: str, own: date | None) -> list[Scope] | None:
     """Every scope one sentence of a partial decision states; None when outside the grammar."""
+    for reader in (_listed_item, _act_scopes):
+        found = reader(sentence, own)
+        if found is not None:
+            return found or None  # [] is a sentence of the shape whose units or date failed
     if _RESERVATION.search(sentence):
         return None  # an exception the grammar cannot scope: the whole decision is unreadable
     part_match = _DELT_SENTENCE.match(sentence)
     if part_match is not None:
-        when = _when(part_match.group("when"), own)
-        if when is None or not _representable(part_match):
-            return None
-        part, section = part_match.group("part").upper(), _named_section(part_match)
-        return [Scope(part=part, section=section, when=when, quote=sentence)]
+        return _delt_scope(part_match, sentence, own)
     listed = _PART_SCOPES.match(sentence) or _LISTED_SCOPES.match(sentence)
     if listed is not None:
         return _part_scopes(listed, sentence, own)
@@ -200,6 +342,14 @@ def _scopes_of(sentence: str, own: date | None) -> list[Scope] | None:
         when = _when(remainder.group("when"), own)
         return [Scope(remainder=True, when=when, quote=sentence)] if when else None
     return _own_section_scopes(sentence)
+
+
+def _delt_scope(match: re.Match[str], sentence: str, own: date | None) -> list[Scope] | None:
+    when = _when(match.group("when"), own)
+    if when is None or not _representable(match):
+        return None
+    part, section = match.group("part").upper(), _named_section(match)
+    return [Scope(part=part, section=section, when=when, quote=sentence)]
 
 
 def _own_section_scopes(sentence: str) -> list[Scope] | None:
@@ -255,19 +405,32 @@ def _named_section(match: re.Match[str]) -> str | None:
     return section_key(found[-1]) if len(found) == 1 else None
 
 
-def _scopes_for(operation: Operation, scopes: list[Scope]) -> list[Scope]:
-    """The scopes that reach the operation; the specific ones when any does; else the remainder."""
-    covering = [scope for scope in scopes if scope.covers(operation)]
-    specific = [s for s in covering if s.section is not None or s.own_sections]
+def _scopes_for(operation: Operation, scopes: list[Scope]) -> list[Scope] | str:
+    """The scopes that reach the operation; the specific ones when any does; else the remainder.
+
+    A scope that spans the operation (the operation rewrites a unit the scope excepts) or
+    cannot place it is a reason instead: the decision's answer for this operation is unknown.
+    """
+    reached = [(scope, scope.reach(operation)) for scope in scopes]
+    if any(answer == "spans" for _, answer in reached):
+        return SPANS
+    if any(answer == "unknown" for _, answer in reached):
+        return UNPLACED
+    covering = [scope for scope, answer in reached if answer == "covers"]
+    specific = [scope for scope in covering if scope.specific]
     if covering:
         return specific or covering
     return [scope for scope in scopes if scope.remainder]
 
 
 def _named_in(law: Document, scope: Scope) -> bool:
-    """Whether the law has the part or own sections the scope names; a remainder names none."""
-    if scope.remainder:
+    """Whether the law has the part or own sections the scope names; a remainder names none.
+
+    A scope of the whole act names the law. A bare unit or chapter scope without a part is
+    a statement about an enacted act's own structure, which only the baseline reading checks.
+    """
+    if scope.remainder or (scope.part is None and not scope.whole and not scope.own_sections):
         return False
     if scope.own_sections:
         return any(p.key in scope.own_sections for p in law.provisions)
-    return scope.part in {part.label.upper() for part in law.parts}
+    return scope.whole or scope.part in {part.label.upper() for part in law.parts}

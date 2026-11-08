@@ -16,7 +16,7 @@ from datetime import date, datetime
 from hashlib import sha256
 from typing import Literal
 
-from lovspor.legaltime.document import Document, Frozen
+from lovspor.legaltime.document import Document, Frozen, Node, list_statements
 from lovspor.legaltime.instructions import _INTRO, Operation, classify
 from lovspor.legaltime.scopes import (
     _PART_LIST,
@@ -358,12 +358,18 @@ def is_decision_for(document: Document, law_refid: str) -> bool:
     )
 
 
+def _statements(node: Node) -> list[str]:
+    """A node's sentences; a lead-in with a list is one statement per item (``list_statements``)."""
+    listed = list_statements(node.ledd) if node.ledd is not None else None
+    return listed if listed is not None else split_sentences(node.text)
+
+
 def _blocks(decision: Document) -> list[tuple[str | None, list[str]]]:
     """The decision's sentences grouped under the title sentences that open each law's block."""
     blocks: list[tuple[str | None, list[str]]] = [(None, [])]
     for part in decision.parts:
         for node in part.nodes:
-            for sentence in split_sentences(node.text):
+            for sentence in _statements(node):
                 if _DECISION_TITLE.match(sentence) and act_refid(sentence) is not None:
                     blocks.append((sentence, []))
                 elif not _informational(sentence):
@@ -518,15 +524,17 @@ class _Decision:
             return "full decision without a readable date"
         return None
 
-    def answer(self, op: Operation) -> tuple[date | None, str] | None:
-        """(date, quote) for the operation, (None, title) when not reached, None on a conflict."""
+    def answer(self, op: Operation) -> tuple[date | None, str] | str:
+        """(date, quote) for the operation; (None, title) when not reached; a reason on conflict."""
         if self.scopes is None:
             return self.full_date, self.title
         scopes = _scopes_for(op, self.scopes)
+        if isinstance(scopes, str):
+            return scopes
         if not scopes:
             return None, self.title
         if len({scope.when for scope in scopes}) > 1:
-            return None
+            return CONFLICT
         return scopes[-1].when, scopes[-1].quote
 
 
@@ -539,8 +547,8 @@ def _fold(current: Timing, read: _Decision, op: Operation, law: str) -> Timing |
     if read.conditional:
         return _conditional(current, read.document)
     answer = read.answer(op)
-    if answer is None:
-        return _unsettled(current, read.document, CONFLICT)
+    if isinstance(answer, str):
+        return _unsettled(current, read.document, answer)
     when, quote = answer
     if when is None and not _decision_dated(current, law):
         return None  # a partial decision that does not reach this operation says nothing about it

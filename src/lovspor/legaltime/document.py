@@ -267,6 +267,30 @@ def _parts(main: etree._Element) -> tuple[Part, ...]:
     return tuple(([Part(label="", nodes=tuple(lead))] if lead else []) + sections)
 
 
+_LIST_MARKUP = re.compile(r"<(?:ul|ol)\b")
+
+
+def list_statements(ledd: Ledd) -> list[str] | None:
+    """A lead-in and its list items as one statement per item; None when the ledd has no list.
+
+    Commencement decisions print ``Følgende trer i kraft straks:`` followed by one list
+    item per part commenced. Each item is read with the lead-in before it, joined by one
+    space, so a scope sentence is checkable against the member: the lead-in text, a
+    space, the item text.
+    """
+    if not _LIST_MARKUP.search(ledd.xml):
+        return None
+    try:
+        root = etree.fromstring(f"<article>{ledd.xml}</article>", parser=_PARSER)
+    except etree.XMLSyntaxError:
+        return None
+    lists = [child for child in root if child.tag in {"ul", "ol"}]
+    lead = collapse(root.text or "")
+    if len(lists) != 1 or not lead:
+        return None  # a list without a lead-in states no commencement of its own
+    return [collapse(f"{lead} {element_text(item)}") for item in lists[0] if item.tag == "li"]
+
+
 def parse_document(body: bytes, member: str) -> Document:
     """Parse one member. Raises ``LegalTimeDocumentError`` on a foreign shape."""
     try:
