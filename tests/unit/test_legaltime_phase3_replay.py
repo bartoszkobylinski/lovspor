@@ -149,3 +149,37 @@ def test_a_bare_timing_is_the_act_wide_special_case() -> None:
     state = replay(ACT_DOC, _dated(date(2023, 1, 1)), EVENTS, date(2023, 4, 1))
     assert set(state.applied) == {"op1", "op2", "op3"}
     assert all(p.in_force == "in_force" and p.ledd_not_in_force == () for p in state.provisions)
+
+
+def test_a_term_substitution_reaching_a_ledd_not_in_force_waits_for_it() -> None:
+    """codex-tests on PR #848: a substitution names its ledd in ``locations``, not its address."""
+    listed = _event(
+        11,
+        _op(
+            11,
+            "substitute_term",
+            locations="§ 15-7 fjerde ledd",
+            term_old="Fire",
+            term_new="Endret",
+        ),
+        date(2023, 3, 1),
+    )
+    before = replay(ACT_DOC, COMMENCEMENT, [INSERT_LEDD_4, listed], date(2023, 6, 30))
+    assert before.withheld == ("op11",) and before.applied == ("op1",)
+    assert {p.key: p for p in before.provisions}["§15-7"].ledd[3].text == "Fire."
+    on_day = replay(ACT_DOC, COMMENCEMENT, [INSERT_LEDD_4, listed], date(2023, 7, 1))
+    assert on_day.applied == ("op1", "op11") and on_day.withheld == ()
+    assert {p.key: p for p in on_day.provisions}["§15-7"].ledd[3].text == "Endret."
+    whole = listed.model_copy(
+        update={"operation": listed.operation.model_copy(update={"locations": "§ 15-7"})}
+    )
+    assert replay(ACT_DOC, COMMENCEMENT, [INSERT_LEDD_4, whole], date(2023, 6, 30)).withheld == (
+        "op11",
+    )  # no ledd listed: every ledd, the flagged one among them
+    beside = listed.model_copy(
+        update={
+            "operation": listed.operation.model_copy(update={"locations": "§ 15-7 første ledd"})
+        }
+    )
+    state = replay(ACT_DOC, COMMENCEMENT, [INSERT_LEDD_4, beside], date(2023, 6, 30))
+    assert "op11" not in state.withheld  # a ledd in force beside the flagged one

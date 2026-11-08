@@ -555,6 +555,18 @@ def _baseline_status(baseline_timing: Timing, at: date) -> StateStatus:
     return "replayed" if baseline_timing.effective <= at else "not_yet_in_force"
 
 
+def _substitutes_flagged(op: Operation, working: _Working) -> bool:
+    """A term substitution reaches a ledd not in force: a listed one, or any when none is listed."""
+    for key, ledd in _locations(op.locations):
+        target = working.map.get(key)
+        if target is None:
+            continue
+        present = {i for i in target.unit.flagged if i <= len(target.ledd)}
+        if present and (not ledd or ledd & present):
+            return True
+    return False
+
+
 def _unit_gate(op: Operation, working: _Working) -> str | None:
     """``withheld`` / an unresolved reason / None (apply) from the targets' commencement at D."""
     if op.kind == "insert_section" and op.new_provision is not None and op.address.section:
@@ -569,6 +581,8 @@ def _unit_gate(op: Operation, working: _Working) -> str | None:
             return "withheld"
         if restructures(op, target.unit.flagged, len(target.ledd)):
             return RESTRUCTURED
+    if op.kind == "substitute_term" and _substitutes_flagged(op, working):
+        return "withheld"
     return None
 
 
