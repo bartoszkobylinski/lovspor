@@ -1,0 +1,346 @@
+"""When each legal unit of an enacted act took effect (ADR-0020, Decisions 4 to 6).
+
+The act's commencement is a *default* timing plus the units an instrument
+dates apart from it: a section, a ledd of a section, or a chapter. The
+evidence is the act's ``dateInForce`` header, the commencement decisions
+citing the act (full or partial, with exceptions), and a commencement
+statement another act writes into this one (``straffelovens
+ikraftsettingslov`` replacing § 411 with "Loven trer i kraft 1. oktober
+2015."), all folded in publication order with no precedence rule: two
+instruments naming different days for one unit leave it ``unresolved``, and
+an instrument whose scope cannot be read unsettles every unit it could have
+reached. A unit excepted from a date keeps whatever state it had, never the
+date it was excepted from.
+"""
+
+import re
+from datetime import date, datetime
+from hashlib import sha256
+
+from lovspor.legaltime.commencement import (
+    _DEFAULT_CLAUSE,
+    CONFLICT,
+    Decisions,
+    DecisionsLike,
+    Proof,
+    Timing,
+    _citing,
+    _conditional,
+    _Decision,
+    _decisions,
+    _settle,
+    _unsettled,
+    header_timing,
+)
+from lovspor.legaltime.document import Document, Frozen
+from lovspor.legaltime.replay import Event
+from lovspor.legaltime.scopes import _RESERVATION, _STRAKS, Scope
+from lovspor.legaltime.text import parse_date, split_sentences
+from lovspor.legaltime.units import Unit
+
+INSTRUMENT_UNDATED = "commencement instrument's own commencement is not proven"
+NAMES_NOTHING = "partial decision names no part or section of the law"
+OUTSIDE = "partial decision outside the grammar"
+BELOW_LEDD = "commencement stated below ledd level"
+_ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
+_CITED = re.compile(r"\blov\s+\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?", re.I)
+
+
+class UnitTiming(Frozen):
+    """One unit the commencement evidence dates, or leaves open, apart from the act."""
+
+    unit: Unit
+    part: str | None = None  # a part qualifier on a chapter (``Lovvedtaket del I kapittel 16``)
+    timing: Timing
+
+
+class Commencement(Frozen):
+    """The act's default commencement and every unit dated apart from it."""
+
+    default: Timing
+    units: tuple[UnitTiming, ...] = ()
+
+    def section_timing(self, key: str, chapter: str | None, parts: tuple[str, ...]) -> Timing:
+        """The timing of one section: its own unit, else its chapter's, else the default.
+
+        ``parts`` are the labels under which the section may be reached by a part qualifier:
+        the act's own part data-name (``del1``) and the amending part that inserted it (``I``).
+        """
+        for entry in self.units:
+            unit = entry.unit
+            if unit.section == key and _whole_section(unit):
+                return entry.timing
+            in_chapter = unit.chapter is not None and unit.chapter == chapter and not unit.heading
+            reached = entry.part is None or _part_name(entry.part) in parts or entry.part in parts
+            if in_chapter and reached:
+                return entry.timing
+        return self.default
+
+    def ledd_timings(self, key: str) -> dict[int, Timing]:
+        """Ledd of the section dated apart from the section itself."""
+        return {
+            e.unit.ledd: e.timing
+            for e in self.units
+            if e.unit.section == key and e.unit.ledd is not None and _only_ledd(e.unit)
+        }
+
+    def finer_than_ledd(self, key: str) -> bool:
+        """A punktum, bokstav or heading of the section is dated apart: not modelled, refuse."""
+        return any(
+            e.unit.section == key and not _whole_section(e.unit) and not _only_ledd(e.unit)
+            for e in self.units
+        )
+
+
+def _whole_section(unit: Unit) -> bool:
+    return (
+        unit.section is not None
+        and unit.ledd is None
+        and unit.punktum is None
+        and unit.bokstav is None
+        and not unit.heading
+    )
+
+
+def _only_ledd(unit: Unit) -> bool:
+    return unit.punktum is None and unit.bokstav is None and not unit.heading
+
+
+def _roman(numeral: str) -> int:
+    total = 0
+    for index, char in enumerate(numeral):
+        value = _ROMAN_VALUES[char]
+        bigger_follows = index + 1 < len(numeral) and _ROMAN_VALUES[numeral[index + 1]] > value
+        total += -value if bigger_follows else value
+    return total
+
+
+def _part_name(roman: str) -> str:
+    """``I`` → ``del1``, the data-name form an enacting act's part section carries."""
+    return f"del{_roman(roman.upper())}"
+
+
+class _Statement(Frozen):
+    """A commencement statement about the act written by another instrument (Decision 5d)."""
+
+    when: date | None
+    known_from: date | None
+    published_at: datetime | None
+    proof: Proof
+    problem: str | None = None
+
+
+def _payload_sentence(event: Event) -> str | None:
+    op = event.operation
+    if op.kind in {"replace_ledd", "insert_ledd"} and op.ledd:
+        return split_sentences(op.ledd[0].text)[0]
+    if op.kind == "replace_section" and op.new_provision is not None and op.new_provision.ledd:
+        return split_sentences(op.new_provision.ledd[0].text)[0]
+    return None
+
+
+def _member_sha(event: Event) -> str | None:
+    return next(
+        (
+            p.sha256
+            for p in event.timing.proofs
+            if p.refid == event.law and p.member == event.member
+        ),
+        None,
+    )
+
+
+def _statement(event: Event, sentence: str) -> _Statement | None:
+    """The statement an operation's payload makes about the act's commencement, if any."""
+    if _DEFAULT_CLAUSE.match(sentence) is None or _RESERVATION.search(sentence):
+        return None
+    digest = _member_sha(event)
+    if digest is None:
+        return None
+    proof = Proof(
+        refid=event.law, member=event.member, sha256=digest,
+        quote_sha256=sha256(sentence.encode("utf-8")).hexdigest(),
+    )  # fmt: skip
+    known = event.published_at.date() if event.published_at else None
+    if event.timing.status != "dated":
+        return _Statement(
+            when=None, known_from=known, published_at=event.published_at, proof=proof,
+            problem=INSTRUMENT_UNDATED,
+        )  # fmt: skip
+    explicit = parse_date(_CITED.sub("", sentence))
+    when = event.timing.effective if _STRAKS.search(sentence) and explicit is None else explicit
+    problem = None if when is not None else "commencement statement without a readable date"
+    return _Statement(when=when, known_from=known, published_at=event.published_at, proof=proof,
+                      problem=problem)  # fmt: skip
+
+
+def instrument_statements(act: str, events: list[Event]) -> list[_Statement]:
+    """Every default-shaped commencement sentence an instrument writes into the act's text."""
+    found: list[_Statement] = []
+    for event in events:
+        if event.operation.act != act:
+            continue
+        sentence = _payload_sentence(event)
+        statement = _statement(event, sentence) if sentence is not None else None
+        if statement is not None:
+            found.append(statement)
+    return found
+
+
+def _unresolved_by(current: Timing, reason: str, proof: Proof) -> Timing:
+    return current.model_copy(
+        update={"status": "unresolved", "effective": None, "retroactive": False,
+                "reason": reason, "proofs": (*current.proofs, proof)}
+    )  # fmt: skip
+
+
+def _fold_statement(current: Timing, statement: _Statement) -> Timing:
+    """Fold an instrument's statement like a full decision: cite, date, or conflict."""
+    if current.status == "unresolved":
+        return current
+    if statement.problem is not None or statement.when is None:
+        reason = statement.problem or "commencement statement without a readable date"
+        return _unresolved_by(current, reason, statement.proof)
+    if current.status == "pending":
+        known = statement.known_from
+        return Timing(
+            status="dated", effective=statement.when, known_from=known,
+            retroactive=known is not None and statement.when < known,
+            proofs=(*current.proofs[1:], statement.proof),
+        )  # fmt: skip
+    if current.effective == statement.when:
+        return current.model_copy(update={"proofs": (*current.proofs, statement.proof)})
+    return _unresolved_by(current, CONFLICT, statement.proof)
+
+
+class _Fold:
+    """The act's default and unit timings, folded instrument by instrument."""
+
+    def __init__(self, act: Document, chapter_of: dict[str, str]) -> None:
+        self.act = act
+        self.chapters = set(chapter_of.values()) | {
+            p.chapter for p in act.provisions if p.chapter is not None
+        }
+        self.sections = set(chapter_of) | {p.key for p in act.provisions}
+        self.default: Timing = header_timing(act)
+        self.units: dict[tuple[Unit, str | None], Timing] = {}
+        self.excluded: set[tuple[Unit, str | None]] = set()
+
+    def result(self) -> Commencement:
+        units = [
+            UnitTiming(unit=unit, part=part, timing=self._reconciled(key, timing))
+            for key, timing in self.units.items()
+            for unit, part in (key,)
+        ]
+        return Commencement(default=self.default, units=tuple(units))
+
+    def _reconciled(self, key: tuple[Unit, str | None], timing: Timing) -> Timing:
+        """A unit the default statement also reaches must agree with it (Decision 6)."""
+        if key in self.excluded or self.default.status != "dated" or timing.status != "dated":
+            return timing
+        if timing.effective == self.default.effective:
+            return timing
+        return timing.model_copy(
+            update={"status": "unresolved", "effective": None, "retroactive": False,
+                    "reason": CONFLICT, "proofs": (*timing.proofs, *self.default.proofs)}
+        )  # fmt: skip
+
+    def unsettle_all(self, decision: Document, reason: str) -> None:
+        self.default = _unsettled(self.default, decision, reason)
+        for key, timing in self.units.items():
+            self.units[key] = _unsettled(timing, decision, reason)
+
+    def decision(self, read: _Decision) -> None:
+        if read.partial:
+            self._partial(read)
+        elif read.unreadable is not None:
+            self.unsettle_all(read.document, read.unreadable)
+        elif read.conditional:
+            self.default = _conditional(self.default, read.document)
+        else:
+            self.default = _settle(self.default, read.full_date, read.document, read.title)
+
+    def _partial(self, read: _Decision) -> None:
+        scopes = read.scopes
+        if read.unreadable is not None and read.unreadable != NAMES_NOTHING:
+            return self.unsettle_all(read.document, read.unreadable)
+        if not scopes:
+            return self.unsettle_all(read.document, OUTSIDE)
+        if not any(self._names_act(scope) for scope in scopes):
+            return self.unsettle_all(read.document, NAMES_NOTHING)
+        for scope in scopes:
+            self._scope(read.document, scope)
+        return None
+
+    def _names_act(self, scope: Scope) -> bool:
+        if scope.whole or scope.remainder:
+            return True
+        if scope.own_sections:
+            return any(key in self.sections for key in scope.own_sections)
+        return any(
+            (u.section is not None and u.section in self.sections)
+            or (u.chapter is not None and u.chapter in self.chapters)
+            for u in scope.units
+        )
+
+    def _scope(self, decision: Document, scope: Scope) -> None:
+        if scope.whole or scope.remainder:
+            self.default = _settle(self.default, scope.when, decision, scope.quote)
+            for unit in scope.excluded:
+                self.excluded.add((unit, None))
+                self.units.setdefault((unit, None), self._excepted(decision, scope.quote))
+            return
+        named = [Unit(section=key) for key in sorted(scope.own_sections)] or list(scope.units)
+        for unit in named:
+            key = (unit, scope.part)
+            base = self.units.get(key, self.default)
+            self.units[key] = _settle(base, scope.when, decision, scope.quote)
+
+    def _excepted(self, decision: Document, quote: str) -> Timing:
+        """An excepted unit keeps the header's state (pending), with the exception as proof."""
+        proof = Proof(
+            refid=decision.header.refid, member=decision.member, sha256=decision.sha256,
+            quote_sha256=sha256(quote.encode("utf-8")).hexdigest(),
+        )  # fmt: skip
+        header = header_timing(self.act)
+        if header.status == "pending":
+            return header.model_copy(update={"proofs": (*header.proofs, proof)})
+        return Timing(
+            status="unresolved", reason="excepted from the act's commencement",
+            known_from=header.known_from, proofs=(*header.proofs, proof),
+        )  # fmt: skip
+
+    def statement(self, statement: _Statement) -> None:
+        self.default = _fold_statement(self.default, statement)
+
+
+def _ordered(reads: list[_Decision], statements: list[_Statement]) -> list[_Decision | _Statement]:
+    def stamp(item: _Decision | _Statement) -> tuple[datetime, str]:
+        if isinstance(item, _Decision):
+            return (item.document.header.published_at or datetime.min, item.document.member)
+        return (item.published_at or datetime.min, item.proof.member)
+
+    return sorted([*reads, *statements], key=stamp)
+
+
+def baseline_commencement(
+    act: Document, decisions: DecisionsLike, events: list[Event]
+) -> Commencement:
+    """The act's commencement per unit, from its header, its decisions and other instruments.
+
+    A dated or unreadable header is the whole answer, as for ``baseline_timing``; a
+    delegated header (``Kongen bestemmer``) is folded with every instrument in reach.
+    """
+    context: Decisions = _decisions(decisions)
+    fold = _Fold(act, context.chapter_of)
+    if fold.default.status != "pending":
+        return fold.result()
+    statements = instrument_statements(act.header.refid, events)
+    for item in _ordered(_citing(act, decisions), statements):
+        if fold.default.status == "unresolved":  # type: ignore[comparison-overlap]
+            break
+        if isinstance(item, _Decision):
+            fold.decision(item)
+        else:
+            fold.statement(item)
+    return fold.result()
