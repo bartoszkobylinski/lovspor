@@ -110,6 +110,44 @@ def test_collect_refuses_an_act_without_an_enacting_member(archive: Path) -> Non
         collect("lov/1999-01-01-1", [archive])
 
 
+@pytest.mark.parametrize(
+    "listed_law,selected",
+    [
+        ("lov/2019-06-14-99", True),
+        ("lov/2020-12-18-999", True),
+        ("lov/2019-06-14-98", False),
+    ],
+)
+def test_collect_selects_multi_law_decisions_by_listed_baseline_or_amender(
+    tmp_path: Path, listed_law: str, selected: bool
+) -> None:
+    """Phase 2: a decision's title can name a different law from its other blocks."""
+    foreign = "lov/2010-05-05-7"
+    title = "Ikraftsetting av lov 5. mai 2010 nr. 7 om annet"
+    body = (
+        '<html><body><header><dl><dd class="refid">forskrift/2022-01-01-8</dd>'
+        f'<dd class="title">{title}</dd><dd class="changesToDocuments"><ul>'
+        f"<li>{foreign}</li><li>{listed_law}</li></ul></dd></dl></header>"
+        f'<main><article class="legalP">{title}.</article>'
+        '<article class="legalP">Loven trer i kraft 1. januar 2022.</article>'
+        "</main></body></html>"
+    ).encode()
+    name = "lti/2022/sf-20220101-008.xml"
+    archive = make_archive(tmp_path / "multi-law.tar.bz2", extra={name: body})
+
+    fresh = collect("lov/2019-06-14-99", [archive])
+    decisions = {doc.member: doc for doc in fresh.decisions}
+    assert (name in decisions) is selected
+    assert set(decisions) == {
+        "lti/2020/sf-20200228-9999.xml",
+        "lti/2021/sf-20210528-9998.xml",
+    } | ({name} if selected else set())
+    if selected:
+        assert decisions[name].header.changes_to_documents == (foreign, listed_law)
+        assert decisions[name].sha256 == sha256(body).hexdigest()
+    assert collect("lov/2019-06-14-99", [archive]) == fresh
+
+
 def test_read_members_refuses_a_missing_name(archive: Path) -> None:
     found = read_members(archive, ["lti/2019/nl-20190614-099.xml"])
     assert found["lti/2019/nl-20190614-099.xml"].header.refid == "lov/2019-06-14-99"

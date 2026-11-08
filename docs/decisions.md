@@ -1059,6 +1059,23 @@ four evidence files were regenerated and every difference traced: added `host_se
 `absorbed_by` and `act_level_problems` fields, renumberings now addressed to their section, and
 second proofs where a decision agrees with the law's own clause.
 
+Phase 2 (2026-11-07, branch `feat/744-phase2-stress`, note
+`docs/research/legal-time-replay-phase2-2026-11-07.md`, report
+`docs/research/data/legal-time-coverage-2026-11-07.json` from `scripts/legal_time_coverage.py`):
+eight harder acts chosen by measured amendment count (utlendingsloven, straffeloven,
+arbeidsmiljøloven, friskolelova, tvisteloven, merverdiavgiftsloven, naturmangfoldloven,
+barnevernsloven). The closed grammar grew by counted sentence shapes only (delegation header
+spellings, staggering and transitional sentences, commencement references, multi-law resolutions
+read block by block, part lists and remainders in `Delt` decisions, part-scoped clauses, numbered
+list items, new chapters, `(1)` ledd, `§ 6A-4` keys); an independent review of the diff found four
+fail-open paths, each closed with a test. Result: 4 of 8 acts have a readable own commencement,
+477 of 2,432 operations apply, 1,199 are unresolved on commencement, 324 instruction sentences are
+unsupported and 337 unattributed, and **0 sections are proven** because every replayed state
+carries act-level problems. The four pilot evidence files are byte-identical at every commit. The
+next limiting factor is commencement at section granularity (partial own commencement, `Delt`
+decisions with exceptions) and commencement stated in another act — a model decision for ADR-0020,
+not a grammar extension. Nothing served, published or written into `lovverk`.
+
 ## How to use this document
 
 - **Before starting a session**: read this + `CLAUDE.md`. Those two together are the full context.

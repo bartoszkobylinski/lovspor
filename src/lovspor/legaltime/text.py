@@ -27,7 +27,7 @@ DATE = re.compile(rf"\b(\d{{1,2}})\.\s*({_MONTH_ALT})\s+(\d{{4}})\b", re.I)
 ACT_CITATION = re.compile(
     rf"\blov\s+(\d{{1,2}})\.\s*({_MONTH_ALT})\s+(\d{{4}})(?:\s+nr\.\s*(\d+))?", re.I
 )
-_SECTION_LABEL = re.compile(r"§\s*(\d+(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
+_SECTION_LABEL = re.compile(r"§\s*(\d+[A-Z]?(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
 _ABBREVIATIONS = frozenset(
     {
         "jf",
@@ -47,6 +47,7 @@ _ABBREVIATIONS = frozenset(
     }
 )
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-ZÆØÅ«§(\d])")
+_ITEM_NUMBER = re.compile(r"\d{1,3}\.")  # ``23.`` opening a numbered intro is not a sentence
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -96,11 +97,11 @@ def section_key_of(label: str) -> str:
 
 def section_sort_key(key: str) -> tuple[int, int, str]:
     """Order ``§88`` < ``§88a`` < ``§89``; chapter-numbered ``§8-7`` by both parts."""
-    match = re.fullmatch(r"§(\d+)(?:-(\d+))?([a-zæøå]?)", key)
+    match = re.fullmatch(r"§(\d+)([A-Z]?)(?:-(\d+))?([a-zæøå]?)", key)
     if match is None:
         return (10**9, 0, key)
-    first, second, letter = match.groups()
-    return (int(first), int(second or 0), letter)
+    first, capital, second, letter = match.groups()
+    return (int(first), int(second or 0), f"{capital}{letter}")
 
 
 def _ends_with_abbreviation(sentence: str) -> bool:
@@ -109,10 +110,10 @@ def _ends_with_abbreviation(sentence: str) -> bool:
 
 
 def split_sentences(text: str) -> list[str]:
-    """Split a ledd into punktum; abbreviations and ordinal numbers never split."""
+    """Split a ledd into punktum; abbreviations, ordinals and a leading item number never split."""
     parts: list[str] = []
     for piece in _SENTENCE_END.split(collapse(text)):
-        if parts and _ends_with_abbreviation(parts[-1]):
+        if parts and (_ends_with_abbreviation(parts[-1]) or _ITEM_NUMBER.fullmatch(parts[-1])):
             parts[-1] = f"{parts[-1]} {piece}"
         else:
             parts.append(piece)

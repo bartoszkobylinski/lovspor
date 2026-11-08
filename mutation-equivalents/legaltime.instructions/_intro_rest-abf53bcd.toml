@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/instructions.py"
+symbol = "_intro_rest"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit 07cc6a24"
+mutation = """
+-    inline = _INLINE_REPEAL.match(intro.group("inline") or "")
++    inline = _INLINE_REPEAL.match(intro.group("inline") or "XXXX")
+"""
+justification = """
+`_INLINE_REPEAL` is anchored on the word oppheves or opphevast followed by a section
+sign at the very start of the text; neither "" nor "XXXX"
+matches it, so when the intro has no inline group the match is None either way and
+the function returns the whole-law repeal sentence in both cases.
+"""

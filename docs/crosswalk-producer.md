@@ -46,8 +46,9 @@ to merge only after the owner has accepted it.
   dataset, Stortinget (R1, unchanged) or any publication.
 - **R4 stays blocked.** Corrections are never promoted.
 
-A ruling is not a release. Publication stays NO-GO. No signing key is configured (`approval-signers` is
-empty), and nothing here publishes, tags, pushes, or writes into `lovverk`.
+A ruling is not a release. Publication stays NO-GO. `approval-signers` names one
+trusted signer, the owner's key (principal `lovspor-owner`, #840), and nothing here
+publishes, tags, pushes, or writes into `lovverk`.
 Publishing a dataset needs a separate owner decision.
 
 All commands sit on the `ops` group (`lovspor.cli` is at its size ratchet).
@@ -126,10 +127,14 @@ now; pass `--cache` outside the checkout.
     ```
 
     The signer must be listed in `src/lovspor/crosswalk/approval-signers`
-    (OpenSSH allowed_signers format). That file ships with **no key**: only the
-    owner adds their own public key, in a change they make and merge. Until then
-    every approval is refused (`no trusted approval signer is configured: release
-    candidates stay blocked`). No tool or agent creates, chooses or adds a key.
+    (OpenSSH allowed_signers format). It names exactly one signer: the owner's
+    own `ssh-ed25519` public key, principal `lovspor-owner`, restricted to
+    `namespaces="lovspor-crosswalk-approval"`, added by the owner in a change they
+    made and merged (#840). `tests/unit/test_crosswalk_shipped_signers.py` pins
+    its fingerprint, so another signer, a wider namespace or a changed key fails
+    CI. A file with no signer line refuses every approval (`no trusted approval
+    signer is configured: release candidates stay blocked`). No tool or agent
+    creates, chooses or adds a key.
   - Promotes, as a new revision, only active attested records that the capture reproduces, raw bytes included, and whose cited archives have an accepted licence basis: `stated_for_file` and `stated_for_dataset` always, `stated_for_endpoint` only under `"R2": "approved"`, `inferred_same_dataset` never. A record citing a member of a `stated_for_dataset` archive outside that archive's Avdeling I year (`lti/2026/`) stays `research_only`.
   - Corrections stay out while R4 is blocked.
 - **Manifest** (`lovspor.crosswalk.manifest`):

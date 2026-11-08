@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/commencement.py"
+symbol = "_informational"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit 07cc6a24"
+mutation = """
+-    stated = _REFERENCE.sub("", sentence)  # what is left once the references are gone
++    stated = _REFERENCE.sub("XXXX", sentence)  # what is left once the references are gone
+"""
+justification = """
+`stated` is searched only for `_COMMENCEMENT_PHRASE` (a commencement verb, "i kraft"
+or "virkning fra"). "XXXX" contains none of these, so whether a stripped reference is
+replaced by "" or by "XXXX" the search gives the same answer for every sentence.
+"""

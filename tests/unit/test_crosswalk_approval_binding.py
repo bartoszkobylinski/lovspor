@@ -179,21 +179,16 @@ def test_a_signature_in_another_namespace_is_refused(
     assert _refused(data, tmp_path, capture_dir, proof).startswith("approval signature refused")
 
 
-def test_the_shipped_trusted_signers_file_names_no_key(tmp_path: Path) -> None:
-    """Release stays blocked until the owner adds their own key in a reviewed change."""
-    shipped = Path(approvals.__file__).with_name("approval-signers")
-    lines = [line.strip() for line in shipped.read_text(encoding="utf-8").splitlines()]
-    assert [line for line in lines if line and not line.startswith("#")] == []
-    message = _write(tmp_path, b"{}", "approval.json")
-    with pytest.raises(CrosswalkError) as caught:
-        approvals.verify_signature(b"{}", approvals.signature_path(message), shipped)
-    assert str(caught.value) == approvals.NO_SIGNER
-
-
 def test_the_gate_refuses_an_approval_nobody_trusted_signed(
-    built: bytes, capture_dir: Path, tmp_path: Path
+    built: bytes, capture_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With the shipped signers file, release-candidate refuses before promoting anything."""
+    """With no trusted signer, release-candidate refuses before promoting anything.
+
+    The signers file is the test's own, holding comments only: whether the shipped
+    file names the owner's key must not decide this test (#840).
+    """
+    signers = _write(tmp_path, b"# no key\n\n", "no-signers")
+    monkeypatch.setattr(approvals, "TRUSTED_SIGNERS", signers)
     proof = approval_dir(tmp_path / "proof", built, new_signer(tmp_path / "keys"))
     data, output = _write(tmp_path, built, "in.jsonl"), tmp_path / "out.jsonl"
     with pytest.raises(CrosswalkError) as caught:

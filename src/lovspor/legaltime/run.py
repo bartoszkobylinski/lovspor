@@ -70,7 +70,7 @@ def _operation_record(op: Operation) -> dict[str, Any]:
         "kind": op.kind,
         "part": op.part,
         "instruction": op.instruction,
-        "address": op.address.model_dump(exclude_none=True),
+        "address": op.address.model_dump(exclude_defaults=True),
         "destination": op.destination,
         "change_part": list(op.change_part),
         "host_section": op.host_section,

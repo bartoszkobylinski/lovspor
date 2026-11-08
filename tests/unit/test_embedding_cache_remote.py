@@ -321,6 +321,49 @@ def test_remote_success_then_local_failure_stops_and_a_fresh_runner_reads_the_bu
 # --- lookup table ------------------------------------------------------------
 
 
+@pytest.mark.parametrize("plant", _INVALID.values(), ids=_INVALID.keys())
+@pytest.mark.parametrize("existing", [False, True], ids=["absent", "existing"])
+def test_publish_validates_downloaded_bytes_before_touching_local_state(
+    remote: Callable[[str], RemoteEntryStore],
+    plant: Callable[[CachedVectors], bytes],
+    existing: bool,
+) -> None:
+    """publish's stated validate-first contract applies even when a key exists."""
+    store, entry = remote("runner-1"), _doc("a")
+    if existing:
+        store.local.put(entry)
+    before = _local_bytes(store, entry.key)
+
+    with pytest.raises(EmbeddingCacheError):
+        store.local.publish(entry.key, plant(entry))
+
+    assert _local_bytes(store, entry.key) == before
+
+
+@pytest.mark.parametrize("held", [False, True], ids=["created", "held"])
+def test_put_preserves_divergent_local_evidence_when_adopting_remote_winner(
+    bucket: r2_fakes.FakeBucket,
+    remote: Callable[[str], RemoteEntryStore],
+    held: bool,
+) -> None:
+    """_adopt promises a conflict rather than replacing a different local value."""
+    store, mine = remote("runner-1"), _unit("a")
+    winner = _other_value(mine)
+    store.local.put(mine)
+    payload = encode_entry(winner)
+    if held:
+        bucket.objects[remote_key(mine.key)] = payload
+
+    with pytest.raises(EmbeddingCacheConflictError):
+        store.put(winner)
+
+    assert _local_bytes(store, mine.key) == encode_entry(mine)
+    assert bucket.objects == {remote_key(mine.key): payload}
+    assert bucket.calls == [("PUT", remote_key(mine.key))] + (
+        [("GET", remote_key(mine.key))] if held else []
+    )
+
+
 def test_remote_valid_local_absent_publishes_the_remote_value(
     bucket: r2_fakes.FakeBucket, remote: Callable[[str], RemoteEntryStore]
 ) -> None:
@@ -450,6 +493,58 @@ def test_a_transient_get_failure_is_retried(
     bucket.objects[remote_key(entry.key)] = encode_entry(entry)
     bucket.fail("GET", 503)
     assert remote("runner-1").get(entry.key) is not None
+
+
+@pytest.mark.parametrize("fault", [403, 503, r2_fakes.TIMEOUT, r2_fakes.DROP])
+def test_unreachable_remote_never_falls_back_to_a_valid_local_copy(
+    bucket: r2_fakes.FakeBucket,
+    remote: Callable[[str], RemoteEntryStore],
+    sleeps: Sleeps,
+    fault: int | str,
+) -> None:
+    """§8.1: an unreachable authority is a refusal, even with a usable local copy."""
+    store, entry = remote("runner-1"), _doc("a")
+    payload = encode_entry(entry)
+    store.local.publish(entry.key, payload)
+    bucket.objects[remote_key(entry.key)] = payload
+    attempts = 1 if fault == 403 else 3
+    bucket.fail("GET", *([fault] * attempts))
+
+    with pytest.raises(EmbeddingCacheStorageError):
+        store.get(entry.key)
+
+    assert bucket.calls == [("GET", remote_key(entry.key))] * attempts
+    assert sleeps == ([] if attempts == 1 else [1.0, 2.0])
+    assert _local_bytes(store, entry.key) == payload
+    assert bucket.objects == {remote_key(entry.key): payload}
+
+
+@pytest.mark.parametrize("held", [409, 412])
+@pytest.mark.parametrize("existing", [False, True], ids=["local-absent", "local-present"])
+def test_unreadable_winner_after_held_put_preserves_both_copies(
+    bucket: r2_fakes.FakeBucket,
+    remote: Callable[[str], RemoteEntryStore],
+    sleeps: Sleeps,
+    held: int,
+    existing: bool,
+) -> None:
+    """§8.1 steps 4–6: a failed winner lookup cannot publish the losing value."""  # noqa: RUF002
+    store, mine = remote("runner-1"), _doc("a")
+    winner = encode_entry(_other_value(mine))
+    bucket.objects[remote_key(mine.key)] = winner
+    if existing:
+        store.local.put(mine)
+    before = _local_bytes(store, mine.key)
+    bucket.fail("PUT", held)
+    bucket.fail("GET", 503, r2_fakes.TIMEOUT, r2_fakes.DROP)
+
+    with pytest.raises(EmbeddingCacheStorageError, match="3 attempts"):
+        store.put(mine)
+
+    assert bucket.calls == [("PUT", remote_key(mine.key))] + [("GET", remote_key(mine.key))] * 3
+    assert sleeps == [1.0, 2.0]
+    assert _local_bytes(store, mine.key) == before
+    assert bucket.objects == {remote_key(mine.key): winner}
 
 
 @pytest.mark.parametrize("status", [400, 403])

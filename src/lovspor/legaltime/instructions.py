@@ -16,26 +16,42 @@ from lovspor.legaltime.text import (
     ORDINALS,
     act_refid,
     ordinal,
+    section_key,
     section_key_of,
     split_sentences,
 )
 
 OpKind = Literal[
     "replace_section", "insert_section", "replace_ledd", "insert_ledd", "replace_punktum",
-    "insert_punktum", "replace_bokstav", "repeal_section", "repeal_ledd", "repeal_punktum",
-    "move_ledd", "renumber", "replace_heading", "substitute_term", "unsupported",
+    "insert_punktum", "replace_bokstav", "insert_bokstav", "repeal_bokstav", "repeal_section",
+    "repeal_ledd", "repeal_punktum", "move_ledd", "renumber", "replace_heading", "substitute_term",
+    "unsupported",
 ]  # fmt: skip
 
-_SEC = r"§\s*\d+(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"  # "i" is the preposition, not a letter
+_SEC = (
+    r"§\s*\d+[A-Z]?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"  # "i" is the preposition, not a letter
+)
+_SECNUM = r"\d+(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
+_SECS = rf"§§?\s*(?P<s1>{_SECNUM})\s+(?P<sj>og|til)\s+(?P<s2>{_SECNUM})"
 _ORD = ORDINAL_ALT
-_LEDD = rf"(?P<l1>{_ORD})(?:\s+(?P<lj>og|til)\s+(?P<l2>{_ORD}))?\s+ledd"
-_PUNKT = rf"(?P<p1>{_ORD})(?:\s+(?P<pj>og|til)\s+(?P<p2>{_ORD}))?\s+punktum"
+_LEDD = (
+    rf"(?:(?P<l1>{_ORD})(?:\s+(?P<lj>og|til)\s+(?P<l2>{_ORD}))?\s+ledd"
+    r"|\((?P<n1>\d+)\)(?:\s+(?P<nj>og|til)\s+\((?P<n2>\d+)\))?)"
+)
+_PUNKT = rf"(?:(?P<p1>{_ORD})(?:\s+(?P<pj>og|til)\s+(?P<p2>{_ORD}))?|(?P<plast>siste))\s+punktum"
 _NEW = r"ny(?:tt|e)?"
+_ITEM = r"(?:bokstav\s+(?P<b>[a-zæøå])|nr\.\s+(?P<bn>\d+))"  # one list item, by letter or number
+_CHAPTER = re.compile(rf"^{_NEW}\s+kapittel\s+\S+\s+(?:skal\s+)?lyde(?:\s+slik)?:$", re.I)
 _LYDE = r"(?:skal\s+)?lyde(?:\s+slik)?:"
-_REPEAL = r"(?:oppheves|opphevast|blir\s+oppheva|vert\s+oppheva|blir\s+opphevet)\.?"
+_REPEAL = (
+    r"(?:oppheves|opphevast|blir\s+oppheva|vert\s+oppheva|blir\s+opphevet|strykes"
+    r"|blir\s+sletta|vert\s+sletta|utgår)\.?"
+)
 _INTRO = re.compile(
-    r"^(?:\d+\.\s*)?I\s+(?:midlertidig\s+)?(?P<act>lov\s+\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?)\b.*?"
-    r"\s+(?:(?:gjøres|gjerast|blir|vert|skal)\s+(?P<rest>.*)|(?P<repeal>oppheves|opphevast|blir\s+oppheva|vert\s+oppheva)\.?)$",
+    r"^(?:\d+\.\s*)?I\s+(?:midlertidig\s+)?(?:lov\s+av\s+(?=\d)|(?=lov))(?P<act>lov\s+)?"
+    r"(?P<date>\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?)\b.*?"
+    r"\s+(?:(?:gjøres|gjerast|gjer\s+ein|blir|vert|skal)\s+(?P<rest>.*)"
+    r"|(?P<inline>(?:oppheves|opphevast)\s+§.*)|(?P<repeal>oppheves|opphevast|blir\s+oppheva|vert\s+oppheva)\.?)$",
     re.S,
 )
 _COMMENCEMENT_SHAPED = re.compile(
@@ -43,9 +59,11 @@ _COMMENCEMENT_SHAPED = re.compile(
     re.I,
 )
 _INTRO_ONLY = re.compile(
-    r"^(?:det\s+gjort\s+)?(?:følgende|følgjande|desse)\s+endring(?:er|ar|ane|a)?"
+    r"^(?:det\s+gjort\s+|ein\s+)?(?:følgende|følgjande|desse)\s+endring(?:er|ar|ane|a)?"
     r"(?:\s+gjerast|\s+gjorde)?:$"
 )
+_MULTI_REPEAL = re.compile(rf"^{_SECS}\s+{_REPEAL}$")
+_INLINE_REPEAL = re.compile(r"^(?:oppheves|opphevast)\s+(?P<target>§.*?)\.?$")
 _SUBSTITUTE = re.compile(
     r"^I\s+(?:følgjande|følgende)\s+(?:lovføresegner|bestemmelser|lover|føresegner)\s+"
     r"(?:vert|skal|blir)\s+(?:ordet|ordene|orda|uttrykket|uttrykka)?\s*«(?P<old>[^»]+)»"
@@ -54,11 +72,17 @@ _SUBSTITUTE = re.compile(
 )
 _RULES: list[tuple[OpKind, re.Pattern[str]]] = [
     ("insert_section", re.compile(rf"^{_NEW}\s+(?P<sec>{_SEC})\s+{_LYDE}$", re.I)),
-    ("replace_heading", re.compile(rf"^(?P<sec>{_SEC})\s+(?:paragraf)?overskriften\s+{_LYDE}$")),
+    ("replace_heading", re.compile(rf"^(?P<sec>{_SEC})\s+(?:paragraf)?overskrift(?:en|a)\s+{_LYDE}$")),  # noqa: E501
+    ("replace_heading", re.compile(rf"^Overskrift(?:en|a)\s+(?:til|i)\s+(?P<sec>{_SEC})\s+{_LYDE}$")),  # noqa: E501
+    ("insert_section", re.compile(rf"^I\s+kapittel\s+\S+\s+skal\s+{_NEW}\s+(?P<sec>{_SEC})\s+{_LYDE}$", re.I)),  # noqa: E501
+    ("repeal_ledd", re.compile(rf"^I\s+(?P<sec>{_SEC})\s+(?:blir|vert)\s+{_LEDD}\s+sletta\.?$")),
     ("replace_section", re.compile(rf"^(?P<sec>{_SEC})\s+{_LYDE}$")),
     ("insert_punktum", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_NEW}\s+{_PUNKT}\s+{_LYDE}$")),  # noqa: E501
     ("replace_punktum", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_PUNKT}\s+{_LYDE}$")),
-    ("replace_bokstav", re.compile(rf"^(?P<sec>{_SEC})\s+{_LEDD}\s+bokstav\s+(?P<b>[a-zæøå])\s+{_LYDE}$")),  # noqa: E501
+    ("insert_bokstav", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_NEW}\s+{_ITEM}\s+{_LYDE}$")),  # noqa: E501
+    ("insert_bokstav", re.compile(rf"^I\s+(?P<sec>{_SEC})\s+skal\s+{_NEW}\s+{_ITEM}\s+lyde:$")),
+    ("replace_bokstav", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_ITEM}\s+{_LYDE}$")),
+    ("repeal_bokstav", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_ITEM}\s+{_REPEAL}$")),
     ("insert_ledd", re.compile(rf"^(?P<sec>{_SEC})\s+{_NEW}\s+{_LEDD}\s+{_LYDE}$")),
     ("replace_ledd", re.compile(rf"^(?P<sec>{_SEC})\s+{_LEDD}\s+{_LYDE}$")),
     ("repeal_punktum", re.compile(rf"^(?P<sec>{_SEC})\s+(?:{_LEDD}\s+)?{_PUNKT}\s+{_REPEAL}$")),
@@ -73,7 +97,7 @@ _RULES: list[tuple[OpKind, re.Pattern[str]]] = [
     (
         "renumber",
         re.compile(
-            rf"^(?:(?P<sec>{_SEC})\s+)?(?:Nåværende|Noverande|Gjeldende|nåværende|noverande)\s+.*\bblir\b.*$"
+            rf"^(?:(?P<sec>{_SEC})\s+)?(?:Nåværende|Noverande|Gjeldende|Tidlegare|Tidligere|nåværende|noverande|tidlegare|tidligere)\s+.*(?:\b(?:ledd|punktum)|§\s*\d+\w*(?:\s+[a-zæøå])?)\s+blir\b.*$"
         ),
     ),
 ]  # fmt: skip
@@ -87,6 +111,7 @@ class Address(Frozen):
     punktum_end: int | None = None
     bokstav: str | None = None
     destination_ledd: int | None = None
+    last_punktum: bool = False  # ``siste punktum``: the ledd's last sentence, whatever its number
 
 
 class Operation(Frozen):
@@ -116,14 +141,21 @@ class Interpretation(Frozen):
 
 def _ord(groups: dict[str, str | None], key: str) -> int | None:
     word = groups.get(key)
+    if word is None and key in _NUMBERED_KEYS:
+        number = groups.get(_NUMBERED_KEYS[key])
+        return int(number) if number else None
     return ordinal(word) if word else None
+
+
+_NUMBERED_KEYS = {"l1": "n1", "l2": "n2"}  # ``(1)`` numbers a ledd where an ordinal would
 
 
 def _span(
     groups: dict[str, str | None], first: str, joiner: str, last: str
 ) -> tuple[int | None, int | None]:
     start, end = _ord(groups, first), _ord(groups, last)
-    if end is not None and groups.get(joiner) == "og" and start is not None and end != start + 1:
+    joined = groups.get(joiner) or (groups.get("nj") if first == "l1" else None)
+    if end is not None and joined == "og" and start is not None and end != start + 1:
         return None, None  # "første og tredje" is two targets, not a range: no address
     return start, end
 
@@ -135,7 +167,8 @@ def _address(groups: dict[str, str | None]) -> Address:
     return Address(
         section=section_key_of(section) if section is not None else None,
         ledd=ledd, ledd_end=ledd_end, punktum=punktum, punktum_end=punktum_end,
-        bokstav=groups.get("b"), destination_ledd=_ord(groups, "to"),
+        bokstav=groups.get("b") or groups.get("bn"), destination_ledd=_ord(groups, "to"),
+        last_punktum=bool(groups.get("plast")),
     )  # fmt: skip
 
 
@@ -156,6 +189,39 @@ def _inline_payload(text: str, payload: tuple[Node, ...]) -> tuple[str, tuple[No
     tail = match.group("tail")
     node = Node(kind="ledd", css_class="inline", text=tail, ledd=Ledd(xml=tail, text=tail))
     return match.group("head"), (node,)
+
+
+def _intro_rest(intro: re.Match[str]) -> str:
+    """What an intro sentence says after naming the act: its instructions, or its own repeal."""
+    if intro.group("rest"):
+        return intro.group("rest")
+    inline = _INLINE_REPEAL.match(intro.group("inline") or "")
+    if inline is not None:
+        return f"{inline.group('target')} oppheves."  # ``oppheves § 12`` is ``§ 12 oppheves.``
+    return f"lov {intro.group('date')} {intro.group('repeal')}"
+
+
+def _expand(sentence: str) -> list[str]:
+    """``§§ 14 og 15 oppheves.`` is one repeal per section; a lettered range is left as it is."""
+    match = _MULTI_REPEAL.match(sentence)
+    if match is None:
+        return [sentence]
+    first, last, joiner = match.group("s1"), match.group("s2"), match.group("sj")
+    if joiner == "og":
+        return [f"§ {first} oppheves.", f"§ {last} oppheves."]
+    if not (first.isdigit() and last.isdigit()) or int(last) < int(first):
+        return [sentence]
+    return [f"§ {n} oppheves." for n in range(int(first), int(last) + 1)]
+
+
+def _pieces(text: str) -> list[tuple[str, str, str]]:
+    """(id suffix, sentence to classify, announced sentence) per instruction sentence."""
+    pieces: list[tuple[str, str, str]] = []
+    for offset, sentence in enumerate(split_sentences(text)):
+        expanded = _expand(sentence)
+        for k, piece in enumerate(expanded):
+            pieces.append((f"{offset}" if len(expanded) == 1 else f"{offset}-{k}", piece, sentence))
+    return pieces
 
 
 def _addressed_act(change_part: tuple[str, ...]) -> str | None:
@@ -253,6 +319,7 @@ class _Reader:
     ) -> bool:
         """True when ``payload`` was consumed by an instruction."""
         text = node.text
+        quoted: str | tuple[str, str] = text
         substitute = _SUBSTITUTE.match(text)
         if substitute is not None:
             self.substitution = _pairs(substitute)
@@ -261,12 +328,13 @@ class _Reader:
             return False
         intro = _INTRO.match(text)
         if intro is not None:
-            self.substitution, self.act = None, act_refid(intro.group("act"))
-            text = intro.group("rest") or f"{intro.group('act')} {intro.group('repeal')}"
-            if _INTRO_ONLY.match(text):
+            self.substitution, self.act = None, act_refid(f"lov {intro.group('date')}")
+            rest = _intro_rest(intro)
+            if _INTRO_ONLY.match(rest):
                 return False
+            quoted = (rest, node.text) if intro.group("inline") else rest
         where = (part[0], f"{part[1]}:{index}", node.host_section)
-        self._instruction(where, text, node.change_part, payload)
+        self._instruction(where, quoted, node.change_part, payload)
         return True
 
     def _substitution_item(self, part: tuple[str, str], index: int, node: Node) -> bool:
@@ -297,30 +365,57 @@ class _Reader:
     def _instruction(
         self,
         where: tuple[str, str, str | None],
-        text: str,
+        text: str | tuple[str, str],
         change_part: tuple[str, ...],
         payload: tuple[Node, ...],
     ) -> None:
         label, tag, host = where
-        act = _addressed_act(change_part) or self.act
+        context = (_addressed_act(change_part) or self.act, label, change_part, host)
+        text, quote = (text, None) if isinstance(text, str) else text
         text, payload = _inline_payload(text, payload)
-        sentences = split_sentences(text)
-        for offset, sentence in enumerate(sentences):
-            kind, groups = classify(sentence)
+        sentences = _pieces(text)
+        for offset, (tag_offset, sentence, announced) in enumerate(sentences):
             last = offset == len(sentences) - 1
-            if kind == "unsupported" and _COMMENCEMENT_SHAPED.search(sentence):
-                self.clauses.append(sentence)  # a commencement sentence among instructions
-                continue
-            if kind == "unsupported" and act is None:
-                continue  # prose outside any act's amendment block: not an operation
-            self.operations.append(
-                _operation(
-                    f"{self.document.header.refid}#{tag}.{offset}",
-                    (kind, groups, sentence),
-                    (act, label, change_part, host),
-                    payload if last else (),
-                )
-            )
+            op_id = f"{self.document.header.refid}#{tag}.{tag_offset}"
+            self._sentence(op_id, (sentence, quote or announced), context, payload if last else ())
+
+    def _sentence(
+        self,
+        op_id: str,
+        sentence: tuple[str, str],
+        context: tuple[str | None, str, tuple[str, ...], str | None],
+        payload: tuple[Node, ...],
+    ) -> None:
+        read, quote = sentence  # the sentence as classified, and as the member announced it
+        kind, groups = classify(read)
+        if payload and _CHAPTER.match(read) and any(n.provision for n in payload):
+            self.operations.extend(_chapter(op_id, quote, context, payload))
+        elif kind == "unsupported" and _COMMENCEMENT_SHAPED.search(read):
+            self.clauses.append(read)  # a commencement sentence among instructions
+        elif kind == "unsupported" and context[0] is None:
+            return  # prose outside any act's amendment block: not an operation
+        else:
+            self.operations.append(_operation(op_id, (kind, groups, quote), context, payload))
+
+
+def _chapter(
+    base: str,
+    sentence: str,
+    context: tuple[str | None, str, tuple[str, ...], str | None],
+    payload: tuple[Node, ...],
+) -> list[Operation]:
+    """``Nytt kapittel 6A skal lyde:`` inserts every provision the chapter text carries."""
+    carried = [n for n in payload if n.provision is not None]
+    labelled = all(section_key(n.provision.label) is not None for n in carried if n.provision)
+    if not labelled or any(n.kind == "ledd" for n in payload):
+        return [_operation(base, ("unsupported", {}, sentence), context, ())]
+    return [
+        _operation(
+            f"{base}-{k}", ("insert_section", {"sec": n.provision.label}, sentence), context, (n,)
+        )
+        for k, n in enumerate(carried)
+        if n.provision is not None
+    ]
 
 
 def _operation(
@@ -344,7 +439,7 @@ def _operation(
 
 _SPAN = rf"(?P<a>{_ORD})(?:\s+(?P<j>og|til)\s+(?:nytt\s+|ny\s+)?(?P<b>{_ORD}))?"
 _RENUMBER_SHIFT = re.compile(
-    rf"^(?:(?P<sec>{_SEC})\s+)?(?:Nåværende|Noverande|Gjeldende|nåværende|noverande)\s+"
+    rf"^(?:(?P<sec>{_SEC})\s+)?(?:Nåværende|Noverande|Gjeldende|Tidlegare|Tidligere|nåværende|noverande|tidlegare|tidligere)\s+"
     rf"{_SPAN}\s+(?P<unit>ledd|punktum)\s+blir\s+(?:nytt\s+|ny\s+)?"
     rf"{_SPAN.replace('?P<a>', '?P<c>').replace('?P<j>', '?P<k>').replace('?P<b>', '?P<d>')}"
     r"\s+(?P<unit2>ledd|punktum)\.?$"

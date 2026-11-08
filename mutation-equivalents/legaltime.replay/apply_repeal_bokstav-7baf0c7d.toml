@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/replay.py"
+symbol = "apply_repeal_bokstav"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit 07cc6a24"
+mutation = """
+-        edited = _remove_item(target.ledd[index - 1].xml, op.address.bokstav or "")
++        edited = _remove_item(target.ledd[index - 1].xml, op.address.bokstav or "XXXX")
+"""
+justification = """
+The fallback is only reached when the address names no item. `_remove_item` then
+looks for an item whose stripped `data-name` equals "" or "XXXX"; Lovdata item names
+are letters or numbers, so neither matches and both versions refuse with
+"bokstav … matched 0 list items" (the label is interpolated into the message, but
+that message is only compared for a real label in any test, and an operation
+without a label never reaches this handler through `interpret`).
+"""

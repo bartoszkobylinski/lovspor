@@ -1,0 +1,12 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/replay.py"
+symbol = "_previous_label"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit 07cc6a24"
+mutation = """
+-    position = _LETTERS.find(label)
++    position = _LETTERS.rfind(label)
+"""
+justification = """
+`_LETTERS` holds each letter once, so `find` and `rfind` return the same index for
+a letter that is present and -1 for one that is not.
+"""

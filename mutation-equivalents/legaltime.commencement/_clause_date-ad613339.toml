@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/commencement.py"
+symbol = "_clause_date"
+registered = "2026-11-07, PR #842, from the mutation artifact at commit 07cc6a24"
+mutation = """
+-    explicit = parse_date(_CITED.sub("", sentence))
++    explicit = parse_date(_CITED.sub("XXXX", sentence))
+"""
+justification = """
+`_CITED.sub(...)` removes every cited act or regulation ("straffeloven 22. mai 1902
+nr. 10") before `parse_date` looks for the clause's own date. The replacement only
+has to carry no date; "XXXX" has no digit, so `DATE` cannot match inside it, and
+`parse_date` finds exactly the first date outside a citation as with "". Same
+argument as the registered `_stated_date` and `_informational` entries.
+"""
