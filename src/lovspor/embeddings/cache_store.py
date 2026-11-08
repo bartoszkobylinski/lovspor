@@ -83,7 +83,8 @@ def _open_private_dir(name: Path | str, parent: int | None) -> int:
     except OSError as exc:
         if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
             raise
-        _check_dir_info(os.stat(name, dir_fd=parent, follow_symlinks=False), Path(name).name)
+        _check_dir_info(os.lstat(name, dir_fd=parent), Path(name).name)
+        # Replaced again by a private directory since the open failed.
         raise EmbeddingCacheError(f"embedding cache refuses {Path(name).name}") from exc
     try:
         _check_owner_only(os.fstat(handle), Path(name).name)
@@ -155,7 +156,7 @@ class LocalEntryStore:
         parts, name = entry_location(entry.key)
         payload = encode_entry(entry)
         try:
-            handle = self._descend(parts, create=True)
+            handle = _descend(self._open_root(), parts, create=True)
             try:
                 _publish(handle, name, payload)
             finally:
@@ -175,26 +176,32 @@ class LocalEntryStore:
         return stored
 
     def _existing_dir(self, parts: tuple[str, ...]) -> int | None:
-        handle = _open_private_dir(self._root, None)  # it may have been swapped since open()
+        handle = self._open_root()
         try:
-            return self._descend(parts, create=False, handle=handle)
+            return _descend(handle, parts)
         except FileNotFoundError:
             return None
 
-    def _descend(self, parts: tuple[str, ...], create: bool, handle: int | None = None) -> int:
-        """Walk ``parts`` below the root by descriptor; the caller closes the result."""
-        if handle is None:
-            handle = _open_private_dir(self._root, None)  # it may have been swapped since open()
-        for part in parts:
-            try:
-                if create:
-                    with contextlib.suppress(FileExistsError):
-                        os.mkdir(part, _DIR_MODE, dir_fd=handle)
-                child = _open_private_dir(part, handle)
-            finally:
-                os.close(handle)
-            handle = child
-        return handle
+    def _open_root(self) -> int:
+        """The root, checked again: it may have been swapped or removed since open()."""
+        try:
+            return _open_private_dir(self._root, None)
+        except FileNotFoundError as exc:
+            raise EmbeddingCacheStorageError("embedding cache root is gone since open()") from exc
+
+
+def _descend(handle: int, parts: tuple[str, ...], create: bool = False) -> int:
+    """Walk ``parts`` below ``handle`` by descriptor, closing it; the caller closes the result."""
+    for part in parts:
+        try:
+            if create:
+                with contextlib.suppress(FileExistsError):
+                    os.mkdir(part, _DIR_MODE, dir_fd=handle)
+            child = _open_private_dir(part, handle)
+        finally:
+            os.close(handle)
+        handle = child
+    return handle
 
 
 def _read_entry(path: Path, directory: int | None = None) -> bytes | None:
