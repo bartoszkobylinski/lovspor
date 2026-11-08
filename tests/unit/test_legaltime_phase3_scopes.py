@@ -211,3 +211,28 @@ def test_a_list_carrying_ledd_yields_one_statement_per_item() -> None:
         list_statements(Ledd(xml="Loven trer i kraft straks.", text="Loven trer i kraft straks."))
         is None
     )
+
+
+def test_lead_sentences_before_the_colon_stand_alone_and_a_lead_without_a_colon_joins_nothing() -> (
+    None
+):
+    item = '<ul><li><article class="legalP">{}</article></li></ul>'
+    titled = Ledd(
+        xml="Delt ikraftsetting av Stortingets vedtak 2. mai 2023 til lov om endringer. "
+        "Følgende trer i kraft 1. juli 2023:"
+        + item.format("Endringsloven del III (jordskiftelova)."),
+        text="",
+    )
+    assert list_statements(titled) == [
+        "Delt ikraftsetting av Stortingets vedtak 2. mai 2023 til lov om endringer.",
+        "Følgende trer i kraft 1. juli 2023: Endringsloven del III (jordskiftelova).",
+    ]
+    numbered = Ledd(
+        xml="Delt iverksetjing av lov 20. juni 2025 nr. 96 om dokumentasjon og arkiv (arkivlova)."
+        + item.format("Paragrafane 1 til 10 og §§ 12 til 25 gjeld frå 1. januar 2026."),
+        text="",
+    )
+    assert list_statements(numbered) == [
+        "Delt iverksetjing av lov 20. juni 2025 nr. 96 om dokumentasjon og arkiv (arkivlova).",
+        "Paragrafane 1 til 10 og §§ 12 til 25 gjeld frå 1. januar 2026.",
+    ]

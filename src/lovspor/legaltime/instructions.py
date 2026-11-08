@@ -421,12 +421,24 @@ class _Reader:
         kind, groups = classify(read)
         if payload and _STRUCTURE.match(read) and any(n.provision for n in payload):
             self.operations.extend(_structure(op_id, quote, context, payload))
-        elif kind == "unsupported" and _COMMENCEMENT_SHAPED.search(read):
+        elif kind == "unsupported" and _clause_like(read):
             self.clauses.append(read)  # a commencement sentence among instructions
         elif kind == "unsupported" and context[0] is None:
             return  # prose outside any act's amendment block: not an operation
         else:
             self.operations.append(_operation(op_id, (kind, groups, quote), context, payload))
+
+
+_OPENS_PAYLOAD = re.compile(r"lyde(?:\s+slik)?:$")
+
+
+def _clause_like(sentence: str) -> bool:
+    """A commencement-shaped sentence that opens no payload.
+
+    ``De delene av § 102 … som ikke allerede er satt i kraft, blir § 402, og skal lyde slik:``
+    instructs, whatever it says about being in force; it is an unsupported operation.
+    """
+    return bool(_COMMENCEMENT_SHAPED.search(sentence)) and _OPENS_PAYLOAD.search(sentence) is None
 
 
 def _structure_part(sentence: str) -> str | None:

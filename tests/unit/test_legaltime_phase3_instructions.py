@@ -109,6 +109,23 @@ def test_a_single_new_chapter_takes_its_chapter_from_the_sentence() -> None:
     ]
 
 
+def test_a_conditional_renumbering_that_opens_a_payload_is_an_instruction_not_a_clause() -> None:
+    body = (
+        '<section class="section"><h2>I</h2>'
+        '<article class="legalP">Lov 20. mai 2005 nr. 28 om straff endres slik:</article>'
+        + _p(
+            "De delene av § 102 i lov 20. mai 2005 nr. 28 som ikke allerede er satt i kraft, "
+            "blir § 402, og skal lyde slik:"
+        )
+        + _future("§402")
+        + '</section><section class="section"><h2>II</h2>'
+        '<article class="legalP">Loven trer i kraft straks.</article></section>'
+    )
+    reading = interpret(parse_document(_law(body).encode(), "lti/x.xml"))
+    assert reading.clauses == ("Loven trer i kraft straks.",)
+    assert [op.kind for op in reading.operations] == ["unsupported"]
+
+
 def _instrument() -> str:
     """Straffelovens ikraftsettingslov: § 1 amends act A's § 411; § 8 is its own clause."""
     return _law(

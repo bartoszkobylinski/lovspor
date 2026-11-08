@@ -18,7 +18,7 @@ from lxml import etree
 from pydantic import BaseModel, ConfigDict
 
 from lovspor.legaltime.errors import LegalTimeDocumentError
-from lovspor.legaltime.text import collapse
+from lovspor.legaltime.text import collapse, split_sentences
 from lovspor.parsing.xml_normalizer import safe_parser
 
 _NOTE_CLASSES = frozenset({"changesToParent", "footnotereference", "footnoteLabel"})
@@ -271,12 +271,13 @@ _LIST_MARKUP = re.compile(r"<(?:ul|ol)\b")
 
 
 def list_statements(ledd: Ledd) -> list[str] | None:
-    """A lead-in and its list items as one statement per item; None when the ledd has no list.
+    """The sentences before a list, then one statement per list item; None without a list.
 
     Commencement decisions print ``Følgende trer i kraft straks:`` followed by one list
-    item per part commenced. Each item is read with the lead-in before it, joined by one
-    space, so a scope sentence is checkable against the member: the lead-in text, a
-    space, the item text.
+    item per part commenced. A last lead sentence that ends with a colon introduces the
+    items and is read with each of them, joined by one space, so the statement is
+    checkable against the member; every other lead sentence, and an item under a lead
+    that does not end with a colon, stands on its own.
     """
     if not _LIST_MARKUP.search(ledd.xml):
         return None
@@ -285,10 +286,12 @@ def list_statements(ledd: Ledd) -> list[str] | None:
     except etree.XMLSyntaxError:
         return None
     lists = [child for child in root if child.tag in {"ul", "ol"}]
-    lead = collapse(root.text or "")
-    if len(lists) != 1 or not lead:
-        return None  # a list without a lead-in states no commencement of its own
-    return [collapse(f"{lead} {element_text(item)}") for item in lists[0] if item.tag == "li"]
+    if len(lists) != 1:
+        return None
+    lead = split_sentences(root.text or "")
+    intro = lead.pop() if lead and lead[-1].endswith(":") else ""
+    items = [element_text(item) for item in lists[0] if item.tag == "li"]
+    return [*lead, *(collapse(f"{intro} {item}") for item in items)]
 
 
 def parse_document(body: bytes, member: str) -> Document:
