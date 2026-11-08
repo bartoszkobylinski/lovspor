@@ -405,6 +405,17 @@ class EmbeddingCacheStorageError(EmbeddingCacheError):
     """
 
 
+class EmbeddingCacheConflictError(EmbeddingCacheError):
+    """The local copy of a cache key holds a different value than the remote winner.
+
+    With the remote store on, the first value committed in the bucket is the
+    key's only value (#802 design §8.1). A local entry that differs was written
+    outside that protocol: while the remote store was off, or by hand. The sync
+    stops, both copies are kept, and the owner chooses which value to keep with
+    the admin tooling. The sync never resolves a conflict by overwriting.
+    """
+
+
 class EmbeddingBudgetError(LovsporError):
     """A keyed sync reached its embedding token budget and stopped (#790).
 

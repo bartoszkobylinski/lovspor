@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/r2_client.py"
+symbol = "get"
+registered = "2026-11-08, PR #844, from run 42496403404"
+mutation = """
+-    return self._send("GET", key, {}, b"")
++    return self._send("GET", key, {}, None)
+"""
+justification = """
+For a GET, httpx builds the identical request from headers={} or headers=None
+and from content=b"" or content=None: an empty body, no Content-Length, no
+extra header. The signer then hashes the same empty content and signs the same
+headers. The assumption test pins both pairs.
+"""
+assumption_test = "tests/unit/test_r2_client_equivalence_assumptions.py::test_assumption_httpx_builds_the_same_get_from_empty_and_absent_parts"

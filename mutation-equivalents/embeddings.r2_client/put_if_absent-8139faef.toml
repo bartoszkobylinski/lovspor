@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/r2_client.py"
+symbol = "put_if_absent"
+registered = "2026-11-08, PR #844, from run 42496403404"
+mutation = """
+-    digest = base64.b64encode(hashlib.md5(data, usedforsecurity=False).digest()).decode()
++    digest = base64.b64encode(hashlib.md5(data, ).digest()).decode()
+"""
+justification = """
+hashlib.md5's `usedforsecurity` keyword only lets a FIPS-restricted OpenSSL
+build refuse the algorithm; it never changes the digest. False (the original),
+True, None and the default all produce the same bytes, so the Content-MD5
+header is identical. The assumption test pins the digest for every spelling.
+"""
+assumption_test = "tests/unit/test_r2_client_equivalence_assumptions.py::test_assumption_md5_digest_ignores_usedforsecurity"

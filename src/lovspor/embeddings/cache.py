@@ -22,11 +22,12 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 
 from lovspor.embeddings.cache_format import CachedVectors, EntryKey, ReadPolicy, UnitKey
+from lovspor.embeddings.cache_remote import remote_requested, with_remote
 from lovspor.embeddings.cache_store import LocalEntryStore
 from lovspor.embeddings.inputs import EmbeddingInput, hash_embedding_inputs
 from lovspor.embeddings.meter import with_meter
@@ -42,6 +43,14 @@ CACHE_DIR_VARIABLE = "LOVSPOR_EMBEDDING_CACHE_DIR"
 MAX_AGE_VARIABLE = "LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS"
 DEFAULT_MAX_AGE_DAYS = 30
 _PROGRESS_EVERY = 50
+
+
+class EntryStore(Protocol):
+    """What the paid boundary needs from a store: the local one, or the remote one over it."""
+
+    def get(self, key: EntryKey) -> CachedVectors | None: ...
+
+    def put(self, entry: CachedVectors) -> CachedVectors: ...
 
 
 @dataclass
@@ -65,11 +74,15 @@ class CacheProgress:
 class CachingEmbedder:
     """The configured adapter, with a durable cache in front of its paid calls."""
 
-    def __init__(self, inner: EmbeddingModel, store: LocalEntryStore, esi: str) -> None:
+    def __init__(self, inner: EmbeddingModel, store: EntryStore, esi: str) -> None:
         self._inner = inner
         self._store = store
         self._esi = esi
         self.progress = CacheProgress()
+
+    @property
+    def store(self) -> EntryStore:
+        return self._store
 
     def encode(self, texts: list[str]) -> np.ndarray:
         return self._inner.encode(texts)
@@ -176,7 +189,14 @@ def with_embedding_cache(
 ) -> EmbeddingModel | None:
     """Wrap ``embedder`` when ``LOVSPOR_EMBEDDING_CACHE_DIR`` is set; else return it as is."""
     raw_root = os.environ.get(CACHE_DIR_VARIABLE)
-    if embedder is None or not raw_root:
+    if embedder is None:
+        return embedder
+    if not raw_root:
+        if remote_requested():
+            raise EmbeddingCacheError(
+                f"a remote embedding cache needs {CACHE_DIR_VARIABLE} for its local copy; "
+                "set it, or unset the remote cache variables",
+            )
         return embedder
     esi = _known_space(embedder)
     if settings.lspe_writer_version != 2:  # noqa: PLR2004 - the current format version
@@ -186,7 +206,7 @@ def with_embedding_cache(
         )
     forbidden = (settings.lovverk_repo_path, *_engine_checkout())
     store = LocalEntryStore.open(Path(raw_root), forbidden, _read_policy())
-    return CachingEmbedder(embedder, store, esi)
+    return CachingEmbedder(embedder, with_remote(store), esi)
 
 
 def _known_space(embedder: EmbeddingModel) -> str:
