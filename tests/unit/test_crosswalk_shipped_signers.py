@@ -280,3 +280,48 @@ def test_a_signature_in_another_namespace_stays_refused(tmp_path: Path, line_opt
     with pytest.raises(CrosswalkError) as caught:
         approvals.verify_signature(b"{}", signature, helper.signers)
     assert str(caught.value).startswith("approval signature refused")
+
+
+@pytest.mark.parametrize("namespace", ["lovspor-crosswalk-approval", "git"])
+def test_shipped_owner_options_enforce_the_approval_namespace(
+    tmp_path: Path, namespace: str
+) -> None:
+    """Exercise the shipped principal/options with OpenSSH using only a temporary key.
+
+    crosswalk-producer.md promises that the owner's line is restricted to the
+    approval namespace. Replace only its public key in a scratch copy so this
+    restriction is exercised without access to the owner's private key.
+    """
+    owner = new_signer(tmp_path / "owner", principal="lovspor-owner")
+    public = owner.key.with_suffix(".pub").read_text(encoding="utf-8").split()[1]
+    signers = _replaced(tmp_path, _shipped_line().split()[3], public)
+    signature = sign(owner, _message(tmp_path), namespace=namespace)
+
+    if namespace == "lovspor-crosswalk-approval":
+        verified = approvals.verify_signature(b"{}", signature, signers)
+        assert verified.principal == "lovspor-owner"
+        assert verified.signers_sha256 == sha256(signers.read_bytes()).hexdigest()
+    else:
+        with pytest.raises(CrosswalkError, match="approval signature refused"):
+            approvals.verify_signature(b"{}", signature, signers)
+        # Check the allowed_signers restriction independently of the verifier's
+        # fixed namespace: even requesting verification as "git" must fail.
+        checked = subprocess.run(
+            [
+                "ssh-keygen",
+                "-Y",
+                "verify",
+                "-f",
+                str(signers),
+                "-I",
+                "lovspor-owner",
+                "-n",
+                namespace,
+                "-s",
+                str(signature),
+            ],
+            input=b"{}",
+            capture_output=True,
+            check=False,
+        )
+        assert checked.returncode != 0
