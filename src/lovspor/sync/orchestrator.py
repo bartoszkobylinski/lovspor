@@ -53,6 +53,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
+from lovspor.embeddings.cache import quantized_document_vectors, with_embedding_cache
 from lovspor.embeddings.inputs import (
     build_embedding_inputs,
     hash_embedding_inputs,
@@ -62,7 +63,6 @@ from lovspor.embeddings.model import (
     count_input_tokens,
 )
 from lovspor.embeddings.provider import UNKNOWN_SPACE_ID, create_embedder, space_id_of
-from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import strip_frontmatter
 from lovspor.embeddings.store import read_embeddings, write_embeddings
 from lovspor.errors import (
@@ -1105,7 +1105,7 @@ def _load_embedder(settings: Settings) -> EmbeddingModel | None:
     ``LOVSPOR_EMBEDDING_PROVIDER`` fails the run instead of quietly producing a
     corpus with no embeddings and no explanation.
     """
-    return create_embedder(settings.embedding)
+    return with_embedding_cache(create_embedder(settings.embedding), settings)
 
 
 def _embedder_identity(embedder: EmbeddingModel) -> tuple[str | None, str | None]:
@@ -1188,8 +1188,7 @@ def _write_embeddings_for_doc(
     if not inputs:
         write_embeddings(path, [], scale=1.0, dim=dim, embedding_space_id=header_esi)
         return path, input_hash
-    matrix = embedder.encode([item.text for item in inputs])
-    quantized, scale = quantize_int8(matrix)
+    quantized, scale = quantized_document_vectors(embedder, inputs, input_hash)
     pairs = [(inputs[i].section_id, quantized[i]) for i in range(len(inputs))]
     write_embeddings(path, pairs, scale, dim=dim, embedding_space_id=header_esi)
     return path, input_hash

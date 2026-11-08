@@ -813,7 +813,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/sync/orchestrator.py"
-value = 2169
+value = 2168
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -904,7 +904,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 rule = "function-lines"
 path = "src/lovspor/sync/orchestrator.py"
 name = "_write_embeddings_for_doc"
-value = 24
+value = 23
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
