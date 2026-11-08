@@ -104,7 +104,7 @@ It never calls a paid provider. A deterministic fake stands in, and its embeddin
 If two jobs only share `needs:`, they may run one after the other. The second writer's `GET` then finds the first writer's object and it never sends a competing `PUT`. Equal sidecars and a third runner paying 0 still hold. They prove eventual agreement, not the conditional-`PUT` race of design §8.1. The workflow therefore forces the race:
 
 1. Both writers use the same run-specific keys: the fake provider's descriptor names the run. Each writer's provider returns different valid vectors.
-2. The cache stores an entry only after the key's `GET` missed, the fake provider was paid and the entry was built. Each writer's **first cache-entry `PUT`** is held at a barrier (`scripts/ops/embedding_cache_g3_race.py`). Before sending it, the writer:
+2. The cache stores an entry only after the key's `GET` missed, the fake provider was paid and the entry was built. Each writer's **first cache-entry `PUT`** is held at a barrier (`src/lovspor/embeddings/g3_race.py`: staging only, imported by no sync, CLI or server path, and measured by the PR mutation gate). Before sending it, the writer:
    * writes its own readiness object, with a conditional `PUT`. The object names the run, the target key and the digest of the entry it is about to send;
    * `GET`s the peer's readiness object until it exists, is valid and names the same run and key.
 3. Only then does either writer send its `PUT`. When it does, the other writer already holds a different candidate for the same key. Whoever commits second is answered `412` (or `409`), `GET`s the winner, validates it and adopts its bytes.

@@ -1,36 +1,20 @@
 """The G3 race barrier and evidence gate, in process (#802, GPT-6 review 5819177180).
 
-``scripts/ops/embedding_cache_g3_race.py`` is staging-only. These tests drive
+``lovspor.embeddings.g3_race`` is staging-only. These tests drive
 its barrier against an in-memory bucket and a fake clock, so a timeout costs no
 wall time, and feed its evidence gate the shapes a sequential schedule leaves.
 The cross-process race itself is in ``test_embedding_cache_staging.py``.
 """
 
-import importlib.util
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
-from types import ModuleType
 from typing import Any
 
 import pytest
 
+from lovspor.embeddings import g3_race as race
 from lovspor.embeddings.r2_client import Reply
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "embedding_cache_g3_race.py"
 _TARGET = "lovspor-embedding-cache/schema-1/esi/units/h/0-4-u.lsec"
-
-
-def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("embedding_cache_g3_race", _SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-race = _load()
 
 
 @dataclass

@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -346,3 +347,43 @@ def test_the_barrier_deadline_ends_before_the_race_job_is_killed() -> None:
     deadline = float(workflow["env"]["LOVSPOR_G3_BARRIER_TIMEOUT_SECONDS"])
     for writer in ("race-a", "race-b"):
         assert 0 < deadline < workflow["jobs"][writer]["timeout-minutes"] * 60 / 2, writer
+
+
+def test_both_target_puts_are_in_flight_at_the_bucket_at_once(
+    endpoint: str, bucket: r2_fakes.FakeBucket, tmp_path: Path
+) -> None:
+    """The bucket holds the first cache-entry PUT it receives until the second
+    writer's PUT for the same key arrives too. Writers that sent their PUTs one
+    after the other could never both be held, and the latch would break."""
+    latch = threading.Barrier(2, timeout=20)
+    held: list[str] = []
+    broken: list[str] = []
+
+    def hold(key: str) -> None:
+        if "/g3-barrier/" in key or (held and key != held[0]) or len(held) >= 2:
+            return
+        held.append(key)
+        try:
+            latch.wait()
+        except threading.BrokenBarrierError:
+            broken.append(key)
+
+    bucket.before_put = hold
+    outputs = [tmp_path / "a.out", tmp_path / "b.out"]
+    for writer in _race(endpoint, "t11", outputs):
+        assert writer.returncode == 0, writer.stderr
+    assert broken == []
+    assert len(held) == 2
+    assert len(set(held)) == 1
+    a, b = (json.loads(_evidence(o)) for o in outputs)
+    assert held[0] == a["target"] == b["target"]
+    assert sorted([a["put_status"], b["put_status"]]) == [200, 412]
+
+
+def test_no_sync_cli_or_server_module_imports_the_race_barrier() -> None:
+    importers = [
+        path.relative_to(_ROOT)
+        for path in (_ROOT / "src" / "lovspor").rglob("*.py")
+        if "g3_race" in path.read_text(encoding="utf-8") and path.name != "g3_race.py"
+    ]
+    assert importers == []

@@ -14,7 +14,7 @@ Steps, each on its own runner with an empty disk:
 * ``race --writer a|b``: two runners sync the same new keys with providers
   that return **different** valid vectors. Each holds its first cache-entry
   ``PUT`` at a barrier until the other has advertised its own candidate for the
-  same key (``embedding_cache_g3_race.py``), then sends it. Each prints its
+  same key (``lovspor.embeddings.g3_race``), then sends it. Each prints its
   evidence: the key, both candidates' digests, its ``PUT`` status, the bucket's
   and its local copy's digests, its sidecar's digest. A writer whose peer never
   arrives fails at ``LOVSPOR_G3_BARRIER_TIMEOUT_SECONDS`` (default 600).
@@ -39,7 +39,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
-from embedding_cache_g3_race import (
+
+from lovspor.embeddings.cache import CachingEmbedder, read_policy_from_env
+from lovspor.embeddings.cache_remote import REMOTE_PREFIX, RemoteEntryStore, with_remote
+from lovspor.embeddings.cache_store import LocalEntryStore
+from lovspor.embeddings.g3_race import (
     CREATED,
     WRITERS,
     Barrier,
@@ -48,10 +52,6 @@ from embedding_cache_g3_race import (
     judge,
     sha256,
 )
-
-from lovspor.embeddings.cache import CachingEmbedder, read_policy_from_env
-from lovspor.embeddings.cache_remote import REMOTE_PREFIX, RemoteEntryStore, with_remote
-from lovspor.embeddings.cache_store import LocalEntryStore
 from lovspor.embeddings.model import EmbeddingModel
 from lovspor.embeddings.provider import esi_for_descriptor
 from lovspor.embeddings.r2_client import R2Client

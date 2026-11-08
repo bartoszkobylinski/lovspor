@@ -1,7 +1,9 @@
 """The G3 race: a cross-runner barrier at the PUT boundary, and its evidence gate (#802).
 
 Staging only. ``scripts/ops/embedding_cache_g3.py`` wraps the R2 client in
-:class:`RacingClient` for its ``race`` step; nothing in ``src/`` uses this file.
+:class:`RacingClient` for its ``race`` step. No sync, CLI or server path imports
+this module (a test pins that); it lives under ``src/`` so the PR mutation gate
+measures it.
 
 Why a barrier: two jobs that merely share ``needs:`` may run one after the
 other, and then the second writer finds the first one's object with a ``GET``
@@ -43,6 +45,7 @@ from typing import Protocol
 
 from lovspor.embeddings.cache_remote import REMOTE_PREFIX
 from lovspor.embeddings.r2_client import Reply
+from lovspor.errors import EmbeddingCacheError
 
 BARRIER_PREFIX = f"{REMOTE_PREFIX}/g3-barrier"
 WRITERS = ("a", "b")
@@ -52,7 +55,7 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 _RUN_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,99}")
 
 
-class RaceError(Exception):
+class RaceError(EmbeddingCacheError):
     """The G3 race could not be run, or its evidence does not prove a race."""
 
 
