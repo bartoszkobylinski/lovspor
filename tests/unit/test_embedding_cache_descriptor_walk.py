@@ -55,8 +55,9 @@ def test_a_root_removed_after_open_is_a_storage_error_not_a_miss(
     store = _open(root)
     root.rmdir()
 
-    with pytest.raises(EmbeddingCacheStorageError, match="root is gone"):
+    with pytest.raises(EmbeddingCacheStorageError, match="root is gone") as refused:
         store.get(_key()) if operation == "get" else store.put(_unit())
+    assert str(refused.value) == "embedding cache root is gone since open()"
     assert not root.exists()
 
 
