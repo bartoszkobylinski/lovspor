@@ -8,12 +8,16 @@ code performs it.
 """
 
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
+from shutil import copytree
 
+import numpy as np
 import pytest
 
 from lovspor.embeddings import cache_store
-from tests.unit.test_embedding_cache_store import _entry, _key, _open, _unit
+from lovspor.embeddings.cache_format import decode_entry, encode_entry
+from tests.unit.test_embedding_cache_store import POLICY, _entry, _key, _open, _unit
 
 
 @pytest.fixture
@@ -64,3 +68,43 @@ def test_a_read_comes_from_the_checked_root_not_the_swapped_in_target(
     swap_after_check(root, decoy)
 
     assert store.get(_key()) is None
+
+
+@pytest.mark.parametrize("depth", [1, 2, 3, 4])
+@pytest.mark.parametrize("operation", ["get", "put"])
+def test_descendant_swapped_after_check_cannot_redirect_access(
+    tmp_path: Path,
+    swap_after_check: Callable[[Path, Path], None],
+    depth: int,
+    operation: str,
+) -> None:
+    """The store's module contract anchors every checked directory, including leaves."""
+    root = tmp_path / "cache"
+    store = _open(root)
+    entry = _unit()
+    store.put(entry)
+    parts, name = cache_store.entry_location(entry.key)
+    directory = root.joinpath(*parts[:depth])
+    target = root.joinpath(*parts, name)
+    relative = target.relative_to(directory)
+    decoy = tmp_path / "decoy"
+    copytree(directory, decoy)
+    decoy_target = decoy / relative
+    decoy_bytes = encode_entry(replace(entry, vectors=-entry.vectors))
+    decoy_target.write_bytes(decoy_bytes)
+    if operation == "put":
+        target.unlink()
+    swap_after_check(directory, decoy)
+
+    found = store.get(entry.key) if operation == "get" else store.put(entry)
+
+    assert found is not None
+    np.testing.assert_array_equal(found.vectors, entry.vectors)
+    held = directory.with_name("held")
+    persisted = decode_entry((held / relative).read_bytes(), entry.key, POLICY)
+    np.testing.assert_array_equal(persisted.vectors, entry.vectors)
+    assert directory.is_symlink()
+    assert directory.readlink() == decoy
+    assert decoy_target.read_bytes() == decoy_bytes
+    assert [path.relative_to(decoy) for path in decoy.rglob("*") if path.is_file()] == [relative]
+    assert not list(held.rglob("*.tmp.*"))
