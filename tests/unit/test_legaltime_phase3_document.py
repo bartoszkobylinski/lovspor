@@ -6,7 +6,7 @@ text enters the repository.
 """
 
 from lovspor.legaltime.document import parse_document
-from lovspor.legaltime.text import chapter_key
+from lovspor.legaltime.text import chapter_key, section_key
 
 _HEAD = (
     '<html><body><header><dl><dd class="refid">lov/2005-05-20-28</dd>'
@@ -47,6 +47,13 @@ def test_a_provision_outside_every_section_has_neither() -> None:
     body = _HEAD + _article("§1", "En.") + "</main></body></html>"
     provision = parse_document(body.encode(), "lti/x.xml").provisions[0]
     assert (provision.chapter, provision.part) == (None, None)
+
+
+def test_a_chapter_lettered_section_label_is_keyed_without_its_space() -> None:
+    assert section_key("§ 9 A-1") == "§9A-1"
+    assert section_key("§ 9 A-2 og 9 A-3") == "§9A-2"
+    assert section_key("§ 6A-4") == "§6A-4"
+    assert section_key("§ 5 Departementet") == "§5"
 
 
 def test_chapter_key_normalises_titles_and_citations_alike() -> None:

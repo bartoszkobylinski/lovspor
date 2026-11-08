@@ -109,6 +109,23 @@ def test_a_single_new_chapter_takes_its_chapter_from_the_sentence() -> None:
     ]
 
 
+def test_a_lettered_new_chapter_inserts_its_spaced_labels_under_the_chapter() -> None:
+    body = (
+        '<section class="section"><h2>I</h2>'
+        + _p("I lov 18. juni 2021 nr. 97 om barnevern gjøres følgende endringer:")
+        + _p("Nytt kapittel 9 A skal lyde:")
+        + _title("Kapittel 9 A Kommunale botiltak med døgnbemanning")
+        + '<article class="futureLegalArticle" data-name="§9A-1">'
+        '<span class="futureLegalArticleHeader"><span class="legalArticleValue">§ 9 A-1</span>'
+        "</span>"
+        '<article class="legalP">T.</article></article>' + "</section>"
+    )
+    operations = interpret(parse_document(_law(body).encode(), "lti/x.xml")).operations
+    assert [(op.kind, op.address.section, op.new_provision.chapter) for op in operations] == [
+        ("insert_section", "§9A-1", "kap9a")
+    ]
+
+
 def test_a_conditional_renumbering_that_opens_a_payload_is_an_instruction_not_a_clause() -> None:
     body = (
         '<section class="section"><h2>I</h2>'

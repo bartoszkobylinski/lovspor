@@ -24,7 +24,7 @@ _STRAKS = re.compile(r"\b(?:straks|med\s+en\s+gang|omgående)\b", re.I)
 _RESERVATION = re.compile(r"\b(?:unntatt|bortsett|likevel|med\s+unntak|unnateke|unnatatt)\b", re.I)
 
 
-_SEC = r"§\s*\d+[A-Z]?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
+_SEC = r"§\s*\d+(?:[A-Z]|\s[A-Z](?=-))?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
 
 
 _DELT_SENTENCE = re.compile(
@@ -116,7 +116,7 @@ _UNIT_START = re.compile(
 
 _LISTING_TOKEN = re.compile(
     r"\s*(?:(?P<range>(?P<first>\d+)\s+til\s+(?P<last>\d+))"
-    r"|(?P<one>\d+[A-Z]?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?)"
+    r"|(?P<one>\d+(?:[A-Z]|\s[A-Z](?=-))?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?)"
     r"|(?P<sep>,|og|§§|§))(?=\s|,|$)"
 )
 

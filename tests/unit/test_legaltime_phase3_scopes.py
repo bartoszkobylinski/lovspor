@@ -202,8 +202,14 @@ def test_a_chapter_exception_is_placed_through_the_act_s_chapter_map() -> None:
     chapters = {"§3-1": "kap3", "§12-11": "kap12"}
     assert scope.reach(_op("I", "replace_section", section="§3-1"), chapters) == "covers"
     assert scope.reach(_op("I", section="§12-11", ledd=2), chapters) == "excluded"
-    assert scope.reach(_op("I", "replace_section", section="§14-1"), chapters) == "unknown"
-    assert _scopes_for(_op("I", "replace_section", section="§14-1"), [scope], chapters) == (
+    # A new chapter is only what its insertion carries: an unplaced section is beside it.
+    assert scope.reach(_op("I", "replace_section", section="§14-1"), chapters) == "covers"
+    existing = _one(
+        "Følgende trer i kraft 1. januar 2026: Endringsloven del I (barnevernsloven) med unntak av "
+        "kapittel 9."
+    )
+    assert existing.reach(_op("I", "replace_section", section="§14-1"), chapters) == "unknown"
+    assert _scopes_for(_op("I", "replace_section", section="§14-1"), [existing], chapters) == (
         "a unit the decision names cannot be placed against the operation"
     )
 

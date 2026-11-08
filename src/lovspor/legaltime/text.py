@@ -27,7 +27,9 @@ DATE = re.compile(rf"\b(\d{{1,2}})\.\s*({_MONTH_ALT})\s+(\d{{4}})\b", re.I)
 ACT_CITATION = re.compile(
     rf"\blov\s+(\d{{1,2}})\.\s*({_MONTH_ALT})\s+(\d{{4}})(?:\s+nr\.\s*(\d+))?", re.I
 )
-_SECTION_LABEL = re.compile(r"§\s*(\d+[A-Z]?(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
+_SECTION_LABEL = re.compile(
+    r"§\s*(\d+(?:[A-Z]|\s[A-Z](?=-))?(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?"
+)
 _CHAPTER_LABEL = re.compile(r"\b[Kk]apit(?:te)?l\s+(\d+)\s*([A-Za-z])?(?![\wæøå])")
 _ABBREVIATIONS = frozenset(
     {
@@ -85,7 +87,7 @@ def section_key(label: str) -> str | None:
     if match is None:
         return None
     number, letter = match.groups()
-    return f"§{number}{letter or ''}"
+    return f"§{number.replace(' ', '')}{letter or ''}"  # ``§ 9 A-1`` is keyed ``§9A-1``
 
 
 def section_key_of(label: str) -> str:

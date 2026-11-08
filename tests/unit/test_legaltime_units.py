@@ -113,6 +113,11 @@ def test_a_chapter_unit_reaches_insertions_stamped_with_it_and_nothing_it_cannot
     assert relation(unit, other) == "disjoint"
     assert relation(unit, _op(section="§9A-1", ledd=1)) == "unknown"
     assert relation(Unit(chapter="kap3", heading=True), insert) == "disjoint"
+    plain = _op("insert_section", section="§5-12").model_copy(
+        update={"new_provision": placed.model_copy(update={"key": "§5-12", "chapter": None})}
+    )
+    assert relation(Unit(chapter="kap9a", new=True), plain) == "disjoint"  # not the new chapter
+    assert relation(unit, plain) == "unknown"  # an existing chapter: only the act can place it
     chapters = {"§9A-1": "kap9a", "§3-1": "kap3"}
     assert relation(unit, _op(section="§9A-1", ledd=1), chapters) == "covers"
     assert relation(unit, _op(section="§3-1", ledd=1), chapters) == "disjoint"

@@ -96,7 +96,7 @@ _CITED = re.compile(
 )  # a cited act or regulation by date, also under its short title (``straffeloven 22. mai 1902``)
 _COMMENCEMENT_PHRASE = re.compile(rf"{_VERB}|\bi\s+kraft\b|\bvirkning\s+fr[aå]\b", re.I)
 _EXCEPTION_NEW_SECTION = re.compile(
-    r"^Ny\s+(?P<sec>§\s*\d+[A-Z]?(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?)(?:\s+i\s+\S+)?\s+trer\s+likevel\s+i\s+kraft\b",
+    r"^Ny\s+(?P<sec>§\s*\d+(?:[A-Z]|\s[A-Z](?=-))?(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?)(?:\s+i\s+\S+)?\s+trer\s+likevel\s+i\s+kraft\b",
     re.I,
 )
 _EXCEPTION_NAMED_SECTION = re.compile(

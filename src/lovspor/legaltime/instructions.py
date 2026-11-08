@@ -29,8 +29,8 @@ OpKind = Literal[
     "unsupported",
 ]  # fmt: skip
 
-_SEC = (
-    r"§\s*\d+[A-Z]?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"  # "i" is the preposition, not a letter
+_SEC = (  # "i" is the preposition, not a letter; ``§ 9 A-1`` carries a spaced chapter letter
+    r"§\s*\d+(?:[A-Z]|\s[A-Z](?=-))?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
 )
 _SECNUM = r"\d+(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
 _SECS = rf"§§?\s*(?P<s1>{_SECNUM})\s+(?P<sj>og|til)\s+(?P<s2>{_SECNUM})"
@@ -43,7 +43,8 @@ _PUNKT = rf"(?:(?P<p1>{_ORD})(?:\s+(?P<pj>og|til)\s+(?P<p2>{_ORD}))?|(?P<plast>s
 _NEW = r"ny(?:tt|e)?"
 _ITEM = r"(?:bokstav\s+(?P<b>[a-zæøå])|nr\.\s+(?P<bn>\d+))"  # one list item, by letter or number
 _STRUCTURE = re.compile(
-    rf"^(?:{_NEW}\s+kapit(?:te)?l(?:er)?\s+\S+(?:\s+til\s+\S+)?(?:\s+plasseres\s+i\s+(?P<in>\w+)\s+del)?"
+    rf"^(?:{_NEW}\s+kapit(?:te)?l(?:er)?\s+(?:\d+(?:\s?[A-Za-z])?|\S+)(?:\s+til\s+\S+)?"
+    r"(?:\s+plasseres\s+i\s+(?P<in>\w+)\s+del)?"
     rf"|(?P<part>\w+)\s+del),?\s+(?:og\s+)?(?:skal\s+)?lyde(?:\s+slik)?:$",
     re.I,
 )  # a new chapter, new chapters placed in a part, or a whole part rewritten

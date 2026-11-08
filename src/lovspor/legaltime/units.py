@@ -25,7 +25,7 @@ from lovspor.legaltime.text import ORDINAL_ALT, chapter_key, ordinal, section_ke
 
 Relation = Literal["covers", "spans", "disjoint", "unknown"]
 
-_SECNUM = r"\d+[A-Z]?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
+_SECNUM = r"\d+(?:[A-Z]|\s[A-Z](?=-))?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
 _UNIT = re.compile(
     rf"^(?:(?P<new>ny|nytt|nye)\s+)?"
     rf"(?:(?P<chapter_heading>overskriften\s+til\s+)?kapit(?:te)?l\s+(?P<chapter>\d+\s*[A-Za-z]?)"
@@ -120,7 +120,9 @@ def _chapter_relation(unit: Unit, operation: Operation, chapter_of: ChapterOf) -
         return "covers" if placed.chapter == unit.chapter else "disjoint"
     chapter = chapter_of.get(operation.address.section or "")
     if chapter is None:
-        return "unknown"  # the operation's target sits in a chapter the act's text does not name
+        # A *new* chapter is only the text its chapter insertion carries; anything else is
+        # beside it. An existing chapter's members only the act's structure can name.
+        return "disjoint" if unit.new else "unknown"
     return "covers" if chapter == unit.chapter else "disjoint"
 
 
