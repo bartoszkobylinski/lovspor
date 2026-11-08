@@ -194,6 +194,30 @@ def test_shapes_phase_two_refused_are_units_now(
     )  # fmt: skip
 
 
+def test_a_chapter_exception_is_placed_through_the_act_s_chapter_map() -> None:
+    scope = _one(
+        "Følgende trer i kraft 1. januar 2026: Endringsloven del I (barnevernsloven) med unntak av "
+        "nytt kapittel 9 A og § 12-11 andre ledd."
+    )
+    chapters = {"§3-1": "kap3", "§12-11": "kap12"}
+    assert scope.reach(_op("I", "replace_section", section="§3-1"), chapters) == "covers"
+    assert scope.reach(_op("I", section="§12-11", ledd=2), chapters) == "excluded"
+    assert scope.reach(_op("I", "replace_section", section="§14-1"), chapters) == "unknown"
+    assert _scopes_for(_op("I", "replace_section", section="§14-1"), [scope], chapters) == (
+        "a unit the decision names cannot be placed against the operation"
+    )
+
+
+def test_a_following_lead_without_a_colon_still_introduces_its_items() -> None:
+    xml = (
+        'Følgende endringer trer i kraft 15. april 2026<ul><li><article class="legalP">'
+        "Endringsloven del II (straffeloven)</article></li></ul>"
+    )
+    assert list_statements(Ledd(xml=xml, text="")) == [
+        "Følgende endringer trer i kraft 15. april 2026 Endringsloven del II (straffeloven)"
+    ]
+
+
 def test_a_list_carrying_ledd_yields_one_statement_per_item() -> None:
     xml = (
         'Følgende trer i kraft straks:<ul class="defaultList"><li data-name="•">'

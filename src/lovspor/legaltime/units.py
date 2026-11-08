@@ -16,6 +16,7 @@ against one named with it).
 """
 
 import re
+from collections.abc import Mapping
 from typing import Literal
 
 from lovspor.legaltime.document import Frozen
@@ -108,13 +109,19 @@ def parse_units(listing: str) -> tuple[Unit, ...] | None:
     return tuple(units) if units else None
 
 
-def _chapter_relation(unit: Unit, operation: Operation) -> Relation:
+ChapterOf = Mapping[str, str]  # section key → chapter data-name, read from the act's structure
+
+
+def _chapter_relation(unit: Unit, operation: Operation, chapter_of: ChapterOf) -> Relation:
     if unit.heading:
         return "disjoint"  # no operation kind addresses a chapter heading
     placed = operation.new_provision
     if operation.kind == "insert_section" and placed is not None and placed.chapter is not None:
         return "covers" if placed.chapter == unit.chapter else "disjoint"
-    return "unknown"  # the operation's target sits in a chapter only the act's text can name
+    chapter = chapter_of.get(operation.address.section or "")
+    if chapter is None:
+        return "unknown"  # the operation's target sits in a chapter the act's text does not name
+    return "covers" if chapter == unit.chapter else "disjoint"
 
 
 def _heading_relation(unit: Unit, operation: Operation) -> Relation:
@@ -134,10 +141,13 @@ def _level(unit_value: int | None, op_value: int | None, op_end: int | None) -> 
     return None if op_value == unit_value else "disjoint"
 
 
-def relation(unit: Unit, operation: Operation) -> Relation:
-    """How the unit stands to the operation's address: covers, spans, disjoint or unknown."""
+def relation(unit: Unit, operation: Operation, chapter_of: ChapterOf | None = None) -> Relation:
+    """How the unit stands to the operation's address: covers, spans, disjoint or unknown.
+
+    ``chapter_of`` places an existing section in its chapter, from the act's own structure.
+    """
     if unit.chapter is not None:
-        return _chapter_relation(unit, operation)
+        return _chapter_relation(unit, operation, chapter_of or {})
     address = operation.address
     if unit.section != address.section:
         return "disjoint"

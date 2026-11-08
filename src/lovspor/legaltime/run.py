@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from lovspor.legaltime.archive import Evidence, pins
-from lovspor.legaltime.commencement import baseline_timing, resolve_timings
+from lovspor.legaltime.commencement import Decisions, baseline_timing, resolve_timings
 from lovspor.legaltime.document import Document
 from lovspor.legaltime.instructions import Operation, interpret
 from lovspor.legaltime.replay import Event, ReplayState, replay
@@ -25,9 +25,22 @@ def _stamp(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
-def _events_of(
-    amender: Document, act: str, decisions: tuple[Document, ...], start: int
-) -> list[Event]:
+def chapter_map(evidence: Evidence) -> dict[str, str]:
+    """Section key → chapter, from the act's enacting structure and every chapter-stamped insertion.
+
+    Text existence only (ADR-0020 Decision 3a): a key is placed in the chapter the
+    announcement that carries it names, whether or not that text is in force at any date.
+    """
+    placed = {p.key: p.chapter for p in evidence.baseline.provisions if p.chapter is not None}
+    for amender in evidence.amenders:
+        for op in interpret(amender).operations:
+            new = op.new_provision
+            if op.act == evidence.act and new is not None and new.chapter is not None:
+                placed.setdefault(new.key, new.chapter)
+    return placed
+
+
+def _events_of(amender: Document, act: str, decisions: Decisions, start: int) -> list[Event]:
     result = interpret(amender)
     timings = resolve_timings(amender, result.clauses, result.operations, decisions)
     events = []
@@ -50,8 +63,9 @@ def _events_of(
 def events_for(evidence: Evidence) -> list[Event]:
     """Every operation aimed at the act, across all amenders, in document order."""
     events: list[Event] = []
+    decisions = Decisions(documents=evidence.decisions, chapter_of=chapter_map(evidence))
     for amender in evidence.amenders:
-        events.extend(_events_of(amender, evidence.act, evidence.decisions, len(events)))
+        events.extend(_events_of(amender, evidence.act, decisions, len(events)))
     return events
 
 

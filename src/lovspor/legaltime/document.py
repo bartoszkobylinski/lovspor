@@ -268,6 +268,7 @@ def _parts(main: etree._Element) -> tuple[Part, ...]:
 
 
 _LIST_MARKUP = re.compile(r"<(?:ul|ol)\b")
+_LEAD_IN = re.compile(r"^(?:Følgende|Følgjande)\b.*\bi\s+kraft\b", re.I)
 
 
 def list_statements(ledd: Ledd) -> list[str] | None:
@@ -289,7 +290,8 @@ def list_statements(ledd: Ledd) -> list[str] | None:
     if len(lists) != 1:
         return None
     lead = split_sentences(root.text or "")
-    intro = lead.pop() if lead and lead[-1].endswith(":") else ""
+    introduces = bool(lead) and (lead[-1].endswith(":") or _LEAD_IN.match(lead[-1]) is not None)
+    intro = lead.pop() if introduces else ""
     items = [element_text(item) for item in lists[0] if item.tag == "li"]
     return [*lead, *(collapse(f"{intro} {item}") for item in items)]
 

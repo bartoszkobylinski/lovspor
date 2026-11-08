@@ -16,6 +16,8 @@ from datetime import date, datetime
 from hashlib import sha256
 from typing import Literal
 
+from pydantic import Field
+
 from lovspor.legaltime.document import Document, Frozen, Node, list_statements
 from lovspor.legaltime.instructions import _INTRO, Operation, classify
 from lovspor.legaltime.scopes import (
@@ -36,6 +38,7 @@ from lovspor.legaltime.text import (
     section_key_of,
     split_sentences,
 )
+from lovspor.legaltime.units import ChapterOf
 
 TimingStatus = Literal["dated", "pending", "unresolved"]
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -125,6 +128,20 @@ _TRANSITIONAL = re.compile(r"\bgjeld(?:er)?\s+(?:bare|berre|også|òg|først|fyr
 _CONTINUES = re.compile(
     r"\b(?:held|holder|heldt)\s+fram\s+å\s+gjelde\b|\bfortsetter\s+å\s+gjelde\b", re.I
 )
+
+
+class Decisions(Frozen):
+    """The commencement decisions in reach, with the act's chapter map for placing scopes."""
+
+    documents: tuple[Document, ...]
+    chapter_of: dict[str, str] = Field(default_factory=dict)  # section key → chapter of the act
+
+
+DecisionsLike = tuple[Document, ...] | Decisions
+
+
+def _decisions(decisions: DecisionsLike) -> Decisions:
+    return decisions if isinstance(decisions, Decisions) else Decisions(documents=decisions)
 
 
 class Proof(Frozen):
@@ -463,8 +480,11 @@ SEVERAL = 2  # from two decisions on, their order matters
 class _Decision:
     """One decision read once, for one law: its block's scopes or date, or why it is unreadable."""
 
-    def __init__(self, decision: Document, law: Document, ordered: bool) -> None:
+    def __init__(
+        self, decision: Document, law: Document, ordered: bool, chapter_of: ChapterOf | None = None
+    ) -> None:
         self.document = decision
+        self.chapter_of = chapter_of or {}
         self.title = decision.header.title
         self.block_problem: str | None = None
         block = _block_for(decision, law.header.refid)
@@ -528,7 +548,7 @@ class _Decision:
         """(date, quote) for the operation; (None, title) when not reached; a reason on conflict."""
         if self.scopes is None:
             return self.full_date, self.title
-        scopes = _scopes_for(op, self.scopes)
+        scopes = _scopes_for(op, self.scopes, self.chapter_of)
         if isinstance(scopes, str):
             return scopes
         if not scopes:
@@ -564,12 +584,13 @@ def _apply_decision(
             timings[op.id] = folded
 
 
-def _citing(law: Document, decisions: tuple[Document, ...]) -> list[_Decision]:
+def _citing(law: Document, decisions: DecisionsLike) -> list[_Decision]:
     """The decisions citing the law, in publication order; unordered ones are marked unreadable."""
-    cited = [d for d in decisions if is_decision_for(d, law.header.refid)]
+    context = _decisions(decisions)
+    cited = [d for d in context.documents if is_decision_for(d, law.header.refid)]
     ordered = len(cited) < SEVERAL or all(d.header.published_at is not None for d in cited)
     return [
-        _Decision(d, law, ordered or d.header.published_at is not None)
+        _Decision(d, law, ordered or d.header.published_at is not None, context.chapter_of)
         for d in sorted(cited, key=lambda d: (d.header.published_at or datetime.min, d.member))
     ]
 
@@ -578,7 +599,7 @@ def resolve_timings(
     law: Document,
     clauses: tuple[str, ...],
     operations: tuple[Operation, ...],
-    decisions: tuple[Document, ...],
+    decisions: DecisionsLike,
 ) -> dict[str, Timing]:
     """Every operation's timing from the law, its clause, and the decisions citing it."""
     timings = clause_timings(law, clauses, operations)
@@ -606,7 +627,7 @@ def _conditional(current: Timing, decision: Document) -> Timing:
     )
 
 
-def baseline_timing(act: Document, decisions: tuple[Document, ...]) -> Timing:
+def baseline_timing(act: Document, decisions: DecisionsLike) -> Timing:
     """When the act itself commenced: its header, folded with every full decision citing it."""
     timing = header_timing(act)
     if timing.status != "pending":

@@ -16,7 +16,7 @@ from pydantic import model_validator
 from lovspor.legaltime.document import Document, Frozen
 from lovspor.legaltime.instructions import Operation
 from lovspor.legaltime.text import chapter_key, parse_date, section_key, section_key_of
-from lovspor.legaltime.units import Relation, Unit, parse_units, relation
+from lovspor.legaltime.units import ChapterOf, Relation, Unit, parse_units, relation
 
 _STRAKS = re.compile(r"\b(?:straks|med\s+en\s+gang|omgående)\b", re.I)
 
@@ -170,13 +170,13 @@ class Scope(Frozen):
             return False
         return self.section is None or operation.address.section == self.section
 
-    def reach(self, operation: Operation) -> Reach:
+    def reach(self, operation: Operation, chapter_of: ChapterOf | None = None) -> Reach:
         """How this scope stands to the operation, once exceptions and narrowing are read."""
         if not self._placed(operation):
             return "disjoint"
         if self.units:
-            return _narrowed(self.units, operation)
-        found = {relation(unit, operation) for unit in self.excluded}
+            return _narrowed(self.units, operation, chapter_of)
+        found = {relation(unit, operation, chapter_of) for unit in self.excluded}
         if "spans" in found or "unknown" in found:
             return "spans" if "spans" in found else "unknown"
         return "excluded" if "covers" in found else "covers"
@@ -185,8 +185,10 @@ class Scope(Frozen):
         return self.reach(operation) == "covers"
 
 
-def _narrowed(units: tuple[Unit, ...], operation: Operation) -> Relation:
-    found = {relation(unit, operation) for unit in units}
+def _narrowed(
+    units: tuple[Unit, ...], operation: Operation, chapter_of: ChapterOf | None
+) -> Relation:
+    found = {relation(unit, operation, chapter_of) for unit in units}
     for answer in ("covers", "spans", "unknown"):
         if answer in found:
             return answer
@@ -405,13 +407,15 @@ def _named_section(match: re.Match[str]) -> str | None:
     return section_key(found[-1]) if len(found) == 1 else None
 
 
-def _scopes_for(operation: Operation, scopes: list[Scope]) -> list[Scope] | str:
+def _scopes_for(
+    operation: Operation, scopes: list[Scope], chapter_of: ChapterOf | None = None
+) -> list[Scope] | str:
     """The scopes that reach the operation; the specific ones when any does; else the remainder.
 
     A scope that spans the operation (the operation rewrites a unit the scope excepts) or
     cannot place it is a reason instead: the decision's answer for this operation is unknown.
     """
-    reached = [(scope, scope.reach(operation)) for scope in scopes]
+    reached = [(scope, scope.reach(operation, chapter_of)) for scope in scopes]
     if any(answer == "spans" for _, answer in reached):
         return SPANS
     if any(answer == "unknown" for _, answer in reached):

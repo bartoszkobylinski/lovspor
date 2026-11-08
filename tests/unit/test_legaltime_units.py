@@ -113,6 +113,10 @@ def test_a_chapter_unit_reaches_insertions_stamped_with_it_and_nothing_it_cannot
     assert relation(unit, other) == "disjoint"
     assert relation(unit, _op(section="§9A-1", ledd=1)) == "unknown"
     assert relation(Unit(chapter="kap3", heading=True), insert) == "disjoint"
+    chapters = {"§9A-1": "kap9a", "§3-1": "kap3"}
+    assert relation(unit, _op(section="§9A-1", ledd=1), chapters) == "covers"
+    assert relation(unit, _op(section="§3-1", ledd=1), chapters) == "disjoint"
+    assert relation(unit, _op(section="§12-1", ledd=1), chapters) == "unknown"
 
 
 def test_units_describe_themselves_for_reports() -> None:
