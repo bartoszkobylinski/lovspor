@@ -54,6 +54,7 @@ class Verification(Frozen):
     replay_events_without_note: tuple[str, ...]
     act_level_problems: tuple[str, ...] = ()
     ledd_counts: dict[str, int] = Field(default_factory=dict)  # subunits (ledd) by class
+    counts_before_blanket: dict[str, int] = Field(default_factory=dict)  # what the blanket hides
 
 
 def _texts(provision: Provision | ProvisionState) -> tuple[str, tuple[str, ...]]:
@@ -157,7 +158,9 @@ def verify(state: ReplayState, oracle_document: Document) -> Verification:
         for key in list(replayed) + [k for k in oracle if k not in replayed]
     ]
     missing_events, missing_notes = _note_checks(replayed, oracle)
+    before: dict[str, int] = {}
     if state.act_level_problems:  # an operation with no known target may have touched any section
+        before = dict(sorted(Counter(s.verdict for s in sections).items()))
         sections = [_blanket(section, state.act_level_problems) for section in sections]
     return Verification(
         act=state.act, at=state.at.isoformat(), oracle_member=oracle_document.member,
@@ -165,7 +168,7 @@ def verify(state: ReplayState, oracle_document: Document) -> Verification:
         counts=dict(sorted(Counter(s.verdict for s in sections).items())),
         sections=tuple(sections), notes_without_replay_event=missing_events,
         replay_events_without_note=missing_notes, act_level_problems=state.act_level_problems,
-        ledd_counts=_ledd_counts(sections, replayed, oracle),
+        ledd_counts=_ledd_counts(sections, replayed, oracle), counts_before_blanket=before,
     )  # fmt: skip
 
 
