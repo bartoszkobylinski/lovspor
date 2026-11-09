@@ -27,6 +27,7 @@ from typing import Any
 import pytest
 import yaml
 
+from lovspor.embeddings.g3_race import WRITERS
 from tests.unit import r2_fakes
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -133,7 +134,7 @@ def _check(endpoint: str, run: str, outputs: list[Path]) -> subprocess.Completed
 
 
 def test_concurrent_writers_race_one_put_wins_and_the_loser_adopts(
-    endpoint: str, tmp_path: Path
+    endpoint: str, bucket: r2_fakes.FakeBucket, tmp_path: Path
 ) -> None:
     outputs = [tmp_path / "a.out", tmp_path / "b.out"]
     done = _race(endpoint, "t2", outputs)
@@ -141,6 +142,7 @@ def test_concurrent_writers_race_one_put_wins_and_the_loser_adopts(
         assert writer.returncode == 0, writer.stderr
     a, b = (json.loads(_evidence(o)) for o in outputs)
     assert a["target"] == b["target"]
+    _assert_both_missed_and_advertised_before_the_first_target_put(bucket, a["target"])
     assert a["candidate_sha256"] != b["candidate_sha256"]
     assert sorted([a["put_status"], b["put_status"]]) == [200, 412]
     winner, loser = (a, b) if a["put_status"] == 200 else (b, a)
@@ -148,6 +150,20 @@ def test_concurrent_writers_race_one_put_wins_and_the_loser_adopts(
     checked = _check(endpoint, "t2", outputs)
     assert checked.returncode == 0, checked.stderr
     assert "third paid 0" in checked.stdout
+
+
+def _assert_both_missed_and_advertised_before_the_first_target_put(
+    bucket: r2_fakes.FakeBucket, target: str
+) -> None:
+    """The bucket's own arrival log, across both processes: each writer's GET
+    of the key missed and each writer's readiness object landed before either
+    sent its conditional PUT for that key."""
+    first_put = bucket.calls.index(("PUT", target))
+    before = bucket.calls[:first_put]
+    assert before.count(("GET", target)) >= len(WRITERS)
+    advertised = {k.rsplit("/", 1)[1] for m, k in before if m == "PUT" and "/g3-barrier/t2/" in k}
+    assert advertised == {f"{w}.json" for w in WRITERS}
+    assert bucket.calls.count(("PUT", target)) == len(WRITERS)
 
 
 def test_the_old_sequential_schedule_is_not_g3_race_evidence(endpoint: str, tmp_path: Path) -> None:
