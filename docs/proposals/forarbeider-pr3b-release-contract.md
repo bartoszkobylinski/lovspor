@@ -13,15 +13,20 @@
 
 **The model.**
 
-1. **Standing policy, signed once.** One owner record covers one source and the document types it names, today regjeringen.no `prop-l` and `prop-ls`. It binds, by SHA-256 of private files:
-   - the source-rights assessment: website terms, robots, åndsverkloven § 14 and § 24;
-   - the publication purpose;
-   - the takedown and correction contact (`kontakt@lovspor.no`) and who answers it;
+1. **Standing policy, signed once.** One owner record covers one source and the document types it names, today regjeringen.no `prop-l` and `prop-ls`, for one validity window. It binds, by SHA-256 of private owner-only files, each kind exactly once and no file for two kinds:
+   - the source-rights assessment: website terms, åndsverkloven § 14 and § 24 (database right), for the intended method and volume;
+   - the personal-data assessment: the owner-approved processing basis under personopplysningsloven for publishing these chapters, and the owner's assessment of the personal data a chapter can still hold when no detector fires. **Detector silence is not proof that a chapter holds no personal data.** This assessment is what accepts that residual risk for clean chapters; without it there is no clearance;
+   - the publication purpose, with the takedown and correction contact (`kontakt@lovspor.no`) and who answers it; the contact may live in the purpose file;
    - retention and deindexing;
    - the owner's acceptance of Git-history permanence;
-   - the owner's explicit acceptance that a chapter the detectors do not flag is published without a person reading it.
+   - the owner's explicit acceptance that a chapter the detectors do not flag is published without a person reading it, as **its own file**. A value set in code is not this acceptance;
+   - the robots.txt and website-terms pages the owner read, as the exact bytes `forarbeider-fetch` stored (point 8), never a browser copy.
 
-   The record also carries the digests of the robots.txt and terms pages that the owner read. It is signed at a terminal with one typed phrase and can be revoked. It must be signed again when a fetched page's robots or terms digest differs from the recorded one, when it is revoked, and when it expires.
+   Signing happens at a terminal and makes no network request. Before the prompt the command prints the source, the document types, the validity window, every bound file's kind and SHA-256 prefix, and the first 12 hex digits of the SHA-256 of the canonical policy record. The typed phrase contains that digest prefix, so any change to any bound byte changes the phrase, and a wrong phrase writes nothing. A typed phrase at a terminal is the owner's act, not cryptographic identity; the record claims no more.
+
+   **At most one effective policy.** Two policies for the same source whose document types intersect and whose windows overlap never both count. Sign refuses while such an unrevoked policy exists; the owner revokes it first. Records are immutable: sign never overwrites or replaces one. Revocation is final and revokes exactly one record; because no second overlapping record can be signed, revoking a policy never brings another back into effect. If two unrevoked overlapping records are nevertheless found (a hand-placed file), every evaluation for that source DENYs.
+
+   A policy must be signed again when it is revoked, when it expires, and when the current source proof (point 8) no longer matches it.
 2. **Automatic per document.** Every existing source proof stays, unchanged:
    - identity, session, chapter URL and ordering;
    - page re-parse and byte reproduction;
@@ -35,47 +40,64 @@
    - **flagged**: a body exists but a detector fired (quotation, third-party work, hearing participants, personal data, sensitive data);
    - **unknown**: any reason not classified in code is treated as flagged.
 3. **Owner only on exceptions.**
-   - A clean chapter is cleared by the standing policy.
-   - A flagged chapter is cleared only through the existing PR3A review, dossier and authorization path, ending in an eligible preflight report. That path is kept intact for exactly this purpose.
+   - A clean chapter is cleared by the standing policy, and only while the policy is effective and a current source proof matches it (point 8).
+   - A flagged chapter is cleared only through the existing PR3A review, dossier and authorization path, ending in an eligible preflight report: individual human review of exactly that chapter. That path is kept intact for exactly this purpose.
    - A withheld chapter is never cleared.
-4. **One confirmation per batch.** A batch of at most 25 documents is planned privately, without writing anything. It is then applied after one typed owner phrase that names the counts and the target branch. The stored confirmation is the owner's dated sign-off for exactly those documents and chapters. The plan also lists a small deterministic sample of clean chapters with their source links. ADR-0018 C3 requires sampling, and this sample serves it as an optional owner spot check, not a gate.
+4. **One confirmation per batch.** A batch of at most 25 documents is planned privately, without writing anything. It is then applied after one typed owner phrase that names the counts and the target branch. The stored confirmation is the owner's dated, written sign-off for exactly those documents and chapters. The plan also lists a small deterministic sample of clean chapters with their source links. ADR-0018 C3 requires sampling, and this sample serves it as an optional owner spot check, not a gate.
 5. **Apply writes a working tree, never history.** Apply writes only `forarbeider/` in a dedicated lovverk release clone, on a non-`main` branch. It never writes the sync clone (`~/.cache/lovverk`) or the engine. It runs no `git add`, commit or push. The owner commits, pushes and opens the lovverk PR, and **merging that PR is the publication**. Forward-only withdrawal ships with or before apply.
-6. **Explicit-list fetch.** A supported command fetches an owner-supplied list of `?ch=N` chapter URLs into private staging:
-   - it checks robots.txt live and rate-limits to at least 5 s;
-   - it never follows links, walks a sitemap or discovers pages;
-   - it caps each run;
-   - it gives up on a redirect that leaves the host.
+6. **Explicit-list fetch.** A supported command, `lovspor ops forarbeider-fetch`, fetches an owner-supplied list of Prop. L / LS landing and `?ch=N` chapter URLs on `https://www.regjeringen.no` into private staging:
+   - it refuses the whole list before any request if one URL is outside that grammar;
+   - it never follows links, walks a sitemap or discovers pages, and caps each run;
+   - it reads robots.txt live at the start of every run (point 8) and never requests a URL robots.txt disallows;
+   - it spaces requests at least 5 s apart, longer when robots.txt sets a longer `Crawl-delay`;
+   - a 403 or 429 on any request stops the run; later URLs are recorded as not attempted;
+   - it follows no redirect for a document page, and stores no body over its size cap;
+   - it sends one identifying User-Agent with a contact address;
+   - it stores pages owner-only under their SHA-256, in a directory outside every Git checkout.
 
    This is not harvesting. Each URL is named by the owner.
 7. **Manifest records how a chapter was cleared.** Each chapter carries `cleared_by: standing_policy | owner_review` and the policy digest, in manifest schema 2. No reader may present a policy-cleared chapter as individually human-reviewed.
+8. **Current source proof.** Automatic clearance needs proof of what the source publishes *now*, not of what the owner once read. A local evidence file that still hashes to its signed digest proves only what was signed.
+   - **robots.txt** is read by every `forarbeider-fetch` run from `https://www.regjeringen.no/robots.txt`, without automatic redirects. A 3xx is followed by hand for at most 5 hops, each to an `https` URL on `www.regjeringen.no`, each spaced like any request; a missing `Location`, any other host or scheme, or a sixth hop makes robots.txt unreadable. The body of a redirect is never parsed. Every hop's URL and status are recorded. The answer is then one of:
+     - **published** (200): the exact body as served, at most 512 KiB, is stored owner-only under its SHA-256;
+     - **refused** (403, 429): the run stops before any document request;
+     - **absent** (any other 4xx, the usual 404): no rules are published (RFC 9309), so the fetch may proceed; nothing is stored, and an absent robots.txt is never evidence for a policy;
+     - **unreadable** (5xx, transport failure, bad redirect, oversized body): the run stops before any document request.
+   - **Website terms** are fetched in the same run from one owner-named `https://www.regjeringen.no` page (`--terms-url`), under the same robots.txt and spacing, following no redirect. A 200 stores the exact body; a 403 or 429 stops the run; any other 4xx records the terms as absent; a 3xx, 5xx, transport failure or oversized body records them as unreadable. The bytes are hashed raw, as served, with no normalisation: a cosmetic change to the page reads as changed terms and denies until the owner re-signs. That cost is the price of failing closed.
+   - The run record carries, for robots.txt and for the terms page: the requested URL, every redirect hop, the final status, the state above, the retrieval time, and for a stored body its SHA-256 and size. A reader recomputes the SHA-256 of the stored bytes and refuses a mismatch.
+   - **Comparison.** An evaluation for automatic clearance consumes one validated current source proof: a fetch run record whose stored robots.txt and terms bytes re-hash to their recorded digests, retrieved at most 24 hours before the evaluation. It clears only if robots.txt is published and its digest equals the policy's robots evidence, and the terms are published and their digest equals the policy's terms evidence. A missing or stale proof, a robots.txt or terms page that is absent, refused or unreadable, a digest that differs, or stored bytes that do not match their record each **DENY automatic clearance**. The flagged-chapter path is unaffected.
+   - `policy sign` and `policy show` make no network request; current proof comes only from a fetch run.
+   - **Robots access never grants reuse rights.** The rights basis is the signed assessment under åndsverkloven § 14 and § 24; robots.txt only governs whether the fetcher may request a page.
 
 **Superseded by this amendment:**
 - PR3B-1 points 3–5 as a precondition for *clean* chapters: the per-chapter PR3A approval, the chapter-specific dossier and the per-chapter owner decision. These still apply to *flagged* chapters.
+- PR3B-1's "NO ... automatic approval" and *Deliberately deferred* "auto-approval": clearing a clean chapter under an effective standing policy with a matching current source proof is the owner-approved automatic approval. Every other form of automatic approval stays forbidden.
 - The sentence "legal sufficiency requires an owner/human decision, not keyword detection." The owner has made that decision once, at the policy level, and accepts detector-based clearance for unflagged chapters.
-- "A no-personal-data pilot still requires an explicit written case-specific review." It is replaced by the policy-level assessment, and flagged chapters keep the case-specific path.
-- "A bounded pilot population": it becomes the per-batch cap.
+- "A no-personal-data pilot still requires an explicit written case-specific review" (PR3B-1 point 4 and *Release controls*). For clean chapters it is replaced by the policy's personal-data assessment (point 1); flagged chapters keep the case-specific path.
+- PR3B-2's "No scheduler, crawler, CI deployment or unreviewed batch operation may trigger it": a batch is reviewed by its one owner confirmation (point 4). Schedulers, crawlers and CI still may not trigger a release.
+- *Release controls not delegated to automated code*: the owner records those items once, in the standing policy, instead of per pilot. "A bounded pilot population" becomes the per-batch cap, and the "separate written release authorization" is the batch confirmation for exactly its documents.
 - In *Deliberately deferred*, "automated harvesting" and, in PR3B-2, "no live government fetch": the explicit-list fetch in point 6 is carved out. Sitemap walks, discovery and crawling stay deferred.
-- Acceptance-matrix rows "Missing PR3A decision", "Dossier lacks …" and "No scoped owner release decision": they now read DENY *for a flagged chapter*. For a clean chapter the equivalent DENY is a missing, revoked, expired or terms-changed standing policy. Row "PR3B-1 against any real checkout: zero writes" still holds for preflight and plan. Apply writes only after the batch confirmation.
+- Acceptance-matrix rows "Missing PR3A decision", "Dossier lacks …" and "No scoped owner release decision": they now read DENY *for a flagged chapter*. For a clean chapter the equivalent DENY is a missing, revoked, expired or ambiguous standing policy, or a missing, stale or non-matching current source proof. Row "PR3B-1 against any real checkout: zero writes" still holds for preflight and plan. Apply writes only after the batch confirmation.
 
 **Unchanged:**
 - the isolated `forarbeider/` dataset;
-- `normative: false`, `source_license: null`, åndsverkloven § 14 (not NLOD);
+- `normative: false`, `source_license: null`, åndsverkloven § 14 (not NLOD), and the § 24 database-right limit;
 - the NOT-enacted-law label;
 - the partial-curated-excerpt marking;
 - deterministic rendering;
 - forward-only withdrawal with the history warning;
-- no chapter text in Git outside the released dataset, in CI, issues or PRs;
-- the owner merges every lovverk release.
+- no chapter text in Git outside the released dataset, in CI, issues or PRs; no robots, terms or evidence bytes in Git or CI either;
+- the owner merges every lovverk release, and nothing publishes without that merge.
 
 MCP and site exposure stay a separate slice.
 
 **Implementation slices:**
-- A1: fetch.
-- A2: standing policy, classifier, batch plan, manifest schema 2.
+- A1: fetch, including the current source proof of point 8.
+- A2: standing policy, classifier, batch plan, manifest schema 2. A2 ships as A2a (the policy record and its evaluation against a current source proof; publishes nothing) and A2b (classifier, batch plan, manifest schema 2).
 - B1: release-checkout guard, batch apply, real withdrawal, takedown runbook.
 - B2: receipt-verified reader of a real release checkout.
 
-Each slice is one PR, TDD, synthetic fixtures only.
+Each slice is one PR, or the named sub-slices above, TDD, synthetic fixtures only.
 
 ## Decision to preserve
 
