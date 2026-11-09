@@ -42,7 +42,7 @@ from lovspor.legaltime.document import Ledd, Provision
 from lovspor.legaltime.instructions import Address, Operation
 from lovspor.legaltime.scopes import Scope
 from lovspor.legaltime.units import Unit
-from tests.unit.test_legaltime_baseline import ACT, _act, _decision
+from tests.unit.test_legaltime_baseline import ACT, STAGED, _act, _decision
 
 PROOF_A = Proof(
     refid="lov/2015-06-19-65", member="lti/2015/a.xml", sha256="a" * 64, quote_sha256="1" * 64
@@ -539,13 +539,19 @@ def test_a_part_of_the_amending_law_in_the_act_s_own_commencement_is_not_placed(
             body,
             "2022-10-14 14:50",
         )
-        commencement = baseline_commencement(act, (by_part,), [])
+        commencement = baseline_commencement(act, (STAGED, by_part), [])
         assert (commencement.default.status, commencement.default.reason) == (
             "unresolved",
             PART_UNPLACED,
         ), body
         assert commencement.default.proofs[-1].refid == refid
-        assert all(e.timing.reason == PART_UNPLACED for e in commencement.units)
+        # STAGED dated the act and two units before it; none keeps its date across the refusal.
+        assert len(commencement.units) >= 2
+        assert all(
+            (e.timing.status, e.timing.effective, e.timing.reason)
+            == ("unresolved", None, PART_UNPLACED)
+            for e in commencement.units
+        )
     with_units = _decision(
         "forskrift/2022-10-14-1744",
         "Delt ikraftsetting av lov 18. juni 2021 nr. 97 om barnevern (barnevernsloven)",

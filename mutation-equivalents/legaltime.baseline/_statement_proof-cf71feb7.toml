@@ -13,5 +13,5 @@ and underscores are interchangeable (`encodings.normalize_encoding`), so
 ``"x".encode("UTF-8")`` and ``"x".encode("utf-8")`` are the same bytes for every
 input and the digest is the same. Documented language behaviour of
 `codecs.lookup`, not a dependency's; the same argument is already registered
-for atomic_io.atomic_write_text and legaltime.archive.index_archive. 
+for atomic_io.atomic_write_text and legaltime.archive.index_archive.
 """
