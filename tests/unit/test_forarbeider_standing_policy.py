@@ -15,6 +15,7 @@ from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.forarbeider import release_commands
+from lovspor.forarbeider.policy_commands import policy_show_impl
 from lovspor.forarbeider.policy_models import (
     PolicyEvidence,
     PolicyEvidenceKind,
@@ -387,3 +388,58 @@ def test_show_refuses_a_revocation_that_names_another_policy(desk: PolicyDesk) -
     assert result.exit_code == 1, result.output
     assert said("refused: release_record_corrupt", result.output)
     assert str(desk.root) not in result.output
+
+
+@pytest.mark.parametrize("command", ["show", "revoke"])
+def test_policy_commands_name_the_invalid_digest_field(desk: PolicyDesk, command: str) -> None:
+    if command == "show":
+        result = desk.show("private-invalid-digest", DECIDED)
+    else:
+        result = desk.invoke(
+            ["revoke", "--policy", "private-invalid-digest", "--decided", f"{OWNER}@{DECIDED}"]
+        )
+    assert result.exit_code == 1, result.output
+    assert said("refused: release_invalid: policy", result.output)
+    assert "private-invalid-digest" not in result.output
+    assert not (desk.workspace / "policies").exists()
+    assert not (desk.workspace / "policy_revocations").exists()
+
+
+@pytest.mark.parametrize("at", ["private-invalid-moment", "2100-05-01T00:00:00"])
+def test_show_names_the_invalid_moment_field(desk: PolicyDesk, at: str) -> None:
+    sha = desk.signed()
+    before = (desk.workspace / "policies" / f"{sha}.json").read_bytes()
+    result = desk.show(sha, at)
+    assert result.exit_code == 1, result.output
+    assert said("refused: invalid_timestamp: at", result.output)
+    assert at not in result.output
+    assert (desk.workspace / "policies" / f"{sha}.json").read_bytes() == before
+    assert not (desk.workspace / "policy_revocations").exists()
+
+
+def test_show_names_evidence_that_became_unsafe(desk: PolicyDesk) -> None:
+    sha = desk.signed()
+    desk.evidence["source_rights"].chmod(0o644)
+    result = desk.show(sha, DECIDED)
+    assert result.exit_code == 1, result.output
+    assert said("refused: observation_unsafe: evidence source_rights", result.output)
+    assert str(desk.root) not in result.output
+    assert PRIVATE_MARKER not in result.output
+    assert not (desk.workspace / "policy_revocations").exists()
+
+
+def test_show_returns_the_complete_policy_summary(desk: PolicyDesk) -> None:
+    sha = desk.signed()
+    record = desk.record(sha)
+    summary = policy_show_impl(
+        release_commands.ReleaseScope(workspace=desk.workspace, ledger=desk.ledger),
+        sha,
+        "2100-05-01T00:00:00Z",
+    )
+    expected = [
+        f"policy {sha} regjeringen.no prop-l,prop-ls valid "
+        "2100-04-04T12:00:00+00:00/2100-07-01T00:00:00+00:00",
+        *(f"evidence {item['kind']} {item['sha256']}" for item in record["evidence"]),
+        "state usable; identity_authenticated=false",
+    ]
+    assert summary == "\n".join(expected)
