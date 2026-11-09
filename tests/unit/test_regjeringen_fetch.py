@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from pytest_httpx import HTTPXMock
+from pytest_httpx import HTTPXMock, IteratorStream
 
 from lovspor.errors import RegjeringenFetchError
 from lovspor.regjeringen_fetch.fetch import (
@@ -306,3 +306,72 @@ def test_an_output_directory_inside_a_git_checkout_is_refused(tmp_path: Path) ->
     (tmp_path / "repo" / ".git").mkdir(parents=True)
     with pytest.raises(RegjeringenFetchError, match="out_inside_git"):
         prepare_out(tmp_path / "repo" / "pages")
+
+
+@pytest.mark.parametrize("size", [0, 8, 9])
+def test_streamed_body_limit_is_inclusive_and_never_stores_a_prefix(
+    httpx_mock: HTTPXMock, tmp_path: Path, size: int
+) -> None:
+    _robots(httpx_mock)
+    body = b"x" * size
+    httpx_mock.add_response(url=CH1, stream=IteratorStream([body[:4], body[4:8], body[8:]]))
+    out = _out(tmp_path)
+    run = _run([CH1], out, _Clock(), max_bytes=8)
+    record = run.records[0]
+    if size <= 8:
+        digest = hashlib.sha256(body).hexdigest()
+        assert record.outcome is FetchOutcome.FETCHED
+        assert record.sha256 == digest
+        assert record.size == size
+        assert (out / f"{digest}.html").read_bytes() == body
+    else:
+        assert record.outcome is FetchOutcome.TOO_LARGE
+        assert record.sha256 is None
+        assert record.size is None
+        assert list(out.glob("*.html")) == []
+
+
+class _InterruptedBody(httpx.SyncByteStream):
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        yield b"partial page"
+        raise httpx.ReadTimeout("interrupted download")
+
+
+def test_interrupted_download_stores_no_prefix_and_continues_to_next_url(
+    httpx_mock: HTTPXMock, tmp_path: Path
+) -> None:
+    _robots(httpx_mock)
+    httpx_mock.add_response(url=CH1, stream=_InterruptedBody())
+    httpx_mock.add_response(url=CH2, content=PAGE)
+    out = _out(tmp_path)
+    run = _run([CH1, CH2], out, _Clock())
+    assert [record.outcome for record in run.records] == [
+        FetchOutcome.TRANSPORT_ERROR,
+        FetchOutcome.FETCHED,
+    ]
+    assert run.records[0].sha256 is None
+    assert run.records[0].size is None
+    assert [path.read_bytes() for path in out.glob("*.html")] == [PAGE]
+    (sidecar,) = out.glob("fetch-run-*.json")
+    assert type(run).model_validate_json(sidecar.read_bytes()) == run
+
+
+def test_robots_timeout_refuses_without_storing_anything(
+    httpx_mock: HTTPXMock, tmp_path: Path
+) -> None:
+    httpx_mock.add_exception(httpx.ReadTimeout("robots timed out"), url=ROBOTS)
+    out = _out(tmp_path)
+    with pytest.raises(RegjeringenFetchError) as caught:
+        _run([CH1], out, _Clock())
+    assert caught.value.reason == "robots_unreadable"
+    assert [str(request.url) for request in httpx_mock.get_requests()] == [ROBOTS]
+    assert list(out.iterdir()) == []
+
+
+def test_url_cap_counts_unique_urls_and_cannot_exceed_200(tmp_path: Path) -> None:
+    urls = [CH1.replace("?ch=1", f"?ch={chapter}") for chapter in range(1, 202)]
+    assert read_url_list(_list(tmp_path, *urls[:200], urls[0]), 999) == tuple(urls[:200])
+    with pytest.raises(RegjeringenFetchError) as caught:
+        read_url_list(_list(tmp_path, *urls), 999)
+    assert caught.value.reason == "too_many_urls"
+    assert caught.value.detail == "201 > 200"

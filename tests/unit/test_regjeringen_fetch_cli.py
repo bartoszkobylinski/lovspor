@@ -1,9 +1,11 @@
 """``lovspor ops forarbeider-fetch`` is reachable and its pages feed the offline commands (#738)."""
 
+import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
@@ -94,3 +96,35 @@ def test_an_incomplete_run_reports_what_was_not_stored(
     assert not complete
     assert f"http_status {OTHER} status 404" in report
     assert report.splitlines()[-1].startswith("fetched 1 of 2;")
+
+
+def test_incomplete_command_exits_2_and_writes_the_run_record(
+    httpx_mock: HTTPXMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("lovspor.regjeringen_fetch.commands.FetchSettings", _instant)
+    httpx_mock.add_response(url=ROBOTS, text="User-agent: *\n")
+    httpx_mock.add_response(url=URL, status_code=429)
+    out = tmp_path / "staging"
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "forarbeider-fetch",
+            "--urls",
+            str(_list(tmp_path, URL, OTHER)),
+            "--out",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    assert f"stopped_by_server {URL} status 429" in result.output
+    assert f"not_attempted {OTHER} status -" in result.output
+    assert "fetched 0 of 2;" in result.output
+    assert [str(request.url) for request in httpx_mock.get_requests()] == [ROBOTS, URL]
+    assert list(out.glob("*.html")) == []
+    (sidecar,) = out.glob("fetch-run-*.json")
+    stored = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert [record["outcome"] for record in stored["records"]] == [
+        "stopped_by_server",
+        "not_attempted",
+    ]
