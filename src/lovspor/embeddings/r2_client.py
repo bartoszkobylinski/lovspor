@@ -94,6 +94,10 @@ class R2Client:
     def http(self) -> httpx.Client:
         return self._http
 
+    @property
+    def credentials(self) -> R2Credentials:
+        return self._credentials
+
     def put_if_absent(self, key: str, data: bytes) -> Reply:
         """One ``PUT`` that creates ``key`` only if no object holds it yet."""
         digest = base64.b64encode(hashlib.md5(data, usedforsecurity=False).digest()).decode()

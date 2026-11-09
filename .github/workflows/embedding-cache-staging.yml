@@ -1,0 +1,184 @@
+name: Embedding cache staging (G3, manual, inert)
+
+# Cross-runner crash and race checks of the remote embedding cache against the
+# STAGING bucket (#802, ADR-0022, design section 8.1 "Test strategy"). A
+# deterministic fake provider stands in: no paid embedding is ever requested.
+#
+# INERT until the owner passes G1 and approves G3. Every job is skipped unless
+# the repository variable EMBEDDING_CACHE_STAGING_ENABLED is 'true', the run was
+# dispatched from main, and the input confirm is 'G3'. The secrets live only in
+# the environment embedding-cache-staging, which main alone may use and which
+# asks the owner to approve each run. Runbook: docs/embedding-cache-r2.md.
+#
+# race-a and race-b need no other job, so they wait for approval together with
+# crash and one review approves all three. Each holds its first cache-entry PUT
+# at a barrier in the staging bucket until the other has advertised a different
+# candidate for the same key, so the two conditional PUTs compete for real; a
+# writer whose peer has not arrived within LOVSPOR_G3_BARRIER_TIMEOUT_SECONDS
+# fails, and race-check refuses anything short of one 200, one 412/409 and the
+# loser holding the winner's bytes.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type G3 to run the staging checks (owner only, after G1 and G3 approval)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: embedding-cache-staging
+  cancel-in-progress: false
+
+env:
+  LOVSPOR_EMBEDDING_CACHE_REMOTE: r2
+  LOVSPOR_EMBEDDING_CACHE_MAX_AGE_DAYS: "32"
+  RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+  LOVSPOR_G3_BARRIER_TIMEOUT_SECONDS: "600"
+
+jobs:
+  crash:
+    if: vars.EMBEDDING_CACHE_STAGING_ENABLED == 'true' && github.ref == 'refs/heads/main' && inputs.confirm == 'G3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: embedding-cache-staging
+    env:
+      LOVSPOR_EMBEDDING_CACHE_R2_BUCKET: ${{ vars.R2_BUCKET }}
+      LOVSPOR_EMBEDDING_CACHE_R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      LOVSPOR_EMBEDDING_CACHE_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      LOVSPOR_EMBEDDING_CACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Checkout lovspor (engine)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.10.0"
+      - name: Setup Python
+        run: uv python install 3.12
+      - name: Install (no dev tools)
+        run: uv sync --frozen --no-dev
+      - name: G3 crash
+        id: g3
+        run: uv run --no-dev python scripts/ops/embedding_cache_g3.py crash --run-id "$RUN_ID"
+
+  resume:
+    needs: [crash]
+    if: vars.EMBEDDING_CACHE_STAGING_ENABLED == 'true' && github.ref == 'refs/heads/main' && inputs.confirm == 'G3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: embedding-cache-staging
+    env:
+      LOVSPOR_EMBEDDING_CACHE_R2_BUCKET: ${{ vars.R2_BUCKET }}
+      LOVSPOR_EMBEDDING_CACHE_R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      LOVSPOR_EMBEDDING_CACHE_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      LOVSPOR_EMBEDDING_CACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Checkout lovspor (engine)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.10.0"
+      - name: Setup Python
+        run: uv python install 3.12
+      - name: Install (no dev tools)
+        run: uv sync --frozen --no-dev
+      - name: G3 resume
+        id: g3
+        run: uv run --no-dev python scripts/ops/embedding_cache_g3.py resume --run-id "$RUN_ID"
+
+  race-a:
+    if: vars.EMBEDDING_CACHE_STAGING_ENABLED == 'true' && github.ref == 'refs/heads/main' && inputs.confirm == 'G3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: embedding-cache-staging
+    outputs:
+      evidence: ${{ steps.g3.outputs.evidence }}
+    env:
+      LOVSPOR_EMBEDDING_CACHE_R2_BUCKET: ${{ vars.R2_BUCKET }}
+      LOVSPOR_EMBEDDING_CACHE_R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      LOVSPOR_EMBEDDING_CACHE_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      LOVSPOR_EMBEDDING_CACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Checkout lovspor (engine)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.10.0"
+      - name: Setup Python
+        run: uv python install 3.12
+      - name: Install (no dev tools)
+        run: uv sync --frozen --no-dev
+      - name: G3 race-a
+        id: g3
+        run: uv run --no-dev python scripts/ops/embedding_cache_g3.py race --run-id "$RUN_ID-race" --writer a --github-output "$GITHUB_OUTPUT"
+
+  race-b:
+    if: vars.EMBEDDING_CACHE_STAGING_ENABLED == 'true' && github.ref == 'refs/heads/main' && inputs.confirm == 'G3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: embedding-cache-staging
+    outputs:
+      evidence: ${{ steps.g3.outputs.evidence }}
+    env:
+      LOVSPOR_EMBEDDING_CACHE_R2_BUCKET: ${{ vars.R2_BUCKET }}
+      LOVSPOR_EMBEDDING_CACHE_R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      LOVSPOR_EMBEDDING_CACHE_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      LOVSPOR_EMBEDDING_CACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Checkout lovspor (engine)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.10.0"
+      - name: Setup Python
+        run: uv python install 3.12
+      - name: Install (no dev tools)
+        run: uv sync --frozen --no-dev
+      - name: G3 race-b
+        id: g3
+        run: uv run --no-dev python scripts/ops/embedding_cache_g3.py race --run-id "$RUN_ID-race" --writer b --github-output "$GITHUB_OUTPUT"
+
+  race-check:
+    needs: [race-a, race-b]
+    if: vars.EMBEDDING_CACHE_STAGING_ENABLED == 'true' && github.ref == 'refs/heads/main' && inputs.confirm == 'G3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: embedding-cache-staging
+    env:
+      LOVSPOR_EMBEDDING_CACHE_R2_BUCKET: ${{ vars.R2_BUCKET }}
+      LOVSPOR_EMBEDDING_CACHE_R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      LOVSPOR_EMBEDDING_CACHE_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      LOVSPOR_EMBEDDING_CACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Checkout lovspor (engine)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.10.0"
+      - name: Setup Python
+        run: uv python install 3.12
+      - name: Install (no dev tools)
+        run: uv sync --frozen --no-dev
+      - name: G3 race-check
+        id: g3
+        env:
+          EVIDENCE_A: ${{ needs.race-a.outputs.evidence }}
+          EVIDENCE_B: ${{ needs.race-b.outputs.evidence }}
+        run: uv run --no-dev python scripts/ops/embedding_cache_g3.py race-check --run-id "$RUN_ID-race" --evidence "$EVIDENCE_A" "$EVIDENCE_B"
