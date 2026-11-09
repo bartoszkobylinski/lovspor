@@ -3125,6 +3125,34 @@ Each item is a private, dated note, written and judged by a person. Code checks 
 
 A separate PR, separately approved, would have to: allow a reviewed real document set through `simulate` into a staging checkout (today synthetic only); decide where a real dataset lives and who may push it; extend the reader beyond the bundled synthetic propositions with the same labels; add a takedown runbook that accepts Git history permanence; and carry the owner's dated sign-off for exactly those documents. Until then no real chapter body belongs in any Git repository or branch, including tests, fixtures, PR text and CI logs.
 
+## Forarbeider: standing release policy (issue #738, contract Amendment 1)
+
+[Amendment 1](proposals/forarbeider-pr3b-release-contract.md#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release) replaces the per-chapter ceremony for chapters no detector flags with one owner record, signed once. This slice (A2a) only records, revokes and shows that policy. **Nothing here releases a chapter**: the batch that will use it is a later slice, and a flagged chapter keeps the per-chapter review, dossier and authorization path whatever the policy says.
+
+```bash
+uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> policy sign \
+  --evidence source_rights=/abs/source-rights.md \
+  --evidence publication_purpose=/abs/purpose.md \
+  --evidence retention_deindexing=/abs/retention.md \
+  --evidence git_permanence_accepted=/abs/git-permanence.md \
+  --evidence privacy_basis_clean=/abs/privacy-clean.md \
+  --evidence robots_txt=/abs/robots.txt \
+  --evidence terms_page=/abs/terms.html \
+  --decided <handle>@2026-11-10T12:00:00+01:00 \
+  --valid 2026-11-10T12:00:00+01:00/2027-02-07T00:00:00+01:00
+```
+
+- Every kind is required, once. Each file must be absolute, owner-only, outside every Git checkout and non-empty; its digest and size are read from the file. `publication_purpose` carries the takedown contact (`kontakt@lovspor.no`) and who answers it.
+- The scope is fixed: `regjeringen.no`, `prop-l` and `prop-ls`. The record states `clears: unflagged_chapters`, `unflagged_published_unread: true`, `git_permanence_accepted: true`, `legal_sufficiency_decided_by_code: false` and `identity_authenticated: false`.
+- At a terminal only, after typing `sign standing policy regjeringen.no prop-l,prop-ls until <valid_until in UTC>`. It is stored as `<ws>/policies/<sha256>.json` and prints that digest.
+
+```bash
+... policy show <policy sha256> --at 2026-12-01T12:00:00+01:00
+... policy revoke --policy <policy sha256> --decided <handle>@<ISO-8601>
+```
+
+`show` re-reads every evidence file and prints `state usable` or `state faults <codes>`: `evaluated_before_policy`, `policy_not_yet_valid`, `policy_expired`, `policy_revoked`, `policy_evidence_changed`, `policy_evidence_unavailable`. Any fault and the policy clears nothing. A revoked or expired policy is never reinstated: sign a new one. Re-signing is also due when a fetched robots.txt or terms page no longer matches the recorded digest; the batch slice checks that.
+
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.
