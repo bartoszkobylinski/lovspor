@@ -5,7 +5,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from pytest_httpx import HTTPXMock
+from pytest_httpx import HTTPXMock, IteratorStream
 
 from lovspor.errors import RegjeringenFetchError
 from lovspor.regjeringen_fetch.fetch import (
@@ -16,7 +16,7 @@ from lovspor.regjeringen_fetch.fetch import (
     verified_source_bytes,
 )
 from lovspor.regjeringen_fetch.models import FetchOutcome, FetchRun, SourceEvidence
-from tests.unit.test_regjeringen_fetch import CH1, PAGE, ROBOTS, _Clock
+from tests.unit.test_regjeringen_fetch import CH1, PAGE, ROBOTS, _Clock, _InterruptedBody
 
 TERMS = "https://www.regjeringen.no/no/om-nettstedet/vilkar/id0000001/"
 TERMS_BODY = b"<!DOCTYPE html><html><body>synthetic terms</body></html>"
@@ -227,3 +227,52 @@ def test_a_second_run_reuses_an_intact_stored_copy(httpx_mock: HTTPXMock, tmp_pa
     assert again is not None
     assert again.sha256 == terms.sha256
     assert verified_source_bytes(out, again) == TERMS_BODY
+
+
+@pytest.mark.parametrize("source_url", [ROBOTS, TERMS])
+def test_interrupted_source_download_never_publishes_a_prefix(
+    httpx_mock: HTTPXMock, tmp_path: Path, source_url: str
+) -> None:
+    if source_url == TERMS:
+        httpx_mock.add_response(url=ROBOTS, text="User-agent: *\n")
+    httpx_mock.add_response(url=source_url, stream=_InterruptedBody())
+    out = prepare_out(tmp_path / "pages")
+    if source_url == ROBOTS:
+        with pytest.raises(RegjeringenFetchError) as caught:
+            _run(out, _Clock())
+        assert caught.value.reason == "robots_unreadable"
+        assert list(out.iterdir()) == []
+        assert _requested(httpx_mock) == [ROBOTS]
+    else:
+        httpx_mock.add_response(url=CH1, content=PAGE)
+        run = _run(out, _Clock())
+        assert run.terms is not None
+        assert (run.terms.state, run.terms.sha256, run.terms.size) == ("unreadable", None, None)
+        assert list(out.glob("terms-*")) == []
+        assert run.records[0].outcome is FetchOutcome.FETCHED
+        assert _requested(httpx_mock) == [ROBOTS, TERMS, CH1]
+        (record,) = out.glob("fetch-run-*.json")
+        assert FetchRun.model_validate_json(record.read_bytes()) == run
+
+
+@pytest.mark.parametrize("size", [64, 65])
+def test_streamed_terms_size_limit_stores_only_a_complete_body(
+    httpx_mock: HTTPXMock, tmp_path: Path, size: int
+) -> None:
+    body = b"t" * size
+    httpx_mock.add_response(url=ROBOTS, text="User-agent: *\n")
+    httpx_mock.add_response(url=TERMS, stream=IteratorStream([body[:32], body[32:]]))
+    httpx_mock.add_response(url=CH1, content=PAGE)
+    out = prepare_out(tmp_path / "pages")
+    settings = FetchSettings(max_bytes=64, clock=_Clock().as_fetch_clock(), terms_url=TERMS)
+    with httpx.Client() as client:
+        run = run_fetch(client, (CH1,), out, settings)
+    assert run.terms is not None
+    assert run.records[0].outcome is FetchOutcome.FETCHED
+    if size == 64:
+        assert run.terms.state == "published"
+        assert run.terms.size == size
+        assert verified_source_bytes(out, run.terms) == body
+    else:
+        assert (run.terms.state, run.terms.sha256, run.terms.size) == ("unreadable", None, None)
+        assert list(out.glob("terms-*")) == []
