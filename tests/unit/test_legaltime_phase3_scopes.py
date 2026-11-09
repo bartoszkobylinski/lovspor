@@ -283,3 +283,18 @@ def test_which_scopes_name_the_law() -> None:
     assert _named_in(act, Scope(own_sections=frozenset({"§1"}), when=OWN, quote="o")) is True
     assert _named_in(act, Scope(own_sections=frozenset({"§99"}), when=OWN, quote="o")) is False
     assert _named_in(act, Scope(part="I", when=OWN, quote="p")) is False
+
+
+@pytest.mark.parametrize("item", ["§ 3-2 bokstav a", "§ 3-2 nr. 3"])
+def test_a_body_item_exception_does_not_except_a_heading_replacement(item: str) -> None:
+    """``med unntak av § 3-2 bokstav a`` carves a body item out of the act's commencement; the
+    heading of § 3-2 is not that item, so a heading replacement is still covered — and a scope
+    that puts only the item into force does not date the heading."""
+    scope = _one(f"Loven trer i kraft 1. januar 2023 med unntak av {item}.")
+    assert scope.reach(_op("I", "replace_heading", section="§3-2")) == "covers"
+    assert scope.reach(_op("I", "replace_bokstav", section="§3-2", ledd=1, bokstav="a")) in {
+        "excluded",
+        "unknown",
+    }
+    only_item = _one(f"Loven {item} trer i kraft 1. januar 2023.")
+    assert only_item.reach(_op("I", "replace_heading", section="§3-2")) == "disjoint"
