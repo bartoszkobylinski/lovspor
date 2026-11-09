@@ -9,6 +9,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.legaltime.baseline import (
     BELOW_LEDD,
@@ -24,6 +25,7 @@ from lovspor.legaltime.baseline import (
     _member_sha,
     _ordered,
     _part_name,
+    _part_only,
     _payload_sentence,
     _roman,
     _Statement,
@@ -38,6 +40,7 @@ from lovspor.legaltime.baseline import (
 from lovspor.legaltime.commencement import CONFLICT, Event, Proof, Timing
 from lovspor.legaltime.document import Ledd, Provision
 from lovspor.legaltime.instructions import Address, Operation
+from lovspor.legaltime.scopes import Scope
 from lovspor.legaltime.units import Unit
 from tests.unit.test_legaltime_baseline import ACT, _act, _decision
 
@@ -66,6 +69,35 @@ def _statement_of(
 
 
 # ----------------------------------------------------------------- small helpers
+
+
+@pytest.mark.parametrize(
+    "address, expected",
+    [
+        ({"part": "I"}, True),
+        ({"part": "I", "section": "§2-1"}, True),
+        ({"part": "I", "units": (Unit(section="§2-1"),)}, False),
+        ({"whole": True}, False),
+        ({"remainder": True}, False),
+        ({"own_sections": frozenset({"§2-1"})}, False),
+        ({"units": (Unit(section="§2-1"),)}, False),
+        ({}, False),
+    ],
+)
+def test_part_only_distinguishes_unplaced_parts_from_act_scopes(
+    address: dict[str, object], expected: bool
+) -> None:
+    scope = Scope(when=date(2023, 1, 1), quote="commencement", **address)  # type: ignore[arg-type]
+    assert _part_only(scope) is expected
+
+
+@pytest.mark.parametrize(
+    "address",
+    [{"whole": True}, {"remainder": True}, {"own_sections": frozenset({"§2-1"})}],
+)
+def test_part_scope_rejects_competing_act_scope_kinds(address: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match="never two"):
+        Scope(part="I", when=date(2023, 1, 1), quote="commencement", **address)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
