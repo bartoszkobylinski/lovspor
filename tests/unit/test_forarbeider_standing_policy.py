@@ -18,9 +18,11 @@ from lovspor.forarbeider import release_commands
 from lovspor.forarbeider.policy_models import (
     PolicyEvidence,
     PolicyEvidenceKind,
+    PolicyRevocation,
     StandingPolicy,
     policy_faults,
 )
+from lovspor.forarbeider.release_models import record_text
 from tests.unit.cli_output import said
 from tests.unit.forarbeider_release_support import PRIVATE_MARKER, private, said_digest
 
@@ -322,3 +324,66 @@ def test_the_policy_is_stored_in_utc() -> None:
     policy = _policy(decided_at="2100-04-04T14:00:00+02:00")
     assert policy.decided_at.utcoffset() == timedelta(0)
     assert policy.decided_at == datetime.fromisoformat("2100-04-04T12:00:00Z")
+
+
+def test_sign_reordered_evidence_is_an_idempotent_record(desk: PolicyDesk) -> None:
+    sha = desk.signed()
+    path = desk.workspace / "policies" / f"{sha}.json"
+    original = path.read_bytes()
+    evidence = [f"{kind}={path}" for kind, path in reversed(desk.evidence.items())]
+    result = desk.sign(options=_evidence_options(evidence))
+    assert result.exit_code == 0, result.output
+    assert said_digest(result.output, "policy") == sha
+    assert path.read_bytes() == original
+    assert hashlib.sha256(original).hexdigest() == sha
+    assert list((desk.workspace / "policies").iterdir()) == [path]
+    assert not desk.ledger.exists()
+
+
+@pytest.mark.parametrize(
+    ("unsafe", "reason"),
+    [
+        ("shared", "observation_unsafe"),
+        ("symlink", "unsafe_input_path"),
+        ("checkout", "unsafe_output_path"),
+    ],
+)
+def test_sign_refuses_unsafe_evidence_without_disclosing_its_path(
+    desk: PolicyDesk, unsafe: str, reason: str
+) -> None:
+    path = desk.evidence["source_rights"]
+    if unsafe == "shared":
+        path.chmod(0o644)
+    elif unsafe == "symlink":
+        target = private(path.with_name("private-target.txt"), b"private note")
+        path.unlink()
+        path.symlink_to(target)
+    else:
+        checkout = desk.root / "checkout"
+        desk.evidence["source_rights"] = private(checkout / "note.txt", b"private note")
+        (checkout / ".git").mkdir()
+    result = desk.sign()
+    assert result.exit_code == 1, result.output
+    assert said(f"refused: {reason}: evidence source_rights", result.output)
+    assert str(desk.root) not in result.output
+    assert PRIVATE_MARKER not in result.output
+    assert not (desk.workspace / "policies").exists()
+
+
+def test_show_refuses_a_revocation_that_names_another_policy(desk: PolicyDesk) -> None:
+    sha = desk.signed()
+    revocation = PolicyRevocation(
+        schema_version=1,
+        record_type="forarbeider_standing_policy_revocation",
+        policy_sha256="0" * 64,
+        owner=OWNER,
+        revoked_at="2100-04-05T00:00:00Z",
+    )
+    private(
+        desk.workspace / "policy_revocations" / f"{sha}.json",
+        record_text(revocation).encode(),
+    )
+    result = desk.show(sha, "2100-05-01T00:00:00Z")
+    assert result.exit_code == 1, result.output
+    assert said("refused: release_record_corrupt", result.output)
+    assert str(desk.root) not in result.output
