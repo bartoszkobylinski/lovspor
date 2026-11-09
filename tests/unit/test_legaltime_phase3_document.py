@@ -83,3 +83,35 @@ def test_unreadable_list_markup_falls_back_to_the_nodes_sentences(xml: str) -> N
     node = Node(kind="ledd", css_class="legalP", text=ledd.text, ledd=ledd)
     assert list_statements(ledd) is None
     assert _statements(node) == ["Loven trer i kraft straks.", "Annet ledd gjelder senere."]
+
+
+def test_nearest_named_ancestors_win_through_unrelated_sections() -> None:
+    """document._enclosing promises the nearest chapter and part, independently."""
+    body = (
+        _HEAD
+        + '<section data-name="del1"><section data-name="kap1">'
+        + '<section data-name="DEL2"><section data-name="KAP9A">'
+        + '<section data-name="kap10-extra"><section data-name="del3-extra">'
+        + _article("§9A-1", "En.")
+        + "</section></section></section></section></section></section>"
+        + "</main></body></html>"
+    )
+    document = parse_document(body.encode(), "lti/nested.xml")
+    provision = document.provisions[0]
+    assert (provision.key, provision.chapter, provision.part) == ("§9A-1", "kap9a", "del2")
+    assert parse_document(body.encode(), "lti/nested.xml") == document
+
+
+@pytest.mark.parametrize("tag", ["ul", "ol"])
+def test_nynorsk_list_lead_is_repeated_without_splitting_item_sentences(tag: str) -> None:
+    """list_statements promises one statement per item, including ordered lists."""
+    intro = "Følgjande trer i kraft straks:"
+    xml = f"{intro}<{tag}><li>Endringsloven del I. § 1.</li><li>Endringsloven del II.</li></{tag}>"
+    ledd = Ledd(xml=xml, text="")
+    node = Node(kind="ledd", css_class="legalP", text="", ledd=ledd)
+    expected = [
+        f"{intro} Endringsloven del I. § 1.",
+        f"{intro} Endringsloven del II.",
+    ]
+    assert list_statements(ledd) == expected
+    assert _statements(node) == expected
