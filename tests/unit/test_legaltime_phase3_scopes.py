@@ -134,6 +134,19 @@ def test_an_item_citing_an_act_inline_reaches_only_that_act_s_operations() -> No
     )  # an act named without a citable date
 
 
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "jf. lov 6. juni 2014 nr. 19 § 2 annet ledd",
+        "lov 6. juni 2014 nr. 19",
+    ],
+)
+def test_inline_act_item_requires_a_leading_act_citation_and_section(tail: str) -> None:
+    # A citation buried in foreign prose must not turn that prose into a known scope.
+    sentence = f"Følgende trer i kraft straks: Endringsloven del IV {tail}."
+    assert _scopes_of(sentence, OWN) is None
+
+
 def test_nine_exceptions_of_every_kind_in_one_item() -> None:
     scope = _one(
         "Følgende trer i kraft 1. januar 2026: Endringsloven del I (barnevernsloven) med unntak av "
