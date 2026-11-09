@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/embeddings/r2_client.py"
+symbol = "get"
+registered = "2026-11-08, PR #844, from run 42496403404"
+mutation = """
+-    return self._send("GET", key, {}, b"")
++    return self._send("get", key, {}, b"")
+"""
+justification = """
+httpx upper-cases the method when it builds a request, so build_request("put"
+| "get", ...) yields the same Request as "PUT" | "GET": the signed canonical
+request (which reads request.method) and the wire request are identical. The
+assumption test pins it through Client.build_request.
+"""
+assumption_test = "tests/unit/test_r2_client_equivalence_assumptions.py::test_assumption_httpx_upper_cases_put_and_get"
