@@ -187,7 +187,10 @@ def _enclosing(article: etree._Element) -> tuple[str | None, str | None]:
     """(chapter, part) data-names of the nearest enclosing sections so named."""
     chapter = part = None
     for ancestor in article.iterancestors("section"):
-        name = (ancestor.get("data-name") or "").lower()
+        raw = ancestor.get("data-name")
+        if raw is None:
+            continue
+        name = raw.lower()
         if chapter is None and _CHAPTER_NAME.fullmatch(name):
             chapter = name
         elif part is None and _PART_NAME.fullmatch(name):

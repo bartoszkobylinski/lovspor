@@ -12,8 +12,10 @@ import pytest
 
 from lovspor.legaltime.document import Ledd, list_statements
 from lovspor.legaltime.instructions import Address, Operation
-from lovspor.legaltime.scopes import Scope, _scopes_for, _scopes_of
+from lovspor.legaltime.scopes import Scope, _named_in, _scopes_for, _scopes_of
 from lovspor.legaltime.units import Unit
+from tests.unit.test_legaltime_document import load
+from tests.unit.test_legaltime_phase2_commencement import _law3
 
 OWN = date(2023, 6, 16)
 
@@ -287,3 +289,18 @@ def test_lead_sentences_before_the_colon_stand_alone_and_a_lead_without_a_colon_
         "Delt iverksetjing av lov 20. juni 2025 nr. 96 om dokumentasjon og arkiv (arkivlova).",
         "Paragrafane 1 til 10 og §§ 12 til 25 gjeld frå 1. januar 2026.",
     ]
+
+
+def test_which_scopes_name_the_law() -> None:
+    law = _law3("Loven trer i kraft straks.")  # parts I, II, III, IV, no provisions of its own
+    act = load("enacting.xml")  # §§ 1-4, no roman parts
+    assert _named_in(law, Scope(remainder=True, when=OWN, quote="r")) is False
+    assert _named_in(law, Scope(units=(Unit(section="§1"),), when=OWN, quote="u")) is False
+    assert _named_in(law, Scope(units=(Unit(chapter="kap16"),), when=OWN, quote="c")) is False
+    assert _named_in(law, Scope(whole=True, excluded=(Unit(section="§1"),), when=OWN, quote="w"))
+    assert _named_in(law, Scope(part="II", when=OWN, quote="p")) is True
+    assert _named_in(law, Scope(part="IX", when=OWN, quote="p")) is False
+    assert _named_in(law, Scope(own_sections=frozenset({"§1"}), when=OWN, quote="o")) is False
+    assert _named_in(act, Scope(own_sections=frozenset({"§1"}), when=OWN, quote="o")) is True
+    assert _named_in(act, Scope(own_sections=frozenset({"§99"}), when=OWN, quote="o")) is False
+    assert _named_in(act, Scope(part="I", when=OWN, quote="p")) is False

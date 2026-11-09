@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/units.py"
+symbol = "_tokens"
+registered = "2026-11-08, PR #847, from the mutation artifact at commit a2197fe9"
+mutation = """
+-    carry = False
++    carry = None
+"""
+justification = """
+``carry`` is only ever read as a truth value (``elif carry and token[:1].isdigit()``) and
+reassigned to ``True`` once a ``§§`` token is seen. ``None`` and ``False`` are both falsy
+under Python's truth rules, so every branch the loop takes is the same, and the
+variable is never returned or compared by identity.
+"""

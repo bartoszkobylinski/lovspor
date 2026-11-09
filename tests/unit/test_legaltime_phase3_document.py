@@ -5,7 +5,10 @@ Synthetic copies of the Lovtidend shape (nested ``section`` elements named
 text enters the repository.
 """
 
-from lovspor.legaltime.document import parse_document
+import pytest
+
+from lovspor.legaltime.commencement import _statements
+from lovspor.legaltime.document import Ledd, Node, list_statements, parse_document
 from lovspor.legaltime.text import chapter_key, section_key
 
 _HEAD = (
@@ -64,3 +67,19 @@ def test_chapter_key_normalises_titles_and_citations_alike() -> None:
     assert chapter_key("Kapittel 6A skal lyde:") == "kap6a"
     assert chapter_key("Annen del. De straffbare handlingene") is None
     assert chapter_key("§ 16") is None
+
+
+@pytest.mark.parametrize(
+    "xml",
+    [
+        "Tiltak:<ul><li>Uavsluttet</ul>",
+        "Tiltak:<ul><li>A.</li></ul><ol><li>B.</li></ol>",
+        "Tiltak:<div><ul><li>A.</li></ul></div>",
+    ],
+)
+def test_unreadable_list_markup_falls_back_to_the_nodes_sentences(xml: str) -> None:
+    """The new list reader refuses ambiguous structure and preserves the text fallback."""
+    ledd = Ledd(xml=xml, text="Loven trer i kraft straks. Annet ledd gjelder senere.")
+    node = Node(kind="ledd", css_class="legalP", text=ledd.text, ledd=ledd)
+    assert list_statements(ledd) is None
+    assert _statements(node) == ["Loven trer i kraft straks.", "Annet ledd gjelder senere."]

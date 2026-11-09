@@ -7,8 +7,8 @@ Shapes seen in the permitted archives (lov 7. mars 2008 nr. 4, lov 19. juni
 from datetime import date
 
 from lovspor.legaltime.commencement import resolve_timings
-from lovspor.legaltime.document import parse_document
-from lovspor.legaltime.instructions import interpret
+from lovspor.legaltime.document import Node, parse_document
+from lovspor.legaltime.instructions import _Reader, interpret
 
 ACT = "lov/2005-05-20-28"
 
@@ -239,3 +239,25 @@ def test_a_one_sentence_term_substitution_names_its_locations() -> None:
          "barnevernsinstitusjon"),
     ]  # fmt: skip
     assert operations[0].locations.startswith("§ 1-2 tredje og fjerde ledd")
+
+
+def test_an_intro_alone_consumes_no_payload() -> None:
+    """``_paragraph`` answers False for an intro alone: the nodes after it are not its payload."""
+    law = parse_document(
+        _law('<section class="section"><h2>I</h2></section>').encode(), "lti/x.xml"
+    )
+    reader = _Reader(law)
+    intro = Node(
+        kind="paragraph",
+        css_class="defaultP",
+        text="I lov 20. mai 2005 nr. 28 om straff gjøres følgende endringer:",
+    )
+    payload = (Node(kind="ledd", css_class="legalP", text="Loose."),)
+    assert reader._paragraph(("I", "0:I"), 0, intro, payload) is False
+    assert reader.act == ACT and reader.operations == []
+    slik = Node(
+        kind="ledd", css_class="legalP", text="Lov 20. mai 2005 nr. 28 om straff endres slik:"
+    )
+    assert reader._paragraph(("I", "0:I"), 1, slik, payload) is False
+    instruction = Node(kind="paragraph", css_class="defaultP", text="§ 1 skal lyde:")
+    assert reader._paragraph(("I", "0:I"), 2, instruction, ()) is True
