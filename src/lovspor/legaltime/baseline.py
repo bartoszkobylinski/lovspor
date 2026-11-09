@@ -43,6 +43,7 @@ from lovspor.legaltime.units import Unit
 
 INSTRUMENT_UNDATED = "commencement instrument's own commencement is not proven"
 NAMES_NOTHING = "partial decision names no part or section of the law"
+PART_UNPLACED = "partial decision names a part that cannot be placed against the act's units"
 OUTSIDE = "partial decision outside the grammar"
 BELOW_LEDD = "commencement stated below ledd level"
 _ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
@@ -226,6 +227,15 @@ def _fold_statement(current: Timing, statement: _Statement) -> Timing:
     return _unresolved_by(current, CONFLICT, statement.proof)
 
 
+def _part_only(scope: Scope) -> bool:
+    """``Loven del I trer i kraft …``, ``Endringsloven del I § 2 …``: a part, with or without a
+    section of that part, and no unit of the act. Whose part — the act's own or the amending
+    law's — the sentence does not say, so the fold cannot place it on any unit."""
+    return scope.part is not None and not (
+        scope.whole or scope.remainder or scope.own_sections or scope.units
+    )
+
+
 class _Fold:
     """The act's default and unit timings, folded instrument by instrument."""
 
@@ -290,6 +300,8 @@ class _Fold:
         scopes = read.scopes or ()
         if read.unreadable is not None and read.unreadable != NAMES_NOTHING:
             return self.unsettle_all(read.document, read.unreadable)
+        if any(_part_only(scope) for scope in scopes):
+            return self.unsettle_all(read.document, PART_UNPLACED)
         if not any(self._names_act(scope) for scope in scopes):  # no scope at all names nothing
             return self.unsettle_all(read.document, NAMES_NOTHING)
         for scope in scopes:

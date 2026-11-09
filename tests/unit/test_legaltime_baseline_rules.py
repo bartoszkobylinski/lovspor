@@ -14,6 +14,7 @@ from lovspor.legaltime.baseline import (
     BELOW_LEDD,
     INSTRUMENT_UNDATED,
     NAMES_NOTHING,
+    PART_UNPLACED,
     Commencement,
     UnitState,
     UnitTiming,
@@ -487,3 +488,39 @@ def test_a_partial_read_without_a_single_scope_names_nothing_of_the_act() -> Non
     assert (fold.default.status, fold.default.reason) == ("unresolved", NAMES_NOTHING)
     assert fold.default.proofs[-1].refid == "forskrift/2022-10-14-1741"
     assert all(t.reason == NAMES_NOTHING for t in fold.units.values())
+
+
+def test_a_part_of_the_amending_law_in_the_act_s_own_commencement_is_not_placed() -> None:
+    """``Loven del I trer i kraft …`` and ``Endringsloven del I § 2-1 …`` name a part, or a section
+    of a part, of some law — the act's own or the amending law's, the sentence does not say — and
+    no unit of the act; the fold refuses the whole decision rather than guess which units a part
+    means (independent review of #848, 2026-11-09). A scope listing the act's units is placed."""
+    act = _act()
+    for refid, body in (
+        ("forskrift/2022-10-14-1742", "Loven del I trer i kraft 1. januar 2023."),
+        ("forskrift/2022-10-14-1743", "Endringsloven del I § 2-1 trer i kraft 1. januar 2023."),
+    ):
+        by_part = _decision(
+            refid,
+            "Delt ikraftsetting av lov 18. juni 2021 nr. 97 om barnevern (barnevernsloven)",
+            "2023-01-01",
+            body,
+            "2022-10-14 14:50",
+        )
+        commencement = baseline_commencement(act, (by_part,), [])
+        assert (commencement.default.status, commencement.default.reason) == (
+            "unresolved",
+            PART_UNPLACED,
+        ), body
+        assert commencement.default.proofs[-1].refid == refid
+        assert all(e.timing.reason == PART_UNPLACED for e in commencement.units)
+    with_units = _decision(
+        "forskrift/2022-10-14-1744",
+        "Delt ikraftsetting av lov 18. juni 2021 nr. 97 om barnevern (barnevernsloven)",
+        "2023-01-01",
+        "Loven § 2-1 trer i kraft 1. januar 2023.",
+        "2022-10-14 14:55",
+    )
+    placed = baseline_commencement(act, (with_units,), [])
+    assert placed.default.reason != PART_UNPLACED
+    assert any(e.unit == Unit(section="§2-1") and e.timing.status == "dated" for e in placed.units)
