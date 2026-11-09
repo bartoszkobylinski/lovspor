@@ -341,3 +341,62 @@ def test_the_winner_may_be_either_writer() -> None:
     )
 
     assert race.judge(a, b) == []
+
+
+@pytest.mark.parametrize("run_id", ["a", "0", "a" * 100])
+def test_valid_run_id_boundaries_preserve_the_coordination_namespace(run_id: str) -> None:
+    barrier = race.Barrier(Memory(), run_id, "a", timeout=0)
+
+    assert barrier.key(_TARGET, "a").split("/")[-3] == run_id
+
+
+@pytest.mark.parametrize("digest", ["b" * 63, "b" * 65, "B" * 64, "g" * 64, "b" * 64 + "\n"])
+def test_invalid_peer_digest_never_releases_the_cache_put(digest: str) -> None:
+    bucket = Memory()
+    client = race.RacingClient(bucket, _barrier(bucket))
+    _advertise(bucket, "b", digest)
+
+    with pytest.raises(race.RaceError, match="peer's coordination object"):
+        client.put_if_absent(_TARGET, b"candidate")
+
+    assert bucket.calls == [
+        ("PUT", client.barrier.key(_TARGET, "a")),
+        ("GET", client.barrier.key(_TARGET, "b")),
+    ]
+    assert _TARGET not in bucket.objects
+    assert client.attempt == race.Attempt()
+
+
+def test_coordination_put_does_not_consume_the_first_cache_entry_barrier() -> None:
+    bucket = Memory()
+    client = race.RacingClient(bucket, _barrier(bucket))
+    coordination_key = client.barrier.key(_TARGET, "a")
+
+    assert client.put_if_absent(coordination_key, b"already advertised").status == 200
+    assert client.attempt == race.Attempt()
+    assert bucket.calls == [("PUT", coordination_key)]
+
+    # The first actual cache PUT must still meet the barrier and refuse reuse.
+    with pytest.raises(race.RaceError, match="coordination object already exists"):
+        client.put_if_absent(_TARGET, b"candidate")
+
+    assert bucket.calls == [("PUT", coordination_key), ("PUT", coordination_key)]
+    assert _TARGET not in bucket.objects
+    assert bucket.objects[coordination_key] == b"already advertised"
+    assert client.attempt == race.Attempt()
+
+
+@pytest.mark.parametrize("loser_status", [409, 412])
+def test_writer_b_winning_requires_writer_a_to_adopt_its_bytes(loser_status: int) -> None:
+    a, b = _evidence(
+        a__put_status=loser_status,
+        b__put_status=200,
+        a__remote_sha256="b" * 64,
+        b__remote_sha256="b" * 64,
+        a__local_sha256="b" * 64,
+        b__local_sha256="b" * 64,
+    )
+    assert race.judge(a, b) == []
+
+    a["local_sha256"] = a["candidate_sha256"]
+    assert race.judge(a, b) == ["the loser did not adopt the winner's bytes"]
