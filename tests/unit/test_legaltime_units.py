@@ -238,3 +238,17 @@ def test_ledd_range_includes_both_endpoints_and_contains_finer_units(
     operation = _op("replace_ledd", section="§1", ledd=2, ledd_end=4)
     assert relation(Unit(section="§1", ledd=ledd), operation) == expected
     assert relation(Unit(section="§1", ledd=ledd, punktum=1, bokstav="a"), operation) == expected
+
+
+@pytest.mark.parametrize("listing", ["§ 1 bokstav a", "§ 1 nr. 3", "§ 1 første ledd bokstav a"])
+def test_a_heading_replacement_is_disjoint_from_every_body_unit(listing: str) -> None:
+    """A heading rewrite touches no ledd, punktum, bokstav or nummer of the section: a body unit
+    is disjoint from it, however the unit is addressed, and only the bare section or the heading
+    unit covers it."""
+    (unit,) = parse_units(listing) or ()
+    assert unit.ledd is not None or unit.bokstav is not None
+    assert relation(unit, _op("replace_heading", section="§1")) == "disjoint"
+    assert relation(Unit(section="§1"), _op("replace_heading", section="§1")) == "covers"
+    assert relation(Unit(section="§1", heading=True), _op("replace_heading", section="§1")) == (
+        "covers"
+    )

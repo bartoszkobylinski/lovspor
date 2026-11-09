@@ -165,7 +165,8 @@ def relation(unit: Unit, operation: Operation, chapter_of: ChapterOf | None = No
     if unit.heading:
         return _heading_relation(operation)
     if operation.kind == "replace_heading":
-        return "covers" if unit.ledd is None and unit.punktum is None else "disjoint"
+        body = (unit.ledd, unit.punktum, unit.bokstav)
+        return "covers" if body == (None, None, None) else "disjoint"  # a heading has no body
     levels = (
         _level(unit.ledd, address.ledd, address.ledd_end),
         _level(unit.punktum, address.punktum, address.punktum_end),
