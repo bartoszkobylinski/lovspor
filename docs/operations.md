@@ -2783,6 +2783,26 @@ are UTC. `lovspor ops usage` also takes a saved file (`lovspor ops usage
 journal.txt`) and `--since today|all|YYYY-MM-DD` to filter by UTC day. Metrics
 are recorded only by the hosted server; `lovspor mcp` (stdio) records none.
 
+## Forarbeider: fetch the listed pages (issue #738)
+
+`lovspor ops forarbeider-fetch` fetches the regjeringen.no Prop. L / Prop. LS pages the owner lists, and nothing else. It replaces saving each page by hand (PR3B contract, Amendment 1, point 6). It publishes nothing, and the pages it stores are read by the offline commands below.
+
+```bash
+install -d -m 700 ~/forarbeider-staging
+cat > ~/forarbeider-staging/urls.txt <<'URLS'
+# Prop. 112 L (2025-2026)
+https://www.regjeringen.no/no/dokumenter/prop.-112-l-20252026/id3172654/?ch=1
+https://www.regjeringen.no/no/dokumenter/prop.-112-l-20252026/id3172654/?ch=10
+URLS
+uv run lovspor ops forarbeider-fetch --urls ~/forarbeider-staging/urls.txt --out ~/forarbeider-staging/pages
+```
+
+- **Only the list, only the grammar.** Each line is a Prop. L / LS landing page or one `?ch=N` chapter page on `https://www.regjeringen.no/no/dokumenter/`. A tracking parameter, another document type, another host or plain HTTP refuses the whole list before any request, with `url_not_allowed`. Blank lines and `#` comments are skipped, and repeats are dropped. `--max` (default 50, at most 200) caps a list. Nothing is discovered: no links are followed and no sitemap is read.
+- **Politeness.** robots.txt is read live once per run. If it is unreadable (5xx, timeout), the run is refused with nothing fetched. A disallowed URL is recorded as `robots_disallowed` and never requested. Requests are at least 5 s apart, longer if robots.txt sets a longer `Crawl-delay`. A 403 or 429 stops the run, and the remaining URLs are recorded as `not_attempted`. Every request carries `User-Agent: lovspor-forarbeider/1 (+https://lovspor.no; kontakt@lovspor.no)`.
+- **What is stored.** Each page is stored as served, as `<sha256>.html`, owner-only (0600). The output directory must be absolute, owner-only (created 0700 if missing) and outside every Git checkout. Redirects are recorded with their `Location` and never followed. A body over 16 MiB is never stored, not even in part. Beside the pages, `fetch-run-<start>.json` (0600) records the robots.txt status and SHA-256, the spacing, and per URL the outcome, status, `retrieved_at` (the machine clock, with offset), digest and size. A later standing policy compares that robots digest with the one it was signed against.
+- **Output.** One line per URL, then a summary. For a stored page the line gives what `forarbeider-metadata` and `forarbeider-chapter` need: `fetched <url> retrieved_at <when> file <path>`. Exit 0 means every URL was stored. Exit 2 means some were not (each named with its outcome). Exit 1 is a refusal with nothing fetched (`refused: <reason>: <detail>`).
+- **Not here.** This command does not review, clear or publish anything. A fetched page is still raw source in private staging, under the retention rules below.
+
 ## Forarbeider: offline staging metadata (issue #738)
 
 `lovspor ops forarbeider-metadata` reads one regjeringen.no Prop. L / Prop. LS chapter page the operator already saved, and writes one validated metadata record. It makes no HTTP request and publishes nothing. ADR-0018 is Accepted as architecture, not as clearance: live fetching, a `lovverk/forarbeider/` dataset and any publication stay gated (PR3).
