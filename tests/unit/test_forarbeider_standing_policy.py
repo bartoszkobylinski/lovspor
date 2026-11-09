@@ -391,12 +391,16 @@ def test_show_returns_the_complete_policy_summary(desk: PolicyDesk) -> None:
         release_commands.ReleaseScope(workspace=desk.workspace, ledger=desk.ledger),
         sha,
         "2100-05-01T00:00:00Z",
+        None,
     )
     expected = [
         f"policy {sha} regjeringen.no prop-l,prop-ls valid "
         "2100-04-04T12:00:00+00:00/2100-07-01T00:00:00+00:00",
         *(f"evidence {item['kind']} {item['sha256']}" for item in record["evidence"]),
         "state usable; identity_authenticated=false",
+        "source proof missing",
+        "source faults source_proof_missing",
+        "automatic clearance denied",
     ]
     assert summary == "\n".join(expected)
 

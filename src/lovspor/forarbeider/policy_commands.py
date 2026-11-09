@@ -32,6 +32,12 @@ from lovspor.forarbeider.policy_models import (
     policy_faults,
     suppresses,
 )
+from lovspor.forarbeider.policy_source import (
+    CurrentSource,
+    SourceFault,
+    read_source_proof,
+    source_faults,
+)
 from lovspor.forarbeider.release_commands import (
     ReleaseScope,
     actor,
@@ -256,19 +262,49 @@ def policy_state(
     return entry.policy, policy_faults(entry, observed, at)
 
 
-def policy_show_impl(scope: ReleaseScope, policy: str, at: str) -> str:
-    """The policy's scope, window, evidence digests and state at ``at``: never paths or handles.
+def policy_clearance(
+    workspace: Path, sha: str, source: CurrentSource | None, at: datetime
+) -> tuple[StandingPolicy, tuple[PolicyFault, ...], tuple[SourceFault, ...]]:
+    """The policy, its record faults (local evidence, window, register) and its source faults.
+
+    It clears automatically only when both are empty: intact local evidence is
+    not proof of what the source publishes now (Amendment 1 point 8).
 
     Raises:
-        ForarbeiderRefusedError: an unknown or edited policy, or a malformed option.
+        ForarbeiderRefusedError: the policy is not stored, or was edited.
+    """
+    record, faults = policy_state(workspace, sha, at)
+    return record, faults, source_faults(record, source, at)
+
+
+def policy_show_impl(scope: ReleaseScope, policy: str, at: str, proof: Path | None) -> str:
+    """The policy's scope, window, evidence digests, state and clearance at ``at``.
+
+    Never prints paths or handles. ``proof`` is a ``forarbeider-fetch`` run record.
+
+    Raises:
+        ForarbeiderRefusedError: an unknown or edited policy, a malformed option, or
+            a source proof that is unreadable or whose stored pages changed.
     """
     workspace = open_release_workspace(scope)
     sha = digest_option(policy, "policy")
     with refused_as("at"):
         moment = aware_moment(at)
-    record, faults = policy_state(workspace, sha, moment)
+    source = None if proof is None else read_source_proof(proof)
+    record, faults, sourced = policy_clearance(workspace, sha, source, moment)
     window = f"{record.valid_from.isoformat()}/{record.valid_until.isoformat()}"
     lines = [f"policy {sha} {record.source_provider} {_types(record)} valid {window}"]
     lines += [f"evidence {item.kind.value} {item.sha256}" for item in record.evidence]
     state = f"faults {','.join(faults)}" if faults else "usable"
-    return "\n".join([*lines, f"state {state}; identity_authenticated=false"])
+    lines += [f"state {state}; identity_authenticated=false", _source_line(source)]
+    lines.append(f"source faults {','.join(sourced)}" if sourced else "source matches")
+    verdict = "denied" if faults or sourced else "allowed"
+    return "\n".join([*lines, f"automatic clearance {verdict}"])
+
+
+def _source_line(source: CurrentSource | None) -> str:
+    if source is None:
+        return "source proof missing"
+    pages = [source.robots] if source.terms is None else [source.robots, source.terms]
+    seen = [f"{page.kind} {page.state} {page.sha256 or '-'}" for page in pages]
+    return f"source proof run {source.run_started_at.isoformat()} " + " ".join(seen)

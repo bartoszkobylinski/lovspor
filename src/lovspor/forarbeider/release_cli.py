@@ -296,6 +296,13 @@ def policy_show(
     ctx: typer.Context,
     policy: Annotated[str, typer.Argument(help="The policy's sha256.")],
     at: Annotated[str, typer.Option(help="The moment evaluated, ISO 8601 with offset.")],
+    source_proof: Annotated[
+        Path | None,
+        typer.Option(help="A forarbeider-fetch run record: the current robots.txt and terms."),
+    ] = None,
 ) -> None:
-    """Show the policy's scope, window, evidence digests and whether it holds at a moment."""
-    _echo(lambda: policy_show_impl(ctx.obj, policy, at))
+    """Show the policy's scope, window, evidence digests and whether it clears at a moment.
+
+    Without a current source proof no automatic clearance is allowed.
+    """
+    _echo(lambda: policy_show_impl(ctx.obj, policy, at, source_proof))
