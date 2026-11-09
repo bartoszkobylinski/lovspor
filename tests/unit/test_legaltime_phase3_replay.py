@@ -96,6 +96,41 @@ def test_an_operation_on_a_ledd_not_yet_in_force_waits_until_its_day() -> None:
     assert provision.ledd_not_in_force == ()
 
 
+@pytest.mark.parametrize("flagged", [1, 2, 3])
+def test_replacement_range_waits_for_each_delayed_ledd_without_partial_edits(flagged: int) -> None:
+    """Decision 4 gates the entire range, including either inclusive endpoint."""
+    day = date(2023, 7, 1)
+    commencement = Commencement(
+        default=_dated(date(2023, 1, 1)),
+        units=(UnitTiming(unit=Unit(section="§15-7", ledd=flagged), timing=_dated(day)),),
+    )
+    replacement = tuple(_ledd(text) for text in ("Ny en.", "Ny to.", "Ny tre."))
+    event = _event(
+        15,
+        _op(
+            15,
+            "replace_ledd",
+            address=Address(section="§15-7", ledd=1, ledd_end=3),
+            ledd=replacement,
+        ),
+        date(2023, 3, 1),
+    )
+    original = next(p.ledd for p in ACT_DOC.provisions if p.key == "§15-7")
+    before = replay(ACT_DOC, commencement, [event], date(2023, 6, 30))
+    provision = next(p for p in before.provisions if p.key == "§15-7")
+    assert before.withheld == ("op15",)
+    assert before.applied == () and before.unresolved == ()
+    assert provision.ledd == original and provision.applied == ()
+    assert provision.ledd_not_in_force == (flagged,)
+
+    on_day = replay(ACT_DOC, commencement, [event], day)
+    provision = next(p for p in on_day.provisions if p.key == "§15-7")
+    assert on_day.applied == ("op15",)
+    assert on_day.withheld == () and on_day.unresolved == ()
+    assert provision.ledd == replacement and provision.applied == ("op15",)
+    assert provision.ledd_not_in_force == ()
+
+
 def test_a_restructuring_of_a_provision_with_a_flagged_ledd_is_refused_not_applied() -> None:
     rewrite = _event(
         4,
