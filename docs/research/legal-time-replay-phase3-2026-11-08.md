@@ -242,6 +242,31 @@ Every count change against phase 2 (2,432 events; 1,196 / 37 / 1,199; 477 applie
   at 2026-11-06 behind it) is reported so the blanket's cost is visible, never to replace the verdict.
 - phase-1 acts: unchanged apart from the version line and the additive fields (§1).
 
+**Reconciliation against the pinned consolidation (oracle 2026-11-04, replay at 2026-11-06), by
+verdict.** The final verdict is `unresolved` for every section of every replayed act: each state
+carries an act-level problem and Decision 7's blanket covers the whole act. The split below is
+`counts_before_blanket`, what the same comparison says section by section with the blanket lifted,
+reported so the blanket's cost is visible. Proven = `exact_raw` + `exact_normalized` +
+`editorial_omission`; `only_in_oracle` is a section the oracle has and the replay lacks (unattributed
+or unsupported insertions), `only_in_replay` the reverse, `oracle_annex` a non-section oracle
+heading (tvisteloven's and utlendingsloven's annex lists). Two acts have no row: arbeidsmiljøloven
+and naturmangfoldloven have no readable commencement, so no text to compare.
+
+| Act | sections | exact_raw | exact_normalized | editorial_omission | text_differs | only_in_oracle | only_in_replay | oracle_annex | unresolved | proven before blanket | proven final | ledd proven |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| utlendingsloven | 212 | 17 | 33 | 0 | 5 | 70 | 0 | 15 | 72 | 50 of 212 | 0 of 212 | 0 of 461 |
+| straffeloven | 400 | 97 | 129 | 0 | 34 | 19 | 0 | 0 | 121 | 226 of 400 | 0 of 400 | 0 of 700 |
+| friskolelova | 92 | 24 | 10 | 0 | 9 | 22 | 1 | 0 | 26 | 34 of 92 | 0 of 92 | 0 of 186 |
+| tvisteloven | 442 | 107 | 189 | 0 | 17 | 7 | 0 | 88 | 34 | 296 of 442 | 0 of 442 | 0 of 1,002 |
+| merverdiavgiftsloven | 206 | 55 | 33 | 1 | 28 | 18 | 6 | 0 | 65 | 89 of 206 | 0 of 206 | 0 of 370 |
+| barnevernsloven | 188 | 56 | 66 | 1 | 21 | 12 | 0 | 0 | 32 | 123 of 188 | 0 of 188 | 0 of 498 |
+| **total** | 1,540 | 356 | 460 | 2 | 114 | 148 | 7 | 103 | 350 | **818 of 1,540** | **0 of 1,540** | **0 of 3,217** |
+
+Ledd are counted under the section's verdict (`ledd_counts`): with the blanket every ledd is
+`ledd_unresolved`, so no subunit is proven either; the ledd denominators are the oracle's ledd per
+act. The per-section `unresolved` before the blanket is a section whose own operations carry an
+unresolved timing or an unresolved renumbering, not the act-level reason.
+
 ## 6. The next limiting factors
 
 1. **The act-level blanket** (Decision 7, refinement deferred by Decision 13): one unsupported
@@ -260,6 +285,14 @@ Every count change against phase 2 (2,432 events; 1,196 / 37 / 1,199; 477 applie
    carve-out is evidence for a staged reading, which only an owner ruling can adopt.
 5. The two remaining unreadable own commencements (arbeidsmiljøloven, naturmangfoldloven), the
    temporary laws' sunset clauses, and the instruction shapes listed per act in the coverage report.
+6. **A part named without units of the act in the act's own commencement** ("Loven del I trer i
+   kraft …", "Endringsloven del I § 2 …"): the sentence does not say whose part — the act's own,
+   which the structure could place, or the amending law's, which only its operations could — so
+   the fold refuses the whole decision
+   (`partial decision names a part that cannot be placed against the act's units`). None of the eight
+   acts' own commencements has the shape; placing it needs a grammar that tells "Loven(s) del" from
+   "Endringsloven del", and for the act's own part a rule mapping a part to its chapters (independent
+   review of #848, 2026-11-09).
 
 Source coverage is not the limit: every member needed was in the pinned archives, no member was
 skipped, and the 2026 archive contributed only announced-not-in-force events.
