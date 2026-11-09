@@ -258,3 +258,48 @@ def test_a_location_outside_the_act_does_not_hide_a_flagged_ledd_listed_after_it
     assert after.withheld == () and after.applied == ("op1",)
     assert after.unresolved == (("op13", "substitution locations unresolved: ['§99-9']"),)
     assert {p.key: p for p in after.provisions}["§15-7"].ledd[3].text == "Fire."
+
+
+@pytest.mark.parametrize("kind", ["insert_ledd", "repeal_ledd"])
+@pytest.mark.parametrize("start", [1, 3])
+def test_ledd_edits_preserve_a_delayed_units_number_until_commencement(
+    kind: str, start: int
+) -> None:
+    """Decision 4: refuse shifts of a flagged ledd, but allow edits after it."""
+    day = date(2023, 7, 1)
+    commencement = Commencement(
+        default=_dated(date(2023, 1, 1)),
+        units=(UnitTiming(unit=Unit(section="§15-7", ledd=2), timing=_dated(day)),),
+    )
+    operation = _op(
+        14,
+        kind,
+        address=Address(section="§15-7", ledd=start),
+        ledd=(_ledd("Ny."),) if kind == "insert_ledd" else (),
+    )
+    event = _event(14, operation, date(2023, 3, 1))
+    original = (_ledd("En."), _ledd("To."), _ledd("Tre."))
+    edited = list(original)
+    if kind == "insert_ledd":
+        edited.insert(start - 1, _ledd("Ny."))
+    else:
+        del edited[start - 1]
+
+    before = replay(ACT_DOC, commencement, [event], date(2023, 6, 30))
+    provision = {p.key: p for p in before.provisions}["§15-7"]
+    assert before.withheld == ()
+    assert provision.ledd_not_in_force == (2,)
+    if start == 1:
+        assert before.unresolved == (("op14", RESTRUCTURED),)
+        assert before.applied == ()
+        assert provision.status == "unresolved" and provision.ledd == original
+    else:
+        assert before.unresolved == () and before.applied == ("op14",)
+        assert provision.status == "replayed" and provision.ledd == tuple(edited)
+
+    on_day = replay(ACT_DOC, commencement, [event], day)
+    provision = {p.key: p for p in on_day.provisions}["§15-7"]
+    assert on_day.applied == ("op14",)
+    assert on_day.withheld == () and on_day.unresolved == ()
+    assert provision.status == "replayed" and provision.ledd == tuple(edited)
+    assert provision.ledd_not_in_force == ()
