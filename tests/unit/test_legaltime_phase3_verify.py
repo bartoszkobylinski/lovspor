@@ -92,3 +92,46 @@ def test_blanket_preserves_diagnostic_counts_but_proves_no_sections_or_ledd() ->
     assert all(s.verdict == "unresolved" and "unknown target" in s.detail for s in result.sections)
     assert result.ledd_counts == {"oracle_ledd": 2, "ledd_unresolved": 2}
     assert result.act_level_problems == ("unknown target",)
+
+
+@pytest.mark.parametrize(
+    "oracle_ledd,verdict",
+    [
+        ((Ledd(xml="<em>En.</em>", text="En."),), "exact_normalized"),
+        (
+            (Ledd(xml="En. \u2013 \u2013 \u2013", text="En. \u2013 \u2013 \u2013"),),
+            "editorial_omission",
+        ),
+    ],
+)
+def test_text_equivalence_never_overrides_commencement_in_ledd_counts(
+    oracle_ledd: tuple[Ledd, ...], verdict: str
+) -> None:
+    """The new subunit accounting must honor flags for every proven text class."""
+    ledd = (Ledd(xml="En.", text="En."),)
+    if verdict == "editorial_omission":
+        ledd += (Ledd(xml="Utelatt hale.", text="Utelatt hale."),)
+    mine = ProvisionState(key="§1", label="§1", heading="", ledd=ledd, ledd_not_in_force=(1,))
+    oracle = _act().model_copy(
+        update={"provisions": (Provision(key="§1", label="§1", heading="", ledd=oracle_ledd),)}
+    )
+    result = verify(_state(mine), oracle)
+    assert result.counts == {verdict: 1}
+    assert result.ledd_counts == {
+        "oracle_ledd": 1, "ledd_proven": 0, "ledd_not_in_force": 1,
+    }  # fmt: skip
+
+    commenced = verify(_state(mine.model_copy(update={"ledd_not_in_force": ()})), oracle)
+    assert commenced.counts == {verdict: 1}
+    assert commenced.ledd_counts == {
+        "oracle_ledd": 1, "ledd_proven": 1, "ledd_not_in_force": 0,
+    }  # fmt: skip
+
+    pending = verify(_state(mine.model_copy(update={"in_force": "pending"})), oracle)
+    assert pending.counts == {"not_in_force": 1}
+    assert pending.ledd_counts == {"oracle_ledd": 1, "ledd_not_in_force": 1}
+
+    blanket = verify(_state(mine, problems=("unknown target",)), oracle)
+    assert blanket.counts_before_blanket == {verdict: 1}
+    assert blanket.counts == {"unresolved": 1}
+    assert blanket.ledd_counts == {"oracle_ledd": 1, "ledd_unresolved": 1}
