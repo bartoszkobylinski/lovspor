@@ -135,3 +135,34 @@ def test_text_equivalence_never_overrides_commencement_in_ledd_counts(
     assert blanket.counts_before_blanket == {verdict: 1}
     assert blanket.counts == {"unresolved": 1}
     assert blanket.ledd_counts == {"oracle_ledd": 1, "ledd_unresolved": 1}
+
+
+@pytest.mark.parametrize("flagged,proven", [((2,), 1), ((1, 2), 0)])
+def test_omitted_tail_commencement_flags_do_not_inflate_oracle_ledd_counts(
+    flagged: tuple[int, ...], proven: int
+) -> None:
+    """_ledd_counts partitions oracle ledd, including when replay has an omitted tail."""
+    mine = ProvisionState(
+        key="§1", label="§1", heading="",
+        ledd=(Ledd(xml="En.", text="En."), Ledd(xml="Hale.", text="Hale.")),
+        ledd_not_in_force=flagged,
+    )  # fmt: skip
+    oracle = _act().model_copy(
+        update={
+            "provisions": (
+                Provision(
+                    key="§1",
+                    label="§1",
+                    heading="",
+                    ledd=(Ledd(xml="En. – – –", text="En. – – –"),),  # noqa: RUF001
+                ),  # fmt: skip  # noqa: RUF028
+            )
+        }
+    )
+    result = verify(_state(mine), oracle)
+    assert result.counts == {"editorial_omission": 1}
+    assert result.ledd_counts == {
+        "oracle_ledd": 1,
+        "ledd_proven": proven,
+        "ledd_not_in_force": 1 - proven,
+    }
