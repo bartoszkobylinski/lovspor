@@ -4,7 +4,78 @@
 **Date:** 2026-11-01  
 **Authority:** Accepted [ADR-0018](https://github.com/bartoszkobylinski/lovspor-notebook/blob/main/docs/adr/ADR-0018-government-forarbeider-corpus.md), [ADR-0017](https://github.com/bartoszkobylinski/lovspor-notebook/blob/main/docs/adr/ADR-0017-source-backed-legislative-crosswalk.md)  
 **Tracking:** [#738](https://github.com/bartoszkobylinski/lovspor/issues/738); [PR1 #741](https://github.com/bartoszkobylinski/lovspor/pull/741), [PR2 #752](https://github.com/bartoszkobylinski/lovspor/pull/752), [PR3A #754](https://github.com/bartoszkobylinski/lovspor/pull/754)  
-**Division of responsibility:** Owner chooses release policy, authorizes each live pilot and merges. Architecture reviewer owns this contract and independent code review. Coding agent implements bounded PRs.
+**Division of responsibility:** Owner chooses release policy, authorizes each live pilot and merges. Architecture reviewer owns this contract and independent code review. Coding agent implements bounded PRs.  
+**Amended:** 2026-11-09 by owner decision. See [Amendment 1](#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release). Where it conflicts with the text below, the amendment wins.
+
+## Amendment 1 (2026-11-09): standing policy, automatic clearance, batch release
+
+**Why.** The real-document pilot ran on 2026-11-09 ([#738 comment](https://github.com/bartoszkobylinski/lovspor/issues/738#issuecomment-6739553217)). It covered Prop. 112 L and Prop. 111 LS, six chapters in all. It proved that the extractor and every source proof work on real pages, nynorsk included. It also proved that the per-chapter ceremony cannot scale to a corpus. That ceremony is evidence notes, a dossier and a typed phrase for every chapter. The owner decided to replace it. Forarbeider are built to be published, and the release process must make that routine. It must not turn each chapter into a legal ritual.
+
+**The model.**
+
+1. **Standing policy, signed once.** One owner record covers one source and the document types it names, today regjeringen.no `prop-l` and `prop-ls`. It binds, by SHA-256 of private files:
+   - the source-rights assessment: website terms, robots, åndsverkloven § 14 and § 24;
+   - the publication purpose;
+   - the takedown and correction contact (`kontakt@lovspor.no`) and who answers it;
+   - retention and deindexing;
+   - the owner's acceptance of Git-history permanence;
+   - the owner's explicit acceptance that a chapter the detectors do not flag is published without a person reading it.
+
+   The record also carries the digests of the robots.txt and terms pages that the owner read. It is signed at a terminal with one typed phrase and can be revoked. It must be signed again when a fetched page's robots or terms digest differs from the recorded one, when it is revoked, and when it expires.
+2. **Automatic per document.** Every existing source proof stays, unchanged:
+   - identity, session, chapter URL and ordering;
+   - page re-parse and byte reproduction;
+   - source and text hashes;
+   - extractor and normalizer versions;
+   - collision and cross-document checks.
+
+   Each chapter is then classified from its extractor `hold_reasons`:
+   - **clean**: no reason except `review_required`;
+   - **withheld**: any body-withholding reason (annex, table, image, footnotes, hidden or repaired markup, and the rest of that set). Never published;
+   - **flagged**: a body exists but a detector fired (quotation, third-party work, hearing participants, personal data, sensitive data);
+   - **unknown**: any reason not classified in code is treated as flagged.
+3. **Owner only on exceptions.**
+   - A clean chapter is cleared by the standing policy.
+   - A flagged chapter is cleared only through the existing PR3A review, dossier and authorization path, ending in an eligible preflight report. That path is kept intact for exactly this purpose.
+   - A withheld chapter is never cleared.
+4. **One confirmation per batch.** A batch of at most 25 documents is planned privately, without writing anything. It is then applied after one typed owner phrase that names the counts and the target branch. The stored confirmation is the owner's dated sign-off for exactly those documents and chapters. The plan also lists a small deterministic sample of clean chapters with their source links. ADR-0018 C3 requires sampling, and this sample serves it as an optional owner spot check, not a gate.
+5. **Apply writes a working tree, never history.** Apply writes only `forarbeider/` in a dedicated lovverk release clone, on a non-`main` branch. It never writes the sync clone (`~/.cache/lovverk`) or the engine. It runs no `git add`, commit or push. The owner commits, pushes and opens the lovverk PR, and **merging that PR is the publication**. Forward-only withdrawal ships with or before apply.
+6. **Explicit-list fetch.** A supported command fetches an owner-supplied list of `?ch=N` chapter URLs into private staging:
+   - it checks robots.txt live and rate-limits to at least 5 s;
+   - it never follows links, walks a sitemap or discovers pages;
+   - it caps each run;
+   - it gives up on a redirect that leaves the host.
+
+   This is not harvesting. Each URL is named by the owner.
+7. **Manifest records how a chapter was cleared.** Each chapter carries `cleared_by: standing_policy | owner_review` and the policy digest, in manifest schema 2. No reader may present a policy-cleared chapter as individually human-reviewed.
+
+**Superseded by this amendment:**
+- PR3B-1 points 3–5 as a precondition for *clean* chapters: the per-chapter PR3A approval, the chapter-specific dossier and the per-chapter owner decision. These still apply to *flagged* chapters.
+- The sentence "legal sufficiency requires an owner/human decision, not keyword detection." The owner has made that decision once, at the policy level, and accepts detector-based clearance for unflagged chapters.
+- "A no-personal-data pilot still requires an explicit written case-specific review." It is replaced by the policy-level assessment, and flagged chapters keep the case-specific path.
+- "A bounded pilot population": it becomes the per-batch cap.
+- In *Deliberately deferred*, "automated harvesting" and, in PR3B-2, "no live government fetch": the explicit-list fetch in point 6 is carved out. Sitemap walks, discovery and crawling stay deferred.
+- Acceptance-matrix rows "Missing PR3A decision", "Dossier lacks …" and "No scoped owner release decision": they now read DENY *for a flagged chapter*. For a clean chapter the equivalent DENY is a missing, revoked, expired or terms-changed standing policy. Row "PR3B-1 against any real checkout: zero writes" still holds for preflight and plan. Apply writes only after the batch confirmation.
+
+**Unchanged:**
+- the isolated `forarbeider/` dataset;
+- `normative: false`, `source_license: null`, åndsverkloven § 14 (not NLOD);
+- the NOT-enacted-law label;
+- the partial-curated-excerpt marking;
+- deterministic rendering;
+- forward-only withdrawal with the history warning;
+- no chapter text in Git outside the released dataset, in CI, issues or PRs;
+- the owner merges every lovverk release.
+
+MCP and site exposure stay a separate slice.
+
+**Implementation slices:**
+- A1: fetch.
+- A2: standing policy, classifier, batch plan, manifest schema 2.
+- B1: release-checkout guard, batch apply, real withdrawal, takedown runbook.
+- B2: receipt-verified reader of a real release checkout.
+
+Each slice is one PR, TDD, synthetic fixtures only.
 
 ## Decision to preserve
 
