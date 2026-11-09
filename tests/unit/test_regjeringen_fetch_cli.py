@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from lovspor.cli import app
 from lovspor.regjeringen_fetch.commands import fetch_impl
 from lovspor.regjeringen_fetch.fetch import FetchClock, FetchSettings
+from tests.unit.cli_output import option_help
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "forarbeider" / "prop-l.html"
 ROBOTS = "https://www.regjeringen.no/robots.txt"
@@ -31,12 +32,10 @@ def _list(tmp_path: Path, *urls: str) -> Path:
 
 
 def test_the_command_is_registered_on_ops() -> None:
-    result = CliRunner().invoke(
-        app, ["ops", "forarbeider-fetch", "--help"], env={"COLUMNS": "200", "TERMINAL_WIDTH": "200"}
-    )
+    result = CliRunner().invoke(app, ["ops", "forarbeider-fetch", "--help"])
     assert result.exit_code == 0
-    assert "--urls" in result.output
-    assert "--out" in result.output
+    assert option_help(app, ["ops", "forarbeider-fetch"], "--urls")
+    assert option_help(app, ["ops", "forarbeider-fetch"], "--out")
 
 
 def test_a_url_outside_the_grammar_exits_1_before_any_request(
