@@ -188,3 +188,26 @@ def test_inserted_chapter_placement_takes_precedence_over_existing_section_map()
     assert relation(Unit(chapter="kap9"), operation, chapters) == "covers"
     assert relation(Unit(chapter="kap1"), operation, chapters) == "disjoint"
     assert chapters == {"§1": "kap1"}
+
+
+@pytest.mark.parametrize("letter_spacing", ["A", " A"])
+def test_unit_listings_normalise_chapter_letter_spacing(letter_spacing: str) -> None:
+    """The new section grammar accepts the spaced chapter letter in every listed unit."""
+    assert parse_units(f"§§ 9{letter_spacing}-1 andre ledd, 9{letter_spacing}-2 og § 10") == (
+        Unit(section="§9A-1", ledd=2),
+        Unit(section="§9A-2"),
+        Unit(section="§10"),
+    )
+
+
+@pytest.mark.parametrize(
+    "ledd, expected",
+    [(1, "disjoint"), (2, "spans"), (3, "spans"), (4, "spans"), (5, "disjoint")],
+)
+def test_ledd_range_includes_both_endpoints_and_contains_finer_units(
+    ledd: int, expected: str
+) -> None:
+    """A rewrite of several ledd spans each contained unit, including its finer units."""
+    operation = _op("replace_ledd", section="§1", ledd=2, ledd_end=4)
+    assert relation(Unit(section="§1", ledd=ledd), operation) == expected
+    assert relation(Unit(section="§1", ledd=ledd, punktum=1, bokstav="a"), operation) == expected
