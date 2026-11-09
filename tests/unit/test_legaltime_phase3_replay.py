@@ -222,6 +222,39 @@ def test_a_bare_timing_is_the_act_wide_special_case() -> None:
     assert all(p.in_force == "in_force" and p.ledd_not_in_force == () for p in state.provisions)
 
 
+@pytest.mark.parametrize("part", ["I", "i", "II"])
+@pytest.mark.parametrize("at", [date(2023, 6, 30), date(2023, 7, 1)])
+def test_inserted_chapter_is_gated_by_its_amending_part_at_the_date_boundary(
+    part: str, at: date
+) -> None:
+    """Decision 4 gates insertions using their chapter and amending part (Decision 3b)."""
+    day = date(2023, 7, 1)
+    commencement = Commencement(
+        default=_dated(date(2023, 1, 1)),
+        units=(UnitTiming(unit=Unit(chapter="kap9a"), part="I", timing=_dated(day)),),
+    )
+    new = Provision(key="§9A-1", label="§ 9A-1", heading="", ledd=(_ledd("Ny."),), chapter="kap9a")
+    operation = _op(
+        16, "insert_section", address=Address(section=new.key), new_provision=new
+    ).model_copy(update={"part": part})
+    event = _event(16, operation, date(2023, 3, 1))
+    state = replay(ACT_DOC, commencement, [event], at)
+    by_key = {p.key: p for p in state.provisions}
+    delayed = part.upper() == "I" and at < day
+    assert state.status == "replayed"
+    assert state.unresolved == () and state.future == () and state.pending == ()
+    assert state.withheld == (("op16",) if delayed else ())
+    assert state.applied == (() if delayed else ("op16",))
+    assert (new.key in by_key) is (not delayed)
+    if not delayed:
+        inserted = by_key[new.key]
+        assert inserted.ledd == new.ledd
+        assert inserted.in_force == "in_force"
+        assert inserted.effective == (day if part.upper() == "I" else date(2023, 1, 1))
+        assert inserted.applied == ("op16",)
+    assert all(by_key[p.key].ledd == p.ledd for p in ACT_DOC.provisions)
+
+
 def test_a_term_substitution_reaching_a_ledd_not_in_force_waits_for_it() -> None:
     """codex-tests on PR #848: a substitution names its ledd in ``locations``, not its address."""
     listed = _event(
