@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/fetch.py"
+symbol = "read_url_list"
+registered = "2026-11-09, PR #852, from run 42661488989 (mutation artifact at commit 06481dad)"
+mutation = """
+-    for raw in path.read_text(encoding="utf-8").splitlines():
++    for raw in path.read_text(encoding="UTF-8").splitlines():
+"""
+justification = """
+The codec registry normalises the encoding name before the lookup
+(`encodings.normalize_encoding` plus lower-casing), so "UTF-8" and "utf-8" name
+the one codec: the same bytes decode to the same text and the same invalid
+bytes raise the same UnicodeDecodeError. Argued from the standard library,
+pinned by the same test as observatory.document_report._decoded.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_codec_names_ignore_case"

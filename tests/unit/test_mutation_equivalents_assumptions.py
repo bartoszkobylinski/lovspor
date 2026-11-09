@@ -856,3 +856,26 @@ def test_lxml_fragment_without_a_doctype_resolves_no_entity_with_either_parser()
     assert etree.tostring(etree.fromstring(plain, parser=None)) == etree.tostring(
         etree.fromstring(plain, parser=safe_parser(remove_blank_text=False))
     )
+
+
+def test_assumption_httpx_follow_redirects_none_does_not_follow() -> None:
+    """Pins the argument that waives ``follow_redirects=False`` ->
+    ``follow_redirects=None`` in ``regjeringen_fetch/fetch.py::_fetch_one``:
+    httpx swaps in the client default only for its ``USE_CLIENT_DEFAULT``
+    sentinel and tests anything else by truthiness, so ``None`` refuses a
+    redirect exactly like ``False`` — even on a client that follows by default."""
+    seen: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if request.url.path == "/from":
+            return httpx.Response(302, headers={"Location": "https://example.org/to"})
+        return httpx.Response(200)
+
+    transport = httpx.MockTransport(answer)
+    with httpx.Client(transport=transport, follow_redirects=True) as client:
+        for value in (False, None):
+            with client.stream("GET", "https://example.org/from", follow_redirects=value) as reply:
+                assert reply.status_code == 302, value
+        assert seen == ["https://example.org/from"] * 2
+        assert client.get("https://example.org/from").status_code == 200

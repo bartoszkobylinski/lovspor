@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/fetch.py"
+symbol = "_fetch_one"
+registered = "2026-11-09, PR #852, from run 42661488989 (mutation artifact at commit 06481dad)"
+mutation = """
+-            "GET", url, headers=_headers(), timeout=_timeout(session), follow_redirects=False
++            "get", url, headers=_headers(), timeout=_timeout(session), follow_redirects=False
+"""
+justification = """
+httpx normalises the method before the request exists: Request.__init__ does
+`self.method = method.upper()`. So "get" and "GET" build the same request and
+put the same bytes on the wire; the same entry exists for observatory.fetch._request.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_httpx_still_normalises_the_request_method"

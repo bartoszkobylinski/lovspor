@@ -24,6 +24,7 @@ from lovspor.forarbeider import release_cli as _forarbeider_release  # noqa: F40
 from lovspor.forarbeider import review_commands as _forarbeider_review  # noqa: F401
 from lovspor.legaltime import commands as _legaltime_commands  # noqa: F401
 from lovspor.ops.commands import ops_app
+from lovspor.regjeringen_fetch import commands as _regjeringen_fetch  # noqa: F401
 from lovspor.usage_report import (
     UsageReportError,
     parse_usage,

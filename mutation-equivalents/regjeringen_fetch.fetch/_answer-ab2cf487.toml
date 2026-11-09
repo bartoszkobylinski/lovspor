@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/fetch.py"
+symbol = "_answer"
+registered = "2026-11-09, PR #852, from run 42661488989 (mutation artifact at commit 06481dad)"
+mutation = """
+-        location = response.headers.get("Location")
++        location = response.headers.get("location")
+"""
+justification = """
+`response.headers` is an httpx `Headers`, whose lookup lower-cases the requested
+name, so "Location", "location" and "LOCATION" read the one stored value on
+every response, whatever spelling the server sent. The redirect record carries
+the same `location` under all three. Argued from the dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_httpx_header_lookup_is_case_insensitive"

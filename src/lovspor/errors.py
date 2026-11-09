@@ -422,3 +422,17 @@ class EmbeddingBudgetError(LovsporError):
     Raised before the request that would cross ``LOVSPOR_EMBEDDING_TOKEN_BUDGET``
     is sent, so the budget is a ceiling on spend, not a report after it.
     """
+
+
+class RegjeringenFetchError(LovsporError):
+    """An explicit-list fetch of regjeringen.no pages was refused (#738).
+
+    Carries a machine-readable ``reason`` (``url_not_allowed``,
+    ``robots_unreadable``, ``out_not_private`` …) and a ``detail``, so the CLI
+    prints ``refused: <reason>: <detail>`` like every forarbeider command.
+    """
+
+    def __init__(self, reason: str, detail: str) -> None:
+        super().__init__(f"{reason}: {detail}")
+        self.reason = reason
+        self.detail = detail
