@@ -3138,20 +3138,23 @@ uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> policy
   --evidence privacy_basis_clean=/abs/privacy-clean.md \
   --evidence robots_txt=/abs/robots.txt \
   --evidence terms_page=/abs/terms.html \
+  --evidence unflagged_unread_acceptance=/abs/unflagged-unread.md \
   --decided <handle>@2026-11-10T12:00:00+01:00 \
   --valid 2026-11-10T12:00:00+01:00/2027-02-07T00:00:00+01:00
 ```
 
-- Every kind is required, once. Each file must be absolute, owner-only, outside every Git checkout and non-empty; its digest and size are read from the file. `publication_purpose` carries the takedown contact (`kontakt@lovspor.no`) and who answers it.
-- The scope is fixed: `regjeringen.no`, `prop-l` and `prop-ls`. The record states `clears: unflagged_chapters`, `unflagged_published_unread: true`, `git_permanence_accepted: true`, `legal_sufficiency_decided_by_code: false` and `identity_authenticated: false`.
-- At a terminal only, after typing `sign standing policy regjeringen.no prop-l,prop-ls until <valid_until in UTC>`. It is stored as `<ws>/policies/<sha256>.json` and prints that digest.
+- Every kind is required, once, and no file (by digest) may be bound for two kinds. Each file must be absolute, owner-only, outside every Git checkout and non-empty; its digest and size are read from the file. `publication_purpose` carries the takedown contact (`kontakt@lovspor.no`) and who answers it.
+- Every acceptance is the owner's own file, never a value set in code: `git_permanence_accepted` for Git-history permanence and `unflagged_unread_acceptance` for publishing a chapter no detector flags without a person reading it.
+- The scope is fixed: `regjeringen.no`, `prop-l` and `prop-ls`. The record states only `clears: unflagged_chapters`, `legal_sufficiency_decided_by_code: false` and `identity_authenticated: false` of itself.
+- Before the prompt, sign prints the source, the document types, the validity window, every bound kind with the first 12 hex of its SHA-256, and the first 12 hex of the SHA-256 of the exact record it will store (`policy <sha12> ...`). At a terminal only, the owner types `sign standing policy <sha12> regjeringen.no prop-l,prop-ls until <valid_until in UTC>`. Any changed byte in any bound file, or a different `--decided`, changes `<sha12>`; an old or wrong phrase writes nothing. The record is stored as `<ws>/policies/<sha256>.json`, whose digest starts with the `<sha12>` shown, and sign prints that digest.
+- **At most one effective policy.** Sign refuses with `policy_overlap: <sha256>` while an unrevoked policy for the same source, sharing a document type and with an overlapping window, is stored: revoke it first. A window that only touches (one ends when the next starts) does not overlap. Sign never overwrites a record: re-signing a revoked policy unchanged is refused with `release_already_revoked`, and a new policy decided before an overlapping policy's revocation is refused with `release_out_of_order`.
 
 ```bash
 ... policy show <policy sha256> --at 2026-12-01T12:00:00+01:00
 ... policy revoke --policy <policy sha256> --decided <handle>@<ISO-8601>
 ```
 
-`show` re-reads every evidence file and prints `state usable` or `state faults <codes>`: `evaluated_before_policy`, `policy_not_yet_valid`, `policy_expired`, `policy_revoked`, `policy_evidence_changed`, `policy_evidence_unavailable`. Any fault and the policy clears nothing. A revoked or expired policy is never reinstated: sign a new one. Re-signing is also due when a fetched robots.txt or terms page no longer matches the recorded digest; the batch slice checks that.
+`show` re-reads every evidence file and every stored policy, and prints `state usable` or `state faults <codes>`: `evaluated_before_policy`, `policy_not_yet_valid`, `policy_expired`, `policy_revoked`, `policy_evidence_changed`, `policy_evidence_unavailable`, `policy_ambiguous` (two unrevoked overlapping policies for the source are stored, which only a hand-placed file can cause; every evaluation for that source denies), `policy_overlaps_revoked` (an overlapping policy was revoked after this one was decided). Any fault and the policy clears nothing. Revocation is final and revokes exactly one record; a revocation cannot be dated before the policy's decision. A revoked or expired policy is never reinstated, and revoking one never brings another into effect: sign a new one, decided at or after the revocation. Re-signing is also due when a fetched robots.txt or terms page no longer matches the recorded digest; the batch slice checks that.
 
 ## Idempotency
 

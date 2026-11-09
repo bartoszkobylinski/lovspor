@@ -1,20 +1,28 @@
 """The standing release policy, version 1 (#738, contract Amendment 1).
 
 One owner record for one source and the document types it names. It binds,
-by digest, the private files the owner decided on: source rights, publication
-purpose with the takedown contact, retention and deindexing, the acceptance of
-Git-history permanence, the acceptance that a chapter no detector flags is
-published without a person reading it, and the robots.txt and terms pages the
-owner read. It clears unflagged chapters only, and only through a batch; a
-flagged chapter still needs the per-chapter path. It is a declaration, not
-proof of who made it: ``identity_authenticated`` is ``False`` by type.
+by digest, the private files the owner decided on, one file per kind: source
+rights, the personal-data assessment, publication purpose with the takedown
+contact, retention and deindexing, the acceptance of Git-history permanence,
+the acceptance that a chapter no detector flags is published without a person
+reading it, and the robots.txt and terms pages the owner read. An acceptance
+is the owner's file, never a value set in code. It clears unflagged chapters
+only, and only through a batch; a flagged chapter still needs the per-chapter
+path. It is a declaration, not proof of who made it: ``identity_authenticated``
+is ``False`` by type.
+
+At most one policy is effective for a source: two unrevoked policies whose
+types intersect and whose windows overlap deny every evaluation of that source,
+and a revocation recorded after a policy was decided suppresses every
+overlapping policy, so revoking one never brings another back.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from enum import StrEnum
+from itertools import combinations
 from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -36,6 +44,7 @@ class PolicyEvidenceKind(StrEnum):
     ROBOTS_TXT = "robots_txt"
     SOURCE_RIGHTS = "source_rights"
     TERMS_PAGE = "terms_page"
+    UNFLAGGED_UNREAD_ACCEPTANCE = "unflagged_unread_acceptance"
 
 
 class PolicyEvidence(BaseModel):
@@ -64,8 +73,6 @@ class StandingPolicy(BaseModel):
     valid_from: AwareDatetime
     valid_until: AwareDatetime
     clears: Literal["unflagged_chapters"]
-    unflagged_published_unread: Literal[True]
-    git_permanence_accepted: Literal[True]
     legal_sufficiency_decided_by_code: Literal[False]
     identity_authenticated: Literal[False]
 
@@ -86,6 +93,8 @@ class StandingPolicy(BaseModel):
     def _every_kind_once(cls, value: tuple[PolicyEvidence, ...]) -> tuple[PolicyEvidence, ...]:
         if tuple(item.kind for item in value) != tuple(PolicyEvidenceKind):
             raise ValueError("evidence must hold every kind, once each, in order")
+        if len({item.sha256 for item in value}) != len(value):
+            raise ValueError("evidence binds one file for two kinds")
         return value
 
     @model_validator(mode="after")
@@ -116,27 +125,94 @@ class PolicyFault(StrEnum):
     """Why a policy does not hold at a moment. Any one and it clears nothing."""
 
     EVALUATED_BEFORE_POLICY = "evaluated_before_policy"
+    POLICY_AMBIGUOUS = "policy_ambiguous"
     POLICY_EVIDENCE_CHANGED = "policy_evidence_changed"
     POLICY_EVIDENCE_UNAVAILABLE = "policy_evidence_unavailable"
     POLICY_EXPIRED = "policy_expired"
     POLICY_NOT_YET_VALID = "policy_not_yet_valid"
+    POLICY_OVERLAPS_REVOKED = "policy_overlaps_revoked"
     POLICY_REVOKED = "policy_revoked"
 
 
+class RegisteredPolicy(BaseModel):
+    """A stored policy, by digest, and its revocation if it has one."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    sha256: _Digest
+    policy: StandingPolicy
+    revocation: PolicyRevocation | None
+
+
+class PolicyObservation(BaseModel):
+    """What an evaluation read: each evidence path's digest now, and every stored policy."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    evidence: dict[str, str | None]
+    policies: tuple[RegisteredPolicy, ...]
+
+
+def overlaps(first: StandingPolicy, second: StandingPolicy) -> bool:
+    """Same source, a document type in common and a moment both windows hold."""
+    return (
+        first.source_provider == second.source_provider
+        and not set(first.document_types).isdisjoint(second.document_types)
+        and first.valid_from < second.valid_until
+        and second.valid_from < first.valid_until
+    )
+
+
 def policy_faults(
-    policy: StandingPolicy, revoked: bool, evidence: Mapping[str, str | None], at: datetime
+    entry: RegisteredPolicy, observed: PolicyObservation, at: datetime
 ) -> tuple[PolicyFault, ...]:
-    """Every fault at ``at``; ``evidence`` maps a path to its actual digest, ``None`` if gone."""
-    faults = _window_faults(policy, at)
-    if revoked:
+    """Every fault ``entry`` has at ``at``, given what ``observed`` read."""
+    faults = _window_faults(entry.policy, at) | _register_faults(entry, observed.policies)
+    if entry.revocation is not None:
         faults.add(PolicyFault.POLICY_REVOKED)
+    faults |= _evidence_faults(entry.policy, observed)
+    return tuple(sorted(faults))
+
+
+def _evidence_faults(policy: StandingPolicy, observed: PolicyObservation) -> set[PolicyFault]:
+    faults: set[PolicyFault] = set()
     for item in policy.evidence:
-        actual = evidence.get(item.path)
+        actual = observed.evidence.get(item.path)
         if actual is None:
             faults.add(PolicyFault.POLICY_EVIDENCE_UNAVAILABLE)
         elif actual != item.sha256:
             faults.add(PolicyFault.POLICY_EVIDENCE_CHANGED)
-    return tuple(sorted(faults))
+    return faults
+
+
+def _register_faults(
+    entry: RegisteredPolicy, register: Iterable[RegisteredPolicy]
+) -> set[PolicyFault]:
+    """Ambiguity anywhere in the source, and a later revocation of an overlapping policy."""
+    others = {item.sha256: item for item in register if item.sha256 != entry.sha256}
+    faults: set[PolicyFault] = set()
+    live = [item.policy for item in (entry, *others.values()) if item.revocation is None]
+    source = [item for item in live if item.source_provider == entry.policy.source_provider]
+    if any(overlaps(first, second) for first, second in combinations(source, 2)):
+        faults.add(PolicyFault.POLICY_AMBIGUOUS)
+    if any(suppresses(item, entry.policy) for item in others.values()):
+        faults.add(PolicyFault.POLICY_OVERLAPS_REVOKED)
+    return faults
+
+
+def suppresses(other: RegisteredPolicy, policy: StandingPolicy) -> bool:
+    """A revocation of an overlapping policy recorded after ``policy`` was decided.
+
+    Sign refuses while an overlapping policy is unrevoked, so a policy decided
+    before such a revocation was never signed through the supported path: it is
+    a second record placed by hand, or an older one a newer revocation retires.
+    """
+    revocation = other.revocation
+    return (
+        revocation is not None
+        and overlaps(other.policy, policy)
+        and revocation.revoked_at > policy.decided_at
+    )
 
 
 def _window_faults(policy: StandingPolicy, at: datetime) -> set[PolicyFault]:

@@ -4,12 +4,18 @@ Sign, revoke and show the standing release policy. Records go to the same
 owner-only workspace as every release record, named by digest and never
 replaced. Nothing here reads a chapter or writes a corpus. Printed: digests,
 kinds, codes and moments. Never evidence paths, evidence text or handles.
+
+Sign prints every bound digest and the digest of the exact record it will
+store before it asks, and the typed phrase carries that record digest, so a
+changed byte in any bound file changes what the owner must type. It refuses
+while an overlapping policy is unrevoked: at most one is ever effective.
 """
 
 import re
 from datetime import datetime
 from pathlib import Path
 
+import typer
 from pydantic import BaseModel, ConfigDict
 
 from lovspor.forarbeider.commands import aware_moment
@@ -18,9 +24,13 @@ from lovspor.forarbeider.policy_models import (
     PolicyEvidence,
     PolicyEvidenceKind,
     PolicyFault,
+    PolicyObservation,
     PolicyRevocation,
+    RegisteredPolicy,
     StandingPolicy,
+    overlaps,
     policy_faults,
+    suppresses,
 )
 from lovspor.forarbeider.release_commands import (
     ReleaseScope,
@@ -33,7 +43,7 @@ from lovspor.forarbeider.release_commands import (
     stored_record,
     validated,
 )
-from lovspor.forarbeider.release_models import digest
+from lovspor.forarbeider.release_models import digest, record_text
 from lovspor.forarbeider.release_store import (
     MAX_EVIDENCE_BYTES,
     read_file,
@@ -41,8 +51,10 @@ from lovspor.forarbeider.release_store import (
     refused_as,
     write_record,
 )
+from lovspor.forarbeider.staging import private_directory_exists
 
 _EVIDENCE = re.compile(r"(?P<kind>[a-z_]+)=(?P<path>/.+)")
+_RECORD_NAME = re.compile(r"[0-9a-f]{64}\.json")
 _SCOPE = "flagged chapters still need their own review"
 
 
@@ -100,15 +112,14 @@ def _policy(grant: PolicyGrant) -> StandingPolicy:
         "decided_at": moment,
         "valid_from": start,
         "valid_until": end,
-        **_ACCEPTED,
+        **_FIXED_POLICY,
     }
     return validated(StandingPolicy, fields)
 
 
-_ACCEPTED: dict[str, object] = {
+#: What the record says of itself. No acceptance is here: each is an owner file.
+_FIXED_POLICY: dict[str, object] = {
     "clears": "unflagged_chapters",
-    "unflagged_published_unread": True,
-    "git_permanence_accepted": True,
     "legal_sufficiency_decided_by_code": False,
     "identity_authenticated": False,
 }
@@ -122,6 +133,14 @@ def _types(policy: StandingPolicy) -> str:
     return ",".join(policy.document_types)
 
 
+def _preview(policy: StandingPolicy, sha: str) -> str:
+    window = f"{policy.valid_from.isoformat()}/{policy.valid_until.isoformat()}"
+    lines = [f"policy {sha[:12]} source {policy.source_provider} types {_types(policy)}"]
+    lines.append(f"valid {window}")
+    lines += [f"evidence {item.kind.value} {item.sha256[:12]}" for item in policy.evidence]
+    return "\n".join(lines)
+
+
 def policy_sign_impl(scope: ReleaseScope, grant: PolicyGrant) -> str:
     """Record the standing policy, at a terminal, and return the line that reports it.
 
@@ -129,29 +148,53 @@ def policy_sign_impl(scope: ReleaseScope, grant: PolicyGrant) -> str:
         ForarbeiderRefusedError: any check failed; nothing was written.
     """
     policy = _policy(grant)
-    until = policy.valid_until.isoformat()
-    scope_text = f"{policy.source_provider} {_types(policy)} until {until}"
-    require_a_person(f"sign standing policy {scope_text}", "policy")
-    sha = write_record(open_release_workspace(scope), "policies", policy)
+    sha = digest(record_text(policy).encode())
+    workspace = open_release_workspace(scope)
+    _require_no_overlap(workspace, policy, sha)
+    scope_text = f"{policy.source_provider} {_types(policy)} until {policy.valid_until.isoformat()}"
+    typer.echo(_preview(policy, sha))
+    require_a_person(f"sign standing policy {sha[:12]} {scope_text}", "policy")
+    stored = write_record(workspace, "policies", policy)
     return (
-        f"policy {sha} {scope_text}: "
+        f"policy {stored} {scope_text}: "
         f"clears unflagged chapters through a batch only, not permission to publish "
         f"a flagged chapter ({_SCOPE})"
     )
+
+
+def _require_no_overlap(workspace: Path, policy: StandingPolicy, sha: str) -> None:
+    """Refuse while an overlapping policy is unrevoked, or was revoked after this decision.
+
+    Raises:
+        ForarbeiderRefusedError: ``policy_overlap``, ``release_already_revoked`` or
+            ``release_out_of_order``, naming the stored policy in the way.
+    """
+    for entry in register(workspace):
+        if not overlaps(entry.policy, policy):
+            continue
+        if entry.revocation is None:
+            raise ForarbeiderRefusedError(RefusalReason.POLICY_OVERLAP, entry.sha256)
+        if entry.sha256 == sha:
+            raise ForarbeiderRefusedError(RefusalReason.RELEASE_ALREADY_REVOKED, sha)
+        if suppresses(entry, policy):
+            raise ForarbeiderRefusedError(RefusalReason.RELEASE_OUT_OF_ORDER, entry.sha256)
 
 
 def policy_revoke_impl(scope: ReleaseScope, policy: str, decided: str) -> str:
     """Record that the owner withdrew the policy. A second revocation is refused.
 
     Raises:
-        ForarbeiderRefusedError: an unknown policy, or one already revoked.
+        ForarbeiderRefusedError: an unknown policy, one already revoked, or a
+            revocation dated before the policy was decided.
     """
     workspace = open_release_workspace(scope)
     sha = digest_option(policy, "policy")
-    stored_record(workspace, "policies", sha, StandingPolicy)
-    if _revoked(workspace, sha):
+    record = stored_record(workspace, "policies", sha, StandingPolicy)
+    if _revocation(workspace, sha) is not None:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_ALREADY_REVOKED, sha)
     owner, moment = actor(decided)
+    if moment < record.decided_at:
+        raise ForarbeiderRefusedError(RefusalReason.RELEASE_OUT_OF_ORDER, sha)
     revocation = PolicyRevocation(
         schema_version=1,
         record_type="forarbeider_standing_policy_revocation",
@@ -163,11 +206,32 @@ def policy_revoke_impl(scope: ReleaseScope, policy: str, decided: str) -> str:
     return f"revoked policy {sha}"
 
 
-def _revoked(workspace: Path, sha: str) -> bool:
+def _revocation(workspace: Path, sha: str) -> PolicyRevocation | None:
     revocation = read_named(workspace, "policy_revocations", sha, PolicyRevocation)
     if revocation is not None and revocation.policy_sha256 != sha:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_RECORD_CORRUPT, sha)
-    return revocation is not None
+    return revocation
+
+
+def register(workspace: Path) -> tuple[RegisteredPolicy, ...]:
+    """Every stored policy with its revocation. A file not named by a digest is corrupt.
+
+    Raises:
+        ForarbeiderRefusedError: an edited or misnamed record, or an unsafe folder.
+    """
+    directory = workspace / "policies"
+    with refused_as("policies"):
+        if not private_directory_exists(directory):
+            return ()
+    names = sorted(path.name for path in directory.iterdir() if not path.name.startswith("."))
+    if any(_RECORD_NAME.fullmatch(name) is None for name in names):
+        raise ForarbeiderRefusedError(RefusalReason.RELEASE_RECORD_CORRUPT, "policies")
+    return tuple(_registered(workspace, name.removesuffix(".json")) for name in names)
+
+
+def _registered(workspace: Path, sha: str) -> RegisteredPolicy:
+    policy = stored_record(workspace, "policies", sha, StandingPolicy)
+    return RegisteredPolicy(sha256=sha, policy=policy, revocation=_revocation(workspace, sha))
 
 
 def _actual(item: PolicyEvidence) -> str | None:
@@ -178,14 +242,18 @@ def _actual(item: PolicyEvidence) -> str | None:
 def policy_state(
     workspace: Path, sha: str, at: datetime
 ) -> tuple[StandingPolicy, tuple[PolicyFault, ...]]:
-    """The stored policy and every fault it has at ``at``, its evidence re-read now.
+    """The stored policy and every fault it has at ``at``, its evidence and the register read now.
+
+    Every stored policy is read too: an overlapping unrevoked one makes this
+    ambiguous, and a later revocation of an overlapping one suppresses it.
 
     Raises:
         ForarbeiderRefusedError: the policy is not stored, or was edited.
     """
-    policy = stored_record(workspace, "policies", sha, StandingPolicy)
-    evidence = {item.path: _actual(item) for item in policy.evidence}
-    return policy, policy_faults(policy, _revoked(workspace, sha), evidence, at)
+    entry = _registered(workspace, sha)
+    evidence = {item.path: _actual(item) for item in entry.policy.evidence}
+    observed = PolicyObservation(evidence=evidence, policies=register(workspace))
+    return entry.policy, policy_faults(entry, observed, at)
 
 
 def policy_show_impl(scope: ReleaseScope, policy: str, at: str) -> str:

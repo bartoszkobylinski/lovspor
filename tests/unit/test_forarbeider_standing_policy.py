@@ -4,76 +4,38 @@ Synthetic evidence only, written owner-only under ``tmp_path``.
 """
 
 import hashlib
-import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
-from typer.testing import CliRunner
 
-from lovspor.cli import app
 from lovspor.forarbeider import release_commands
 from lovspor.forarbeider.policy_commands import policy_show_impl
 from lovspor.forarbeider.policy_models import (
-    PolicyEvidence,
-    PolicyEvidenceKind,
+    PolicyObservation,
     PolicyRevocation,
+    RegisteredPolicy,
     StandingPolicy,
     policy_faults,
 )
 from lovspor.forarbeider.release_models import record_text
 from tests.unit.cli_output import said
-from tests.unit.forarbeider_release_support import PRIVATE_MARKER, private, said_digest
-
-OWNER = "owner-b"
-DECIDED = "2100-04-04T12:00:00Z"
-VALID = "2100-04-04T12:00:00Z/2100-07-01T00:00:00Z"
-PHRASE = "sign standing policy regjeringen.no prop-l,prop-ls until 2100-07-01T00:00:00+00:00\n"
-KINDS = tuple(kind.value for kind in PolicyEvidenceKind)
-
-
-class PolicyDesk:
-    """A release workspace and one private evidence file per policy kind."""
-
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        self.workspace = root / "workspace"
-        self.ledger = root / "ledger"
-        self.evidence = {
-            kind: private(root / "evidence" / f"{kind}.txt", f"{PRIVATE_MARKER} {kind}".encode())
-            for kind in KINDS
-        }
-
-    def invoke(self, args: list[str], phrase: str | None = None) -> Any:
-        head = ["ops", "forarbeider-release", "--workspace", str(self.workspace)]
-        head += ["--ledger", str(self.ledger), "policy"]
-        return CliRunner().invoke(app, [*head, *args], input=phrase)
-
-    def sign(self, *, options: list[str] | None = None, phrase: str = PHRASE) -> Any:
-        evidence = [f"{kind}={path}" for kind, path in self.evidence.items()]
-        given = options if options is not None else _evidence_options(evidence)
-        actor = ["--decided", f"{OWNER}@{DECIDED}", "--valid", VALID]
-        return self.invoke(["sign", *given, *actor], phrase)
-
-    def signed(self) -> str:
-        result = self.sign()
-        assert result.exit_code == 0, result.output
-        return said_digest(result.output, "policy")
-
-    def show(self, sha: str, at: str) -> Any:
-        return self.invoke(["show", sha, "--at", at])
-
-    def record(self, sha: str) -> dict[str, Any]:
-        loaded: dict[str, Any] = json.loads(
-            (self.workspace / "policies" / f"{sha}.json").read_text()
-        )
-        return loaded
-
-
-def _evidence_options(values: list[str]) -> list[str]:
-    return [token for value in values for token in ("--evidence", value)]
+from tests.unit.forarbeider_policy_support import (
+    DECIDED,
+    KINDS,
+    OWNER,
+    UNTIL,
+    VALID,
+    PolicyDesk,
+    shown_phrase,
+)
+from tests.unit.forarbeider_policy_support import evidence_options as _evidence_options
+from tests.unit.forarbeider_policy_support import (
+    standing_policy as _policy,
+)
+from tests.unit.forarbeider_release_support import PRIVATE_MARKER, private
 
 
 @pytest.fixture
@@ -91,8 +53,8 @@ def test_sign_stores_the_policy_under_its_digest(desk: PolicyDesk) -> None:
     assert [item["kind"] for item in record["evidence"]] == list(KINDS)
     assert record["owner"] == OWNER
     assert record["clears"] == "unflagged_chapters"
-    assert record["unflagged_published_unread"] is True
-    assert record["git_permanence_accepted"] is True
+    assert "unflagged_published_unread" not in record
+    assert "git_permanence_accepted" not in record
     assert record["legal_sufficiency_decided_by_code"] is False
     assert record["identity_authenticated"] is False
 
@@ -169,14 +131,7 @@ def test_sign_refuses_a_wrong_phrase(desk: PolicyDesk) -> None:
 
 
 def test_sign_refuses_a_window_that_ends_before_it_starts(desk: PolicyDesk) -> None:
-    evidence = [f"{kind}={path}" for kind, path in desk.evidence.items()]
-    actor = [
-        "--decided",
-        f"{OWNER}@{DECIDED}",
-        "--valid",
-        "2100-07-01T00:00:00Z/2100-04-04T12:00:00Z",
-    ]
-    result = desk.invoke(["sign", *_evidence_options(evidence), *actor], PHRASE)
+    result = desk.sign(valid="2100-07-01T00:00:00Z/2100-04-04T12:00:00Z")
     assert result.exit_code == 1
     assert said("refused: release_invalid", result.output)
 
@@ -240,31 +195,28 @@ def test_show_refuses_an_edited_policy_record(desk: PolicyDesk) -> None:
     assert said("refused: release_record_corrupt", result.output)
 
 
-def _policy(**changes: Any) -> StandingPolicy:
-    fields: dict[str, Any] = {
-        "schema_version": 1,
-        "record_type": "forarbeider_standing_policy",
-        "source_provider": "regjeringen.no",
-        "document_types": ("prop-l", "prop-ls"),
-        "evidence": tuple(
-            PolicyEvidence(kind=kind, path=f"/p/{kind}", sha256="a" * 64, size_bytes=1)
-            for kind in PolicyEvidenceKind
-        ),
-        "owner": OWNER,
-        "decided_at": "2100-04-04T12:00:00Z",
-        "valid_from": "2100-04-05T00:00:00Z",
-        "valid_until": "2100-07-01T00:00:00Z",
-        "clears": "unflagged_chapters",
-        "unflagged_published_unread": True,
-        "git_permanence_accepted": True,
-        "legal_sufficiency_decided_by_code": False,
-        "identity_authenticated": False,
-    }
-    return StandingPolicy.model_validate({**fields, **changes})
-
-
 def _intact(policy: StandingPolicy) -> dict[str, str | None]:
     return {item.path: item.sha256 for item in policy.evidence}
+
+
+def _revocation(at: str, sha: str = "f" * 64) -> PolicyRevocation:
+    return PolicyRevocation(
+        schema_version=1,
+        record_type="forarbeider_standing_policy_revocation",
+        policy_sha256=sha,
+        owner=OWNER,
+        revoked_at=datetime.fromisoformat(at),
+    )
+
+
+def _entry(
+    policy: StandingPolicy, revocation: PolicyRevocation | None = None, sha: str = "f" * 64
+) -> RegisteredPolicy:
+    return RegisteredPolicy(sha256=sha, policy=policy, revocation=revocation)
+
+
+def _observed(policy: StandingPolicy, *register: RegisteredPolicy) -> PolicyObservation:
+    return PolicyObservation(evidence=_intact(policy), policies=register)
 
 
 @pytest.mark.parametrize(
@@ -279,7 +231,7 @@ def _intact(policy: StandingPolicy) -> dict[str, str | None]:
 )
 def test_policy_faults_at_the_window_edges(at: str, faults: tuple[str, ...]) -> None:
     policy = _policy()
-    found = policy_faults(policy, False, _intact(policy), datetime.fromisoformat(at))
+    found = policy_faults(_entry(policy), _observed(policy), datetime.fromisoformat(at))
     assert found == faults
 
 
@@ -290,7 +242,9 @@ def test_policy_faults_name_revocation_and_each_evidence_fault_once() -> None:
     evidence[first], evidence[second] = None, "b" * 64
     del evidence[third]
     at = datetime.fromisoformat("2100-05-01T00:00:00Z")
-    assert policy_faults(policy, True, evidence, at) == (
+    revocation = _revocation("2100-04-05T00:00:00Z")
+    observed = PolicyObservation(evidence=evidence, policies=())
+    assert policy_faults(_entry(policy, revocation), observed, at) == (
         "policy_evidence_changed",
         "policy_evidence_unavailable",
         "policy_revoked",
@@ -304,8 +258,8 @@ def test_policy_faults_name_revocation_and_each_evidence_fault_once() -> None:
         {"document_types": ("prop-l", "prop-l")},
         {"document_types": ()},
         {"valid_until": "2100-04-05T00:00:00Z"},
-        {"unflagged_published_unread": False},
-        {"git_permanence_accepted": False},
+        {"unflagged_published_unread": True},
+        {"git_permanence_accepted": True},
         {"identity_authenticated": True},
         {"source_provider": "lovdata.no"},
     ],
@@ -327,14 +281,16 @@ def test_the_policy_is_stored_in_utc() -> None:
     assert policy.decided_at == datetime.fromisoformat("2100-04-04T12:00:00Z")
 
 
-def test_sign_reordered_evidence_is_an_idempotent_record(desk: PolicyDesk) -> None:
+def test_sign_reordered_evidence_is_the_same_record_and_never_a_second(desk: PolicyDesk) -> None:
+    evidence = [f"{kind}={path}" for kind, path in reversed(desk.evidence.items())]
+    reordered = desk.invoke(desk.sign_args(_evidence_options(evidence), DECIDED, VALID), "\n")
+    assert shown_phrase(reordered.output) == shown_phrase(desk.shown().output)
     sha = desk.signed()
     path = desk.workspace / "policies" / f"{sha}.json"
     original = path.read_bytes()
-    evidence = [f"{kind}={path}" for kind, path in reversed(desk.evidence.items())]
     result = desk.sign(options=_evidence_options(evidence))
-    assert result.exit_code == 0, result.output
-    assert said_digest(result.output, "policy") == sha
+    assert result.exit_code == 1, result.output
+    assert said(f"refused: policy_overlap: {sha}", result.output)
     assert path.read_bytes() == original
     assert hashlib.sha256(original).hexdigest() == sha
     assert list((desk.workspace / "policies").iterdir()) == [path]
@@ -443,3 +399,78 @@ def test_show_returns_the_complete_policy_summary(desk: PolicyDesk) -> None:
         "state usable; identity_authenticated=false",
     ]
     assert summary == "\n".join(expected)
+
+
+def _sha12(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+
+
+def test_sign_shows_every_bound_digest_and_the_record_digest_before_the_prompt(
+    desk: PolicyDesk,
+) -> None:
+    shown = desk.shown()
+    assert shown.exit_code == 1
+    phrase = shown_phrase(shown.output)
+    prefix = phrase.split()[3]
+    assert phrase == f"sign standing policy {prefix} regjeringen.no prop-l,prop-ls until {UNTIL}"
+    assert said(f"policy {prefix} source regjeringen.no types prop-l,prop-ls", shown.output)
+    assert said(f"valid 2100-04-04T12:00:00+00:00/{UNTIL}", shown.output)
+    for kind, path in desk.evidence.items():
+        assert said(f"evidence {kind} {_sha12(path)}", shown.output), kind
+    assert not (desk.workspace / "policies").exists()
+    sha = desk.signed()
+    assert sha.startswith(prefix)
+    stored = desk.workspace / "policies" / f"{sha}.json"
+    assert hashlib.sha256(stored.read_bytes()).hexdigest().startswith(prefix)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_phrase_changes_with_any_evidence_byte(desk: PolicyDesk, kind: str) -> None:
+    before = shown_phrase(desk.shown().output)
+    path = desk.evidence[kind]
+    path.write_bytes(path.read_bytes()[:-1] + b"X")
+    after = shown_phrase(desk.shown().output)
+    assert before != after
+    assert after.startswith("sign standing policy ")
+    result = desk.sign(phrase=f"{before}\n")
+    assert result.exit_code == 1
+    assert said("refused: review_not_interactive: policy", result.output)
+    assert not (desk.workspace / "policies").exists()
+
+
+def test_the_phrase_changes_with_the_decision_moment(desk: PolicyDesk) -> None:
+    first = shown_phrase(desk.shown().output)
+    later = shown_phrase(desk.shown(decided="2100-04-04T12:00:01Z").output)
+    assert first.split()[3] != later.split()[3]
+
+
+def test_sign_requires_its_own_acceptance_file_for_unread_publication(desk: PolicyDesk) -> None:
+    assert "unflagged_unread_acceptance" in KINDS
+    sha = desk.signed()
+    record = desk.record(sha)
+    kinds = [item["kind"] for item in record["evidence"]]
+    assert "unflagged_unread_acceptance" in kinds
+    acceptance = desk.evidence["unflagged_unread_acceptance"]
+    bound = next(i for i in record["evidence"] if i["kind"] == "unflagged_unread_acceptance")
+    assert bound["sha256"] == hashlib.sha256(acceptance.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("same", ["path", "bytes"])
+def test_sign_refuses_one_file_bound_for_two_kinds(desk: PolicyDesk, same: str) -> None:
+    rights = desk.evidence["source_rights"]
+    if same == "path":
+        desk.evidence["publication_purpose"] = rights
+    else:
+        desk.evidence["publication_purpose"].unlink()
+        private(desk.evidence["publication_purpose"], rights.read_bytes())
+    result = desk.sign()
+    assert result.exit_code == 1, result.output
+    assert said("refused: release_invalid: evidence", result.output)
+    assert not (desk.workspace / "policies").exists()
+
+
+def test_the_policy_model_refuses_one_digest_for_two_kinds() -> None:
+    evidence = list(_policy().evidence)
+    evidence[1] = evidence[1].model_copy(update={"sha256": evidence[0].sha256})
+    with pytest.raises(ValidationError, match="one file for two kinds"):
+        _policy(evidence=tuple(evidence))
