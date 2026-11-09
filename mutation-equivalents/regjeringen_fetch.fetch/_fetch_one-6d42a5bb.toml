@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/fetch.py"
+symbol = "_fetch_one"
+registered = "2026-11-09, PR #852, from run 42661488989 (mutation artifact at commit 06481dad)"
+mutation = """
+-            "GET", url, headers=_headers(), timeout=_timeout(session), follow_redirects=False
++            "GET", url, headers=_headers(), timeout=_timeout(session), follow_redirects=None
+"""
+justification = """
+httpx `Client.send` substitutes the client default only for the
+`USE_CLIENT_DEFAULT` sentinel; any other value is passed through, and the
+redirect loop tests it by truthiness (`if follow_redirects:`). None is not the
+sentinel and is falsy, so it refuses to follow a redirect exactly like False,
+even on a client built with `follow_redirects=True`. Argued from the
+dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_httpx_follow_redirects_none_does_not_follow"

@@ -41,6 +41,7 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from lovspor.innsyn.sender import Sender
+from lovspor.observatory.fetch import CaptureSettings, RateLimiter
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
 from lovspor.parsing.xml_normalizer import safe_parser
@@ -856,3 +857,41 @@ def test_lxml_fragment_without_a_doctype_resolves_no_entity_with_either_parser()
     assert etree.tostring(etree.fromstring(plain, parser=None)) == etree.tostring(
         etree.fromstring(plain, parser=safe_parser(remove_blank_text=False))
     )
+
+
+def test_assumption_httpx_follow_redirects_none_does_not_follow() -> None:
+    """Pins the argument that waives ``follow_redirects=False`` ->
+    ``follow_redirects=None`` in ``regjeringen_fetch/fetch.py::_fetch_one``:
+    httpx swaps in the client default only for its ``USE_CLIENT_DEFAULT``
+    sentinel and tests anything else by truthiness, so ``None`` refuses a
+    redirect exactly like ``False`` — even on a client that follows by default."""
+    seen: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if request.url.path == "/from":
+            return httpx.Response(302, headers={"Location": "https://example.org/to"})
+        return httpx.Response(200)
+
+    transport = httpx.MockTransport(answer)
+    with httpx.Client(transport=transport, follow_redirects=True) as client:
+        for value in (False, None):
+            with client.stream("GET", "https://example.org/from", follow_redirects=value) as reply:
+                assert reply.status_code == 302, value
+        assert seen == ["https://example.org/from"] * 2
+        assert client.get("https://example.org/from").status_code == 200
+
+
+def test_assumption_rate_limiter_ignores_the_interval_on_a_hosts_first_wait() -> None:
+    """Pins the argument that waives ``wait(HOST, session.delay)`` ->
+    ``wait(HOST, None)`` in ``regjeringen_fetch/fetch.py::_read_robots``, which
+    always runs on a fresh limiter: a host's first ``wait`` sleeps nothing,
+    never reads ``minimum_interval``, and records the same timestamp, so the
+    next request is spaced the same whatever the first call was given."""
+    for interval in (0.0, None):
+        slept: list[float] = []
+        ticks = iter([10.0, 11.0, 11.0]).__next__
+        limiter = RateLimiter(CaptureSettings(monotonic=ticks, sleep=slept.append))
+        assert limiter.wait("www.regjeringen.no", interval) == 0.0  # type: ignore[arg-type]
+        assert limiter.wait("www.regjeringen.no", 5.0) == 4.0
+        assert slept == [4.0], interval
