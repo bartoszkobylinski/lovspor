@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/baseline.py"
+symbol = "_excepted"
+registered = "2026-11-09, PR #848, from the mutation artifact at commit fb737255"
+mutation = """
+-        quote_sha256=sha256(quote.encode("utf-8")).hexdigest(),
++        quote_sha256=sha256(quote.encode("UTF-8")).hexdigest(),
+"""
+justification = """
+The mutated name is passed to ``str.encode`` and nowhere else. Python's codec
+registry normalises an encoding name before lookup: case is folded and hyphens
+and underscores are interchangeable (`encodings.normalize_encoding`), so
+``"x".encode("UTF-8")`` and ``"x".encode("utf-8")`` are the same bytes for every
+input and the digest is the same. Documented language behaviour of
+`codecs.lookup`, not a dependency's; the same argument is already registered
+for atomic_io.atomic_write_text and legaltime.archive.index_archive. 
+"""

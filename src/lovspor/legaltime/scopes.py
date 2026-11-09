@@ -293,10 +293,11 @@ def _item_units(rest: str) -> _Item | None:
     if not _UNIT_START.match(tail):
         if not tail.lower().startswith("lov ") or "§" not in tail:
             return None  # neither a unit listing nor an inline act citation before one
-        act = act_refid(tail[: tail.index("§")])  # ``lov 6. juni 2014 nr. 19 om … § 2 …``
+        cited, mark, listing = tail.partition("§")  # ``lov 6. juni 2014 nr. 19 om … § 2 …``
+        act = act_refid(cited)
         if act is None:
             return None  # an act named without a citable date: whose units these are is unstated
-        tail = tail[tail.index("§") :]
+        tail = mark + listing
     units = parse_units(tail)
     return _Item(units=units, act=act) if units is not None else None
 

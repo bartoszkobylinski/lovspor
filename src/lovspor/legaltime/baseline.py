@@ -287,12 +287,10 @@ class _Fold:
             self.default = _settle(self.default, read.full_date, read.document, read.title)
 
     def _partial(self, read: _Decision) -> None:
-        scopes = read.scopes
+        scopes = read.scopes or ()
         if read.unreadable is not None and read.unreadable != NAMES_NOTHING:
             return self.unsettle_all(read.document, read.unreadable)
-        if not scopes:
-            return self.unsettle_all(read.document, OUTSIDE)
-        if not any(self._names_act(scope) for scope in scopes):
+        if not any(self._names_act(scope) for scope in scopes):  # no scope at all names nothing
             return self.unsettle_all(read.document, NAMES_NOTHING)
         for scope in scopes:
             self._scope(read.document, scope)

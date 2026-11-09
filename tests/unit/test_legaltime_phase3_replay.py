@@ -238,3 +238,23 @@ def test_staged_replay_is_repeatable_without_mutating_inputs() -> None:
     assert replay(ACT_DOC, COMMENCEMENT, EVENTS, date(2023, 6, 30)).model_dump_json() == before
     assert (ACT_DOC.model_dump_json(), COMMENCEMENT.model_dump_json()) == documents
     assert [e.model_dump_json() for e in EVENTS] == events
+
+
+def test_a_location_outside_the_act_does_not_hide_a_flagged_ledd_listed_after_it() -> None:
+    """``_substitutes_flagged`` skips a location the act has no provision for and goes on reading:
+    the flagged ledd named after it still withholds the substitution."""
+    op = _op(
+        13,
+        "substitute_term",
+        locations="§ 99-9 første ledd, § 15-7 fjerde ledd",
+        term_old="Fire",
+        term_new="Endret",
+    )
+    events = [INSERT_LEDD_4, _event(13, op, date(2023, 3, 1))]
+    before = replay(ACT_DOC, COMMENCEMENT, events, date(2023, 6, 30))
+    assert before.withheld == ("op13",)
+    assert {p.key: p for p in before.provisions}["§15-7"].ledd[3].text == "Fire."
+    after = replay(ACT_DOC, COMMENCEMENT, events, date(2023, 7, 1))
+    assert after.withheld == () and after.applied == ("op1",)
+    assert after.unresolved == (("op13", "substitution locations unresolved: ['§99-9']"),)
+    assert {p.key: p for p in after.provisions}["§15-7"].ledd[3].text == "Fire."

@@ -6,12 +6,14 @@ that names the value it changed.
 """
 
 from datetime import date, datetime
+from types import SimpleNamespace
 
 import pytest
 
 from lovspor.legaltime.baseline import (
     BELOW_LEDD,
     INSTRUMENT_UNDATED,
+    NAMES_NOTHING,
     Commencement,
     UnitState,
     UnitTiming,
@@ -466,3 +468,22 @@ def test_full_conditional_and_unreadable_decisions_fold_into_the_default() -> No
     )
     refused = baseline_commencement(act, (unreadable,), [])
     assert refused.default.status == "unresolved" and refused.default.reason
+
+
+def test_a_partial_read_without_a_single_scope_names_nothing_of_the_act() -> None:
+    """``_Decision`` marks a scopeless partial read unreadable before the fold sees it; the fold
+    still answers for the shape on its own: no scope names anything, so every unit is unsettled
+    with the decision as proof."""
+    fold = _Fold(_act(), {})
+    decision = _decision(
+        "forskrift/2022-10-14-1741",
+        "Delt ikraftsetting av lov 18. juni 2021 nr. 97 om barnevern (barnevernsloven)",
+        "2023-01-01",
+        "x",
+        "2022-10-14 14:40",
+    )
+    read = SimpleNamespace(scopes=(), unreadable=None, document=decision)
+    fold._partial(read)  # type: ignore[arg-type]
+    assert (fold.default.status, fold.default.reason) == ("unresolved", NAMES_NOTHING)
+    assert fold.default.proofs[-1].refid == "forskrift/2022-10-14-1741"
+    assert all(t.reason == NAMES_NOTHING for t in fold.units.values())
