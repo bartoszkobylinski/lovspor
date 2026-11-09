@@ -144,7 +144,7 @@ to read the two instruments as staged. Not decided here.
 operations withheld; 2015-09-30: `not_yet_in_force`, 614 withheld; 2015-10-01: `replayed`, 376
 applied, 343 unresolved, 128 act-level problems, 358 provisions; 2026-11-06: 463 applied, 371
 unresolved, 143 act-level, 381 provisions against 400 in the oracle. **Sections proven: 0 of 400
-(blanket); behind the blanket 226 of 400; ledd 0 of 700.**
+(blanket); behind the blanket 226 of 400; ledd 0 of 700.** The full report at this ladder plus 2026-11-06 (same command as §1 with `--act lov/2005-05-20-28` and `--at 2008-03-06 --at 2008-03-07 --at 2015-09-30 --at 2015-10-01 --at 2026-11-06`) is 11.6 MB and is not committed; its sha256 is `169f7aaf6087b5f25a53a5fc4b0861a2abb45d019e4dd74412903d196eed3635`, and `tests/integration/test_legaltime_phase3.py` rebuilds the four intermediate states and asserts their status, withheld, applied and provision counts on every run against the pinned archives.
 
 **Why the text does not reach 2015.** The 2008 and 2009 laws renumber the enacting §§ 101–102 ("§
 101 i lov 20. mai 2005 nr. 28 blir § 401, og skal lyde slik:", "Nåværende § 401 blir § 411 som

@@ -111,7 +111,16 @@ def test_straffeloven_is_commenced_by_its_ikraftsettingslov_and_chapter_16_contr
         "forskrift/2008-03-07-225",
         "lov/2015-06-19-65",
     }
-    states = build_report(evidence, [date(2015, 9, 30), date(2015, 10, 1)], None, ARCHIVES)[
-        "states"
+    ladder = [date(2008, 3, 6), date(2008, 3, 7), date(2015, 9, 30), date(2015, 10, 1)]
+    states = build_report(evidence, ladder, None, ARCHIVES)["states"]
+    assert [s["status"] for s in states] == ["not_yet_in_force"] * 3 + ["replayed"]
+    # The 2008 decision dates chapter 16's operations the day it is published, the act is not in
+    # force, so they wait: 4 withheld the day before, 105 the day of; by 2015-09-30 every dated
+    # operation waits (614); on 2015-10-01 the text exists (358 provisions) and 376 apply.
+    assert [(len(s["withheld"]), len(s["applied"]), len(s["provisions"])) for s in states] == [
+        (4, 0, 0),
+        (105, 0, 0),
+        (614, 0, 0),
+        (0, 376, 358),
     ]
-    assert [s["status"] for s in states] == ["not_yet_in_force", "replayed"]
+    assert all(s["unresolved_commencement"] == [] for s in states)
