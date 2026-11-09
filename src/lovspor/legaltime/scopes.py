@@ -181,9 +181,6 @@ class Scope(Frozen):
             return "spans" if "spans" in found else "unknown"
         return "excluded" if "covers" in found else "covers"
 
-    def covers(self, operation: Operation) -> bool:
-        return self.reach(operation) == "covers"
-
 
 def _narrowed(
     units: tuple[Unit, ...], operation: Operation, chapter_of: ChapterOf | None
