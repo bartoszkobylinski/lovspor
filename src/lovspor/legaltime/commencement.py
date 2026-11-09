@@ -16,7 +16,9 @@ from datetime import date, datetime
 from hashlib import sha256
 from typing import Literal
 
-from lovspor.legaltime.document import Document, Frozen
+from pydantic import Field
+
+from lovspor.legaltime.document import Document, Frozen, Node, list_statements
 from lovspor.legaltime.instructions import _INTRO, Operation, classify
 from lovspor.legaltime.scopes import (
     _PART_LIST,
@@ -36,6 +38,7 @@ from lovspor.legaltime.text import (
     section_key_of,
     split_sentences,
 )
+from lovspor.legaltime.units import ChapterOf
 
 TimingStatus = Literal["dated", "pending", "unresolved"]
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -93,7 +96,7 @@ _CITED = re.compile(
 )  # a cited act or regulation by date, also under its short title (``straffeloven 22. mai 1902``)
 _COMMENCEMENT_PHRASE = re.compile(rf"{_VERB}|\bi\s+kraft\b|\bvirkning\s+fr[aå]\b", re.I)
 _EXCEPTION_NEW_SECTION = re.compile(
-    r"^Ny\s+(?P<sec>§\s*\d+[A-Z]?(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?)(?:\s+i\s+\S+)?\s+trer\s+likevel\s+i\s+kraft\b",
+    r"^Ny\s+(?P<sec>§\s*\d+(?:[A-Z]|\s[A-Z](?=-))?(?:-\d+)?(?:\s*[a-zæøå](?![a-zæøå]))?)(?:\s+i\s+\S+)?\s+trer\s+likevel\s+i\s+kraft\b",
     re.I,
 )
 _EXCEPTION_NAMED_SECTION = re.compile(
@@ -125,6 +128,20 @@ _TRANSITIONAL = re.compile(r"\bgjeld(?:er)?\s+(?:bare|berre|også|òg|først|fyr
 _CONTINUES = re.compile(
     r"\b(?:held|holder|heldt)\s+fram\s+å\s+gjelde\b|\bfortsetter\s+å\s+gjelde\b", re.I
 )
+
+
+class Decisions(Frozen):
+    """The commencement decisions in reach, with the act's chapter map for placing scopes."""
+
+    documents: tuple[Document, ...]
+    chapter_of: dict[str, str] = Field(default_factory=dict)  # section key → chapter of the act
+
+
+DecisionsLike = tuple[Document, ...] | Decisions
+
+
+def _decisions(decisions: DecisionsLike) -> Decisions:
+    return decisions if isinstance(decisions, Decisions) else Decisions(documents=decisions)
 
 
 class Proof(Frozen):
@@ -358,12 +375,18 @@ def is_decision_for(document: Document, law_refid: str) -> bool:
     )
 
 
+def _statements(node: Node) -> list[str]:
+    """A node's sentences; a lead-in with a list is one statement per item (``list_statements``)."""
+    listed = list_statements(node.ledd) if node.ledd is not None else None
+    return listed if listed is not None else split_sentences(node.text)
+
+
 def _blocks(decision: Document) -> list[tuple[str | None, list[str]]]:
     """The decision's sentences grouped under the title sentences that open each law's block."""
     blocks: list[tuple[str | None, list[str]]] = [(None, [])]
     for part in decision.parts:
         for node in part.nodes:
-            for sentence in split_sentences(node.text):
+            for sentence in _statements(node):
                 if _DECISION_TITLE.match(sentence) and act_refid(sentence) is not None:
                     blocks.append((sentence, []))
                 elif not _informational(sentence):
@@ -457,8 +480,11 @@ SEVERAL = 2  # from two decisions on, their order matters
 class _Decision:
     """One decision read once, for one law: its block's scopes or date, or why it is unreadable."""
 
-    def __init__(self, decision: Document, law: Document, ordered: bool) -> None:
+    def __init__(
+        self, decision: Document, law: Document, ordered: bool, chapter_of: ChapterOf | None = None
+    ) -> None:
         self.document = decision
+        self.chapter_of = chapter_of or {}
         self.title = decision.header.title
         self.block_problem: str | None = None
         block = _block_for(decision, law.header.refid)
@@ -518,15 +544,17 @@ class _Decision:
             return "full decision without a readable date"
         return None
 
-    def answer(self, op: Operation) -> tuple[date | None, str] | None:
-        """(date, quote) for the operation, (None, title) when not reached, None on a conflict."""
+    def answer(self, op: Operation) -> tuple[date | None, str] | str:
+        """(date, quote) for the operation; (None, title) when not reached; a reason on conflict."""
         if self.scopes is None:
             return self.full_date, self.title
-        scopes = _scopes_for(op, self.scopes)
+        scopes = _scopes_for(op, self.scopes, self.chapter_of)
+        if isinstance(scopes, str):
+            return scopes
         if not scopes:
             return None, self.title
         if len({scope.when for scope in scopes}) > 1:
-            return None
+            return CONFLICT
         return scopes[-1].when, scopes[-1].quote
 
 
@@ -539,8 +567,8 @@ def _fold(current: Timing, read: _Decision, op: Operation, law: str) -> Timing |
     if read.conditional:
         return _conditional(current, read.document)
     answer = read.answer(op)
-    if answer is None:
-        return _unsettled(current, read.document, CONFLICT)
+    if isinstance(answer, str):
+        return _unsettled(current, read.document, answer)
     when, quote = answer
     if when is None and not _decision_dated(current, law):
         return None  # a partial decision that does not reach this operation says nothing about it
@@ -556,12 +584,13 @@ def _apply_decision(
             timings[op.id] = folded
 
 
-def _citing(law: Document, decisions: tuple[Document, ...]) -> list[_Decision]:
+def _citing(law: Document, decisions: DecisionsLike) -> list[_Decision]:
     """The decisions citing the law, in publication order; unordered ones are marked unreadable."""
-    cited = [d for d in decisions if is_decision_for(d, law.header.refid)]
+    context = _decisions(decisions)
+    cited = [d for d in context.documents if is_decision_for(d, law.header.refid)]
     ordered = len(cited) < SEVERAL or all(d.header.published_at is not None for d in cited)
     return [
-        _Decision(d, law, ordered or d.header.published_at is not None)
+        _Decision(d, law, ordered or d.header.published_at is not None, context.chapter_of)
         for d in sorted(cited, key=lambda d: (d.header.published_at or datetime.min, d.member))
     ]
 
@@ -570,7 +599,7 @@ def resolve_timings(
     law: Document,
     clauses: tuple[str, ...],
     operations: tuple[Operation, ...],
-    decisions: tuple[Document, ...],
+    decisions: DecisionsLike,
 ) -> dict[str, Timing]:
     """Every operation's timing from the law, its clause, and the decisions citing it."""
     timings = clause_timings(law, clauses, operations)
@@ -598,7 +627,7 @@ def _conditional(current: Timing, decision: Document) -> Timing:
     )
 
 
-def baseline_timing(act: Document, decisions: tuple[Document, ...]) -> Timing:
+def baseline_timing(act: Document, decisions: DecisionsLike) -> Timing:
     """When the act itself commenced: its header, folded with every full decision citing it."""
     timing = header_timing(act)
     if timing.status != "pending":

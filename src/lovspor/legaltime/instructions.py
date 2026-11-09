@@ -15,6 +15,7 @@ from lovspor.legaltime.text import (
     ORDINAL_ALT,
     ORDINALS,
     act_refid,
+    chapter_key,
     ordinal,
     section_key,
     section_key_of,
@@ -28,8 +29,8 @@ OpKind = Literal[
     "unsupported",
 ]  # fmt: skip
 
-_SEC = (
-    r"§\s*\d+[A-Z]?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"  # "i" is the preposition, not a letter
+_SEC = (  # "i" is the preposition, not a letter; ``§ 9 A-1`` carries a spaced chapter letter
+    r"§\s*\d+(?:[A-Z]|\s[A-Z](?=-))?(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
 )
 _SECNUM = r"\d+(?:-\d+)?(?:\s*[a-hj-zæøå](?![a-zæøå]))?"
 _SECS = rf"§§?\s*(?P<s1>{_SECNUM})\s+(?P<sj>og|til)\s+(?P<s2>{_SECNUM})"
@@ -41,7 +42,13 @@ _LEDD = (
 _PUNKT = rf"(?:(?P<p1>{_ORD})(?:\s+(?P<pj>og|til)\s+(?P<p2>{_ORD}))?|(?P<plast>siste))\s+punktum"
 _NEW = r"ny(?:tt|e)?"
 _ITEM = r"(?:bokstav\s+(?P<b>[a-zæøå])|nr\.\s+(?P<bn>\d+))"  # one list item, by letter or number
-_CHAPTER = re.compile(rf"^{_NEW}\s+kapittel\s+\S+\s+(?:skal\s+)?lyde(?:\s+slik)?:$", re.I)
+_STRUCTURE = re.compile(
+    rf"^(?:{_NEW}\s+kapit(?:te)?l(?:er)?\s+(?:\d+(?:\s?[A-Za-z])?|\S+)(?:\s+til\s+\S+)?"
+    r"(?:\s+plasseres\s+i\s+(?P<in>\w+)\s+del)?"
+    rf"|(?P<part>\w+)\s+del),?\s+(?:og\s+)?(?:skal\s+)?lyde(?:\s+slik)?:$",
+    re.I,
+)  # a new chapter, new chapters placed in a part, or a whole part rewritten
+_PART_WORDS = {"annen": 2}  # the one part ordinal the ordinal table does not spell this way
 _LYDE = r"(?:skal\s+)?lyde(?:\s+slik)?:"
 _REPEAL = (
     r"(?:oppheves|opphevast|blir\s+oppheva|vert\s+oppheva|blir\s+opphevet|strykes"
@@ -54,6 +61,10 @@ _INTRO = re.compile(
     r"|(?P<inline>(?:oppheves|opphevast)\s+§.*)|(?P<repeal>oppheves|opphevast|blir\s+oppheva|vert\s+oppheva)\.?)$",
     re.S,
 )
+_INTRO_SLIK = re.compile(
+    r"^(?:\d+\.\s*)?(?:I\s+)?[Ll]ov\s+(?:av\s+)?(?P<date>\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?)\b"
+    r"[^:]*?\s+(?:endres|endrast|vert\s+endra|blir\s+endra)\s+slik:$"
+)  # ``Lov 20. mai 2005 nr. 28 om straff endres slik:`` opens an amendment block too
 _COMMENCEMENT_SHAPED = re.compile(
     r"\bi\s+kraft\b|\bgjeld(?:er)?\s+fr[aå]\b|\bte[kr]\s+til\s+å\s+gjelde\b|\btar\s+til\s+å\s+gjelde\b",
     re.I,
@@ -233,14 +244,25 @@ def _addressed_act(change_part: tuple[str, ...]) -> str | None:
 _COMMENCEMENT_HEADING = re.compile(r"ikraft|iverkset|i\s+kraft", re.I)
 
 
+def _is_intro(text: str) -> bool:
+    return _INTRO.match(text) is not None or _INTRO_SLIK.match(text) is not None
+
+
 def _commencement_provisions(document: Document) -> list[str]:
-    """An enacting act states its commencement in a provision headed Ikrafttredelse or alike."""
-    return [
-        ledd.text
-        for provision in document.provisions
-        if _COMMENCEMENT_HEADING.search(provision.heading)
-        for ledd in provision.ledd
-    ]
+    """An enacting act states its commencement in a provision headed Ikrafttredelse or alike.
+
+    From the first amendment intro on, a provision's ledd are an instruction and its
+    payload about another act (straffelovens ikraftsettingslov § 1), never this act's clause.
+    """
+    texts: list[str] = []
+    for provision in document.provisions:
+        if not _COMMENCEMENT_HEADING.search(provision.heading):
+            continue
+        for ledd in provision.ledd:
+            if _is_intro(ledd.text):
+                break
+            texts.append(ledd.text)
+    return texts
 
 
 def _pairs(match: re.Match[str]) -> tuple[tuple[str, str], ...]:
@@ -261,7 +283,7 @@ def _instruction_like(node: Node) -> bool:
     if node.kind != "ledd":
         return False
     text = node.text
-    return bool(_INTRO.match(text) or _SUBSTITUTE.match(text)) or classify(text)[0] != "unsupported"
+    return bool(_is_intro(text) or _SUBSTITUTE.match(text)) or classify(text)[0] != "unsupported"
 
 
 def _next_instruction(nodes: list[Node], start: int) -> int:
@@ -319,23 +341,33 @@ class _Reader:
     ) -> bool:
         """True when ``payload`` was consumed by an instruction."""
         text = node.text
-        quoted: str | tuple[str, str] = text
         substitute = _SUBSTITUTE.match(text)
         if substitute is not None:
             self.substitution = _pairs(substitute)
             return False
         if self.substitution is not None and self._substitution_item(part, index, node):
             return False
-        intro = _INTRO.match(text)
-        if intro is not None:
-            self.substitution, self.act = None, act_refid(f"lov {intro.group('date')}")
-            rest = _intro_rest(intro)
-            if _INTRO_ONLY.match(rest):
-                return False
-            quoted = (rest, node.text) if intro.group("inline") else rest
+        quoted = self._open_block(text)
+        if quoted is None:
+            return False
         where = (part[0], f"{part[1]}:{index}", node.host_section)
         self._instruction(where, quoted, node.change_part, payload)
         return True
+
+    def _open_block(self, text: str) -> str | tuple[str, str] | None:
+        """Name the act an intro opens; the sentence(s) to classify, or None for an intro alone."""
+        slik = _INTRO_SLIK.match(text)
+        if slik is not None:
+            self.substitution, self.act = None, act_refid(f"lov {slik.group('date')}")
+            return None
+        intro = _INTRO.match(text)
+        if intro is None:
+            return text
+        self.substitution, self.act = None, act_refid(f"lov {intro.group('date')}")
+        rest = _intro_rest(intro)
+        if _INTRO_ONLY.match(rest):
+            return None
+        return (rest, text) if intro.group("inline") else rest
 
     def _substitution_item(self, part: tuple[str, str], index: int, node: Node) -> bool:
         act = act_refid(node.text)
@@ -388,9 +420,9 @@ class _Reader:
     ) -> None:
         read, quote = sentence  # the sentence as classified, and as the member announced it
         kind, groups = classify(read)
-        if payload and _CHAPTER.match(read) and any(n.provision for n in payload):
-            self.operations.extend(_chapter(op_id, quote, context, payload))
-        elif kind == "unsupported" and _COMMENCEMENT_SHAPED.search(read):
+        if payload and _STRUCTURE.match(read) and any(n.provision for n in payload):
+            self.operations.extend(_structure(op_id, quote, context, payload))
+        elif kind == "unsupported" and _clause_like(read):
             self.clauses.append(read)  # a commencement sentence among instructions
         elif kind == "unsupported" and context[0] is None:
             return  # prose outside any act's amendment block: not an operation
@@ -398,24 +430,60 @@ class _Reader:
             self.operations.append(_operation(op_id, (kind, groups, quote), context, payload))
 
 
-def _chapter(
+_OPENS_PAYLOAD = re.compile(r"lyde(?:\s+slik)?:$")
+
+
+def _clause_like(sentence: str) -> bool:
+    """A commencement-shaped sentence that opens no payload.
+
+    ``De delene av § 102 … som ikke allerede er satt i kraft, blir § 402, og skal lyde slik:``
+    instructs, whatever it says about being in force; it is an unsupported operation.
+    """
+    return bool(_COMMENCEMENT_SHAPED.search(sentence)) and _OPENS_PAYLOAD.search(sentence) is None
+
+
+def _structure_part(sentence: str) -> str | None:
+    """``Annen del skal lyde:`` / ``… plasseres i annen del`` → ``del2``; None when unnamed."""
+    match = _STRUCTURE.match(sentence)
+    word = (match.group("part") or match.group("in")) if match else None
+    if word is None:
+        return None
+    number = ordinal(word) or _PART_WORDS.get(word.lower())
+    return f"del{number}" if number is not None else None
+
+
+def _placed(node: Node, provision: Provision, chapter: str | None, part: str | None) -> Node:
+    placed = provision.model_copy(update={"chapter": chapter, "part": part})
+    return node.model_copy(update={"provision": placed})
+
+
+def _structure(
     base: str,
     sentence: str,
     context: tuple[str | None, str, tuple[str, ...], str | None],
     payload: tuple[Node, ...],
 ) -> list[Operation]:
-    """``Nytt kapittel 6A skal lyde:`` inserts every provision the chapter text carries."""
+    """``Nytt kapittel 6A skal lyde:`` / ``Annen del skal lyde:`` insert every provision carried.
+
+    Each inserted provision is stamped with the chapter whose title precedes it (or the
+    chapter the sentence names) and the part the sentence names, read, never inferred.
+    """
     carried = [n for n in payload if n.provision is not None]
     labelled = all(section_key(n.provision.label) is not None for n in carried if n.provision)
     if not labelled or any(n.kind == "ledd" for n in payload):
         return [_operation(base, ("unsupported", {}, sentence), context, ())]
-    return [
-        _operation(
-            f"{base}-{k}", ("insert_section", {"sec": n.provision.label}, sentence), context, (n,)
-        )
-        for k, n in enumerate(carried)
-        if n.provision is not None
-    ]
+    chapter, part = chapter_key(sentence), _structure_part(sentence)
+    operations: list[Operation] = []
+    for node in payload:
+        if node.kind == "title":
+            chapter = chapter_key(node.text) or chapter
+        elif node.provision is not None:
+            placed = _placed(node, node.provision, chapter, part)
+            parsed: tuple[OpKind, dict[str, str | None], str] = (
+                "insert_section", {"sec": node.provision.label}, sentence,
+            )  # fmt: skip
+            operations.append(_operation(f"{base}-{len(operations)}", parsed, context, (placed,)))
+    return operations
 
 
 def _operation(

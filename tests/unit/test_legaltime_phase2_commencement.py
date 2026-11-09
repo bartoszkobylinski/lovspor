@@ -350,12 +350,15 @@ def test_the_remainder_covers_what_no_other_scope_of_the_decision_covers() -> No
     "body",
     [
         "Romertall I trer i kraft 1. juli 2021, med unntak av endringen i § 1.",
-        "Følgende trer i kraft 1. juli 2021: Endringsloven del I med unntak av ny § 2 a.",
-        "Følgende trer i kraft 1. juli 2021: Endringsloven del I § 1 annet ledd.",
         "Romertall I § 1 første ledd og II trer i kraft 1. juli 2021.",
     ],
 )
-def test_part_scopes_with_exceptions_or_ledd_qualifiers_stay_outside_the_grammar(body: str) -> None:
+def test_part_scopes_with_unscopable_exceptions_or_qualifiers_stay_outside_the_grammar(
+    body: str,
+) -> None:
+    """Phase 3 reads ``med unntak av ny § 2 a`` and ``§ 1 annet ledd`` as units (ADR-0020 D4/D6,
+    tests/unit/test_legaltime_phase3_scopes.py); an exception the unit grammar cannot read, or
+    sections listed under several parts, still refuse the whole decision."""
     law = _law("Loven gjelder fra den tid Kongen bestemmer.")
     timings = _by_part(law, _delt(body))
     assert {t.reason for t in timings.values()} == {"partial decision outside the grammar"}, body

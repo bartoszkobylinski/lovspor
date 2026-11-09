@@ -18,7 +18,7 @@ from lxml import etree
 from pydantic import BaseModel, ConfigDict
 
 from lovspor.legaltime.errors import LegalTimeDocumentError
-from lovspor.legaltime.text import collapse
+from lovspor.legaltime.text import collapse, split_sentences
 from lovspor.parsing.xml_normalizer import safe_parser
 
 _NOTE_CLASSES = frozenset({"changesToParent", "footnotereference", "footnoteLabel"})
@@ -56,6 +56,8 @@ class Provision(Frozen):
     heading: str
     ledd: tuple[Ledd, ...]
     notes: tuple[str, ...] = ()
+    chapter: str | None = None  # the enclosing chapter section's data-name (``kap16``)
+    part: str | None = None  # the enclosing top-level part's data-name (``del1``)
 
 
 class Node(Frozen):
@@ -177,8 +179,28 @@ def _ledd_of(article: etree._Element) -> tuple[Ledd, ...]:
     return tuple(ledd)
 
 
+_CHAPTER_NAME = re.compile(r"kap\d+[a-z]?")
+_PART_NAME = re.compile(r"del\d+")
+
+
+def _enclosing(article: etree._Element) -> tuple[str | None, str | None]:
+    """(chapter, part) data-names of the nearest enclosing sections so named."""
+    chapter = part = None
+    for ancestor in article.iterancestors("section"):
+        raw = ancestor.get("data-name")
+        if raw is None:
+            continue
+        name = raw.lower()
+        if chapter is None and _CHAPTER_NAME.fullmatch(name):
+            chapter = name
+        elif part is None and _PART_NAME.fullmatch(name):
+            part = name
+    return chapter, part
+
+
 def _provision(article: etree._Element) -> Provision:
     key = article.get("data-name") or ""
+    chapter, part = _enclosing(article)
     values = [e for e in article.iter("span") if _css(e) == "legalArticleValue"]
     titles = [e for e in article.iter("span") if _css(e) == "legalArticleTitle"]
     notes = tuple(
@@ -192,6 +214,8 @@ def _provision(article: etree._Element) -> Provision:
         heading=element_text(titles[0]) if titles else "",
         ledd=_ledd_of(article),
         notes=notes,
+        chapter=chapter,
+        part=part,
     )
 
 
@@ -244,6 +268,35 @@ def _parts(main: etree._Element) -> tuple[Part, ...]:
     lead = _nodes([e for e in main if e.tag not in {"section", "h1"}])
     sections = [_part(s) for s in main if s.tag == "section"]
     return tuple(([Part(label="", nodes=tuple(lead))] if lead else []) + sections)
+
+
+_LIST_MARKUP = re.compile(r"<(?:ul|ol)\b")
+_LEAD_IN = re.compile(r"^(?:Følgende|Følgjande)\b.*\bi\s+kraft\b", re.I)
+
+
+def list_statements(ledd: Ledd) -> list[str] | None:
+    """The sentences before a list, then one statement per list item; None without a list.
+
+    Commencement decisions print ``Følgende trer i kraft straks:`` followed by one list
+    item per part commenced. A last lead sentence that ends with a colon introduces the
+    items and is read with each of them, joined by one space, so the statement is
+    checkable against the member; every other lead sentence, and an item under a lead
+    that does not end with a colon, stands on its own.
+    """
+    if not _LIST_MARKUP.search(ledd.xml):
+        return None
+    try:
+        root = etree.fromstring(f"<article>{ledd.xml}</article>", parser=_PARSER)
+    except etree.XMLSyntaxError:
+        return None
+    lists = [child for child in root if child.tag in {"ul", "ol"}]
+    if len(lists) != 1:
+        return None
+    lead = split_sentences(root.text or "")
+    introduces = bool(lead) and (lead[-1].endswith(":") or _LEAD_IN.match(lead[-1]) is not None)
+    intro = lead.pop() if introduces else ""
+    items = [element_text(item) for item in lists[0] if item.tag == "li"]
+    return [*lead, *(collapse(f"{intro} {item}") for item in items)]
 
 
 def parse_document(body: bytes, member: str) -> Document:

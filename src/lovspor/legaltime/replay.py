@@ -23,7 +23,7 @@ from lovspor.parsing.xml_normalizer import safe_parser
 
 ProvisionStatus = Literal["replayed", "unresolved"]
 StateStatus = Literal["replayed", "not_yet_in_force", "unresolved_baseline"]
-_SECTION_REF = re.compile(r"§\s*(\d+[A-Z]?(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
+_SECTION_REF = re.compile(r"§\s*(\d+(?:[A-Z]|\s[A-Z](?=-))?(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
 _LEDD_REF = re.compile(
     rf"\b((?:{ORDINAL_ALT})(?:\s*,\s*(?:{ORDINAL_ALT}))*(?:\s+(?:og|til)\s+(?:{ORDINAL_ALT}))?)\s+ledd\b",
     re.I,
@@ -351,7 +351,7 @@ def _locations(text: str) -> list[tuple[str, frozenset[int]]]:
     for index, match in enumerate(chunks):
         tail = text[match.end() : chunks[index + 1].start() if index + 1 < len(chunks) else None]
         ledd = frozenset(n for phrase in _LEDD_REF.findall(tail) for n in _ledd_numbers(phrase))
-        places.append((f"§{match.group(1)}{match.group(2) or ''}", ledd))
+        places.append((f"§{match.group(1).replace(' ', '')}{match.group(2) or ''}", ledd))
     return places
 
 
