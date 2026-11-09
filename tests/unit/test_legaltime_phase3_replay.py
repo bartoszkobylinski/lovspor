@@ -5,6 +5,7 @@ staged commencement, on a synthetic act with the decision's own sentences.
 """
 
 from datetime import date, datetime
+from itertools import permutations
 
 import pytest
 
@@ -12,7 +13,7 @@ from lovspor.legaltime.baseline import Commencement, UnitTiming, baseline_commen
 from lovspor.legaltime.commencement import Event, Timing
 from lovspor.legaltime.document import Ledd, Provision
 from lovspor.legaltime.instructions import Address, Operation
-from lovspor.legaltime.replay import RESTRUCTURED, replay
+from lovspor.legaltime.replay import RESTRUCTURED, ReplayState, replay
 from lovspor.legaltime.units import Unit
 from tests.unit.test_legaltime_baseline import ACT, STAGED, _act
 
@@ -64,6 +65,39 @@ REPLACE_LEDD_4 = _event(
     date(2023, 3, 1),
 )
 EVENTS = [INSERT_LEDD_4, NEW_2_6, REPLACE_LEDD_4]
+
+
+@pytest.mark.parametrize("at", [date(2023, 6, 30), date(2023, 7, 1)])
+def test_staged_replay_orders_events_before_gating_and_applying(at: date) -> None:
+    """Replay's effective-date ordering also governs per-unit commencement gates."""
+    expected = replay(ACT_DOC, COMMENCEMENT, EVENTS, at)
+    provision = next(p for p in expected.provisions if p.key == "§15-7")
+    if at == date(2023, 6, 30):
+        assert expected.applied == ("op1",)
+        assert expected.withheld == ("op2", "op3")
+        assert provision.ledd[3].text == "Fire."
+        assert provision.ledd_not_in_force == (4,)
+    else:
+        assert expected.applied == ("op1", "op3")
+        assert expected.withheld == ("op2",)
+        assert provision.ledd[3].text == "Fire b."
+        assert provision.ledd_not_in_force == ()
+    for ordering in permutations(EVENTS):
+        assert replay(ACT_DOC, COMMENCEMENT, list(ordering), at).model_dump_json() == (
+            expected.model_dump_json()
+        )
+
+
+def test_staged_replay_json_round_trip_preserves_commencement_evidence() -> None:
+    """Persisted replay states retain dates, one-based flags and withheld event IDs."""
+    state = replay(ACT_DOC, COMMENCEMENT, EVENTS, date(2023, 6, 30))
+    restored = ReplayState.model_validate_json(state.model_dump_json())
+    assert restored == state
+    provision = next(p for p in restored.provisions if p.key == "§15-7")
+    assert provision.in_force == "in_force"
+    assert provision.effective == date(2023, 1, 1)
+    assert provision.ledd_not_in_force == (4,)
+    assert restored.withheld == ("op2", "op3")
 
 
 def test_the_day_before_the_act_commences_nothing_is_in_force_and_dated_operations_wait() -> None:
