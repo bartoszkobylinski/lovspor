@@ -230,10 +230,10 @@ def _fold_statement(current: Timing, statement: _Statement) -> Timing:
 def _part_only(scope: Scope) -> bool:
     """``Loven del I trer i kraft …``, ``Endringsloven del I § 2 …``: a part, with or without a
     section of that part, and no unit of the act. Whose part — the act's own or the amending
-    law's — the sentence does not say, so the fold cannot place it on any unit."""
-    return scope.part is not None and not (
-        scope.whole or scope.remainder or scope.own_sections or scope.units
-    )
+    law's — the sentence does not say, so the fold cannot place it on any unit. ``Scope._one_kind``
+    keeps a part apart from ``whole``, ``remainder`` and ``own_sections``; only ``units`` can
+    narrow it."""
+    return scope.part is not None and not scope.units
 
 
 class _Fold:
