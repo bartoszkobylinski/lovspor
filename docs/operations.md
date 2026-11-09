@@ -150,9 +150,30 @@ refuses: that is evidence, and `invalidate` is the deliberate removal.
 on the cache, so nothing else changes; deleting the directory loses only
 money already spent, never corpus state.
 
-**Not yet:** GitHub-hosted runners discard their disk with the job, so this
-does not protect the scheduled sync. That needs the remote backend the owner
-has not yet chosen (design §8, D1).
+**Remote store (Cloudflare R2), built but off.** GitHub-hosted runners discard
+their disk with the job, so the local store alone does not protect the
+scheduled sync.
+
+* **Decided:** the owner accepted R2 Standard as the remote backend on
+  2026-11-08, for architecture and offline development only (ADR-0022, G0 and
+  D1–D3).
+* **Built:** the adapter (`embeddings/r2_client.py`, `embeddings/cache_remote.py`)
+  writes each paid unit to the bucket before the next request, remote first.
+* **Off:** the sync uses it only when `LOVSPOR_EMBEDDING_CACHE_REMOTE=r2`, the
+  local directory and the four `LOVSPOR_EMBEDDING_CACHE_R2_*` variables are
+  all set. No workflow sets them.
+* **Not approved:** bucket, token and secrets (G1), staging tests (G3) and
+  activation (G4/G5).
+* **Runbook:** every owner step, rotation and rollback are in
+  [`docs/embedding-cache-r2.md`](embedding-cache-r2.md).
+
+With the remote store on, two more refusals can stop a sync. Neither one pays
+over anything:
+
+* `EmbeddingCacheConflictError`: the local copy and the bucket hold different
+  values for one key. Both copies are kept.
+* `EmbeddingCacheStorageError`: the bucket stayed unreachable after three
+  attempts, or refused a request.
 
 ### Renderer versioning and self-healing re-renders
 

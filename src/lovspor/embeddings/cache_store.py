@@ -157,8 +157,23 @@ class LocalEntryStore:
 
     def put(self, entry: CachedVectors) -> CachedVectors:
         """Persist ``entry`` durably; if the key exists, return the stored entry."""
-        parts, name = entry_location(entry.key)
-        payload = encode_entry(entry)
+        stored = self._write(entry.key, encode_entry(entry))
+        return entry if stored is None else stored
+
+    def publish(self, key: EntryKey, payload: bytes) -> CachedVectors:
+        """Persist these exact entry bytes, validated against ``key`` first.
+
+        The remote store's winner arrives as bytes; publishing them unchanged
+        keeps the local copy byte-identical to the bucket's object (#802 §8.1).
+        If the key already exists, the stored entry is returned, not replaced.
+        """
+        entry = decode_entry(payload, key, self._policy)
+        stored = self._write(key, payload)
+        return entry if stored is None else stored
+
+    def _write(self, key: EntryKey, payload: bytes) -> CachedVectors | None:
+        """Publish ``payload`` under ``key``: ``None`` once written, else the existing entry."""
+        parts, name = entry_location(key)
         try:
             handle = _descend(self._open_root(), parts, create=True)
             try:
@@ -166,12 +181,12 @@ class LocalEntryStore:
             finally:
                 os.close(handle)
         except FileExistsError:
-            return self._existing(entry.key)
+            return self._existing(key)
         except OSError as exc:
             raise EmbeddingCacheStorageError(
-                f"cannot persist embedding cache entry ({entry.key.label()}): {exc.strerror}",
+                f"cannot persist embedding cache entry ({key.label()}): {exc.strerror}",
             ) from exc
-        return entry
+        return None
 
     def _existing(self, key: EntryKey) -> CachedVectors:
         stored = self.get(key)
