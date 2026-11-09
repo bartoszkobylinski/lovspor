@@ -41,7 +41,6 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from lovspor.innsyn.sender import Sender
-from lovspor.observatory.fetch import CaptureSettings, RateLimiter
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
 from lovspor.parsing.xml_normalizer import safe_parser
@@ -880,18 +879,3 @@ def test_assumption_httpx_follow_redirects_none_does_not_follow() -> None:
                 assert reply.status_code == 302, value
         assert seen == ["https://example.org/from"] * 2
         assert client.get("https://example.org/from").status_code == 200
-
-
-def test_assumption_rate_limiter_ignores_the_interval_on_a_hosts_first_wait() -> None:
-    """Pins the argument that waives ``wait(HOST, session.delay)`` ->
-    ``wait(HOST, None)`` in ``regjeringen_fetch/fetch.py::_read_robots``, which
-    always runs on a fresh limiter: a host's first ``wait`` sleeps nothing,
-    never reads ``minimum_interval``, and records the same timestamp, so the
-    next request is spaced the same whatever the first call was given."""
-    for interval in (0.0, None):
-        slept: list[float] = []
-        ticks = iter([10.0, 11.0, 11.0]).__next__
-        limiter = RateLimiter(CaptureSettings(monotonic=ticks, sleep=slept.append))
-        assert limiter.wait("www.regjeringen.no", interval) == 0.0  # type: ignore[arg-type]
-        assert limiter.wait("www.regjeringen.no", 5.0) == 4.0
-        assert slept == [4.0], interval

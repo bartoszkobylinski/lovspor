@@ -140,6 +140,6 @@ def test_report_uses_twelve_robot_digest_characters(httpx_mock: HTTPXMock, tmp_p
     report, complete = fetch_impl(urls, out, 10, FetchSettings(clock=_Clock().as_fetch_clock()))
     assert complete
     assert report.splitlines()[-1] == (
-        f"fetched 1 of 1; robots {hashlib.sha256(robots).hexdigest()[:12]}; "
+        f"fetched 1 of 1; robots {hashlib.sha256(robots).hexdigest()[:12]}; terms -; "
         f"spacing 5s; run {out / 'fetch-run-20261109T120000+0000.json'}"
     )

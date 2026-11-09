@@ -139,8 +139,8 @@ def test_robots_digest_is_recorded_for_the_standing_policy(
     _robots(httpx_mock, text)
     httpx_mock.add_response(url=CH1, content=PAGE)
     run = _run([CH1], _out(tmp_path), _Clock())
-    assert run.robots_sha256 == hashlib.sha256(text.encode()).hexdigest()
-    assert run.robots_status == 200
+    assert run.robots.sha256 == hashlib.sha256(text.encode()).hexdigest()
+    assert (run.robots.state, run.robots.status) == ("published", 200)
 
 
 def test_a_redirect_is_recorded_and_not_followed(httpx_mock: HTTPXMock, tmp_path: Path) -> None:
