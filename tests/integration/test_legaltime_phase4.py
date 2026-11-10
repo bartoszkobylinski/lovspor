@@ -13,7 +13,7 @@ import pytest
 from lovspor.legaltime.archive import collect, file_sha256, read_members
 from lovspor.legaltime.commencement import _blocks
 from lovspor.legaltime.instructions import interpret
-from lovspor.legaltime.run import build_report
+from lovspor.legaltime.run import build_report, commencement_for, events_for
 
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "data/cache/legaltime"
@@ -79,6 +79,10 @@ def test_the_naturmangfoldloven_decision_keeps_sentence_two() -> None:
     decision = read_members(ARCHIVES[0], [member])[member]
     sentences = [s for _, body in _blocks(decision) for s in body]
     assert any(s.startswith("Fra samme tidspunkt trer endringene i § 78") for s in sentences)
+    evidence = collect("lov/2009-06-19-100", ARCHIVES)
+    default = commencement_for(evidence, events_for(evidence)).default
+    assert (default.status, default.effective) == ("unresolved", None)
+    assert "forskrift/2009-06-19-704" in {p.refid for p in default.proofs}
 
 
 def test_barnevernsloven_unknown_target_unresolved_ops_blanket_every_state() -> None:

@@ -26,7 +26,7 @@ Only permitted publicData archives were read; no lovdata.no HTML and no Lovdata 
 - a new `legalArticle` (`host_section` change) closes the block;
 - so does an intro shape the grammar cannot bind (`… gjøres følgende endringer …:` / `… endres slik:`), anywhere in a node, including one fused into the end of a payload ledd;
 - an instruction's payload ends at the next instruction, at such an intro, or at an article boundary;
-- an intro that opens only a unit of the act already named keeps the block (`§ 4-2 endres slik:`, `I § 15-11 gjøres følgende endringer:`, `§ 102 nr. 1 vert endra slik:`, `Kapittel 6 endres slik:`), unless it names another act by date (`I § 3 i lov 22. mai 1902 nr. 13 …`);
+- an intro that opens only a unit of the act already named keeps the block (`§ 4-2 endres slik:`, `I § 15-11 gjøres følgende endringer:`, `§ 102 nr. 1 vert endra slik:`, `Kapittel 6 endres slik:`), unless it names an act in any way: by date (`I § 3 i lov 22. mai 1902 nr. 13 …`), by short title (`I § 3 i straffeloven …`, review round 2), or as `lov …`/`forskrift …`. This had no measured effect on the evidence;
 - inside a block opened by an unbindable intro, an `unsupported` sentence is counted as an unattributed operation, not dropped as prose.
 
 What follows a closed block is **unattributed**. No act is inferred from the intro's free text. Binding `… i lov 22. mai 1902 nr. 13 militær straffelov:` positively would need a grammar extension; that is left for later work (#861 item 3).

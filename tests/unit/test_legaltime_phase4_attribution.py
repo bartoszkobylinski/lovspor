@@ -187,6 +187,10 @@ def test_an_intro_to_a_unit_of_the_same_act_keeps_the_block(sub_intro: str) -> N
     "intro",
     [
         "I § 3 i lov 22. mai 1902 nr. 13 gjøres følgende endringer:",
+        "I § 3 i straffeloven gjøres følgende endringer:",  # independent review, round 2
+        "I kapittel 10 i arbeidsmiljøloven gjøres følgende endringer:",
+        "§ 5 i lov om domstolene endres slik:",
+        "I del II i forskrift om straffegjennomføring gjøres følgende endringer:",
         "I straffeloven 2005 tredje del gjøres følgende endringer:",  # lov 7. mars 2008 nr. 4
         "1. I militær straffelov 22. mai 1902 nr. 13 gjøres følgende endringer:",
         "(2) Brot på teieplikta kan straffast med bøter. 196. I lov 27. juni 2003 nr. 58 om "

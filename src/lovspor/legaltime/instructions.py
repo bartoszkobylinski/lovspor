@@ -75,6 +75,7 @@ _UNIT_LED = re.compile(
     rf"|nr\.|bokstav|punkt|(?:{ORDINAL_ALT})\s+(?:ledd|punktum))",
     re.I,
 )  # ``§ 4-2 endres slik:``: a unit of the act already named, not another act
+_ACT_WORD = re.compile(r"\b[\wæøå-]+(?:loven|lova|lov)\b|\blov\b|\bforskrift\w*", re.I)
 _COMMENCEMENT_SHAPED = re.compile(
     r"\bi\s+kraft\b|\bgjeld(?:er)?\s+fr[aå]\b|\bte[kr]\s+til\s+å\s+gjelde\b|\btar\s+til\s+å\s+gjelde\b",
     re.I,
@@ -304,7 +305,8 @@ def _unbound_intro(text: str) -> bool:
     """An intro shape the grammar cannot bind, unless it only opens a unit of the same act."""
     if _UNBOUND_INTRO.search(text) is None or _is_intro(text):
         return False
-    return _UNIT_LED.match(text) is None or act_refid(text) is not None
+    names_act = act_refid(text) is not None or _ACT_WORD.search(text) is not None
+    return _UNIT_LED.match(text) is None or names_act
 
 
 def _next_instruction(nodes: list[Node], start: int) -> int:
