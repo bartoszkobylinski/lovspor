@@ -7,15 +7,18 @@ mutation = """
 +        self.bound_host: str | None = ""  # the article whose intro bound ``act``
 """
 justification = """
-``bound_host`` is read only in ``_Reader._boundary``: ``if node.host_section !=
-self.bound_host or unbound:`` resets ``substitution``, ``pending_item_act`` and
-``act`` to None and sets ``bound_host`` to the node's host and ``unbound`` to the
-node's own ``_unbound_intro`` value. ``_boundary`` runs before anything else for
-the first node read. With the initial value None that node either matches (host
-None, not an intro: nothing changes) or resets; with "" it always resets. A reset
-at the first node writes None over values that ``__init__`` and ``_read_part``
-already set to None, writes the node's host into ``bound_host`` (what a match
-would leave it equal to) and writes ``unbound`` = ``_unbound_intro(text)``, which
-the non-reset path also leaves at False when that is False and resets to True
-otherwise. Every later read sees the same state, so the output is identical.
+``bound_host`` is read only in ``_Reader._boundary``, as ``moved =
+node.host_section != self.bound_host``. ``moved`` resets the block (``substitution``,
+``pending_item_act`` and ``act`` to None, ``bound_host`` to the node's host,
+``unbound`` to ``unbound or binding.opens``) and clears ``in_list``. ``bound_host``
+carries across parts, so only the document's first node can see the initial
+value. With None that node either matches (host None) or resets; with "" it
+always resets. At the first node ``substitution``, ``pending_item_act`` and
+``act`` are already None (``__init__``, ``_read_part``), ``in_list`` is already
+False (``_read_part``), the reset writes the host the matching path leaves equal
+to it, and ``unbound`` ends as ``unbound or binding.opens`` on both paths: the
+non-reset path is taken only when both are False and ``self.unbound`` is still
+its initial False. Every later read sees the same state, so the output is
+identical. (Re-argued for PR #873, where ``_boundary`` gained ``binding.opens``
+and ``in_list``.)
 """

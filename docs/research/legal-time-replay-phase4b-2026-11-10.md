@@ -179,6 +179,24 @@ The Phase 4A coverage file `legal-time-coverage-2026-11-10.json` is left as it w
 |---|---|---|---|---|
 | 1 | `2ae6f009` | NOT READY | major: a canonical intro binds a date-only citation (`I lov 20. mai 2005 gjøres …` → `lov/2005-05-20`); major: the audit tool classed a two-citation sentence as proven when the first citation matched; minor: the archive tests counted operations without pinning the block | the audit now requires exactly one citation that the header lists, with unit tests; the archive tests pin the run and the multi-act part IV. The date-only binding predates Phase 4A and is unchanged here: measured and filed as #872 (128 operations in the eight acts' amenders, 77 header-proven, none bound to a coverage act) |
 
+| 2 | `b43b56c0` | READY | none | — |
+
+## 6b. Mutation (CI, PR-scoped, mutmut 3.8.0)
+
+The first run, at `6f422981`, killed 320 of 339 mutants. 19 survived. Two of those match the Phase 4A registered equivalents (`bound_host` `""`, `unbound` `None` in `_Reader.__init__`); 0 timed out, 0 suspicious, 0 without tests. The other 17 were handled as follows:
+
+- **One survivor exposed a real defect.** `bind`'s `opens=False` mutant survived because no test had an unproven Phase 4B intro that `_unbound_intro` does not also catch. Writing that test (`I tolltariffen 1. januar 2000 nr. 1 skal desse endringane gjerast:` after a straffeloven block) showed the intro swallowed as the **payload** of the instruction before it: `_next_instruction` ended a payload only at Phase 4A's unbound shapes. The next instruction then inherited straffeloven. A payload now also ends at a Phase 4B block shape (`attribution.opens_block`), but never at a numbered heading or item, because a payload provision may list acts. On the archives this changes **0 operations, payload sizes or clauses** in the 403 members, and the evidence files regenerate byte-identically.
+- **13 killed**, the two `opens` mutants above among them, by `tests/unit/test_legaltime_phase4b_mutants.py`, one test per mutated guard:
+  - part start outside a list;
+  - `seen_instruction` after a proven intro;
+  - `unbound` after a proven or inline binding, which leaks into the next part;
+  - a proven intro inside a substitution list;
+  - a commencement-shaped intro kept as a clause;
+  - every sentence before a fused intro;
+  - an unproven inline item read as one unsupported operation.
+- **2 removed as dead code:** `bind`'s `sentences[-1] if sentences else ""`. `split_sentences` never returns an empty list.
+- **2 registered as provably equivalent:** `_Reader.__init__` `in_list` `True`/`None`. `_read_part` assigns `in_list = False` before `_boundary`, its only reader, can run. The Phase 4A `bound_host` entry was re-argued for the new `_boundary`.
+
 ## 7. Limitations
 
 - **The header proof is incomplete in some members.** Lovdata's `changesToDocuments` omits acts a few members plainly amend (lov/2008-03-07-4 for straffegjennomføringsloven and militær straffelov; lov/2007-01-26-3 and lov/2009-06-19-74 for several). Those blocks stay unattributed. That is the fail-closed choice: the sentence alone is not enough proof.

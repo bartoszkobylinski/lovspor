@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/instructions.py"
+symbol = "__init__"
+registered = "2026-11-10, PR #873, from the mutation artifact at commit 6f422981"
+mutation = """
+-        self.in_list = False  # inside a list intro naming no act: numbered act headings bind
++        self.in_list = True  # inside a list intro naming no act: numbered act headings bind
+"""
+justification = """
+``in_list`` is read in one place, ``_Reader._boundary``: ``self.in_list =
+(self.in_list and not moved) or listing``, which then passes it to
+``attribution.bind``. ``_boundary`` is called only from ``_read_part``, and
+``_read_part`` assigns ``self.in_list = False`` (with ``seen_instruction`` and
+``skip_until``) before its loop reads the first node. ``run`` calls nothing else
+that reads it. So the value ``__init__`` assigns is always overwritten with False
+before any read: True, None or False there produce the same state at every read
+and the same output.
+"""

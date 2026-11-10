@@ -315,7 +315,8 @@ def _next_instruction(nodes: list[Node], start: int) -> int:
     host = nodes[start - 1].host_section
     for index in range(start, len(nodes)):
         node = nodes[index]
-        if _instruction_like(node) or _unbound_intro(node.text) or node.host_section != host:
+        closes = _unbound_intro(node.text) or attribution.opens_block(node.text)
+        if _instruction_like(node) or closes or node.host_section != host:
             return index
     return len(nodes)
 

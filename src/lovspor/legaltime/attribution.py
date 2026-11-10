@@ -115,12 +115,20 @@ def is_intro(text: str) -> bool:
     return INTRO.match(text) is not None or INTRO_SLIK.match(text) is not None
 
 
+def opens_block(text: str) -> bool:
+    """An intro of a closed shape ends the node's text, so no payload runs past it.
+
+    Numbered headings and items are left out: a payload provision may list acts.
+    """
+    return not is_intro(text) and _shaped(split_sentences(text)[-1])
+
+
 def bind(text: str, changes: tuple[str, ...], in_list: bool) -> Binding:
     """The binding a node's text states; ``in_list``: inside a list intro naming no act."""
     if is_intro(text):
         return Binding()  # ``instructions._open_block`` reads it
-    sentences = split_sentences(text)
-    last = sentences[-1] if sentences else ""
+    sentences = split_sentences(text)  # never empty: ``""`` is one empty sentence
+    last = sentences[-1]
     if _shaped(last):
         head = " ".join(sentences[:-1])
         return Binding(opens=True, act=_proven(last, changes), head=head, intro=last)
