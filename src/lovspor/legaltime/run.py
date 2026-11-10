@@ -19,7 +19,7 @@ from lovspor.legaltime.instructions import Operation, interpret
 from lovspor.legaltime.replay import Event, ReplayState, replay
 from lovspor.legaltime.verify import verify
 
-REPLAY_VERSION = "legaltime-replay-3"  # phase 3: commencement per legal unit (ADR-0020 D4)
+REPLAY_VERSION = "legaltime-replay-4"  # phase 4A: attribution and D7 blanket inputs (#856-#859)
 
 
 def _stamp(value: datetime | None) -> str | None:
@@ -41,7 +41,8 @@ def chapter_map(evidence: Evidence) -> dict[str, str]:
     return placed
 
 
-def _events_of(amender: Document, act: str, decisions: Decisions, start: int) -> list[Event]:
+def _events_of(amender: Document, act: str | None, decisions: Decisions, start: int) -> list[Event]:
+    """The member's operations aimed at ``act``; ``None`` selects those naming no act."""
     result = interpret(amender)
     timings = resolve_timings(amender, result.clauses, result.operations, decisions)
     events = []
@@ -65,13 +66,26 @@ def decisions_for(evidence: Evidence) -> Decisions:
     return Decisions(documents=evidence.decisions, chapter_of=chapter_map(evidence))
 
 
-def events_for(evidence: Evidence) -> list[Event]:
-    """Every operation aimed at the act, across all amenders, in document order."""
+def _collect(evidence: Evidence, act: str | None) -> list[Event]:
     events: list[Event] = []
     decisions = decisions_for(evidence)
     for amender in evidence.amenders:
-        events.extend(_events_of(amender, evidence.act, decisions, len(events)))
+        events.extend(_events_of(amender, act, decisions, len(events)))
     return events
+
+
+def events_for(evidence: Evidence) -> list[Event]:
+    """Every operation aimed at the act, across all amenders, in document order."""
+    return _collect(evidence, evidence.act)
+
+
+def unattributed_for(evidence: Evidence) -> list[Event]:
+    """Every operation an amender states without a recognisable act (ADR-0020 D7, #859).
+
+    Each may be aimed at the act; the replay never applies one, and keeps every state it
+    may be in effect at unproven.
+    """
+    return _collect(evidence, None)
 
 
 def commencement_for(evidence: Evidence, events: list[Event]) -> Commencement:
@@ -80,7 +94,8 @@ def commencement_for(evidence: Evidence, events: list[Event]) -> Commencement:
 
 
 def state_at(evidence: Evidence, events: list[Event], at: date) -> ReplayState:
-    return replay(evidence.baseline, commencement_for(evidence, events), events, at)
+    every = [*events, *unattributed_for(evidence)]
+    return replay(evidence.baseline, commencement_for(evidence, events), every, at)
 
 
 def _operation_record(op: Operation) -> dict[str, Any]:
@@ -192,9 +207,10 @@ def build_report(
     evidence: Evidence, dates: list[date], oracle: Document | None, archives: list[Path]
 ) -> dict[str, Any]:
     """Deterministic report: same archives, same act, same dates → identical JSON."""
-    events = events_for(evidence)
+    events, unattributed = events_for(evidence), unattributed_for(evidence)
     commencement = commencement_for(evidence, events)
-    states = [replay(evidence.baseline, commencement, events, at) for at in sorted(dates)]
+    every = [*events, *unattributed]
+    states = [replay(evidence.baseline, commencement, every, at) for at in sorted(dates)]
     report: dict[str, Any] = {
         "replay_version": REPLAY_VERSION,
         "act": evidence.act,
@@ -204,6 +220,7 @@ def build_report(
         "baseline_timing": commencement.default.model_dump(mode="json"),
         "commencement": _commencement_record(commencement),
         "events": [_event_record(e) for e in events],
+        "unattributed_events": [_event_record(e) for e in unattributed],
         "states": [_state_record(s) for s in states],
     }
     if oracle is not None:
