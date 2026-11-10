@@ -735,9 +735,9 @@
     "target provision missing or no heading text": 1,
     "target provision missing or no replacement text": 1,
     "target provision missing or repealed": 1,
-    "target unknown, commencement commencement sentence outside the grammar": 15,
+    "target unknown, commencement commencement sentence outside the grammar": 16,
     "target unknown, commencement full decision body carries an exception": 3,
-    "target unknown, commencement partial decision outside the grammar": 5,
+    "target unknown, commencement partial decision outside the grammar": 4,
     "unattributed operation, act unknown (lti/2015/nl-20150619-065.xml)": 219,
     "unattributed operation, act unknown (lti/2016/nl-20160527-014.xml)": 2,
     "unattributed operation, act unknown (lti/2021/nl-20210618-097.xml); co": 2,
@@ -755,12 +755,12 @@
    "status": "replayed",
    "unresolved_reasons": {
     "commencement clause outside the grammar": 2,
-    "commencement sentence outside the grammar": 108,
+    "commencement sentence outside the grammar": 111,
     "exception outside the grammar": 1,
     "full decision body carries an exception": 17,
     "insertion point does not exist": 1,
     "ledd 2 does not exist": 1,
-    "partial decision outside the grammar": 34,
+    "partial decision outside the grammar": 31,
     "punktum 2-2": 1,
     "punktum 3-3": 1,
     "punktum 4 insertion": 1,
@@ -793,7 +793,7 @@
   },
   "ladder": [
    {
-    "act_level_problems": 17,
+    "act_level_problems": 18,
     "applied": 0,
     "at": "2008-01-01",
     "future": 162,
@@ -807,7 +807,7 @@
     "withheld": 0
    },
    {
-    "act_level_problems": 30,
+    "act_level_problems": 31,
     "applied": 35,
     "at": "2012-01-01",
     "future": 109,
@@ -821,7 +821,7 @@
     "withheld": 0
    },
    {
-    "act_level_problems": 261,
+    "act_level_problems": 262,
     "applied": 50,
     "at": "2016-01-01",
     "future": 85,
@@ -889,10 +889,10 @@
   },
   "timing_reasons": {
    "commencement clause outside the grammar": 2,
-   "commencement sentence outside the grammar": 108,
+   "commencement sentence outside the grammar": 111,
    "exception outside the grammar": 1,
    "full decision body carries an exception": 17,
-   "partial decision outside the grammar": 34
+   "partial decision outside the grammar": 31
   },
   "unattributed_operations": 223,
   "unsupported_instructions": {

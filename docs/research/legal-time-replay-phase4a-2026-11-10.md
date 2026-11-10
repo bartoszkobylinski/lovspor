@@ -35,11 +35,16 @@ What follows a closed block is **unattributed**. No act is inferred from the int
 
 `Fra samme tid…`, `Kongen kan…`, `Dersom…`, `Når…` and similar openings were discarded before any grammar saw them. **Fix:** a sentence with such an opening is still informational, *unless* both of the following hold:
 - it states a commencement phrase (`i kraft`, `tek … til å gjelde`, once references like `når loven trer i kraft` are removed);
-- it carries a date, `straks`, a reservation or exception (`med unntak`, `unntatt`, `likevel`, `bortsett`), or the `Fra samme tid` anaphora.
+- it carries a date, `straks`, a reservation or exception (`med unntak`, `unntatt`, `likevel`, `bortsett`), or the `Fra samme tid` anaphora;
+- or it names a unit (§, kapittel, del, ledd) and its main clause states the commencement (`Dersom § 2-6 ikke er satt i kraft, trer den i kraft.`).
+
+The unit case was added after the independent review. A commencement phrase confined to a leading reference clause does not count: `Er arvelateren død før ny § 99 a i arveloven trer i kraft, regnes fristen …` (lov/2020-12-18-149) and `Fra den tid endringene … i del I i loven her trer i kraft, oppheves midlertidig lov …` (lov/2026-06-19-48) stay informational. A first version without this main-clause rule refused both, and cost the arveloven pilot 10 proven sections; that version was not committed.
 
 Such a sentence reaches the decision parser and the clause reader, and is refused there if unread (`partial decision outside the grammar` / `commencement sentence outside the grammar`). FOR-2009-06-19-704 sentence 2 (`Fra samme tidspunkt trer endringene i § 78 nr. 1 til 16 i kraft, med unntak av nr. 7.`) is now in the decision's block. Plain prose (`Fra samme tid oppheves lov …`, `Kongen kan sette de enkelte bestemmelsene i kraft til forskjellig tid.`) stays informational.
 
-**Measured effect on the evidence: none.** No timing, default or unit changed in the eight acts or the five evidence files. naturmangfoldloven's default is still refused by sentence 1. The defect was latent, and it is now closed before the title-cited-subject grammar can expose it.
+**Measured effect on the evidence:** the pilots, barnevernsloven, straffeloven and seven of the eight coverage acts are unchanged. naturmangfoldloven's default is still refused by sentence 1: the defect was latent, and it is now closed before the title-cited-subject grammar can expose it.
+
+merverdiavgiftsloven changes. lov/2017-06-16-55's clause `Kongen kan sette i kraft del III og IV til ulik tid for ulike deler av riket.` now reaches the grammar and is refused. Its three operations aimed at the act were already `unresolved`; they now carry `commencement sentence outside the grammar` with no `known_from`. One of them is an unknown-target operation, so under the #858 rule it blankets every state. Act-level counts at 2008-01-01, 2012-01-01 and 2016-01-01 rise by one (17 → 18, 30 → 31, 261 → 262); the end state is unchanged.
 
 ### #858: an unknown target with unresolved timing bypassed the blanket
 
@@ -111,7 +116,7 @@ Committed evidence digests (sha256):
 | `legal-time-replay-2026-11-06-sivilombudsloven.json` | `decb09e06d3733338a6fc6956ea73526b155196fe9ab38514ee510aac8c370c2` |
 | `legal-time-replay-2026-11-06-spraklova.json` | `d8caf6beffcbf924f366bc9e7bff7f2c2e49db04dae608c89874c049f3e61f68` |
 | `legal-time-replay-2026-11-08-barnevernsloven.json` | `55ea120e045f4cc31b212e0de8de9f608b9f4f098cd88bc53b517e096e848296` |
-| `legal-time-coverage-2026-11-10.json` | `118e34a8bfeefbae7d6ba83b75783f2f283af7a0fcc2279fabb038ef748804ba` |
+| `legal-time-coverage-2026-11-10.json` | `35b56473af42788d7a7c63f048c2895921c54cce50c859cfcfe2e07eae3542e2` |
 
 ## 3. Audit of every operation whose attribution changed
 
@@ -131,7 +136,7 @@ No operation lost an attribution that a recognised intro of its own block proves
 
 ## 4. Tests and gates
 
-- **Red-first.** The 51 new unit tests (`tests/unit/test_legaltime_phase4_{attribution,commencement,blanket}.py`) were run against `51c5d702`: **30 fail, 21 pass**. Every defect has failing tests on the old code (#856 10, #857 11, #858 3, #859 6). The 21 that pass are preservation and negative guards: valid multi-paragraph blocks, unit-level sub-intros, truly informational prose, named targets, pending and future operations.
+- **Red-first.** The 51 new unit tests (`tests/unit/test_legaltime_phase4_{attribution,commencement,blanket}.py`) were run against `51c5d702`: **30 fail, 21 pass**. Every defect has failing tests on the old code (#856 10, #857 11, #858 3, #859 6). Later additions (review round: three unit-conditional cases, two reference-clause negatives, the `_named` branches, `state_at`) bring the phase-4 unit set to 62. The 21 that pass are preservation and negative guards: valid multi-paragraph blocks, unit-level sub-intros, truly informational prose, named targets, pending and future operations.
 - `tests/integration/test_legaltime_phase4.py` (pinned archives) checks four things. On the real member: 216 §§ 4–5 operations, none straffeloven's. On the straffeloven ladder: nothing from them applied, and the blanket names the member. The real FOR-2009-06-19-704 block keeps sentence 2. The barnevernsloven XI:12.0/14.0 operations blanket every state.
 - `tests/integration/test_legaltime_phase3.py`: the straffeloven pins move from (105, 614, 376) to (99, 392, 335), with the reason in a comment. The barnevernsloven and pilot evidence regenerate byte-for-byte from the committed files.
 - **Determinism:** two independent rebuilds of all 14 reports and the coverage file (15 files) produced identical sha256 digests.

@@ -119,6 +119,12 @@ _INFORMATIONAL = re.compile(
     re.I,
 )
 _SAME_TIME = re.compile(r"^(?:Fra\s+samme\s+tid|Frå\s+same\s+tid)", re.I)
+_NAMES_UNIT = re.compile(
+    r"§|\bkapit(?:te)?l(?:et)?\b|\bkap\.\s*\d|\bdel\s+[IVXLC\d]|\bledd\b", re.I
+)
+_LEADING_CONDITION = re.compile(
+    r"^(?:Er|Dersom|Hvis|Når|Fra\s+den\s+tid|Frå\s+den\s+tid)\b[^,]*,\s*", re.I
+)
 _SPLIT_VERB = re.compile(
     r"\b(?:tek|tar)\s.+?\btil\s+å\s+gjelde\b", re.I
 )  # ``tek § 3 til å gjelde``
@@ -301,14 +307,23 @@ def _states_commencement(sentence: str) -> bool:
     """An informational opening that still dates, excepts or reserves a unit (#857).
 
     ``Fra samme tidspunkt trer endringene i § 78 … i kraft, med unntak av nr. 7`` dates by
-    reference to the sentence before it and carries an exception; it must reach the grammar
-    and be refused there if unread, never be dropped as prose.
+    reference to the sentence before it and carries an exception; ``Dersom § 2-6 …, trer den
+    i kraft`` conditions a named unit. Each must reach the grammar and be refused there if
+    unread, never be dropped as prose.
     """
     stated = _REFERENCE.sub("", sentence)
     if _COMMENCEMENT_PHRASE.search(stated) is None and _SPLIT_VERB.search(stated) is None:
         return False
     dated = parse_date(_CITED.sub("", sentence)) is not None or bool(_STRAKS.search(sentence))
-    return dated or bool(_RESERVATION.search(sentence)) or bool(_SAME_TIME.match(sentence))
+    marked = bool(_RESERVATION.search(sentence)) or bool(_SAME_TIME.match(sentence))
+    return dated or marked or _conditions_a_unit(stated)
+
+
+def _conditions_a_unit(stated: str) -> bool:
+    """A named unit whose commencement the main clause states, not a leading reference to it."""
+    main = _LEADING_CONDITION.sub("", stated, count=1)
+    phrase = _COMMENCEMENT_PHRASE.search(main) or _SPLIT_VERB.search(main)
+    return phrase is not None and _NAMES_UNIT.search(_CITED.sub("", stated)) is not None
 
 
 def _exception_timing(document: Document, sentence: str) -> Timing:

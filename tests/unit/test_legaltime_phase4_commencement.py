@@ -47,6 +47,9 @@ def test_the_naturmangfoldloven_decision_keeps_its_dated_exception_sentence() ->
         "Kongen kan likevel sette § 2-6 i kraft 1. juli 2023.",
         "Dersom § 2-6 ikke er satt i kraft, trer den i kraft 1. januar 2024.",
         "Når loven trer i kraft, trer § 2-6 likevel ikke i kraft.",
+        "Dersom § 2-6 ikke er satt i kraft, trer den i kraft.",  # independent review, no date
+        "Fra den tid Kongen bestemmer, trer kapittel 3 i kraft.",
+        "Når loven trer i kraft, trer del II i kraft.",
     ],
 )
 def test_an_informational_opening_does_not_hide_a_commencement(sentence: str) -> None:
@@ -62,6 +65,13 @@ def test_an_informational_opening_does_not_hide_a_commencement(sentence: str) ->
         "Kongen kan sette de enkelte bestemmelsene i kraft til forskjellig tid.",
         "Departementet kan gi overgangsregler.",
         "Når loven trer i kraft, gjelder overgangsreglene i kapittel 18.",
+        "Kongen kan bestemme at de enkelte bestemmelsene i loven skal tre i kraft til ulik tid.",
+        # lov 18. desember 2020 nr. 149 (arveloven pilot): a transitional reference, not a date
+        "Er arvelateren død før ny § 99 a i arveloven trer i kraft, regnes fristen etter § 99 a "
+        "første ledd første punktum fra tidspunktet for ikrafttredelsen av bestemmelsen.",
+        # lov 19. juni 2026 nr. 48: the unit sits in the reference, the main clause repeals
+        "Fra den tid endringene av konkurslovens første del i del I i loven her trer i kraft, "
+        "oppheves midlertidig lov 7. mai 2020 nr. 38 om rekonstruksjon.",
     ],
 )
 def test_truly_informational_prose_stays_informational(sentence: str) -> None:

@@ -19,7 +19,7 @@ from lovspor.legaltime.commencement import Timing
 from lovspor.legaltime.document import Document, parse_document
 from lovspor.legaltime.instructions import Address, Operation
 from lovspor.legaltime.replay import Event, ReplayState
-from lovspor.legaltime.run import build_report
+from lovspor.legaltime.run import build_report, events_for, state_at
 from lovspor.legaltime.verify import PROVEN
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "legaltime"
@@ -209,3 +209,39 @@ def test_the_report_carries_the_unattributed_operation_its_state_and_its_verific
         e["operation"]["id"]
         for e in clean["events"]  # type: ignore[index]
     ]
+
+
+@pytest.mark.parametrize(
+    ("op", "blanketed"),
+    [
+        (_op("substitute_term", Address()).model_copy(update={"locations": ""}), True),
+        (_op("substitute_term", Address()).model_copy(update={"locations": "§ 9"}), False),
+        (_op("move_ledd", Address()).model_copy(update={"destination": "§9"}), False),
+        (_op("renumber", Address(ledd=2)), True),
+    ],
+)
+def test_only_an_operation_that_names_no_provision_is_a_target_unknown(
+    op: Operation, blanketed: bool
+) -> None:
+    """A named provision absent from the state is still named; the problem stays on it."""
+    state = _state(_event(op, UNRESOLVED))
+    assert bool(state.act_level_problems) is blanketed
+
+
+def test_state_at_carries_the_unattributed_operations_of_the_evidence() -> None:
+    baseline = _load("enacting.xml")
+    baseline = baseline.model_copy(
+        update={"header": baseline.header.model_copy(update={"date_in_force": "2021-01-01"})}
+    )
+    evidence = Evidence(
+        act=ACT, archives=(), baseline=baseline, amenders=(_amender(True),), decisions=()
+    )
+    state = state_at(evidence, events_for(evidence), AT)
+    assert state.act_level_problems == (
+        "lov/2022-01-01-1#0:I:0.0: unattributed operation, act unknown "
+        "(lti/2022/nl-20220101-001.xml)",
+    )
+    clean = Evidence(
+        act=ACT, archives=(), baseline=baseline, amenders=(_amender(False),), decisions=()
+    )
+    assert state_at(clean, events_for(clean), AT).act_level_problems == ()
