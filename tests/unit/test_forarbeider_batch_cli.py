@@ -19,6 +19,7 @@ from pytest_httpx import HTTPXMock
 from lovspor.forarbeider import release_cli
 from lovspor.forarbeider.batch_models import MAX_DOCUMENTS
 from lovspor.forarbeider.release_models import digest
+from lovspor.forarbeider.review_models import ReviewStatus
 from lovspor.regjeringen_fetch.models import FetchRun, evidence_file_name
 from tests.unit.cli_output import option_help, said
 from tests.unit.forarbeider_batch_support import (
@@ -208,6 +209,31 @@ def test_withheld_and_flagged_chapters_without_a_report_are_excluded(
     assert chapters["regjeringen-9000101-ch2"]["reasons"] == ["withheld"]
     assert chapters["regjeringen-9000101-ch3"]["reasons"] == ["preflight_missing"]
     assert said("chapter 2 regjeringen-9000101-ch2 withheld excluded withheld", result.output)
+
+
+def _deny_report(desk: Any) -> str:
+    result = desk.preflight(None)
+    assert result.exit_code == 2, result.output
+    return said_digest(result.output, "report")
+
+
+def test_a_chapter_excluded_for_several_reasons_prints_them_comma_joined(
+    batch: BatchDesk, httpx_mock: HTTPXMock
+) -> None:
+    desk = batch.add(1, extras={3: QUOTE})
+    desk.decide(3, ReviewStatus.APPROVED)
+    report = _deny_report(desk)
+    batch.ready(httpx_mock)
+
+    result = batch.plan(batch.request([batch.document(1, (report, []))]))
+
+    assert result.exit_code == 0, result.output
+    chapters = chapters_of(batch.stored(said_digest(result.output, "BATCH PLAN")))
+    reasons = chapters["regjeringen-9000101-ch3"]["reasons"]
+    assert len(reasons) > 1
+    assert said(
+        f"chapter 3 regjeringen-9000101-ch3 flagged excluded {','.join(reasons)}", result.output
+    )
 
 
 def test_twenty_five_documents_plan_and_twenty_six_are_refused_unread(
