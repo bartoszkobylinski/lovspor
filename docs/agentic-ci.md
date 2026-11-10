@@ -77,7 +77,9 @@ PR opened/synchronize
 
 - **Claude Code local / human** — production code, small PRs, local gates:
   `scripts/quality/verify-fast.sh` at commit, `scripts/quality/verify-deep.sh` at push
-  (`docs/decisions.md` §9d; agent rules in `CLAUDE.md`). The fast gate runs every fast-ci
+  (`docs/decisions.md` §9d; agent rules in `CLAUDE.md`). The push gate runs only the unit
+  tests the push's changed paths reach (the full suite on a shared-infrastructure change
+  or `VERIFY_DEEP_FULL=1`, #864); fast-ci and the Test matrix run the full suite. The fast gate runs every fast-ci
   step by the same command, except those a test lists as push-time or CI-only (#558). No workflow installs git hooks,
   so neither gate runs on a CI lane; the lanes' own steps stay the gate there.
   Never invokes Codex manually for PR testing; never waits locally for mutation results.
