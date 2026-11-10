@@ -71,6 +71,10 @@ class RefusalReason(StrEnum):
     DOCUMENT_NOT_RELEASED = "document_not_released"
     DOCUMENT_UNKNOWN = "document_unknown"
     CHAPTER_NOT_RELEASED = "chapter_not_released"
+    BATCH_EMPTY = "batch_empty"
+    BATCH_TOO_LARGE = "batch_too_large"
+    DOCUMENT_DUPLICATE = "document_duplicate"
+    TARGET_BRANCH_INVALID = "target_branch_invalid"
 
 
 class ForarbeiderRefusedError(LovsporError):
