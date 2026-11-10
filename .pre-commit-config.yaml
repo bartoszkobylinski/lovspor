@@ -1,7 +1,8 @@
 # Transport only (issue #323, docs/decisions.md §9d): no check is named here.
 # The checks live in scripts/quality/, so a hook and a manual run of the same
 # script cannot drift apart. Commit stage: the fast gate. Push stage: the deep
-# gate (the fast gate, then the full unit suite). CI stays authoritative.
+# gate (the fast gate, the security scan, the push's unit tests). CI stays
+# authoritative.
 # default_install_hook_types makes a plain `pre-commit install` install both.
 default_install_hook_types: [pre-commit, pre-push]
 
