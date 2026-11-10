@@ -58,7 +58,10 @@ _INLINE = re.compile(
     re.S,
 )  # ``19. Lov 17. juni 2005 nr. 90 om mekling … § 34-4 … skal lyde:``: heading + instruction
 _INDIRECT = re.compile(r"\bom\s+endring|\(\s*endring|\bromertall\b|\bendringslov", re.I)
-_AFTER_VERB = re.compile(r"\bendring\w*\s+i\s+(?:lov\s+)?$", re.I)  # ``… endringer i lov <cit>``
+_AFTER_VERB = re.compile(
+    rf"\b(?:gjøres|gjerast|blir|vert)\s+{_THESE}\s+i\s+(?:lov\s+)?$", re.I
+)  # ``… gjøres følgende endringer i lov <cit>``: the main verb's own object
+_ACT_NOUN = re.compile(r"\b[\wæøå-]*(?:lov|loven|lova)\b", re.I)
 _TITLE_SLOT = re.compile(
     rf"^{_ITEM}?(?:I\s+)?(?:[^,()]*?(?:lov|loven|lova)|lov\s+om\s[^,()]*?)\s+$", re.I
 )  # ``I straffegjennomføringsloven <cit>``, ``Lov om rettergangsmåten i straffesaker <cit>``
@@ -105,14 +108,16 @@ def citations(text: str) -> list[str]:
 def _named(sentence: str) -> bool:
     """The citation sits where the amended act is named, not in a clause about another text.
 
-    Either right after ``endring(er|ane) i [lov]``, or after a title ending in an act noun
-    (or ``Lov om <title>``) with no comma, bracket or referring word before it.
+    Either right after the main verb's ``gjøres følgende endringer i [lov]``, or after a title
+    ending in an act noun (or ``Lov om <title>``) that holds no other act noun and no comma,
+    bracket or referring word: ``I straffeloven med hjemmel i lov …`` names two acts.
     """
     match = _CITATION.search(sentence)
     lead = sentence[: match.start()] if match else ""
     if _AFTER_VERB.search(lead):
         return True
-    return _TITLE_SLOT.match(lead) is not None and _NOT_A_NAME.search(lead) is None
+    titled = _TITLE_SLOT.match(lead) is not None and len(_ACT_NOUN.findall(lead)) == 1
+    return titled and _NOT_A_NAME.search(lead) is None
 
 
 def proven(sentence: str, changes: tuple[str, ...]) -> str | None:

@@ -25,6 +25,10 @@ year and number, whether it cites exactly one and the member's header lists it
 - ``check``: anything else. Zero is the merge condition.
 
 Nothing here decides an attribution; it restates the readings and the evidence beside them.
+``identity_proven`` deliberately reuses the engine's chain (``attribution.proven``), so it
+flags every operation whose new act differs from what that chain proves for its governing
+sentence. It is not an independent oracle of the chain itself: that is the manual reading of
+each distinct governing sentence and the independent review.
 """
 
 from __future__ import annotations
