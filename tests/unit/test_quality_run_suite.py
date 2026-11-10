@@ -76,6 +76,55 @@ class TestArgv:
         assert "tests/unit/" not in argv
 
 
+class TestRunPytest:
+    def test_the_qos_prefix_runs_ahead_of_the_pytest_argv(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A missing or reordered prefix would start pytest at full priority,
+        exactly the contention issue #864 moved the suite out of."""
+        monkeypatch.setattr(rs, "qos_prefix", lambda: ["/usr/bin/nice", "-n", "10"])
+        seen: dict[str, object] = {}
+
+        def fake_run(argv: list[str], cwd: Path, check: bool) -> object:
+            seen["argv"] = argv
+            seen["cwd"] = cwd
+            seen["check"] = check
+
+            class Result:
+                returncode = 0
+
+            return Result()
+
+        monkeypatch.setattr(rs.subprocess, "run", fake_run)
+
+        code = rs.run_pytest([sys.executable, "-m", "pytest", "tests/unit/test_a.py"])
+
+        assert code == 0
+        assert seen["argv"] == [
+            "/usr/bin/nice",
+            "-n",
+            "10",
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/unit/test_a.py",
+        ]
+        assert seen["cwd"] == rs.ROOT
+        assert seen["check"] is False
+
+    def test_the_exit_code_is_the_subprocess_returncode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(rs, "qos_prefix", list)
+
+        class Result:
+            returncode = 7
+
+        monkeypatch.setattr(rs.subprocess, "run", lambda *a, **k: Result())
+
+        assert rs.run_pytest(["anything"]) == 7
+
+
 class TestScopeLine:
     def test_full(self) -> None:
         scope = Scope(full="pyproject.toml changed", tests=(), changed=3, python_changed=True)

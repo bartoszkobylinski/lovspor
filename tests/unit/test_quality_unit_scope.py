@@ -99,6 +99,11 @@ class TestSelection:
     ) -> None:
         assert _tests(us.compute_scope(tree, ["src/lovspor/pkg/leaf.py"])) == ["test_leaf.py"]
 
+    def test_a_changed_package_init_is_seeded_by_its_own_package_name(self, tree: Path) -> None:
+        """``__init__.py`` stands for the package, not a module literally named
+        ``__init__``; leaf's `from . import inner` imports exactly that name."""
+        assert _tests(us.compute_scope(tree, ["src/lovspor/pkg/__init__.py"])) == ["test_leaf.py"]
+
     def test_a_helper_module_chain_carries_the_import(self, tree: Path) -> None:
         """test_chain -> tests.unit.chain -> tests.unit.helper -> lovspor.c."""
         assert "test_chain.py" in _tests(us.compute_scope(tree, ["src/lovspor/c.py"]))
