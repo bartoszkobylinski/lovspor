@@ -55,7 +55,7 @@ A unit-led sentence (`I kapittel 3 i lov … gjøres følgende endringer:`) is n
 
 ## 3. Every changed attribution
 
-`scripts/legal_time_attribution_audit.py` dumps every operation of every amender of the eight acts at each commit, then classifies every operation whose act, kind, instruction or presence differs, with its governing sentence, the acts that sentence cites and whether the header lists them. Output: `docs/research/data/legal-time-attribution-audit-2026-11-10.json` (sha256 `af57e31a…17c03`; inputs: the `73f7c805` dump `0f53261c…`, the branch dump `543268b8…`).
+`scripts/legal_time_attribution_audit.py` dumps every operation of every amender of the eight acts at each commit, then classifies every operation whose act, kind, instruction or presence differs, with its governing sentence, the acts that sentence cites, and whether it cites exactly one act that the header lists (`identity_proven`). `tests/unit/test_legal_time_attribution_audit.py` pins that two citations, an unlisted act or an act the sentence does not cite are never classed as proven. Output: `docs/research/data/legal-time-attribution-audit-2026-11-10.json` (sha256 `02b3206c…71d57`; inputs: the `73f7c805` dump `0f53261c…`, the branch dump `543268b8…`).
 
 | class | ops | meaning |
 |---|---|---|
@@ -156,7 +156,7 @@ Arveloven, personopplysningsloven, sivilombudsloven and språklova: **no content
 | `legal-time-replay-2026-11-06-spraklova.json` | `1d6604ae012bbad798e3036bfc2a46fc2f8d1b2accd7307d14af35180d243374` |
 | `legal-time-replay-2026-11-08-barnevernsloven.json` | `f0a83234e4deef9342efc8f70f705162f4e1292f3202eca3715b8153934ea89f` |
 | `legal-time-coverage-2026-11-10-phase4b.json` | `fe51cae5266f963e9d3bf2db80e55b4f6e61ca68dbf178512553b718508b7737` |
-| `legal-time-attribution-audit-2026-11-10.json` | `af57e31a3aace9f509d9eb20239bcf0a3e9f9ab8c3fb7e39f8608843efe17c03` |
+| `legal-time-attribution-audit-2026-11-10.json` | `02b3206c6e88bff061960f5608480c1eb9d76aaf8dcd97374f9e14f93fb71d57` |
 
 The Phase 4A coverage file `legal-time-coverage-2026-11-10.json` is left as it was, so the Phase 4A note still points at its own evidence. **Determinism:** two independent rebuilds of the eight per-act reports, both ladders and the five evidence files (15 files) produced identical digests.
 
@@ -171,11 +171,18 @@ The Phase 4A coverage file `legal-time-coverage-2026-11-10.json` is left as it w
 - Article boundaries followed by unknown intros.
 - Payload references that are not act bindings, and transitional sentences.
 
-`tests/integration/test_legaltime_phase4b.py` (pinned archives): the ikraftsettingslov's §§ 4/5 bind 71/145 operations to the two acts its header lists; none is a straffeloven event, unattributed event, applied operation or act-level entry on the straffeloven ladder; three real members bind every operation of their block; the misprinted straffeloven date stays unattributed. `test_legaltime_phase4.py` keeps its 71/216 counts and now asserts that none is straffeloven's (Phase 4A asserted "unattributed"); `test_legaltime_phase3.py` pins the straffeloven ladder at (4, 99, 391, 335).
+`tests/integration/test_legaltime_phase4b.py` (pinned archives): the ikraftsettingslov's §§ 4/5 bind 71/145 operations to the two acts its header lists; none is a straffeloven event, unattributed event, applied operation or act-level entry on the straffeloven ladder; two real members bind every operation of their block, with no operation of another act or of none inside that run; lov/2007-06-15-21 part IV reads lov/2005-06-17-58 § 10 and then four operations of the eldreråd act under the reordered intro; the misprinted straffeloven date stays unattributed. `test_legaltime_phase4.py` keeps its 71/216 counts and now asserts that none is straffeloven's (Phase 4A asserted "unattributed"); `test_legaltime_phase3.py` pins the straffeloven ladder at (4, 99, 391, 335).
+
+## 6a. Independent review (Codex, read-only, `codex exec -s read-only`)
+
+| round | head reviewed | verdict | findings | resolution |
+|---|---|---|---|---|
+| 1 | `2ae6f009` | NOT READY | major: a canonical intro binds a date-only citation (`I lov 20. mai 2005 gjøres …` → `lov/2005-05-20`); major: the audit tool classed a two-citation sentence as proven when the first citation matched; minor: the archive tests counted operations without pinning the block | the audit now requires exactly one citation that the header lists, with unit tests; the archive tests pin the run and the multi-act part IV. The date-only binding predates Phase 4A and is unchanged here: measured and filed as #872 (128 operations in the eight acts' amenders, 77 header-proven, none bound to a coverage act) |
 
 ## 7. Limitations
 
 - **The header proof is incomplete in some members.** Lovdata's `changesToDocuments` omits acts a few members plainly amend (lov/2008-03-07-4 for straffegjennomføringsloven and militær straffelov; lov/2007-01-26-3 and lov/2009-06-19-74 for several). Those blocks stay unattributed. That is the fail-closed choice: the sentence alone is not enough proof.
 - **A proven intro binds a block, not a sentence.** Within it, the Phase 4A rules decide where the block ends. A block whose end the grammar misses would misattribute its tail, as at Phase 4A for canonical intros. The audit found none in the eight acts' amenders.
 - **Whole-act repeals** (`N. Lov … oppheves.`) close the block but are not bound to the repealed act: they have no unit to apply and stay unattributed operations.
+- **Date-only canonical citations** bind without the header proof Phase 4B requires of its own shapes (#872).
 - **Titles are not evidence yet.** Binding a short title (friskolelova, 13 operations) would need the act's official title as an input to the parser.

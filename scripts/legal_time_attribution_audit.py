@@ -12,10 +12,11 @@ them is one member) and records each operation's id, act, kind and instruction, 
 sentence of the member that opens or closes an amendment block. ``diff`` prints one JSON
 document: every operation whose act, kind, instruction or presence changed, with the block
 sentence that governs it in the newer reading, the acts that sentence cites by day, month,
-year and number, whether the member's header lists each of them, and a class:
+year and number, whether it cites exactly one and the member's header lists it
+(``identity_proven``), and a class:
 
-- ``new_proven``: unattributed before, bound now to the one act the governing sentence cites,
-  which the header lists;
+- ``new_proven``: unattributed before, bound now to the one and only act the governing
+  sentence cites, which the header lists;
 - ``rebound_proven``: bound before to an act the governing sentence does not cite, bound now
   to the act it does cite, which the header lists;
 - ``unbound_was_false``: bound before to an act the governing sentence does not cite,
@@ -132,12 +133,12 @@ def _row(
 ) -> dict[str, Any]:
     citations = importlib.import_module(_ATTRIBUTION).citations
     cited = citations(sentence.split("§", maxsplit=1)[0] if sentence[:1].isdigit() else sentence)
-    proof = bool(cited) and cited[0] in changes
+    proof = len(cited) == 1 and cited[0] in changes  # one act, and the header lists it
     o, n = before_op, after_op
     return {
         "op": (n or o)[0], "before": o and o[1], "after": n and n[1], "kind": (n or o)[2],
         "instruction": (n or o)[3], "governing": sentence, "cited": cited,
-        "header_lists_cited": proof, "class": _class(o, n, cited, proof),
+        "identity_proven": proof, "class": _class(o, n, cited, proof),
     }  # fmt: skip
 
 

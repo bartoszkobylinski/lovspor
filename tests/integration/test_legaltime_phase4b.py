@@ -75,13 +75,16 @@ def test_the_straffeloven_ladder_still_applies_nothing_from_sections_4_and_5() -
     [
         ("lti/2013/nl-20130621-085.xml", "lov/1902-05-22-10", 24),  # title before the citation
         ("lti/2007/nl-20070629-083.xml", "lov/2001-05-18-21", 15),  # short title before it
-        ("lti/2007/nl-20070615-021.xml", "lov/1991-11-08-76", 9),  # reordered nynorsk: 4 + 5 bound
     ],
 )
 def test_a_proven_intro_binds_every_operation_of_its_block(
     member: str, act: str, count: int
 ) -> None:
-    assert _read(member).count(act) == count
+    """The count, and no operation of another act or of none inside the act's run (review r1)."""
+    acts = _read(member)
+    assert acts.count(act) == count
+    first, last = acts.index(act), len(acts) - 1 - acts[::-1].index(act)
+    assert set(acts[first : last + 1]) == {act}
 
 
 def test_a_misprinted_citation_stays_unattributed() -> None:
@@ -90,3 +93,12 @@ def test_a_misprinted_citation_stays_unattributed() -> None:
     document = read_members(ARCHIVES[0], [member])[member]
     assert "lov/2005-05-22-28" not in document.header.changes_to_documents
     assert "lov/2005-05-22-28" not in _read(member)
+
+
+def test_a_reordered_intro_after_another_acts_block_in_one_part_binds_its_own_act() -> None:
+    """lov/2007-06-15-21 IV: lov/2005-06-17-58 § 10, then ``Frå det tidspunktet … i lov 8.
+    november 1991 nr. 76 … gjort gjeldande:`` and four operations of that act."""
+    member = "lti/2007/nl-20070615-021.xml"
+    document = read_members(ARCHIVES[0], [member])[member]
+    part_iv = [op.act for op in interpret(document).operations if ":IV:" in op.id]
+    assert part_iv == ["lov/2005-06-17-58", *["lov/1991-11-08-76"] * 4]
