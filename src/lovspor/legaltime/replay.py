@@ -15,7 +15,16 @@ from typing import Literal
 
 from lxml import etree
 
-from lovspor.legaltime.commencement import Timing
+from lovspor.legaltime.baseline import (
+    Commencement,
+    InForce,
+    UnitState,
+    addresses_flagged,
+    restructures,
+    state_gate,
+    unit_state,
+)
+from lovspor.legaltime.commencement import Event, Timing
 from lovspor.legaltime.document import Document, Frozen, Ledd, Provision, element_text
 from lovspor.legaltime.instructions import Address, Operation, _shift
 from lovspor.legaltime.text import ORDINAL_ALT, ordinal, section_sort_key, split_sentences
@@ -23,6 +32,7 @@ from lovspor.parsing.xml_normalizer import safe_parser
 
 ProvisionStatus = Literal["replayed", "unresolved"]
 StateStatus = Literal["replayed", "not_yet_in_force", "unresolved_baseline"]
+RESTRUCTURED = "ledd-level commencement cannot follow a restructuring of the provision"
 _SECTION_REF = re.compile(r"§\s*(\d+(?:[A-Z]|\s[A-Z](?=-))?(?:-\d+)?)\s*([a-hj-zæøå](?![a-zæøå]))?")
 _LEDD_REF = re.compile(
     rf"\b((?:{ORDINAL_ALT})(?:\s*,\s*(?:{ORDINAL_ALT}))*(?:\s+(?:og|til)\s+(?:{ORDINAL_ALT}))?)\s+ledd\b",
@@ -32,13 +42,7 @@ _ORDINAL_WORD = re.compile(ORDINAL_ALT, re.I)
 _LIST_MARKUP = re.compile(r"<(?:ul|ol)\b")
 
 
-class Event(Frozen):
-    sequence: int
-    law: str
-    member: str
-    operation: Operation
-    timing: Timing
-    published_at: datetime | None
+__all__ = ["Event", "ProvisionState", "ReplayState", "replay"]
 
 
 class ProvisionState(Frozen):
@@ -51,6 +55,9 @@ class ProvisionState(Frozen):
     problems: tuple[str, ...] = ()
     applied: tuple[str, ...] = ()
     pending: tuple[str, ...] = ()
+    in_force: InForce = "in_force"  # the unit's legal effectiveness at D (Decision 3b)
+    effective: date | None = None  # the unit's proven commencement day, when it has one
+    ledd_not_in_force: tuple[int, ...] = ()  # ledd dated apart and not yet in force at D
 
 
 class ReplayState(Frozen):
@@ -64,21 +71,31 @@ class ReplayState(Frozen):
     unresolved: tuple[tuple[str, str], ...]
     act_level_problems: tuple[str, ...]
     withheld: tuple[str, ...] = ()
+    not_in_force: tuple[str, ...] = ()  # sections with text at D whose commencement is later
+    pending_commencement: tuple[str, ...] = ()  # sections whose commencement is delegated, undated
+    unresolved_commencement: tuple[str, ...] = ()  # sections whose commencement cannot be read
+
+
+_IN_FORCE = UnitState(in_force="in_force", effective=None, flagged=(), problems=())
 
 
 class _Provision:
-    def __init__(self, source: Provision) -> None:
+    def __init__(self, source: Provision, unit: UnitState = _IN_FORCE) -> None:
         self.label, self.heading, self.ledd = source.label, source.heading, list(source.ledd)
         self.repealed = False
-        self.problems: list[str] = []
+        self.unit = unit
+        self.problems: list[str] = list(unit.problems)
         self.applied: list[str] = []
         self.pending: list[str] = []
 
     def freeze(self, key: str) -> ProvisionState:
+        unresolved = bool(self.problems) or self.unit.in_force == "unresolved"
         return ProvisionState(
             key=key, label=self.label, heading=self.heading, ledd=tuple(self.ledd),
-            repealed=self.repealed, status="unresolved" if self.problems else "replayed",
+            repealed=self.repealed, status="unresolved" if unresolved else "replayed",
             problems=tuple(self.problems), applied=tuple(self.applied), pending=tuple(self.pending),
+            in_force=self.unit.in_force, effective=self.unit.effective,
+            ledd_not_in_force=tuple(i for i in self.unit.flagged if i <= len(self.ledd)),
         )  # fmt: skip
 
 
@@ -102,10 +119,22 @@ def _sentence_slice(address: Address, count: int) -> tuple[int, int]:
 class _Working:
     """Mutable provision map; every ``apply_*`` returns a failure reason or None."""
 
-    def __init__(self, baseline: Document) -> None:
+    def __init__(
+        self, baseline: Document, commencement: Commencement | None = None, at: date | None = None
+    ) -> None:
+        self.commencement, self.at = commencement, at
         self.order = [p.key for p in baseline.provisions]
-        self.map = {p.key: _Provision(p) for p in baseline.provisions}
+        self.map = {
+            p.key: _Provision(p, self.unit_state(p.key, p.chapter, (p.part or "",)))
+            for p in baseline.provisions
+        }
         self.done: set[str] = set()  # ids of operations that applied, for absorbed renumberings
+
+    def unit_state(self, key: str, chapter: str | None, parts: tuple[str, ...]) -> UnitState:
+        """The section's commencement at D; without a commencement every unit is in force."""
+        if self.commencement is None or self.at is None:
+            return _IN_FORCE
+        return unit_state(self.commencement, key, (chapter, parts), self.at)
 
     def _target(self, key: str | None) -> _Provision | None:
         return self.map.get(key) if key else None
@@ -142,7 +171,9 @@ class _Working:
             return "new provision without key or text, or key already present"
         if op.new_provision.key != key:
             return f"new text is headed {op.new_provision.key}, not {key}"
-        self.map[key] = _Provision(op.new_provision)
+        new = op.new_provision
+        unit = self.unit_state(key, new.chapter, (new.part or "", op.part.upper()))
+        self.map[key] = _Provision(new, unit)
         self.order.insert(_insert_position(self.order, key), key)
         return None
 
@@ -524,6 +555,41 @@ def _baseline_status(baseline_timing: Timing, at: date) -> StateStatus:
     return "replayed" if baseline_timing.effective <= at else "not_yet_in_force"
 
 
+def _substitutes_flagged(op: Operation, working: _Working) -> bool:
+    """A term substitution reaches a ledd not in force: a listed one, or any when none is listed."""
+    for key, ledd in _locations(op.locations):
+        target = working.map.get(key)
+        if target is None:
+            continue
+        present = {i for i in target.unit.flagged if i <= len(target.ledd)}
+        if present and (not ledd or ledd & present):
+            return True
+    return False
+
+
+def _unit_gate(op: Operation, working: _Working) -> str | None:
+    """``withheld`` / an unresolved reason / None (apply) from the targets' commencement at D."""
+    if op.kind == "insert_section" and op.new_provision is not None and op.address.section:
+        new = op.new_provision
+        parts = (new.part or "", op.part.upper())
+        return state_gate(working.unit_state(op.address.section, new.chapter, parts))
+    for target in _targets(op, working):
+        gate = state_gate(target.unit)
+        if gate is not None:
+            return gate
+        if addresses_flagged(op, target.unit.flagged, len(target.ledd)):
+            return "withheld"
+        if restructures(op, target.unit.flagged, len(target.ledd)):
+            return RESTRUCTURED
+    if op.kind == "substitute_term" and _substitutes_flagged(op, working):
+        return "withheld"
+    return None
+
+
+def _keys(provisions: tuple[ProvisionState, ...], in_force: InForce) -> tuple[str, ...]:
+    return tuple(p.key for p in provisions if p.in_force == in_force)
+
+
 class _Run:
     """One replay pass: the bucket every event lands in."""
 
@@ -539,11 +605,7 @@ class _Run:
     def take(self, event: Event, verdict: str) -> None:
         op = event.operation
         if verdict == "apply":
-            problem = _apply(self.working, event, self.act_problems)
-            if problem:
-                self.unresolved.append((op.id, problem))
-            else:
-                self.applied.append(op.id)
+            self._apply(event)
         elif verdict == "unresolved":
             self.unresolved.append((op.id, event.timing.reason))
             for target in _targets(op, self.working):
@@ -555,13 +617,49 @@ class _Run:
             for target in _targets(op, self.working):
                 target.pending.append(op.id)
 
+    def _apply(self, event: Event) -> None:
+        """Apply a dated operation unless its target unit is not in force at D (Decision 4)."""
+        op = event.operation
+        gate = _unit_gate(op, self.working)
+        if gate == "withheld":
+            self.withheld.append(op.id)
+            return
+        if gate is not None:
+            self.unresolved.append((op.id, gate))
+            for target in _targets(op, self.working):
+                target.problems.append(f"{op.id}: {gate}")
+            return
+        problem = _apply(self.working, event, self.act_problems)
+        if problem:
+            self.unresolved.append((op.id, problem))
+        else:
+            self.applied.append(op.id)
+
+    def state(
+        self, act: str, at: date, status: StateStatus, provisions: tuple[ProvisionState, ...]
+    ) -> ReplayState:
+        return ReplayState(
+            act=act, at=at, status=status, provisions=provisions,
+            applied=tuple(self.applied), future=tuple(self.future), pending=tuple(self.pending),
+            unresolved=tuple(self.unresolved), act_level_problems=tuple(self.act_problems),
+            withheld=tuple(self.withheld), not_in_force=_keys(provisions, "not_yet_in_force"),
+            pending_commencement=_keys(provisions, "pending"),
+            unresolved_commencement=_keys(provisions, "unresolved"),
+        )  # fmt: skip
+
 
 def replay(
-    baseline: Document, baseline_timing: Timing, events: list[Event], at: date
+    baseline: Document, commencement: Timing | Commencement, events: list[Event], at: date
 ) -> ReplayState:
-    """The act's provisions at legal date ``at``; refuses nothing, marks everything."""
-    status = _baseline_status(baseline_timing, at)
-    working = _Working(baseline)
+    """The act's provisions at legal date ``at``; refuses nothing, marks everything.
+
+    ``commencement`` is the act's per-unit commencement; a bare ``Timing`` is the act-wide
+    special case (one commencement for every unit).
+    """
+    if isinstance(commencement, Timing):
+        commencement = Commencement(default=commencement)
+    status = _baseline_status(commencement.default, at)
+    working = _Working(baseline, commencement, at)
     run = _Run(working)
     for event in sorted(events, key=_order_key):
         verdict = _classify(event, at)
@@ -572,9 +670,4 @@ def replay(
     provisions = (
         tuple(working.map[k].freeze(k) for k in working.order) if status == "replayed" else ()
     )
-    return ReplayState(
-        act=baseline.header.refid, at=at, status=status, provisions=provisions,
-        applied=tuple(run.applied), future=tuple(run.future), pending=tuple(run.pending),
-        unresolved=tuple(run.unresolved), act_level_problems=tuple(run.act_problems),
-        withheld=tuple(run.withheld),
-    )  # fmt: skip
+    return run.state(baseline.header.refid, at, status, provisions)

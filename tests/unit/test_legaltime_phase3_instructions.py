@@ -95,6 +95,24 @@ def test_new_chapters_placed_in_a_part_carry_chapter_and_part() -> None:
     ]
 
 
+def test_several_new_chapters_without_titles_stamp_no_chapter() -> None:
+    """``Nye kapitler 6 til 8`` names a run, not one chapter: unplaced until a title names one."""
+    body = (
+        '<section class="section"><h2>I</h2>'
+        '<article class="legalP">Lov 20. mai 2005 nr. 28 om straff endres slik:</article>'
+        + _p("Nye kapitler 6 til 8 plasseres i annen del, og skal lyde:")
+        + _future("§61")
+        + _title("Kapittel 7. B")
+        + _future("§71")
+        + "</section>"
+    )
+    operations = interpret(parse_document(_law(body).encode(), "lti/x.xml")).operations
+    assert [(op.new_provision.chapter, op.new_provision.part) for op in operations] == [
+        (None, "del2"),
+        ("kap7", "del2"),
+    ]
+
+
 def test_a_single_new_chapter_takes_its_chapter_from_the_sentence() -> None:
     body = (
         '<section class="section"><h2>I</h2>'
@@ -171,6 +189,56 @@ def test_an_instrument_commencing_another_act_has_one_clause_of_its_own() -> Non
     ] == [("replace_ledd", ACT, "§411", 1)]
     timing = resolve_timings(law, reading.clauses, reading.operations, ())[reading.operations[0].id]
     assert (timing.status, timing.effective) == ("dated", date(2015, 6, 19))
+
+
+def test_a_range_shift_after_a_first_ledd_rewrite_is_an_insertion() -> None:
+    body = (
+        '<section class="section"><h2>I</h2>'
+        + _p("I lov 18. juni 2021 nr. 97 om barnevern gjøres følgende endringer:")
+        + _p("§ 13-5 første ledd skal lyde:")
+        + '<article class="legalP">Ny første.</article>'
+        + _p("Nåværende første til femte ledd blir annet til sjette ledd.")
+        + "</section>"
+    )
+    operations = interpret(parse_document(_law(body).encode(), "lti/x.xml")).operations
+    assert [(op.kind, op.address.ledd, op.absorbed_by) for op in operations] == [
+        ("insert_ledd", 1, None),
+        ("renumber", None, operations[0].id),
+    ]
+
+
+def test_a_range_shift_that_skips_a_number_is_not_an_insertion() -> None:
+    body = (
+        '<section class="section"><h2>I</h2>'
+        + _p("I lov 18. juni 2021 nr. 97 om barnevern gjøres følgende endringer:")
+        + _p("§ 13-5 første ledd skal lyde:")
+        + '<article class="legalP">Ny første.</article>'
+        + _p("Nåværende annet til femte ledd blir tredje til sjette ledd.")
+        + "</section>"
+    )
+    operations = interpret(parse_document(_law(body).encode(), "lti/x.xml")).operations
+    assert [(op.kind, op.absorbed_by) for op in operations] == [
+        ("replace_ledd", None),
+        ("renumber", None),
+    ]
+
+
+def test_a_one_sentence_term_substitution_names_its_locations() -> None:
+    body = (
+        '<section class="section"><h2>II</h2>'
+        + _p("I lov 18. juni 2021 nr. 97 om barnevern gjøres følgende endringer:")
+        + _p(
+            "Ordet «atferdsinstitusjon» skal endres til «barnevernsinstitusjon» i § 1-2 tredje "
+            "og fjerde ledd, § 5-1 første ledd bokstav d og § 10-4."
+        )
+        + "</section>"
+    )
+    operations = interpret(parse_document(_law(body).encode(), "lti/x.xml")).operations
+    assert [(op.kind, op.act, op.term_old, op.term_new) for op in operations] == [
+        ("substitute_term", ACT.replace("2005-05-20-28", "2021-06-18-97"), "atferdsinstitusjon",
+         "barnevernsinstitusjon"),
+    ]  # fmt: skip
+    assert operations[0].locations.startswith("§ 1-2 tredje og fjerde ledd")
 
 
 def test_an_intro_alone_consumes_no_payload() -> None:

@@ -1029,7 +1029,10 @@ whose provenance the website cannot vouch for.
 
 ## 21. Legal-time replay pilot from Norsk Lovtidend avd. I (proposed 2026-11-06, #744)
 
-**Status:** pilot built, ADR-0020 proposed in lovspor-notebook; nothing accepted, nothing served.
+**Status:** pilot built; ADR-0020 **accepted** by the owner on 2026-11-08 (lovspor-notebook PR #165,
+merge `1f857f22`) as architectural direction only — phase 3 implementation is in review (below),
+nothing is served, published or written into `lovverk`; serving, materialisation and publication each
+need their own decision (ADR-0020 Decision 13).
 
 A bounded package `src/lovspor/legaltime/` reconstructs an act's provisions at a legal date by
 applying the announced amendments from the `lovtidend-avd1` archives in legal-effective order:
@@ -1075,6 +1078,28 @@ carries act-level problems. The four pilot evidence files are byte-identical at 
 next limiting factor is commencement at section granularity (partial own commencement, `Delt`
 decisions with exceptions) and commencement stated in another act — a model decision for ADR-0020,
 not a grammar extension. Nothing served, published or written into `lovverk`.
+
+Phase 3 (2026-11-08, after ADR-0020 was accepted; note
+`docs/research/legal-time-replay-phase3-2026-11-08.md`, evidence
+`docs/research/data/legal-time-replay-2026-11-08-barnevernsloven.json`, coverage
+`docs/research/data/legal-time-coverage-2026-11-08.json`; two PRs, part 1 grammar and structure
+`feat/744-phase3-commencement`, part 2 per-unit commencement and replay `feat/744-phase3-replay`,
+neither merged by the author): commencement is modelled per legal unit (`baseline.py`: a default
+timing plus units dated apart — a section, a ledd, a chapter under a part — folded in publication
+order with Decision 6's rules: same day cited, different days `conflicting commencement decisions`,
+an excepted unit keeps the header's state, an unreadable scope unsettles every unit); a commencement
+sentence another dated instrument writes into the act is a statement about the act with provenance
+naming both (Decision 5(d): straffelovens ikraftsettingslov dates straffeloven 2015-10-01); the
+replay gates every dated operation on its target unit's effectiveness at D (`withheld`, ledd-level
+flags, restructurings under a flag refused); the unit grammar (`units.py`) and scopes with
+exceptions (`scopes.py`) read the decisions' own shapes; `REPLAY_VERSION` is `legaltime-replay-3`.
+Measured: barnevernsloven dated 2023-01-01 less § 2-6 (pending) and § 15-7 fjerde ledd (2023-07-01),
+states proven before and after each day; straffeloven dated 2015-10-01 by the 2015 statute, chapter 16
+(2008-03-07 by resolution) `unresolved` as a Decision-6 contradiction; on the phase-2 set 6 of 8 own
+commencements readable (was 4), 1,990 of 2,783 events dated (was 1,196 of 2,432), 1,107 applied (was
+477), **0 sections proven** under the act-level blanket of Decision 7 (818 of 1,540 agree with the
+oracle behind it, reported as `counts_before_blanket`, never as a verdict). Section renumbering stays
+`unresolved` (Decision 7, Decision 13), which is why straffeloven's text does not pass 2008.
 
 ## How to use this document
 

@@ -188,7 +188,7 @@ def test_event_state_and_archive_records_are_exact() -> None:
     record = run._state_record(state)
     assert set(record) == {
         "at", "status", "applied", "future", "pending", "unresolved", "act_level_problems", "withheld",  # noqa: E501
-        "provisions",
+        "not_in_force", "pending_commencement", "unresolved_commencement", "provisions",
     }  # fmt: skip
     assert record["status"] == "not_yet_in_force"
     assert len(record["withheld"]) == 4
@@ -218,7 +218,7 @@ def test_build_report_pins_oracle_sorted_inputs_and_json_mode(tmp_path: Path) ->
     report = run.build_report(evidence, [date(2023, 1, 1)], oracle, [first, second])
     assert [p["filename"] for p in report["inputs"]] == [second.name, first.name]
     assert report["oracle"] == {"member": "nl/x.xml", "sha256": oracle.sha256}
-    assert report["replay_version"] == "legaltime-replay-2"
+    assert report["replay_version"] == "legaltime-replay-3"
     assert report["verification"][0]["at"] == "2023-01-01"
     assert isinstance(report["verification"][0]["counts"], dict)
     json.dumps(report)

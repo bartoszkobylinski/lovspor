@@ -113,6 +113,40 @@ def test_listed_part_items_with_units_or_exceptions(
     assert (scope.part, scope.excluded, scope.units) == (part, excluded, units)
 
 
+def test_an_item_citing_an_act_inline_reaches_only_that_act_s_operations() -> None:
+    scope = _one(
+        "Følgende trer i kraft straks: Endringsloven del IV lov 6. juni 2014 nr. 19 om stans i "
+        "utbetalinga av offentlege ytingar § 2 annet ledd og § 3."
+    )
+    assert scope.act == "lov/2014-06-06-19"
+    cited = _op("IV", section="§2", ledd=2).model_copy(update={"act": "lov/2014-06-06-19"})
+    other = _op("IV", section="§2", ledd=2)  # the same address in barnevernsloven
+    assert scope.reach(cited) == "covers"
+    assert scope.reach(other) == "unknown"
+    assert _scopes_for(other, [scope]) == (
+        "a unit the decision names cannot be placed against the operation"
+    )
+    assert (
+        _scopes_of(
+            "Følgende trer i kraft straks: Endringsloven del IV lov om stans § 2 annet ledd.", OWN
+        )
+        is None
+    )  # an act named without a citable date
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "jf. lov 6. juni 2014 nr. 19 § 2 annet ledd",
+        "lov 6. juni 2014 nr. 19",
+    ],
+)
+def test_inline_act_item_requires_a_leading_act_citation_and_section(tail: str) -> None:
+    # A citation buried in foreign prose must not turn that prose into a known scope.
+    sentence = f"Følgende trer i kraft straks: Endringsloven del IV {tail}."
+    assert _scopes_of(sentence, OWN) is None
+
+
 def test_nine_exceptions_of_every_kind_in_one_item() -> None:
     scope = _one(
         "Følgende trer i kraft 1. januar 2026: Endringsloven del I (barnevernsloven) med unntak av "

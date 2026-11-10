@@ -1,4 +1,4 @@
-"""Coverage and failure taxonomy over legal-time replay evidence files (#744, phase 2).
+"""Coverage and failure taxonomy over legal-time replay evidence files (#744, phases 2 and 3).
 
 Reads the JSON reports ``lovspor ops legal-time replay`` writes and prints one
 JSON document: per act, the members read, the operation kinds, the timing
@@ -61,23 +61,75 @@ def _events(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_PROVEN = ("exact_raw", "exact_normalized", "editorial_omission")
+
+
+def _proven(counts: dict[str, int]) -> str:
+    """``n of total`` sections, the total being every section either side holds."""
+    return f"{sum(counts.get(k, 0) for k in _PROVEN)} of {sum(counts.values())}"
+
+
 def _verification(report: dict[str, Any]) -> dict[str, Any]:
     verifications = report.get("verification") or []
     if not verifications:
         return {"counts": None}
     last = verifications[-1]
+    before = last.get("counts_before_blanket") or {}
+    ledd = last.get("ledd_counts") or {}
     return {
         "counts": last["counts"],
+        "sections_proven": _proven(last["counts"]),
+        "counts_before_blanket": before or None,
+        "sections_proven_before_blanket": _proven(before) if before else None,
+        "ledd_counts": ledd or None,
+        "ledd_proven": f"{ledd.get('ledd_proven', 0)} of {ledd.get('oracle_ledd', 0)}"
+        if ledd
+        else None,
         "text_differs": [s["key"] for s in last["sections"] if s["verdict"] == "text_differs"][:40],
         "notes_without_replay_event": len(last["notes_without_replay_event"]),
         "replay_events_without_note": len(last["replay_events_without_note"]),
     }
 
 
+def _commencement(report: dict[str, Any]) -> dict[str, Any] | None:
+    """The per-unit commencement (phase 3): the default and every unit dated apart."""
+    found = report.get("commencement")
+    if found is None:
+        return None
+    return {
+        "default": {
+            k: found["default"][k] for k in ("status", "effective", "known_from", "reason")
+        },
+        "default_proofs": [p["refid"] for p in found["default"]["proofs"]],
+        "units": [
+            {
+                "unit": u["unit"],
+                "part": u["part"],
+                "status": u["timing"]["status"],
+                "effective": u["timing"]["effective"],
+                "reason": u["timing"]["reason"],
+                "proofs": [p["refid"] for p in u["timing"]["proofs"]],
+            }
+            for u in found["units"]
+        ],
+    }
+
+
 def _ladder(report: dict[str, Any]) -> list[dict[str, Any]]:
     keys = ("applied", "future", "pending", "unresolved", "withheld", "act_level_problems")
+    units = ("not_in_force", "pending_commencement", "unresolved_commencement")
     return [
-        {"at": state["at"], "status": state["status"], **{k: len(state[k]) for k in keys}}
+        {
+            "at": state["at"],
+            "status": state["status"],
+            **{k: len(state[k]) for k in keys},
+            **{k: len(state[k]) for k in units if k in state},
+            "ledd_not_in_force": {
+                p["key"]: p["ledd_not_in_force"]
+                for p in state["provisions"]
+                if p.get("ledd_not_in_force")
+            },
+        }
         for state in report["states"]
     ]
 
@@ -95,6 +147,7 @@ def taxonomy(path: Path) -> dict[str, Any]:
         "members": dict(members),
         "unattributed_operations": unattributed,
         "baseline": {k: baseline[k] for k in ("status", "effective", "reason")},
+        "commencement": _commencement(report),
         **_events(report),
         "end_state": _end_state(report),
         "verification": _verification(report),

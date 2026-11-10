@@ -144,6 +144,17 @@ def _decisions(decisions: DecisionsLike) -> Decisions:
     return decisions if isinstance(decisions, Decisions) else Decisions(documents=decisions)
 
 
+class Event(Frozen):
+    """One announced operation aimed at the act, with the timing its evidence supports."""
+
+    sequence: int
+    law: str
+    member: str
+    operation: Operation
+    timing: "Timing"
+    published_at: datetime | None
+
+
 class Proof(Frozen):
     """Where a timing was read: the member, and the sha256 of the sentence it came from.
 

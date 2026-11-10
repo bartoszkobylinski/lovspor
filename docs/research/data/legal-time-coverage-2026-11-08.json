@@ -1,0 +1,1853 @@
+{
+ "arbeidsmiljoloven": {
+  "act": "lov/2005-06-17-62",
+  "archives": [
+   {
+    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
+    "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   },
+   {
+    "archive": "lovtidend-avd1-2026.tar.bz2",
+    "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   }
+  ],
+  "baseline": {
+   "effective": null,
+   "reason": "partial decision outside the grammar",
+   "status": "unresolved"
+  },
+  "commencement": {
+   "default": {
+    "effective": null,
+    "known_from": "2005-06-17",
+    "reason": "partial decision outside the grammar",
+    "status": "unresolved"
+   },
+   "default_proofs": [
+    "lov/2005-06-17-62",
+    "forskrift/2005-06-17-609"
+   ],
+   "units": []
+  },
+  "end_state": {
+   "act_level_reasons": {},
+   "at": "2026-11-06",
+   "buckets": {
+    "act_level_problems": 0,
+    "applied": 0,
+    "future": 0,
+    "pending": 2,
+    "unresolved": 82,
+    "withheld": 272
+   },
+   "status": "unresolved_baseline",
+   "unresolved_reasons": {
+    "commencement sentence outside the grammar": 20,
+    "conflicting commencement decisions": 1,
+    "decision body has no commencement sentence for this law": 5,
+    "full decision body carries an exception": 36,
+    "full decision body names several dates": 14,
+    "partial decision outside the grammar": 6
+   }
+  },
+  "events": 356,
+  "kinds": {
+   "insert_ledd": 21,
+   "insert_punktum": 14,
+   "insert_section": 37,
+   "renumber": 30,
+   "repeal_bokstav": 1,
+   "repeal_ledd": 13,
+   "repeal_punktum": 11,
+   "repeal_section": 6,
+   "replace_bokstav": 11,
+   "replace_heading": 4,
+   "replace_ledd": 109,
+   "replace_punktum": 43,
+   "replace_section": 23,
+   "substitute_term": 2,
+   "unsupported": 31
+  },
+  "ladder": [
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2008-01-01",
+    "future": 207,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 2,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 82,
+    "unresolved_commencement": 0,
+    "withheld": 65
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2012-01-01",
+    "future": 155,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 2,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 82,
+    "unresolved_commencement": 0,
+    "withheld": 117
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2016-01-01",
+    "future": 125,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 2,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 82,
+    "unresolved_commencement": 0,
+    "withheld": 147
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2020-01-01",
+    "future": 85,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 2,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 82,
+    "unresolved_commencement": 0,
+    "withheld": 187
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2024-01-01",
+    "future": 30,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 2,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 82,
+    "unresolved_commencement": 0,
+    "withheld": 242
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2026-11-06",
+    "future": 0,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 2,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 82,
+    "unresolved_commencement": 0,
+    "withheld": 272
+   }
+  ],
+  "members": {
+   "amending": 77,
+   "decision": 85,
+   "enacting": 1
+  },
+  "replay_version": "legaltime-replay-3",
+  "timing": {
+   "dated": 272,
+   "pending": 2,
+   "unresolved": 82
+  },
+  "timing_reasons": {
+   "commencement sentence outside the grammar": 20,
+   "conflicting commencement decisions": 1,
+   "decision body has no commencement sentence for this law": 5,
+   "full decision body carries an exception": 36,
+   "full decision body names several dates": 14,
+   "partial decision outside the grammar": 6
+  },
+  "unattributed_operations": 10,
+  "unsupported_instructions": {
+   "Fjerde ledd oppheves.": 1,
+   "Fristforlengelse og oppfriskning ved oppsigelse under sykdom, svangerskap, foreldrepermisj": 1,
+   "Gjennomsnittsberegning av den alminnelige arbeidstid": 1,
+   "I følgende bestemmelser skal betegnelsen «Aetat» endres til «Arbeids- og velferdsetaten»:": 1,
+   "I § 15-11 gjøres følgende endringer:": 1,
+   "Kapittel 7 skal lyde:": 1,
+   "Någjeldende andre ledd bokstav g blir nytt andre ledd bokstav h.": 1,
+   "Någjeldende fjerde ledd blir nytt femte ledd.": 1,
+   "Någjeldende tredje punktum blir nytt fjerde punktum.": 1,
+   "Nåværende tredje ledd oppheves.": 1,
+   "Omsorg for og pleie av nære pårørende": 1,
+   "Tredje ledd skal lyde:": 1,
+   "disse endringene gjøres:": 1,
+   "§ 1-7 fjerde ledd og nytt femte ledd skal lyde:": 1,
+   "§ 10-12 sjette, nytt sjuende og nytt åttende ledd skal lyde:": 1,
+   "§ 12-10 overskriften og første ledd skal lyde:": 1,
+   "§ 13-9 tredje ledd blir nytt andre ledd.": 1,
+   "§ 14-13 andre ledd og nytt tredje ledd skal lyde:": 1,
+   "§ 14-9 første ledd andre punktum bokstav d, bokstav e og ny bokstav f skal lyde:": 1,
+   "§ 15-13 a første, andre, tredje og fjerde ledd skal lyde:": 1,
+   "§ 15-3 tiande ledd andre punktum skal lyde:": 1,
+   "§ 17-2 tredje, fjerde og nytt femte ledd skal lyde:": 1,
+   "§ 18-6 første leddet lyde:": 1,
+   "§ 2-2 første ledd bokstav b og ny bokstav c skal lyde:": 1,
+   "§ 4-1 nytt åttande ledd lyde:": 1
+  },
+  "verification": {
+   "counts": null
+  }
+ },
+ "barnevernsloven": {
+  "act": "lov/2021-06-18-97",
+  "archives": [
+   {
+    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
+    "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   },
+   {
+    "archive": "lovtidend-avd1-2026.tar.bz2",
+    "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   }
+  ],
+  "baseline": {
+   "effective": "2023-01-01",
+   "reason": "",
+   "status": "dated"
+  },
+  "commencement": {
+   "default": {
+    "effective": "2023-01-01",
+    "known_from": "2022-10-14",
+    "reason": "",
+    "status": "dated"
+   },
+   "default_proofs": [
+    "forskrift/2022-10-14-1739"
+   ],
+   "units": [
+    {
+     "effective": null,
+     "part": null,
+     "proofs": [
+      "lov/2021-06-18-97",
+      "forskrift/2022-10-14-1739"
+     ],
+     "reason": "",
+     "status": "pending",
+     "unit": "§2-6"
+    },
+    {
+     "effective": "2023-07-01",
+     "part": null,
+     "proofs": [
+      "forskrift/2022-10-14-1739",
+      "forskrift/2022-10-14-1739"
+     ],
+     "reason": "",
+     "status": "dated",
+     "unit": "§15-7 ledd 4"
+    }
+   ]
+  },
+  "end_state": {
+   "act_level_reasons": {
+    "renumbering not implied by the operation before it": 3,
+    "unsupported instruction": 7
+   },
+   "at": "2026-11-06",
+   "buckets": {
+    "act_level_problems": 10,
+    "applied": 101,
+    "future": 15,
+    "pending": 3,
+    "unresolved": 66,
+    "withheld": 0
+   },
+   "status": "replayed",
+   "unresolved_reasons": {
+    "commencement sentence outside the grammar": 45,
+    "partial decision outside the grammar": 3,
+    "punktum 2-2": 1,
+    "renumbering not implied by the operation before it": 3,
+    "target ledd range does not exist": 1,
+    "target provision missing or no heading text": 5,
+    "term not found in ['§6-1', '§6-2']": 1,
+    "unsupported instruction": 7
+   }
+  },
+  "events": 185,
+  "kinds": {
+   "insert_ledd": 10,
+   "insert_punktum": 4,
+   "insert_section": 18,
+   "renumber": 10,
+   "repeal_ledd": 1,
+   "replace_bokstav": 14,
+   "replace_heading": 8,
+   "replace_ledd": 53,
+   "replace_punktum": 45,
+   "replace_section": 12,
+   "substitute_term": 1,
+   "unsupported": 9
+  },
+  "ladder": [
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2008-01-01",
+    "future": 134,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 3,
+    "pending_commencement": 0,
+    "status": "not_yet_in_force",
+    "unresolved": 48,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2012-01-01",
+    "future": 134,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 3,
+    "pending_commencement": 0,
+    "status": "not_yet_in_force",
+    "unresolved": 48,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2016-01-01",
+    "future": 134,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 3,
+    "pending_commencement": 0,
+    "status": "not_yet_in_force",
+    "unresolved": 48,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2020-01-01",
+    "future": 134,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 3,
+    "pending_commencement": 0,
+    "status": "not_yet_in_force",
+    "unresolved": 48,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 3,
+    "applied": 20,
+    "at": "2024-01-01",
+    "future": 109,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 3,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 53,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 10,
+    "applied": 101,
+    "at": "2026-11-06",
+    "future": 15,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 3,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 66,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   }
+  ],
+  "members": {
+   "amending": 18,
+   "decision": 23,
+   "enacting": 1
+  },
+  "replay_version": "legaltime-replay-3",
+  "timing": {
+   "dated": 134,
+   "pending": 3,
+   "unresolved": 48
+  },
+  "timing_reasons": {
+   "commencement sentence outside the grammar": 45,
+   "partial decision outside the grammar": 3
+  },
+  "unattributed_operations": 4,
+  "unsupported_instructions": {
+   "I § 18-2 nr. 16 skal endringen i lov 29. april 2005 nr. 20 om innkreving av underholdsbidr": 1,
+   "Kapittel 10 skal lyde:": 1,
+   "Kapittel 6 overskriften skal lyde:": 1,
+   "Overskriften til kapittel 5 skal lyde:": 1,
+   "Plikten til å legge fram politiattest i samsvar med første punktum gjelder også den eller ": 1,
+   "Tilsynsansvaret gjelder også familiebaserte botilbud etter § 11-1 femte ledd.": 1,
+   "§ 12-7 andre og nytt tredje ledd skal lyde:": 1,
+   "§ 16-3 fjerde ledd bokstav c og d skal lyde:": 1,
+   "§ 16-7 bokstav c og ny bokstav d skal lyde:": 1
+  },
+  "verification": {
+   "counts": {
+    "unresolved": 188
+   },
+   "counts_before_blanket": {
+    "editorial_omission": 1,
+    "exact_normalized": 66,
+    "exact_raw": 56,
+    "only_in_oracle": 12,
+    "text_differs": 21,
+    "unresolved": 32
+   },
+   "ledd_counts": {
+    "ledd_unresolved": 498,
+    "oracle_ledd": 498
+   },
+   "ledd_proven": "0 of 498",
+   "notes_without_replay_event": 33,
+   "replay_events_without_note": 0,
+   "sections_proven": "0 of 188",
+   "sections_proven_before_blanket": "123 of 188",
+   "text_differs": []
+  }
+ },
+ "friskolelova": {
+  "act": "lov/2003-07-04-84",
+  "archives": [
+   {
+    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
+    "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   },
+   {
+    "archive": "lovtidend-avd1-2026.tar.bz2",
+    "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   }
+  ],
+  "baseline": {
+   "effective": "2003-10-01",
+   "reason": "",
+   "status": "dated"
+  },
+  "commencement": {
+   "default": {
+    "effective": "2003-10-01",
+    "known_from": "2003-07-04",
+    "reason": "",
+    "status": "dated"
+   },
+   "default_proofs": [
+    "lov/2003-07-04-84"
+   ],
+   "units": []
+  },
+  "end_state": {
+   "act_level_reasons": {
+    "insertion point does not exist": 3,
+    "renumbering not implied by the operation before it": 4,
+    "target ledd range does not exist": 1,
+    "target provision missing": 4,
+    "target provision missing or no replacement text": 12,
+    "target provision missing or repealed": 3,
+    "unsupported instruction": 20
+   },
+   "at": "2026-11-06",
+   "buckets": {
+    "act_level_problems": 47,
+    "applied": 168,
+    "future": 0,
+    "pending": 0,
+    "unresolved": 132,
+    "withheld": 0
+   },
+   "status": "replayed",
+   "unresolved_reasons": {
+    "bokstav f matched 0 list items": 1,
+    "bokstav g matched 0 list items": 2,
+    "commencement sentence outside the grammar": 16,
+    "decision body has no commencement sentence for this law": 20,
+    "full decision body carries an exception": 9,
+    "full decision body names several dates": 7,
+    "insertion point does not exist": 4,
+    "item p, the one before q, is not in the ledd": 1,
+    "new provision without key or text, or key already present": 3,
+    "partial decision names no part or section of the law": 1,
+    "partial decision outside the grammar": 15,
+    "renumbering names ledd 7, the provision has 4": 1,
+    "renumbering not implied by the operation before it": 4,
+    "target ledd range does not exist": 6,
+    "target provision missing": 4,
+    "target provision missing or no heading text": 2,
+    "target provision missing or no replacement text": 13,
+    "target provision missing or repealed": 3,
+    "unsupported instruction": 20
+   }
+  },
+  "events": 300,
+  "kinds": {
+   "insert_bokstav": 5,
+   "insert_ledd": 19,
+   "insert_punktum": 1,
+   "insert_section": 45,
+   "renumber": 14,
+   "repeal_ledd": 4,
+   "repeal_punktum": 2,
+   "repeal_section": 7,
+   "replace_bokstav": 15,
+   "replace_heading": 2,
+   "replace_ledd": 65,
+   "replace_punktum": 12,
+   "replace_section": 79,
+   "substitute_term": 1,
+   "unsupported": 29
+  },
+  "ladder": [
+   {
+    "act_level_problems": 18,
+    "applied": 69,
+    "at": "2008-01-01",
+    "future": 140,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 91,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 20,
+    "applied": 71,
+    "at": "2012-01-01",
+    "future": 136,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 93,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 22,
+    "applied": 73,
+    "at": "2016-01-01",
+    "future": 130,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 97,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 24,
+    "applied": 87,
+    "at": "2020-01-01",
+    "future": 112,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 101,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 30,
+    "applied": 103,
+    "at": "2024-01-01",
+    "future": 85,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 112,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 47,
+    "applied": 168,
+    "at": "2026-11-06",
+    "future": 0,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 132,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   }
+  ],
+  "members": {
+   "amending": 50,
+   "decision": 147,
+   "enacting": 1
+  },
+  "replay_version": "legaltime-replay-3",
+  "timing": {
+   "dated": 232,
+   "unresolved": 68
+  },
+  "timing_reasons": {
+   "commencement sentence outside the grammar": 16,
+   "decision body has no commencement sentence for this law": 20,
+   "full decision body carries an exception": 9,
+   "full decision body names several dates": 7,
+   "partial decision names no part or section of the law": 1,
+   "partial decision outside the grammar": 15
+  },
+  "unattributed_operations": 2,
+  "unsupported_instructions": {
+   "Kapittel 2 skal lyde:": 1,
+   "Kapittel 4 overskrifta skal lyde:": 1,
+   "Kapittel 6 skal lyde:": 1,
+   "Kapittel 6A skal lyde:": 1,
+   "Lov 4. juli 2003 nr. 84 om frittståande skolar (friskolelova)": 1,
+   "Lov 4. juli 2003 nr. 84 om private skolar med rett til statstilskot (privatskolelova)": 1,
+   "Lov om private skolar med rett til statstilskot (privatskolelova)": 1,
+   "Lovens tittel skal lyde:": 1,
+   "Ny tittel på lova skal lyde:": 1,
+   "Ny § 1-5 Forsøksverksemd skal lyde:": 1,
+   "Nåværende § 8-3 blir § 8-2.": 1,
+   "Siste punktum blir § 6A-5.": 1,
+   "Tittelen på loven skal lyde:": 1,
+   "§ 2-1 andre ledd bokstav h og i oppheves.": 1,
+   "§ 2-1 første ledd femte og nytt sjette punktum skal lyde:": 1,
+   "§ 3-1 sjuande ledd skal lyde:": 1,
+   "§ 3-7 skal lyde": 1,
+   "§ 4-2 andre ledd blir § 6A-4 første ledd.": 1,
+   "§ 4-2 endres slik:": 1,
+   "§ 4-2 tredje og nye fjerde og femte ledd skal lyde:": 1,
+   "§ 4-4 endres slik:": 1,
+   "§ 5-2 fjerde ledd blir tredje ledd og skal lyde:": 1,
+   "§ 5-3 og § 5-4 vert oppheva.": 1,
+   "§ 6-3 annet ledd og nytt tredje ledd skal lyde:": 1,
+   "§ 7-7 overskriften og første ledd skal lyde:": 1
+  },
+  "verification": {
+   "counts": {
+    "unresolved": 92
+   },
+   "counts_before_blanket": {
+    "exact_normalized": 10,
+    "exact_raw": 24,
+    "only_in_oracle": 22,
+    "only_in_replay": 1,
+    "text_differs": 9,
+    "unresolved": 26
+   },
+   "ledd_counts": {
+    "ledd_unresolved": 186,
+    "oracle_ledd": 186
+   },
+   "ledd_proven": "0 of 186",
+   "notes_without_replay_event": 23,
+   "replay_events_without_note": 1,
+   "sections_proven": "0 of 92",
+   "sections_proven_before_blanket": "34 of 92",
+   "text_differs": []
+  }
+ },
+ "merverdiavgiftsloven": {
+  "act": "lov/2009-06-19-58",
+  "archives": [
+   {
+    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
+    "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   },
+   {
+    "archive": "lovtidend-avd1-2026.tar.bz2",
+    "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   }
+  ],
+  "baseline": {
+   "effective": "2010-01-01",
+   "reason": "",
+   "status": "dated"
+  },
+  "commencement": {
+   "default": {
+    "effective": "2010-01-01",
+    "known_from": "2009-11-10",
+    "reason": "",
+    "status": "dated"
+   },
+   "default_proofs": [
+    "forskrift/2009-11-06-1347"
+   ],
+   "units": []
+  },
+  "end_state": {
+   "act_level_reasons": {
+    "renumbering not implied by the operation before it": 10,
+    "target ledd range does not exist": 1,
+    "target provision missing or no heading text": 1,
+    "target provision missing or no replacement text": 1,
+    "target provision missing or repealed": 1,
+    "unsupported instruction": 28
+   },
+   "at": "2026-11-06",
+   "buckets": {
+    "act_level_problems": 42,
+    "applied": 105,
+    "future": 1,
+    "pending": 0,
+    "unresolved": 218,
+    "withheld": 0
+   },
+   "status": "replayed",
+   "unresolved_reasons": {
+    "commencement clause outside the grammar": 2,
+    "commencement sentence outside the grammar": 108,
+    "exception outside the grammar": 1,
+    "full decision body carries an exception": 17,
+    "insertion point does not exist": 1,
+    "ledd 2 does not exist": 1,
+    "partial decision outside the grammar": 34,
+    "punktum 2-2": 1,
+    "punktum 3-3": 1,
+    "punktum 4 insertion": 1,
+    "punktum without ledd on a provision with several ledd": 2,
+    "renumbering not implied by the operation before it": 10,
+    "target ledd range does not exist": 3,
+    "target provision missing or no heading text": 5,
+    "target provision missing or no replacement text": 2,
+    "target provision missing or repealed": 1,
+    "unsupported instruction": 28
+   }
+  },
+  "events": 324,
+  "kinds": {
+   "insert_bokstav": 3,
+   "insert_ledd": 21,
+   "insert_punktum": 13,
+   "insert_section": 18,
+   "renumber": 26,
+   "repeal_bokstav": 1,
+   "repeal_ledd": 7,
+   "repeal_punktum": 3,
+   "repeal_section": 16,
+   "replace_bokstav": 17,
+   "replace_heading": 6,
+   "replace_ledd": 76,
+   "replace_punktum": 35,
+   "replace_section": 33,
+   "unsupported": 49
+  },
+  "ladder": [
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2008-01-01",
+    "future": 162,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "not_yet_in_force",
+    "unresolved": 162,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 13,
+    "applied": 35,
+    "at": "2012-01-01",
+    "future": 109,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 180,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 19,
+    "applied": 50,
+    "at": "2016-01-01",
+    "future": 85,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 189,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 38,
+    "applied": 78,
+    "at": "2020-01-01",
+    "future": 34,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 212,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 42,
+    "applied": 103,
+    "at": "2024-01-01",
+    "future": 3,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 218,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 42,
+    "applied": 105,
+    "at": "2026-11-06",
+    "future": 1,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 218,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   }
+  ],
+  "members": {
+   "amending": 56,
+   "decision": 96,
+   "enacting": 1
+  },
+  "replay_version": "legaltime-replay-3",
+  "timing": {
+   "dated": 162,
+   "unresolved": 162
+  },
+  "timing_reasons": {
+   "commencement clause outside the grammar": 2,
+   "commencement sentence outside the grammar": 108,
+   "exception outside the grammar": 1,
+   "full decision body carries an exception": 17,
+   "partial decision outside the grammar": 34
+  },
+  "unattributed_operations": 0,
+  "unsupported_instructions": {
+   "Betaling via bank som vilkår for fradrag for inngående merverdiavgift": 1,
+   "Deloverskriften «IV Forskriftsfullmakt» foran nåværende § 6-34 flyttes foran ny § 6-35.": 1,
+   "Gjeldende §§ 6-2 til 6-6 blir §§ 6-3 til 6-7.": 1,
+   "I kapittel 14 skal ny deloverskrift foran § 14-1 lyde:": 1,
+   "I kapittel 14 skal ny deloverskrift foran § 14-4 lyde:": 1,
+   "I kapittel 15 avsnitt III blir nåværende § 15-14 ny § 15-11.": 1,
+   "I § 15-12 skal paragrafoverskriften lyde:": 1,
+   "Kapittel 12 oppheves.": 1,
+   "Kapittel 14 overskriften skal lyde:": 1,
+   "Kapittel 15 avsnitt II overskriften skal lyde:": 1,
+   "Kapittel 16 skal lyde:": 1,
+   "Nye §§ 5-9 til 5-11 skal lyde:": 1,
+   "Nåværende bokstav j og k blir bokstav k og ny bokstav l.": 1,
+   "Nåværende § 18-3 blir ny § 18-4.": 1,
+   "Nåværende § 6-34 blir ny § 6-35.": 1,
+   "Overskriften til kapittel 18 i loven skal lyde:": 1,
+   "§ 1-3 annet ledd bokstav d og ny bokstav e skal lyde:": 1,
+   "§ 14-1 tredje, fjerde og femte ledd skal lyde:": 1,
+   "§ 15-1 åttande ledd skal lyde:": 1,
+   "§ 15-7 tredje ledd tredje punktum og § 15-7 fjerde ledd annet punktum oppheves.": 1,
+   "§ 16-8 første ledd innledningen skal lyde:": 1,
+   "§ 19-1 tredje ledd blir nytt annet ledd.": 1,
+   "§ 21-2 tredje ledd blir annet ledd.": 1,
+   "§ 6-29 annet ledd nye bokstaver d, e og f skal lyde:": 1,
+   "§ 8-6 første ledd tredje punktum og nytt fjerde og femte punktum skal lyde:": 1
+  },
+  "verification": {
+   "counts": {
+    "unresolved": 206
+   },
+   "counts_before_blanket": {
+    "editorial_omission": 1,
+    "exact_normalized": 33,
+    "exact_raw": 55,
+    "only_in_oracle": 18,
+    "only_in_replay": 6,
+    "text_differs": 28,
+    "unresolved": 65
+   },
+   "ledd_counts": {
+    "ledd_unresolved": 370,
+    "oracle_ledd": 370
+   },
+   "ledd_proven": "0 of 370",
+   "notes_without_replay_event": 37,
+   "replay_events_without_note": 6,
+   "sections_proven": "0 of 206",
+   "sections_proven_before_blanket": "89 of 206",
+   "text_differs": []
+  }
+ },
+ "naturmangfoldloven": {
+  "act": "lov/2009-06-19-100",
+  "archives": [
+   {
+    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
+    "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   },
+   {
+    "archive": "lovtidend-avd1-2026.tar.bz2",
+    "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   }
+  ],
+  "baseline": {
+   "effective": null,
+   "reason": "partial decision outside the grammar",
+   "status": "unresolved"
+  },
+  "commencement": {
+   "default": {
+    "effective": null,
+    "known_from": "2009-06-19",
+    "reason": "partial decision outside the grammar",
+    "status": "unresolved"
+   },
+   "default_proofs": [
+    "lov/2009-06-19-100",
+    "forskrift/2009-06-19-704"
+   ],
+   "units": []
+  },
+  "end_state": {
+   "act_level_reasons": {},
+   "at": "2026-11-06",
+   "buckets": {
+    "act_level_problems": 0,
+    "applied": 0,
+    "future": 0,
+    "pending": 0,
+    "unresolved": 5,
+    "withheld": 44
+   },
+   "status": "unresolved_baseline",
+   "unresolved_reasons": {
+    "commencement sentence outside the grammar": 2,
+    "partial decision outside the grammar": 3
+   }
+  },
+  "events": 49,
+  "kinds": {
+   "insert_bokstav": 1,
+   "insert_ledd": 3,
+   "insert_punktum": 2,
+   "insert_section": 6,
+   "renumber": 3,
+   "repeal_ledd": 1,
+   "replace_bokstav": 1,
+   "replace_ledd": 19,
+   "replace_punktum": 6,
+   "replace_section": 4,
+   "substitute_term": 1,
+   "unsupported": 2
+  },
+  "ladder": [
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2008-01-01",
+    "future": 44,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 5,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2012-01-01",
+    "future": 44,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 5,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2016-01-01",
+    "future": 20,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 5,
+    "unresolved_commencement": 0,
+    "withheld": 24
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2020-01-01",
+    "future": 13,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 5,
+    "unresolved_commencement": 0,
+    "withheld": 31
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2024-01-01",
+    "future": 9,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 5,
+    "unresolved_commencement": 0,
+    "withheld": 35
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2026-11-06",
+    "future": 0,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 0,
+    "pending_commencement": 0,
+    "status": "unresolved_baseline",
+    "unresolved": 5,
+    "unresolved_commencement": 0,
+    "withheld": 44
+   }
+  ],
+  "members": {
+   "amending": 22,
+   "decision": 27,
+   "enacting": 1
+  },
+  "replay_version": "legaltime-replay-3",
+  "timing": {
+   "dated": 44,
+   "unresolved": 5
+  },
+  "timing_reasons": {
+   "commencement sentence outside the grammar": 2,
+   "partial decision outside the grammar": 3
+  },
+  "unattributed_operations": 4,
+  "unsupported_instructions": {
+   "Kapittel VII Overskriften skal lyde:": 1,
+   "Overskriften i lovens kapittel III skal lyde:": 1
+  },
+  "verification": {
+   "counts": null
+  }
+ },
+ "straffeloven": {
+  "act": "lov/2005-05-20-28",
+  "archives": [
+   {
+    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
+    "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   },
+   {
+    "archive": "lovtidend-avd1-2026.tar.bz2",
+    "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   }
+  ],
+  "baseline": {
+   "effective": "2015-10-01",
+   "reason": "",
+   "status": "dated"
+  },
+  "commencement": {
+   "default": {
+    "effective": "2015-10-01",
+    "known_from": "2015-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "default_proofs": [
+    "lov/2015-06-19-65"
+   ],
+   "units": [
+    {
+     "effective": null,
+     "part": "I",
+     "proofs": [
+      "forskrift/2008-03-07-225",
+      "lov/2015-06-19-65"
+     ],
+     "reason": "conflicting commencement decisions",
+     "status": "unresolved",
+     "unit": "kap16"
+    }
+   ]
+  },
+  "end_state": {
+   "act_level_reasons": {
+    "new provision without key or text, or key already present": 7,
+    "renumbering not implied by the operation before it": 6,
+    "target ledd range does not exist": 11,
+    "target provision missing": 2,
+    "target provision missing or no replacement text": 10,
+    "target provision missing or repealed": 30,
+    "the operation this renumbering follows did not apply": 3,
+    "unsupported instruction": 74
+   },
+   "at": "2026-11-06",
+   "buckets": {
+    "act_level_problems": 143,
+    "applied": 463,
+    "future": 0,
+    "pending": 16,
+    "unresolved": 371,
+    "withheld": 0
+   },
+   "status": "replayed",
+   "unresolved_reasons": {
+    "bokstav 1 matched 0 list items": 3,
+    "bokstav 2 matched 0 list items": 1,
+    "bokstav 3 matched 0 list items": 1,
+    "bokstav 4 matched 0 list items": 1,
+    "bokstav 5 matched 0 list items": 1,
+    "bokstav 7 matched 0 list items": 1,
+    "bokstav b matched 0 list items": 1,
+    "bokstav f matched 0 list items": 1,
+    "commencement conflicting commencement decisions": 10,
+    "commencement sentence outside the grammar": 19,
+    "dateInForce outside the grammar": 1,
+    "decision body has no commencement sentence for this law": 2,
+    "insertion point does not exist": 2,
+    "item without ledd on a provision with several ledd": 2,
+    "ledd 2 does not exist": 6,
+    "ledd 3 does not exist": 2,
+    "ledd 4 does not exist": 1,
+    "ledd 5 does not exist": 1,
+    "ledd 6 does not exist": 1,
+    "new provision without key or text, or key already present": 8,
+    "partial decision outside the grammar": 83,
+    "punktum 2-2": 3,
+    "punktum 3-3": 1,
+    "punktum 3-3 does not exist among 2": 1,
+    "punktum 3-6": 1,
+    "punktum 6 insertion": 1,
+    "punktum operation on a ledd that carries a list": 6,
+    "punktum without ledd on a provision with several ledd": 4,
+    "renumbering names ledd 3, the provision has 2": 2,
+    "renumbering names punktum 4, the ledd has 2": 1,
+    "renumbering not implied by the operation before it": 8,
+    "target ledd range does not exist": 28,
+    "target provision missing": 2,
+    "target provision missing or no heading text": 2,
+    "target provision missing or no replacement text": 52,
+    "target provision missing or repealed": 32,
+    "the operation this renumbering follows did not apply": 5,
+    "unsupported instruction": 74
+   }
+  },
+  "events": 850,
+  "kinds": {
+   "insert_ledd": 26,
+   "insert_punktum": 15,
+   "insert_section": 306,
+   "renumber": 29,
+   "repeal_bokstav": 4,
+   "repeal_ledd": 12,
+   "repeal_punktum": 10,
+   "repeal_section": 11,
+   "replace_bokstav": 59,
+   "replace_heading": 4,
+   "replace_ledd": 111,
+   "replace_punktum": 71,
+   "replace_section": 98,
+   "substitute_term": 2,
+   "unsupported": 92
+  },
+  "ladder": [
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2008-01-01",
+    "future": 725,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 16,
+    "pending_commencement": 0,
+    "status": "not_yet_in_force",
+    "unresolved": 105,
+    "unresolved_commencement": 0,
+    "withheld": 4
+   },
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2012-01-01",
+    "future": 400,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 16,
+    "pending_commencement": 0,
+    "status": "not_yet_in_force",
+    "unresolved": 105,
+    "unresolved_commencement": 0,
+    "withheld": 329
+   },
+   {
+    "act_level_problems": 129,
+    "applied": 377,
+    "at": "2016-01-01",
+    "future": 113,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 16,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 344,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 135,
+    "applied": 412,
+    "at": "2020-01-01",
+    "future": 67,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 16,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 355,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 139,
+    "applied": 441,
+    "at": "2024-01-01",
+    "future": 30,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 16,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 363,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 143,
+    "applied": 463,
+    "at": "2026-11-06",
+    "future": 0,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 16,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 371,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   }
+  ],
+  "members": {
+   "amending": 81,
+   "decision": 148,
+   "enacting": 1
+  },
+  "replay_version": "legaltime-replay-3",
+  "timing": {
+   "dated": 729,
+   "pending": 16,
+   "unresolved": 105
+  },
+  "timing_reasons": {
+   "commencement sentence outside the grammar": 19,
+   "dateInForce outside the grammar": 1,
+   "decision body has no commencement sentence for this law": 2,
+   "partial decision outside the grammar": 83
+  },
+  "unattributed_operations": 106,
+  "unsupported_instructions": {
+   "1. I militær straffelov 22. mai 1902 nr. 13 gjøres følgende endringer:": 1,
+   "1. Militær straffelov 22. mai 1902 nr. 13 § 107 oppheves.": 1,
+   "2. Lov 18. august 1914 nr. 3 om forsvarshemmeligheter oppheves.": 1,
+   "De delene av § 102 i lov 20. mai 2005 nr. 28 som ikke allerede er satt i kraft, blir § 402": 1,
+   "Det gjeldende annet ledd annet punktum blir annet ledd tredje punktum.": 1,
+   "I oppregningen i § 196 første ledd bokstav a føyes det til et komma etter § 194, og hakepa": 1,
+   "I straffeloven 2005 tredje del gjøres følgende endringer:": 1,
+   "I § 11 første ledd erstattes «legemsdel» med «kroppsdel».": 1,
+   "I § 11 første ledd føyes «vesentlig» til foran «vansirethet».": 1,
+   "I § 138 skal det fortsatt stå «sprenglegeme».": 1,
+   "I § 158 erstattes «helbred» med «helse».": 1,
+   "I § 16 første ledd erstattes «og som foretar noe som er ment å lede direkte til utføringen": 1,
+   "I § 196 annet ledd erstattes hakeparentesen med 312-314.": 1,
+   "I § 37 bokstav i erstattes «samtykket til» med «samtykket i».": 1,
+   "I § 44 annet ledd annet punktum utgår ordet «likevel».": 1,
+   "I § 5 første ledd føyes til nr. 8, 9 og 10, som lyder slik: anses som omsorgsunndragelse, ": 1,
+   "I § 5 første ledd nr. 6 utgår «eller» etter komma, og i nr. 7 erstattes punktum etter «fen": 1,
+   "I § 5 tredje ledd føyes nr. 8 til i oppregningen.": 1,
+   "I § 77 føyes det til en bokstav l, som skal lyde:": 1,
+   "I §§ 11, 101, 102, 103, 107, 138, 140, 141, 142, 143, 144 og 194 erstattes «legeme» med «k": 1,
+   "Punktumet i bokstav k erstattes av et komma.": 1,
+   "§ 101 i lov 20. mai 2005 nr. 28 blir § 401, og skal lyde slik:": 1,
+   "§ 102 nr. 1 vert endra slik:": 1,
+   "§ 63 første ledd erstattes «er straffri» med «ikke kan straffes».": 1,
+   "§§ 80-86 og §§ 90-94 a oppheves.": 1
+  },
+  "verification": {
+   "counts": {
+    "unresolved": 400
+   },
+   "counts_before_blanket": {
+    "exact_normalized": 129,
+    "exact_raw": 97,
+    "only_in_oracle": 19,
+    "text_differs": 34,
+    "unresolved": 121
+   },
+   "ledd_counts": {
+    "ledd_unresolved": 700,
+    "oracle_ledd": 700
+   },
+   "ledd_proven": "0 of 700",
+   "notes_without_replay_event": 20,
+   "replay_events_without_note": 27,
+   "sections_proven": "0 of 400",
+   "sections_proven_before_blanket": "226 of 400",
+   "text_differs": []
+  }
+ },
+ "tvisteloven": {
+  "act": "lov/2005-06-17-90",
+  "archives": [
+   {
+    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
+    "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   },
+   {
+    "archive": "lovtidend-avd1-2026.tar.bz2",
+    "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   }
+  ],
+  "baseline": {
+   "effective": "2008-01-01",
+   "reason": "",
+   "status": "dated"
+  },
+  "commencement": {
+   "default": {
+    "effective": "2008-01-01",
+    "known_from": "2007-01-26",
+    "reason": "",
+    "status": "dated"
+   },
+   "default_proofs": [
+    "forskrift/2007-01-26-88"
+   ],
+   "units": []
+  },
+  "end_state": {
+   "act_level_reasons": {
+    "unsupported instruction": 8
+   },
+   "at": "2026-11-06",
+   "buckets": {
+    "act_level_problems": 8,
+    "applied": 94,
+    "future": 0,
+    "pending": 8,
+    "unresolved": 61,
+    "withheld": 0
+   },
+   "status": "replayed",
+   "unresolved_reasons": {
+    "commencement sentence outside the grammar": 24,
+    "dateInForce outside the grammar": 6,
+    "item c is already in the ledd": 1,
+    "item without ledd on a provision with several ledd": 1,
+    "ledd 1 does not exist": 1,
+    "partial decision outside the grammar": 14,
+    "punktum 7-7": 1,
+    "punktum operation on a ledd that carries a list": 3,
+    "target ledd range does not exist": 1,
+    "target provision missing or no replacement text": 1,
+    "unsupported instruction": 8
+   }
+  },
+  "events": 163,
+  "kinds": {
+   "insert_bokstav": 1,
+   "insert_ledd": 10,
+   "insert_punktum": 8,
+   "insert_section": 6,
+   "renumber": 2,
+   "repeal_punktum": 2,
+   "repeal_section": 1,
+   "replace_bokstav": 20,
+   "replace_ledd": 42,
+   "replace_punktum": 39,
+   "replace_section": 13,
+   "substitute_term": 2,
+   "unsupported": 17
+  },
+  "ladder": [
+   {
+    "act_level_problems": 3,
+    "applied": 15,
+    "at": "2008-01-01",
+    "future": 90,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 8,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 50,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 3,
+    "applied": 16,
+    "at": "2012-01-01",
+    "future": 89,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 8,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 50,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 5,
+    "applied": 29,
+    "at": "2016-01-01",
+    "future": 74,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 8,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 52,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 7,
+    "applied": 38,
+    "at": "2020-01-01",
+    "future": 61,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 8,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 56,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 8,
+    "applied": 82,
+    "at": "2024-01-01",
+    "future": 13,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 8,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 60,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 8,
+    "applied": 94,
+    "at": "2026-11-06",
+    "future": 0,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 8,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 61,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   }
+  ],
+  "members": {
+   "amending": 51,
+   "decision": 99,
+   "enacting": 1
+  },
+  "replay_version": "legaltime-replay-3",
+  "timing": {
+   "dated": 111,
+   "pending": 8,
+   "unresolved": 44
+  },
+  "timing_reasons": {
+   "commencement sentence outside the grammar": 24,
+   "dateInForce outside the grammar": 6,
+   "partial decision outside the grammar": 14
+  },
+  "unattributed_operations": 7,
+  "unsupported_instructions": {
+   "Endringa i domstolloven § 119 første ledd skal lyde:": 1,
+   "Endringa i domstolloven § 20 andre ledd andre punktum skal lyde:": 1,
+   "Endringa i skifteloven § 22 første ledd skal lyde:": 1,
+   "Endringane i domstolloven § 53, overskrifta i kapittel 4, §§ 71, 86 a, 87, 91, 95, 97, 98,": 1,
+   "I femte del skal nytt kapittel 28 A lyde:": 1,
+   "I nr. 11 skal endringen av lov 13. desember 1991 nr. 81 om sosiale tjenester mv. § 9-10 op": 1,
+   "I nr. 15 skal endringen av lov 2. juli 1999 nr. 62 om etablering og gjennomføring av psyki": 1,
+   "I § 28-A1 tredje ledd første punktum erstattes ordet «planteforedlerett» av «planteforedle": 1,
+   "I § 32-2 skal uttrykket «unntatt § 19-13» lyde:": 1,
+   "I § 37-3 nr. 14 vert det gjort følgjande endring:": 1,
+   "I § 37-3 nr. 5 vert det gjort følgjande endringar:": 1,
+   "Nåværende bokstav c til e blir bokstav d til f.": 1,
+   "Tvistelovens del Hvordan tvisteloven er bygd opp med tilhørende innholdsfortegnelse opphev": 1,
+   "opphevinga av lov 15. desember 1967 nr. 9 om patenter § 52 femte ledd oppheva.": 1,
+   "§ 10-1 annet ledd innledningen og bokstav a og b skal lyde:": 1,
+   "§ 28-A3 annet ledd tredje punktum skal lyde:": 1,
+   "§ 4-4 fjerde, femte og nytt sjette ledd lyde:": 1
+  },
+  "verification": {
+   "counts": {
+    "unresolved": 442
+   },
+   "counts_before_blanket": {
+    "exact_normalized": 189,
+    "exact_raw": 107,
+    "only_in_oracle": 7,
+    "oracle_annex": 88,
+    "text_differs": 17,
+    "unresolved": 34
+   },
+   "ledd_counts": {
+    "ledd_unresolved": 1002,
+    "oracle_ledd": 1002
+   },
+   "ledd_proven": "0 of 1002",
+   "notes_without_replay_event": 9,
+   "replay_events_without_note": 0,
+   "sections_proven": "0 of 442",
+   "sections_proven_before_blanket": "296 of 442",
+   "text_differs": []
+  }
+ },
+ "utlendingsloven": {
+  "act": "lov/2008-05-15-35",
+  "archives": [
+   {
+    "archive": "lovtidend-avd1-2001-2025.tar.bz2",
+    "sha256": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0"
+   },
+   {
+    "archive": "lovtidend-avd1-2026.tar.bz2",
+    "sha256": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+   }
+  ],
+  "baseline": {
+   "effective": "2010-01-01",
+   "reason": "",
+   "status": "dated"
+  },
+  "commencement": {
+   "default": {
+    "effective": "2010-01-01",
+    "known_from": "2009-11-03",
+    "reason": "",
+    "status": "dated"
+   },
+   "default_proofs": [
+    "forskrift/2009-10-30-1324"
+   ],
+   "units": []
+  },
+  "end_state": {
+   "act_level_reasons": {
+    "insertion point does not exist": 4,
+    "renumbering not implied by the operation before it": 10,
+    "substitution locations unresolved": 1,
+    "target ledd range does not exist": 10,
+    "target provision missing or no replacement text": 2,
+    "target provision missing or repealed": 11,
+    "unsupported instruction": 55
+   },
+   "at": "2026-11-06",
+   "buckets": {
+    "act_level_problems": 93,
+    "applied": 176,
+    "future": 0,
+    "pending": 9,
+    "unresolved": 371,
+    "withheld": 0
+   },
+   "status": "replayed",
+   "unresolved_reasons": {
+    "bokstav a matched 0 list items": 1,
+    "bokstav f matched 0 list items": 1,
+    "bokstav n matched 0 list items": 1,
+    "bokstav replacement leaves the ledd markup ill-formed": 3,
+    "commencement sentence outside the grammar": 24,
+    "conflicting commencement decisions": 13,
+    "dateInForce outside the grammar": 5,
+    "decision body has no commencement sentence for this law": 31,
+    "full decision body carries an exception": 6,
+    "insertion point does not exist": 6,
+    "item k, the one before l, is not in the ledd": 1,
+    "ledd 3 does not exist": 1,
+    "ledd 5 does not exist": 1,
+    "ledd 7 does not exist": 2,
+    "ledd 8 does not exist": 2,
+    "narrowed by a later partial decision": 8,
+    "partial decision names no part or section of the law": 12,
+    "partial decision outside the grammar": 142,
+    "punktum 2-3": 1,
+    "punktum 5 insertion": 1,
+    "punktum without ledd on a provision with several ledd": 1,
+    "renumbering names ledd 7, the provision has 6": 1,
+    "renumbering names ledd 9, the provision has 8": 1,
+    "renumbering names punktum 5, the ledd has 4": 1,
+    "renumbering not implied by the operation before it": 14,
+    "substitution locations unresolved": 1,
+    "target ledd range does not exist": 15,
+    "target provision missing or no heading text": 5,
+    "target provision missing or no replacement text": 2,
+    "target provision missing or repealed": 11,
+    "term not found in ['§77']": 1,
+    "the operation this renumbering follows did not apply": 1,
+    "unsupported instruction": 55
+   }
+  },
+  "events": 556,
+  "kinds": {
+   "insert_bokstav": 4,
+   "insert_ledd": 37,
+   "insert_punktum": 13,
+   "insert_section": 37,
+   "renumber": 38,
+   "repeal_bokstav": 7,
+   "repeal_ledd": 5,
+   "repeal_punktum": 8,
+   "repeal_section": 9,
+   "replace_bokstav": 60,
+   "replace_heading": 5,
+   "replace_ledd": 116,
+   "replace_punktum": 66,
+   "replace_section": 35,
+   "substitute_term": 2,
+   "unsupported": 114
+  },
+  "ladder": [
+   {
+    "act_level_problems": 0,
+    "applied": 0,
+    "at": "2008-01-01",
+    "future": 306,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 9,
+    "pending_commencement": 0,
+    "status": "not_yet_in_force",
+    "unresolved": 241,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 18,
+    "applied": 32,
+    "at": "2012-01-01",
+    "future": 251,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 9,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 264,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 32,
+    "applied": 85,
+    "at": "2016-01-01",
+    "future": 172,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 9,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 290,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 55,
+    "applied": 116,
+    "at": "2020-01-01",
+    "future": 111,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 9,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 320,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 78,
+    "applied": 154,
+    "at": "2024-01-01",
+    "future": 39,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 9,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 354,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   },
+   {
+    "act_level_problems": 93,
+    "applied": 176,
+    "at": "2026-11-06",
+    "future": 0,
+    "ledd_not_in_force": {},
+    "not_in_force": 0,
+    "pending": 9,
+    "pending_commencement": 0,
+    "status": "replayed",
+    "unresolved": 371,
+    "unresolved_commencement": 0,
+    "withheld": 0
+   }
+  ],
+  "members": {
+   "amending": 106,
+   "decision": 203,
+   "enacting": 1
+  },
+  "replay_version": "legaltime-replay-3",
+  "timing": {
+   "dated": 306,
+   "pending": 9,
+   "unresolved": 241
+  },
+  "timing_reasons": {
+   "commencement sentence outside the grammar": 24,
+   "conflicting commencement decisions": 13,
+   "dateInForce outside the grammar": 5,
+   "decision body has no commencement sentence for this law": 31,
+   "full decision body carries an exception": 6,
+   "narrowed by a later partial decision": 8,
+   "partial decision names no part or section of the law": 12,
+   "partial decision outside the grammar": 142
+  },
+  "unattributed_operations": 5,
+  "unsupported_instructions": {
+   "I § 120 skal overskriften lyde:": 1,
+   "I § 122 skal overskriften lyde:": 1,
+   "Kapittel 13 skal lyde:": 1,
+   "Noverande §§ 124 og 125 blir §§ 126 og 127.": 1,
+   "Nåværende bokstav b til e blir ny bokstav a til d.": 1,
+   "Nåværende bokstav c til g blir bokstav a til e.": 2,
+   "Overskrifta i kapittel 3 skal lyde:": 1,
+   "Overskriften til kapittel 13 skal lyde:": 1,
+   "Tredje og fjerde ledd blir nytt åttende og niende ledd.": 1,
+   "§ 103 første og nytt annet ledd skal lyde:": 1,
+   "§ 105 første ledd bokstav c og ny bokstav d skal lyde:": 1,
+   "§ 108 annet ledd bokstav c og d skal lyde:": 1,
+   "§ 108 første ledd og annet ledd bokstav a skal lyde:": 1,
+   "§ 108 første, annet, tredje, fjerde, femte og sjette ledd blir nytt annet, tredje, fjerde,": 1,
+   "§ 108 syvende ledd blir nytt åttende ledd og skal lyde:": 1,
+   "§ 108 tredje ledd bokstav a og b skal lyde:": 1,
+   "§ 108 åttende og niende ledd blir nytt niende og tiende ledd.": 1,
+   "§ 20 første ledd bokstav a og b oppheves.": 2,
+   "§ 23 første ledd bokstav c nytt tredje punktum skal lyde:": 1,
+   "§ 28 første ledd innledningen og bokstav a skal lyde:": 1,
+   "§ 62 femte ledd og sjette ledd skal lyde:": 1,
+   "§ 66 annet ledd bokstav a og b skal lyde:": 2,
+   "§ 66 første ledd innledningen og bokstav a skal lyde:": 1,
+   "§ 67 første ledd bokstav c og d skal lyde:": 3,
+   "§ 94 annet, tredje og fjerde ledd skal lyde:": 1
+  },
+  "verification": {
+   "counts": {
+    "unresolved": 212
+   },
+   "counts_before_blanket": {
+    "exact_normalized": 33,
+    "exact_raw": 17,
+    "only_in_oracle": 70,
+    "oracle_annex": 15,
+    "text_differs": 5,
+    "unresolved": 72
+   },
+   "ledd_counts": {
+    "ledd_unresolved": 461,
+    "oracle_ledd": 461
+   },
+   "ledd_proven": "0 of 461",
+   "notes_without_replay_event": 72,
+   "replay_events_without_note": 0,
+   "sections_proven": "0 of 212",
+   "sections_proven_before_blanket": "50 of 212",
+   "text_differs": []
+  }
+ }
+}

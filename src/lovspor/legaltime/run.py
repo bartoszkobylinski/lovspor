@@ -12,13 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from lovspor.legaltime.archive import Evidence, pins
-from lovspor.legaltime.commencement import Decisions, baseline_timing, resolve_timings
+from lovspor.legaltime.baseline import Commencement, baseline_commencement
+from lovspor.legaltime.commencement import Decisions, resolve_timings
 from lovspor.legaltime.document import Document
 from lovspor.legaltime.instructions import Operation, interpret
 from lovspor.legaltime.replay import Event, ReplayState, replay
 from lovspor.legaltime.verify import verify
 
-REPLAY_VERSION = "legaltime-replay-2"
+REPLAY_VERSION = "legaltime-replay-3"  # phase 3: commencement per legal unit (ADR-0020 D4)
 
 
 def _stamp(value: datetime | None) -> str | None:
@@ -60,18 +61,26 @@ def _events_of(amender: Document, act: str, decisions: Decisions, start: int) ->
     return events
 
 
+def decisions_for(evidence: Evidence) -> Decisions:
+    return Decisions(documents=evidence.decisions, chapter_of=chapter_map(evidence))
+
+
 def events_for(evidence: Evidence) -> list[Event]:
     """Every operation aimed at the act, across all amenders, in document order."""
     events: list[Event] = []
-    decisions = Decisions(documents=evidence.decisions, chapter_of=chapter_map(evidence))
+    decisions = decisions_for(evidence)
     for amender in evidence.amenders:
         events.extend(_events_of(amender, evidence.act, decisions, len(events)))
     return events
 
 
+def commencement_for(evidence: Evidence, events: list[Event]) -> Commencement:
+    """The act's commencement per unit, from its header, its decisions and other instruments."""
+    return baseline_commencement(evidence.baseline, decisions_for(evidence), events)
+
+
 def state_at(evidence: Evidence, events: list[Event], at: date) -> ReplayState:
-    timing = baseline_timing(evidence.baseline, evidence.decisions)
-    return replay(evidence.baseline, timing, events, at)
+    return replay(evidence.baseline, commencement_for(evidence, events), events, at)
 
 
 def _operation_record(op: Operation) -> dict[str, Any]:
@@ -104,8 +113,10 @@ def _event_record(event: Event) -> dict[str, Any]:
 
 
 def _provision_record(state: ReplayState) -> list[dict[str, Any]]:
-    return [
-        {
+    """Per provision; the legal-effectiveness fields appear only where they say something."""
+    records = []
+    for p in state.provisions:
+        record: dict[str, Any] = {
             "key": p.key,
             "status": p.status,
             "repealed": p.repealed,
@@ -113,8 +124,12 @@ def _provision_record(state: ReplayState) -> list[dict[str, Any]]:
             "applied": list(p.applied),
             "problems": list(p.problems),
         }
-        for p in state.provisions
-    ]
+        if p.in_force != "in_force":
+            record["in_force"] = p.in_force
+        if p.ledd_not_in_force:
+            record["ledd_not_in_force"] = list(p.ledd_not_in_force)
+        records.append(record)
+    return records
 
 
 def _state_record(state: ReplayState) -> dict[str, Any]:
@@ -127,6 +142,9 @@ def _state_record(state: ReplayState) -> dict[str, Any]:
         "unresolved": [list(pair) for pair in state.unresolved],
         "act_level_problems": list(state.act_level_problems),
         "withheld": list(state.withheld),
+        "not_in_force": list(state.not_in_force),
+        "pending_commencement": list(state.pending_commencement),
+        "unresolved_commencement": list(state.unresolved_commencement),
         "provisions": _provision_record(state),
     }
 
@@ -175,16 +193,16 @@ def build_report(
 ) -> dict[str, Any]:
     """Deterministic report: same archives, same act, same dates → identical JSON."""
     events = events_for(evidence)
-    states = [state_at(evidence, events, at) for at in sorted(dates)]
+    commencement = commencement_for(evidence, events)
+    states = [replay(evidence.baseline, commencement, events, at) for at in sorted(dates)]
     report: dict[str, Any] = {
         "replay_version": REPLAY_VERSION,
         "act": evidence.act,
         "inputs": pins(sorted(archives, key=lambda p: p.name)),
         "archives": _archive_records(evidence),
         "members": _members(evidence),
-        "baseline_timing": baseline_timing(evidence.baseline, evidence.decisions).model_dump(
-            mode="json"
-        ),
+        "baseline_timing": commencement.default.model_dump(mode="json"),
+        "commencement": _commencement_record(commencement),
         "events": [_event_record(e) for e in events],
         "states": [_state_record(s) for s in states],
     }
@@ -192,6 +210,21 @@ def build_report(
         report["oracle"] = {"member": oracle.member, "sha256": oracle.sha256}
         report["verification"] = _verifications(states, oracle)
     return report
+
+
+def _commencement_record(commencement: Commencement) -> dict[str, Any]:
+    """The default and every unit dated apart from it, with each unit's timing and proofs."""
+    return {
+        "default": commencement.default.model_dump(mode="json"),
+        "units": [
+            {
+                "unit": entry.unit.describe(),
+                "part": entry.part,
+                "timing": entry.timing.model_dump(mode="json"),
+            }
+            for entry in commencement.units
+        ],
+    }
 
 
 def _verifications(states: list[ReplayState], oracle: Document) -> list[dict[str, Any]]:

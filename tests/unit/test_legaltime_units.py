@@ -190,6 +190,33 @@ def test_inserted_chapter_placement_takes_precedence_over_existing_section_map()
     assert chapters == {"§1": "kap1"}
 
 
+@pytest.mark.parametrize(
+    "ledd,expected",
+    [(1, "disjoint"), (2, "spans"), (3, "spans"), (4, "spans"), (5, "disjoint")],
+)
+def test_ledd_range_includes_both_endpoints_and_excludes_adjacent_units(
+    ledd: int, expected: str
+) -> None:
+    """units.py: an operation rewriting a larger unit spans each contained unit."""
+    operation = _op("replace_ledd", section="§1", ledd=2, ledd_end=4)
+    assert relation(Unit(section="§1", ledd=ledd), operation) == expected
+    assert relation(Unit(section="§2", ledd=ledd), operation) == "disjoint"
+
+
+@pytest.mark.parametrize("listing", ["ny § 2-6", "§ 2-6 nytt tredje ledd"])
+def test_new_section_and_ledd_labels_do_not_change_address_matching(listing: str) -> None:
+    """Unit.new is recorded but never used to match section-level addresses."""
+    units = parse_units(listing)
+    assert units is not None
+    (unit,) = units
+    assert unit.new is True
+    assert relation(unit, _op(section="§2-6", ledd=3)) == "covers"
+    assert relation(unit, _op("repeal_section", section="§2-6")) == (
+        "covers" if unit.ledd is None else "spans"
+    )
+    assert relation(unit, _op(section="§2-7", ledd=3)) == "disjoint"
+
+
 @pytest.mark.parametrize("letter_spacing", ["A", " A"])
 def test_unit_listings_normalise_chapter_letter_spacing(letter_spacing: str) -> None:
     """The new section grammar accepts the spaced chapter letter in every listed unit."""

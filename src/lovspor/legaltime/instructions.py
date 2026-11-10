@@ -81,6 +81,10 @@ _SUBSTITUTE = re.compile(
     r"(?:\s+og\s+«(?P<old2>[^»]+)»)?\s+(?:endra|endres|endrast)\s+til\s+(?:henholdsvis\s+)?"
     r"«(?P<new>[^»]+)»(?:\s+og\s+«(?P<new2>[^»]+)»)?:$"
 )
+_SUBSTITUTE_IN = re.compile(
+    r"^(?:Ordet|Ordene|Orda|Uttrykket|Uttrykka)\s+«(?P<old>[^»]+)»\s+(?:skal\s+)?(?:endres|endrast|vert\s+endra|blir\s+endra)\s+til\s+"
+    r"«(?P<new>[^»]+)»\s+i\s+(?P<locations>§.+?)\.?$"
+)  # one sentence naming the term, its replacement and the sections and ledd it applies in
 _RULES: list[tuple[OpKind, re.Pattern[str]]] = [
     ("insert_section", re.compile(rf"^{_NEW}\s+(?P<sec>{_SEC})\s+{_LYDE}$", re.I)),
     ("replace_heading", re.compile(rf"^(?P<sec>{_SEC})\s+(?:paragraf)?overskrift(?:en|a)\s+{_LYDE}$")),  # noqa: E501
@@ -388,8 +392,9 @@ class _Reader:
         self, where: tuple[str, str, str | None], act: str, text: str, terms: tuple[str, str]
     ) -> Operation:
         label, tag, host = where
+        op_id = tag if "#" in tag else f"{self.document.header.refid}#{tag}"
         return Operation(
-            id=f"{self.document.header.refid}#{tag}", kind="substitute_term", act=act,
+            id=op_id, kind="substitute_term", act=act,
             address=Address(), instruction=text, part=label, term_old=terms[0],
             term_new=terms[1], locations=text[text.index("§") :], host_section=host,
         )  # fmt: skip
@@ -420,7 +425,13 @@ class _Reader:
     ) -> None:
         read, quote = sentence  # the sentence as classified, and as the member announced it
         kind, groups = classify(read)
-        if payload and _STRUCTURE.match(read) and any(n.provision for n in payload):
+        substitute_in = _SUBSTITUTE_IN.match(read)
+        if substitute_in is not None and context[0] is not None:
+            where = (context[1], op_id, context[3])
+            terms = (substitute_in.group("old"), substitute_in.group("new"))
+            text = f"§{substitute_in.group('locations')[1:]}"  # locations start at the first §
+            self.operations.append(self._substitute(where, context[0], text, terms))
+        elif payload and _STRUCTURE.match(read) and any(n.provision for n in payload):
             self.operations.extend(_structure(op_id, quote, context, payload))
         elif kind == "unsupported" and _clause_like(read):
             self.clauses.append(read)  # a commencement sentence among instructions
@@ -546,11 +557,18 @@ def _shift(sentence: str) -> Shift | None:
 
 
 def _as_insertion(previous: Operation, shift: Shift) -> Operation | None:
-    """``§ N X ledd skal lyde`` + ``Nåværende X ledd blir X+1 ledd`` is an insertion."""
+    """``§ N X ledd skal lyde`` + ``Nåværende X [til Y] ledd blir X+1 [til Y+1] ledd`` inserts.
+
+    Every renumbered ledd moves up by one from the ledd the previous sentence addressed, so
+    that sentence states a new ledd, not a replacement of the one it numbers.
+    """
     same_section = shift.section is None or shift.section == previous.address.section
-    (old, new), *rest = shift.pairs
-    fits = previous.kind == "replace_ledd" and previous.address.ledd == old and new == old + 1
-    if fits and same_section and shift.unit == "ledd" and not rest:
+    first = shift.pairs[0][0]
+    fits = previous.kind == "replace_ledd" and previous.address.ledd == first
+    shifted = all(new == old + 1 for old, new in shift.pairs) and all(
+        shift.pairs[k][0] == first + k for k in range(len(shift.pairs))
+    )
+    if fits and same_section and shift.unit == "ledd" and shifted:
         return previous.model_copy(update={"kind": "insert_ledd"})
     return None
 

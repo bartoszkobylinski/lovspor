@@ -15,7 +15,7 @@ from pydantic import model_validator
 
 from lovspor.legaltime.document import Document, Frozen
 from lovspor.legaltime.instructions import Operation
-from lovspor.legaltime.text import chapter_key, parse_date, section_key, section_key_of
+from lovspor.legaltime.text import act_refid, chapter_key, parse_date, section_key, section_key_of
 from lovspor.legaltime.units import ChapterOf, Relation, Unit, parse_units, relation
 
 _STRAKS = re.compile(r"\b(?:straks|med\s+en\s+gang|omgående)\b", re.I)
@@ -140,6 +140,7 @@ class Scope(Frozen):
     whole: bool = False  # "Loven trer i kraft D, med unntak av …": the act, less the exceptions
     units: tuple[Unit, ...] = ()  # narrowed to these units of the act
     excluded: tuple[Unit, ...] = ()  # these units are not reached by this scope
+    act: str | None = None  # the act an item cites inline before its units; must be the target's
     when: date
     quote: str  # the sentence the scope and date were read from
 
@@ -174,6 +175,8 @@ class Scope(Frozen):
         """How this scope stands to the operation, once exceptions and narrowing are read."""
         if not self._placed(operation):
             return "disjoint"
+        if self.act is not None and operation.act != self.act:
+            return "unknown"  # the item names another act's units: not placeable against this one
         if self.units:
             return _narrowed(self.units, operation, chapter_of)
         found = {relation(unit, operation, chapter_of) for unit in self.excluded}
@@ -266,23 +269,34 @@ def _strip_parenthetical(rest: str) -> str | None:
     return None
 
 
-def _item_units(rest: str) -> tuple[tuple[Unit, ...], tuple[Unit, ...]] | None:
-    """(units, excluded) an item names after ``del R``; None when outside the grammar."""
+class _Item(Frozen):
+    units: tuple[Unit, ...] = ()
+    excluded: tuple[Unit, ...] = ()
+    act: str | None = None  # the act cited inline before the units, as a refid
+
+
+def _item_units(rest: str) -> _Item | None:
+    """What an item names after ``del R``; None when its tail is outside the grammar."""
     tail = _strip_parenthetical(rest)
     if tail is None:
         return None
     if not tail:
-        return (), ()
+        return _Item()
     exceptions = _EXCEPTIONS.match(tail)
     if exceptions is not None:
         excluded = parse_units(exceptions.group("units"))
-        return ((), excluded) if excluded is not None else None
+        return _Item(excluded=excluded) if excluded is not None else None
+    act = None
     if not _UNIT_START.match(tail):
         if not tail.lower().startswith("lov ") or "§" not in tail:
             return None  # neither a unit listing nor an inline act citation before one
-        tail = tail[tail.index("§") :]  # ``lov 6. juni 2014 nr. 19 om … § 2 …``: the act's name
+        cited, mark, listing = tail.partition("§")  # ``lov 6. juni 2014 nr. 19 om … § 2 …``
+        act = act_refid(cited)
+        if act is None:
+            return None  # an act named without a citable date: whose units these are is unstated
+        tail = mark + listing
     units = parse_units(tail)
-    return (units, ()) if units is not None else None
+    return _Item(units=units, act=act) if units is not None else None
 
 
 def _listed_item(sentence: str, own: date | None) -> list[Scope] | None:
@@ -293,9 +307,17 @@ def _listed_item(sentence: str, own: date | None) -> list[Scope] | None:
     read = _item_units(match.group("rest"))
     if when is None or read is None:
         return None  # not one part with units: the part-list grammar below may still read it
-    units, excluded = read
     part = match.group("part").upper()
-    return [Scope(part=part, units=units, excluded=excluded, when=when, quote=sentence)]
+    return [
+        Scope(
+            part=part,
+            units=read.units,
+            excluded=read.excluded,
+            act=read.act,
+            when=when,
+            quote=sentence,
+        )
+    ]
 
 
 def _act_scopes(sentence: str, own: date | None) -> list[Scope] | None:
