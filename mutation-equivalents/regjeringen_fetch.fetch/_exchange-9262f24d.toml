@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/fetch.py"
+symbol = "_exchange"
+registered = "2026-11-10, PR #852 review fix (identity coding), rewritten for the changed line / new call site"
+mutation = """
+-        return _Reply(status, response.headers.get("Location"), body, coded)
++        return _Reply(status, response.headers.get("LOCATION"), body, coded)
+"""
+justification = """
+`response.headers` is an httpx `Headers`, whose lookup lower-cases the requested
+name, so every spelling of "Location" reads the one stored value on every
+response, whatever spelling the server sent. Argued from the dependency, hence
+pinned; the same argument covers `_answer`'s Location lookup.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_httpx_header_lookup_is_case_insensitive"
