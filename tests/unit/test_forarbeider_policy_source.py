@@ -192,6 +192,52 @@ def test_a_malformed_proof_record_refuses(httpx_mock: HTTPXMock, tmp_path: Path)
     assert said("source_proof", result.output)
 
 
+@pytest.mark.parametrize("page_kind", ["robots", "terms"])
+@pytest.mark.parametrize(
+    ("damage", "reason"),
+    [
+        ("missing", "evidence_missing"),
+        ("readable", "evidence_not_private"),
+        ("symlink", "evidence_not_private"),
+        ("same_size_edit", "evidence_mismatch"),
+    ],
+)
+def test_show_refuses_unsafe_or_corrupt_pages_in_current_source_proof(
+    httpx_mock: HTTPXMock, tmp_path: Path, page_kind: str, damage: str, reason: str
+) -> None:
+    """Operations' current-source-proof contract requires both stored pages verified."""
+    signed_run = _published(httpx_mock, tmp_path / "signed")
+    desk = _desk_bound_to(tmp_path, signed_run)
+    sha = desk.signed()
+    later = _published(httpx_mock, tmp_path / "later")
+    run = FetchRun.model_validate_json(later.read_bytes())
+    page = run.robots if page_kind == "robots" else run.terms
+    stored = _stored(later, page)
+    original = stored.read_bytes()
+    if damage == "missing":
+        stored.unlink()
+    elif damage == "readable":
+        stored.chmod(0o640)
+    elif damage == "symlink":
+        target = stored.with_suffix(".backup")
+        stored.rename(target)
+        stored.symlink_to(target)
+    else:
+        stored.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+
+    before = {path: path.read_bytes() for path in desk.workspace.rglob("*.json")}
+    signed_before = {path: path.read_bytes() for path in desk.evidence.values()}
+    proof_before = later.read_bytes()
+    result = _show(desk, sha, later)
+
+    assert result.exit_code == 1, result.output
+    assert said(f"release_record_corrupt: source_proof {reason}", result.output)
+    assert not said("automatic clearance allowed", result.output)
+    assert {path: path.read_bytes() for path in desk.workspace.rglob("*.json")} == before
+    assert later.read_bytes() == proof_before
+    assert {path: path.read_bytes() for path in desk.evidence.values()} == signed_before
+
+
 @pytest.mark.parametrize("problem", ["missing", "readable"])
 def test_a_missing_or_unsafe_proof_record_refuses(
     httpx_mock: HTTPXMock, tmp_path: Path, problem: str
