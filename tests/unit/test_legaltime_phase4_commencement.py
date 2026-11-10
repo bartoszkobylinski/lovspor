@@ -50,6 +50,9 @@ def test_the_naturmangfoldloven_decision_keeps_its_dated_exception_sentence() ->
         "Dersom § 2-6 ikke er satt i kraft, trer den i kraft.",  # independent review, no date
         "Fra den tid Kongen bestemmer, trer kapittel 3 i kraft.",
         "Når loven trer i kraft, trer del II i kraft.",
+        "Dersom fjerde ledd ikke er satt i kraft, trer det i kraft.",  # _NAMES_UNIT: bare "ledd"
+        "Fra den tid Kongen bestemmer, trer kap. 3 i kraft.",  # _NAMES_UNIT: abbreviated "kap."
+        "Dersom § 2-6 ikke er satt i kraft, tek den til å gjelde 1. januar 2024.",  # _SPLIT_VERB
     ],
 )
 def test_an_informational_opening_does_not_hide_a_commencement(sentence: str) -> None:

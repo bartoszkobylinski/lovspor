@@ -152,6 +152,22 @@ def test_a_part_without_legal_articles_keeps_its_intro_across_paragraphs() -> No
     assert [op.act for op in _operations(body)] == [STRAFFELOVEN, STRAFFELOVEN]
 
 
+def test_an_unbound_intro_closes_the_block_even_without_a_legal_article_host() -> None:
+    """Outside any legalArticle, host_section is always None: only ``unbound`` can close it."""
+    body = (
+        '<section class="section"><h2>I</h2>'
+        + _ledd("I lov 20. mai 2005 nr. 28 om straff gjøres følgende endringer:")
+        + _p("§ 40 oppheves.")
+        + _ledd("Følgende endringer gjøres i annen lovgivning:")
+        + _p("§ 41 oppheves.")
+        + "</section>"
+    )
+    assert [(op.address.section, op.act) for op in _operations(body)] == [
+        ("§40", STRAFFELOVEN),
+        ("§41", None),
+    ]
+
+
 def test_an_unrecognised_intro_produces_no_operation_and_no_clause() -> None:
     reading = interpret(parse_document(_law(SECTION_3 + SECTION_4), "lti/2015/nl-20150619-065.xml"))
     assert all(op.instruction != INTRO_4 for op in reading.operations)
@@ -176,6 +192,10 @@ def test_an_unsupported_sentence_in_an_unbound_block_is_counted_unattributed_not
         "§ 102 nr. 1 vert endra slik:",  # lov 21. desember 2005 nr. 131
         "Kapittel 6 endres slik:",
         "Tredje ledd endres slik:",
+        "Kap. 6 endres slik:",  # abbreviated chapter, same _UNIT_LED alternative family
+        "Nr. 1 endres slik:",
+        "Overskriften endres slik:",
+        "Del I endres slik:",
     ],
 )
 def test_an_intro_to_a_unit_of_the_same_act_keeps_the_block(sub_intro: str) -> None:
