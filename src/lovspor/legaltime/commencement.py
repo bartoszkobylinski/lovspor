@@ -118,6 +118,10 @@ _INFORMATIONAL = re.compile(
     r"Forskrifter\s+(?:gitt|gjevne|fastsatt|fastsette)\s)",
     re.I,
 )
+_SAME_TIME = re.compile(r"^(?:Fra\s+samme\s+tid|Frå\s+same\s+tid)", re.I)
+_SPLIT_VERB = re.compile(
+    r"\b(?:tek|tar)\s.+?\btil\s+å\s+gjelde\b", re.I
+)  # ``tek § 3 til å gjelde``
 _REFERENCE = re.compile(
     r"\b(?:etter\s+at|når|før|innen|fra\s+det\s+tidspunkt(?:et)?|på\s+det\s+tidspunkt(?:et)?|frå\s+det\s+tidspunktet)"
     r"\s+(?:denne\s+)?(?:loven|lova|lov|lovendringen|lovendringa|lovendringene|endringsloven|endringslova)"
@@ -282,7 +286,7 @@ def _informational(sentence: str) -> bool:
     sentence = _NUMBERED.sub("", sentence)
     without_citations = _CITED.sub("", sentence)
     if _INFORMATIONAL.match(sentence):
-        return True
+        return not _states_commencement(sentence)
     if _DELEGATES.match(sentence) and _COMMENCEMENT_PHRASE.search(sentence):
         return False  # "Kongen bestemmer når loven trer i kraft": a delegation, however phrased
     if _PENDING_WORDS.search(sentence) and _COMMENCEMENT_PHRASE.search(sentence):
@@ -291,6 +295,20 @@ def _informational(sentence: str) -> bool:
         return parse_date(without_citations) is None
     stated = _REFERENCE.sub("", sentence)  # what is left once the references are gone
     return _COMMENCEMENT_PHRASE.search(stated) is None and parse_date(without_citations) is None
+
+
+def _states_commencement(sentence: str) -> bool:
+    """An informational opening that still dates, excepts or reserves a unit (#857).
+
+    ``Fra samme tidspunkt trer endringene i § 78 … i kraft, med unntak av nr. 7`` dates by
+    reference to the sentence before it and carries an exception; it must reach the grammar
+    and be refused there if unread, never be dropped as prose.
+    """
+    stated = _REFERENCE.sub("", sentence)
+    if _COMMENCEMENT_PHRASE.search(stated) is None and _SPLIT_VERB.search(stated) is None:
+        return False
+    dated = parse_date(_CITED.sub("", sentence)) is not None or bool(_STRAKS.search(sentence))
+    return dated or bool(_RESERVATION.search(sentence)) or bool(_SAME_TIME.match(sentence))
 
 
 def _exception_timing(document: Document, sentence: str) -> Timing:
