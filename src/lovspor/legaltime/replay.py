@@ -522,6 +522,18 @@ def _targets(op: Operation, working: _Working) -> list[_Provision]:
     return [working.map[k] for k in keys if k and k in working.map]
 
 
+def _named(op: Operation) -> bool:
+    """The operation names the provision it is aimed at, present in the state or not."""
+    if op.kind == "substitute_term":
+        return bool(_locations(op.locations))
+    return bool(op.address.section or op.destination)
+
+
+def _known_by(timing: Timing, at: date) -> bool:
+    """Uncertainty counts from the day its evidence was known; from the start if unknown."""
+    return timing.known_from is None or timing.known_from <= at
+
+
 def _order_key(event: Event) -> tuple[date, datetime, int]:
     return (event.timing.effective or date.max, event.published_at or datetime.min, event.sequence)
 
@@ -593,8 +605,8 @@ def _keys(provisions: tuple[ProvisionState, ...], in_force: InForce) -> tuple[st
 class _Run:
     """One replay pass: the bucket every event lands in."""
 
-    def __init__(self, working: _Working) -> None:
-        self.working = working
+    def __init__(self, working: _Working, at: date) -> None:
+        self.working, self.at = working, at
         self.applied: list[str] = []
         self.future: list[str] = []
         self.pending: list[str] = []
@@ -602,14 +614,33 @@ class _Run:
         self.act_problems: list[str] = []
         self.withheld: list[str] = []
 
+    def route(self, event: Event, verdict: str, status: StateStatus) -> None:
+        """Unattributed operations are never applied; others wait while the act is not in force."""
+        if event.operation.act is None:
+            self._unattributed(event, verdict)
+        elif verdict == "apply" and status != "replayed":
+            self.withheld.append(event.operation.id)
+        else:
+            self.take(event, verdict)
+
+    def _unattributed(self, event: Event, verdict: str) -> None:
+        """ADR-0020 D7: an operation of unknown act possibly in effect at D may be this act's."""
+        if verdict == "apply" or (verdict == "unresolved" and _known_by(event.timing, self.at)):
+            problem = f"{event.operation.id}: unattributed operation, act unknown ({event.member})"
+            reason = f"; commencement {event.timing.reason}" if verdict == "unresolved" else ""
+            self.act_problems.append(problem + reason)
+
     def take(self, event: Event, verdict: str) -> None:
         op = event.operation
         if verdict == "apply":
             self._apply(event)
         elif verdict == "unresolved":
-            self.unresolved.append((op.id, event.timing.reason))
+            reason = event.timing.reason
+            self.unresolved.append((op.id, reason))
             for target in _targets(op, self.working):
-                target.problems.append(f"{op.id}: commencement {event.timing.reason}")
+                target.problems.append(f"{op.id}: commencement {reason}")
+            if not _named(op) and _known_by(event.timing, self.at):  # #858: may be in effect at D
+                self.act_problems.append(f"{op.id}: target unknown, commencement {reason}")
         elif verdict == "future":
             self.future.append(op.id)
         else:
@@ -660,13 +691,9 @@ def replay(
         commencement = Commencement(default=commencement)
     status = _baseline_status(commencement.default, at)
     working = _Working(baseline, commencement, at)
-    run = _Run(working)
+    run = _Run(working, at)
     for event in sorted(events, key=_order_key):
-        verdict = _classify(event, at)
-        if verdict == "apply" and status != "replayed":
-            run.withheld.append(event.operation.id)  # dated, but the act itself is not in force
-        else:
-            run.take(event, verdict)
+        run.route(event, _classify(event, at), status)
     provisions = (
         tuple(working.map[k].freeze(k) for k in working.order) if status == "replayed" else ()
     )

@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/commencement.py"
+symbol = "_conditions_a_unit"
+registered = "2026-11-10, PR #865, from the mutation artifact at commit 1f8be75f"
+mutation = """
+-    main = _LEADING_CONDITION.sub("", stated, count=1)
++    main = _LEADING_CONDITION.sub("", stated, count=2)
+"""
+justification = """
+Same argument as the unlimited-count mutant of this line: ``_LEADING_CONDITION``
+is anchored with ``^`` and compiled without ``re.MULTILINE``, so it can match only
+at position 0 and ``re.sub`` replaces at most one occurrence whatever ``count``
+allows. ``count=1`` and ``count=2`` give the same string for every input.
+Python's own ``re`` semantics, not a dependency's.
+"""

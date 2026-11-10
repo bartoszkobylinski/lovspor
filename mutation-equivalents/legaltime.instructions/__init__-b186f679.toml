@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/instructions.py"
+symbol = "__init__"
+registered = "2026-11-10, PR #865, from the mutation artifact at commit 1f8be75f"
+mutation = """
+-        self.unbound = False  # inside a block whose intro names an act the grammar cannot bind
++        self.unbound = None  # inside a block whose intro names an act the grammar cannot bind
+"""
+justification = """
+``unbound`` is read in exactly one place, ``_Reader._sentence``'s ``... and not
+self.unbound``, and is otherwise only overwritten with a bool by ``_boundary``.
+``not None`` and ``not False`` are both True, so every expression that reads the
+initial value evaluates the same. Python's own truthiness semantics.
+"""

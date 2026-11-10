@@ -65,6 +65,20 @@ _INTRO_SLIK = re.compile(
     r"^(?:\d+\.\s*)?(?:I\s+)?[Ll]ov\s+(?:av\s+)?(?P<date>\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?)\b"
     r"[^:]*?\s+(?:endres|endrast|vert\s+endra|blir\s+endra)\s+slik:$"
 )  # ``Lov 20. mai 2005 nr. 28 om straff endres slik:`` opens an amendment block too
+_UNBOUND_INTRO = re.compile(
+    r"(?:\b(?:gjøres|gjerast|gjer\s+ein|blir\s+gjort|vert\s+gjort)\s+(?:følgende|følgjande|desse|slike)"
+    r"\s+endring\w*|\b(?:endres|endrast|vert\s+endra|blir\s+endra)\s+slik)\b[^:]*:$",
+    re.I,
+)  # opens an amendment block whose act the intro grammar cannot name (#856)
+_UNIT_LED = re.compile(
+    rf"^(?:\d+\.\s*)?(?:I\s+)?(?:§|kapit|kap\.|(?:\w+\s+)?del\b|overskrift|innledning|vedlegg"
+    rf"|nr\.|bokstav|punkt|(?:{ORDINAL_ALT})\s+(?:ledd|punktum))",
+    re.I,
+)  # ``§ 4-2 endres slik:``: a unit of the act already named, not another act
+_ACT_WORD = re.compile(
+    r"\b[\wæøå-]+(?:loven|lova|lov)\b|\blov\b|\bforskrift\w*|\blovgiv\w*|\blovgjev\w*", re.I
+)
+_AMENDS = re.compile(r"\bendring\w*|\bendr(?:es|ast|a|et|ede)\b", re.I)
 _COMMENCEMENT_SHAPED = re.compile(
     r"\bi\s+kraft\b|\bgjeld(?:er)?\s+fr[aå]\b|\bte[kr]\s+til\s+å\s+gjelde\b|\btar\s+til\s+å\s+gjelde\b",
     re.I,
@@ -290,9 +304,31 @@ def _instruction_like(node: Node) -> bool:
     return bool(_is_intro(text) or _SUBSTITUTE.match(text)) or classify(text)[0] != "unsupported"
 
 
+def _unbound_intro(text: str) -> bool:
+    """An intro the grammar cannot bind, unless it only opens a unit of the same act.
+
+    Any word order counts: a sentence ending in a colon that amends and names an act
+    (``I lov … skal følgende endringer gjøres:``) opens a block as surely as the shapes
+    ``_UNBOUND_INTRO`` spells out.
+    """
+    if _is_intro(text) or _SUBSTITUTE.match(text):
+        return False
+    names_act = act_refid(text) is not None or _ACT_WORD.search(text) is not None
+    instructs = _OPENS_PAYLOAD.search(text) is not None  # ``… slik § 52 a lyder etter endringer
+    # ved lov …, skal … lyde:`` cites an earlier amendment, it does not open a block
+    amends = text.endswith(":") and _AMENDS.search(text) is not None and names_act
+    amends = amends and not instructs
+    if _UNBOUND_INTRO.search(text) is None and not amends:
+        return False
+    return _UNIT_LED.match(text) is None or names_act
+
+
 def _next_instruction(nodes: list[Node], start: int) -> int:
+    """Where an instruction's payload ends: the next instruction, intro or article (#856)."""
+    host = nodes[start - 1].host_section
     for index in range(start, len(nodes)):
-        if _instruction_like(nodes[index]):
+        node = nodes[index]
+        if _instruction_like(node) or _unbound_intro(node.text) or node.host_section != host:
             return index
     return len(nodes)
 
@@ -307,6 +343,8 @@ class _Reader:
         self.clauses: list[str] = []
         self.substitution: tuple[tuple[str, str], ...] | None = None
         self.pending_item_act: str | None = None
+        self.bound_host: str | None = None  # the article whose intro bound ``act``
+        self.unbound = False  # inside a block whose intro names an act the grammar cannot bind
 
     def run(self) -> Interpretation:
         for index, part in enumerate(self.document.parts):
@@ -325,6 +363,7 @@ class _Reader:
         for index, node in enumerate(nodes):  # a for loop: no index arithmetic can stall it
             if index < skip_until:
                 continue  # consumed as the payload of the instruction before it
+            self._boundary(node)
             if _instruction_like(node):
                 end = _next_instruction(nodes, index + 1)
                 consumed = self._paragraph(part, index, node, tuple(nodes[index + 1 : end]))
@@ -333,6 +372,18 @@ class _Reader:
                     skip_until = end
             else:
                 self._loose(node, seen_instruction, part, index)
+
+    def _boundary(self, node: Node) -> None:
+        """Close the open block where its act is no longer proven (#856).
+
+        An act is bound only by an intro naming it, inside the article that intro sits
+        in. A new article, or an intro whose act the grammar cannot name, ends the block:
+        what follows is unattributed until another intro names its act, never inherited.
+        """
+        unbound = _unbound_intro(node.text)
+        if node.host_section != self.bound_host or unbound:
+            self.substitution, self.pending_item_act, self.act = None, None, None
+            self.bound_host, self.unbound = node.host_section, unbound
 
     def _loose(self, node: Node, seen: bool, part: tuple[str, str], index: int) -> None:
         if self.substitution is not None and node.kind == "ledd":
@@ -435,7 +486,7 @@ class _Reader:
             self.operations.extend(_structure(op_id, quote, context, payload))
         elif kind == "unsupported" and _clause_like(read):
             self.clauses.append(read)  # a commencement sentence among instructions
-        elif kind == "unsupported" and context[0] is None:
+        elif kind == "unsupported" and context[0] is None and not self.unbound:
             return  # prose outside any act's amendment block: not an operation
         else:
             self.operations.append(_operation(op_id, (kind, groups, quote), context, payload))
