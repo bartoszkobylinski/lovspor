@@ -17,9 +17,12 @@ import pytest
 from lovspor.forarbeider.corpus_models import (
     MANIFEST_PATH,
     ForarbeiderManifestV2,
+    PolicyClearance,
+    ReviewClearance,
     manifest_v2_text,
     parse_any_manifest,
 )
+from lovspor.forarbeider.corpus_reader import _restated, _review_time, synthetic_rendering
 from lovspor.forarbeider.release_models import digest
 from tests.unit.cli_output import said
 from tests.unit.forarbeider_reader_support import L_ID, exact, loaded, read, released_box
@@ -152,3 +155,55 @@ def test_another_manifest_version_is_incompatible_for_the_reader(box: Path) -> N
 
     assert result.exit_code == 1
     assert said("refused: manifest_incompatible: manifest", result.output)
+
+
+def test_review_time_is_the_review_decided_at_only_for_a_review_clearance() -> None:
+    policy = PolicyClearance(
+        cleared_by="standing_policy",
+        policy_sha256="b" * 64,
+        source_proof_sha256="c" * 64,
+        individually_reviewed=False,
+    )
+    review = ReviewClearance.model_validate(
+        {
+            "cleared_by": "owner_review",
+            "review_decided_at": "2100-04-02T12:00:00Z",
+            "review": {"subject_key": "d" * 64, "revision": 1, "head_sha256": "e" * 64},
+            "authorization_sha256": "f" * 64,
+            "report_sha256": "0" * 64,
+            "provenance": "recorded",
+            "individually_reviewed": True,
+        }
+    )
+
+    assert _review_time(policy) is None
+    assert _review_time(review) == review.review_decided_at
+
+
+def test_synthetic_rendering_carries_review_times_and_always_drops_withdrawal(
+    box: Path,
+) -> None:
+    entry = parse_any_manifest((box / MANIFEST_PATH).read_bytes()).documents[0]
+    withdrawn_entry = entry.model_copy(
+        update={"times": entry.times.model_copy(update={"withdrawn_at": "2100-04-11T00:00:00Z"})}
+    )
+
+    rendering = synthetic_rendering(entry)
+    withdrawn_rendering = synthetic_rendering(withdrawn_entry)
+
+    assert len(rendering.chapters) == len(entry.chapters)
+    for chapter, source in zip(rendering.chapters, entry.chapters, strict=True):
+        assert chapter.review_decided_at == source.clearance.review_decided_at
+        assert chapter.review_decided_at is not None
+    assert rendering.times.withdrawn_at is None
+    assert withdrawn_rendering.times.withdrawn_at is None
+
+
+def test_restated_requires_the_same_number_of_chapters_as_rendered(box: Path) -> None:
+    entry = parse_any_manifest((box / MANIFEST_PATH).read_bytes()).documents[0]
+    rendering = synthetic_rendering(entry)
+    assert len(entry.chapters) > 1
+    short_rendering = rendering._replace(chapters=rendering.chapters[:-1])
+
+    with pytest.raises(ValueError, match=r"zip\(\)"):
+        _restated(entry, short_rendering)

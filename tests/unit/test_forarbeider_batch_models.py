@@ -13,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from lovspor.forarbeider.batch_classify import ChapterClass
+from lovspor.forarbeider.batch_commands import _chapter_line, plan_lines
 from lovspor.forarbeider.batch_models import (
     MAX_DOCUMENTS,
     SAMPLE_SIZE,
@@ -20,7 +21,9 @@ from lovspor.forarbeider.batch_models import (
     BatchReason,
     PlannedChapter,
     PlannedDocument,
+    _require_distinct,
     counts_of,
+    coverage_of,
     sample_of,
     valid_branch,
 )
@@ -277,10 +280,93 @@ def test_an_excluded_chapter_has_sorted_reasons_from_any_source() -> None:
     chapter = PlannedChapter.model_validate(excluded)
 
     assert [str(item) for item in chapter.reasons] == reasons
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as caught:
         PlannedChapter.model_validate({**excluded, "reasons": reasons[::-1]})
+    assert [error["msg"] for error in caught.value.errors()] == [
+        "Value error, reasons must be sorted, once each"
+    ]
     with pytest.raises(ValidationError):
         PlannedChapter.model_validate({**excluded, "reasons": ["not_a_reason"]})
+
+
+def test_coverage_of_distinguishes_full_from_partial_and_empty() -> None:
+    chapters = [PlannedChapter.model_validate(_chapter(1, number)) for number in (1, 2, 3, 4)]
+
+    assert coverage_of([1, 2, 3, 4], chapters) == "every_listed_chapter"
+    assert coverage_of([1, 2, 3, 4], chapters[:2]) == "partial_curated_excerpt"
+    assert coverage_of([1, 2, 3, 4], []) == "none"
+
+
+def test_require_distinct_messages_and_the_source_or_destination_split() -> None:
+    out_of_order = [
+        PlannedDocument.model_validate(_planned(2)),
+        PlannedDocument.model_validate(_planned(1)),
+    ]
+    with pytest.raises(ValueError, match=r"^documents must be sorted by id, once each$"):
+        _require_distinct(out_of_order)
+
+    # Same source_document_id, different document_type: distinct destinations,
+    # duplicate sources only. The "or" in the original still raises.
+    first = PlannedDocument.model_validate(
+        _custom_planned("regjeringen-9000101", "prop-l", 9000101)
+    )
+    second = PlannedDocument.model_validate(
+        _custom_planned("regjeringen-9000102", "prop-ls", 9000101)
+    )
+    with pytest.raises(ValueError, match=r"^a document is planned twice$"):
+        _require_distinct([first, second])
+
+    # One document, two chapters that happen to share a chapter_id: ids, sources
+    # and destinations are all fine, only the chapter list is duplicated.
+    duplicated = PlannedDocument.model_validate(
+        _custom_planned("regjeringen-9000201", "prop-l", 9000201, duplicate_chapter_id=True)
+    )
+    with pytest.raises(ValueError, match=r"^a chapter is planned twice$"):
+        _require_distinct([duplicated])
+
+
+def _custom_planned(
+    doc_id: str, document_type: str, source_document_id: int, duplicate_chapter_id: bool = False
+) -> dict[str, Any]:
+    document = {
+        "id": doc_id,
+        "document_type": document_type,
+        "session": "2099-2100",
+        "proposition_number": 900,
+        "source_document_id": source_document_id,
+        "source_url": f"https://www.regjeringen.no/no/dokumenter/x/id{source_document_id}/",
+    }
+    if duplicate_chapter_id:
+        numbers = [1, 2]
+        chapter_ids = [f"{doc_id}-ch1", f"{doc_id}-ch1"]
+    else:
+        numbers = [1]
+        chapter_ids = [f"{doc_id}-ch1"]
+    chapters = [
+        {
+            "chapter_number": number,
+            "chapter_id": chapter_id,
+            "source_page_url": f"{document['source_url']}?ch={number}",
+            "source_sha256": "2" * 64,
+            "text_sha256": "3" * 64,
+            "extractor_version": 1,
+            "normalizer_version": 1,
+            "hold_reasons": [],
+            "classification": "clean",
+            "included": True,
+            "clearance": POLICY,
+            "reasons": [],
+        }
+        for number, chapter_id in zip(numbers, chapter_ids, strict=True)
+    ]
+    return {
+        "document": document,
+        "destination": destination_of(DocumentIdentity.model_validate(document)),
+        "listed_chapters": numbers,
+        "report_sha256": None,
+        "chapters": chapters,
+        "coverage": "every_listed_chapter",
+    }
 
 
 def test_a_chapter_of_another_document_or_a_wrong_coverage_is_invalid() -> None:
@@ -299,3 +385,39 @@ def test_a_plan_round_trips_through_its_json() -> None:
 
     assert again == plan
     assert ChapterClass.CLEAN in {chapter.classification for chapter in again.documents[0].chapters}
+
+
+def test_chapter_line_prints_exact_digest_and_pin_slices() -> None:
+    policy_chapter = PlannedChapter.model_validate(_chapter(1, 2))
+    assert _chapter_line(policy_chapter) == (
+        f"chapter 2 {policy_chapter.chapter_id} clean included standing_policy "
+        f"policy {POLICY_SHA[:12]}"
+    )
+
+    review_chapter = PlannedChapter.model_validate(
+        _chapter(1, 3, classification="flagged", clearance=REVIEW)
+    )
+    assert _chapter_line(review_chapter) == (
+        f"chapter 3 {review_chapter.chapter_id} flagged included owner_review "
+        f"report {REVIEW['report_sha256'][:12]} pin {REVIEW['review']['subject_key'][:12]}@1"
+    )
+
+    excluded_chapter = PlannedChapter.model_validate(
+        _chapter(1, 2, included=False, clearance=None, reasons=["page_not_fetched"])
+    )
+    assert _chapter_line(excluded_chapter) == (
+        f"chapter 2 {excluded_chapter.chapter_id} clean excluded page_not_fetched"
+    )
+
+
+def test_plan_lines_sums_included_and_uses_real_newlines() -> None:
+    mixed = [_chapter(1, 2), _chapter(1, 3, classification="flagged", clearance=REVIEW)]
+    plan = BatchPlan.model_validate(_plan([_planned(1, mixed)]))
+
+    text = plan_lines(plan, "f" * 64)
+    lines = text.split("\n")
+
+    assert lines[0] == (
+        f"BATCH PLAN {'f' * 64} documents 1 included 2 "
+        "(standing_policy 1, owner_review 1) excluded 0"
+    )

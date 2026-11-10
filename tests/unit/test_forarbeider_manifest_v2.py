@@ -288,6 +288,46 @@ def test_a_review_after_the_owner_decision_is_out_of_order() -> None:
     _invalid(payload)
 
 
+def test_clearance_time_diagnostics_are_exact() -> None:
+    payload = _golden()
+    payload["documents"][1]["times"]["reviewed_at"] = "2100-04-03T12:00:00Z"
+    with pytest.raises(ValidationError) as caught:
+        ForarbeiderManifestV2.model_validate(payload)
+    assert [error["msg"] for error in caught.value.errors()] == [
+        "Value error, a review time exactly when a chapter was reviewed"
+    ]
+
+    payload = _golden()
+    payload["documents"][0]["times"]["policy_decided_at"] = None
+    with pytest.raises(ValidationError) as caught:
+        ForarbeiderManifestV2.model_validate(payload)
+    assert [error["msg"] for error in caught.value.errors()] == [
+        "Value error, a policy time exactly when a chapter was cleared by the policy"
+    ]
+
+    payload = _golden()
+    payload["documents"][0]["chapters"][0]["clearance"]["review_decided_at"] = (
+        "2100-04-05T12:00:00Z"
+    )
+    with pytest.raises(ValidationError) as caught:
+        ForarbeiderManifestV2.model_validate(payload)
+    assert [error["msg"] for error in caught.value.errors()] == [
+        "Value error, a chapter was approved after the owner decided"
+    ]
+
+
+def test_a_review_decided_exactly_at_the_owner_decision_is_accepted() -> None:
+    payload = _golden()
+    owner_decided_at = payload["documents"][0]["times"]["owner_decided_at"]
+    payload["documents"][0]["chapters"][0]["clearance"]["review_decided_at"] = owner_decided_at
+
+    parsed = ForarbeiderManifestV2.model_validate(payload)
+
+    assert parsed.documents[0].chapters[0].clearance.review_decided_at.isoformat() == (
+        owner_decided_at.replace("Z", "+00:00")
+    )
+
+
 def test_release_before_the_owner_decision_or_withdrawal_before_release_is_invalid() -> None:
     _times(1, released_at="2100-04-03T12:00:00Z")
     payload = _golden()

@@ -271,6 +271,42 @@ def test_the_same_document_twice_is_refused(batch: BatchDesk, httpx_mock: HTTPXM
     assert not (batch.workspace / "batch_plans").exists()
 
 
+def test_a_document_repeated_after_another_one_is_still_refused(
+    batch: BatchDesk, httpx_mock: HTTPXMock
+) -> None:
+    batch.add(1)
+    batch.add(2)
+    batch.ready(httpx_mock)
+    request = batch.request([batch.document(1), batch.document(2), batch.document(1)])
+
+    _refused(batch.plan(request), "document_duplicate", "regjeringen-9000101")
+    assert not (batch.workspace / "batch_plans").exists()
+
+
+def test_a_malformed_policy_digest_is_refused_by_name_on_stderr(
+    batch: BatchDesk, httpx_mock: HTTPXMock
+) -> None:
+    batch.add(1)
+    batch.ready(httpx_mock)
+
+    result = batch.plan(batch.request([batch.document(1)]), policy="not-a-digest")
+
+    _refused(result, "release_invalid", "policy")
+    assert said("refused: release_invalid: policy", result.stderr)
+
+
+def test_a_malformed_at_moment_is_refused_by_name_on_stderr(
+    batch: BatchDesk, httpx_mock: HTTPXMock
+) -> None:
+    batch.add(1)
+    batch.ready(httpx_mock)
+
+    result = batch.plan(batch.request([batch.document(1)]), at="not-a-time")
+
+    _refused(result, "invalid_timestamp", "at")
+    assert said("refused: invalid_timestamp: at", result.stderr)
+
+
 def test_the_same_chapter_twice_is_refused(batch: BatchDesk, httpx_mock: HTTPXMock) -> None:
     batch.add(1)
     batch.ready(httpx_mock)

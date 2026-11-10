@@ -6,6 +6,7 @@ policy verdict is built directly, so each policy and source fault is shown on
 its own. The CLI tests read the same paths end to end.
 """
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -18,13 +19,21 @@ from lovspor.forarbeider.batch_clearance import (
     Batch,
     DocumentEvidence,
     PolicyVerdict,
+    _chapter_input,
+    _outcome,
+    _review_clearance,
+    _sha,
+    clean_reasons,
+    document_input,
     plan_of,
     planned_chapter,
     planned_document,
+    review_reasons,
     routed,
 )
 from lovspor.forarbeider.batch_models import BatchReason
 from lovspor.forarbeider.corpus_models import PolicyClearance, ReviewClearance
+from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.policy_models import PolicyFault
 from lovspor.forarbeider.policy_source import SourceFault
 from lovspor.forarbeider.release_commands import (
@@ -411,3 +420,151 @@ def test_a_changed_input_changes_the_inputs_digest_and_reseeds_the_sample(
     assert len({before.inputs_sha256, later.inputs_sha256, fewer.inputs_sha256}) == 3
     assert before.sample != later.sample
     assert len(before.sample) == 5
+
+
+def test_outcome_is_none_for_a_chapter_the_report_does_not_list(batch: BatchDesk) -> None:
+    desk = batch.add(1)
+    evidence = _evidence(desk)
+
+    assert _outcome(evidence.fresh, 999) is None
+
+
+def test_clean_reasons_handles_a_chapter_the_fresh_report_does_not_list(
+    batch: BatchDesk,
+) -> None:
+    desk = batch.add(1)
+    evidence = _evidence(desk)
+    observed = _observed(evidence, 2)
+    forged = DocumentEvidence(
+        evidence.inputs, evidence.fresh.model_copy(update={"chapters": ()}), evidence.report
+    )
+
+    reasons = clean_reasons(forged, _verdict(desk), observed)
+
+    assert reasons == set(evidence.fresh.document_reasons) - REVIEW_PATH
+
+
+def test_review_reasons_handles_a_chapter_the_fresh_report_does_not_list(
+    batch: BatchDesk,
+) -> None:
+    desk = batch.add(1, extras={3: QUOTE})
+    review = batch.flagged_report(1, (3,))
+    evidence = _evidence(desk, review)
+    observed = _observed(evidence, 3)
+    forged = DocumentEvidence(
+        evidence.inputs, evidence.fresh.model_copy(update={"chapters": ()}), evidence.report
+    )
+
+    reasons = review_reasons(forged, observed)
+
+    assert BatchReason.PREFLIGHT_NOT_ELIGIBLE in reasons
+
+
+def test_review_reasons_or_not_and_for_a_stale_report_still_planned(batch: BatchDesk) -> None:
+    desk = batch.add(1, extras={3: QUOTE})
+    review = batch.flagged_report(1, (3,))
+    evidence = _evidence(desk, review)
+    observed = _observed(evidence, 3)
+    assert evidence.report is not None
+    forged_record = evidence.report.record.model_copy(
+        update={"outcome": "deny", "document_reasons": (DenyReason.REVIEW_MISSING,)}
+    )
+    forged = DocumentEvidence(
+        evidence.inputs, evidence.fresh, Stored(forged_record, evidence.report.sha256)
+    )
+
+    reasons = review_reasons(forged, observed)
+
+    assert BatchReason.PREFLIGHT_NOT_ELIGIBLE in reasons
+
+
+def test_review_clearance_or_and_precedence_and_refusal_fields(batch: BatchDesk) -> None:
+    desk = batch.add(1)
+    desk.decide(2, ReviewStatus.APPROVED)
+    evidence = _evidence(desk)
+    observed = _observed(evidence, 2)
+    assert observed.history
+    assert evidence.report is None
+
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        _review_clearance(evidence, observed)
+
+    assert caught.value.reason is RefusalReason.RELEASE_INVALID
+    assert caught.value.detail == observed.result.id
+
+
+def test_a_withheld_chapters_hold_reasons_are_the_actual_values(batch: BatchDesk) -> None:
+    desk = batch.add(1, extras={3: TABLE})
+
+    chapter = _chapter(_evidence(desk), _verdict(desk), 3)
+
+    assert chapter.hold_reasons == tuple(str(item) for item in desk.results[3].hold_reasons)
+    assert "table" in chapter.hold_reasons
+
+
+def test_planned_document_report_sha256_is_populated_from_evidence(batch: BatchDesk) -> None:
+    desk = batch.add(1, extras={3: QUOTE})
+    review = batch.flagged_report(1, (3,))
+    evidence = _evidence(desk, review)
+
+    document = planned_document(evidence, _verdict(desk))
+
+    assert document.report_sha256 == evidence.report.sha256
+    assert document.report_sha256 is not None
+
+
+def test_sha_is_none_only_for_a_none_input() -> None:
+    assert _sha(None) is None
+    assert _sha(b"hello") == hashlib.sha256(b"hello").hexdigest()
+
+
+def test_chapter_input_reflects_the_actual_page_and_review_history(batch: BatchDesk) -> None:
+    desk = batch.add(1)
+    desk.decide(2, ReviewStatus.APPROVED)
+    evidence = _evidence(desk)
+    observed = _observed(evidence, 2)
+    assert observed.page is not None
+    assert observed.history
+
+    built = _chapter_input(observed)
+
+    assert built.page_sha256 == hashlib.sha256(observed.page).hexdigest()
+    assert built.review_revision == len(observed.history)
+    assert built.review_head_sha256 == observed.history[-1].sha256
+
+
+def test_chapter_input_with_no_review_chain_has_a_sentinel_revision(batch: BatchDesk) -> None:
+    desk = batch.add(1)
+    evidence = _evidence(desk)
+    observed = _observed(evidence, 2)
+    no_history = Observed(observed.result, observed.page, None)
+
+    built = _chapter_input(no_history)
+
+    assert built.review_revision == -1
+    assert built.review_head_sha256 is None
+
+
+def test_chapter_input_with_an_empty_review_chain_has_zero_revision(batch: BatchDesk) -> None:
+    desk = batch.add(1)
+    evidence = _evidence(desk)
+    observed = _observed(evidence, 2)
+    empty_history = Observed(observed.result, observed.page, ())
+
+    built = _chapter_input(empty_history)
+
+    assert built.review_revision == 0
+    assert built.review_head_sha256 is None
+
+
+def test_document_input_reflects_the_metadata_page_and_report(batch: BatchDesk) -> None:
+    desk = batch.add(1, extras={3: QUOTE})
+    review = batch.flagged_report(1, (3,))
+    evidence = _evidence(desk, review)
+    assert evidence.inputs.metadata_page is not None
+
+    built = document_input(evidence)
+
+    assert built.metadata_page_sha256 == hashlib.sha256(evidence.inputs.metadata_page).hexdigest()
+    assert built.report_sha256 == evidence.report.sha256
+    assert built.report_sha256 is not None

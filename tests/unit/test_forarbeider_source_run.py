@@ -7,6 +7,7 @@ chapter's page can be proved to come from the run used as source proof. Only
 """
 
 import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -49,6 +50,23 @@ def test_only_fetched_pages_are_listed_by_url_and_digest(
 
     assert run.fetched == frozenset({(CH2, hashlib.sha256(b"<html>two</html>").hexdigest())})
     assert run.sha256 == hashlib.sha256(run_file.read_bytes()).hexdigest()
+
+
+def test_fetched_requires_both_the_fetched_outcome_and_a_stored_digest(
+    httpx_mock: HTTPXMock, tmp_path: Path
+) -> None:
+    run_file = _run(httpx_mock, tmp_path / "fetch")
+    payload = json.loads(run_file.read_text())
+    for record in payload["records"]:
+        if record["url"] == CH3:
+            assert record["outcome"] != "fetched"
+            assert record["sha256"] is None
+            record["sha256"] = hashlib.sha256(b"not actually fetched").hexdigest()
+    run_file.write_text(json.dumps(payload))
+
+    run = read_source_run(run_file)
+
+    assert run.fetched == frozenset({(CH2, hashlib.sha256(b"<html>two</html>").hexdigest())})
 
 
 def test_the_source_part_is_exactly_the_policy_source_proof(
