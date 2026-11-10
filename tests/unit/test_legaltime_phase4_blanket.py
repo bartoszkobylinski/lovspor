@@ -211,21 +211,46 @@ def test_the_report_carries_the_unattributed_operation_its_state_and_its_verific
     ]
 
 
+REASON = "commencement sentence outside the grammar"
+
+
 @pytest.mark.parametrize(
-    ("op", "blanketed"),
+    ("op", "act_level", "on_section"),
     [
-        (_op("substitute_term", Address()).model_copy(update={"locations": ""}), True),
-        (_op("substitute_term", Address()).model_copy(update={"locations": "§ 9"}), False),
-        (_op("move_ledd", Address()).model_copy(update={"destination": "§9"}), False),
-        (_op("renumber", Address(ledd=2)), True),
+        (
+            _op("substitute_term", Address()).model_copy(update={"locations": ""}),
+            (f"x#I:0.0: target unknown, commencement {REASON}",),
+            {},
+        ),
+        (
+            _op("substitute_term", Address()).model_copy(update={"locations": "§ 1"}),
+            (),
+            {"§1": (f"x#I:0.0: commencement {REASON}",)},
+        ),
+        (_op("substitute_term", Address()).model_copy(update={"locations": "§ 9"}), (), {}),
+        (_op("move_ledd", Address()).model_copy(update={"destination": "§9"}), (), {}),
+        (
+            _op("move_ledd", Address()).model_copy(update={"destination": "§2"}),
+            (),
+            {"§2": (f"x#I:0.0: commencement {REASON}",)},
+        ),
+        (
+            _op("renumber", Address(ledd=2)),
+            (f"x#I:0.0: target unknown, commencement {REASON}",),
+            {},
+        ),
     ],
 )
 def test_only_an_operation_that_names_no_provision_is_a_target_unknown(
-    op: Operation, blanketed: bool
+    op: Operation, act_level: tuple[str, ...], on_section: dict[str, tuple[str, ...]]
 ) -> None:
-    """A named provision absent from the state is still named; the problem stays on it."""
+    """A named provision, present or absent, carries the problem itself; none is act-level."""
     state = _state(_event(op, UNRESOLVED))
-    assert bool(state.act_level_problems) is blanketed
+    assert state.act_level_problems == act_level
+    assert state.unresolved == (("x#I:0.0", REASON),)
+    assert state.applied == ()
+    problems = {p.key: p.problems for p in state.provisions if p.problems}
+    assert problems == on_section
 
 
 def test_state_at_carries_the_unattributed_operations_of_the_evidence() -> None:

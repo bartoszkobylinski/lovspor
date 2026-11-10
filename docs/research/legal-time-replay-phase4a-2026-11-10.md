@@ -142,6 +142,19 @@ No operation lost an attribution that a recognised intro of its own block proves
 - `tests/integration/test_legaltime_phase3.py`: the straffeloven pins move from (105, 614, 376) to (99, 392, 335), with the reason in a comment. The barnevernsloven and pilot evidence regenerate byte-for-byte from the committed files.
 - **Determinism:** two independent rebuilds of all 14 reports and the coverage file (15 files) produced identical sha256 digests.
 
+## 4a. Independent review (Codex, read-only, `codex exec -s read-only`)
+
+| round | head reviewed | verdict | major finding | resolution |
+|---|---|---|---|---|
+| 1 | `fbe8db77` | NOT READY | `Dersom § 2-6 ikke er satt i kraft, trer den i kraft.` still dropped | fixed in `1fd85c26` (unit named + commencement in the main clause) |
+| 2 | `1fd85c26` | NOT READY | short-title unit intro `I § 3 i straffeloven gjøres følgende endringer:` kept the block | fixed in `42ddf1c7` |
+| 3 | `42ddf1c7` | NOT READY | intros worded outside the fixed shapes kept the block | fixed in `0b1111ef`. The round's own example (`I lov … skal følgende endringer gjøres:`) is read by `_INTRO` and binds its act; round 4 confirmed this |
+| 4 | `0b1111ef` | NOT READY | `Kongen kan sette endringene i kraft.` dropped as informational | **declined**, see below; minor test-strength finding fixed |
+
+Round 4's major is declined. `Kongen kan sette … i kraft` grants the power to commence. It states no commencement, date, exception or unit, which is the class of sentence the task says to keep as informational. The unit's timing still comes from the default clause, the `dateInForce` header and the decisions: with `Kongen bestemmer` it is `pending`, and every decision citing the law is folded in. Refusing every such delegation would refuse the standard delegation clause most acts carry, without evidence that any of them dates a unit. A delegation that names a unit, a date or an exception (`Kongen kan likevel sette § 2-6 i kraft 1. juli 2023.`) does reach the grammar, and a test pins that. Owner may overrule.
+
+The sandbox could not run pytest or `gh` in any round; each review was static.
+
 ## 5. Limitations
 
 - Operations after an unbindable intro are unattributed even where a human can read the act from the sentence (militær straffelov, plan- og bygningsloven by short title). That is the fail-closed choice: binding them is grammar work under #861 item 3 and needs its own tests.
