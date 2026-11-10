@@ -42,7 +42,7 @@ The audit also measured the opposite failure: operations that Phase 4A still cre
 
 1. **Shape.** The node's last sentence is one of three closed shapes, ending in a colon: `I <title> <citation> … gjøres|skal|blir|vert følgende|følgjande|desse endring(er|ar…) [gjerast]:`; `<title> <citation> … endres|endrast|vert endra|blir endra slik:`; `… gjøres|gjerast|blir|vert følgende … endringer i [lov] <citation> … [gjort gjeldande]:`. An optional item mark (`17.`, `1 a.`, `3)`) may precede it. Two more shapes are numbered items: an act heading (`N. Lov <citation> [om …][:]`, no verb, only inside a list intro that names no act) and an act heading fused with its instruction (`N. Lov <citation> <title> [skal] § … lyde:`).
 2. **Uniqueness.** The sentence (for a fused item, its part before the `§`) cites exactly one act by day, month, year **and number**. Two citations, a date without a number, or a day without its full stop cite nothing.
-3. **Directness.** It amends that act, not an amendment of it: `om endring(er) i`, `(endringer i`, `romertall` and `endringslov` refuse.
+3. **Directness.** It amends that act, not an amendment of it: `om endring(er) i`, `(endringer i`, `romertall` and `endringslov` refuse. Nor is the citation a reference: if the clause leading up to it (after its last comma or bracket) holds `etter`, `ved`, `jf.`, `lyder`, `lydde`, `endret` or `endra`, the act cited is the source of a wording (`I straffeloven, slik den lyder etter lov …`), not the act amended.
 4. **Header proof.** The member's own `changesToDocuments` header lists the cited act. This is Lovdata's metadata about which documents the announcement changes; it is independent of the sentence.
 
 A unit-led sentence (`I kapittel 3 i lov … gjøres følgende endringer:`) is not a Phase 4B shape: Phase 4A closes the block and that stays. A short title alone is never an identity. Nothing is matched by similarity.
@@ -180,6 +180,7 @@ The Phase 4A coverage file `legal-time-coverage-2026-11-10.json` is left as it w
 | 1 | `2ae6f009` | NOT READY | major: a canonical intro binds a date-only citation (`I lov 20. mai 2005 gjøres …` → `lov/2005-05-20`); major: the audit tool classed a two-citation sentence as proven when the first citation matched; minor: the archive tests counted operations without pinning the block | the audit now requires exactly one citation that the header lists, with unit tests; the archive tests pin the run and the multi-act part IV. The date-only binding predates Phase 4A and is unchanged here: measured and filed as #872 (128 operations in the eight acts' amenders, 77 header-proven, none bound to a coverage act) |
 
 | 2 | `b43b56c0` | READY | none | — |
+| 3 | `74a7d6dd` | NOT READY | major: one citation inside a reference clause bound as the amended act (`I straffeloven, slik den lyder etter lov 20. desember 2023 nr. 110, gjøres følgende endringer:` → `lov/2023-12-20-110`); minor: the audit called an attribution false when the sentence cited the old act second. The new equivalents were confirmed provable | a citation whose leading clause (after its last comma or bracket) holds `etter`, `ved`, `jf.`, `lyder`, `lydde`, `endret` or `endra` proves nothing, with three negative tests; the audit compares against the whole citation set, with a test. On the archives: 0 operations changed |
 
 ## 6b. Mutation (CI, PR-scoped, mutmut 3.8.0)
 

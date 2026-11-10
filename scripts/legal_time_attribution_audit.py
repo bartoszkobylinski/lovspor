@@ -95,7 +95,7 @@ def _class(before: list[Any] | None, after: list[Any] | None, cited: list[str], 
     names_new = bool(cited) and cited[0] == new and proof
     if old is None and names_new:
         return "new_proven"
-    if old is not None and old not in cited[:1] and (new is None or names_new):
+    if old is not None and old not in cited and (new is None or names_new):
         return "unbound_was_false" if new is None else "rebound_proven"
     return "check"
 

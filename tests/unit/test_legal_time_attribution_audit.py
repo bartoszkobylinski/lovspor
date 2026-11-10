@@ -176,3 +176,13 @@ def test_governing_is_empty_once_the_search_crosses_an_article_boundary() -> Non
     operations = interpret(document).operations
     assert [op.act for op in operations] == [STRAFFELOVEN, None]
     assert _audit()._governing(document, operations[1].id) == ""
+
+
+def test_losing_an_act_the_sentence_cites_second_is_never_called_false() -> None:
+    """Independent review round 3: the whole citation set decides, not its first member."""
+    sentence = (
+        "I tvisteloven 17. juni 2005 nr. 90, slik den lyder etter lov 1. januar 2020 nr. 1, "
+        "gjøres følgende endringer:"
+    )
+    row = _row(sentence, "lov/2020-01-01-1", None, [TVISTELOVEN, "lov/2020-01-01-1"])
+    assert row["class"] == "check"

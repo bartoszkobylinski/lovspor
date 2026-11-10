@@ -160,6 +160,13 @@ def test_a_proven_intro_outside_the_canonical_shapes_binds_its_act(intro: str, a
         # two citations: which act is amended is not unique
         ("I tvisteloven 17. juni 2005 nr. 90, slik den lyder etter lov 1. januar 2020 nr. 1, "
          "gjøres følgende endringer:", ("lov/2005-06-17-90", "lov/2020-01-01-1")),
+        # independent review round 3: the one citation is the source of a wording, not the act
+        ("I straffeloven, slik den lyder etter lov 20. desember 2023 nr. 110, gjøres følgende "
+         "endringer:", ("lov/2023-12-20-110",)),
+        ("I straffeloven (jf. lov 20. desember 2023 nr. 110) gjøres følgende endringer:",
+         ("lov/2023-12-20-110",)),
+        ("Straffeloven som endret ved lov 20. desember 2023 nr. 110 endres slik:",
+         ("lov/2023-12-20-110",)),
         # a unit of the cited act leads: Phase 4A closes it, Phase 4B does not bind it
         ("I kapittel 3 i lov 22. mai 1902 nr. 13 gjøres følgende endringer:", (MILITAER,)),
     ],

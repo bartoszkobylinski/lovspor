@@ -58,6 +58,9 @@ _INLINE = re.compile(
     re.S,
 )  # ``19. Lov 17. juni 2005 nr. 90 om mekling … § 34-4 … skal lyde:``: heading + instruction
 _INDIRECT = re.compile(r"\bom\s+endring|\(\s*endring|\bromertall\b|\bendringslov", re.I)
+_REFERENCE = re.compile(r"\b(?:etter|ved|jf|lyder|lydde|endret|endra)\b", re.I)
+# ``I straffeloven, slik den lyder etter lov 20. desember 2023 nr. 110, …``: the act cited
+# right after one of these words is the source of a wording, not the act amended
 _ACT_LED = re.compile(rf"^{_ITEM}(?:I\s+)?[Ll]ov\s+(?:av\s+)?\d{{1,2}}\.\s*(?:{_MONTH})\s", re.I)
 # a numbered list item led by an act citation instructs that act, never the block before it;
 # an unnumbered ``Lov … (privatskolelova)`` is a payload (a new title) and closes nothing
@@ -93,11 +96,18 @@ def citations(text: str) -> list[str]:
     ]
 
 
+def _referenced(sentence: str) -> bool:
+    """The clause leading up to the citation (after its last comma or bracket) refers, not names."""
+    match = _CITATION.search(sentence)
+    lead = re.split(r"[,(]", sentence[: match.start()])[-1] if match else ""
+    return _REFERENCE.search(lead) is not None
+
+
 def _proven(sentence: str, changes: tuple[str, ...]) -> str | None:
     cited = citations(sentence)
     if len(cited) != 1 or _INDIRECT.search(sentence) or cited[0] not in changes:
         return None
-    return cited[0]
+    return None if _referenced(sentence) else cited[0]
 
 
 def _shaped(sentence: str) -> bool:
