@@ -75,6 +75,9 @@ def test_an_informational_opening_does_not_hide_a_commencement(sentence: str) ->
         # lov 19. juni 2026 nr. 48: the unit sits in the reference, the main clause repeals
         "Fra den tid endringene av konkurslovens første del i del I i loven her trer i kraft, "
         "oppheves midlertidig lov 7. mai 2020 nr. 38 om rekonstruksjon.",
+        # the unit and the phrase both sit in the condition; the main clause states neither
+        "Dersom § 2-6 trer i kraft, oppheves forskriften.",  # _LEADING_CONDITION: Dersom
+        "Hvis § 2-6 trer i kraft, oppheves forskriften.",  # _LEADING_CONDITION: Hvis
     ],
 )
 def test_truly_informational_prose_stays_informational(sentence: str) -> None:
