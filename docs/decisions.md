@@ -1029,10 +1029,12 @@ whose provenance the website cannot vouch for.
 
 ## 21. Legal-time replay pilot from Norsk Lovtidend avd. I (proposed 2026-11-06, #744)
 
-**Status:** pilot built; ADR-0020 **accepted** by the owner on 2026-11-08 (lovspor-notebook PR #165,
-merge `1f857f22`) as architectural direction only — phase 3 implementation is in review (below),
+**Status:** pilot complete; ADR-0020 **accepted** by the owner on 2026-11-08 (lovspor-notebook PR #165,
+merge `1f857f22`) as architectural direction only — phase 3 merged 2026-11-09/10 (#847 `fe93dca5`,
+#848 `97f5f7fe`), closeout note `docs/research/legal-time-replay-phase3-closeout-2026-11-10.md`;
 nothing is served, published or written into `lovverk`; serving, materialisation and publication each
-need their own decision (ADR-0020 Decision 13).
+need their own decision (ADR-0020 Decision 13). Phase 4 is tracked in #861 and waits for the owner's
+rulings in lovspor-notebook #169–#173.
 
 A bounded package `src/lovspor/legaltime/` reconstructs an act's provisions at a legal date by
 applying the announced amendments from the `lovtidend-avd1` archives in legal-effective order:
@@ -1083,8 +1085,8 @@ Phase 3 (2026-11-08, after ADR-0020 was accepted; note
 `docs/research/legal-time-replay-phase3-2026-11-08.md`, evidence
 `docs/research/data/legal-time-replay-2026-11-08-barnevernsloven.json`, coverage
 `docs/research/data/legal-time-coverage-2026-11-08.json`; two PRs, part 1 grammar and structure
-`feat/744-phase3-commencement`, part 2 per-unit commencement and replay `feat/744-phase3-replay`,
-neither merged by the author): commencement is modelled per legal unit (`baseline.py`: a default
+`feat/744-phase3-commencement` = PR #847, merged `fe93dca5`; part 2 per-unit commencement and replay
+`feat/744-phase3-replay` = PR #848, merged `97f5f7fe`; both merged by the owner): commencement is modelled per legal unit (`baseline.py`: a default
 timing plus units dated apart — a section, a ledd, a chapter under a part — folded in publication
 order with Decision 6's rules: same day cited, different days `conflicting commencement decisions`,
 an excepted unit keeps the header's state, an unreadable scope unsettles every unit); a commencement
@@ -1100,6 +1102,20 @@ commencements readable (was 4), 1,990 of 2,783 events dated (was 1,196 of 2,432)
 477), **0 sections proven** under the act-level blanket of Decision 7 (818 of 1,540 agree with the
 oracle behind it, reported as `counts_before_blanket`, never as a verdict). Section renumbering stays
 `unresolved` (Decision 7, Decision 13), which is why straffeloven's text does not pass 2008.
+
+Closeout (2026-11-10, note above): the phase-3 evidence was reproduced from the pinned archives on the
+merged tree (integration rebuild byte-for-byte; phase-1 evidence structurally identical modulo
+`replay_version` and the additive fields; the eight-act coverage content-identical to the committed
+2026-11-08 file). Four engine defects found during the reproduction are filed, none changes a verdict:
+#856 (operations after an unrecognised intro inherit the previous act — 71 militær-straffelov
+operations of lov/2015-06-19-65 § 4 attributed to straffeloven, 11 applied, hidden only by the
+blanket), #857 (`_INFORMATIONAL` drops dated `Fra samme tid` sentences), #858 (unresolved-timing
+unknown-target operations never reach the blanket), #859 (Decision 7's unattributed leg not
+implemented). They are prerequisites of any blanket refinement. The five owner decisions phase 3
+left open are filed in lovspor-notebook: #169 kap. 16 as a staged reading (a reservation in the
+act's own commencement section), #170 section label lineage across renumbering, #171 applicability
+statements are not commencement (arbeidsmiljøloven, naturmangfoldloven), #172 a part unit, #173
+reach sets under Decision 7 (stricter-only, report-only, gated on #856–#859).
 
 ## How to use this document
 
