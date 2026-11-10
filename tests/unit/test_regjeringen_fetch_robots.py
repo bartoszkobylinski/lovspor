@@ -6,6 +6,7 @@ and the bytes a policy is compared against are the bytes that were served.
 
 import hashlib
 import stat
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 
@@ -34,6 +35,29 @@ def _refused(out: Path) -> RegjeringenFetchError:
 
 def _requested(httpx_mock: HTTPXMock) -> list[str]:
     return [str(request.url) for request in httpx_mock.get_requests()]
+
+
+@pytest.mark.parametrize("redirect", [False, True])
+@pytest.mark.parametrize("status", [200, 404])
+def test_robots_evidence_records_the_final_request_time(
+    httpx_mock: HTTPXMock, tmp_path: Path, redirect: bool, status: int
+) -> None:
+    if redirect:
+        httpx_mock.add_response(url=ROBOTS, status_code=302, headers={"Location": MOVED})
+    httpx_mock.add_response(
+        url=MOVED if redirect else ROBOTS, status_code=status, text="User-agent: *\n"
+    )
+    httpx_mock.add_response(url=CH1, content=PAGE)
+    out = prepare_out(tmp_path / "pages")
+    run = _run(out, _Clock())
+
+    expected = datetime(2026, 11, 9, 12, 0, tzinfo=UTC) + timedelta(seconds=5 if redirect else 0)
+    assert run.robots.retrieved_at == expected
+    assert run.robots.hops[-1].url == (MOVED if redirect else ROBOTS)
+    assert run.robots.status == status
+    (sidecar,) = out.glob("fetch-run-*.json")
+    stored = FetchRun.model_validate_json(sidecar.read_bytes())
+    assert stored.robots.retrieved_at == expected
 
 
 @pytest.mark.parametrize("status", [403, 429])
