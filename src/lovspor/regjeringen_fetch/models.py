@@ -17,6 +17,7 @@ class FetchOutcome(StrEnum):
     NOT_ATTEMPTED = "not_attempted"
     HTTP_STATUS = "http_status"
     TOO_LARGE = "too_large"
+    CONTENT_ENCODED = "content_encoded"
     TRANSPORT_ERROR = "transport_error"
 
 
