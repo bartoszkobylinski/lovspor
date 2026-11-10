@@ -203,3 +203,14 @@ def test_a_robots_body_that_cannot_be_read_stops_the_run(
     error = _refused(out)
     assert (error.reason, error.detail) == ("robots_unreadable", detail)
     assert list(out.iterdir()) == []
+
+
+def test_robots_retrieved_at_is_the_moment_of_the_final_hop(
+    httpx_mock: HTTPXMock, tmp_path: Path
+) -> None:
+    httpx_mock.add_response(url=ROBOTS, status_code=301, headers={"Location": "/robots-moved.txt"})
+    httpx_mock.add_response(url=MOVED, text="User-agent: *\nDisallow: /no/\n")
+    clock = _Clock()
+    clock.ticks = 7.0
+    run = _run(prepare_out(tmp_path / "pages"), clock)
+    assert run.robots.retrieved_at == datetime(2026, 11, 9, 12, 0, 12, tzinfo=UTC)
