@@ -1133,8 +1133,9 @@ Phase 4B (2026-11-10, #861; note `docs/research/legal-time-replay-phase4b-2026-1
 `docs/research/data/legal-time-coverage-2026-11-10-phase4b.json`, per-operation audit
 `docs/research/data/legal-time-attribution-audit-2026-11-10.json`; `REPLAY_VERSION`
 `legaltime-replay-5`): an intro outside the two canonical shapes binds its act only on a reproducible
-evidence chain: a closed sentence shape, exactly one act cited by day, month, year and number, no
-amendment of an amendment, and the member's own `changesToDocuments` header listing that act. A short
+evidence chain: a closed sentence shape, exactly one act cited by day, month, year and number in
+the slot that names the amended act (never in a clause about another text), no amendment of an
+amendment, and the member's own `changesToDocuments` header listing that act. A short
 title alone is never an identity. A numbered list item led by an act citation closes the open block,
 so it no longer inherits the act before it. Every one of the 410 changed attributions is classified:
 380 source-proven (9 replacing a false attribution), 23 false attributions removed, 7 intro sentences

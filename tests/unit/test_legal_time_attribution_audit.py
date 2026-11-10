@@ -186,3 +186,13 @@ def test_losing_an_act_the_sentence_cites_second_is_never_called_false() -> None
     )
     row = _row(sentence, "lov/2020-01-01-1", None, [TVISTELOVEN, "lov/2020-01-01-1"])
     assert row["class"] == "check"
+
+
+def test_one_listed_citation_in_a_referring_clause_is_never_proven() -> None:
+    """Independent review round 4: the audit applies the engine's whole chain, not a count."""
+    sentence = (
+        "I straffeloven, med de endringer som følger av lov 20. desember 2023 nr. 110, gjøres "
+        "følgende endringer:"
+    )
+    row = _row(sentence, None, "lov/2023-12-20-110", ["lov/2023-12-20-110"])
+    assert (row["identity_proven"], row["class"]) == (False, "check")

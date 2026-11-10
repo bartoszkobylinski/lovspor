@@ -65,7 +65,7 @@ def _governing(document: Any, op_id: str) -> str:
         text = node.text
         if attribution.is_intro(text):
             return text
-        if instructions._unbound_intro(text) or attribution.bind(text, changes, True).opens:
+        if instructions._unbound_intro(text) or attribution.bind(text, changes, False).opens:
             return split_sentences(text)[-1]
     return ""
 
@@ -131,9 +131,12 @@ def _documents(after: dict[str, Any], refids: list[str], cache: Path) -> dict[st
 def _row(
     before_op: list[Any] | None, after_op: list[Any] | None, sentence: str, changes: list[str]
 ) -> dict[str, Any]:
-    citations = importlib.import_module(_ATTRIBUTION).citations
-    cited = citations(sentence.split("§", maxsplit=1)[0] if sentence[:1].isdigit() else sentence)
-    proof = len(cited) == 1 and cited[0] in changes  # one act, and the header lists it
+    attribution = importlib.import_module(_ATTRIBUTION)
+    head = sentence.split("§", maxsplit=1)[0] if sentence[:1].isdigit() else sentence
+    cited = attribution.citations(head)
+    # one act, the header lists it, and the engine's whole chain holds for this sentence
+    proof = len(cited) == 1 and cited[0] in changes
+    proof = proof and attribution.proven(head, tuple(changes)) == cited[0]
     o, n = before_op, after_op
     return {
         "op": (n or o)[0], "before": o and o[1], "after": n and n[1], "kind": (n or o)[2],

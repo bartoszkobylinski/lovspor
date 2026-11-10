@@ -167,6 +167,11 @@ def test_a_proven_intro_outside_the_canonical_shapes_binds_its_act(intro: str, a
          ("lov/2023-12-20-110",)),
         ("Straffeloven som endret ved lov 20. desember 2023 nr. 110 endres slik:",
          ("lov/2023-12-20-110",)),
+        # independent review round 4: a referring clause the round-3 word list did not name
+        ("I straffeloven, med de endringer som følger av lov 20. desember 2023 nr. 110, gjøres "
+         "følgende endringer:", ("lov/2023-12-20-110",)),
+        ("I straffeloven med de endringer som følger av lov 20. desember 2023 nr. 110 gjøres "
+         "følgende endringer:", ("lov/2023-12-20-110",)),
         # a unit of the cited act leads: Phase 4A closes it, Phase 4B does not bind it
         ("I kapittel 3 i lov 22. mai 1902 nr. 13 gjøres følgende endringer:", (MILITAER,)),
     ],
