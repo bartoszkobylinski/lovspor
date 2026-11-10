@@ -5,6 +5,7 @@ never what regjeringen.no publishes now. The proof is a fetch run whose stored
 robots.txt and terms bytes re-hash to their record, at most 24 hours old.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ from lovspor.forarbeider.policy_source import (
 from lovspor.regjeringen_fetch.fetch import FetchClock, FetchSettings, prepare_out, run_fetch
 from lovspor.regjeringen_fetch.models import FetchRun, SourceEvidence, evidence_file_name
 from tests.unit.cli_output import said
-from tests.unit.forarbeider_policy_support import PolicyDesk, standing_policy
+from tests.unit.forarbeider_policy_support import PolicyDesk, shown_phrase, standing_policy
 
 ROBOTS = "https://www.regjeringen.no/robots.txt"
 TERMS = "https://www.regjeringen.no/no/om-nettstedet/vilkar/id0000001/"
@@ -261,7 +262,7 @@ def _source(robots_sha: str | None, terms_sha: str | None, at: datetime) -> Curr
         return SourceEvidence.model_validate(
             {
                 "kind": kind,
-                "requested_url": "https://www.regjeringen.no/x",
+                "requested_url": TERMS if kind == "website_terms" else ROBOTS,
                 "hops": (),
                 "state": state,
                 "status": 404 if sha is None else 200,
@@ -311,3 +312,77 @@ def test_the_oldest_page_sets_the_proof_age() -> None:
         SourceFault.SOURCE_PROOF_STALE,
     )
     assert source_faults(policy, newer_terms, moment + timedelta(hours=3)) == ()
+
+
+OTHER_TERMS = "https://www.regjeringen.no/no/arkiv/vilkar-2020/id0000002/"
+
+
+def _forged(run_file: Path, change: Any) -> None:
+    doc = json.loads(run_file.read_text())
+    change(doc)
+    run_file.write_text(json.dumps(doc))
+
+
+@pytest.mark.parametrize(
+    ("change", "fault"),
+    [
+        (lambda d: d["terms"].update(kind="robots_txt"), "terms_identity"),
+        (lambda d: d["robots"].update(requested_url=TERMS), "robots_identity"),
+        (lambda d: d["robots"]["hops"][0].update(status=503), "robots_hops"),
+        (lambda d: d["terms"]["hops"][0].update(url=OTHER_TERMS), "terms_hops"),
+        (lambda d: d.update(user_agent="someone-else/1"), "user_agent"),
+    ],
+)
+def test_a_proof_no_fetch_run_writes_is_refused(
+    httpx_mock: HTTPXMock, tmp_path: Path, change: Any, fault: str
+) -> None:
+    run_file = _published(httpx_mock, tmp_path / "fetch")
+    desk = _desk_bound_to(tmp_path, run_file)
+    sha = desk.signed()
+    _forged(run_file, change)
+    result = _show(desk, sha, run_file)
+    assert result.exit_code == 1
+    assert said(f"source_proof source_proof_inconsistent: {fault}", result.output)
+    assert not said("automatic clearance", result.output)
+
+
+def test_the_same_terms_bytes_from_another_url_deny(httpx_mock: HTTPXMock, tmp_path: Path) -> None:
+    signed_run = _published(httpx_mock, tmp_path / "signed")
+    desk = _desk_bound_to(tmp_path, signed_run)
+    sha = desk.signed()
+    httpx_mock.add_response(url=ROBOTS, content=ROBOTS_BODY)
+    httpx_mock.add_response(url=OTHER_TERMS, content=TERMS_BODY)
+    httpx_mock.add_response(url=CH1, content=b"<html>page</html>")
+    clock = FetchClock(now=lambda: RUN_AT, monotonic=lambda: 0.0, sleep=lambda _: None)
+    out = prepare_out(tmp_path / "elsewhere")
+    with httpx.Client() as client:
+        run_fetch(client, (CH1,), out, FetchSettings(clock=clock, terms_url=OTHER_TERMS))
+    (later,) = out.glob("fetch-run-*.json")
+    result = _show(desk, sha, later)
+    assert said("source faults terms_url_changed", result.output)
+    assert said("automatic clearance denied", result.output)
+
+
+def test_the_policy_binds_and_shows_the_terms_url(httpx_mock: HTTPXMock, tmp_path: Path) -> None:
+    desk = _desk_bound_to(tmp_path, _published(httpx_mock, tmp_path / "fetch"))
+    shown = desk.shown()
+    assert said(f"terms_url {TERMS}", shown.output)
+    sha = desk.signed()
+    assert desk.record(sha)["terms_url"] == TERMS
+    other = desk.sign_args(
+        None, "2100-04-04T12:00:00Z", "2100-04-04T12:00:00Z/2100-07-01T00:00:00Z"
+    )
+    other[other.index("--terms-url") + 1] = OTHER_TERMS
+    assert shown_phrase(desk.invoke(other, "\n").output) != shown_phrase(shown.output)
+
+
+@pytest.mark.parametrize("url", ["https://example.org/terms", "https://www.regjeringen.no/x?y"])
+def test_a_terms_url_outside_the_grammar_signs_nothing(
+    httpx_mock: HTTPXMock, tmp_path: Path, url: str
+) -> None:
+    desk = _desk_bound_to(tmp_path, _published(httpx_mock, tmp_path / "fetch"))
+    desk.terms_url = url
+    result = desk.shown()
+    assert result.exit_code == 1
+    assert said("release_invalid", result.output)
+    assert not (desk.workspace / "policies").exists()

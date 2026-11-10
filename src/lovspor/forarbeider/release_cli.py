@@ -18,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
+import click
 import typer
 
 from lovspor.forarbeider.corpus_commands import (
@@ -272,17 +273,21 @@ def synthetic_fixtures(
 
 @policy_app.command("sign")
 def policy_sign(
-    ctx: typer.Context,
     evidence: Annotated[
         list[str],
         typer.Option(help="KIND=/absolute/private/file, once per kind; may be repeated."),
+    ],
+    terms_url: Annotated[
+        str,
+        typer.Option(help="The www.regjeringen.no page the terms evidence was fetched from."),
     ],
     decided: _Actor,
     valid: Annotated[str, typer.Option(help="FROM/UNTIL, ISO 8601 with offsets.")],
 ) -> None:
     """Sign the standing policy at a terminal. It clears unflagged chapters through a batch only."""
-    grant = PolicyGrant(evidence=tuple(evidence), decided=decided, valid=valid)
-    _echo(lambda: policy_sign_impl(ctx.obj, grant))
+    grant = PolicyGrant(evidence=tuple(evidence), terms_url=terms_url, decided=decided, valid=valid)
+    scope = click.get_current_context().obj
+    _echo(lambda: policy_sign_impl(scope, grant))
 
 
 @policy_app.command("revoke")

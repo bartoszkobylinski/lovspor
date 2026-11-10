@@ -47,6 +47,7 @@ def test_preview_exact_lines_and_digest_width() -> None:
     assert _preview(policy, "a" * 64).splitlines() == [
         "policy aaaaaaaaaaaa source regjeringen.no types prop-l,prop-ls",
         "valid 2100-04-05T00:00:00+00:00/2100-07-01T00:00:00+00:00",
+        f"terms_url {policy.terms_url}",
         *[f"evidence {item.kind.value} {item.sha256[:12]}" for item in policy.evidence],
     ]
 

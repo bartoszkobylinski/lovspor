@@ -8,6 +8,12 @@ says, page by page, why it does not match a policy. It makes no request.
 
 Evidence that is intact on disk is not current: a policy whose local files all
 hash to their signed digests still clears nothing without a matching proof.
+
+Integrity, not authentication. A proof that passes here is a record a fetch
+run could have written, whose stored pages are still its bytes. Nothing in it
+is signed by regjeringen.no, so it cannot prove the server sent those bytes;
+anyone able to write the owner-only staging directory can write one. That
+directory, and the owner running the fetch, are the trust boundary.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.policy_models import PolicyEvidenceKind, StandingPolicy
 from lovspor.forarbeider.release_commands import forbidden_trees
 from lovspor.forarbeider.release_store import MAX_EVIDENCE_BYTES, read_file, refused_as
-from lovspor.regjeringen_fetch.fetch import verified_source_bytes
+from lovspor.regjeringen_fetch.fetch import check_source_proof, verified_source_bytes
 from lovspor.regjeringen_fetch.models import FetchRun, SourceEvidence, SourceState
 
 SOURCE_PROOF_MAX_AGE = timedelta(hours=24)
@@ -38,6 +44,7 @@ class SourceFault(StrEnum):
     SOURCE_PROOF_STALE = "source_proof_stale"
     TERMS_CHANGED = "terms_changed"
     TERMS_NOT_PUBLISHED = "terms_not_published"
+    TERMS_URL_CHANGED = "terms_url_changed"
 
 
 class CurrentSource(BaseModel):
@@ -65,18 +72,20 @@ def read_source_proof(run_file: Path) -> CurrentSource:
         run = FetchRun.model_validate_json(payload)
     except ValidationError as error:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_INVALID, "source_proof") from error
-    for page in (run.robots, run.terms):
-        if page is not None and page.state is SourceState.PUBLISHED:
-            _verified(run_file.parent, page)
+    try:
+        _consistent(run, run_file.parent)
+    except RegjeringenFetchError as error:
+        detail = f"source_proof {error}"
+        raise ForarbeiderRefusedError(RefusalReason.RELEASE_RECORD_CORRUPT, detail) from error
     return CurrentSource(run_started_at=run.started_at, robots=run.robots, terms=run.terms)
 
 
-def _verified(out: Path, page: SourceEvidence) -> None:
-    try:
-        verified_source_bytes(out, page)
-    except RegjeringenFetchError as error:
-        detail = f"source_proof {error.reason}"
-        raise ForarbeiderRefusedError(RefusalReason.RELEASE_RECORD_CORRUPT, detail) from error
+def _consistent(run: FetchRun, out: Path) -> None:
+    """A story a fetch run could have written, and stored pages that are still its bytes."""
+    check_source_proof(run)
+    for page in (run.robots, run.terms):
+        if page is not None and page.state is SourceState.PUBLISHED:
+            verified_source_bytes(out, page)
 
 
 def source_faults(
@@ -91,6 +100,8 @@ def source_faults(
     terms = (SourceFault.TERMS_NOT_PUBLISHED, SourceFault.TERMS_CHANGED)
     faults |= _page(signed.get(PolicyEvidenceKind.ROBOTS_TXT), source.robots, robots)
     faults |= _page(signed.get(PolicyEvidenceKind.TERMS_PAGE), source.terms, terms)
+    if source.terms is not None and source.terms.requested_url != policy.terms_url:
+        faults.add(SourceFault.TERMS_URL_CHANGED)
     return tuple(sorted(faults))
 
 

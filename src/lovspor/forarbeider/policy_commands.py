@@ -70,6 +70,7 @@ class PolicyGrant(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     evidence: tuple[str, ...]
+    terms_url: str
     decided: str
     valid: str
 
@@ -118,6 +119,7 @@ def _policy(grant: PolicyGrant) -> StandingPolicy:
         "decided_at": moment,
         "valid_from": start,
         "valid_until": end,
+        "terms_url": grant.terms_url,
         **_FIXED_POLICY,
     }
     return validated(StandingPolicy, fields)
@@ -143,6 +145,7 @@ def _preview(policy: StandingPolicy, sha: str) -> str:
     window = f"{policy.valid_from.isoformat()}/{policy.valid_until.isoformat()}"
     lines = [f"policy {sha[:12]} source {policy.source_provider} types {_types(policy)}"]
     lines.append(f"valid {window}")
+    lines.append(f"terms_url {policy.terms_url}")
     lines += [f"evidence {item.kind.value} {item.sha256[:12]}" for item in policy.evidence]
     return "\n".join(lines)
 

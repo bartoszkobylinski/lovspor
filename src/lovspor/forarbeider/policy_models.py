@@ -27,9 +27,11 @@ from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from lovspor.errors import RegjeringenFetchError
 from lovspor.forarbeider.identity import DocumentType
 from lovspor.forarbeider.release_models import SHA256
 from lovspor.forarbeider.review_models import Reviewer
+from lovspor.regjeringen_fetch.fetch import check_terms_url
 
 _Digest = Annotated[str, Field(pattern=SHA256)]
 
@@ -72,6 +74,7 @@ class StandingPolicy(BaseModel):
     decided_at: AwareDatetime
     valid_from: AwareDatetime
     valid_until: AwareDatetime
+    terms_url: str
     clears: Literal["unflagged_chapters"]
     legal_sufficiency_decided_by_code: Literal[False]
     identity_authenticated: Literal[False]
@@ -80,6 +83,15 @@ class StandingPolicy(BaseModel):
     @classmethod
     def _in_utc(cls, value: datetime) -> datetime:
         return value.astimezone(UTC)
+
+    @field_validator("terms_url")
+    @classmethod
+    def _one_regjeringen_page(cls, value: str) -> str:
+        """The page the owner read the terms at: a current proof must come from it."""
+        try:
+            return check_terms_url(value)
+        except RegjeringenFetchError as error:
+            raise ValueError(error.reason) from error
 
     @field_validator("document_types")
     @classmethod
