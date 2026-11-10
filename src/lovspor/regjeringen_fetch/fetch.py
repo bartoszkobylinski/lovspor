@@ -21,6 +21,14 @@ module enforces:
 - **Stop on refusal.** A 403 or 429 ends the run; later URLs are recorded as
   not attempted.
 - **No redirect is followed**, and a body over ``max_bytes`` is never stored.
+- **Exact bytes as served.** Every request asks for ``Accept-Encoding:
+  identity``. An uncoded body is stored and hashed byte for byte as it came
+  off the wire (chunked framing is not content), with no charset decoding or
+  normalisation, so the same served content always has the same digest. A
+  body that still carries a content coding is never decoded and never stored:
+  its digest would depend on the server's compressor, and inflating it is how
+  a small response becomes an unbounded one. A page records
+  ``content_encoded``; robots.txt stops the run; the terms read as unreadable.
 
 Pages land owner-only under their SHA-256, outside every Git checkout. The
 offline ``forarbeider-metadata`` / ``forarbeider-chapter`` commands read them.
@@ -33,6 +41,7 @@ import stat
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from itertools import pairwise
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -66,6 +75,7 @@ _TERMS_PATH = re.compile(r"/|(/[A-Za-z0-9._~-]+)+/?")
 _STOP_STATUSES = frozenset({403, 429})
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 ROBOTS_MAX_BYTES = 512 * 1024
+_PROOF = "source_proof_inconsistent"
 MAX_ROBOTS_HOPS = 5
 _PRIVATE_BITS = 0o077
 
@@ -102,11 +112,12 @@ class _Robots:
 
 @dataclass(frozen=True)
 class _Reply:
-    """One response, read once: the body only for a 200 within the cap."""
+    """One response, read once: the body only for an uncoded 200 within the cap."""
 
     status: int
     location: str | None
     body: bytes | None
+    coded: bool
 
 
 @dataclass
@@ -284,6 +295,8 @@ def _robots_answer(session: _Session, read: _Read, reply: _Reply) -> _Robots:
         return _Robots(read.evidence(SourceState.ABSENT, status), RobotsPolicy.parse([]))
     if status != httpx.codes.OK:
         raise RegjeringenFetchError("robots_unreadable", str(status))
+    if reply.coded:
+        raise RegjeringenFetchError("robots_unreadable", "content_encoded")
     if reply.body is None:
         raise RegjeringenFetchError("robots_unreadable", "oversized")
     try:
@@ -330,8 +343,10 @@ def _exchange(session: _Session, url: str, max_bytes: int) -> _Reply:
         "GET", url, headers=_headers(), timeout=_timeout(session), follow_redirects=False
     ) as response:
         status = response.status_code
-        body = _bounded_body(response, max_bytes) if status == httpx.codes.OK else None
-        return _Reply(status, response.headers.get("Location"), body)
+        coded = _coded(response)
+        readable = status == httpx.codes.OK and not coded
+        body = _bounded_body(response, max_bytes) if readable else None
+        return _Reply(status, response.headers.get("Location"), body, coded)
 
 
 def _store_evidence(out: Path, evidence: SourceEvidence, body: bytes) -> None:
@@ -364,6 +379,94 @@ def verified_source_bytes(out: Path, evidence: SourceEvidence) -> bytes:
     if hashlib.sha256(body).hexdigest() != evidence.sha256 or len(body) != evidence.size:
         raise RegjeringenFetchError("evidence_mismatch", name)
     return body
+
+
+def check_source_proof(run: FetchRun) -> None:
+    """Refuse a run record that no ``forarbeider-fetch`` run writes.
+
+    This is integrity of the record's own story, not authentication: it proves
+    nothing about what regjeringen.no served. Anyone who can write the owner's
+    private staging directory can write a consistent record, so that directory
+    (owner-only, outside every checkout) is the trust boundary. What this
+    refuses is a record whose pages sit under the wrong kind, whose robots.txt
+    came from another URL, whose redirects do not chain on this host, whose
+    state its status contradicts, or whose times run backwards.
+
+    Raises:
+        RegjeringenFetchError: ``source_proof_inconsistent`` naming the first fault.
+    """
+    if run.user_agent != USER_AGENT:
+        raise RegjeringenFetchError(_PROOF, "user_agent")
+    _check_robots(run.robots)
+    if run.robots.retrieved_at < run.started_at:
+        raise RegjeringenFetchError(_PROOF, "robots_before_start")
+    if run.terms is not None:
+        _check_terms(run.terms)
+        if run.terms.retrieved_at < run.robots.retrieved_at:
+            raise RegjeringenFetchError(_PROOF, "terms_before_robots")
+
+
+def _check_robots(evidence: SourceEvidence) -> None:
+    named = evidence.kind is SourceKind.ROBOTS_TXT and evidence.requested_url == ROBOTS_URL
+    if not named or evidence.state not in (SourceState.PUBLISHED, SourceState.ABSENT):
+        raise RegjeringenFetchError(_PROOF, "robots_identity")
+    if not _robots_chain(evidence.hops) or evidence.hops[-1].status != evidence.status:
+        raise RegjeringenFetchError(_PROOF, "robots_hops")
+    if not _state_matches(evidence):
+        raise RegjeringenFetchError(_PROOF, "robots_state")
+
+
+def _robots_chain(hops: tuple[Hop, ...]) -> bool:
+    """Starts at ROBOTS_URL, at most MAX_ROBOTS_HOPS redirects, each leading to the next."""
+    if not hops or len(hops) > MAX_ROBOTS_HOPS + 1 or hops[0].url != ROBOTS_URL:
+        return False
+    return all(_leads_to(here, there) for here, there in pairwise(hops))
+
+
+def _leads_to(here: Hop, there: Hop) -> bool:
+    if here.status not in _REDIRECT_STATUSES or here.location is None:
+        return False
+    target = urljoin(here.url, here.location)
+    parts = urlsplit(target)
+    return (parts.scheme, parts.netloc) == ("https", HOST) and target == there.url
+
+
+def _check_terms(evidence: SourceEvidence) -> None:
+    if evidence.kind is not SourceKind.WEBSITE_TERMS:
+        raise RegjeringenFetchError(_PROOF, "terms_identity")
+    try:
+        check_terms_url(evidence.requested_url)
+    except RegjeringenFetchError as error:
+        raise RegjeringenFetchError(_PROOF, "terms_identity") from error
+    if not _terms_hops(evidence):
+        raise RegjeringenFetchError(_PROOF, "terms_hops")
+    if not _state_matches(evidence):
+        raise RegjeringenFetchError(_PROOF, "terms_state")
+
+
+def _terms_hops(evidence: SourceEvidence) -> bool:
+    """One request to the named URL, or none at all (disallowed, or no answer)."""
+    hops = evidence.hops
+    if not hops:
+        return evidence.status is None and evidence.state is SourceState.UNREADABLE
+    return (
+        len(hops) == 1
+        and hops[0].url == evidence.requested_url
+        and (hops[0].status == evidence.status)
+    )
+
+
+def _state_matches(evidence: SourceEvidence) -> bool:
+    """The state the fetcher gives this final status, and no other."""
+    status = evidence.status
+    if evidence.state is SourceState.PUBLISHED:
+        return status == httpx.codes.OK
+    if evidence.state is SourceState.REFUSED:
+        return status in _STOP_STATUSES
+    client = status is not None and httpx.codes.is_client_error(status)
+    if evidence.state is SourceState.ABSENT:
+        return client and status not in _STOP_STATUSES
+    return not client
 
 
 def _fetch_all(
@@ -408,6 +511,12 @@ def _answer(
         return base.model_copy(update={"outcome": FetchOutcome.STOPPED_BY_SERVER})
     if status != httpx.codes.OK:
         return base
+    return _stored(session, base, response)
+
+
+def _stored(session: _Session, base: FetchRecord, response: httpx.Response) -> FetchRecord:
+    if _coded(response):
+        return base.model_copy(update={"outcome": FetchOutcome.CONTENT_ENCODED})
     body = _bounded_body(response, session.settings.max_bytes)
     if body is None:
         return base.model_copy(update={"outcome": FetchOutcome.TOO_LARGE})
@@ -417,11 +526,22 @@ def _answer(
     return base.model_copy(update=stored)
 
 
+def _coded(response: httpx.Response) -> bool:
+    """Whether the body still carries a content coding despite ``Accept-Encoding: identity``."""
+    coding: str = response.headers.get("Content-Encoding", "identity")
+    return coding != "identity"
+
+
 def _bounded_body(response: httpx.Response, max_bytes: int) -> bytes | None:
-    """The body, or ``None`` once it passes ``max_bytes``: a cut body is never stored."""
+    """The uncoded body as it arrived, or ``None`` once it passes ``max_bytes``.
+
+    Read raw: the caller has checked there is no content coding, so these are
+    the representation's bytes exactly, and nothing is ever inflated. A cut
+    body is never stored.
+    """
     chunks: list[bytes] = []
     size = 0
-    for chunk in response.iter_bytes():
+    for chunk in response.iter_raw():
         size += len(chunk)
         if size > max_bytes:
             return None
@@ -446,7 +566,7 @@ def _record(session: _Session, url: str, outcome: FetchOutcome) -> FetchRecord:
 
 
 def _headers() -> dict[str, str]:
-    return {"User-Agent": USER_AGENT}
+    return {"User-Agent": USER_AGENT, "Accept-Encoding": "identity"}
 
 
 def _timeout(session: _Session) -> float:

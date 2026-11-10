@@ -9,7 +9,7 @@ import pytest
 from pytest_httpx import HTTPXMock, IteratorStream
 
 from lovspor.regjeringen_fetch.fetch import FetchSettings, prepare_out, run_fetch
-from lovspor.regjeringen_fetch.models import FetchOutcome, FetchRun
+from lovspor.regjeringen_fetch.models import FetchOutcome
 from tests.unit.test_regjeringen_fetch import CH1, CH2, ROBOTS, _Clock
 
 
@@ -17,7 +17,11 @@ from tests.unit.test_regjeringen_fetch import CH1, CH2, ROBOTS, _Clock
 def test_compressed_page_limit_applies_to_decoded_bytes(
     httpx_mock: HTTPXMock, tmp_path: Path, size: int
 ) -> None:
-    """A small wire payload cannot evade the maximum stored body size."""
+    """A small wire payload cannot evade the maximum stored body size.
+
+    Since the identity-only rule (#738 review), a coded body is never inflated
+    or stored at all, whatever it would decode to.
+    """
     body = b"x" * size
     compressed = gzip.compress(body, mtime=0)
     assert len(compressed) < 1024
@@ -36,23 +40,12 @@ def test_compressed_page_limit_applies_to_decoded_bytes(
             FetchSettings(max_bytes=1024, clock=_Clock().as_fetch_clock()),
         )
     record = run.records[0]
-    if size == 1024:
-        digest = hashlib.sha256(body).hexdigest()
-        assert (record.outcome, record.sha256, record.size) == (
-            FetchOutcome.FETCHED,
-            digest,
-            size,
-        )
-        assert (out / f"{digest}.html").read_bytes() == body
-    else:
-        assert (record.outcome, record.sha256, record.size) == (
-            FetchOutcome.TOO_LARGE,
-            None,
-            None,
-        )
-        assert list(out.glob("*.html")) == []
-    (sidecar,) = out.glob("fetch-run-*.json")
-    assert FetchRun.model_validate_json(sidecar.read_bytes()) == run
+    assert (record.outcome, record.sha256, record.size) == (
+        FetchOutcome.CONTENT_ENCODED,
+        None,
+        None,
+    )
+    assert list(out.glob("*.html")) == []
 
 
 def test_page_links_never_expand_the_explicit_url_list(
