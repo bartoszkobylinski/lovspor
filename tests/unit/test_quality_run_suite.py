@@ -2,7 +2,7 @@
 
 Several agent sessions push at once on one Mac that also hosts the CI runners;
 each push used to start a full single-core suite. The step now runs the push's
-scope, in one of a few machine-wide slots, at background priority.
+scope, in one of a few machine-wide slots, at nice 10.
 """
 
 import fcntl
@@ -40,13 +40,12 @@ def _hold(path: Path) -> object:
 
 
 class TestQos:
-    def test_taskpolicy_runs_the_suite_as_background_work(self) -> None:
-        prefix = rs.qos_prefix(lambda name: f"/usr/sbin/{name}")
-
-        assert prefix == ["/usr/sbin/taskpolicy", "-b"]
-
-    def test_without_taskpolicy_nice_lowers_the_priority(self) -> None:
-        prefix = rs.qos_prefix(lambda name: "/usr/bin/nice" if name == "nice" else None)
+    def test_nice_lowers_the_priority_even_where_taskpolicy_exists(self) -> None:
+        """Not `taskpolicy -b`: background QoS pins a process to the efficiency
+        cores on Apple Silicon even when the performance cores are idle, which
+        made a full suite run at 4:44 CPU in 30 min (#864). Nice yields to
+        interactive work and still uses every core when the machine is free."""
+        prefix = rs.qos_prefix(lambda name: f"/usr/bin/{name}")
 
         assert prefix == ["/usr/bin/nice", "-n", "10"]
 

@@ -39,7 +39,7 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 2. Invoke `/security-check` — clean
 3. Then `git commit`
 
-Before every push: `scripts/quality/verify-deep.sh` — green (the fast gate, then the fail-closed security scan, then the unit tests in the push's scope via `scripts/quality/run_suite.py`: the test files the changed paths reach, the full suite on a shared-infrastructure change or with `VERIFY_DEEP_FULL=1`, without network-marked tests — they answer for a third-party credential, not for the diff, #359; at most two such runs at a time on the machine, at background priority, #864). Run `VERIFY_DEEP_FULL=1 scripts/quality/verify-deep.sh` before pushing a change you suspect has wide reach.
+Before every push: `scripts/quality/verify-deep.sh` — green (the fast gate, then the fail-closed security scan, then the unit tests in the push's scope via `scripts/quality/run_suite.py`: the test files the changed paths reach, the full suite on a shared-infrastructure change or with `VERIFY_DEEP_FULL=1`, without network-marked tests — they answer for a third-party credential, not for the diff, #359; at most two such runs at a time on the machine, at nice 10, #864). Run `VERIFY_DEEP_FULL=1 scripts/quality/verify-deep.sh` before pushing a change you suspect has wide reach.
 
 `uv run pre-commit install` installs both hooks: pre-commit runs `verify-fast.sh`, pre-push runs `verify-deep.sh` (a clone whose hooks predate #323 re-runs it to add pre-push). Step 2 is manual until the skill auto-triggers. CI stays authoritative: fast-ci and the Test matrix run lint, mypy and the full unit suite on every PR, whatever ran locally. Measured costs and the stage split: `docs/decisions.md` §9d.
 

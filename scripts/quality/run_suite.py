@@ -6,7 +6,7 @@ runners; a full single-core suite per push drove the load to 12 and a 15-minute
 gate past an hour. This step runs only the unit test files the push reaches
 (``unit_scope.py``; the whole suite on a shared-infrastructure change or with
 ``VERIFY_DEEP_FULL=1``), and at most ``LOVSPOR_SUITE_SLOTS`` (default 2) of
-these runs at a time across every worktree, each at background priority.
+these runs at a time across every worktree, each at a lower nice value (nice 10).
 
 Not the network-marked tests: they answer for the operator's third-party
 credential, not for the change being pushed (issue #359).
@@ -42,10 +42,11 @@ __all__ = ["Scope", "main"]
 
 
 def qos_prefix(which: Callable[[str], str | None] = shutil.which) -> list[str]:
-    """Background QoS on macOS, else a lower nice value, else nothing."""
-    taskpolicy = which("taskpolicy")
-    if taskpolicy:
-        return [taskpolicy, "-b"]
+    """A lower nice value, else nothing.
+
+    Never ``taskpolicy -b``: background QoS pins the suite to the efficiency
+    cores on Apple Silicon even when the performance cores are idle (#864).
+    """
     nice = which("nice")
     return [nice, "-n", "10"] if nice else []
 

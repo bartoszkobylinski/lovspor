@@ -2,7 +2,7 @@
 # The deep gate (issue #323, docs/decisions.md §9d and §9f): the fast gate, then
 # the fail-closed security scan, then the unit tests in the push's scope (issue
 # #864: the whole suite on a shared-infrastructure change or with
-# VERIFY_DEEP_FULL=1, in a machine-wide slot, at background priority). The
+# VERIFY_DEEP_FULL=1, in a machine-wide slot, at nice 10). The
 # pre-push hook runs exactly this script. CI runs the fast checks, the scan and
 # the whole unit suite on every PR and stays authoritative.
 #
