@@ -111,26 +111,32 @@ class _Reply:
 
 @dataclass
 class _Read:
-    """One source-policy page being read: its hops so far and the latest request time."""
+    """One source-policy page being read: its hops so far and the latest request time.
+
+    ``retrieved_at`` is set by each request; a page never requested (a terms
+    page robots.txt disallows) is given the moment that was decided. Evidence
+    built before either is refused by the model, never dated by a guess.
+    """
 
     kind: SourceKind
     requested_url: str
-    retrieved_at: datetime
+    retrieved_at: datetime | None = None
     hops: list[Hop] = field(default_factory=list)
 
     def evidence(
         self, state: SourceState, status: int | None, body: bytes | None = None
     ) -> SourceEvidence:
-        return SourceEvidence(
-            kind=self.kind,
-            requested_url=self.requested_url,
-            hops=tuple(self.hops),
-            state=state,
-            status=status,
-            retrieved_at=self.retrieved_at,
-            sha256=None if body is None else hashlib.sha256(body).hexdigest(),
-            size=None if body is None else len(body),
-        )
+        fields = {
+            "kind": self.kind,
+            "requested_url": self.requested_url,
+            "hops": tuple(self.hops),
+            "state": state,
+            "status": status,
+            "retrieved_at": self.retrieved_at,
+            "sha256": None if body is None else hashlib.sha256(body).hexdigest(),
+            "size": None if body is None else len(body),
+        }
+        return SourceEvidence.model_validate(fields)
 
 
 @dataclass
@@ -242,7 +248,7 @@ def _read_robots(session: _Session) -> _Robots:
         RegjeringenFetchError: ``robots_refused`` on 403/429, ``robots_unreadable``
             on anything that is neither a readable 200 nor another 4xx.
     """
-    read = _Read(SourceKind.ROBOTS_TXT, ROBOTS_URL, session.settings.clock.now())
+    read = _Read(SourceKind.ROBOTS_TXT, ROBOTS_URL)
     reply = _robots_hop(session, read, ROBOTS_URL)
     while reply.status in _REDIRECT_STATUSES and reply.location is not None:
         if len(read.hops) > MAX_ROBOTS_HOPS:
