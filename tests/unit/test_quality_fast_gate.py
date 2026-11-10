@@ -40,9 +40,9 @@ FAST_CHECKS = {
 CONFLICT_MARKERS = "scripts/quality/check_conflict_markers.sh"
 TESTS_TREE = "scripts/quality/check_tests_tree.sh"
 RELEASE_CONTRACTS = REPO_ROOT / "tests" / "unit" / "test_release_contracts.py"
-# `-m "not network"`: a test that needs a live third-party credential answers
-# for the operator's key, not for the change being pushed (issue #359).
-UNIT_SUITE = "uv run pytest tests/unit/ -q -m not network"
+# The push's scope of the unit suite, in a machine-wide slot (issue #864). The
+# `-m "not network"` argument (issue #359) is pinned in test_quality_run_suite.py.
+UNIT_SUITE = "uv run python scripts/quality/run_suite.py"
 SECURITY_SCAN = "uv run python scripts/quality/check_security_scan.py"
 STUB_TOOLS = ("uv", "gitleaks")
 
@@ -56,9 +56,6 @@ git_context="${GIT_DIR-unset}|${GIT_WORK_TREE-unset}|${GIT_INDEX_FILE-unset}|${G
 git_context="$git_context|${GIT_COMMON_DIR-unset}|${GIT_OBJECT_DIRECTORY-unset}"
 git_context="$git_context|${GIT_FUTURE_EXPORTED_VARIABLE-unset}"
 printf '%s\\t%s\\t%s\\n' "$(pwd -P)" "$line" "$git_context" >> "$GATE_STUB_LOG"
-if [ "@TOOL@" = uv ] && [ "${1-}" = run ] && [ "${2-}" = pytest ]; then
-  printf 'pytest argc=%s marker=<%s>\\n' "$#" "${6-}"
-fi
 if printf '%s\\n' "$GATE_STUB_FAIL" | grep -Fqx "$line"; then
   echo "detail for $line"
   printf '\\033[31mstub: %s failed\\033[0m\\n\\n' "$line"
@@ -287,13 +284,9 @@ class TestDeepGate:
         assert run.cwds == {str(REPO_ROOT)}
         assert run.output.rstrip().endswith("verify-deep: all checks passed")
 
-    def test_passes_the_network_marker_expression_as_one_pytest_argument(
-        self, tmp_path: Path
-    ) -> None:
-        """Without shell quoting, pytest treats `network` as a test path."""
-        run = _run_gate(DEEP, tmp_path)
-
-        assert "pytest argc=6 marker=<not network>" in run.output
+    def test_the_unit_step_names_a_script_that_exists(self) -> None:
+        """A renamed step script would fail every push with a missing-file error."""
+        assert (REPO_ROOT / UNIT_SUITE.rsplit(" ", 1)[-1]).is_file()
 
     def test_a_failing_security_scan_fails_the_gate_naming_it(self, tmp_path: Path) -> None:
         """A scanner that skipped files reports through this gate or nowhere."""
@@ -381,8 +374,9 @@ CI_ONLY = {
 PUSH_TIME = {
     # ~2 s; §9f placed it at push and test_never_runs_the_security_scan pins it.
     "Security scan (fail-closed)": SECURITY_SCAN,
-    # ~260 s: the cost §9d moved out of the commit loop. Locally without the
-    # network-marked tests, which answer for a credential CI does not hold (#359).
+    # ~260 s: the cost §9d moved out of the commit loop. Locally only the push's
+    # scope (#864) and without the network-marked tests, which answer for a
+    # credential CI does not hold (#359); CI runs the whole suite.
     "Unit tests": UNIT_SUITE,
 }
 
