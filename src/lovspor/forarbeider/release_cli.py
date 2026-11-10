@@ -18,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
+import click
 import typer
 
 from lovspor.forarbeider.corpus_commands import (
@@ -32,6 +33,12 @@ from lovspor.forarbeider.corpus_commands import (
 )
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.pilot_audit import pilot_audit_impl
+from lovspor.forarbeider.policy_commands import (
+    PolicyGrant,
+    policy_revoke_impl,
+    policy_show_impl,
+    policy_sign_impl,
+)
 from lovspor.forarbeider.release_commands import (
     ChapterScope,
     Grant,
@@ -51,8 +58,10 @@ _SAFE_DETAIL = re.compile(r"[A-Za-z0-9_.,: -]*")
 
 release_app = typer.Typer(help="Private, offline release preflight. Publishes nothing.")
 chapters_app = typer.Typer(help="Commands on the staged chapters of one proposition.")
+policy_app = typer.Typer(help="The standing release policy: signed once, revocable.")
 ops_app.add_typer(release_app, name="forarbeider-release")
 release_app.add_typer(chapters_app, name="chapters")
+release_app.add_typer(policy_app, name="policy")
 
 
 def refusal_line(error: ForarbeiderRefusedError) -> str:
@@ -260,3 +269,45 @@ def synthetic_fixtures(
 ) -> None:
     """Write the bundled synthetic Prop. L and Prop. LS staged files: invented text only."""
     _echo(lambda: fixtures_impl(ctx.obj, out))
+
+
+@policy_app.command("sign")
+def policy_sign(
+    evidence: Annotated[
+        list[str],
+        typer.Option(help="KIND=/absolute/private/file, once per kind; may be repeated."),
+    ],
+    terms_url: Annotated[
+        str,
+        typer.Option(help="The www.regjeringen.no page the terms evidence was fetched from."),
+    ],
+    decided: _Actor,
+    valid: Annotated[str, typer.Option(help="FROM/UNTIL, ISO 8601 with offsets.")],
+) -> None:
+    """Sign the standing policy at a terminal. It clears unflagged chapters through a batch only."""
+    grant = PolicyGrant(evidence=tuple(evidence), terms_url=terms_url, decided=decided, valid=valid)
+    scope = click.get_current_context().obj
+    _echo(lambda: policy_sign_impl(scope, grant))
+
+
+@policy_app.command("revoke")
+def policy_revoke(ctx: typer.Context, policy: _Digest, decided: _Actor) -> None:
+    """Withdraw the standing policy. A later batch clears nothing under it."""
+    _echo(lambda: policy_revoke_impl(ctx.obj, policy, decided))
+
+
+@policy_app.command("show")
+def policy_show(
+    ctx: typer.Context,
+    policy: Annotated[str, typer.Argument(help="The policy's sha256.")],
+    at: Annotated[str, typer.Option(help="The moment evaluated, ISO 8601 with offset.")],
+    source_proof: Annotated[
+        Path | None,
+        typer.Option(help="A forarbeider-fetch run record: the current robots.txt and terms."),
+    ] = None,
+) -> None:
+    """Show the policy's scope, window, evidence digests and whether it clears at a moment.
+
+    Without a current source proof no automatic clearance is allowed.
+    """
+    _echo(lambda: policy_show_impl(ctx.obj, policy, at, source_proof))

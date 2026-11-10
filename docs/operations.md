@@ -3149,6 +3149,42 @@ Each item is a private, dated note, written and judged by a person. Code checks 
 
 A separate PR, separately approved, would have to: allow a reviewed real document set through `simulate` into a staging checkout (today synthetic only); decide where a real dataset lives and who may push it; extend the reader beyond the bundled synthetic propositions with the same labels; add a takedown runbook that accepts Git history permanence; and carry the owner's dated sign-off for exactly those documents. Until then no real chapter body belongs in any Git repository or branch, including tests, fixtures, PR text and CI logs.
 
+## Forarbeider: standing release policy (issue #738, contract Amendment 1)
+
+[Amendment 1](proposals/forarbeider-pr3b-release-contract.md#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release) replaces the per-chapter ceremony for chapters no detector flags with one owner record, signed once. This slice (A2a) only records, revokes and shows that policy. **Nothing here releases a chapter**: the batch that will use it is a later slice, and a flagged chapter keeps the per-chapter review, dossier and authorization path whatever the policy says.
+
+```bash
+uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> policy sign \
+  --evidence source_rights=/abs/source-rights.md \
+  --evidence publication_purpose=/abs/purpose.md \
+  --evidence retention_deindexing=/abs/retention.md \
+  --evidence git_permanence_accepted=/abs/git-permanence.md \
+  --evidence privacy_basis_clean=/abs/privacy-clean.md \
+  --evidence robots_txt=<fetch out>/robots-<sha256>.txt \
+  --evidence terms_page=<fetch out>/terms-<sha256>.html \
+  --evidence unflagged_unread_acceptance=/abs/unflagged-unread.md \
+  --terms-url "$TERMS_URL" \
+  --decided <handle>@2026-11-10T12:00:00+01:00 \
+  --valid 2026-11-10T12:00:00+01:00/2027-02-07T00:00:00+01:00
+```
+
+- Every kind is required, once, and no file (by digest) may be bound for two kinds. Each file must be absolute, owner-only, outside every Git checkout and non-empty; its digest and size are read from the file. `publication_purpose` carries the takedown contact (`kontakt@lovspor.no`) and who answers it.
+- `robots_txt` and `terms_page` are the exact files `forarbeider-fetch` stored (its report prints their paths), never a browser copy: only those bytes can match a later run's digests. `--terms-url` is the page that run read the terms from (same grammar as `forarbeider-fetch --terms-url`); the policy records it, sign prints it before the phrase, and it is inside the digest the phrase carries. Sign does not check that the terms file came from that URL: it makes no request, and that pairing is the owner's assertion. What it buys is the comparison below: a current proof must come from the same URL, so an unchanged copy of the old terms served elsewhere cannot stand in for the page the owner read.
+- `privacy_basis_clean` is the owner-approved personal-data assessment: the processing basis under personopplysningsloven and the residual risk accepted for chapters no detector flags. Detector silence is not proof that a chapter holds no personal data.
+- Every acceptance is the owner's own file, never a value set in code: `git_permanence_accepted` for Git-history permanence and `unflagged_unread_acceptance` for publishing a chapter no detector flags without a person reading it.
+- The scope is fixed: `regjeringen.no`, `prop-l` and `prop-ls`. The record states only `clears: unflagged_chapters`, `legal_sufficiency_decided_by_code: false` and `identity_authenticated: false` of itself.
+- Before the prompt, sign prints the source, the document types, the validity window, every bound kind with the first 12 hex of its SHA-256, and the first 12 hex of the SHA-256 of the exact record it will store (`policy <sha12> ...`). At a terminal only, the owner types `sign standing policy <sha12> regjeringen.no prop-l,prop-ls until <valid_until in UTC>`. Any changed byte in any bound file, or a different `--decided`, changes `<sha12>`; an old or wrong phrase writes nothing. The record is stored as `<ws>/policies/<sha256>.json`, whose digest starts with the `<sha12>` shown, and sign prints that digest.
+- **At most one effective policy.** Sign refuses with `policy_overlap: <sha256>` while an unrevoked policy for the same source, sharing a document type and with an overlapping window, is stored: revoke it first. A window that only touches (one ends when the next starts) does not overlap. Sign never overwrites a record: re-signing a revoked policy unchanged is refused with `release_already_revoked`, and a new policy decided before an overlapping policy's revocation is refused with `release_out_of_order`.
+
+```bash
+... policy show <policy sha256> --at 2026-12-01T12:00:00+01:00 --source-proof <fetch out>/fetch-run-<start>.json
+... policy revoke --policy <policy sha256> --decided <handle>@<ISO-8601>
+```
+
+`show` re-reads every evidence file and every stored policy, and prints `state usable` or `state faults <codes>`: `evaluated_before_policy`, `policy_not_yet_valid`, `policy_expired`, `policy_revoked`, `policy_evidence_changed`, `policy_evidence_unavailable`, `policy_ambiguous` (two unrevoked overlapping policies for the source are stored, which only a hand-placed file can cause; every evaluation for that source denies), `policy_overlaps_revoked` (an overlapping policy was revoked after this one was decided). Any fault and the policy clears nothing. Revocation is final and revokes exactly one record; a revocation cannot be dated before the policy's decision. A revoked or expired policy is never reinstated, and revoking one never brings another into effect: sign a new one, decided at or after the revocation. `state` judges the record alone: its local evidence, window and the register.
+
+Then `show` judges the **current source proof** (Amendment 1 point 8). `--source-proof` names a `forarbeider-fetch` run record; show reads it (absolute, owner-only, outside every Git checkout), re-hashes the robots.txt and terms bytes stored beside it and refuses (`release_record_corrupt: source_proof <reason>`, or `release_invalid: source_proof` for a malformed record) if they changed. It also refuses a record no fetch run writes (`release_record_corrupt: source_proof source_proof_inconsistent: <fault>`, see `forarbeider-fetch`). These checks are integrity, not authentication: a consistent record whose bytes re-hash proves the record is intact and could have come from a fetch run, never that regjeringen.no served it. Anyone who can write the owner-only staging directory can write such a record, so that directory is the trust boundary. It makes no network request. It prints `source proof missing` or `source proof run <start> <kind> <state> <sha256> ...`, then `source matches` or `source faults <codes>`: `source_proof_missing`, `source_proof_stale` (the oldest page is more than 24 hours older than `--at`, or a page was read after `--at`), `robots_not_published` / `terms_not_published` (absent, refused, unreadable, or no terms page read), `robots_changed` / `terms_changed` (the digest differs from the signed evidence), `terms_url_changed` (the proof read the terms from another URL than the policy names, whatever their bytes). The last line is `automatic clearance allowed` only when the record has no fault and the source matches; otherwise `automatic clearance denied`. Intact local files never stand in for the current proof: a changed terms page denies until the owner fetches it and signs again.
+
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.

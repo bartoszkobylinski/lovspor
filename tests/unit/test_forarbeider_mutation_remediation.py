@@ -127,7 +127,7 @@ def test_option_diagnostics(parser, text, detail):
 
 def test_invalid_model_reports_sorted_field_names_only():
     refused(
-        commands._validated,
+        commands.validated,
         (ReleaseRevocation, {}),
         "release_invalid: authorization_sha256,owner,record_type,revoked_at,schema_version",
     )

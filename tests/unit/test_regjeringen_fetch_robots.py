@@ -22,6 +22,34 @@ from tests.unit.test_regjeringen_fetch import CH1, PAGE, ROBOTS, _Clock
 MOVED = "https://www.regjeringen.no/robots-moved.txt"
 
 
+def test_robots_evidence_dates_the_final_request_not_the_response(
+    httpx_mock: HTTPXMock, tmp_path: Path
+) -> None:
+    clock = _Clock()
+    started_at = clock.now()
+
+    def redirect(request: httpx.Request) -> httpx.Response:
+        clock.sleep(2.0)
+        return httpx.Response(302, headers={"Location": MOVED})
+
+    def rules(request: httpx.Request) -> httpx.Response:
+        clock.sleep(3.0)
+        return httpx.Response(200, text="User-agent: *\nDisallow: /no/\n")
+
+    httpx_mock.add_callback(redirect, url=ROBOTS)
+    httpx_mock.add_callback(rules, url=MOVED)
+    out = prepare_out(tmp_path / "pages")
+    run = _run(out, clock)
+
+    assert run.started_at == started_at
+    assert run.robots.retrieved_at == started_at + timedelta(seconds=5)
+    assert clock.now() == started_at + timedelta(seconds=8)
+    assert run.records[0].outcome is FetchOutcome.ROBOTS_DISALLOWED
+    (record_file,) = out.glob("fetch-run-*.json")
+    saved = FetchRun.model_validate_json(record_file.read_bytes())
+    assert saved.robots.retrieved_at == run.robots.retrieved_at
+
+
 def _run(out: Path, clock: _Clock) -> FetchRun:
     with httpx.Client() as client:
         return run_fetch(client, (CH1,), out, FetchSettings(clock=clock.as_fetch_clock()))

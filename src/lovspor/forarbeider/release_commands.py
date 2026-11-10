@@ -186,7 +186,7 @@ def interval(text: str) -> tuple[datetime, datetime]:
         return aware_moment(start), aware_moment(end)
 
 
-def _validated[T: BaseModel](model: type[T], fields: dict[str, object]) -> T:
+def validated[T: BaseModel](model: type[T], fields: dict[str, object]) -> T:
     """Field names only on a refusal: the input may be the very name the grammar refused."""
     try:
         return model.model_validate(fields)
@@ -215,7 +215,7 @@ def _artifact(text: str) -> EvidenceArtifact:
     if not payload:
         raise ForarbeiderRefusedError(RefusalReason.INPUT_UNREADABLE, "evidence")
     chapters = sorted({int(number) for number in match["chapters"].split(",")})
-    return _validated(
+    return validated(
         EvidenceArtifact,
         {
             "kind": match["kind"],
@@ -236,7 +236,7 @@ def dossier_impl(scope: ChapterScope, evidence: Sequence[str], reviewed: str) ->
     staged = _staged(scope)
     artifacts = sorted((_artifact(item) for item in evidence), key=_artifact_key)
     reviewer, moment = actor(reviewed)
-    dossier = _validated(
+    dossier = validated(
         ReleaseDossier,
         {
             "schema_version": 1,
@@ -362,7 +362,7 @@ def authorize_impl(scope: ChapterScope, grant: Grant) -> str:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_OUT_OF_ORDER, "dossier")
     chapters = _approved_pins(scope, staged, decided)
     declared = _declared(dossier, sha, chapters, grant)
-    authorization = _validated(ReleaseAuthorization, {**_FIXED_AUTHORIZATION, **declared})
+    authorization = validated(ReleaseAuthorization, {**_FIXED_AUTHORIZATION, **declared})
     document = dossier.document
     require_a_person(f"authorize {document.id} {sha[:12]}")
     stored = write_record(open_release_workspace(scope.release), "authorizations", authorization)
@@ -393,10 +393,10 @@ def _numbers(chapters: tuple[AuthorizedChapter, ...]) -> str:
     return ",".join(str(item.chapter.chapter_number) for item in chapters)
 
 
-def require_a_person(phrase: str) -> None:
+def require_a_person(phrase: str, role: str = "authorization") -> None:
     """Keeps cron, CI and a pipe out. A pseudo-terminal can still get past it."""
     if not _interactive() or typer.prompt(f"Type to confirm: {phrase}") != phrase:
-        raise ForarbeiderRefusedError(RefusalReason.REVIEW_NOT_INTERACTIVE, "authorization")
+        raise ForarbeiderRefusedError(RefusalReason.REVIEW_NOT_INTERACTIVE, role)
 
 
 def revoke_impl(scope: ReleaseScope, authorization: str, decided: str) -> str:
@@ -412,7 +412,7 @@ def revoke_impl(scope: ReleaseScope, authorization: str, decided: str) -> str:
     if read_named(workspace, "revocations", sha, ReleaseRevocation) is not None:
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_ALREADY_REVOKED, sha)
     owner, moment = actor(decided)
-    revocation = _validated(
+    revocation = validated(
         ReleaseRevocation,
         {
             "schema_version": 1,

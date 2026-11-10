@@ -58,6 +58,7 @@ class RefusalReason(StrEnum):
     RELEASE_RECORD_CORRUPT = "release_record_corrupt"
     RELEASE_ALREADY_REVOKED = "release_already_revoked"
     RELEASE_OUT_OF_ORDER = "release_out_of_order"
+    POLICY_OVERLAP = "policy_overlap"
     MANIFEST_INVALID = "manifest_invalid"
     MANIFEST_INCOMPATIBLE = "manifest_incompatible"
     CORPUS_TREE_MISMATCH = "corpus_tree_mismatch"

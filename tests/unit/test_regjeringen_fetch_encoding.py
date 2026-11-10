@@ -56,6 +56,30 @@ def test_an_uncoded_page_is_stored_exactly_as_it_came_off_the_wire(
     assert (out / f"{record.sha256}.html").read_bytes() == body
 
 
+@pytest.mark.codex_proposal
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Proposal: content-coding tokens are case-insensitive (RFC 9110 §8.4.1), "
+        "so a differently-cased 'identity' should be treated as uncoded too"
+    ),
+)
+@pytest.mark.parametrize("coding", ["IDENTITY", "Identity"])
+def test_an_uncoded_page_survives_a_differently_cased_identity_token(
+    httpx_mock: HTTPXMock, tmp_path: Path, coding: str
+) -> None:
+    """``_coded`` compares the header value with ``!=``, so a conformant server that
+    spells the content-coding token in another case is wrongly treated as coded.
+    """
+    body = b"<html>mixed-case identity token</html>"
+    httpx_mock.add_response(url=ROBOTS, content=ROBOTS_BODY)
+    httpx_mock.add_response(url=CH1, content=body, headers={"Content-Encoding": coding})
+    out = prepare_out(tmp_path / "pages")
+    record = _run(out).records[0]
+    assert record.outcome is FetchOutcome.FETCHED
+    assert record.sha256 == hashlib.sha256(body).hexdigest()
+
+
 @pytest.mark.parametrize("coding", ["gzip", "br", "deflate", "x-unknown"])
 def test_a_coded_page_is_neither_decoded_nor_stored(
     httpx_mock: HTTPXMock, tmp_path: Path, coding: str
