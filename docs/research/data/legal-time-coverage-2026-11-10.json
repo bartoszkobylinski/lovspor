@@ -36,6 +36,7 @@
     "target unknown, commencement full decision body names several dates": 1,
     "target unknown, commencement partial decision outside the grammar": 2,
     "unattributed operation, act unknown (lti/2007/nl-20070126-003.xml)": 9,
+    "unattributed operation, act unknown (lti/2007/nl-20070615-021.xml); co": 4,
     "unattributed operation, act unknown (lti/2009/nl-20090619-074.xml)": 6,
     "unattributed operation, act unknown (lti/2015/nl-20150619-065.xml)": 219,
     "unattributed operation, act unknown (lti/2017/nl-20170616-051.xml)": 15,
@@ -43,7 +44,7 @@
    },
    "at": "2026-11-06",
    "buckets": {
-    "act_level_problems": 264,
+    "act_level_problems": 268,
     "applied": 0,
     "future": 0,
     "pending": 2,
@@ -80,7 +81,7 @@
   },
   "ladder": [
    {
-    "act_level_problems": 16,
+    "act_level_problems": 20,
     "applied": 0,
     "at": "2008-01-01",
     "future": 207,
@@ -94,7 +95,7 @@
     "withheld": 65
    },
    {
-    "act_level_problems": 22,
+    "act_level_problems": 26,
     "applied": 0,
     "at": "2012-01-01",
     "future": 155,
@@ -108,7 +109,7 @@
     "withheld": 117
    },
    {
-    "act_level_problems": 244,
+    "act_level_problems": 248,
     "applied": 0,
     "at": "2016-01-01",
     "future": 125,
@@ -122,7 +123,7 @@
     "withheld": 147
    },
    {
-    "act_level_problems": 260,
+    "act_level_problems": 264,
     "applied": 0,
     "at": "2020-01-01",
     "future": 85,
@@ -136,7 +137,7 @@
     "withheld": 187
    },
    {
-    "act_level_problems": 260,
+    "act_level_problems": 264,
     "applied": 0,
     "at": "2024-01-01",
     "future": 30,
@@ -150,7 +151,7 @@
     "withheld": 242
    },
    {
-    "act_level_problems": 264,
+    "act_level_problems": 268,
     "applied": 0,
     "at": "2026-11-06",
     "future": 0,
@@ -183,7 +184,7 @@
    "full decision body names several dates": 14,
    "partial decision outside the grammar": 6
   },
-  "unattributed_operations": 253,
+  "unattributed_operations": 257,
   "unsupported_instructions": {
    "Fjerde ledd oppheves.": 1,
    "Fristforlengelse og oppfriskning ved oppsigelse under sykdom, svangerskap, foreldrepermisj": 1,
@@ -741,11 +742,12 @@
     "unattributed operation, act unknown (lti/2015/nl-20150619-065.xml)": 219,
     "unattributed operation, act unknown (lti/2016/nl-20160527-014.xml)": 2,
     "unattributed operation, act unknown (lti/2021/nl-20210618-097.xml); co": 2,
+    "unattributed operation, act unknown (lti/2022/nl-20221220-110.xml)": 5,
     "unsupported instruction": 28
    },
    "at": "2026-11-06",
    "buckets": {
-    "act_level_problems": 288,
+    "act_level_problems": 293,
     "applied": 105,
     "future": 1,
     "pending": 0,
@@ -849,7 +851,7 @@
     "withheld": 0
    },
    {
-    "act_level_problems": 288,
+    "act_level_problems": 293,
     "applied": 103,
     "at": "2024-01-01",
     "future": 3,
@@ -863,7 +865,7 @@
     "withheld": 0
    },
    {
-    "act_level_problems": 288,
+    "act_level_problems": 293,
     "applied": 105,
     "at": "2026-11-06",
     "future": 1,
@@ -894,7 +896,7 @@
    "full decision body carries an exception": 17,
    "partial decision outside the grammar": 31
   },
-  "unattributed_operations": 223,
+  "unattributed_operations": 228,
   "unsupported_instructions": {
    "Betaling via bank som vilkår for fradrag for inngående merverdiavgift": 1,
    "Deloverskriften «IV Forskriftsfullmakt» foran nåværende § 6-34 flyttes foran ny § 6-35.": 1,
@@ -1171,7 +1173,7 @@
     "target unknown, commencement partial decision outside the grammar": 13,
     "unattributed operation, act unknown (lti/2005/nl-20051221-131.xml); co": 13,
     "unattributed operation, act unknown (lti/2007/nl-20070126-003.xml)": 9,
-    "unattributed operation, act unknown (lti/2007/nl-20070413-014.xml); co": 7,
+    "unattributed operation, act unknown (lti/2007/nl-20070413-014.xml); co": 12,
     "unattributed operation, act unknown (lti/2007/nl-20070629-083.xml); co": 18,
     "unattributed operation, act unknown (lti/2007/nl-20070629-084.xml); co": 18,
     "unattributed operation, act unknown (lti/2008/nl-20080307-004.xml)": 16,
@@ -1179,7 +1181,7 @@
     "unattributed operation, act unknown (lti/2008/nl-20080627-053.xml)": 2,
     "unattributed operation, act unknown (lti/2009/nl-20090619-074.xml)": 6,
     "unattributed operation, act unknown (lti/2010/nl-20100625-046.xml)": 10,
-    "unattributed operation, act unknown (lti/2012/nl-20120622-049.xml)": 1,
+    "unattributed operation, act unknown (lti/2012/nl-20120622-049.xml)": 3,
     "unattributed operation, act unknown (lti/2013/nl-20130405-012.xml)": 4,
     "unattributed operation, act unknown (lti/2013/nl-20130621-085.xml)": 24,
     "unattributed operation, act unknown (lti/2014/nl-20140509-016.xml); co": 9,
@@ -1191,18 +1193,18 @@
    },
    "at": "2026-11-06",
    "buckets": {
-    "act_level_problems": 454,
+    "act_level_problems": 461,
     "applied": 424,
     "future": 0,
     "pending": 16,
-    "unresolved": 188,
+    "unresolved": 183,
     "withheld": 0
    },
    "status": "replayed",
    "unresolved_reasons": {
     "bokstav f matched 0 list items": 1,
     "commencement conflicting commencement decisions": 10,
-    "commencement sentence outside the grammar": 19,
+    "commencement sentence outside the grammar": 14,
     "dateInForce outside the grammar": 1,
     "decision body has no commencement sentence for this law": 2,
     "ledd 4 does not exist": 1,
@@ -1222,7 +1224,7 @@
     "unsupported instruction": 47
    }
   },
-  "events": 628,
+  "events": 623,
   "kinds": {
    "insert_ledd": 21,
    "insert_punktum": 13,
@@ -1234,15 +1236,15 @@
    "repeal_section": 6,
    "replace_bokstav": 45,
    "replace_heading": 4,
-   "replace_ledd": 65,
-   "replace_punktum": 32,
+   "replace_ledd": 61,
+   "replace_punktum": 31,
    "replace_section": 49,
    "substitute_term": 2,
    "unsupported": 65
   },
   "ladder": [
    {
-    "act_level_problems": 73,
+    "act_level_problems": 78,
     "applied": 0,
     "at": "2008-01-01",
     "future": 503,
@@ -1251,12 +1253,12 @@
     "pending": 16,
     "pending_commencement": 0,
     "status": "not_yet_in_force",
-    "unresolved": 105,
+    "unresolved": 100,
     "unresolved_commencement": 0,
     "withheld": 4
    },
    {
-    "act_level_problems": 125,
+    "act_level_problems": 130,
     "applied": 0,
     "at": "2012-01-01",
     "future": 184,
@@ -1265,12 +1267,12 @@
     "pending": 16,
     "pending_commencement": 0,
     "status": "not_yet_in_force",
-    "unresolved": 105,
+    "unresolved": 100,
     "unresolved_commencement": 0,
     "withheld": 323
    },
    {
-    "act_level_problems": 428,
+    "act_level_problems": 435,
     "applied": 336,
     "at": "2016-01-01",
     "future": 113,
@@ -1279,12 +1281,12 @@
     "pending": 16,
     "pending_commencement": 0,
     "status": "replayed",
-    "unresolved": 163,
+    "unresolved": 158,
     "unresolved_commencement": 0,
     "withheld": 0
    },
    {
-    "act_level_problems": 434,
+    "act_level_problems": 441,
     "applied": 372,
     "at": "2020-01-01",
     "future": 67,
@@ -1293,12 +1295,12 @@
     "pending": 16,
     "pending_commencement": 0,
     "status": "replayed",
-    "unresolved": 173,
+    "unresolved": 168,
     "unresolved_commencement": 0,
     "withheld": 0
    },
    {
-    "act_level_problems": 444,
+    "act_level_problems": 451,
     "applied": 401,
     "at": "2024-01-01",
     "future": 30,
@@ -1307,12 +1309,12 @@
     "pending": 16,
     "pending_commencement": 0,
     "status": "replayed",
-    "unresolved": 181,
+    "unresolved": 176,
     "unresolved_commencement": 0,
     "withheld": 0
    },
    {
-    "act_level_problems": 454,
+    "act_level_problems": 461,
     "applied": 424,
     "at": "2026-11-06",
     "future": 0,
@@ -1321,7 +1323,7 @@
     "pending": 16,
     "pending_commencement": 0,
     "status": "replayed",
-    "unresolved": 188,
+    "unresolved": 183,
     "unresolved_commencement": 0,
     "withheld": 0
    }
@@ -1335,15 +1337,15 @@
   "timing": {
    "dated": 507,
    "pending": 16,
-   "unresolved": 105
+   "unresolved": 100
   },
   "timing_reasons": {
-   "commencement sentence outside the grammar": 19,
+   "commencement sentence outside the grammar": 14,
    "dateInForce outside the grammar": 1,
    "decision body has no commencement sentence for this law": 2,
    "partial decision outside the grammar": 83
   },
-  "unattributed_operations": 381,
+  "unattributed_operations": 388,
   "unsupported_instructions": {
    "1. Militær straffelov 22. mai 1902 nr. 13 § 107 oppheves.": 1,
    "2. Lov 13. desember 1946 nr. 14 om straff for utlendske krigsbrotsmenn oppheves.": 1,
@@ -1377,10 +1379,10 @@
    },
    "counts_before_blanket": {
     "exact_normalized": 166,
-    "exact_raw": 126,
+    "exact_raw": 128,
     "only_in_oracle": 19,
     "text_differs": 21,
-    "unresolved": 68
+    "unresolved": 66
    },
    "ledd_counts": {
     "ledd_unresolved": 700,
@@ -1390,7 +1392,7 @@
    "notes_without_replay_event": 23,
    "replay_events_without_note": 1,
    "sections_proven": "0 of 400",
-   "sections_proven_before_blanket": "292 of 400",
+   "sections_proven_before_blanket": "294 of 400",
    "text_differs": []
   }
  },

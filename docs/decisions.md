@@ -1123,7 +1123,7 @@ four engine defects are fixed without narrowing the blanket. An amendment block'
 an intro that names it inside its own article; anything after an intro the grammar cannot bind is
 unattributed, never inherited (#856: lov/2015-06-19-65 §§ 4–5, 216 operations of militær straffelov
 and straffeprosessloven, 41 applied into straffeloven at `51c5d702`, now 0; an audit of every changed
-attribution found 47 more operations that had inherited the wrong *other* act). A commencement-shaped
+attribution found 56 more operations that had inherited the wrong *other* act). A commencement-shaped
 sentence with a date, exception or reservation is never dropped as informational (#857). Unresolved-
 timing unknown-target operations (#858) and unattributed operations in effect at D (#859) are act-level
 problems. Proven stays 0 of 1,540 phase-2 sections; the four phase-1 acts are unchanged in content.

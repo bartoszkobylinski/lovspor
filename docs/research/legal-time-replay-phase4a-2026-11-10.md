@@ -68,32 +68,32 @@ lov/2015-06-19-65 operations attributed to straffeloven: **259 → 43** (§ 3 42
 
 | state | status | withheld | applied | unresolved ops | act-level | §§ 4–5 ops applied |
 |---|---|---|---|---|---|---|
-| 2008-03-06 | not_yet_in_force | 4 → 4 | 0 | 105 → 105 | 0 → 73 | 0 |
-| 2008-03-07 | not_yet_in_force | 105 → 99 | 0 | 105 → 105 | 0 → 89 | 0 |
-| 2015-09-30 | not_yet_in_force | 614 → 392 | 0 | 105 → 105 | 0 → 386 | 0 |
-| 2015-10-01 | replayed | 0 | 376 → **335** | 343 → 162 | 128 → 427 | **41 → 0** (§ 4 11 → 0, § 5 30 → 0) |
-| 2026-11-06 | replayed | 0 | 463 → **424** | 371 → 188 | 143 → 454 | **41 → 0** |
+| 2008-03-06 | not_yet_in_force | 4 → 4 | 0 | 105 → 100 | 0 → 78 | 0 |
+| 2008-03-07 | not_yet_in_force | 105 → 99 | 0 | 105 → 100 | 0 → 94 | 0 |
+| 2015-09-30 | not_yet_in_force | 614 → 392 | 0 | 105 → 100 | 0 → 393 | 0 |
+| 2015-10-01 | replayed | 0 | 376 → **335** | 343 → 157 | 128 → 434 | **41 → 0** (§ 4 11 → 0, § 5 30 → 0) |
+| 2026-11-06 | replayed | 0 | 463 → **424** | 371 → 183 | 143 → 461 | **41 → 0** |
 
-Every one of the 41 applied operations at `51c5d702` is gone from `applied` and from every provision's `applied`. Of the 11 § 4 operations (§13 l.1, §30 l.1, §34 l.3, §40, §59 l.1, §61 l.1, §67 l.1, §69 l.1, §71 l.2, §78 l.1, §89 l.1), none applies. Verification at 2026-11-06: still `unresolved` 400/400. Behind the blanket, sections agreeing with the oracle rise from **226 to 292 of 400**. The 66 sections that military-law and procedure-law text had overwritten now match the consolidated text. The blanket hides that number; it is never shown as a verdict. Withheld 105 → 99 at 2008-03-07 comes from 6 unsupported sentences of lov/2008-03-07-4 that are now unattributed: `I straffeloven 2005 tredje del gjøres følgende endringer:` and the two sentences after it, plus `1. I militær straffelov 22. mai 1902 nr. 13 gjøres følgende endringer:`, `§§ 80-86 og §§ 90-94 a oppheves.` and `2. Lov 18. august 1914 nr. 3 om forsvarshemmeligheter oppheves.`. The last three were misattributed militær straffelov and forsvarshemmeligheter text.
+Every one of the 41 applied operations at `51c5d702` is gone from `applied` and from every provision's `applied`. Of the 11 § 4 operations (§13 l.1, §30 l.1, §34 l.3, §40, §59 l.1, §61 l.1, §67 l.1, §69 l.1, §71 l.2, §78 l.1, §89 l.1), none applies. Verification at 2026-11-06: still `unresolved` 400/400. Behind the blanket, sections agreeing with the oracle rise from **226 to 294 of 400**. The 68 sections that military-law and procedure-law text had overwritten, or that carried their problems, now match the consolidated text. The blanket hides that number; it is never shown as a verdict. Withheld 105 → 99 at 2008-03-07 comes from 6 unsupported sentences of lov/2008-03-07-4 that are now unattributed: `I straffeloven 2005 tredje del gjøres følgende endringer:` and the two sentences after it, plus `1. I militær straffelov 22. mai 1902 nr. 13 gjøres følgende endringer:`, `§§ 80-86 og §§ 90-94 a oppheves.` and `2. Lov 18. august 1914 nr. 3 om forsvarshemmeligheter oppheves.`. The last three were misattributed militær straffelov and forsvarshemmeligheter text. Unresolved 105 → 100 at every date: five straffeprosessloven operations of lov/2007-04-13-14 part IV (§ 3).
 
-Ladder digest: `169f7aaf…eed3635` → `38c513eea28dce44103f4b9c40618d76dedd51469d3bd72efba1942cc7059ad7`. The file is 5.4 MB, regenerated and not committed, as in Phase 3.
+Ladder digest: `169f7aaf…eed3635` → `a0a9cfa5c9bb41e50a07d9fb7d84d87e846ffe9c90b1f3a8f823a036b59f6ea8`. The file is 5.4 MB, regenerated and not committed, as in Phase 3.
 
 ### 2.2 Eight-act coverage (`legal-time-coverage-2026-11-08.json` → `legal-time-coverage-2026-11-10.json`, end state 2026-11-06)
 
 | act | events | dated | pending | unres. timing | applied | unres. ops | act-level | unattributed (members) | unattributed events | proven | agree behind blanket |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | utlendingsloven | 556 | 306 | 9 | 241 | 176 | 371 | 93 → 405 | 5 → 245 | 0 → 245 | 0/212 | 50/212 |
-| straffeloven | 850 → 628 | 729 → 507 | 16 | 105 | 463 → 424 | 371 → 188 | 143 → 454 | 106 → 381 | 0 → 381 | 0/400 | 226 → 292/400 |
-| arbeidsmiljøloven | 356 | 272 | 2 | 82 | 0 | 82 | 0 → 264 | 10 → 253 | 0 → 253 | no text | — |
+| straffeloven | 850 → 623 | 729 → 507 | 16 | 105 → 100 | 463 → 424 | 371 → 183 | 143 → 461 | 106 → 388 | 0 → 388 | 0/400 | 226 → 294/400 |
+| arbeidsmiljøloven | 356 | 272 | 2 | 82 | 0 | 82 | 0 → 268 | 10 → 257 | 0 → 257 | no text | — |
 | friskolelova | 300 | 232 | 0 | 68 | 168 | 132 | 47 → 78 | 2 → 21 | 0 → 21 | 0/92 | 34/92 |
 | tvisteloven | 163 | 111 | 8 | 44 | 94 | 61 | 8 → 262 | 7 → 245 | 0 → 245 | 0/442 | 296/442 |
-| merverdiavgiftsloven | 324 | 162 | 0 | 162 | 105 | 218 | 42 → 288 | 0 → 223 | 0 → 223 | 0/206 | 89/206 |
+| merverdiavgiftsloven | 324 | 162 | 0 | 162 | 105 | 218 | 42 → 293 | 0 → 228 | 0 → 228 | 0/206 | 89/206 |
 | naturmangfoldloven | 49 | 44 | 0 | 5 | 0 | 5 | 0 → 4 | 4 | 0 → 4 | no text | — |
 | barnevernsloven | 185 | 134 | 3 | 48 | 101 | 66 | 10 → 17 | 4 | 0 → 4 | 0/188 | 123/188 |
-| **total** | 2,783 → 2,561 | 1,990 → 1,768 | 38 | 755 | 1,107 → 1,068 | 1,306 → 1,123 | 343 → 1,772 | 138 → 1,376 | 0 → 1,376 | **0 → 0** | 818 → 884 of 1,540 |
+| **total** | 2,783 → 2,556 | 1,990 → 1,768 | 38 | 755 → 750 | 1,107 → 1,068 | 1,306 → 1,118 | 343 → 1,788 | 138 → 1,392 | 0 → 1,392 | **0 → 0** | 818 → 886 of 1,540 |
 
-Own commencement: 6 of 8, unchanged; no default or unit timing changed. **Proven: 0 of 1,540 sections before and after**, so no verdict changed. The 1,772 act-level entries at the eight end states split into three classes:
-- **unattributed (#859): 1,376.** At 2026-11-06 every unattributed operation is in effect or unresolved, and known. Most come from lov/2015-06-19-65, which amends utlendingsloven, tvisteloven and merverdiavgiftsloven in its § 6, so under D7 its 219 unattributed operations keep every state of those acts built from it unproven.
+Own commencement: 6 of 8, unchanged; no default or unit timing changed. **Proven: 0 of 1,540 sections before and after**, so no verdict changed. The 1,788 act-level entries at the eight end states split into three classes:
+- **unattributed (#859): 1,392.** At 2026-11-06 every unattributed operation is in effect or unresolved, and known. Most come from lov/2015-06-19-65, which amends utlendingsloven, tvisteloven and merverdiavgiftsloven in its § 6, so under D7 its 219 unattributed operations keep every state of those acts built from it unproven.
 - **target unknown with unresolved timing (#858): 140.**
 - **other: 256**, down from 343. These are the handler failures the old act-level set already held; 87 fewer because straffeloven's §§ 4–5 failures are no longer straffeloven's.
 
@@ -120,24 +120,25 @@ Committed evidence digests (sha256):
 
 ## 3. Audit of every operation whose attribution changed
 
-Across all rebuilt reports, 435 operations are unattributed that were not unattributed before. Each one was classified against its attribution at `51c5d702`:
+Across all rebuilt reports, 451 operations are unattributed that were not unattributed before. Each one was classified against its attribution at `51c5d702`:
 
-1. **222 were straffeloven's.** 216 are the lov/2015-06-19-65 § 4/§ 5 blocks (militær straffelov, straffeprosessloven). The other 6 come from lov/2008-03-07-4 (§ 2.1).
+1. **227 were straffeloven's.** 216 are the lov/2015-06-19-65 § 4/§ 5 blocks (militær straffelov, straffeprosessloven). 6 come from lov/2008-03-07-4 (§ 2.1). 5 come from lov/2007-04-13-14 part IV, which opens `I § 102 nr. 4 (endringer i lov 22. mai 1981 nr. 25 om rettegangsmåten i straffesaker) tilføyes:`: they are straffeprosessloven provisions (§§ 68, 76, 332, 333, 455) embedded in straffeloven § 102 nr. 4.
 2. **126 were already unattributed.** They are only newly *listed* as `unattributed_events`.
-3. **47 were attributed to another act that their own block does not name.** Each sat after an intro the grammar cannot bind:
+3. **56 were attributed to another act that their own block does not name.** Each sat after an intro the grammar cannot bind:
    - an act cited by short title: `84. I plan- og bygningslov 14. juni 1985 nr. 77 …`, `I vegtrafikklov …`, `I sjømannslov …`, `I straffegjennomføringsloven …`, `I vegloven …`, `2. I Almindelig borgerlig Straffelov …`;
    - a capitalised `I Lov 29. juni 2007 nr. 75 …`;
+   - a reordered or nynorsk intro naming the act: `Frå det tidspunktet lova tek til å gjelde, blir desse endringane i lov 8. november 1991 nr. 76 om kommunale og fylkeskommunale eldreråd gjort gjeldande:` (lov/2007-06-15-21, credited to lov/2005-06-17-58), `§ 13-3 nr. 5 om endringer i skattebetalingsloven:` (lov/2022-12-20-110: an amendment to an amendment list, every operation `unsupported`);
    - an intro fused into the end of the previous payload ledd: `… 17. I lov 13. juni 1997 nr. 45 om allmennaksjeselskaper gjøres følgende endringer:`, `196. I lov 27. juni 2003 nr. 58 …`, `1 a. I lov 6. juni 1891 nr. 2 …`.
 
    At `51c5d702` these were attributed to the preceding block's act. For example, allmennaksjeloven's and straffegjennomføringsloven's operations in lov/2014-05-09-16 went to sjøloven (lov/1994-06-24-39).
-4. **40 were silently dropped** as "prose outside any act's amendment block". They are `unsupported` sentences inside a block whose intro the grammar cannot bind, for example lov/2003-07-04-85's whole friskolelova block and 18 of lov/2015-06-19-65 §§ 4–5. They are now counted.
+4. **42 were silently dropped** as "prose outside any act's amendment block". They are `unsupported` sentences inside a block whose intro the grammar cannot bind, for example lov/2003-07-04-85's whole friskolelova block, 18 of lov/2015-06-19-65 §§ 4–5 and lov/2012-06-22-49's `I almindelig borgerlig straffelov 22. mai 1902 nr. 10 skal desse endringane gjerast:`. They are now counted.
 
-No operation lost an attribution that a recognised intro of its own block proves. Three unsupported sentences about straffeloven itself (lov/2008-03-07-4 I:111/112/114, after `I straffeloven 2005 tredje del gjøres følgende endringer:`, a short-title intro) moved from act-level `unsupported` to unattributed. Both block every state, so nothing became provable. A first version of the fix also closed blocks at unit-level sub-intros: it lost 19 friskolelova, 6 arbeidsmiljøloven and 4 straffeloven operations. The audit caught this, the unit-led exemption fixed it, and the regression tests pin it.
+No operation lost an attribution that a recognised intro of its own block proves. Three unsupported sentences about straffeloven itself (lov/2008-03-07-4 I:111/112/114, after `I straffeloven 2005 tredje del gjøres følgende endringer:`, a short-title intro) moved from act-level `unsupported` to unattributed. Both block every state, so nothing became provable. A first version of the fix also closed blocks at unit-level sub-intros: it lost 19 friskolelova, 6 arbeidsmiljøloven and 4 straffeloven operations. The audit caught this, the unit-led exemption fixed it, and the regression tests pin it. A second over-reach came from the round-3 word-order rule: payload instructions citing an earlier amending act as the source of their wording (`I § 52 a, slik ny § 52 a lyder etter endringer ved lov 20. januar 2012 nr. 6 del X, skal … lyde:`, lov/2014-06-20-49) closed straffeloven's block and lost a valid § 83 insertion. Sentences that open a payload are now excluded from that rule, and a test pins the case.
 
 ## 4. Tests and gates
 
-- **Red-first.** The 51 new unit tests (`tests/unit/test_legaltime_phase4_{attribution,commencement,blanket}.py`) were run against `51c5d702`: **30 fail, 21 pass**. Every defect has failing tests on the old code (#856 10, #857 11, #858 3, #859 6). Later additions (review round: three unit-conditional cases, two reference-clause negatives, the `_named` branches, `state_at`) bring the phase-4 unit set to 62. The 21 that pass are preservation and negative guards: valid multi-paragraph blocks, unit-level sub-intros, truly informational prose, named targets, pending and future operations.
-- `tests/integration/test_legaltime_phase4.py` (pinned archives) checks four things. On the real member: 216 §§ 4–5 operations, none straffeloven's. On the straffeloven ladder: nothing from them applied, and the blanket names the member. The real FOR-2009-06-19-704 block keeps sentence 2. The barnevernsloven XI:12.0/14.0 operations blanket every state.
+- **Red-first.** The 51 new unit tests (`tests/unit/test_legaltime_phase4_{attribution,commencement,blanket}.py`) were run against `51c5d702`: **30 fail, 21 pass**. Every defect has failing tests on the old code (#856 10, #857 11, #858 3, #859 6). Later additions (review rounds 1–3: unit-conditional and reference-clause cases, short-title and reordered intros, payload instructions citing an earlier amendment, substitution and payload negatives, the `_named` branches, `state_at`) bring the phase-4 unit set to 73. The 21 that pass are preservation and negative guards: valid multi-paragraph blocks, unit-level sub-intros, truly informational prose, named targets, pending and future operations.
+- `tests/integration/test_legaltime_phase4.py` (pinned archives) checks four things; the naturmangfoldloven check also asserts that the act's default stays `unresolved` with FOR-2009-06-19-704 among its proofs. On the real member: 216 §§ 4–5 operations, none straffeloven's. On the straffeloven ladder: nothing from them applied, and the blanket names the member. The real FOR-2009-06-19-704 block keeps sentence 2. The barnevernsloven XI:12.0/14.0 operations blanket every state.
 - `tests/integration/test_legaltime_phase3.py`: the straffeloven pins move from (105, 614, 376) to (99, 392, 335), with the reason in a comment. The barnevernsloven and pilot evidence regenerate byte-for-byte from the committed files.
 - **Determinism:** two independent rebuilds of all 14 reports and the coverage file (15 files) produced identical sha256 digests.
 
