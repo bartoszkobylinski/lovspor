@@ -1129,6 +1129,19 @@ sentence with a date, exception or reservation is never dropped as informational
 timing unknown-target operations (#858) and unattributed operations in effect at D (#859) are act-level
 problems. Proven stays 0 of 1,540 phase-2 sections; the four phase-1 acts are unchanged in content.
 
+Phase 4B (2026-11-10, #861; note `docs/research/legal-time-replay-phase4b-2026-11-10.md`, coverage
+`docs/research/data/legal-time-coverage-2026-11-10-phase4b.json`, per-operation audit
+`docs/research/data/legal-time-attribution-audit-2026-11-10.json`; `REPLAY_VERSION`
+`legaltime-replay-5`): an intro outside the two canonical shapes binds its act only on a reproducible
+evidence chain: a closed sentence shape, exactly one act cited by day, month, year and number, no
+amendment of an amendment, and the member's own `changesToDocuments` header listing that act. A short
+title alone is never an identity. A numbered list item led by an act citation closes the open block,
+so it no longer inherits the act before it. Every one of the 410 changed attributions is classified:
+380 source-proven (9 replacing a false attribution), 23 false attributions removed, 7 intro sentences
+no longer counted as operations, 0 incorrect. Unattributed 1,392 → 175 (451 → 96 distinct), act-level
+1,788 → 570; proven stays 0 of 1,540, the blanket is not narrowed, and the four phase-1 acts are
+unchanged in content.
+
 ## How to use this document
 
 - **Before starting a session**: read this + `CLAUDE.md`. Those two together are the full context.
