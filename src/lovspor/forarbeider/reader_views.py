@@ -6,6 +6,11 @@ not enacted law. Only what the dataset itself publishes is shown: identity,
 labels, receipts, digests and the separate time axes. No reviewer handle,
 dossier, evidence, authorization, raw page or path outside the dataset.
 Chapter text appears only in the ``chapter`` record, for the one chapter asked for.
+
+The document, chapter and provenance records are version 2: each receipt
+carries the clearance its manifest states (a version 1 manifest is lifted to
+``owner_review`` with ``provenance: manifest_v1``), and the times carry the
+policy's decision as its own axis.
 """
 
 import json
@@ -14,7 +19,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.forarbeider.corpus_models import ChapterReceipt
+from lovspor.forarbeider.corpus_models import ChapterReceiptV2
 from lovspor.forarbeider.corpus_reader import Member, Shelf
 from lovspor.forarbeider.corpus_render import ReleasedChapter, _chapter, reference
 from lovspor.forarbeider.models import JSON_LAYOUT
@@ -59,7 +64,8 @@ class Times(BaseModel):
     model_config = _FROZEN
 
     source_published_at: date | None
-    reviewed_at: datetime
+    reviewed_at: datetime | None
+    policy_decided_at: datetime | None
     owner_decided_at: datetime
     released_at: datetime
     time_basis: Literal["operator_supplied_unauthenticated"]
@@ -85,6 +91,7 @@ class ListRecord(_Record):
 
 
 class DocumentRecord(_Record):
+    schema_version: Literal[2] = 2  # type: ignore[assignment]
     record_type: Literal["forarbeider_reader_document"] = "forarbeider_reader_document"
     manifest_sha256: str | None
     document: DocumentIdentity
@@ -96,30 +103,32 @@ class DocumentRecord(_Record):
     coverage: str
     partial_curated_excerpt: bool
     listed_chapters: tuple[int, ...]
-    chapters: tuple[ChapterReceipt, ...]
+    chapters: tuple[ChapterReceiptV2, ...]
     times: Times
     path: str
     markdown_sha256: str | None
 
 
 class ChapterRecord(_Record):
+    schema_version: Literal[2] = 2  # type: ignore[assignment]
     record_type: Literal["forarbeider_reader_chapter"] = "forarbeider_reader_chapter"
     document: DocumentIdentity
     reference: str
     labels: Labels
     coverage: str
     partial_curated_excerpt: bool
-    chapter: ChapterReceipt
+    chapter: ChapterReceiptV2
     markdown: str
 
 
 class ProvenanceRecord(_Record):
+    schema_version: Literal[2] = 2  # type: ignore[assignment]
     record_type: Literal["forarbeider_reader_provenance"] = "forarbeider_reader_provenance"
     manifest_sha256: str | None
     document: DocumentIdentity
     labels: Labels
     source_url: str
-    chapters: tuple[ChapterReceipt, ...]
+    chapters: tuple[ChapterReceiptV2, ...]
     times: Times
     path: str
     markdown_sha256: str | None

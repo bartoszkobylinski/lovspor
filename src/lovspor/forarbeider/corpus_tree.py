@@ -25,6 +25,9 @@ from lovspor.forarbeider.corpus_models import (
     INDEX_PATH,
     MANIFEST_PATH,
     ForarbeiderManifest,
+    ForarbeiderManifestV2,
+    lift_v1,
+    parse_any_manifest,
     parse_manifest,
     verify_members,
 )
@@ -61,6 +64,13 @@ class Dataset(NamedTuple):
     """The dataset as found: its manifest and the digest of its bytes, ``None`` when absent."""
 
     manifest: ForarbeiderManifest
+    manifest_sha256: str | None
+
+
+class AnyDataset(NamedTuple):
+    """The dataset as a reader finds it: a version 1 or 2 manifest, read as version 2."""
+
+    manifest: ForarbeiderManifestV2
     manifest_sha256: str | None
 
 
@@ -161,17 +171,57 @@ def read_dataset_files(checkout: Path) -> tuple[Dataset, dict[str, bytes]]:
     Raises:
         ForarbeiderRefusedError: as :func:`read_dataset`.
     """
+    found = _manifest_bytes(checkout)
+    if found is None:
+        return Dataset(EMPTY_MANIFEST, None), {}
+    raw, files = found
+    manifest = parse_manifest(raw)
+    _require_members(manifest, files)
+    return Dataset(manifest, digest(raw)), files
+
+
+def read_any_dataset_files(checkout: Path) -> tuple[AnyDataset, dict[str, bytes]]:
+    """:func:`read_dataset_files` for a reader: a version 1 manifest is lifted to version 2.
+
+    Raises:
+        ForarbeiderRefusedError: as :func:`read_dataset`, with ``manifest_incompatible``
+            only for a version other than 1 and 2.
+    """
+    found = _manifest_bytes(checkout)
+    if found is None:
+        return AnyDataset(lift_v1(EMPTY_MANIFEST), None), {}
+    raw, files = found
+    manifest = parse_any_manifest(raw)
+    _require_members(manifest, files)
+    return AnyDataset(manifest, digest(raw)), files
+
+
+def _manifest_bytes(checkout: Path) -> tuple[bytes, dict[str, bytes]] | None:
+    """The manifest's bytes and every other dataset file, ``None`` without a dataset.
+
+    Raises:
+        ForarbeiderRefusedError: an unsafe tree, or a dataset with no manifest.
+    """
     files = _dataset_files(checked_checkout(checkout))
     if files is None:
-        return Dataset(EMPTY_MANIFEST, None), {}
+        return None
     raw = files.pop(MANIFEST_PATH, None)
     if raw is None:
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, MANIFEST_PATH)
-    manifest = parse_manifest(raw)
+    return raw, files
+
+
+def _require_members(
+    manifest: ForarbeiderManifest | ForarbeiderManifestV2, files: dict[str, bytes]
+) -> None:
+    """The index is the manifest's, and the other files exactly its released members.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_tree_mismatch``.
+    """
     if files.pop(INDEX_PATH, None) != render_index(manifest).encode():
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, INDEX_PATH)
     verify_members(manifest, files)
-    return Dataset(manifest, digest(raw)), files
 
 
 def _write_new(path: Path, text: str) -> None:
