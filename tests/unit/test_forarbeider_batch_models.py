@@ -421,3 +421,13 @@ def test_plan_lines_sums_included_and_uses_real_newlines() -> None:
         f"BATCH PLAN {'f' * 64} documents 1 included 2 "
         "(standing_policy 1, owner_review 1) excluded 0"
     )
+
+
+def test_an_owner_reviewed_chapter_line_names_its_report_and_pin() -> None:
+    chapter = PlannedChapter.model_validate(
+        _chapter(1, 2, classification="flagged", clearance=REVIEW)
+    )
+
+    line = _chapter_line(chapter)
+
+    assert line.endswith(f"flagged included owner_review report {'0' * 12} pin {'d' * 12}@1")

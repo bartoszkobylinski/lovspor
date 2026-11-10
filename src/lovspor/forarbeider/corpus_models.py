@@ -457,7 +457,7 @@ def _lifted(member: ManifestDocument, renderer_version: int) -> dict[str, object
         for item in member.chapters
     )
     times = {**member.times.model_dump(), "policy_decided_at": None}
-    fields = member.model_dump(exclude={"chapters", "times"})
+    fields = member.model_dump()
     return {**fields, "chapters": chapters, "times": times, "renderer_version": renderer_version}
 
 

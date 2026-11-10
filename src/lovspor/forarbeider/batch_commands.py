@@ -192,7 +192,7 @@ def _chapter_line(chapter: PlannedChapter) -> str:
         return f"{head} included standing_policy policy {clearance.policy_sha256[:12]}"
     if isinstance(clearance, ReviewClearance) and clearance.review is not None:
         pin = f"{clearance.review.subject_key[:12]}@{clearance.review.revision}"
-        report = (clearance.report_sha256 or "")[:12]
+        report = str(clearance.report_sha256)[:12]
         return f"{head} included owner_review report {report} pin {pin}"
     return f"{head} excluded {','.join(chapter.reasons)}"
 

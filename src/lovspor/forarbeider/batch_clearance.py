@@ -239,7 +239,7 @@ def planned_chapter(
         classification=kind,
         included=clearance is not None,
         clearance=clearance,
-        reasons=tuple(sorted(reasons, key=str)),
+        reasons=tuple(sorted(reasons)),
     )
 
 
