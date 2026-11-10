@@ -1,5 +1,6 @@
 """``lovspor ops forarbeider-fetch`` is reachable and its pages feed the offline commands (#738)."""
 
+import gzip
 import json
 import re
 from dataclasses import replace
@@ -99,6 +100,22 @@ def test_an_incomplete_run_reports_what_was_not_stored(
     assert not complete
     assert f"http_status {OTHER} status 404" in report
     assert report.splitlines()[-1].startswith("fetched 1 of 2;")
+
+
+def test_a_content_encoded_page_is_reported_and_leaves_the_run_incomplete(
+    httpx_mock: HTTPXMock, tmp_path: Path
+) -> None:
+    httpx_mock.add_response(url=ROBOTS, text="User-agent: *\n")
+    httpx_mock.add_response(
+        url=URL,
+        content=gzip.compress(FIXTURE.read_bytes()),
+        headers={"Content-Encoding": "gzip"},
+    )
+    report, complete = fetch_impl(_list(tmp_path, URL), tmp_path / "staging", 10, _instant())
+    assert not complete
+    assert f"content_encoded {URL} status 200" in report
+    assert report.splitlines()[-1].startswith("fetched 0 of 1;")
+    assert list((tmp_path / "staging").glob("*.html")) == []
 
 
 def test_incomplete_command_exits_2_and_writes_the_run_record(
