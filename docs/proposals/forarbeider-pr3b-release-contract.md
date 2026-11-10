@@ -20,7 +20,7 @@
    - retention and deindexing;
    - the owner's acceptance of Git-history permanence;
    - the owner's explicit acceptance that a chapter the detectors do not flag is published without a person reading it, as **its own file**. A value set in code is not this acceptance;
-   - the robots.txt and website-terms pages the owner read, as the exact bytes `forarbeider-fetch` stored (point 8), never a browser copy.
+   - the robots.txt and website-terms pages the owner read, as the exact bytes `forarbeider-fetch` stored (point 8), never a browser copy, together with the terms page's URL. The URL is part of the signed record: a current proof must read the terms from the same URL, so an unchanged copy of old terms served at another address cannot stand in for the page the owner read. Sign makes no request and cannot verify that the terms file came from that URL; the pairing is the owner's assertion.
 
    Signing happens at a terminal and makes no network request. Before the prompt the command prints the source, the document types, the validity window, every bound file's kind and SHA-256 prefix, and the first 12 hex digits of the SHA-256 of the canonical policy record. The typed phrase contains that digest prefix, so any change to any bound byte changes the phrase, and a wrong phrase writes nothing. A typed phrase at a terminal is the owner's act, not cryptographic identity; the record claims no more.
 
@@ -53,7 +53,8 @@
    - a 403 or 429 on any request stops the run; later URLs are recorded as not attempted;
    - it follows no redirect for a document page, and stores no body over its size cap;
    - it sends one identifying User-Agent with a contact address;
-   - it stores pages owner-only under their SHA-256, in a directory outside every Git checkout.
+   - it stores pages owner-only under their SHA-256, in a directory outside every Git checkout;
+   - **exact bytes as served** means the response content with no content coding: every request sends `Accept-Encoding: identity`, and an uncoded body is stored and hashed byte for byte as it arrived (HTTP/1.1 chunked framing is not content; no charset decoding or normalisation). A body that still carries a `Content-Encoding` other than `identity` is never decoded and never stored: its digest would depend on the server's compressor, and inflating it defeats the size cap. A page records `content_encoded`, robots.txt makes the run unreadable, the terms read as unreadable. This is the "raw-response SHA-256" of ADR-0018.
 
    This is not harvesting. Each URL is named by the owner.
 7. **Manifest records how a chapter was cleared.** Each chapter carries `cleared_by: standing_policy | owner_review` and the policy digest, in manifest schema 2. No reader may present a policy-cleared chapter as individually human-reviewed.
@@ -66,6 +67,8 @@
    - **Website terms** are fetched in the same run from one owner-named `https://www.regjeringen.no` page (`--terms-url`), under the same robots.txt and spacing, following no redirect. A 200 stores the exact body; a 403 or 429 stops the run; any other 4xx records the terms as absent; a 3xx, 5xx, transport failure or oversized body records them as unreadable. The bytes are hashed raw, as served, with no normalisation: a cosmetic change to the page reads as changed terms and denies until the owner re-signs. That cost is the price of failing closed.
    - The run record carries, for robots.txt and for the terms page: the requested URL, every redirect hop, the final status, the state above, the retrieval time, and for a stored body its SHA-256 and size. A reader recomputes the SHA-256 of the stored bytes and refuses a mismatch.
    - **Comparison.** An evaluation for automatic clearance consumes one validated current source proof: a fetch run record whose stored robots.txt and terms bytes re-hash to their recorded digests, retrieved at most 24 hours before the evaluation. It clears only if robots.txt is published and its digest equals the policy's robots evidence, and the terms are published and their digest equals the policy's terms evidence. A missing or stale proof, a robots.txt or terms page that is absent, refused or unreadable, a digest that differs, or stored bytes that do not match their record each **DENY automatic clearance**. The flagged-chapter path is unaffected.
+   - The proof must also be a record a fetch run writes: robots.txt under its kind and canonical URL, a redirect chain that starts there and chains hop to hop on `https://www.regjeringen.no` (at most five redirects), terms from a URL inside the `--terms-url` grammar with at most one request, a final status that matches the recorded state, times that do not run backwards and the fetcher's own User-Agent. Anything else DENYs by refusal, and so does a terms URL that differs from the policy's.
+   - **Integrity, not authentication.** These checks prove a proof is intact and internally consistent. Nothing in it is signed by regjeringen.no, so it never proves the server sent those bytes; anyone who can write the owner-only staging directory can write a consistent record. The trust boundary is that directory and the owner running the fetch.
    - `policy sign` and `policy show` make no network request; current proof comes only from a fetch run.
    - **Robots access never grants reuse rights.** The rights basis is the signed assessment under åndsverkloven § 14 and § 24; robots.txt only governs whether the fetcher may request a page.
 
