@@ -198,8 +198,11 @@ value, fail-closed. Politik's research reader (#185 there) took the value on
 `lovtidend-avd1-2026.tar.bz2`, binds each cited member to its archive's year, and
 requires the manifest's NLOD 2.0 attribution for such a file. It still refuses
 every `release_candidate`; the opt-in reader that verifies the owner's signed
-approval itself (#186 there) merged the same day. ADR-0021 ("Contract version"):
-once any `1.0.0-rc` file leaves the private workspace, or once Politik #185
-merges, a further enum change needs a version bump. #185 has merged, so the
-`1.0.0-rc` enum is frozen from 2026-11-09; this freezes the contract and
-publishes nothing.
+approval itself (#186 there) merged the same day, and so did the law page's
+case evidence built on that reader (#193 there). That feature is off by
+default and stays off until the owner turns it on; none of the three merges
+grants publication, which remains a separate owner step. ADR-0021 ("Contract
+version"): once any `1.0.0-rc` file leaves the private workspace, or once
+Politik #185 merges, a further enum change needs a version bump. #185 has
+merged, so the `1.0.0-rc` enum is frozen from 2026-11-09; this freezes the
+contract and publishes nothing.
