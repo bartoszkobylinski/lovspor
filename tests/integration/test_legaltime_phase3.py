@@ -116,15 +116,19 @@ def test_straffeloven_is_commenced_by_its_ikraftsettingslov_and_chapter_16_contr
     assert [s["status"] for s in states] == ["not_yet_in_force"] * 3 + ["replayed"]
     # The 2008 decision dates chapter 16's operations the day it is published, the act is not in
     # force, so they wait: 4 withheld the day before, 99 the day of; by 2015-09-30 every dated
-    # operation waits (392); on 2015-10-01 the text exists (358 provisions) and 335 apply.
+    # operation waits (391); on 2015-10-01 the text exists (358 provisions) and 335 apply.
     # Phase 4A (#856): 105/614/376 at 51c5d702 counted the militær straffelov and
     # straffeprosessloven blocks of lov/2015-06-19-65 §§ 4-5 (216 ops, 41 applied) and six
     # unsupported sentences of lov/2008-03-07-4 after intros the grammar cannot bind (``I
     # straffeloven 2005 tredje del …``, ``1. I militær straffelov …``) as straffeloven's.
+    # Phase 4B (#861): 392 → 391 at 2015-09-30. lov/2009-06-19-74's ``2. Lov 13. desember 1946
+    # nr. 14 om straff for utlendske krigsbrotsmenn oppheves.`` repeals another act; Phase 4A
+    # credited it to the straffeloven block before it, a numbered item naming an act now closes
+    # that block.
     assert [(len(s["withheld"]), len(s["applied"]), len(s["provisions"])) for s in states] == [
         (4, 0, 0),
         (99, 0, 0),
-        (392, 0, 0),
+        (391, 0, 0),
         (0, 335, 358),
     ]
     assert all(s["unresolved_commencement"] == [] for s in states)

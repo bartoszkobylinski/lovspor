@@ -10,6 +10,8 @@ instead of guessing. Nothing here applies an operation.
 import re
 from typing import Literal
 
+from lovspor.legaltime import attribution
+from lovspor.legaltime.attribution import Binding, is_intro
 from lovspor.legaltime.document import Document, Frozen, Ledd, Node, Provision
 from lovspor.legaltime.text import (
     ORDINAL_ALT,
@@ -54,17 +56,6 @@ _REPEAL = (
     r"(?:oppheves|opphevast|blir\s+oppheva|vert\s+oppheva|blir\s+opphevet|strykes"
     r"|blir\s+sletta|vert\s+sletta|utgår)\.?"
 )
-_INTRO = re.compile(
-    r"^(?:\d+\.\s*)?I\s+(?:midlertidig\s+)?(?:lov\s+av\s+(?=\d)|(?=lov))(?P<act>lov\s+)?"
-    r"(?P<date>\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?)\b.*?"
-    r"\s+(?:(?:gjøres|gjerast|gjer\s+ein|blir|vert|skal)\s+(?P<rest>.*)"
-    r"|(?P<inline>(?:oppheves|opphevast)\s+§.*)|(?P<repeal>oppheves|opphevast|blir\s+oppheva|vert\s+oppheva)\.?)$",
-    re.S,
-)
-_INTRO_SLIK = re.compile(
-    r"^(?:\d+\.\s*)?(?:I\s+)?[Ll]ov\s+(?:av\s+)?(?P<date>\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?)\b"
-    r"[^:]*?\s+(?:endres|endrast|vert\s+endra|blir\s+endra)\s+slik:$"
-)  # ``Lov 20. mai 2005 nr. 28 om straff endres slik:`` opens an amendment block too
 _UNBOUND_INTRO = re.compile(
     r"(?:\b(?:gjøres|gjerast|gjer\s+ein|blir\s+gjort|vert\s+gjort)\s+(?:følgende|følgjande|desse|slike)"
     r"\s+endring\w*|\b(?:endres|endrast|vert\s+endra|blir\s+endra)\s+slik)\b[^:]*:$",
@@ -262,10 +253,6 @@ def _addressed_act(change_part: tuple[str, ...]) -> str | None:
 _COMMENCEMENT_HEADING = re.compile(r"ikraft|iverkset|i\s+kraft", re.I)
 
 
-def _is_intro(text: str) -> bool:
-    return _INTRO.match(text) is not None or _INTRO_SLIK.match(text) is not None
-
-
 def _commencement_provisions(document: Document) -> list[str]:
     """An enacting act states its commencement in a provision headed Ikrafttredelse or alike.
 
@@ -277,7 +264,7 @@ def _commencement_provisions(document: Document) -> list[str]:
         if not _COMMENCEMENT_HEADING.search(provision.heading):
             continue
         for ledd in provision.ledd:
-            if _is_intro(ledd.text):
+            if is_intro(ledd.text):
                 break
             texts.append(ledd.text)
     return texts
@@ -301,7 +288,7 @@ def _instruction_like(node: Node) -> bool:
     if node.kind != "ledd":
         return False
     text = node.text
-    return bool(_is_intro(text) or _SUBSTITUTE.match(text)) or classify(text)[0] != "unsupported"
+    return bool(is_intro(text) or _SUBSTITUTE.match(text)) or classify(text)[0] != "unsupported"
 
 
 def _unbound_intro(text: str) -> bool:
@@ -311,7 +298,7 @@ def _unbound_intro(text: str) -> bool:
     (``I lov … skal følgende endringer gjøres:``) opens a block as surely as the shapes
     ``_UNBOUND_INTRO`` spells out.
     """
-    if _is_intro(text) or _SUBSTITUTE.match(text):
+    if is_intro(text) or _SUBSTITUTE.match(text):
         return False
     names_act = act_refid(text) is not None or _ACT_WORD.search(text) is not None
     instructs = _OPENS_PAYLOAD.search(text) is not None  # ``… slik § 52 a lyder etter endringer
@@ -345,6 +332,7 @@ class _Reader:
         self.pending_item_act: str | None = None
         self.bound_host: str | None = None  # the article whose intro bound ``act``
         self.unbound = False  # inside a block whose intro names an act the grammar cannot bind
+        self.in_list = False  # inside a list intro naming no act: numbered act headings bind
 
     def run(self) -> Interpretation:
         for index, part in enumerate(self.document.parts):
@@ -359,31 +347,53 @@ class _Reader:
     def _read_part(self, part: tuple[str, str], nodes: list[Node]) -> None:
         """``part`` is (printed label, unique tag prefix)."""
         self.substitution, self.pending_item_act, self.act = None, None, None
-        seen_instruction, skip_until = False, 0
+        self.in_list, seen_instruction, skip_until = False, False, 0
         for index, node in enumerate(nodes):  # a for loop: no index arithmetic can stall it
             if index < skip_until:
                 continue  # consumed as the payload of the instruction before it
-            self._boundary(node)
-            if _instruction_like(node):
+            binding = self._boundary(node)
+            read = self._bound(node, binding) if binding.act else node
+            if read is None:
+                seen_instruction = True
+            elif _instruction_like(read):
                 end = _next_instruction(nodes, index + 1)
-                consumed = self._paragraph(part, index, node, tuple(nodes[index + 1 : end]))
+                consumed = self._paragraph(part, index, read, tuple(nodes[index + 1 : end]))
                 seen_instruction = True
                 if consumed:
                     skip_until = end
             else:
-                self._loose(node, seen_instruction, part, index)
+                self._loose(read, seen_instruction, part, index)
+            if binding.act:  # the intro closes its own node: its act binds what follows
+                self.act, self.unbound = binding.act, False
 
-    def _boundary(self, node: Node) -> None:
+    def _boundary(self, node: Node) -> Binding:
         """Close the open block where its act is no longer proven (#856).
 
         An act is bound only by an intro naming it, inside the article that intro sits
         in. A new article, or an intro whose act the grammar cannot name, ends the block:
         what follows is unattributed until another intro names its act, never inherited.
         """
-        unbound = _unbound_intro(node.text)
-        if node.host_section != self.bound_host or unbound:
+        unbound, moved = _unbound_intro(node.text), node.host_section != self.bound_host
+        binding = self._binding(node.text, unbound)
+        if moved or unbound or binding.opens:
             self.substitution, self.pending_item_act, self.act = None, None, None
-            self.bound_host, self.unbound = node.host_section, unbound
+            self.bound_host, self.unbound = node.host_section, unbound or binding.opens
+        listing = unbound and not attribution.citations(node.text)  # ``… i andre lover:``
+        self.in_list = (self.in_list and not moved) or listing
+        return binding
+
+    def _bound(self, node: Node, binding: Binding) -> Node | None:
+        """A proven intro is no operation; what precedes it in a paragraph is read as before."""
+        if not _instruction_like(node):
+            return node  # a ledd intro reads as loose text, exactly as Phase 4A read it
+        if _clause_like(binding.intro):
+            self.clauses.append(binding.intro)
+        return node.model_copy(update={"text": binding.head}) if binding.head else None
+
+    def _binding(self, text: str, unbound: bool) -> Binding:
+        if _SUBSTITUTE.match(text) or (self.substitution and not unbound):
+            return Binding()  # a substitution intro, or an item of its list
+        return attribution.bind(text, self.document.header.changes_to_documents, self.in_list)
 
     def _loose(self, node: Node, seen: bool, part: tuple[str, str], index: int) -> None:
         if self.substitution is not None and node.kind == "ledd":
@@ -411,18 +421,26 @@ class _Reader:
 
     def _open_block(self, text: str) -> str | tuple[str, str] | None:
         """Name the act an intro opens; the sentence(s) to classify, or None for an intro alone."""
-        slik = _INTRO_SLIK.match(text)
+        slik = attribution.INTRO_SLIK.match(text)
         if slik is not None:
             self.substitution, self.act = None, act_refid(f"lov {slik.group('date')}")
             return None
-        intro = _INTRO.match(text)
+        intro = attribution.INTRO.match(text)
         if intro is None:
-            return text
+            return self._inline(text)
         self.substitution, self.act = None, act_refid(f"lov {intro.group('date')}")
         rest = _intro_rest(intro)
         if _INTRO_ONLY.match(rest):
             return None
         return (rest, text) if intro.group("inline") else rest
+
+    def _inline(self, text: str) -> str:
+        """Phase 4B: ``N. Lov <citation> … § X skal lyde:`` binds its proven act from here on."""
+        item = attribution.inline(text, self.document.header.changes_to_documents)
+        if item is None:
+            return text
+        self.act, self.unbound = item[0], False
+        return item[1]
 
     def _substitution_item(self, part: tuple[str, str], index: int, node: Node) -> bool:
         act = act_refid(node.text)
