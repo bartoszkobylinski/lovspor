@@ -1,0 +1,21 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/instructions.py"
+symbol = "__init__"
+registered = "2026-11-10, PR #865, from the mutation artifact at commit 1f8be75f"
+mutation = """
+-        self.bound_host: str | None = None  # the article whose intro bound ``act``
++        self.bound_host: str | None = ""  # the article whose intro bound ``act``
+"""
+justification = """
+``bound_host`` is read only in ``_Reader._boundary``: ``if node.host_section !=
+self.bound_host or unbound:`` resets ``substitution``, ``pending_item_act`` and
+``act`` to None and sets ``bound_host`` to the node's host and ``unbound`` to the
+node's own ``_unbound_intro`` value. ``_boundary`` runs before anything else for
+the first node read. With the initial value None that node either matches (host
+None, not an intro: nothing changes) or resets; with "" it always resets. A reset
+at the first node writes None over values that ``__init__`` and ``_read_part``
+already set to None, writes the node's host into ``bound_host`` (what a match
+would leave it equal to) and writes ``unbound`` = ``_unbound_intro(text)``, which
+the non-reset path also leaves at False when that is False and resets to True
+otherwise. Every later read sees the same state, so the output is identical.
+"""

@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/commencement.py"
+symbol = "_conditions_a_unit"
+registered = "2026-11-10, PR #865, from the mutation artifact at commit 1f8be75f"
+mutation = """
+-    main = _LEADING_CONDITION.sub("", stated, count=1)
++    main = _LEADING_CONDITION.sub("", stated, )
+"""
+justification = """
+``_LEADING_CONDITION`` (a leading Er/Dersom/Hvis/Når/Fra den tid clause up to its
+first comma) starts with ``^`` and is compiled with ``re.I`` only: anchored at the string start, no ``re.MULTILINE``.
+``re.sub`` scans left to right and resumes after each match; ``^`` without
+MULTILINE matches only at position 0, so after a first match at 0 no later
+position can match. The pattern therefore replaces at most one occurrence, and
+``count=1`` and no count (unlimited) give the same string for every input.
+Python's own ``re`` semantics, not a dependency's.
+"""
