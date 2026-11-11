@@ -387,3 +387,39 @@ def test_inline_date_only_substitution_keeps_locations_and_requires_header_proof
         ("substitute_term", expected, SUBSTITUTE_ITEMS[3]),
         ("substitute_term", "lov/1972-06-09-31", "§ 13 tredje ledd"),
     ]
+
+
+@pytest.mark.parametrize("changes", [(), (FORVALTNING, "lov/1967-02-10-3")])
+def test_split_unproven_substitution_item_consumes_only_its_own_locations(
+    changes: tuple[str, ...],
+) -> None:
+    """Research note §1: unproven items retain locations and end the preceding pending act."""
+    body = "".join(
+        _p(text)
+        for text in (
+            SUBSTITUTE,
+            SUBSTITUTE_ITEMS[0],
+            SUBSTITUTE_ITEMS[2],
+            SUBSTITUTE_ITEMS[3],
+            "§ 2",
+            *SUBSTITUTE_ITEMS[4:],
+        )
+    )
+    operations = _operations(body, *changes)
+    assert [(op.act, op.locations) for op in operations if op.kind == "substitute_term"] == [
+        (None, SUBSTITUTE_ITEMS[3]),
+        ("lov/1972-06-09-31", "§ 13 tredje ledd"),
+    ]
+
+
+@pytest.mark.parametrize("changes", [(), (SKIFTE,), (SKIFTE, "lov/1930-02-21-3")])
+def test_date_only_change_address_overrides_only_its_node(changes: tuple[str, ...]) -> None:
+    """A node's address uses header proof without rebinding the surrounding numbered block."""
+    body = _article(
+        "§1",
+        _ledd(NUMBERED),
+        _addressed(f"{SKIFTE}/§41", _p("§ 41 oppheves.")),
+        _p("§ 42 oppheves."),
+    )
+    expected = SKIFTE if changes == (SKIFTE,) else None
+    assert _acts(body, *changes) == [("§41", expected), ("§42", STRAFFELOVEN)]
