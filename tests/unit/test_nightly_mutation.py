@@ -270,6 +270,35 @@ def test_a_rerun_after_a_completed_night_measures_an_empty_range(main_repo: Path
     assert out["source"].startswith("tag `nightly-mutation-base`")
 
 
+@pytest.mark.parametrize("annotated", [False, True])
+def test_a_valid_tag_needs_no_week_old_history(main_repo: Path, annotated: bool) -> None:
+    """A usable completed-night tag takes precedence over the seven-day fallback."""
+    tagged = _commit(main_repo, "measured", _ago(timedelta(hours=2)))
+    if annotated:
+        _git(
+            main_repo,
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "tag",
+            "-a",
+            "nightly-mutation-base",
+            "-m",
+            "completed night",
+            tagged,
+        )
+    else:
+        _git(main_repo, "tag", "nightly-mutation-base", tagged)
+    head = _commit(main_repo, "not measured yet")
+
+    status, out = _resolve_range(main_repo)
+
+    assert status == 0
+    assert (out["base"], out["head"]) == (tagged, head)
+    assert out["source"].startswith("tag `nightly-mutation-base`")
+
+
 def test_a_rerun_of_an_incomplete_night_measures_the_same_range(main_repo: Path) -> None:
     _commit(main_repo, "old", OLD)
     tagged = _commit(main_repo, "measured by the last completed night")
