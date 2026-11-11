@@ -423,16 +423,14 @@ class _Reader:
     def _open_block(self, text: str) -> str | tuple[str, str] | None:
         """Name the act an intro opens; the sentence(s) to classify, or None for an intro alone."""
         slik = attribution.INTRO_SLIK.match(text)
-        if slik is not None:
-            self.substitution, self.act = None, act_refid(f"lov {slik.group('date')}")
-            return None
-        intro = attribution.INTRO.match(text)
+        intro = slik or attribution.INTRO.match(text)
         if intro is None:
             return self._inline(text)
-        self.substitution, self.act = None, act_refid(f"lov {intro.group('date')}")
-        rest = _intro_rest(intro)
-        if _INTRO_ONLY.match(rest):
-            return None
+        changes = self.document.header.changes_to_documents
+        self.substitution, self.act = None, attribution.canonical_act(intro.group("date"), changes)
+        self.unbound = self.unbound or self.act is None  # #872: unproven, so never inherited
+        if slik is not None or _INTRO_ONLY.match(rest := _intro_rest(intro)):
+            return None  # an intro alone: ``INTRO_SLIK`` always, ``INTRO`` without an instruction
         return (rest, text) if intro.group("inline") else rest
 
     def _inline(self, text: str) -> str:
@@ -444,22 +442,24 @@ class _Reader:
         return item[1]
 
     def _substitution_item(self, part: tuple[str, str], index: int, node: Node) -> bool:
-        act = act_refid(node.text)
+        act = attribution.item_act(node.text, self.document.header.changes_to_documents)
         has_locations = "§" in node.text
         if act is not None and not has_locations:
             self.pending_item_act = act
             return True
-        if act is None and has_locations and self.pending_item_act is not None:
+        if act == "":  # #872: an unproven item ends the act pending before it, too
+            self.pending_item_act = None
+        elif act is None and has_locations and self.pending_item_act is not None:
             act, self.pending_item_act = self.pending_item_act, None
         if act is None or not has_locations:
             return False
         for offset, terms in enumerate(self.substitution or ()):
             where = (part[0], f"{part[1]}:{index}.{offset}", node.host_section)
-            self.operations.append(self._substitute(where, act, node.text, terms))
+            self.operations.append(self._substitute(where, act or None, node.text, terms))
         return True
 
     def _substitute(
-        self, where: tuple[str, str, str | None], act: str, text: str, terms: tuple[str, str]
+        self, where: tuple[str, str, str | None], act: str | None, text: str, terms: tuple[str, str]
     ) -> Operation:
         label, tag, host = where
         op_id = tag if "#" in tag else f"{self.document.header.refid}#{tag}"
@@ -477,7 +477,9 @@ class _Reader:
         payload: tuple[Node, ...],
     ) -> None:
         label, tag, host = where
-        context = (_addressed_act(change_part) or self.act, label, change_part, host)
+        addressed, changes = _addressed_act(change_part), self.document.header.changes_to_documents
+        act = self.act if addressed is None else attribution.identified(addressed, changes)  # #872
+        context = (act, label, change_part, host)
         text, quote = (text, None) if isinstance(text, str) else text
         text, payload = _inline_payload(text, payload)
         sentences = _pieces(text)

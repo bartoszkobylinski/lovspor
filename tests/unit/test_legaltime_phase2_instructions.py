@@ -20,10 +20,13 @@ ENACTED = Timing(status="dated", effective=date(2021, 1, 1))
 
 
 def _amending(
-    *articles: str, intro: str = "I lov 14. juni 2019 nr. 99 om prøving gjøres følgende endringer:"
+    *articles: str,
+    intro: str = "I lov 14. juni 2019 nr. 99 om prøving gjøres følgende endringer:",
+    changes: str = "",
 ) -> Document:
+    listed = f'<dd class="changesToDocuments"><ul><li>{changes}</li></ul></dd>' if changes else ""
     body = (
-        '<html><body><header><dl><dd class="refid">lov/2021-06-01-7</dd></dl></header>'
+        f'<html><body><header><dl><dd class="refid">lov/2021-06-01-7</dd>{listed}</dl></header>'
         f'<main><section class="section"><h2>I</h2><article class="defaultP">{intro}</article>'
         f"{''.join(articles)}</section></main></body></html>"
     )
@@ -110,10 +113,15 @@ def test_intro_variants_name_the_act_and_state_no_operation(intro: str, act: str
 
 
 def test_an_intro_with_an_inline_repeal_yields_that_repeal() -> None:
-    ops = _ops(intro="3. I lov 21. februar 1930 om skifte oppheves § 12 annet ledd annet punktum.")
+    """The repeal is read either way; its date-only act binds only on header proof (#872)."""
+    intro = "3. I lov 21. februar 1930 om skifte oppheves § 12 annet ledd annet punktum."
+    address = Address(section="§12", ledd=2, punktum=2)
+    ops = _ops(intro=intro, changes="lov/1930-02-21")
     assert [(op.kind, op.act, op.address) for op in ops] == [
-        ("repeal_punktum", "lov/1930-02-21", Address(section="§12", ledd=2, punktum=2))
+        ("repeal_punktum", "lov/1930-02-21", address)
     ]
+    unproven = _ops(intro=intro)
+    assert [(op.kind, op.act, op.address) for op in unproven] == [("repeal_punktum", None, address)]
     whole = _ops(intro="2. I lov 15. desember 1967 nr. 9 om patenter oppheves § 61.")
     assert [(op.kind, op.address.section) for op in whole] == [("repeal_section", "§61")]
 
