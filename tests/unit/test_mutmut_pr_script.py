@@ -168,12 +168,31 @@ class TestBudget:
 
 SILENT_MUTMUT = "#!/bin/sh\nexec sleep 30\n"
 NO_SETUP_ALLOWANCE = {"MUTMUT_PR_SETUP_BUDGET_SECONDS": "0"}
-# GNU timeout handles SIGALRM as its own timer firing: it marks the run timed
-# out, TERMs the child and exits 124. Raising it from the fake, after the
-# spinner is written, ends the budget at a known point instead of racing a
-# short wall clock against the fake's startup on a loaded machine (issue #491).
 SPINNER_BUDGET_SECONDS = 20
-SPINNER_MUTMUT = "#!/bin/sh\nprintf 'collecting stats\\r'\nkill -ALRM \"$PPID\"\nexec sleep 30\n"
+SPINNER_MUTMUT = "#!/bin/sh\nprintf 'collecting stats\\r'\n"
+
+
+def _budget_timeout_stand_in(tmp_path: Path, status: int) -> Path:
+    """A timeout(1) whose budget runs out right after the command has finished writing.
+
+    The order "spinner first, then the budget" has to be a fact of the test input:
+    a real short budget raced the fake's startup (issue #491), and a fake raising
+    SIGALRM at its own timeout(1) raced that process's fork() (issue #878) — in
+    coreutils 9.4 a SIGALRM that lands before the parent has stored the child's
+    pid makes it _exit(143), not 124. Real expiry stays covered by this class's
+    other tests, whose budget is timeout(1)'s own timer.
+    """
+    bin_dir = tmp_path / "timeout-bin"
+    bin_dir.mkdir()
+    stand_in = bin_dir / "timeout"
+    args_file = tmp_path / "timeout-args"
+    stand_in.write_text(
+        f'#!/bin/sh\nprintf \'%s\\n\' "$1" "$2" "$3" > \'{args_file}\'\n'
+        f'shift 3\n"$@"\nexit {status}\n',
+        encoding="utf-8",
+    )
+    stand_in.chmod(0o755)
+    return bin_dir
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -294,26 +313,6 @@ class TestBudgetKillBeforeFirstTally:
 
         assert "no mutant was measured before the budget ran out" in result.stdout
 
-    def test_budget_verdict_starts_after_spinner_line(self, tmp_path: Path) -> None:
-        repo = _repo_with_one_changed_function(tmp_path, SPINNER_MUTMUT)
-
-        result = subprocess.run(
-            ["bash", "scripts/mutmut-pr.sh", "base"],
-            cwd=repo,
-            capture_output=True,
-            env={
-                **os.environ,
-                **NO_SETUP_ALLOWANCE,
-                "MUTMUT_PR_FILE_BUDGET_SECONDS": str(SPINNER_BUDGET_SECONDS),
-            },
-            timeout=60,
-            check=False,
-        )
-
-        verdict = f"mutation budget exceeded: after {SPINNER_BUDGET_SECONDS}s".encode()
-        assert b"collecting stats\r\n" + verdict in result.stdout
-        assert result.returncode == 16
-
     def test_the_gate_reads_it_as_the_budget(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -335,6 +334,42 @@ def _mutation_to_json() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+class TestBudgetVerdictAfterSpinner:
+    """Issue #365: the verdict gets its own line after the spinner's bare CR.
+
+    No real timeout(1) needed: the budget is a stand-in (issue #878), so this runs
+    wherever bash does, macOS without coreutils included.
+    """
+
+    # 124: timeout(1)'s TERM ended the run; 137: the --kill-after SIGKILL did.
+    @pytest.mark.parametrize("timeout_status", [124, 137])
+    def test_budget_verdict_starts_after_spinner_line(
+        self, tmp_path: Path, timeout_status: int
+    ) -> None:
+        repo = _repo_with_one_changed_function(tmp_path, SPINNER_MUTMUT)
+        bin_dir = _budget_timeout_stand_in(tmp_path, timeout_status)
+
+        result = subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "base"],
+            cwd=repo,
+            capture_output=True,
+            env={
+                **os.environ,
+                **NO_SETUP_ALLOWANCE,
+                "MUTMUT_PR_FILE_BUDGET_SECONDS": str(SPINNER_BUDGET_SECONDS),
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            },
+            timeout=60,
+            check=False,
+        )
+
+        handed_over = (tmp_path / "timeout-args").read_text(encoding="utf-8").split()
+        assert handed_over == ["--signal=TERM", "--kill-after=30", str(SPINNER_BUDGET_SECONDS)]
+        verdict = f"mutation budget exceeded: after {SPINNER_BUDGET_SECONDS}s".encode()
+        assert b"collecting stats\r\n" + verdict in result.stdout
+        assert result.returncode == 16
 
 
 class TestScoreReport:
