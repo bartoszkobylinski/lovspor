@@ -8,8 +8,10 @@ never reported as clean, and only a completed run moves the base tag.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -201,3 +203,104 @@ def test_the_red_step_fires_exactly_on_an_incomplete_verdict(
     step = _step("Fail a night that did not measure its range")
     assert step["if"] == "always() && steps.verdict.outputs.complete != 'true'"
     assert (complete != "true") is red
+
+
+# The range step decides what a re-run measures: run its own shell, in a real
+# repository, instead of asserting its text.
+OLD = "2020-01-01T00:00:00+00:00"
+
+
+def _commit(repo: Path, message: str, date: str | None = None) -> str:
+    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t"}
+    env |= {"GIT_COMMITTER_EMAIL": "t@t", "PATH": os.environ["PATH"]}
+    if date is not None:
+        env |= {"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+    subprocess.run(
+        ["git", "commit", "-q", "--allow-empty", "-m", message], cwd=repo, env=env, check=True
+    )
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _git(repo: Path, *args: str) -> str:
+    done = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+def _resolve_range(repo: Path) -> tuple[int, dict[str, str]]:
+    output = repo.parent / "github-output"
+    output.write_text("", encoding="utf-8")
+    done = subprocess.run(
+        ["bash", "-c", str(_step("Resolve the range")["run"])],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": os.environ["PATH"],
+            "BASE_TAG": "nightly-mutation-base",
+            "GITHUB_OUTPUT": str(output),
+        },
+        check=False,
+    )
+    lines = output.read_text(encoding="utf-8").splitlines()
+    return done.returncode, dict(line.split("=", 1) for line in lines)
+
+
+@pytest.fixture
+def main_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    return repo
+
+
+def test_a_rerun_after_a_completed_night_measures_an_empty_range(main_repo: Path) -> None:
+    _commit(main_repo, "old", OLD)
+    head = _commit(main_repo, "new")
+    _git(main_repo, "tag", "nightly-mutation-base", head)
+
+    status, out = _resolve_range(main_repo)
+
+    assert status == 0
+    assert out["base"] == out["head"] == head
+    assert out["source"].startswith("tag `nightly-mutation-base`")
+
+
+def test_a_rerun_of_an_incomplete_night_measures_the_same_range(main_repo: Path) -> None:
+    _commit(main_repo, "old", OLD)
+    tagged = _commit(main_repo, "measured by the last completed night")
+    _git(main_repo, "tag", "nightly-mutation-base", tagged)
+    head = _commit(main_repo, "not measured yet")
+
+    first = _resolve_range(main_repo)
+    second = _resolve_range(main_repo)
+
+    assert first == second
+    assert (first[1]["base"], first[1]["head"]) == (tagged, head)
+
+
+@pytest.mark.parametrize("tag", ["missing", "not-an-ancestor"])
+def test_an_unusable_tag_falls_back_to_the_last_week_old_commit(main_repo: Path, tag: str) -> None:
+    old = _commit(main_repo, "old", OLD)
+    if tag == "not-an-ancestor":
+        _git(main_repo, "checkout", "-q", "-b", "rewritten")
+        _git(main_repo, "tag", "nightly-mutation-base", _commit(main_repo, "elsewhere"))
+        _git(main_repo, "checkout", "-q", "main")
+    head = _commit(main_repo, "new")
+
+    status, out = _resolve_range(main_repo)
+
+    assert status == 0
+    assert (out["base"], out["head"]) == (old, head)
+    assert out["source"].startswith("fallback:")
+
+
+def test_no_tag_and_no_week_old_commit_fails_the_range_step(main_repo: Path) -> None:
+    """A failed range step leaves no result: the verdict is tool_failure, so the run is red."""
+    three_days = (datetime.now(UTC) - timedelta(days=3)).isoformat(timespec="seconds")
+    _commit(main_repo, "inside the week", three_days)
+    _commit(main_repo, "new")
+
+    status, out = _resolve_range(main_repo)
+
+    assert status == 1
+    assert "base" not in out
