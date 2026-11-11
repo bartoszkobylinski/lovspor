@@ -259,3 +259,50 @@ def test_856_militaer_straffelov_never_inherits_straffeloven_beside_date_only_in
         ("§14", None),
     ]
     assert _acts(body, STRAFFELOVEN) == [("§40", STRAFFELOVEN), ("§13", None), ("§14", None)]
+
+
+def test_other_numbered_acts_of_the_same_date_never_unsettle_a_numbered_proof() -> None:
+    """lov/2015-06-19-65's real header lists lov/1902-05-22-10, -11 and -13 (§ 4 cites -13)."""
+    intro_4 = (
+        "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i "
+        "lov 22. mai 1902 nr. 13 militær straffelov:"
+    )
+    body = _article("§4", _ledd(intro_4), _p("§ 13 oppheves."))
+    header = ("lov/1902-05-22-10", "lov/1902-05-22-11", "lov/1902-05-22-13")
+    assert _acts(body, *header) == [("§13", "lov/1902-05-22-13")]
+
+
+# A substitution list names its acts the same way: same proof (independent review, round 1) ---
+
+SUBSTITUTE = "I følgjande lovføresegner vert «fylkesmannen» endra til «statsforvalteren»:"
+SUBSTITUTE_ITEMS = (  # lov/2021-05-07-34, items 6-8 of its list
+    "6. lov 18. juni 1965 nr. 4 om vegtrafikk",
+    "§ 24 sjuande ledd",
+    "7. lov 10. februar 1967 om behandlingsmåten i forvaltningssaker",
+    "§ 21 andre ledd andre punktum, § 28 tredje ledd andre punktum",
+    "8. lov 9. juni 1972 nr. 31 om svensk reinbeiting i Norge og norsk reinbeiting i Sverige",
+    "§ 13 tredje ledd",
+)
+
+
+def _substitutions(*changes: str) -> list[tuple[str | None, str]]:
+    body = "".join(_p(text) for text in (SUBSTITUTE, *SUBSTITUTE_ITEMS))
+    operations = _operations(body, *changes)
+    return [(op.act, op.locations) for op in operations if op.kind == "substitute_term"]
+
+
+def test_a_date_only_substitution_item_binds_when_the_header_lists_that_exact_refid() -> None:
+    assert _substitutions(FORVALTNING, "lov/1965-06-18-4", "lov/1972-06-09-31") == [
+        ("lov/1965-06-18-4", "§ 24 sjuande ledd"),
+        (FORVALTNING, "§ 21 andre ledd andre punktum, § 28 tredje ledd andre punktum"),
+        ("lov/1972-06-09-31", "§ 13 tredje ledd"),
+    ]
+
+
+@pytest.mark.parametrize("changes", [(), ("lov/1967-02-10-3",), (FORVALTNING, "lov/1967-02-10-3")])
+def test_an_unproven_date_only_substitution_item_is_counted_unattributed(
+    changes: tuple[str, ...],
+) -> None:
+    """Absent, numbered-only or ambiguous: its locations are kept, its act is unknown."""
+    acts = [act for act, _ in _substitutions("lov/1965-06-18-4", "lov/1972-06-09-31", *changes)]
+    assert acts == ["lov/1965-06-18-4", None, "lov/1972-06-09-31"]

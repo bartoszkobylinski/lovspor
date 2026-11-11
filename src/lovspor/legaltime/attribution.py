@@ -120,19 +120,24 @@ def header_proves(refid: str, changes: tuple[str, ...]) -> bool:
     """
     if _DATE_ONLY.fullmatch(refid) is None:
         return refid in changes
-    return {c for c in changes if c == refid or c.startswith(f"{refid}-")} == {refid}
+    date = refid.split("-")  # ``lov/YYYY``, ``MM``, ``DD``: any act of that date shares them
+    return {c for c in changes if c.split("-")[:3] == date} == {refid}
 
 
-def canonical_act(date: str, changes: tuple[str, ...]) -> str | None:
-    """The act a canonical intro's citation names (#872).
+def identified(refid: str | None, changes: tuple[str, ...]) -> str | None:
+    """The act a canonical citation or a substitution item names (#872).
 
-    A citation by day, month, year and number binds as printed, as it always has. A date
-    alone binds only when ``header_proves`` its refid; otherwise the intro names no act.
+    A citation by day, month, year and number names its act as printed, as it always has. A
+    date alone names one only when ``header_proves`` its refid; otherwise it names no act.
     """
-    refid = act_refid(f"lov {date}")
     if refid is None or _DATE_ONLY.fullmatch(refid) is None:
         return refid
     return refid if header_proves(refid, changes) else None
+
+
+def canonical_act(date: str, changes: tuple[str, ...]) -> str | None:
+    """The act a canonical intro's citation names: ``identified``, from its date group."""
+    return identified(act_refid(f"lov {date}"), changes)
 
 
 def _named(lead: str) -> bool:

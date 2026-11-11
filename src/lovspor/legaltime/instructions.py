@@ -445,7 +445,8 @@ class _Reader:
         return item[1]
 
     def _substitution_item(self, part: tuple[str, str], index: int, node: Node) -> bool:
-        act = act_refid(node.text)
+        cited, changes = act_refid(node.text), self.document.header.changes_to_documents
+        act = cited and (attribution.identified(cited, changes) or "")  # "": unproven (#872)
         has_locations = "§" in node.text
         if act is not None and not has_locations:
             self.pending_item_act = act
@@ -456,11 +457,11 @@ class _Reader:
             return False
         for offset, terms in enumerate(self.substitution or ()):
             where = (part[0], f"{part[1]}:{index}.{offset}", node.host_section)
-            self.operations.append(self._substitute(where, act, node.text, terms))
+            self.operations.append(self._substitute(where, act or None, node.text, terms))
         return True
 
     def _substitute(
-        self, where: tuple[str, str, str | None], act: str, text: str, terms: tuple[str, str]
+        self, where: tuple[str, str, str | None], act: str | None, text: str, terms: tuple[str, str]
     ) -> Operation:
         label, tag, host = where
         op_id = tag if "#" in tag else f"{self.document.header.refid}#{tag}"
