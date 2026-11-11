@@ -320,3 +320,38 @@ def test_an_unproven_item_with_its_locations_ends_the_pending_act_before_it() ->
     assert [(op.act, op.locations) for op in operations if op.kind == "substitute_term"] == [
         (None, "§ 21 andre ledd")
     ]
+
+
+# Lovdata's per-node change address names an act too: same proof (independent review, round 3) -
+
+
+def _addressed(part: str, *children: str) -> str:
+    return f'<div class="change" data-change-part="{part}">{"".join(children)}</div>'
+
+
+@pytest.mark.parametrize(
+    "changes", [(STRAFFELOVEN,), (STRAFFELOVEN, "lov/1930-02-21-3"), (SKIFTE, "lov/1930-02-21-3")]
+)
+def test_an_unproven_date_only_change_address_binds_nothing(changes: tuple[str, ...]) -> None:
+    """Neither the address's act nor the act of the block before it."""
+    body = _article(
+        "§1", _ledd(NUMBERED), _p("§ 40 oppheves."), _ledd(INTRO_UNLISTED),
+        _addressed("lov/1930-02-21/§41", _p("§ 41 oppheves.")),
+    )  # fmt: skip
+    assert _acts(body, *changes) == [("§40", STRAFFELOVEN), ("§41", None)]
+
+
+def test_an_unproven_date_only_change_address_never_falls_back_to_the_open_block() -> None:
+    body = _article("§1", _ledd(NUMBERED), _addressed("lov/1930-02-21/§41", _p("§ 41 oppheves.")))
+    assert _acts(body, STRAFFELOVEN) == [("§41", None)]
+
+
+def test_a_proven_date_only_or_a_numbered_change_address_binds_as_before() -> None:
+    proven = _article(
+        "§1", _ledd(INTRO_PROVEN), _addressed("lov/1930-02-21/§41", _p("§ 41 oppheves."))
+    )
+    assert _acts(proven, SKIFTE) == [("§41", SKIFTE)]
+    numbered = _article(
+        "§1", _ledd(INTRO_UNLISTED), _addressed(f"{STRAFFELOVEN}/§41", _p("§ 41 oppheves."))
+    )
+    assert _acts(numbered) == [("§41", STRAFFELOVEN)]

@@ -477,7 +477,9 @@ class _Reader:
         payload: tuple[Node, ...],
     ) -> None:
         label, tag, host = where
-        context = (_addressed_act(change_part) or self.act, label, change_part, host)
+        addressed, changes = _addressed_act(change_part), self.document.header.changes_to_documents
+        act = self.act if addressed is None else attribution.identified(addressed, changes)  # #872
+        context = (act, label, change_part, host)
         text, quote = (text, None) if isinstance(text, str) else text
         text, payload = _inline_payload(text, payload)
         sentences = _pieces(text)
