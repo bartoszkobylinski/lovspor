@@ -18,6 +18,9 @@ import pytest
 TRUSTED_URL = "https://github.com/bartoszkobylinski/lovverk.git"
 BRANCH = "forarbeider/batch-2100-04-10"
 _ROOT_MANIFEST = {"documents": {}, "generated_at": None, "version": 1}
+#: No detached ``git maintenance``/``gc`` after a commit: it writes ``.git`` after the helper
+#: returns and races every "nothing changed" snapshot (#883).
+_QUIET = ("-c", "maintenance.auto=false", "-c", "gc.auto=0")
 _HERMETIC = {
     "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_CONFIG_GLOBAL": os.devnull,
@@ -30,7 +33,7 @@ def git(repo: Path, *args: str, check: bool = True) -> str:
     """Git in ``repo`` with a fixed identity and no outside configuration."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     done = subprocess.run(
-        ["git", "-c", "user.name=Operator", "-c", "user.email=op@example.invalid", *args],
+        ["git", *_QUIET, "-c", "user.name=Operator", "-c", "user.email=op@example.invalid", *args],
         cwd=repo,
         capture_output=True,
         text=True,
