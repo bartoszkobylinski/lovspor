@@ -336,3 +336,30 @@ def test_the_inline_canonical_intro_proves_a_date_only_binding_by_the_header(
 ) -> None:
     """Independent review, round 7: the inline ``INTRO`` form carries the same proof."""
     assert _row(SKIFTE_INLINE, before, "lov/1930-02-21", changes)["class"] == expected
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [SKIFTE_UNLISTED, SKIFTE_INLINE, "Lov 21. februar 1930 om skifte endres slik:"],
+)
+@pytest.mark.parametrize("before", [None, TVISTELOVEN, "lov/1930-02-21"])
+def test_date_only_identity_proof_never_certifies_a_different_target(
+    sentence: str, before: str | None
+) -> None:
+    """The audit's new/rebound classes require the act the governing sentence names."""
+    row = _row(sentence, before, STRAFFELOVEN, ["lov/1930-02-21", STRAFFELOVEN])
+    assert row["identity_proven"] is True  # proof of skifte, not of the operation's target
+    assert row["class"] == "check"
+
+
+@pytest.mark.parametrize(
+    "sentence", [SKIFTE_UNLISTED, "Lov 21. februar 1930 om skifte endres slik:"]
+)
+def test_date_only_proof_never_explains_added_or_deleted_bound_operations(sentence: str) -> None:
+    """Research note §2 promises unchanged operation presence, not just proven identities."""
+    operation = ["x#0:I:1.0", "lov/1930-02-21", "replace_ledd", "§ 1 skal lyde:"]
+    audit = _audit()
+    for before, after in ((None, operation), (operation, None)):
+        row = audit._row(before, after, sentence, ["lov/1930-02-21"])
+        assert row["identity_proven"] is True
+        assert row["class"] == "check"
