@@ -86,6 +86,9 @@ class RefusalReason(StrEnum):
     CHECKOUT_OPERATION_IN_PROGRESS = "checkout_operation_in_progress"
     CHECKOUT_PENDING_CHANGE = "checkout_pending_change"
     CHECKOUT_DIRTY = "checkout_dirty"
+    BATCH_NOTHING_INCLUDED = "batch_nothing_included"
+    TARGET_BRANCH_MISMATCH = "target_branch_mismatch"
+    PLAN_NOT_REPRODUCED = "plan_not_reproduced"
 
 
 class ForarbeiderRefusedError(LovsporError):

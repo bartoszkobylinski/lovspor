@@ -125,6 +125,12 @@ class BatchInputs(BaseModel):
     source_proof_sha256: _Digest
     documents: tuple[DocumentInput, ...]
 
+    @field_validator("at")
+    @classmethod
+    def _in_utc(cls, value: datetime) -> datetime:
+        """One instant, one digest: the plan keeps ``at`` in UTC, so a replay can only know that."""
+        return value.astimezone(UTC)
+
 
 def _sorted_once(reasons: tuple[str, ...]) -> tuple[str, ...]:
     if list(reasons) != sorted(set(reasons)):
@@ -284,11 +290,28 @@ class BatchPlan(BaseModel):
         if not valid_branch(self.target_branch):
             raise ValueError("target branch is outside the forarbeider/ grammar")
         _require_distinct(self.documents)
+        _require_bound(self)
         if self.sample != sample_of(self.documents, self.inputs_sha256):
             raise ValueError("the sample is not the one the inputs digest selects")
         if self.counts != counts_of(self.documents):
             raise ValueError("the counts are not the plan's")
         return self
+
+
+def _require_bound(plan: BatchPlan) -> None:
+    """Each clearance names this plan's policy and proof, or its own document's report."""
+    for document in plan.documents:
+        for chapter in document.chapters:
+            clearance = chapter.clearance
+            if isinstance(clearance, PolicyClearance) and (
+                clearance.policy_sha256 != plan.policy_sha256
+                or clearance.source_proof_sha256 != plan.source_proof_sha256
+            ):
+                raise ValueError("a policy clearance names another policy or source proof")
+            if isinstance(clearance, ReviewClearance) and (
+                clearance.report_sha256 != document.report_sha256
+            ):
+                raise ValueError("a review clearance names another report")
 
 
 def valid_branch(branch: str) -> bool:

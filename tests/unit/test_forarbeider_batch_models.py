@@ -7,6 +7,7 @@ not a valid plan.
 """
 
 import json
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -17,6 +18,7 @@ from lovspor.forarbeider.batch_commands import _chapter_line, plan_lines
 from lovspor.forarbeider.batch_models import (
     MAX_DOCUMENTS,
     SAMPLE_SIZE,
+    BatchInputs,
     BatchPlan,
     BatchReason,
     PlannedChapter,
@@ -91,11 +93,12 @@ def _planned(number: int, chapters: list[dict[str, Any]] | None = None) -> dict[
     coverage = "none" if not included else "partial_curated_excerpt"
     if included == [1, 2, 3, 4]:
         coverage = "every_listed_chapter"
+    reviewed = any(item.get("clearance") == REVIEW for item in planned)
     return {
         "document": document,
         "destination": destination_of(DocumentIdentity.model_validate(document)),
         "listed_chapters": [1, 2, 3, 4],
-        "report_sha256": None,
+        "report_sha256": REVIEW["report_sha256"] if reviewed else None,
         "chapters": planned,
         "coverage": coverage,
     }
@@ -431,3 +434,41 @@ def test_an_owner_reviewed_chapter_line_names_its_report_and_pin() -> None:
     line = _chapter_line(chapter)
 
     assert line.endswith(f"flagged included owner_review report {'0' * 12} pin {'d' * 12}@1")
+
+
+@pytest.mark.parametrize(
+    "clearance",
+    [
+        {**POLICY, "policy_sha256": "9" * 64},
+        {**POLICY, "source_proof_sha256": "9" * 64},
+    ],
+)
+def test_a_policy_clearance_naming_another_policy_or_proof_is_invalid(
+    clearance: dict[str, Any],
+) -> None:
+    """#738 B1a: a plan's clearances bind to the plan's own policy and source proof."""
+    with pytest.raises(ValidationError, match="another policy or source proof"):
+        BatchPlan.model_validate(_plan([_planned(1, [_chapter(1, 2, clearance=clearance)])]))
+
+
+def test_a_review_clearance_must_name_its_own_document_report() -> None:
+    chapter = _chapter(1, 2, classification="flagged", clearance=REVIEW)
+    planned = {**_planned(1, [chapter]), "report_sha256": None}
+    with pytest.raises(ValidationError, match="another report"):
+        BatchPlan.model_validate(_plan([planned]))
+    planned["report_sha256"] = REVIEW["report_sha256"]
+    assert BatchPlan.model_validate(_plan([planned])).counts.owner_review == 1
+
+
+def test_the_inputs_moment_is_kept_in_utc_whatever_offset_it_was_given() -> None:
+    """#738 B1a: the plan stores ``at`` in UTC, so a replay must digest the same instant."""
+    fields = {
+        "target_branch": "forarbeider/batch-1",
+        "policy_sha256": POLICY_SHA,
+        "source_proof_sha256": PROOF_SHA,
+        "documents": [],
+    }
+    offset = BatchInputs.model_validate({**fields, "at": "2100-04-10T13:00:00+01:00"})
+    utc = BatchInputs.model_validate({**fields, "at": "2100-04-10T12:00:00Z"})
+    assert offset.model_dump_json() == utc.model_dump_json()
+    assert offset.at.utcoffset() == timedelta(0)

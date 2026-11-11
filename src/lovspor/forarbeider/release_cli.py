@@ -6,8 +6,8 @@ parameters and a release needs more. Each command only calls its ``_impl`` in
 :mod:`lovspor.forarbeider.release_commands`.
 
 Exit 1 is a typed refusal, with nothing written. Exit 2 is a written ``deny``
-report, a batch plan that includes no chapter, or a plan or simulation
-refused because the preflight now denies.
+report, a batch plan that includes no chapter, a plan or simulation refused
+because the preflight now denies, or a batch plan that no longer reproduces.
 Exit 0 is an ``eligible_preview`` report or a plan, which still authorize no
 publication: no command here writes to ``lovverk`` or any real Git checkout.
 The simulator writes only a disposable sandbox this package made, from the
@@ -22,6 +22,7 @@ from typing import Annotated
 import click
 import typer
 
+from lovspor.forarbeider.apply_preflight import ApplyPreflightRequest, apply_preflight_impl
 from lovspor.forarbeider.batch_commands import (
     BatchPlanRequest,
     batch_plan_impl,
@@ -59,6 +60,8 @@ from lovspor.forarbeider.release_commands import (
 from lovspor.ops.commands import ops_app
 
 DENY_EXIT = 2
+#: Refusals that mean "the evidence now denies", not "the input could not be read".
+DENY_REASONS = frozenset({RefusalReason.PROMOTION_DENIED, RefusalReason.PLAN_NOT_REPRODUCED})
 #: Reason codes, roles, chapter ids and digests. A path has a separator and is never printed.
 _SAFE_DETAIL = re.compile(r"[A-Za-z0-9_.,: -]*")
 
@@ -83,7 +86,7 @@ def _echo(action: Callable[[], str]) -> None:
         typer.echo(action())
     except ForarbeiderRefusedError as error:
         typer.echo(refusal_line(error), err=True)
-        code = DENY_EXIT if error.reason is RefusalReason.PROMOTION_DENIED else 1
+        code = DENY_EXIT if error.reason in DENY_REASONS else 1
         raise typer.Exit(code=code) from error
 
 
@@ -363,3 +366,31 @@ def batch_show(
 ) -> None:
     """Show a stored batch plan's ids, digests and codes, never paths, names or text."""
     _echo(lambda: batch_show_impl(ctx.obj, sha))
+
+
+@batch_app.command("preflight")
+def batch_preflight(
+    plan: Annotated[str, typer.Argument(help="The stored batch plan's sha256.")],
+    checkout: Annotated[
+        Path,
+        typer.Option(
+            help="The dedicated lovverk release clone, on the plan's branch; never written."
+        ),
+    ],
+    request: Annotated[
+        Path, typer.Option(help="The private batch request file the plan was made from.")
+    ],
+    source_proof: Annotated[
+        Path, typer.Option(help="The forarbeider-fetch run record the plan was made from.")
+    ],
+) -> None:
+    """Check a stored batch plan against a release clone, now. Read-only: writes, applies nothing.
+
+    Runs only read-only Git and re-evaluates the plan at the machine clock.
+    Exit 0: the plan reproduces exactly; exit 2: it no longer does; exit 1: refused.
+    """
+    ask = ApplyPreflightRequest(
+        plan=plan, checkout=checkout, request=request, source_proof=source_proof
+    )
+    scope = click.get_current_context().obj
+    _echo(lambda: apply_preflight_impl(scope, ask))
