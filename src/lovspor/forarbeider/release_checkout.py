@@ -72,6 +72,8 @@ OPERATIONS: tuple[tuple[str, str], ...] = (
     ("sequencer", "sequencer"),
 )
 PENDING: tuple[tuple[str, str], ...] = ((LOCK, "lock"), (JOURNAL, "journal"), (STAGING, "staging"))
+#: ``remote.<name>.<key>``: a top-level ``remote.pushDefault`` names no remote.
+_REMOTE_KEY_DOTS = 2
 _COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 _LAYOUT = (
     "rev-parse",
@@ -239,7 +241,9 @@ def require_trusted_remote(config: Mapping[str, tuple[str, ...]]) -> None:
         ForarbeiderRefusedError: ``checkout_remote_untrusted: origin|remotes|pushurl``.
     """
     names = {
-        key.removeprefix("remote.").rsplit(".", 1)[0] for key in config if key.startswith("remote.")
+        key.removeprefix("remote.").rsplit(".", 1)[0]
+        for key in config
+        if key.startswith("remote.") and key.count(".") >= _REMOTE_KEY_DOTS
     }
     urls = config.get("remote.origin.url", ())
     if "origin" not in names or len(urls) != 1 or not TRUSTED_REMOTE.fullmatch(urls[0]):

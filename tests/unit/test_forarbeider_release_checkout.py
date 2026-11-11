@@ -305,6 +305,11 @@ def test_a_second_remote_is_refused(clone: Path) -> None:
     refused(clone, "checkout_remote_untrusted", "remotes")
 
 
+def test_a_top_level_remote_setting_is_not_a_second_remote(clone: Path) -> None:
+    git(clone, "config", "remote.pushDefault", "origin")
+    passes(clone)
+
+
 def test_a_foreign_pushurl_is_refused(clone: Path) -> None:
     git(clone, "config", "remote.origin.pushurl", "https://example.invalid/x.git")
     refused(clone, "checkout_remote_untrusted", "pushurl")
