@@ -31,6 +31,7 @@ TIMEOUT_SECONDS = 60
 #: Every argument vector Git may be run with. Exact matches, never prefixes.
 ALLOWED: frozenset[tuple[str, ...]] = frozenset(
     {
+        ("version",),
         (
             "rev-parse",
             "--path-format=absolute",

@@ -616,3 +616,59 @@ def test_a_parent_is_unsafe_when_someone_else_could_rename_the_checkout(
 ) -> None:
     owners = {"me": os.geteuid(), "root": 0, "other": os.geteuid() + 4242}
     assert release_checkout._unsafe_parent(_status(owners[uid], mode)) is unsafe
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        GitReading(code=0, out=b"git version 2.31.9\n"),
+        GitReading(code=0, out=b"git version 1.9.0\n"),
+        GitReading(code=0, out=b"not a version\n"),
+        GitReading(code=0, out=b"git version two\n"),
+        GitReading(code=0, out=b"\xff\xfe\n"),
+        GitReading(code=129, out=b""),
+    ],
+)
+def test_a_git_too_old_or_unreadable_to_ignore_global_config_is_refused(
+    clone: Path, monkeypatch: pytest.MonkeyPatch, answer: GitReading
+) -> None:
+    """Below 2.32 ``GIT_CONFIG_GLOBAL`` is silently ignored: the guard fails closed (#738)."""
+    _answering(monkeypatch, "version", answer)
+    refused(clone, "checkout_unverifiable", "git_version")
+
+
+def test_a_failing_version_command_is_refused(clone: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _answering(monkeypatch, "version", None)
+    refused(clone, "checkout_unverifiable", "git_version")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        b"git version 2.32.0\n",
+        b"git version 2.45.2\n",
+        b"git version 2.39.5 (Apple Git-154)\n",
+        b"git version 2.45.2.windows.1\n",
+        b"git version 3.0\n",
+    ],
+)
+def test_a_git_new_enough_is_accepted(
+    clone: Path, monkeypatch: pytest.MonkeyPatch, answer: bytes
+) -> None:
+    _answering(monkeypatch, "version", GitReading(code=0, out=answer))
+    passes(clone)
+
+
+def test_the_version_is_asked_before_any_other_git(
+    clone: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[str, ...]] = []
+    real = release_checkout.read_git
+
+    def record(checkout: Path, argv: tuple[str, ...]) -> GitReading:
+        seen.append(argv)
+        return real(checkout, argv)
+
+    monkeypatch.setattr(release_checkout, "read_git", record)
+    passes(clone)
+    assert seen[0] == ("version",)

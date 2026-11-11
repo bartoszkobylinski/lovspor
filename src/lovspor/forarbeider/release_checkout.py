@@ -74,6 +74,10 @@ OPERATIONS: tuple[tuple[str, str], ...] = (
 PENDING: tuple[tuple[str, str], ...] = ((LOCK, "lock"), (JOURNAL, "journal"), (STAGING, "staging"))
 #: ``remote.<name>.<key>``: a top-level ``remote.pushDefault`` names no remote.
 _REMOTE_KEY_DOTS = 2
+#: ``GIT_CONFIG_GLOBAL`` arrived in Git 2.32 (``--path-format=absolute`` in 2.31). An older Git
+#: ignores it without a word and reads the operator's global config, so it is refused.
+MIN_GIT_VERSION = (2, 32)
+_GIT_VERSION = re.compile(r"git version (\d+)\.(\d+)(?:\.\d+)?(?:[ .].*)?")
 _COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 _LAYOUT = (
     "rev-parse",
@@ -175,6 +179,21 @@ def require_not_forbidden(path: Path) -> None:
     for code, root in forbidden_checkouts():
         if _overlaps(path, root):
             raise _refused(RefusalReason.CHECKOUT_FORBIDDEN, code)
+
+
+def require_git_version(path: Path) -> None:
+    """A Git new enough that ``lovspor.git_read``'s isolated environment holds.
+
+    Raises:
+        ForarbeiderRefusedError: ``checkout_unverifiable: git_version``: unreadable or too old.
+    """
+    try:
+        reading = read_git(path, ("version",))
+        match = _GIT_VERSION.fullmatch(reading.out.decode("utf-8").strip())
+    except (GitReadError, UnicodeDecodeError) as error:
+        raise _refused(RefusalReason.CHECKOUT_UNVERIFIABLE, "git_version") from error
+    if reading.code != 0 or match is None or (int(match[1]), int(match[2])) < MIN_GIT_VERSION:
+        raise _refused(RefusalReason.CHECKOUT_UNVERIFIABLE, "git_version")
 
 
 def require_own_git_dir(path: Path) -> None:
@@ -380,6 +399,7 @@ def require_clean(path: Path) -> None:
 def _repository(path: Path) -> None:
     """Everything that makes ``path`` a trustworthy, idle lovverk clone, branch aside."""
     require_own_git_dir(path)
+    require_git_version(path)
     config = local_config(path)
     require_safe_config(config)
     require_trusted_remote(config)

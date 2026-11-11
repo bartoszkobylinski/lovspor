@@ -165,3 +165,10 @@ def test_the_process_is_started_with_list_argv_no_shell_and_the_fixed_prefix(
     assert seen["check"] is False
     assert seen["timeout"] == git_read.TIMEOUT_SECONDS
     assert seen["env"] == git_environment(tmp_path)
+
+
+def test_the_version_is_readable_through_the_allowlist(tmp_path: Path) -> None:
+    clone = release_clone(tmp_path)
+    reading = read_git(clone, ("version",))
+    assert reading.code == 0
+    assert reading.out.startswith(b"git version ")
