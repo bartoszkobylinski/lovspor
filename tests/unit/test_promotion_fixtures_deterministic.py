@@ -34,3 +34,20 @@ def test_bytes_do_not_depend_on_the_clock(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(time, "localtime", lambda *_: (2001, 2, 3, 4, 5, 6, 0, 0, 0))
     assert minimal_docx() == first
     assert docx_with_document(b"<x/>") == docx_with_document(b"<x/>")
+
+
+def test_docx_with_document_bytes_match_across_clocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "localtime", lambda *_: (2001, 2, 3, 4, 5, 6, 0, 0, 0))
+    first = docx_with_document(b"<x/>")
+    monkeypatch.setattr(time, "localtime", lambda *_: (2031, 8, 9, 10, 11, 12, 0, 0, 0))
+    assert docx_with_document(b"<x/>") == first
+
+
+@pytest.mark.parametrize("document", [b"", b"<broken", b"\xff\x00\r\n"])
+def test_fixed_timestamp_preserves_custom_part_and_raw_payload(document: bytes) -> None:
+    # This helper also constructs deliberately invalid DOCX inputs for parser tests.
+    payload = docx_with_document(document, part="word/other.xml")
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        assert archive.namelist() == ["word/other.xml"]
+        assert archive.read("word/other.xml") == document
+        assert archive.testzip() is None
