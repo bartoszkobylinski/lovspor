@@ -513,6 +513,22 @@ def verify_identity(raw: Path, target_branch: str, held: HeldLock) -> str:
     return _on_branch(path, target_branch)[0]
 
 
+def require_published(path: Path, head: str) -> None:
+    """HEAD is the commit ``origin/main`` pointed at when the clone last fetched.
+
+    Read from the local remote-tracking ref, without the network: it proves the
+    release is committed and was on lovverk ``main`` at the last fetch, never
+    that the remote holds it now.
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_published: origin_main``.
+    """
+    reading = _read(path, ("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"))
+    published = _text(reading.out, "rev-parse").removesuffix("\n")
+    if reading.code != 0 or published != head:
+        raise _refused(RefusalReason.RELEASE_NOT_PUBLISHED, "origin_main")
+
+
 def read_back_of(branch: str, head: str, held: HeldLock) -> ReadBack:
     """The release clone's read-back after a change, run before its journal is cleared.
 

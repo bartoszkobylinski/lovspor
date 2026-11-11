@@ -46,6 +46,7 @@ ALLOWED: frozenset[tuple[str, ...]] = frozenset(
             "--is-bare-repository",
         ),
         ("rev-parse", "--verify", "--quiet", "HEAD^{commit}"),
+        ("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"),
         ("rev-list", "--max-parents=0", "HEAD"),
         ("symbolic-ref", "--quiet", "HEAD"),
         ("config", "--local", "--list", "-z"),

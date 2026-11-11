@@ -845,3 +845,34 @@ def test_a_write_outside_the_named_paths_is_dirty(clone: Path) -> None:
 def test_only_unstaged_changes_and_new_files_name_a_path(record: bytes, path: str | None) -> None:
 
     assert status_path(record) == path
+
+
+# --- B2: the published head ------------------------------------------------------------------
+
+
+def test_a_head_equal_to_the_fetched_origin_main_is_published(clone: Path) -> None:
+    git(clone, "switch", "--quiet", "main")
+    git(clone, "update-ref", "refs/remotes/origin/main", "HEAD")
+    head = git(clone, "rev-parse", "HEAD").strip()
+    before = snapshot(clone.parent)
+
+    release_checkout.require_published(clone, head)
+
+    assert snapshot(clone.parent) == before
+
+
+@pytest.mark.parametrize("state", ["ahead", "missing"])
+def test_a_head_not_on_the_fetched_origin_main_is_not_published(clone: Path, state: str) -> None:
+    git(clone, "switch", "--quiet", "main")
+    if state == "ahead":
+        git(clone, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(clone, "commit", "--quiet", "--allow-empty", "-m", "local only")
+    head = git(clone, "rev-parse", "HEAD").strip()
+
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        release_checkout.require_published(clone, head)
+
+    assert (caught.value.reason.value, caught.value.detail) == (
+        "release_not_published",
+        "origin_main",
+    )

@@ -237,3 +237,5 @@ This contract translates ADR-0018 into reviewable implementation boundaries. It 
    - The intent is stored first (named by the resulting manifest digest), then a `withdraw_draft` runs through the same transaction, then the receipt is stored, as `sandbox-withdraw` does.
    - It prints the Git-history warning. The owner commits the removal; history is never rewritten.
 8. **Not in B1:** MCP or site exposure; the receipt-verified reader of a real clone (B2).
+
+B2 (2026-11-11) ships that reader as `forarbeider-release-read` ([operations](../operations.md#forarbeider-receipt-verified-reader-of-a-real-release-issue-738-contract-amendment-1-b2)): a published `main` (HEAD equal to the fetched `origin/main`), the B1a guard, manifest schema 2, and every released document checked against the owner's private confirmation, receipt, plan and cited records. MCP and site exposure stay a separate slice.
