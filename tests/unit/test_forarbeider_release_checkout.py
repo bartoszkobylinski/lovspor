@@ -672,3 +672,40 @@ def test_the_version_is_asked_before_any_other_git(
     monkeypatch.setattr(release_checkout, "read_git", record)
     passes(clone)
     assert seen[0] == ("version",)
+
+
+def _foreign_root(clone: Path) -> tuple[str, str]:
+    """Point the batch branch at an unrelated root commit with the trusted root's tree."""
+    trusted = root_commit(clone)
+    tree = git(clone, "rev-parse", f"{trusted}^{{tree}}").strip()
+    foreign = git(clone, "commit-tree", tree, "-m", "foreign root").strip()
+    git(clone, "update-ref", f"refs/heads/{BRANCH}", foreign)
+    return foreign, trusted
+
+
+@pytest.mark.parametrize("override", ["replace", "graft"])
+def test_local_history_overrides_cannot_disguise_a_foreign_root(clone: Path, override: str) -> None:
+    """Codex, PR #875: replace objects or grafts must not make a foreign root look trusted."""
+    foreign, trusted = _foreign_root(clone)
+    if override == "replace":
+        tree = git(clone, "rev-parse", f"{foreign}^{{tree}}").strip()
+        disguise = git(clone, "commit-tree", tree, "-p", trusted, "-m", "disguise").strip()
+        git(clone, "replace", foreign, disguise)
+    else:
+        (clone / ".git" / "info" / "grafts").write_text(f"{foreign} {trusted}\n")
+    assert root_commit(clone) == trusted
+    refused(clone, "checkout_identity_mismatch", "root_commit")
+
+
+def test_a_graft_file_on_a_genuine_history_is_refused(clone: Path) -> None:
+    head = git(clone, "rev-parse", "HEAD").strip()
+    (clone / ".git" / "info" / "grafts").write_text(f"{head}\n")
+    refused(clone, "checkout_unsafe", "grafts")
+
+
+def test_a_replace_ref_on_a_genuine_history_is_refused(clone: Path) -> None:
+    head = git(clone, "rev-parse", "HEAD").strip()
+    tree = git(clone, "rev-parse", "HEAD^{tree}").strip()
+    twin = git(clone, "commit-tree", tree, "-p", head, "-m", "twin").strip()
+    git(clone, "replace", twin, head)
+    refused(clone, "checkout_unsafe", "replace_refs")

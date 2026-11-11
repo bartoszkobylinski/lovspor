@@ -10,6 +10,9 @@ so the one Git capability the guard needs lives here, as narrow as it can be:
   ``.git/index``, and a "read-only" status becomes a write;
 - fsmonitor and the untracked cache forced off, so no configured helper runs
   and no cache answers for the worktree;
+- replace objects and grafts ignored (``--no-replace-objects``,
+  ``GIT_NO_REPLACE_OBJECTS``, ``GIT_GRAFT_FILE`` at the null device), so local
+  history overrides cannot make one commit answer for another;
 - a minimal environment built here, never inherited: ``GIT_DIR``,
   ``GIT_WORK_TREE``, ``GIT_INDEX_FILE`` and the rest could point Git at
   another repository, and the system and global config are ignored, so only
@@ -32,6 +35,7 @@ TIMEOUT_SECONDS = 60
 ALLOWED: frozenset[tuple[str, ...]] = frozenset(
     {
         ("version",),
+        ("for-each-ref", "--format=%(refname)", "refs/replace"),
         (
             "rev-parse",
             "--path-format=absolute",
@@ -87,6 +91,8 @@ def git_environment(checkout: Path) -> dict[str, str]:
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_CEILING_DIRECTORIES": str(checkout.parent),
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_GRAFT_FILE": os.devnull,
     }
 
 

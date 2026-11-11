@@ -361,6 +361,21 @@ def trusted_roots(path: Path) -> tuple[str, ...]:
     return tuple(sorted(lines))
 
 
+def require_no_history_overrides(path: Path) -> None:
+    """No graft file and no replace ref: local rewrites of what a commit's history is.
+
+    Git is run with both ignored, so they cannot disguise the root commit; a clone
+    carrying either is still not one whose history a release should be written on.
+
+    Raises:
+        ForarbeiderRefusedError: ``checkout_unsafe: grafts|replace_refs``.
+    """
+    if os.path.lexists(path / ".git" / "info" / "grafts"):
+        raise _refused(RefusalReason.CHECKOUT_UNSAFE, "grafts")
+    if _git(path, ("for-each-ref", "--format=%(refname)", "refs/replace")).strip():
+        raise _refused(RefusalReason.CHECKOUT_UNSAFE, "replace_refs")
+
+
 def status_fault(record: bytes) -> str:
     """What one ``status --porcelain=v2 -z`` record says is not clean.
 
@@ -422,6 +437,7 @@ def verify_checkout(raw: Path, target_branch: str) -> CheckoutState:
         raise _refused(RefusalReason.CHECKOUT_BRANCH_MISMATCH, "branch")
     require_structure(path)
     roots = trusted_roots(path)
+    require_no_history_overrides(path)
     require_clean(path)
     dataset, _ = read_any_dataset_files(path)
     return CheckoutState(

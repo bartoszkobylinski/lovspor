@@ -84,7 +84,11 @@ def test_the_environment_is_minimal_and_never_inherited(
         "GIT_TERMINAL_PROMPT",
         "GIT_OPTIONAL_LOCKS",
         "GIT_CEILING_DIRECTORIES",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_GRAFT_FILE",
     }
+    assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
+    assert env["GIT_GRAFT_FILE"] == os.devnull
     assert env["GIT_OPTIONAL_LOCKS"] == "0"
     assert env["GIT_CONFIG_GLOBAL"] == os.devnull
     assert env["GIT_CONFIG_NOSYSTEM"] == "1"
@@ -156,7 +160,12 @@ def test_the_process_is_started_with_list_argv_no_shell_and_the_fixed_prefix(
     assert argv[0] == "git"
     assert argv[-3:] == ["symbolic-ref", "--quiet", "HEAD"]
     assert argv[argv.index("-C") + 1] == str(tmp_path)
-    for flag in ("--no-optional-locks", "--no-pager", "--literal-pathspecs"):
+    for flag in (
+        "--no-optional-locks",
+        "--no-pager",
+        "--literal-pathspecs",
+        "--no-replace-objects",
+    ):
         assert flag in argv
     for setting in ("core.fsmonitor=false", "core.untrackedCache=false"):
         assert argv[argv.index(setting) - 1] == "-c"
