@@ -355,3 +355,35 @@ def test_a_proven_date_only_or_a_numbered_change_address_binds_as_before() -> No
         "§1", _ledd(INTRO_UNLISTED), _addressed(f"{STRAFFELOVEN}/§41", _p("§ 41 oppheves."))
     )
     assert _acts(numbered) == [("§41", STRAFFELOVEN)]
+
+
+@pytest.mark.parametrize(
+    "other",
+    [SKIFTE, "lov/1930-02-20-3", "lov/1930-03-21-3", "lov/1931-02-21-3"],
+)
+def test_only_another_act_of_the_exact_date_makes_header_proof_ambiguous(other: str) -> None:
+    """#872's rule excludes numbered acts of the same date, not neighboring dates or duplicates."""
+    body = _article("§1", _ledd(INTRO_PROVEN), _p("§ 40 oppheves."))
+    assert _acts(body, SKIFTE, other) == [("§40", SKIFTE)]
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        ((FORVALTNING,), FORVALTNING),
+        ((), None),
+        (("lov/1967-02-10-3",), None),
+        ((FORVALTNING, "lov/1967-02-10-3"), None),
+    ],
+)
+def test_inline_date_only_substitution_keeps_locations_and_requires_header_proof(
+    changes: tuple[str, ...], expected: str | None
+) -> None:
+    """The research note §1 requires unproven items to remain operations with no act."""
+    item = f"{SUBSTITUTE_ITEMS[2]} {SUBSTITUTE_ITEMS[3]}"
+    body = "".join(_p(text) for text in (SUBSTITUTE, item, *SUBSTITUTE_ITEMS[4:]))
+    operations = _operations(body, *changes)
+    assert [(op.kind, op.act, op.locations) for op in operations] == [
+        ("substitute_term", expected, SUBSTITUTE_ITEMS[3]),
+        ("substitute_term", "lov/1972-06-09-31", "§ 13 tredje ledd"),
+    ]
