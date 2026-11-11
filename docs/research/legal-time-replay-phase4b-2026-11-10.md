@@ -183,6 +183,7 @@ The Phase 4A coverage file `legal-time-coverage-2026-11-10.json` is left as it w
 | 3 | `74a7d6dd` | NOT READY | major: one citation inside a reference clause bound as the amended act (`I straffeloven, slik den lyder etter lov 20. desember 2023 nr. 110, gjøres følgende endringer:` → `lov/2023-12-20-110`); minor: the audit called an attribution false when the sentence cited the old act second. The new equivalents were confirmed provable | first a referring-word rule (superseded in round 4), three negative tests; the audit compares against the whole citation set, with a test. On the archives: 0 operations changed |
 | 4 | `3ed531e7` | NOT READY | major: `… med de endringer som følger av lov 20. desember 2023 nr. 110 …` passed the word list; major: the audit's proof counted citations and header membership but not the engine's directness rule; minor: the audit's `_governing` forced `in_list` | the positive slot rule of §2 (link 3) replaces the word list, with two more negative tests; the audit's `identity_proven` now also requires `attribution.proven` (the engine's whole chain) and `_governing` no longer forces `in_list`. On the archives: 0 operations changed, evidence byte-identical; one audit row (`17. I lov 20. desember 2018 nr. 115 om endringer i sjøloven …`, already `unbound_was_false`) now reads `identity_proven: false` |
 | 5 | `88dbcef1` | NOT READY | major: `I straffeloven med hjemmel i lov 20. desember 2023 nr. 110 gjøres følgende endringer:` passed the title slot (free words ending in `lov`); the same class reaches the verb slot through `… med endringer i lov …, gjøres …`; major: the audit trusts the engine's chain | the verb slot now requires the main verb's own object (`gjøres følgende endringer i [lov]`) and the title slot exactly one act noun, with three more negative tests; on the archives 0 operations changed. The audit finding is answered rather than changed: `identity_proven` restates the engine's chain on purpose, so that the audit flags any operation whose new act differs from what the chain proves for its governing sentence. It is not an independent oracle. Independence comes from the manual reading of every distinct governing sentence (§1, §3) and from this review |
+| 6 | `b0e5ca90` | **READY** | none | — |
 
 ## 6b. Mutation (CI, PR-scoped, mutmut 3.8.0)
 
@@ -199,6 +200,8 @@ The first run, at `6f422981`, killed 320 of 339 mutants. 19 survived. Two of tho
   - an unproven inline item read as one unsupported operation.
 - **2 removed as dead code:** `bind`'s `sentences[-1] if sentences else ""`. `split_sentences` never returns an empty list.
 - **2 registered as provably equivalent:** `_Reader.__init__` `in_list` `True`/`None`. `_read_part` assigns `in_list = False` before `_boundary`, its only reader, can run. The Phase 4A `bound_host` entry was re-argued for the new `_boundary`.
+
+The second run, at `b0e5ca90` (after review rounds 3–5 changed `attribution.py`), killed **377 of 383**: 0 timed out, 0 suspicious, 0 without tests, 6 survived. 4 are the registered `_Reader.__init__` equivalents. 2 sat in a dead branch of `_named` (`if match else ""`): `_named` runs only after `_proven` has seen exactly one citation. `_proven` now hands `_named` the text before that citation, so the branch is gone.
 
 ## 7. Limitations
 

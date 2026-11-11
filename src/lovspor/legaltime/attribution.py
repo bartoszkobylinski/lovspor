@@ -105,15 +105,13 @@ def citations(text: str) -> list[str]:
     ]
 
 
-def _named(sentence: str) -> bool:
-    """The citation sits where the amended act is named, not in a clause about another text.
+def _named(lead: str) -> bool:
+    """The text before the citation leaves it where the amended act is named.
 
     Either right after the main verb's ``gjøres følgende endringer i [lov]``, or after a title
     ending in an act noun (or ``Lov om <title>``) that holds no other act noun and no comma,
     bracket or referring word: ``I straffeloven med hjemmel i lov …`` names two acts.
     """
-    match = _CITATION.search(sentence)
-    lead = sentence[: match.start()] if match else ""
     if _AFTER_VERB.search(lead):
         return True
     titled = _TITLE_SLOT.match(lead) is not None and len(_ACT_NOUN.findall(lead)) == 1
@@ -129,7 +127,8 @@ def _proven(sentence: str, changes: tuple[str, ...]) -> str | None:
     cited = citations(sentence)
     if len(cited) != 1 or _INDIRECT.search(sentence) or cited[0] not in changes:
         return None
-    return cited[0] if _named(sentence) else None
+    first = next(_CITATION.finditer(sentence))  # the one citation ``cited`` holds
+    return cited[0] if _named(sentence[: first.start()]) else None
 
 
 def _shaped(sentence: str) -> bool:
