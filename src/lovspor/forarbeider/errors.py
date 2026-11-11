@@ -89,6 +89,9 @@ class RefusalReason(StrEnum):
     BATCH_NOTHING_INCLUDED = "batch_nothing_included"
     TARGET_BRANCH_MISMATCH = "target_branch_mismatch"
     PLAN_NOT_REPRODUCED = "plan_not_reproduced"
+    RELEASE_CONFLICT = "release_conflict"
+    BATCH_ALREADY_APPLIED = "batch_already_applied"
+    CONFIRMATION_MISMATCH = "confirmation_mismatch"
 
 
 class ForarbeiderRefusedError(LovsporError):

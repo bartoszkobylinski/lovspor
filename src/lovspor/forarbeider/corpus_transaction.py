@@ -1,7 +1,9 @@
 """One change to the sandbox's ``forarbeider/`` tree, all or nothing (#738, PR3B-2).
 
-The only writer in this package, and only ever called on a sandbox that
-:func:`~lovspor.forarbeider.corpus_tree.require_sandbox` accepted. Nothing is
+The only writer in this package. It is called on a sandbox that
+:func:`~lovspor.forarbeider.corpus_tree.require_sandbox` accepted, or (B1b) on
+a release clone the release-checkout guard accepted under the caller's lock;
+the caller passes the read-back that proves the tree afterwards. Nothing is
 staged in Git, committed or pushed.
 
 A change holds an exclusive lock, stages every new file's bytes and every
@@ -13,7 +15,8 @@ withdrawal intent's, so the caller can check that decision still holds
 before it chooses: :func:`finish` replays the operations forward, a file
 already holding its target bytes skipped; :func:`roll_back` puts every file
 back as it was. Either way the tree is read back and must be exactly the
-manifest's, with the baseline untouched; only then are the journal and the
+manifest's, with the baseline untouched (a release clone: Git status lists
+exactly the files the change wrote); only then are the journal and the
 staged bytes removed. A lock left by a process that died stays until the
 owner, having checked nothing runs, removes it.
 """
@@ -21,7 +24,7 @@ owner, having checked nothing runs, removes it.
 import json
 import os
 import shutil
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Literal, NamedTuple, Self
@@ -226,19 +229,47 @@ def _run(sandbox: Path, journal: Journal) -> None:
         raise _failed(DATASET_ROOT) from error
 
 
-def _verify(sandbox: Path, expected: str | None) -> None:
+#: Proves the tree after a change: ``(root, expected manifest digest, paths changed)``.
+ReadBack = Callable[[Path, str | None, frozenset[str]], None]
+
+
+def sandbox_read_back(sandbox: Path, expected: str | None, changed: frozenset[str]) -> None:
     """The tree read back is the manifest ``expected``'s, and the baseline is as made.
+
+    ``changed`` needs no check here: the baseline is compared byte for byte.
 
     Raises:
         ForarbeiderRefusedError: ``corpus_tree_mismatch`` and the journal stays.
     """
+    del changed
     if read_dataset(require_sandbox(sandbox, ())).manifest_sha256 != expected:
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, MANIFEST_PATH)
+
+
+def written(journal: Journal) -> frozenset[str]:
+    """The paths a finished ``journal`` leaves holding other bytes than before."""
+    return frozenset(op.path for op in journal.operations if op.sha256 != op.previous_sha256)
 
 
 def _clear(sandbox: Path) -> None:
     (sandbox / JOURNAL).unlink(missing_ok=True)
     shutil.rmtree(sandbox / STAGING, ignore_errors=True)
+
+
+def clear_orphaned_staging(root: Path) -> bool:
+    """Remove staging a run left with no journal, never following a link; whether there was any.
+
+    Staging without a journal holds only bytes no operation names: the run
+    stopped before its journal was written, or after it was cleared.
+    """
+    staging = root / STAGING
+    if not os.path.lexists(staging):
+        return False
+    if staging.is_symlink() or not staging.is_dir():
+        staging.unlink()
+    else:
+        shutil.rmtree(staging)
+    return True
 
 
 def pending(sandbox: Path) -> Journal | None:
@@ -259,18 +290,18 @@ def pending(sandbox: Path) -> Journal | None:
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "journal") from error
 
 
-def finish(sandbox: Path, journal: Journal) -> None:
+def finish(sandbox: Path, journal: Journal, read_back: ReadBack = sandbox_read_back) -> None:
     """Replay ``journal`` forward; the caller holds the lock and checked its decision.
 
     Raises:
         ForarbeiderRefusedError: the tree cannot be brought to the journaled state.
     """
     _run(sandbox, journal)
-    _verify(sandbox, journal.target_manifest_sha256)
+    read_back(sandbox, journal.target_manifest_sha256, written(journal))
     _clear(sandbox)
 
 
-def roll_back(sandbox: Path, journal: Journal) -> None:
+def roll_back(sandbox: Path, journal: Journal, read_back: ReadBack = sandbox_read_back) -> None:
     """Put the tree back as it was before ``journal``; the caller holds the lock.
 
     Raises:
@@ -286,7 +317,7 @@ def roll_back(sandbox: Path, journal: Journal) -> None:
         _prune(sandbox)
     except OSError as error:
         raise _failed(DATASET_ROOT) from error
-    _verify(sandbox, manifest.previous_sha256)
+    read_back(sandbox, manifest.previous_sha256, frozenset())
     _clear(sandbox)
 
 
@@ -302,7 +333,9 @@ def _stage(sandbox: Path, writes: Mapping[str, bytes], journal: Journal) -> None
         raise _failed("staging") from error
 
 
-def apply(sandbox: Path, draft: Draft, binding: Binding) -> None:
+def apply(
+    sandbox: Path, draft: Draft, binding: Binding, read_back: ReadBack = sandbox_read_back
+) -> None:
     """Make the dataset the draft's; the caller holds the lock and checked the base.
 
     Raises:
@@ -320,7 +353,7 @@ def apply(sandbox: Path, draft: Draft, binding: Binding) -> None:
     )
     staged = {**{digest(payload): payload for payload in previous.values()}, **draft.writes}
     _stage(sandbox, staged, journal)
-    finish(sandbox, journal)
+    finish(sandbox, journal, read_back)
 
 
 def holds(sandbox: Path, expected: Mapping[str, str | None]) -> bool:

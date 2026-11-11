@@ -553,7 +553,7 @@ def test_verification_names_target_manifest(tmp_path: Path) -> None:
         ),
     )
     with pytest.raises(ForarbeiderRefusedError) as caught:
-        transaction._verify(box, journal)
+        transaction.sandbox_read_back(box, journal.target_manifest_sha256, frozenset())
     assert (caught.value.reason, caught.value.detail) == (
         RefusalReason.CORPUS_TREE_MISMATCH,
         models.MANIFEST_PATH,

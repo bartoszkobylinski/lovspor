@@ -56,6 +56,7 @@ class BatchReason(StrEnum):
     PREFLIGHT_CHANGED = "preflight_changed"
     PREFLIGHT_MISSING = "preflight_missing"
     PREFLIGHT_NOT_ELIGIBLE = "preflight_not_eligible"
+    PREFLIGHT_OUTCOME_MISSING = "preflight_outcome_missing"
     REVIEW_VETO = "review_veto"
     WITHHELD = "withheld"
 

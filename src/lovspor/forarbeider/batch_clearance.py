@@ -5,7 +5,9 @@ verdict it reuses: the preflight is evaluated once per document at the plan's
 moment, and its reasons are split between the two paths.
 
 - A ``withheld`` chapter is excluded, always.
-- A ``clean`` chapter may be cleared only by the standing policy. It ignores
+- A ``clean`` chapter may be cleared only by the standing policy. A chapter
+  the fresh preflight has no outcome for is excluded on either path: silence
+  is not a verdict. It ignores
   exactly the :data:`REVIEW_PATH` reasons (dossier, authorization, evidence,
   review status and checkpoint), and every other reason blocks it, so a
   preflight reason this module has not classified blocks too. The policy and
@@ -142,6 +144,8 @@ def clean_reasons(
     outcome = _outcome(evidence.fresh, result.chapter_number)
     found = set(evidence.fresh.document_reasons) | set(() if outcome is None else outcome.reasons)
     reasons: set[ExclusionReason] = set(found - REVIEW_PATH)
+    if outcome is None:
+        reasons.add(BatchReason.PREFLIGHT_OUTCOME_MISSING)
     reasons |= set(verdict.faults)
     if result.document_type not in verdict.policy.document_types:
         reasons.add(BatchReason.POLICY_SCOPE_MISMATCH)
@@ -168,6 +172,8 @@ def review_reasons(evidence: DocumentEvidence, observed: Observed) -> set[Exclus
     outcome = _outcome(fresh, number)
     reasons: set[ExclusionReason] = set(fresh.document_reasons)
     reasons |= set(() if outcome is None else outcome.reasons)
+    if outcome is None:
+        reasons.add(BatchReason.PREFLIGHT_OUTCOME_MISSING)
     if outcome is None or not outcome.eligible:
         reasons.add(BatchReason.PREFLIGHT_NOT_ELIGIBLE)
     if report.outcome != "eligible_preview" or number not in report.planned_chapters:

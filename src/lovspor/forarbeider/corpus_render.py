@@ -24,6 +24,7 @@ from typing import Any, NamedTuple
 from lovspor.forarbeider.chapter_models import ChapterResult, TextBlock, text_hash
 from lovspor.forarbeider.corpus_models import (
     RENDERER_VERSION,
+    ChapterClearance,
     ChapterReceipt,
     DocumentTimes,
     DocumentTimesV2,
@@ -266,6 +267,51 @@ def member_of(rendering: Rendering, markdown: str) -> ManifestDocument:
             "times": rendering.times,
         }
     )
+
+
+def member_v2_of(
+    rendering: Rendering, markdown: str, clearances: Sequence[ChapterClearance]
+) -> ManifestDocumentV2:
+    """The version 2 member listing ``markdown``, each chapter with the clearance given for it.
+
+    ``clearances`` are in the rendering's chapter order, one each.
+
+    Raises:
+        ValueError: a member version 2 cannot state (pydantic's ``ValidationError``).
+    """
+    metadata = rendering.metadata
+    document = document_of(metadata)
+    pairs = zip(rendering.chapters, clearances, strict=True)
+    chapters = [{**_receipt_fields(item.result), "clearance": cleared} for item, cleared in pairs]
+    return ManifestDocumentV2.model_validate(
+        {
+            **_FIXED_MEMBER,
+            "document": document,
+            "title": metadata.title,
+            "ministry": metadata.ministry,
+            "path": destination_of(document),
+            "markdown_sha256": digest(markdown.encode()),
+            "listed_chapters": tuple(chapter.chapter_number for chapter in metadata.chapters),
+            "chapters": chapters,
+            "coverage": _coverage(rendering),
+            "times": rendering.times,
+            "renderer_version": RENDERER_VERSION,
+        }
+    )
+
+
+def _receipt_fields(result: ChapterResult) -> dict[str, object]:
+    return {
+        "chapter_number": result.chapter_number,
+        "chapter_id": result.id,
+        "chapter_title": result.chapter_title,
+        "source_page_url": result.source_page_url,
+        "source_sha256": result.source_sha256,
+        "text_sha256": result.text_sha256,
+        "extractor_version": result.extractor_version,
+        "normalizer_version": result.normalizer_version,
+        "retrieved_at": result.retrieved_at,
+    }
 
 
 def _receipt(item: ReleasedChapter) -> ChapterReceipt:
