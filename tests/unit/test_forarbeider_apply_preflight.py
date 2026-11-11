@@ -396,3 +396,24 @@ def test_the_difference_names_inputs_then_the_first_changed_chapter_then_the_pla
     assert _difference(plan, stored) == f"{DOC1}-ch2: included"
     assert _difference(replayed, plan) == f"{DOC1}-ch2: policy_revoked,review_veto"
     assert _difference(plan, plan) == "plan"
+
+
+def test_a_clean_head_change_changes_the_confirmation_binding(
+    bench: Bench, httpx_mock: HTTPXMock
+) -> None:
+    """B1's binding covers HEAD even when the plan and corpus bytes are unchanged."""
+    request = bench.mixed(httpx_mock)
+    sha = bench.planned(request)
+    first = apply_preflight(bench.scope(), bench.ask(sha, request), NOW)
+    git(bench.clone, "commit", "--quiet", "--allow-empty", "-m", "new release head")
+    head = git(bench.clone, "rev-parse", "HEAD").strip()
+    before = snapshot(bench.root)
+
+    later = apply_preflight(bench.scope(), bench.ask(sha, request), NOW)
+
+    assert snapshot(bench.root) == before
+    assert later.plan == first.plan
+    assert later.binding.head_commit == head
+    assert later.binding.head_commit != first.binding.head_commit
+    assert later.binding.base_manifest_sha256 == first.binding.base_manifest_sha256
+    assert later.binding_sha256 != first.binding_sha256

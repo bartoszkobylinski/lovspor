@@ -709,3 +709,19 @@ def test_a_replace_ref_on_a_genuine_history_is_refused(clone: Path) -> None:
     twin = git(clone, "commit-tree", tree, "-p", head, "-m", "twin").strip()
     git(clone, "replace", twin, head)
     refused(clone, "checkout_unsafe", "replace_refs")
+
+
+def test_a_merge_with_both_trusted_and_foreign_roots_is_refused(clone: Path) -> None:
+    """Every history root must be trusted; finding one trusted root is insufficient."""
+    trusted = root_commit(clone)
+    head = git(clone, "rev-parse", "HEAD").strip()
+    tree = git(clone, "rev-parse", "HEAD^{tree}").strip()
+    foreign = git(clone, "commit-tree", tree, "-m", "unrelated root").strip()
+    merged = git(
+        clone, "commit-tree", tree, "-p", head, "-p", foreign, "-m", "merge unrelated history"
+    ).strip()
+    git(clone, "update-ref", f"refs/heads/{BRANCH}", merged)
+    assert set(git(clone, "rev-list", "--max-parents=0", "HEAD").split()) == {trusted, foreign}
+    assert git(clone, "status", "--porcelain") == ""
+
+    refused(clone, "checkout_identity_mismatch", "root_commit")
