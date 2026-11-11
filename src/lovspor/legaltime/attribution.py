@@ -135,6 +135,15 @@ def identified(refid: str | None, changes: tuple[str, ...]) -> str | None:
     return refid if header_proves(refid, changes) else None
 
 
+def item_act(text: str, changes: tuple[str, ...]) -> str | None:
+    """The act a substitution-list item cites: ``identified``, or ``""`` when it cites one unproven.
+
+    ``""`` keeps the item's locations as operations of no act, so they are counted, not dropped.
+    """
+    cited = act_refid(text)
+    return cited and (identified(cited, changes) or "")
+
+
 def canonical_act(date: str, changes: tuple[str, ...]) -> str | None:
     """The act a canonical intro's citation names: ``identified``, from its date group."""
     return identified(act_refid(f"lov {date}"), changes)

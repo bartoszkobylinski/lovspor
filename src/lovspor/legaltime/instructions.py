@@ -429,11 +429,8 @@ class _Reader:
         changes = self.document.header.changes_to_documents
         self.substitution, self.act = None, attribution.canonical_act(intro.group("date"), changes)
         self.unbound = self.unbound or self.act is None  # #872: unproven, so never inherited
-        if slik is not None:
-            return None
-        rest = _intro_rest(intro)
-        if _INTRO_ONLY.match(rest):
-            return None
+        if slik is not None or _INTRO_ONLY.match(rest := _intro_rest(intro)):
+            return None  # an intro alone: ``INTRO_SLIK`` always, ``INTRO`` without an instruction
         return (rest, text) if intro.group("inline") else rest
 
     def _inline(self, text: str) -> str:
@@ -445,13 +442,14 @@ class _Reader:
         return item[1]
 
     def _substitution_item(self, part: tuple[str, str], index: int, node: Node) -> bool:
-        cited, changes = act_refid(node.text), self.document.header.changes_to_documents
-        act = cited and (attribution.identified(cited, changes) or "")  # "": unproven (#872)
+        act = attribution.item_act(node.text, self.document.header.changes_to_documents)
         has_locations = "§" in node.text
         if act is not None and not has_locations:
             self.pending_item_act = act
             return True
-        if act is None and has_locations and self.pending_item_act is not None:
+        if act == "":  # #872: an unproven item ends the act pending before it, too
+            self.pending_item_act = None
+        elif act is None and has_locations and self.pending_item_act is not None:
             act, self.pending_item_act = self.pending_item_act, None
         if act is None or not has_locations:
             return False

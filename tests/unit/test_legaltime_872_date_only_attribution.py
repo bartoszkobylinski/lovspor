@@ -306,3 +306,17 @@ def test_an_unproven_date_only_substitution_item_is_counted_unattributed(
     """Absent, numbered-only or ambiguous: its locations are kept, its act is unknown."""
     acts = [act for act, _ in _substitutions("lov/1965-06-18-4", "lov/1972-06-09-31", *changes)]
     assert acts == ["lov/1965-06-18-4", None, "lov/1972-06-09-31"]
+
+
+def test_an_unproven_item_with_its_locations_ends_the_pending_act_before_it() -> None:
+    """Independent review, round 2: a location-only line after it never inherits item 6's act.
+
+    The item joins lov/2021-05-07-34's item 7 and its locations. A *proven* inline item keeps
+    the pending act as before (``test_explicit_substitution_act_does_not_steal_pending_act``).
+    """
+    item = "7. lov 10. februar 1967 om behandlingsmåten i forvaltningssaker § 21 andre ledd"
+    body = "".join(_p(t) for t in (SUBSTITUTE, SUBSTITUTE_ITEMS[0], item, "§ 2"))
+    operations = _operations(body, "lov/1965-06-18-4", FORVALTNING, "lov/1967-02-10-3")
+    assert [(op.act, op.locations) for op in operations if op.kind == "substitute_term"] == [
+        (None, "§ 21 andre ledd")
+    ]
