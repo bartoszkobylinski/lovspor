@@ -212,9 +212,21 @@ def minimal_docx(lines: tuple[str, ...] = REGULATION_LINES) -> bytes:
     document += paragraphs + "</w:body></w:document>"
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("[Content_Types].xml", "<Types/>")
-        archive.writestr("word/document.xml", document)
+        archive.writestr(_zip_entry("[Content_Types].xml"), "<Types/>")
+        archive.writestr(_zip_entry("word/document.xml"), document)
     return buffer.getvalue()
+
+
+# A fixed entry timestamp. `writestr(name, ...)` stamps each entry with the current
+# local time, so the archive bytes changed every two seconds. These bytes end up in
+# parametrize ids, and under pytest-xdist each worker collects separately: two workers
+# straddling a two-second boundary saw different test ids and the run aborted with
+# "Different tests were collected between gwN and gwM" (lovspor main, 2026-11-11).
+_ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+
+
+def _zip_entry(name: str) -> zipfile.ZipInfo:
+    return zipfile.ZipInfo(name, date_time=_ZIP_EPOCH)
 
 
 def _docx_paragraph(line: str) -> str:
@@ -226,5 +238,5 @@ def _docx_paragraph(line: str) -> str:
 def docx_with_document(document: bytes, part: str = "word/document.xml") -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr(part, document)
+        archive.writestr(_zip_entry(part), document)
     return buffer.getvalue()
