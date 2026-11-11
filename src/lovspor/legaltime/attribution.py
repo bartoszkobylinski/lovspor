@@ -61,6 +61,7 @@ _INDIRECT = re.compile(r"\bom\s+endring|\(\s*endring|\bromertall\b|\bendringslov
 _AFTER_VERB = re.compile(
     rf"\b(?:gjøres|gjerast|blir|vert)\s+{_THESE}\s+i\s+(?:lov\s+)?$", re.I
 )  # ``… gjøres følgende endringer i lov <cit>``: the main verb's own object
+_I_FRAME = re.compile(rf"^{_ITEM}?I\s")  # ``I <act> …`` already names the target up front
 _ACT_NOUN = re.compile(r"\b[\wæøå-]*(?:lov|loven|lova)\b", re.I)
 _TITLE_SLOT = re.compile(
     rf"^{_ITEM}?(?:I\s+)?(?:[^,()]*?(?:lov|loven|lova)|lov\s+om\s[^,()]*?)\s+$", re.I
@@ -113,7 +114,7 @@ def _named(lead: str) -> bool:
     bracket or referring word: ``I straffeloven med hjemmel i lov …`` names two acts.
     """
     if _AFTER_VERB.search(lead):
-        return True
+        return _I_FRAME.match(lead) is None  # ``I straffeloven, gjøres … i lov <cit>``: two targets
     titled = _TITLE_SLOT.match(lead) is not None and len(_ACT_NOUN.findall(lead)) == 1
     return titled and _NOT_A_NAME.search(lead) is None
 
