@@ -3042,7 +3042,7 @@ release sandbox-withdraw --sandbox ~/forarbeider-sandbox \
 Make the sandbox before the plan you mean to apply: a plan records the dataset state it was made against, and `simulate` refuses it against any other (`plan_stale: plan`).
 
 - **`plan`** takes an `eligible_preview` report and the checkpoints it was evaluated against, and evaluates the preflight again from the private files as they are now, at the report's own `--at`. Anything different, even one chapter fewer, is a DENY (exit 2, `promotion_denied`): a held, rejected or reopened review, a revocation, a changed page, text, dossier or evidence file, a missing or other checkpoint. It then reads the corpus checkout's `forarbeider/` tree, which must be exactly what its manifest lists, and renders the manifest, index and document. Those bytes go to `<workspace>/previews/<sha256>.preview`, the plan to `<workspace>/plans/<sha256>.json`, both owner-only and outside Git. The checkout is never written, a real one included. A plan says `publication_authorized=false writes_corpus=false`.
-- **`sandbox-create`** makes a new, owner-only directory outside every repository: the skeleton `git init` writes (unborn `main`, no remote, no commit), a marker inside `.git`, and placeholder `README.md`, `manifest.json`, `lover/`, `forskrifter/` and `lokale-forskrifter/` that every write checks unchanged. No Git command runs: this package never starts a subprocess.
+- **`sandbox-create`** makes a new, owner-only directory outside every repository: the skeleton `git init` writes (unborn `main`, no remote, no commit), a marker inside `.git`, and placeholder `README.md`, `manifest.json`, `lover/`, `forskrifter/` and `lokale-forskrifter/` that every write checks unchanged. No Git command runs for the simulator; the package starts no process itself, and the only Git it causes is the read-only release-checkout guard of `batch preflight`, through `lovspor.git_read`.
 - **`simulate`** refuses anything but a sandbox it made (a clone, a remote, an edited baseline, a symlink, a directory others can write), and a plan whose pages are not the bundled synthetic ones. It re-runs the preflight, ends the authorization by the machine clock against `valid_until`, and rebuilds the plan from the sandbox as it is now. Then it writes one change under an exclusive lock: the new bytes, and the previous bytes of every file replaced or removed, are staged inside `.git`, each staging file created and read through a no-follow descriptor (a symlink, FIFO or hard link there is refused, never followed), and a journal lists every operation and names its action and the plan behind it. Documents, index and manifest are each replaced whole, and the tree is read back and verified before the journal is removed. Every run re-checks the plan first, a retry included: an interrupted change of this plan is finished only while the plan still holds, and rolled back, every file put back as it was, once it is revoked, expired or otherwise denied. An applied plan retried after that is denied, not `UNCHANGED`; taking it down is a withdrawal. A journal of another plan or a withdrawal is refused and left alone. A journal can only name dataset files.
 - **`sandbox-withdraw`** keeps the member, marked `withdrawn` with its `withdrawn_at`, removes its file and drops it from the index. It needs no grant: an interrupted release is rolled back first, whatever its plan's state, and an interrupted withdrawal finished; a journal naming no plan or intent in the workspace is refused. Before the sandbox changes it stores a withdrawal intent (owner, time, document, manifest digests before and after) in the workspace's `withdrawal_intents/`; the receipt in `withdrawals/` follows the change, under the intent's digest. If the receipt cannot be written the withdrawal still stands, and the next run of the same command writes that receipt from the original decision, once. A withdrawal that has its receipt is refused as `document_not_released`. It says, and the withdrawal record keeps (`history_erased: false`), that **Git history and every clone keep the earlier bytes; a revert does not erase them**. For a real corpus that is why the only safe choice for a doubtful chapter is to withhold it before release: taking down published bytes is the owner's decision and an escalation outside any command here.
 
@@ -3187,7 +3187,7 @@ Then `show` judges the **current source proof** (Amendment 1 point 8). `--source
 
 ## Forarbeider: private batch plan (issue #738, contract Amendment 1, A2b)
 
-[Amendment 1](proposals/forarbeider-pr3b-release-contract.md#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release) points 2–4 and 7. `batch plan` decides, for at most 25 propositions, which chapters a later batch release could carry and by which path. **It publishes, authorizes, confirms and applies nothing**: the plan states `publication_authorized: false`, `writes_corpus: false`, `applies: false` and `owner_confirmation: required_not_given` by type, and no command in this slice reads a plan to write anything. The batch confirmation and apply are slice B1.
+[Amendment 1](proposals/forarbeider-pr3b-release-contract.md#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release) points 2–4 and 7. `batch plan` decides, for at most 25 propositions, which chapters a later batch release could carry and by which path. **It publishes, authorizes, confirms and applies nothing**: the plan states `publication_authorized: false`, `writes_corpus: false`, `applies: false` and `owner_confirmation: required_not_given` by type, and no command reads a plan to write anything. `batch preflight` (B1a, below) re-checks a plan read-only; the batch confirmation and apply are slice B1b.
 
 ```bash
 uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> batch plan \
@@ -3232,7 +3232,7 @@ The request is the owner's private JSON file (absolute, owner-only, outside ever
 
 **Output and exit.** Exit 0 when at least one chapter is included, exit 2 when none is; the plan is written either way. Printed: `BATCH PLAN <sha> documents <n> included <i> (standing_policy <p>, owner_review <r>) excluded <e>`, the target branch with `publication_authorized=false applies=false owner_confirmation=required_not_given`, the policy, source-proof and inputs digests, one line per document (id, destination, coverage) and per chapter (number, id, class, `included standing_policy policy <sha12>`, `included owner_review report <sha12> pin <key12>@<revision>` or `excluded <codes>`), then up to five `sample <chapter id> <source URL> (optional spot check, not a gate)` lines. Never chapter text, evidence, handles or a private path. `batch show <sha>` prints the same lines from the stored plan and refuses an edited one (`release_record_corrupt`).
 
-**Storage and determinism.** The plan is `<ws>/batch_plans/<sha256>.json`, owner-only, named by the digest of its exact bytes and never replaced; planning the same request again writes nothing new. `inputs_sha256` is the digest of every staged byte and named record the plan read (metadata, results, pages, review chain heads, report, checkpoints, policy, source proof, `--at`, target branch), never a path; the request's document order does not matter. The C3 sample is the five policy-cleared chapters with the lowest `sha256(inputs_sha256 + "\n" + chapter_id)`, so the same inputs always give the same sample and any changed input reshuffles it. The plan's validator recomputes the sample, the counts and the coverage. Planning reads only private files, makes no request, starts no process and has no corpus or checkout argument: `lovverk` and the sync clone are never touched.
+**Storage and determinism.** The plan is `<ws>/batch_plans/<sha256>.json`, owner-only, named by the digest of its exact bytes and never replaced; planning the same request again writes nothing new. `inputs_sha256` is the digest of every staged byte and named record the plan read (metadata, results, pages, review chain heads, report, checkpoints, policy, source proof, `--at` as its UTC instant, target branch), never a path, so the same instant given with another offset is the same plan and `batch preflight` can replay it; the request's document order does not matter. The C3 sample is the five policy-cleared chapters with the lowest `sha256(inputs_sha256 + "\n" + chapter_id)`, so the same inputs always give the same sample and any changed input reshuffles it. The plan's validator recomputes the sample, the counts and the coverage. Planning reads only private files, makes no request, starts no process and has no corpus or checkout argument: `lovverk` and the sync clone are never touched.
 
 **Manifest schema 2** (`corpus_models.py`; nothing writes it yet, the batch apply in B1 will). Each chapter receipt carries `clearance`, one of:
 - `cleared_by: standing_policy`, `policy_sha256`, `source_proof_sha256`, `individually_reviewed: false`; no review field is allowed;
@@ -3278,6 +3278,106 @@ Times add `policy_decided_at`, `null` exactly when no chapter was policy-cleared
 | v2 labels and distinct time axes | `tests/unit/test_forarbeider_manifest_v2.py::test_a_label_that_is_fixed_by_type_cannot_change`, `::test_the_distinct_time_axes_survive_a_round_trip`, `::test_review_time_is_null_exactly_when_no_chapter_was_reviewed`, `::test_policy_time_is_null_exactly_when_no_chapter_was_policy_cleared` |
 | v1 lift; `parse_manifest` stays v1-only | `tests/unit/test_forarbeider_manifest_v2.py::test_a_v1_manifest_is_lifted_with_owner_review_and_explicit_legacy_nulls`, `::test_parse_manifest_still_refuses_version_2`, `tests/unit/test_forarbeider_corpus_manifest.py::test_another_schema_version_is_incompatible` |
 | Reader reads v1 and v2 | `tests/unit/test_forarbeider_reader_v2.py::test_a_v1_sandbox_is_served_with_lifted_owner_review_clearances`, `::test_a_v2_sandbox_serves_each_chapter_with_its_stated_clearance`, `::test_a_forged_v2_receipt_is_not_synthetic_whatever_clears_it` |
+
+## Forarbeider: read-only apply preflight (issue #738, contract Amendment 1, B1a)
+
+[Amendment 1](proposals/forarbeider-pr3b-release-contract.md#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release) points 4, 5 and 8. `batch preflight` answers one question before a batch release may write: **does this stored plan still hold, exactly, against this release clone, now?** It writes nothing at all, runs only read-only Git, makes no request, asks no confirmation and applies nothing. The batch confirmation, apply and withdrawal are slice B1b. The architecture they follow is in the contract's [B1 appendix](proposals/forarbeider-pr3b-release-contract.md#appendix-b1-implementation-architecture-non-normative).
+
+**The release clone** is a dedicated lovverk clone, used for nothing else, on the plan's target branch. Make it once, by hand, outside every other repository:
+
+```bash
+git clone https://github.com/bartoszkobylinski/lovverk.git /abs/lovverk-release
+git -C /abs/lovverk-release switch -c forarbeider/batch-2026-12-01
+```
+
+It is never the sync clone (`lovspor fetch-corpus`, `~/.cache/lovverk` or `$XDG_CACHE_HOME/lovverk`), never `$LOVVERK_CORPUS_PATH`, never a worktree of either, never a shallow clone, and never the engine checkout. No command makes or updates it.
+
+```bash
+uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> batch preflight <plan sha256> \
+  --checkout /abs/lovverk-release \
+  --request /abs/private/batch.json \
+  --source-proof <fetch out>/fetch-run-<start>.json
+```
+
+`--request` and `--source-proof` are the files the plan was made from: the plan stores neither path. The policy is the plan's own; there is no `--policy`. There is no `--at` either: the moment is the machine clock.
+
+**What it checks, in order; the first failure refuses.**
+1. The workspace already exists and is private (a preflight never creates it). The plan is stored under its digest, intact (counts, sample, coverage and each clearance's policy, proof or report digest re-validated), and includes at least one chapter.
+2. **The checkout guard.**
+   - The path is absolute and already canonical, with no symlink on the way, owner-only, and so are its parents (a root-owned sticky `/tmp` excepted).
+   - It is not, inside or around the engine, the sync clone or `$LOVVERK_CORPUS_PATH`. Each is compared by device and inode when it exists, so a letter-case alias counts, and by canonical path when it does not.
+   - `.git` is its own directory: no linked worktree, gitfile or `objects/info/alternates`.
+   - The local config holds no filter, fsmonitor, hooks path, include, `core.worktree`, sparse checkout or URL rewrite.
+   - There is exactly one remote, `origin`, at `https://github.com/bartoszkobylinski/lovverk(.git)`, `git@github.com:bartoszkobylinski/lovverk(.git)` or `ssh://git@github.com/bartoszkobylinski/lovverk(.git)`, and any push URL is one of those.
+   - Git agrees the repository is rooted at that path, not bare and not shallow.
+   - No merge, rebase, cherry-pick, revert, bisect, `am` or sequencer is in progress, and no forarbeider lock, journal or staging is left in `.git`.
+   - HEAD is the plan's branch, born, not detached.
+   - The tree has `manifest.json`, `lover/` and `forskrifter/`, and every root commit is lovverk's initial commit `27aef25110812552319a83228b65aed9af44bfd5`, read with replace objects and grafts ignored; no `.git/info/grafts` and no ref under `refs/replace/` exists.
+   - Index and worktree are clean, nothing is untracked, no assume-unchanged or skip-worktree flag hides an edit, nothing is ignored inside `forarbeider/` (ignored files elsewhere are allowed), and the existing `forarbeider/` dataset is exactly what its manifest lists.
+3. The request names the plan's target branch.
+4. **Reproduction.** The A2b evaluation runs again **now**, from the request and the source proof, under the plan's policy: policy state, source-proof freshness, every staged byte, review chain, report, authorization and checkpoint. Stamped with the plan's own moment, the result must be the stored plan **byte for byte**, digest for digest. A stored eligible plan never approves by itself. A chapter excluded or withheld in the plan stays out, and a chapter that would now be excluded fails the whole preflight.
+
+**Git** runs only through `lovspor.git_read`. The commands are an exact read-only allowlist (`version`, `rev-parse`, `symbolic-ref`, `config --local --list`, `status --porcelain=v2`, `ls-files`, `rev-list --max-parents=0`, `for-each-ref refs/replace`). Replace objects and grafts are ignored on every run (`--no-replace-objects`, `GIT_NO_REPLACE_OBJECTS=1`, `GIT_GRAFT_FILE` at the null device), so a local history override cannot make a foreign root commit look like lovverk's; a clone that carries a graft file or a replace ref is refused anyway. Every run passes `--no-optional-locks`, so `git status` never rewrites `.git/index`, with fsmonitor and the untracked cache off. The environment is built from scratch: `GIT_DIR`, `GIT_WORK_TREE` and global or system config are never inherited. That isolation needs Git 2.32 or newer: an older Git silently ignores `GIT_CONFIG_GLOBAL` and would read the operator's global config, so the guard asks `git version` before any other Git command and refuses an older or unreadable one (`checkout_unverifiable: git_version`).
+
+**The 24-hour consequence.** The plan's source proof must be at most 24 hours old *when the preflight runs* (point 8), and every authorization a flagged chapter relies on must still be valid then. So a preflight, and the B1b apply that repeats it, must run within 24 hours of the `forarbeider-fetch` run the plan was made from, before any authorization expires, and before anyone records a new PR3A decision on a batch chapter. Otherwise it refuses with `plan_not_reproduced`, and the way forward is always the same: fetch again, plan again (and in B1b, confirm again).
+
+**Output and exit.**
+- **Exit 0** prints:
+  - `APPLY PREFLIGHT PASS plan <sha> binding <sha>`;
+  - `target <branch> head <commit> base forarbeider/manifest.json <sha|absent>`;
+  - the counts;
+  - one `document <id> <destination> coverage <c> chapters <n,...>` line per document, naming its included chapters only;
+  - `writes_corpus=false applies=false owner_confirmation=required_not_given evaluated_at <iso>`.
+
+  The binding digest covers the plan digest, branch, HEAD commit, base manifest digest, remote, each included chapter id with its text digest, and the counts, and leaves out the moment. The same world gives the same binding; the B1b confirmation will name it. Never printed: chapter text, a handle, a private path, the checkout path included.
+- **Exit 2** is `refused: plan_not_reproduced: <where>`. `<where>` is `inputs` (a staged byte, review chain head, report or checkpoint changed), `source_proof` (another proof file), or `<chapter id>: <reasons now>` for the first chapter whose verdict changed (for example `authorization_revoked`, `authorization_expired`, `policy_revoked`, `source_proof_stale`).
+- **Exit 1** is any other refusal; each is written `refused: <reason>: <detail>` on stderr:
+
+| Reason | Detail |
+|---|---|
+| `release_record_missing` | `workspace` (absent), or the plan digest (not stored) |
+| `release_invalid` | `plan` (malformed digest) |
+| `release_record_corrupt` | the plan digest (edited) |
+| `batch_nothing_included` | the plan digest |
+| `target_branch_mismatch` | `request` |
+| `checkout_unsafe` | `path`, `parent`, `grafts` (`.git/info/grafts` present), `replace_refs` (any ref under `refs/replace/`) |
+| `checkout_forbidden` | `engine`, `sync_clone`, `corpus_path` |
+| `checkout_alias` | `git_dir`, `alternates`, `toplevel`, `common_dir` |
+| `checkout_config_unsafe` | `filter`, `include`, `includeif`, `url`, `core.fsmonitor`, `core.worktree`, `core.sparsecheckout`, `core.hookspath`, `extensions.worktreeconfig` |
+| `checkout_remote_untrusted` | `origin`, `remotes`, `pushurl` |
+| `checkout_identity_mismatch` | `shallow`, `structure`, `root_commit` |
+| `checkout_operation_in_progress` | `merge`, `rebase`, `cherry_pick`, `revert`, `bisect`, `am`, `sequencer` |
+| `checkout_pending_change` | `lock`, `journal`, `staging` |
+| `checkout_branch_mismatch` | `detached`, `unborn`, `branch` |
+| `checkout_dirty` | `index`, `worktree`, `untracked`, `hidden_flag`, `ignored_dataset` |
+| `checkout_unverifiable` | `git_version` (Git older than 2.32 or its version unreadable), or the Git command whose answer could not be read |
+| `corpus_tree_mismatch` / `manifest_invalid` / `unsafe_input_path` | the existing dataset is not exactly its manifest |
+
+The planner's own refusals for the request, staged files, policy and proof apply unchanged.
+
+### Acceptance matrix (B1a)
+
+| Requirement | Test |
+|---|---|
+| Read-only Git: exact allowlist, no write/network/notes verb, refused before any process | `tests/unit/test_git_read.py::test_the_allowlist_holds_no_write_network_or_notes_verb`, `::test_an_argv_outside_the_allowlist_is_refused_before_any_process` |
+| No optional locks; minimal env never inherited | `tests/unit/test_git_read.py::test_status_does_not_rewrite_a_stale_index`, `::test_the_environment_is_minimal_and_never_inherited`, `::test_an_inherited_git_dir_cannot_point_the_reader_elsewhere`, `::test_the_process_is_started_with_list_argv_no_shell_and_the_fixed_prefix` |
+| Only the guard imports the Git reader; the package still imports no `subprocess` | `tests/unit/test_forarbeider_boundary.py::test_only_the_release_checkout_guard_imports_the_git_reader`, `::test_package_cannot_reach_the_network` |
+| Canonical path, symlinks, unsafe parents, never creates a clone | `tests/unit/test_forarbeider_release_checkout.py::test_a_symlinked_checkout_is_refused`, `::test_a_checkout_below_a_symlinked_parent_is_refused`, `::test_a_relative_path_is_refused`, `::test_a_missing_path_is_refused_and_never_created`, `::test_a_parent_others_can_write_is_refused`, `::test_a_parent_is_unsafe_when_someone_else_could_rename_the_checkout` |
+| Never the engine, the sync clone or the configured corpus | `tests/unit/test_forarbeider_release_checkout.py::test_the_engine_checkout_is_refused_before_any_git_runs`, `::test_the_sync_clone_is_refused`, `::test_the_configured_corpus_path_is_refused`, `::test_a_checkout_holding_the_sync_path_is_refused_though_it_does_not_exist`, `::test_a_letter_case_alias_of_the_sync_clone_is_refused` |
+| Aliases of another repository | `tests/unit/test_forarbeider_release_checkout.py::test_a_linked_worktree_is_refused`, `::test_borrowed_objects_are_refused`, `::test_an_inherited_git_environment_cannot_redirect_the_guard` |
+| Trusted remote and repository identity | `tests/unit/test_forarbeider_release_checkout.py::test_every_trusted_remote_form_is_accepted`, `::test_an_untrusted_origin_is_refused`, `::test_a_second_remote_is_refused`, `::test_a_foreign_pushurl_is_refused`, `::test_the_pinned_root_is_the_lovverk_initial_commit`, `::test_an_unknown_root_commit_is_refused`, `::test_a_clone_without_the_lovverk_shape_is_refused`, `::test_a_shallow_clone_is_refused` |
+| Unsafe configuration | `tests/unit/test_forarbeider_release_checkout.py::test_unsafe_local_configuration_is_refused` |
+| Replace objects and grafts cannot disguise a foreign root; either is refused | `tests/unit/test_forarbeider_release_checkout.py::test_local_history_overrides_cannot_disguise_a_foreign_root`, `::test_a_graft_file_on_a_genuine_history_is_refused`, `::test_a_replace_ref_on_a_genuine_history_is_refused`, `tests/unit/test_git_read.py::test_the_environment_is_minimal_and_never_inherited` |
+| Explicit non-main branch equal to the plan's | `tests/unit/test_forarbeider_release_checkout.py::test_main_is_refused`, `::test_another_forarbeider_branch_is_refused`, `::test_a_detached_head_is_refused`, `::test_an_unborn_branch_is_refused` |
+| No operation in progress | `tests/unit/test_forarbeider_release_checkout.py::test_a_real_operation_in_progress_is_refused`, `::test_every_operation_marker_is_refused_alone`, `::test_an_unfinished_forarbeider_change_is_refused` |
+| Clean index/worktree, no untracked, no hidden edit, dataset exact | `tests/unit/test_forarbeider_release_checkout.py::test_an_unstaged_edit_is_refused`, `::test_a_staged_edit_is_refused`, `::test_an_untracked_file_is_refused`, `::test_an_ignored_file_inside_the_dataset_is_refused`, `::test_an_edit_hidden_from_status_by_an_index_flag_is_refused`, `::test_a_dataset_that_is_not_its_manifest_is_refused` |
+| Ambiguous or unverifiable Git refuses | `tests/unit/test_forarbeider_release_checkout.py::test_git_that_fails_or_answers_unexpectedly_is_unverifiable`, `::test_a_head_that_is_not_a_commit_digest_is_unverifiable` |
+| Git too old (< 2.32) or version unreadable refuses; asked first | `tests/unit/test_forarbeider_release_checkout.py::test_a_git_too_old_or_unreadable_to_ignore_global_config_is_refused`, `::test_a_failing_version_command_is_refused`, `::test_a_git_new_enough_is_accepted`, `::test_the_version_is_asked_before_any_other_git` |
+| Plan integrity, ≥1 included, branch match | `tests/unit/test_forarbeider_apply_preflight.py::test_an_unknown_malformed_or_edited_plan_is_refused`, `::test_a_plan_that_includes_nothing_is_refused`, `::test_a_request_for_another_branch_is_refused`, `tests/unit/test_forarbeider_batch_models.py::test_a_policy_clearance_naming_another_policy_or_proof_is_invalid`, `::test_a_review_clearance_must_name_its_own_document_report` |
+| Re-evaluation now must reproduce the plan exactly | `tests/unit/test_forarbeider_apply_preflight.py::test_an_unchanged_world_passes_and_prints_the_binding`, `::test_a_restaged_page_is_not_reproduced`, `::test_a_new_review_decision_is_not_reproduced`, `::test_another_checkpoint_is_not_reproduced`, `::test_an_authorization_revoked_since_the_plan_is_not_reproduced`, `::test_an_authorization_expired_since_the_plan_is_not_reproduced`, `::test_a_policy_revoked_since_the_plan_is_not_reproduced`, `::test_a_source_proof_older_than_a_day_is_not_reproduced`, `::test_another_source_proof_is_not_reproduced`, `::test_a_plan_made_at_an_offset_moment_reproduces` |
+| Excluded and withheld never in the binding | `tests/unit/test_forarbeider_apply_preflight.py::test_the_binding_lists_only_included_chapters` |
+| One function for the CLI and B1b; stable binding | `tests/unit/test_forarbeider_apply_preflight.py::test_the_command_prints_what_apply_preflight_returns_and_the_binding_is_stable` |
+| Writes nothing anywhere, on a pass and on every refusal; no text or private path printed | every test in `tests/unit/test_forarbeider_apply_preflight.py` (whole `tmp_path` snapshot, markers and paths absent), every refusal in `tests/unit/test_forarbeider_release_checkout.py`; `test_forarbeider_apply_preflight.py::test_a_missing_workspace_is_refused_and_never_created` |
 
 ## Idempotency
 

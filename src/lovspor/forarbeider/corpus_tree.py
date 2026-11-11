@@ -1,7 +1,8 @@
 """A checkout's ``forarbeider/`` tree, and the disposable synthetic sandbox (#738, PR3B-2).
 
-No Git command runs: this package never starts a subprocess. A checkout is
-read file by file through no-follow descriptors, so a symlink, a hard link or
+No Git command runs here, and the package starts no process itself (the
+release-checkout guard's read-only Git goes through ``lovspor.git_read``). A
+checkout is read file by file through no-follow descriptors, so a symlink, a hard link or
 a special file anywhere in ``forarbeider/`` is refused, never followed, and the tree
 must be exactly what its manifest lists.
 

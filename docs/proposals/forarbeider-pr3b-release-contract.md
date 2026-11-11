@@ -207,3 +207,28 @@ No automated harvesting, sitemap walk, PDF/OCR, background cron, auto-approval, 
 4. Owner then decides whether to authorize the **PR3B-2 code scope**. This decision is distinct from authorization to release any specific real chapter; that remains explicitly gated.
 
 This contract translates ADR-0018 into reviewable implementation boundaries. It is not legal advice, a licence, evidence of GDPR compliance, or permission to publish.
+
+## Appendix: B1 implementation architecture (non-normative)
+
+**Status:** implementation notes for slice B1, written with B1a (2026-11-11, [#738](https://github.com/bartoszkobylinski/lovspor/issues/738)). This is not an amendment. Where it differs from Amendment 1 or the text above, those win. B1a ships the release-checkout guard and the read-only `batch preflight` ([operations](../operations.md#forarbeider-read-only-apply-preflight-issue-738-contract-amendment-1-b1a)). Everything below marked B1b is not implemented.
+
+1. **What B1b may write.**
+   - Only `forarbeider/**` in the guarded release clone: rendered documents at their `DOCUMENT_PATH`, `INDEX.md`, `manifest.json` (schema 2).
+   - Its own lock, journal and staging inside that clone's `.git/`.
+   - In the private workspace, the confirmation and receipt records.
+   - Never the root `manifest.json`, `lover/`, `forskrifter/`, `lokale-forskrifter/` or any other path, the sync clone, the engine, or a Git ref. No `git add`, commit or push: the owner commits, pushes and opens the lovverk PR, and merging it is the publication.
+2. **One gate, called twice.** `apply_preflight(scope, request, now)` (`forarbeider/apply_preflight.py`) is the only way to obtain an apply verdict. `batch confirm` runs it and shows the binding. `batch apply` runs it again **inside the clone's lock, immediately before staging**, and requires the same binding digest the confirmation names. No verdict object or digest from an earlier process is accepted, so nothing changed between confirmation and write (a re-staged page, a new review decision, an expired authorization or proof, a moved HEAD, a changed base manifest) can slip through.
+3. **Owner confirmation binding (B1b).** One typed phrase at a terminal (`require_a_person`), containing the plan digest prefix, the binding digest prefix, the included count and the target branch. The binding digest covers the plan digest, target branch, HEAD commit, base manifest digest, remote, every included chapter id with its text digest, and the counts by path. The stored `BatchConfirmation` records those values, the document ids, the owner handle and time, and `identity_authenticated: false`. A typed phrase is the owner's act, not cryptographic identity.
+4. **Atomic write and rollback.** Reuse `corpus_transaction`: journal before the first operation, every new file's bytes and every replaced file's previous bytes staged inside `.git`, documents then index then manifest, forward `finish` or backward `roll_back`, and a read-back check before the journal is cleared.
+   - One journal per batch, `Binding("batch_release", <confirmation sha>)`, so a batch is all or nothing.
+   - Its `_verify` is today bound to the synthetic sandbox (`require_sandbox`). B1b passes the release-checkout guard's read-back instead, and changes nothing else in the transaction.
+5. **Post-write check.** After apply, `git status --porcelain=v2` (read-only, through `lovspor.git_read`) must list exactly the planned `forarbeider/` paths and nothing else, and the dataset read back must be the target manifest. Otherwise roll back and refuse.
+6. **Crash recovery and idempotency.**
+   - A journal left by a dead run is settled before anything else. A release journal whose confirmation still reproduces (same binding) is finished; otherwise it is rolled back, never completed. This is the rule `simulate` already follows.
+   - The clean-tree precondition is relaxed for one case only: exactly this confirmation's own paths already hold their planned bytes. That run reports `UNCHANGED` and writes nothing.
+   - After the owner has committed the batch, the tree is clean again and the manifest already holds it: `UNCHANGED`.
+7. **Forward-only withdrawal (B1b, ships with or before apply).**
+   - Against the guarded clone, at a terminal, with no release grant needed.
+   - The intent is stored first (named by the resulting manifest digest), then a `withdraw_draft` runs through the same transaction, then the receipt is stored, as `sandbox-withdraw` does.
+   - It prints the Git-history warning. The owner commits the removal; history is never rewritten.
+8. **Not in B1:** MCP or site exposure; the receipt-verified reader of a real clone (B2).

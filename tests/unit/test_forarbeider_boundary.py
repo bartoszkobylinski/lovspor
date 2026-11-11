@@ -63,3 +63,17 @@ def test_package_states_no_licence_in_any_value() -> None:
     for path in PACKAGE.glob("*.py"):
         for literal in _string_literals(path):
             assert not any(word in literal for word in LICENCE_WORDS), (path, literal)
+
+
+def _imports_git_reader(path: Path) -> bool:
+    return any(name.split(".")[:2] == ["lovspor", "git_read"] for name in _imports(path))
+
+
+def test_only_the_release_checkout_guard_imports_the_git_reader() -> None:
+    """The one process the package may cause is read-only Git, from one module (#738, B1a)."""
+    importers = {
+        path.relative_to(SOURCE).as_posix()
+        for path in SOURCE.rglob("*.py")
+        if _imports_git_reader(path)
+    }
+    assert importers == {"forarbeider/release_checkout.py"}

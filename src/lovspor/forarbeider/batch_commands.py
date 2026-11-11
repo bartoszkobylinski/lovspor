@@ -62,7 +62,7 @@ class BatchPlanRequest(BaseModel):
     at: str
 
 
-def _request(path: Path) -> BatchRequest:
+def read_request(path: Path) -> BatchRequest:
     """The private request, refused before any staged file is read when it cannot be a batch.
 
     Raises:
@@ -154,6 +154,24 @@ def _require_one_batch(documents: Sequence[DocumentEvidence]) -> None:
         seen |= keys
 
 
+def batch_evidence(scope: ReleaseScope, ask: BatchPlanRequest, batch: BatchRequest) -> Batch:
+    """Every input of ``batch`` read and evaluated at ``ask.at``; nothing is written.
+
+    The workspace is opened as every release command opens it: created when
+    absent. A caller that must write nothing proves it exists first.
+
+    Raises:
+        ForarbeiderRefusedError: an input could not be read safely or is not one batch.
+    """
+    with refused_as("at"):
+        at = aware_moment(ask.at)
+    workspace = open_release_workspace(scope)
+    verdict = _policy_verdict(workspace, ask, at)
+    documents = tuple(_document(scope, workspace, item, ask.at) for item in batch.documents)
+    _require_one_batch(documents)
+    return Batch(batch.target_branch, at, verdict, documents)
+
+
 def batch_plan_impl(scope: ReleaseScope, ask: BatchPlanRequest) -> tuple[str, bool]:
     """Write the plan; return its lines and whether any chapter is included.
 
@@ -161,15 +179,8 @@ def batch_plan_impl(scope: ReleaseScope, ask: BatchPlanRequest) -> tuple[str, bo
         ForarbeiderRefusedError: an input could not be read safely or is not one
             batch; nothing was written.
     """
-    batch = _request(ask.request)
-    with refused_as("at"):
-        at = aware_moment(ask.at)
-    workspace = open_release_workspace(scope)
-    verdict = _policy_verdict(workspace, ask, at)
-    documents = tuple(_document(scope, workspace, item, ask.at) for item in batch.documents)
-    _require_one_batch(documents)
-    plan = plan_of(Batch(batch.target_branch, at, verdict, documents))
-    sha = write_record(workspace, "batch_plans", plan)
+    plan = plan_of(batch_evidence(scope, ask, read_request(ask.request)))
+    sha = write_record(open_release_workspace(scope), "batch_plans", plan)
     counts = plan.counts
     return plan_lines(plan, sha), counts.standing_policy + counts.owner_review > 0
 
