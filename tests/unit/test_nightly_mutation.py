@@ -119,3 +119,85 @@ def test_only_the_jobs_that_write_hold_write_scopes() -> None:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     assert workflow["permissions"] == {"contents": "read"}
     assert _job()["permissions"] == {"contents": "write", "issues": "write"}
+
+
+# Every verdict that is not complete, and none at all: a Verdict step that died.
+@pytest.mark.parametrize("verdict", ["partial", "budget_exceeded", "tool_failure", ""])
+def test_a_night_that_did_not_measure_its_range_ends_red(verdict: str) -> None:
+    """Issue #879: every earlier step swallows its failure, so the run was green.
+
+    Edits to the report issue send no mail, so a run that ends green on a
+    partial, budget-exceeded or failed night reports it as clean everywhere a
+    human looks without opening the issue, every night the tag stays put.
+    """
+    step = _step("Fail a night that did not measure its range")
+    assert step["if"] == "always() && steps.verdict.outputs.complete != 'true'"
+    done = subprocess.run(
+        ["bash", "-c", str(step["run"])],
+        capture_output=True,
+        text=True,
+        env={"VERDICT": verdict, "REASON": "r"},
+        check=False,
+    )
+    assert done.returncode == 1
+    assert f"verdict '{verdict or 'none'}'" in done.stdout
+
+
+def test_the_red_night_comes_after_its_report() -> None:
+    names = [str(s.get("name", "")) for s in _job()["steps"]]  # type: ignore[union-attr]
+    report = next(i for i, n in enumerate(names) if n.startswith("Report"))
+    fail = names.index("Fail a night that did not measure its range")
+    assert fail == len(names) - 1
+    assert fail > report
+
+
+def test_the_incomplete_night_failure_is_not_swallowed() -> None:
+    """The documented red run requires an unhandled step failure (#879)."""
+    step = _step("Fail a night that did not measure its range")
+    assert step.get("continue-on-error", False) is False
+    assert _job().get("continue-on-error", False) is False
+
+
+@pytest.mark.parametrize("missing_outputs", [False, True])
+def test_the_failure_annotation_reports_the_gate_reason(missing_outputs: bool) -> None:
+    step = _step("Fail a night that did not measure its range")
+    assert step["env"] == {
+        "VERDICT": "${{ steps.verdict.outputs.verdict }}",
+        "REASON": "${{ steps.verdict.outputs.reason }}",
+    }
+    env = {} if missing_outputs else {"VERDICT": "partial", "REASON": "unmeasured_mutants"}
+    done = subprocess.run(
+        ["bash", "-e", "-c", str(step["run"])],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    verdict = env.get("VERDICT", "none")
+    reason = env.get("REASON", "none")
+    assert done.returncode == 1
+    assert done.stdout == (
+        f"::error::nightly mutation verdict '{verdict}' (gate reason: {reason}): "
+        "the range was not fully measured and the base tag did not move\n"
+    )
+    assert done.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("reason", "red"),
+    [
+        ("ok", False),
+        ("surviving_mutants", False),
+        ("run_incomplete", True),
+        ("budget_exceeded", True),
+        ("tool_failed", True),
+    ],
+)
+def test_the_red_step_fires_exactly_on_an_incomplete_verdict(
+    tmp_path: Path, reason: str, red: bool
+) -> None:
+    """The step's `if` reads `complete`; tie it to what the verdict script prints."""
+    complete = _verdict(tmp_path, {"schema_version": 1, "gate": {"reason": reason}})["complete"]
+    step = _step("Fail a night that did not measure its range")
+    assert step["if"] == "always() && steps.verdict.outputs.complete != 'true'"
+    assert (complete != "true") is red

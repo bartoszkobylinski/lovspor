@@ -178,6 +178,10 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   missing), body rewritten every night: verdict, range and where its base came from,
   whether the tag moved, the run link, and `mutation_gate.py --summary` (counts, survivors,
   timed-out and suspicious mutants). GitHub mails on create, not on edit.
+- **Run status.** After the report, a night whose verdict is not complete (`partial`,
+  `budget_exceeded`, `tool_failure`) fails its last step, so the run ends red and GitHub's
+  failed-run mail fires; `clean` and `survivors` end green (#879). Before this a non-complete
+  night ended green, and the unmailed issue edit was its only trace.
 - **Remediation.** Not wired yet. `mutation-remediation.yml` is built around a PR: it is
   triggered by a `PR Pipeline` run of a `pull_request` event, downloads the artifact of that
   run, checks out and pushes to that run's head branch and counts its cycles on that PR. A
