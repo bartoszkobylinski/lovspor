@@ -198,6 +198,16 @@ def test_a_title_before_the_main_verbs_own_object_is_never_proven() -> None:
     ]
 
 
+def test_an_item_numbered_i_frame_before_the_verbs_own_object_is_never_proven() -> None:
+    """``_I_FRAME`` tolerates a leading item number (``3) I …``), same refusal as unnumbered."""
+    intro = "3) I straffeloven, gjøres følgende endringer i lov 20. desember 2023 nr. 110:"
+    body = SECTION_3 + _article("§3b", _ledd(intro), _p("§ 41 oppheves."))
+    assert _acts(body, STRAFFELOVEN, "lov/2023-12-20-110") == [
+        ("§40", STRAFFELOVEN),
+        ("§41", None),
+    ]
+
+
 def test_an_embedded_amendment_of_another_act_stays_closed_with_the_header_proof() -> None:
     """lov/2007-04-13-14 IV: straffeprosessloven text inside straffeloven § 102 nr. 4."""
     body = _article(
