@@ -22,6 +22,9 @@ year and number, whether it cites exactly one and the member's header lists it
 - ``unbound_was_false``: bound before to an act the governing sentence does not cite,
   unattributed now;
 - ``intro_not_an_operation``: a proven intro sentence that was counted as an operation;
+- ``unbound_date_only_unproven`` (#872): bound before to the date-only refid a canonical intro
+  cites by date alone, unattributed now because the header does not prove that refid. Not
+  proven wrong: no longer proven at all;
 - ``check``: anything else. Zero is the merge condition.
 
 Nothing here decides an attribution; it restates the readings and the evidence beside them.
@@ -42,7 +45,7 @@ from typing import Any
 from lovspor.legaltime import instructions
 from lovspor.legaltime.archive import collect, read_members
 from lovspor.legaltime.instructions import interpret
-from lovspor.legaltime.text import split_sentences
+from lovspor.legaltime.text import act_refid, split_sentences
 
 ACTS = (
     "lov/2008-05-15-35", "lov/2005-05-20-28", "lov/2005-06-17-62", "lov/2003-07-04-84",
@@ -104,6 +107,20 @@ def _class(before: list[Any] | None, after: list[Any] | None, cited: list[str], 
     return "check"
 
 
+def _date_only_unproven(
+    before: list[Any] | None, after: list[Any] | None, sentence: str, changes: list[str]
+) -> bool:
+    """#872: the operation lost the date-only act its canonical intro cites, which is unproven."""
+    attribution = importlib.import_module(_ATTRIBUTION)
+    old = (before or [None, None])[1]
+    if old is None or after is None or after[1] is not None:
+        return False
+    intro = attribution.INTRO.match(sentence) or attribution.INTRO_SLIK.match(sentence)
+    if intro is None or act_refid(f"lov {intro.group('date')}") != old:
+        return False
+    return attribution.canonical_act(intro.group("date"), tuple(changes)) is None
+
+
 def _changed(before: dict[str, Any], after: dict[str, Any]) -> dict[str, list[str]]:
     """Member refid → ids of operations whose reading differs between the two dumps."""
     result: dict[str, list[str]] = {}
@@ -145,7 +162,9 @@ def _row(
     return {
         "op": (n or o)[0], "before": o and o[1], "after": n and n[1], "kind": (n or o)[2],
         "instruction": (n or o)[3], "governing": sentence, "cited": cited,
-        "identity_proven": proof, "class": _class(o, n, cited, proof),
+        "identity_proven": proof,
+        "class": "unbound_date_only_unproven" if _date_only_unproven(o, n, sentence, changes)
+        else _class(o, n, cited, proof),
     }  # fmt: skip
 
 

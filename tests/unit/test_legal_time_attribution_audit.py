@@ -196,3 +196,35 @@ def test_one_listed_citation_in_a_referring_clause_is_never_proven() -> None:
     )
     row = _row(sentence, None, "lov/2023-12-20-110", ["lov/2023-12-20-110"])
     assert (row["identity_proven"], row["class"]) == (False, "check")
+
+
+SKIFTE_UNLISTED = "14. I lov 21. februar 1930 om skifte gjøres følgende endringer:"  # 2007-01-26-3
+
+
+def test_a_lost_date_only_act_its_header_does_not_prove_is_unproven_not_false() -> None:
+    """#872: the canonical intro cites lov/1930-02-21 by date alone; the header does not list it."""
+    row = _row(SKIFTE_UNLISTED, "lov/1930-02-21", None, [STRAFFELOVEN])
+    assert row["class"] == "unbound_date_only_unproven"
+    numbered = _row("I lov 20. mai 2005 nr 28 om straff gjøres følgende endring:", "lov/2005-05-20",
+                    None, [STRAFFELOVEN])  # fmt: skip
+    assert numbered["class"] == "unbound_date_only_unproven"  # lov/2021-05-07-33
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "changes"),
+    [
+        ("lov/1930-02-21", None, ["lov/1930-02-21"]),  # the header proves it: losing it is a bug
+        ("lov/1930-02-21", STRAFFELOVEN, [STRAFFELOVEN]),  # rebound, not unbound
+        (STRAFFELOVEN, None, [STRAFFELOVEN]),  # not the act the intro cites by date
+        (None, None, []),  # was never bound
+    ],
+)
+def test_only_a_lost_unproven_date_only_act_is_classed_unproven(
+    before: str | None, after: str | None, changes: list[str]
+) -> None:
+    assert _row(SKIFTE_UNLISTED, before, after, changes)["class"] != "unbound_date_only_unproven"
+
+
+def test_a_non_canonical_sentence_is_never_classed_date_only_unproven() -> None:
+    row = _row("§ 40 oppheves.", "lov/1930-02-21", None, [])
+    assert row["class"] != "unbound_date_only_unproven"
