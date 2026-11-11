@@ -3,12 +3,17 @@
 import ast
 from pathlib import Path
 
+import pytest
+
 import lovspor
 
 SOURCE = Path(lovspor.__file__).parent
 PACKAGE = SOURCE / "forarbeider"
 FORBIDDEN_IN_PACKAGE = {"httpx", "requests", "urllib.request", "socket", "subprocess", "aiohttp"}
 LICENCE_WORDS = ("NLOD", "CC0", "CC-BY")
+
+# Every test here reads src/ as text: none can kill a mutant (pyproject [tool.mutmut]).
+pytestmark = pytest.mark.structural
 
 
 def _imports(path: Path) -> set[str]:

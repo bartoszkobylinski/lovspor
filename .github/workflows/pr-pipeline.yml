@@ -1,15 +1,26 @@
-# Agentic CI: fast checks -> independent Codex test author -> mutation gate.
-# Architecture and invariants: docs/agentic-ci.md
+# Agentic CI: fast checks -> independent Codex test author (once, on ready) -> READY.
+# Mutation is not in this pipeline: it runs nightly on main and reports
+# (.github/workflows/nightly-mutation.yml). Architecture: docs/agentic-ci.md
 name: PR Pipeline
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # ready_for_review: a draft gets fast-ci only; marking it ready is what
+    # starts the independent test author (the `author_lane` condition below).
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Post-merge check: fast-ci on every commit that lands on main catches the
+  # combined breakage of two PRs that were each green alone. Only fast-ci and
+  # nothing else runs on this event; every other job is gated on pull_request.
+  push:
+    branches: [main]
 
-# A stale run must never outlive a new SHA.
+# A draft's run is cheap and a new push makes it stale, so a draft cancels its
+# predecessor. A ready PR's run carries the agent round and is never killed
+# mid-run: the next run queues behind it instead. A push to main gets one
+# group per commit, so no post-merge check evicts another.
 concurrency:
-  group: pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'push' && format('main-{0}', github.sha) || format('pr-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: ${{ github.event.pull_request.draft == true }}
 
 permissions:
   contents: read
@@ -79,7 +90,10 @@ jobs:
         run: uv run python scripts/quality/check_dependency_policy.py
 
       - name: Unit tests
-        run: uv run pytest tests/unit/
+        # -n auto (pytest-xdist): ~20 000 tests ran serially for ~22 min. The
+        # suite was checked parallel-safe before this was enabled: the same
+        # pass/skip/xfail counts under xdist as serially (docs/agentic-ci.md).
+        run: uv run pytest tests/unit/ -n auto
 
   # The agent lane runs on two machines on purpose. `codex-author` stays on the
   # self-hosted Mac mini runner because the Codex session's `auth.json` is a long-lived
@@ -109,7 +123,16 @@ jobs:
     # The runner holding Codex auth never executes fork code.
     # Nor dependabot code: that actor gets no repository secrets, so the lanes
     # cannot check out; fast-ci and the Test matrix still judge the bump (#361).
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    # The author runs ONCE per PR, when it becomes ready: on `ready_for_review`,
+    # or on `opened` when the PR was opened ready. Never on a draft, never on
+    # `synchronize` (a later push, the author's own push included) and never on
+    # `reopened`. A skipped author is not a failure: `ready` accepts it.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]' &&
+      (github.event.action == 'ready_for_review' ||
+       (github.event.action == 'opened' && github.event.pull_request.draft == false))
     # No push token and no write scopes on this lane: the box produces a
     # patch, the hosted verifier is the only leg that can reach the branch.
     permissions:
@@ -380,7 +403,10 @@ jobs:
     # `!cancelled()` rather than `success()`: when the agent lane dies with its
     # box this job must still run, because it is the escalation path for exactly
     # that. A fork PR skips `codex-author`, and a skipped need is not a failure.
-    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+    # A SKIPPED author (draft, `synchronize`, `reopened`, fork, dependabot: its
+    # own `if`) is no round at all, so this verifier skips with it. A dead
+    # author is `failure`, never `skipped`, and still reaches the escalation.
+    if: ${{ !cancelled() && needs.codex-author.result != 'skipped' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -864,12 +890,14 @@ jobs:
           fi
           scripts/ci/pr_sticky_comment.sh pipeline "$PR" "$RUNNER_TEMP/lane-escalation.md"
 
-  # Issue #798. A push skips mutation and ready for the synchronize run it
-  # fires, and on PR #791 that run never came: no verdict, nothing red. This
-  # waits, bounded, for a run on the exact pushed SHA. When the follow-up run
-  # starts, the concurrency group cancels this run, which is the same success;
-  # when none starts, the PR is labelled needs-human:pipeline and told how to
-  # start it. It never closes, reopens or pushes anything itself.
+  # Issue #798. A push skips ready for the synchronize run it fires, and on PR
+  # #791 that run never came: no verdict, nothing red. This waits, bounded, for
+  # a run on the exact pushed SHA. A ready PR's group does not cancel (see
+  # `concurrency`), so the follow-up run exists as a QUEUED run behind this
+  # one, and the runs API lists a queued run: the wait ends on it, this run
+  # finishes, and the queued one starts. When none exists, the PR is labelled
+  # needs-human:pipeline and told how to start it. It never closes, reopens or
+  # pushes anything itself.
   follow-up:
     needs: codex-tests
     if: needs.codex-tests.outputs.pushed == 'true'
@@ -906,103 +934,17 @@ jobs:
             echo "this head predates scripts/ci/await_followup_run.sh (#798); not watched"
           fi
 
+  # The ruleset `main-branch-protection` requires a check named `mutation`, so
+  # this job stays, by name, as a trivial pass. Mutation itself runs nightly on
+  # main and reports there (nightly-mutation.yml): it is not a merge gate, and
+  # `ready` does not need it. Pull requests only, like the check it stands for.
   mutation:
-    # Runs only when fast CI is green, Codex finished, and Codex did NOT just push —
-    # a push fires a fresh synchronize run that redoes mutation on the new SHA.
-    needs: [fast-ci, codex-tests]
-    # `!cancelled()`, never `always()` (issue #101): on cancellation GitHub
-    # keeps every running job whose `if` still evaluates true, so an `always()`
-    # mutation job held the pr-<PR#> group against the next push's run.
-    if: >-
-      !cancelled() &&
-      needs.fast-ci.result == 'success' &&
-      (needs.codex-tests.result == 'success' ||
-       (needs.codex-tests.result == 'skipped' && github.actor == 'dependabot[bot]')) &&
-      needs.codex-tests.outputs.pushed != 'true'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # Backstop over the script's own run budget (issue #102: 1200 s per
-    # changed file, plus 2400 s for mutmut's setup since #622). Two changed
-    # files allow 80 minutes, and harvesting the resulting cache also needs
-    # room to emit the explicit budget verdict artifact.
-    timeout-minutes: 100
-    env:
-      UV_PYTHON: "3.12"
+    timeout-minutes: 5
     steps:
-      # Pin the exact head SHA so mutation-result.json is bound to it (the default
-      # pull_request checkout is the merge ref — the wrong SHA for the contract).
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          version: "0.10.0"
-          enable-cache: true
-
-      - name: Sync dependencies
-        run: uv sync --frozen
-
-      - name: PR-scoped mutation testing (no LLM)
-        id: mut
-        run: |
-          set +e
-          scripts/mutmut-pr.sh "${{ github.event.pull_request.base.sha }}" 2>&1 | tee mutation-raw.log
-          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
-
-      - name: Collect survivors, with what each one changed
-        if: always()
-        run: |
-          uv run mutmut results > mutation-results.txt 2>/dev/null || true
-          sed -n 's/^    \(.*\): survived$/\1/p' mutation-results.txt > survivors.txt
-          # The shadow tree is still on disk here — this is the only moment the
-          # mutation diff can be recovered without a second mutmut run (#119).
-          # If it fails, the bare ids remain valid input for the report.
-          uv run python scripts/ci/mutation_survivors.py \
-            --survivors-file survivors.txt \
-            --out survivors.jsonl || cp survivors.txt survivors.jsonl
-          # #776: timed-out and suspicious mutants are named the same way, so
-          # remediation and triage read which mutant and what it changed.
-          for bucket in timeout suspicious; do
-            sed -n "s/^    \(.*\): ${bucket}\$/\1/p" mutation-results.txt > "${bucket}.txt"
-            uv run python scripts/ci/mutation_survivors.py \
-              --survivors-file "${bucket}.txt" \
-              --out "${bucket}.jsonl" || cp "${bucket}.txt" "${bucket}.jsonl"
-          done
-
-      - name: Build mutation-result.json
-        if: always()
-        run: |
-          # #776, guarded for one release cycle (#381): a head that predates
-          # the flags still builds its artifact, without the two lists.
-          unverdicted=()
-          if python scripts/ci/mutation_to_json.py --help | grep -q -- '--timeouts-file'; then
-            unverdicted=(--timeouts-file timeout.jsonl --suspicious-file suspicious.jsonl)
-          fi
-          python scripts/ci/mutation_to_json.py \
-            --commit "${{ github.event.pull_request.head.sha }}" \
-            --raw mutation-raw.log \
-            --survivors-file survivors.jsonl \
-            "${unverdicted[@]}" \
-            --tool-exit-code "${{ steps.mut.outputs.exit_code || '3' }}" \
-            --out mutation-result.json
-
-      - name: Upload mutation artifact (PASS and FAIL)
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: mutation-result-${{ github.event.pull_request.head.sha }}
-          path: |
-            mutation-result.json
-            mutation-raw.log
-
-      - name: Job summary
-        if: always()
-        run: python scripts/ci/mutation_gate.py --summary mutation-result.json >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Mutation gate
-        run: python scripts/ci/mutation_gate.py mutation-result.json
+      - name: Mutation is not a PR check
+        run: echo "mutation moved to the nightly lane (docs/agentic-ci.md)"
 
   # Issue #191. The pipeline's verdict is durable only in the labels: checks
   # scroll off a PR, labels sit on it and on every filtered list. Six
@@ -1011,11 +953,24 @@ jobs:
   # defect that had been resolved rounds earlier. The error runs in the
   # expensive direction — a genuinely blocked PR then looks like a resolved one.
   ready:
-    needs: [fast-ci, codex-tests, mutation]
-    # READY is a claim about the mutation gate, so it is not made when that job
-    # was skipped. That is the run where the test author pushed and a fresh run
-    # is already on its way to reach its own verdict.
-    if: needs.mutation.result == 'success'
+    needs: [fast-ci, codex-tests]
+    # READY is a claim about fast-ci and the independent author's round. A
+    # skipped author round (draft-to-ready already ran it, or a later push) is
+    # no objection; a failed one is. A fork PR's author is skipped because the
+    # Codex runner never runs fork code: no independent round ever reviewed it,
+    # so a fork never reaches READY here, as before. Not made on the run where the author just
+    # pushed: the synchronize run for that push reaches its own verdict. Not
+    # made on a draft, which gets fast-ci only, nor on the push-to-main check.
+    # Mutation is not a claim READY makes any more (nightly-mutation.yml).
+    if: >-
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      needs.fast-ci.result == 'success' &&
+      (needs.codex-tests.result == 'success' ||
+       (needs.codex-tests.result == 'skipped' &&
+        github.event.pull_request.head.repo.full_name == github.repository)) &&
+      needs.codex-tests.outputs.pushed != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

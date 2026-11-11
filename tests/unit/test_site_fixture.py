@@ -361,6 +361,7 @@ class TestSyntheticDocument:
 
 
 class TestNoClock:
+    @pytest.mark.structural
     def test_the_generator_imports_no_clock_and_reads_no_time(self) -> None:
         """observed_at is an explicit input, never the generator's clock (ADR:645-660)."""
         tree = ast.parse(Path(fixture_module.__file__).read_text(encoding="utf-8"))

@@ -261,6 +261,7 @@ class TestWriteReleaseContentId:
 
 
 class TestNoClock:
+    @pytest.mark.structural
     def test_the_site_package_calls_no_clock(self) -> None:
         """A site build is a function of exactly four inputs; the builder
         calls no clock (ADR-0014 Decision 3)."""

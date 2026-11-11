@@ -122,6 +122,7 @@ dev = [
     # lxml-stubs precedent so `mypy src/` stays strict-green.
     "types-jsonschema>=4.23",
     "bandit>=1.9",
+    "pytest-xdist>=3.8.0",
 ]
 
 [build-system]
@@ -228,6 +229,7 @@ markers = [
     "integration: integration tests (slower, may use real fixtures)",
     "network: requires network access",
     "codex_proposal: the CI test author proposes a stricter contract than the PR states; advisory, never blocking (issue #248)",
+    "structural: reads source files as text or AST instead of calling the code; cannot kill a mutant, so mutmut deselects it (docs/agentic-ci.md)",
 ]
 
 # ---------- Coverage ----------
@@ -247,7 +249,19 @@ show_missing = true
 # ---------- Mutmut ----------
 [tool.mutmut]
 source_paths = ["src/lovspor/"]
-pytest_add_cli_args = ["-x", "-q"]
+# Structural tests read src/ as text or AST: no mutant can change what they
+# check, yet they dominate mutmut's setup passes. Deselected here only; the
+# normal suite still runs them.
+pytest_add_cli_args = ["-x", "-q", "-m", "not structural"]
+# A log call carries no behaviour a test asserts on; its mutants (message
+# strings, level names, argument order) only add survivors nobody should kill.
+# Regexes, matched per source line. mutmut 3.8 skips every expression that
+# STARTS on a matching line together with its children, so the arguments on a
+# call's continuation lines are covered too (mutation/file_mutation.py,
+# _skip_node_and_children).
+do_not_mutate_patterns = [
+    '\b(_?logger|_LOGGER|log|logging)\.(debug|info|warning|warn|error|exception|critical|log)\(',
+]
 pytest_add_cli_args_test_selection = ["tests/unit/"]
 # Per-mutant wall limit = (estimated_time + timeout_constant) * timeout_multiplier,
 # and estimated_time sums only the pytest `call` phase, never setup/teardown.

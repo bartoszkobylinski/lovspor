@@ -244,6 +244,51 @@ class TestBudgetKillBeforeFirstTally:
         assert "mutation budget exceeded: after 2s" in result.stdout
         assert result.returncode == 16
 
+    def test_the_nightly_total_budget_replaces_the_sum(self, tmp_path: Path) -> None:
+        """nightly-mutation.yml hands over the seconds left until its 06:00 stop."""
+        repo = _repo_with_one_changed_function(tmp_path, SILENT_MUTMUT)
+        budgets = {
+            "MUTMUT_PR_SETUP_BUDGET_SECONDS": "100",
+            "MUTMUT_PR_FILE_BUDGET_SECONDS": "100",
+            "MUTMUT_PR_TOTAL_BUDGET_SECONDS": "1",
+        }
+
+        result = subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "base"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env={**os.environ, **budgets},
+            timeout=60,
+            check=False,
+        )
+
+        assert (
+            "budget: 1s wall clock for the whole run (MUTMUT_PR_TOTAL_BUDGET_SECONDS), "
+            "1 changed file(s)" in result.stdout
+        )
+        assert "mutation budget exceeded: after 1s" in result.stdout
+        assert result.returncode == 16
+
+    @pytest.mark.parametrize("value", ["0", "-5", "1.5", "soon"])
+    def test_a_malformed_total_budget_is_refused(self, tmp_path: Path, value: str) -> None:
+        repo = _repo_with_one_changed_function(tmp_path, SILENT_MUTMUT)
+
+        result = subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "base"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "MUTMUT_PR_TOTAL_BUDGET_SECONDS": value},
+            timeout=60,
+            check=False,
+        )
+
+        assert result.returncode == 2
+        assert f"MUTMUT_PR_TOTAL_BUDGET_SECONDS must be a positive whole number, got '{value}'" in (
+            result.stderr
+        )
+
     def test_names_every_mutant_unmeasured(self, tmp_path: Path) -> None:
         result = self._run(tmp_path)
 

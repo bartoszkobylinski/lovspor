@@ -144,6 +144,7 @@ class TestToolSurfaceDescriptor:
 
 
 class TestLayering:
+    @pytest.mark.structural
     def test_the_registry_does_not_import_the_benchmark(self) -> None:
         """A public product surface reads this module; it must not pull
         benchmark methodology in as its registry (ADR-0014)."""

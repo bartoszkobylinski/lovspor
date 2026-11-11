@@ -19,4 +19,4 @@
 - [ ] `uv run pytest` green
 - [ ] Coverage ≥ 90% on changed files
 - [ ] `/security-check` clean
-- [ ] PR Pipeline green: fast-ci, codex-tests, mutation (a `not_applicable` mutation gate is a valid outcome for PRs with no `src/` changes)
+- [ ] PR Pipeline green: fast-ci, codex-tests, ready (mutation is a nightly report on `main`, not a PR gate — `docs/agentic-ci.md`)

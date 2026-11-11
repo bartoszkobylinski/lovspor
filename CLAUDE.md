@@ -55,13 +55,16 @@ Before every push: `scripts/quality/verify-deep.sh` — green (the fast gate, th
 - Never commit to `main` directly. The single exception is the bootstrap commit `chore: initialize repository`.
 
 ### PR workflow (mandatory)
-1. Feature complete on branch → push → open PR (`gh pr create`), fill the PR template.
-2. From PR open, **GitHub Actions owns the handoff** (`docs/agentic-ci.md`): fast-ci,
-   the existing Test matrix, an independent Codex test author on the self-hosted runner,
-   and the PR-scoped mutation gate run automatically.
-3. Do not manually invoke Codex for PR testing. Do not wait locally for mutation results.
+1. Push the branch and open the PR as a **draft** (`gh pr create --draft`), fill the PR
+   template. A draft gets fast-ci and the Test matrix only. Mark it ready
+   (`gh pr ready`) when the implementation is done.
+2. From ready, **GitHub Actions owns the handoff** (`docs/agentic-ci.md`): fast-ci, the
+   existing Test matrix, and ONE round of an independent Codex test author on the
+   self-hosted runner run automatically. Mutation is not a PR check: it runs nightly on
+   `main` and reports in the `Nightly mutation` issue.
+3. Do not manually invoke Codex for PR testing. Do not run or wait for mutation locally.
 4. The pipeline ends READY TO MERGE (all checks green) or BLOCKED with a label:
-   `needs-human:mutation` or `needs-implementation-fix` + a short PR comment.
+   `needs-implementation-fix` or `needs-human:pipeline` + a short PR comment.
 5. On `needs-implementation-fix`: read the failing test, fix the implementation on the
    same branch; change the test only if it provably contradicts the spec.
 6. A BLOCKED result is a required escalation, not permission to guess.
@@ -130,7 +133,7 @@ supported interface refuses, the feature does not exist yet.
 - `tests/unit/` — fast, isolated, one module at a time. Every public function covered.
 - `tests/integration/` — pipeline end-to-end on real fixture tarballs and XML samples.
 - `tests/fixtures/` — real XML/JSON samples from Lovdata, captured once, committed, never regenerated unless source schema changes.
-- Mutation testing: **the CI `mutation` job runs `./scripts/mutmut-pr.sh` on every PR** (no LLM; mutmut **3.8.0**, pinned at `pyproject.toml:84`) — one function-scoped run over the `src/lovspor/` functions the PR changed, under one total wall-clock budget, publishing `mutation-result.json`. `mutation not applicable` is a valid outcome, not a skipped step. Survivors route to Codex remediation (max 2 cycles, then `needs-human:mutation`); `budget_exceeded` and `unmeasured_mutants` route straight to `needs-human:mutation`. Claude does not run mutmut locally before opening a PR (`./scripts/mutmut-pr.sh --list` to preview scope is fine); full-repo `uv run mutmut run` only when explicitly asked (§9a). **Suspicious and signal-killed mutants were not killed** — never fold them into the killed count. A survivor is killed by a test or, only if **provably equivalent**, registered in `mutation-equivalents/` with a written justification (plus `assumption_test` when it argues from a dependency) — never a waiver for an inconvenient survivor. A critical-path survivor is fixed on the same branch. Triaging survivors, a red mutation gate, or registering an equivalent: load the `mutation-testing` skill (`.claude/skills/mutation-testing/SKILL.md`) first.
+- Mutation testing: **a nightly report on `main`, not a merge gate** (`.github/workflows/nightly-mutation.yml`, no LLM; mutmut **3.8.0**, pinned at `pyproject.toml:84`). It runs `./scripts/mutmut-pr.sh` over the range since the last completed night (tag `nightly-mutation-base`), stops by 06:00 Europe/Oslo, and rewrites the `Nightly mutation` issue. There is **no per-PR 0-survivor requirement**: the `mutation` check on PRs is a trivial pass kept for the ruleset. A survivor from the nightly issue is killed by a test in a normal PR — tests only. A **provably equivalent** mutant is marked `# pragma: no mutate` with a one-line reason, or registered in `mutation-equivalents/` with a written justification (plus `assumption_test` when it argues from a dependency) — **never a `src/` rewrite** to make a mutant disappear, never a waiver for an inconvenient survivor. Claude does not run mutmut locally (`./scripts/mutmut-pr.sh --list` to preview scope is fine); full-repo `uv run mutmut run` only when explicitly asked (§9a). **Suspicious and signal-killed mutants were not killed** — never fold them into the killed count. Triaging survivors or registering an equivalent: load the `mutation-testing` skill (`.claude/skills/mutation-testing/SKILL.md`) first.
 - HTTP transport mocked with `pytest-httpx` only. Logic is never mocked.
 
 ## Forbidden
@@ -141,7 +144,7 @@ supported interface refuses, the feature does not exist yet.
 - `subprocess.run(..., shell=True)`.
 - Tar/zip extraction without `tarfile.data_filter` (CVE-2007-4559).
 - `lxml.etree.parse()` without `resolve_entities=False`, `huge_tree=False` (XXE / billion laughs).
-- Merge a PR before the PR Pipeline (fast-ci, codex-tests, mutation) is green or its BLOCKED state is explicitly resolved by the user.
+- Merge a PR before the PR Pipeline (fast-ci, codex-tests, ready) is green or its BLOCKED state is explicitly resolved by the user.
 - Commit without `/security-check` pass.
 - Commit message with AI/Claude attribution.
 
@@ -170,8 +173,8 @@ scripts/quality/verify-deep.sh        # deep gate = pre-push hook: fast gate + s
 VERIFY_DEEP_FULL=1 scripts/quality/verify-deep.sh  # same, with the full unit suite (wide-reach change)
 uv run pytest                         # all tests
 uv run pytest tests/unit/             # unit suite alone
-# Mutation testing is the CI mutation job's work, not Claude's pre-push step.
-# ./scripts/mutmut-pr.sh              # PR-scoped run (CI); --list previews scope
+# Mutation testing is the nightly lane's work, not Claude's pre-push step.
+# ./scripts/mutmut-pr.sh              # scoped run (nightly CI); --list previews scope
 # uv run mutmut run                   # full-repo baseline — only if explicitly asked
 ```
 
@@ -182,5 +185,5 @@ uv run pytest tests/unit/             # unit suite alone
 - Coverage ≥ 90% on changed files
 - `/security-check` clean
 - PR description filled per template
-- PR Pipeline green: fast-ci, codex-tests, mutation (or BLOCKED explicitly resolved by the user)
+- PR Pipeline green: fast-ci, codex-tests, ready (or BLOCKED explicitly resolved by the user)
 - No commit to main without PR
