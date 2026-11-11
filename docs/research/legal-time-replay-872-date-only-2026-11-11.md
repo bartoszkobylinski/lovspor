@@ -154,6 +154,34 @@ After round 5 the CI test author (`3d755a61`, `[agent:codex-tests]`) added 8 cas
 
 **CI** at `3d755a61`: everything passed. That covers fast-ci, the Test matrix (3.12, 3.13, 3.14), codex-author, codex-tests, mutation, the security audit, publish determinism (digest on three platforms, compare), GitGuardian and ready. Locally: the full unit suite (20,364 passed, 2 skipped, 10 xfailed), the pinned legaltime integration suite (26 passed), the deep gate on push, the fast gate on every commit, and `/security-check` (0 vulnerabilities, 0 leaks, 0 unreadable files; the bandit MEDIUM findings are pre-existing and in files this change does not touch).
 
+### 5a. The audit classifier (codex-tests, run 43015286940, head `6bb25053`)
+
+On the note-only push, the CI test author wrote two blocking cases. Each loses a date-only act that the header *had* proven (`14. I lov 21. februar 1930 om skifte …`, and the `INTRO_SLIK` form `Lov 21. februar 1930 om skifte endres slik:`, with `lov/1930-02-21` in the header) and expects `check`. The audit returned `unbound_was_false`. That was a classifier defect, not a wrong expectation. `_class` decided "false" from `attribution.citations()`, which reads only citations with a number, so the date-only act the canonical intro *does* name looked uncited, and the loss of a proven attribution passed as the removal of a false one. The engine was never affected: no operation of the 128 lost a header-proven act (the integration test pins the 77).
+
+The fix (`4b5b5923`) is in `scripts/legal_time_attribution_audit.py` only:
+- `_named` adds the canonical intro's date-only refid to the acts the sentence names.
+- `_date_only_proof` counts the canonical shapes' own header proof as identity proof (review round 6).
+
+A lost attribution is now classed as follows:
+
+| before | the header | class |
+|---|---|---|
+| the date-only act the intro names | proves it | `check` (a proven attribution lost) |
+| the date-only act the intro names | does not prove it | `unbound_date_only_unproven` |
+| an act the sentence does not name at all | any | `unbound_was_false` |
+
+The converse cases changed with it. A header-proven date-only binding is `new_proven` (or `rebound_proven`), and a header-proven date-only intro sentence that stops being an operation is `intro_not_an_operation`, where before both fell to `check`. `cited` keeps its documented meaning, citations by day, month, year and number.
+
+**No classification changed in any committed audit.** With the fixed classifier, the #872 audit re-runs byte-identical (`49859122…`, 51 × `unbound_date_only_unproven`, 0 `check`): each of the 51 rows already took the date-only path first. The Phase 4B audit `legal-time-attribution-audit-2026-11-10.json` also re-runs byte-identical (`d1c4e0d3…`, from a fresh `73f7c805` dump `0f53261c…`, the Phase 4B input). The 128-operation result stands at 77 retained and 51 unbound. Because `src/` is unchanged, no report digest changed: two more independent rebuilds (G, H) of the fifteen files match each other, rebuild E and every committed evidence file byte for byte.
+
+Tests: the two blocking cases and three other generated cases are adopted verbatim from the run's `codex-tests.patch` artifact. `test_legal_time_attribution_audit.py` adds the three lost-attribution classes for `INTRO`, `INTRO_SLIK` and the inline intro, a numbered intro, and the converse classes `new_proven`, `rebound_proven` and `intro_not_an_operation`. Against the classifier at `6bb25053`, 11 of the file's 47 cases fail.
+
+| round | head | verdict | findings | resolution |
+|---|---|---|---|---|
+| 6 | working tree | NOT READY | major: the date-only header proof did not count as proof (a proven binding was `check`, not `new_proven`); minor: `cited` stays numbered-only; minor: inline and positive cases untested | `_date_only_proof`, with tests; `cited` kept as documented, because changing it would rewrite both committed audits |
+| 7 | working tree | NOT READY | minor: no positive inline-intro cases | tests added |
+| 8 | `4b5b5923` | **READY** | none | — |
+
 ## 6. Limitations
 
 - **A numbered canonical citation still binds without header proof**, as before: the task preserves it. lov/2007-01-26-3 shows the cost, its header omits acts whose numbered blocks still bind (e.g. `lov/1893-07-20-2`). Requiring header proof there would be a separate, measured change.
@@ -162,4 +190,4 @@ After round 5 the CI test author (`3d755a61`, `[agent:codex-tests]`) added 8 cas
 
 ## 7. Recommendation
 
-**MERGE**, for the owner to decide. The code is final at `3d755a61`; the commit after it changes only this note. The change is strictly fail-closed. It retains every header-proven date-only binding (77), removes the 51 unproven ones, and closes the same hole in substitution items and change addresses. It changes no coverage-act event, applied operation or verdict. The evidence reproduces deterministically, the independent review ended READY, and CI is green with mutation at 201/201. The result is 151 more unattributed entries and 150 more act-level problems. That is the cost of not guessing, not a loss of correct coverage.
+**MERGE**, for the owner to decide. The engine (`src/`) is final at `3edf7fec` and the audit classifier at `4b5b5923`; the commit after that changes only this note, and PR #876 names the final head. The change is strictly fail-closed. It retains every header-proven date-only binding (77), removes the 51 unproven ones, and closes the same hole in substitution items and change addresses. It changes no coverage-act event, applied operation or verdict. The evidence reproduces deterministically, the independent review ended READY, and CI is green with mutation at 201/201. The result is 151 more unattributed entries and 150 more act-level problems. That is the cost of not guessing, not a loss of correct coverage.
