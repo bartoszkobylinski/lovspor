@@ -13,15 +13,19 @@ sentence of the member that opens or closes an amendment block. ``diff`` prints 
 document: every operation whose act, kind, instruction or presence changed, with the block
 sentence that governs it in the newer reading, the acts that sentence cites by day, month,
 year and number, whether it cites exactly one and the member's header lists it
-(``identity_proven``), and a class:
+(``identity_proven``; for a canonical intro citing a date-only act, that the header proves
+exactly that refid, #872), and a class:
 
 - ``new_proven``: unattributed before, bound now to the one and only act the governing
   sentence cites, which the header lists;
-- ``rebound_proven``: bound before to an act the governing sentence does not cite, bound now
-  to the act it does cite, which the header lists;
-- ``unbound_was_false``: bound before to an act the governing sentence does not cite,
-  unattributed now;
+- ``rebound_proven``: bound before to an act the governing sentence does not name, bound now
+  to the act it cites, which the header lists;
+- ``unbound_was_false``: bound before to an act the governing sentence does not name (by a
+  numbered citation, or by the date-only citation of a canonical intro), unattributed now;
 - ``intro_not_an_operation``: a proven intro sentence that was counted as an operation;
+- ``unbound_date_only_unproven`` (#872): bound before to the date-only refid a canonical intro
+  cites by date alone, unattributed now because the header does not prove that refid. Not
+  proven wrong: no longer proven at all;
 - ``check``: anything else. Zero is the merge condition.
 
 Nothing here decides an attribution; it restates the readings and the evidence beside them.
@@ -35,6 +39,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -42,7 +47,7 @@ from typing import Any
 from lovspor.legaltime import instructions
 from lovspor.legaltime.archive import collect, read_members
 from lovspor.legaltime.instructions import interpret
-from lovspor.legaltime.text import split_sentences
+from lovspor.legaltime.text import act_refid, split_sentences
 
 ACTS = (
     "lov/2008-05-15-35", "lov/2005-05-20-28", "lov/2005-06-17-62", "lov/2003-07-04-84",
@@ -104,6 +109,46 @@ def _class(before: list[Any] | None, after: list[Any] | None, cited: list[str], 
     return "check"
 
 
+def _canonical_date(sentence: str) -> str | None:
+    """The date group of a canonical intro (``INTRO``, ``INTRO_SLIK``), numbered or not."""
+    attribution = importlib.import_module(_ATTRIBUTION)
+    intro = attribution.INTRO.match(sentence) or attribution.INTRO_SLIK.match(sentence)
+    return intro.group("date") if intro is not None else None
+
+
+def _named(sentence: str, cited: list[str]) -> list[str]:
+    """Every act the sentence names: its numbered citations, then a canonical date-only one.
+
+    ``citations`` reads only day, month, year and number, so without this a date-only act the
+    intro does name looks uncited, and losing it would pass for removing a false attribution.
+    """
+    date = _canonical_date(sentence)
+    refid = act_refid(f"lov {date}") if date is not None else None
+    return [*cited, refid] if refid is not None and refid not in cited else cited
+
+
+def _date_only_proof(sentence: str, changes: list[str]) -> bool:
+    """#872: a canonical intro cites a date-only act, and the header proves exactly it."""
+    attribution = importlib.import_module(_ATTRIBUTION)
+    date = _canonical_date(sentence)
+    refid = attribution.canonical_act(date, tuple(changes)) if date is not None else None
+    return refid is not None and re.fullmatch(r"lov/\d{4}-\d{2}-\d{2}", refid) is not None
+
+
+def _date_only_unproven(
+    before: list[Any] | None, after: list[Any] | None, sentence: str, changes: list[str]
+) -> bool:
+    """#872: the operation lost the date-only act its canonical intro cites, which is unproven."""
+    attribution = importlib.import_module(_ATTRIBUTION)
+    old = (before or [None, None])[1]
+    if old is None or after is None or after[1] is not None:
+        return False
+    date = _canonical_date(sentence)
+    if date is None or act_refid(f"lov {date}") != old:
+        return False
+    return attribution.canonical_act(date, tuple(changes)) is None
+
+
 def _changed(before: dict[str, Any], after: dict[str, Any]) -> dict[str, list[str]]:
     """Member refid → ids of operations whose reading differs between the two dumps."""
     result: dict[str, list[str]] = {}
@@ -141,11 +186,14 @@ def _row(
     # one act, the header lists it, and the engine's whole chain holds for this sentence
     proof = len(cited) == 1 and cited[0] in changes
     proof = proof and attribution.proven(head, tuple(changes)) == cited[0]
+    proof = proof or _date_only_proof(sentence, changes)  # the canonical shapes' own proof
     o, n = before_op, after_op
     return {
         "op": (n or o)[0], "before": o and o[1], "after": n and n[1], "kind": (n or o)[2],
         "instruction": (n or o)[3], "governing": sentence, "cited": cited,
-        "identity_proven": proof, "class": _class(o, n, cited, proof),
+        "identity_proven": proof,
+        "class": "unbound_date_only_unproven" if _date_only_unproven(o, n, sentence, changes)
+        else _class(o, n, _named(sentence, cited), proof),
     }  # fmt: skip
 
 

@@ -196,3 +196,170 @@ def test_one_listed_citation_in_a_referring_clause_is_never_proven() -> None:
     )
     row = _row(sentence, None, "lov/2023-12-20-110", ["lov/2023-12-20-110"])
     assert (row["identity_proven"], row["class"]) == (False, "check")
+
+
+SKIFTE_UNLISTED = "14. I lov 21. februar 1930 om skifte gjøres følgende endringer:"  # 2007-01-26-3
+
+
+def test_a_lost_date_only_act_its_header_does_not_prove_is_unproven_not_false() -> None:
+    """#872: the canonical intro cites lov/1930-02-21 by date alone; the header does not list it."""
+    row = _row(SKIFTE_UNLISTED, "lov/1930-02-21", None, [STRAFFELOVEN])
+    assert row["class"] == "unbound_date_only_unproven"
+    numbered = _row("I lov 20. mai 2005 nr 28 om straff gjøres følgende endring:", "lov/2005-05-20",
+                    None, [STRAFFELOVEN])  # fmt: skip
+    assert numbered["class"] == "unbound_date_only_unproven"  # lov/2021-05-07-33
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "changes"),
+    [
+        ("lov/1930-02-21", None, ["lov/1930-02-21"]),  # the header proves it: losing it is a bug
+        ("lov/1930-02-21", STRAFFELOVEN, [STRAFFELOVEN]),  # rebound, not unbound
+        (STRAFFELOVEN, None, [STRAFFELOVEN]),  # not the act the intro cites by date
+        (None, None, []),  # was never bound
+    ],
+)
+def test_only_a_lost_unproven_date_only_act_is_classed_unproven(
+    before: str | None, after: str | None, changes: list[str]
+) -> None:
+    assert _row(SKIFTE_UNLISTED, before, after, changes)["class"] != "unbound_date_only_unproven"
+
+
+def test_a_non_canonical_sentence_is_never_classed_date_only_unproven() -> None:
+    row = _row("§ 40 oppheves.", "lov/1930-02-21", None, [])
+    assert row["class"] != "unbound_date_only_unproven"
+
+
+def test_a_disappearing_date_only_operation_is_never_certified_as_an_unbinding() -> None:
+    """#872 retains operations: dropping one must remain an audit check."""
+    before = ["x#0:I:1.0", "lov/1930-02-21", "replace_ledd", "§ 1 skal lyde:"]
+    row = _audit()._row(before, None, SKIFTE_UNLISTED, [])
+    assert row["class"] == "check"
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [SKIFTE_UNLISTED, "Lov 21. februar 1930 om skifte endres slik:"],
+)
+def test_losing_a_header_proven_date_only_act_requires_an_audit_check(sentence: str) -> None:
+    """Research note §1 retains every header-proven binding; losing one is not explained away."""
+    row = _row(sentence, "lov/1930-02-21", None, ["lov/1930-02-21"])
+    assert row["class"] == "check"
+
+
+@pytest.mark.parametrize(
+    ("before", "changes", "expected"),
+    [
+        # proven before (the header lists the date-only refid), lost now: a regression to check
+        ("lov/1930-02-21", ["lov/1930-02-21"], "check"),
+        # the date-only refid the intro names, never proven by the header: removed honestly
+        ("lov/1930-02-21", [STRAFFELOVEN], "unbound_date_only_unproven"),
+        ("lov/1930-02-21", ["lov/1930-02-21", "lov/1930-02-21-3"], "unbound_date_only_unproven"),
+        # an act the intro does not name at all: a false attribution removed
+        (STRAFFELOVEN, [STRAFFELOVEN], "unbound_was_false"),
+        (TVISTELOVEN, ["lov/1930-02-21"], "unbound_was_false"),
+    ],
+)
+@pytest.mark.parametrize(
+    "sentence", [SKIFTE_UNLISTED, "Lov 21. februar 1930 om skifte endres slik:"]
+)
+def test_a_lost_attribution_is_proven_lost_unproven_or_false_by_its_source(
+    sentence: str, before: str, changes: list[str], expected: str
+) -> None:
+    """The three classes of a lost attribution, for ``INTRO`` and ``INTRO_SLIK`` alike."""
+    assert _row(sentence, before, None, changes)["class"] == expected
+
+
+def test_a_numbered_intro_still_names_only_its_numbered_act() -> None:
+    """Losing the act a numbered canonical intro cites is a check; any other act was false."""
+    sentence = "I lov 20. mai 2005 nr. 28 om straff gjøres følgende endringer:"
+    assert _row(sentence, STRAFFELOVEN, None, [STRAFFELOVEN])["class"] == "check"
+    assert _row(sentence, "lov/2005-05-20", None, [STRAFFELOVEN])["class"] == "unbound_was_false"
+
+
+SKIFTE_INLINE = "2. I lov 21. februar 1930 om skifte skal § 86 annet ledd lyde:"  # 2014-05-09-16
+
+
+@pytest.mark.parametrize(
+    "sentence", [SKIFTE_UNLISTED, "Lov 21. februar 1930 om skifte endres slik:"]
+)
+def test_a_header_proven_date_only_binding_is_new_proven_and_an_unproven_one_is_not(
+    sentence: str,
+) -> None:
+    """Independent review, round 6: the canonical shapes' own proof counts as identity proof."""
+    proven = _row(sentence, None, "lov/1930-02-21", ["lov/1930-02-21"])
+    assert (proven["identity_proven"], proven["class"]) == (True, "new_proven")
+    for changes in ([], ["lov/1930-02-21-3"], ["lov/1930-02-21", "lov/1930-02-21-3"]):
+        row = _row(sentence, None, "lov/1930-02-21", changes)
+        assert (row["identity_proven"], row["class"]) == (False, "check")
+    assert _row(sentence, None, "lov/1930-02-21", ["lov/1930-02-21"])["cited"] == []
+
+
+def test_a_header_proven_date_only_intro_sentence_is_not_an_operation() -> None:
+    old = ["x#0:I:1.0", None, "unsupported", SKIFTE_UNLISTED]
+    proven = _audit()._row(old, None, SKIFTE_UNLISTED, ["lov/1930-02-21"])
+    assert proven["class"] == "intro_not_an_operation"
+    assert _audit()._row(old, None, SKIFTE_UNLISTED, [])["class"] == "check"
+
+
+def test_a_rebinding_to_a_header_proven_date_only_act_is_rebound_proven() -> None:
+    row = _row(SKIFTE_UNLISTED, STRAFFELOVEN, "lov/1930-02-21", ["lov/1930-02-21"])
+    assert row["class"] == "rebound_proven"
+    assert _row(SKIFTE_UNLISTED, STRAFFELOVEN, "lov/1930-02-21", [])["class"] == "check"
+
+
+@pytest.mark.parametrize(
+    ("before", "changes", "expected"),
+    [
+        ("lov/1930-02-21", ["lov/1930-02-21"], "check"),
+        ("lov/1930-02-21", [], "unbound_date_only_unproven"),
+        (STRAFFELOVEN, [STRAFFELOVEN], "unbound_was_false"),
+    ],
+)
+def test_the_inline_canonical_intro_classifies_a_lost_act_like_the_others(
+    before: str, changes: list[str], expected: str
+) -> None:
+    assert _row(SKIFTE_INLINE, before, None, changes)["class"] == expected
+
+
+@pytest.mark.parametrize(
+    ("before", "changes", "expected"),
+    [
+        (None, ["lov/1930-02-21"], "new_proven"),
+        (STRAFFELOVEN, ["lov/1930-02-21"], "rebound_proven"),
+        (None, [], "check"),
+        (None, ["lov/1930-02-21", "lov/1930-02-21-3"], "check"),
+    ],
+)
+def test_the_inline_canonical_intro_proves_a_date_only_binding_by_the_header(
+    before: str | None, changes: list[str], expected: str
+) -> None:
+    """Independent review, round 7: the inline ``INTRO`` form carries the same proof."""
+    assert _row(SKIFTE_INLINE, before, "lov/1930-02-21", changes)["class"] == expected
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [SKIFTE_UNLISTED, SKIFTE_INLINE, "Lov 21. februar 1930 om skifte endres slik:"],
+)
+@pytest.mark.parametrize("before", [None, TVISTELOVEN, "lov/1930-02-21"])
+def test_date_only_identity_proof_never_certifies_a_different_target(
+    sentence: str, before: str | None
+) -> None:
+    """The audit's new/rebound classes require the act the governing sentence names."""
+    row = _row(sentence, before, STRAFFELOVEN, ["lov/1930-02-21", STRAFFELOVEN])
+    assert row["identity_proven"] is True  # proof of skifte, not of the operation's target
+    assert row["class"] == "check"
+
+
+@pytest.mark.parametrize(
+    "sentence", [SKIFTE_UNLISTED, "Lov 21. februar 1930 om skifte endres slik:"]
+)
+def test_date_only_proof_never_explains_added_or_deleted_bound_operations(sentence: str) -> None:
+    """Research note §2 promises unchanged operation presence, not just proven identities."""
+    operation = ["x#0:I:1.0", "lov/1930-02-21", "replace_ledd", "§ 1 skal lyde:"]
+    audit = _audit()
+    for before, after in ((None, operation), (operation, None)):
+        row = audit._row(before, after, sentence, ["lov/1930-02-21"])
+        assert row["identity_proven"] is True
+        assert row["class"] == "check"
