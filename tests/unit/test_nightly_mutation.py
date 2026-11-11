@@ -151,6 +151,38 @@ def test_the_red_night_comes_after_its_report() -> None:
     assert fail > report
 
 
+def test_the_incomplete_night_failure_is_not_swallowed() -> None:
+    """The documented red run requires an unhandled step failure (#879)."""
+    step = _step("Fail a night that did not measure its range")
+    assert step.get("continue-on-error", False) is False
+    assert _job().get("continue-on-error", False) is False
+
+
+@pytest.mark.parametrize("missing_outputs", [False, True])
+def test_the_failure_annotation_reports_the_gate_reason(missing_outputs: bool) -> None:
+    step = _step("Fail a night that did not measure its range")
+    assert step["env"] == {
+        "VERDICT": "${{ steps.verdict.outputs.verdict }}",
+        "REASON": "${{ steps.verdict.outputs.reason }}",
+    }
+    env = {} if missing_outputs else {"VERDICT": "partial", "REASON": "unmeasured_mutants"}
+    done = subprocess.run(
+        ["bash", "-e", "-c", str(step["run"])],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    verdict = env.get("VERDICT", "none")
+    reason = env.get("REASON", "none")
+    assert done.returncode == 1
+    assert done.stdout == (
+        f"::error::nightly mutation verdict '{verdict}' (gate reason: {reason}): "
+        "the range was not fully measured and the base tag did not move\n"
+    )
+    assert done.stderr == ""
+
+
 @pytest.mark.parametrize(
     ("reason", "red"),
     [
