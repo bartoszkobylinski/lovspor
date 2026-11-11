@@ -188,6 +188,26 @@ def test_an_unproven_or_ambiguous_intro_binds_nothing(intro: str, changes: tuple
     assert _acts(body, STRAFFELOVEN, *changes) == [("§40", STRAFFELOVEN), ("§41", None)]
 
 
+@pytest.mark.codex_proposal
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Proposal: the main verb's object slot (_AFTER_VERB) never checks for a second "
+        "act noun before it, unlike the title slot that round 5 (#861) hardened for exactly "
+        "this ambiguity. A stray title ahead of the verb's own 'gjøres følgende endringer "
+        "i lov <citation>:' still names the act, the same way 'I straffeloven med hjemmel "
+        "i lov ...' did before round 5 closed that path for the title slot."
+    ),
+)
+def test_a_title_before_the_main_verbs_own_object_is_never_proven() -> None:
+    intro = "I straffeloven, gjøres følgende endringer i lov 20. desember 2023 nr. 110:"
+    body = SECTION_3 + _article("§3b", _ledd(intro), _p("§ 41 oppheves."))
+    assert _acts(body, STRAFFELOVEN, "lov/2023-12-20-110") == [
+        ("§40", STRAFFELOVEN),
+        ("§41", None),
+    ]
+
+
 def test_an_embedded_amendment_of_another_act_stays_closed_with_the_header_proof() -> None:
     """lov/2007-04-13-14 IV: straffeprosessloven text inside straffeloven § 102 nr. 4."""
     body = _article(
