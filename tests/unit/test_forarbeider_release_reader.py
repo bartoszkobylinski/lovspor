@@ -29,6 +29,7 @@ from lovspor.forarbeider.corpus_models import (
 )
 from lovspor.forarbeider.corpus_render import render_index
 from lovspor.forarbeider.corpus_transaction import JOURNAL, LOCK
+from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from tests.unit.cli_output import said
 from tests.unit.forarbeider_apply_support import (
     DOC1,
@@ -458,3 +459,27 @@ def test_the_reader_is_reached_only_through_its_own_ops_command() -> None:
     }
     assert importers == {"ops_cli.py"}
     os.environ.get("LOVVERK_CORPUS_PATH")
+
+
+@pytest.mark.parametrize(
+    ("line", "forged"),
+    [
+        ('source_provider: "regjeringen.no"', 'source_provider: "elsewhere"'),
+        ("renderer_version: 1", "renderer_version: 2"),
+        ('dataset: "forarbeider"', 'dataset: "lover"'),
+    ],
+)
+def test_every_front_matter_field_must_restate_the_member(
+    released: ApplyBench, line: str, forged: str
+) -> None:
+    """B2 regression (Codex round 1): a provider or other field the check skipped."""
+    member = parse_any_manifest((released.clone / MANIFEST_PATH).read_bytes()).documents[0]
+    markdown = (released.clone / PATH1).read_text()
+    release_reader.require_restated(member, markdown)
+    assert line in markdown
+
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        release_reader.require_restated(member, markdown.replace(line, forged, 1))
+    assert caught.value.detail == "front_matter"
+    with pytest.raises(ForarbeiderRefusedError):
+        release_reader.require_restated(member, markdown.replace("---\n", "---\nextra: 1\n", 1))

@@ -245,16 +245,27 @@ def front_matter(markdown: str) -> dict[str, object]:
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "front_matter") from error
 
 
-def require_restated(member: ManifestDocumentV2, markdown: str) -> None:
-    """The file says what its member says: identity, labels, coverage, chapters, digests.
+def _identity(member: ManifestDocumentV2) -> dict[str, object]:
+    document, published = member.document, member.times.source_published_at
+    return {
+        "dataset": "forarbeider",
+        "id": document.id,
+        "document_type": document.document_type,
+        "session": document.session,
+        "proposition_number": document.proposition_number,
+        "title": member.title,
+        "ministry": member.ministry,
+        "source_url": document.source_url,
+        "published_at": None if published is None else published.isoformat(),
+        "renderer_version": member.renderer_version,
+    }
 
-    Raises:
-        ForarbeiderRefusedError: ``corpus_tree_mismatch: front_matter``.
-    """
-    expected = {
-        "id": member.document.id,
+
+def _labels_and_chapters(member: ManifestDocumentV2) -> dict[str, object]:
+    return {
         "source_document_type": "forarbeid",
         "normative": False,
+        "source_provider": "regjeringen.no",
         "source_license": None,
         "rights_basis": "åndsverkloven § 14",
         "release_status": "released",
@@ -264,11 +275,18 @@ def require_restated(member: ManifestDocumentV2, markdown: str) -> None:
         "released_chapters": [item.chapter_number for item in member.chapters],
         "chapter_text_sha256": [item.text_sha256 for item in member.chapters],
     }
+
+
+def require_restated(member: ManifestDocumentV2, markdown: str) -> None:
+    """The file says what its member says: every front-matter field the renderer writes.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_tree_mismatch: front_matter``.
+    """
+    expected = {**_identity(member), **_labels_and_chapters(member)}
     found = front_matter(markdown)
-    if (
-        any(found.get(key, ...) != value for key, value in expected.items())
-        or NOT_LAW not in markdown
-    ):
+    differs = found != expected
+    if differs or NOT_LAW not in markdown:
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "front_matter")
 
 
