@@ -31,6 +31,7 @@ from tests.unit.forarbeider_reader_support import (
 from tests.unit.forarbeider_release_support import (
     OWNER,
     PRIVATE_MARKER,
+    REVIEWED,
     REVIEWER,
     Desk,
     at_a_terminal,  # noqa: F401
@@ -106,6 +107,7 @@ def test_show_states_labels_time_axes_and_every_released_receipt(box: Path, desk
     assert set(times) == {
         "source_published_at",
         "reviewed_at",
+        "policy_decided_at",
         "owner_decided_at",
         "released_at",
         "time_basis",
@@ -117,7 +119,8 @@ def test_show_states_labels_time_axes_and_every_released_receipt(box: Path, desk
     assert [item["chapter_number"] for item in receipts] == [2, 3]
     assert receipts[0]["source_page_url"] == desk.results[2].source_page_url
     assert receipts[0]["text_sha256"] == desk.results[2].text_sha256
-    assert {"retrieved_at", "review_decided_at"} <= set(receipts[0])
+    assert "retrieved_at" in receipts[0]
+    assert receipts[0]["clearance"]["review_decided_at"] == REVIEWED
 
 
 def test_show_marks_a_proposition_missing_a_listed_chapter_as_a_partial_excerpt(

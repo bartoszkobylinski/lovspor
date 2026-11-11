@@ -21,6 +21,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
+from typing import NamedTuple
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, ValidationError
 
@@ -28,9 +29,10 @@ from lovspor.errors import RegjeringenFetchError
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.policy_models import PolicyEvidenceKind, StandingPolicy
 from lovspor.forarbeider.release_commands import forbidden_trees
+from lovspor.forarbeider.release_models import digest
 from lovspor.forarbeider.release_store import MAX_EVIDENCE_BYTES, read_file, refused_as
 from lovspor.regjeringen_fetch.fetch import check_source_proof, verified_source_bytes
-from lovspor.regjeringen_fetch.models import FetchRun, SourceEvidence, SourceState
+from lovspor.regjeringen_fetch.models import FetchOutcome, FetchRun, SourceEvidence, SourceState
 
 SOURCE_PROOF_MAX_AGE = timedelta(hours=24)
 
@@ -57,12 +59,33 @@ class CurrentSource(BaseModel):
     terms: SourceEvidence | None
 
 
+class SourceRun(NamedTuple):
+    """One fetch run as a batch reads it: the proof, the pages it stored, its record's digest.
+
+    ``fetched`` holds ``(url, sha256)`` of every listed URL the run stored;
+    any other outcome stored nothing and proves no page.
+    """
+
+    source: CurrentSource
+    fetched: frozenset[tuple[str, str]]
+    sha256: str
+
+
 def read_source_proof(run_file: Path) -> CurrentSource:
     """A fetch run record and the stored pages beside it, every digest re-checked.
 
     Raises:
         ForarbeiderRefusedError: the record is unsafe, unreadable or malformed, or a
             stored page is missing or no longer the bytes its record names.
+    """
+    return read_source_run(run_file).source
+
+
+def read_source_run(run_file: Path) -> SourceRun:
+    """:func:`read_source_proof`, with the pages the run fetched and the record's digest.
+
+    Raises:
+        ForarbeiderRefusedError: as :func:`read_source_proof`.
     """
     with refused_as("source_proof"):
         payload = read_file(run_file, forbidden_trees(), MAX_EVIDENCE_BYTES)
@@ -77,7 +100,13 @@ def read_source_proof(run_file: Path) -> CurrentSource:
     except RegjeringenFetchError as error:
         detail = f"source_proof {error}"
         raise ForarbeiderRefusedError(RefusalReason.RELEASE_RECORD_CORRUPT, detail) from error
-    return CurrentSource(run_started_at=run.started_at, robots=run.robots, terms=run.terms)
+    source = CurrentSource(run_started_at=run.started_at, robots=run.robots, terms=run.terms)
+    fetched = frozenset(
+        (record.url, record.sha256)
+        for record in run.records
+        if record.outcome is FetchOutcome.FETCHED and record.sha256 is not None
+    )
+    return SourceRun(source, fetched, digest(payload))
 
 
 def _consistent(run: FetchRun, out: Path) -> None:

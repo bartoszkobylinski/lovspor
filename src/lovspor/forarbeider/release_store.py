@@ -47,6 +47,7 @@ Folder = Literal[
     "withdrawals",
     "policies",
     "policy_revocations",
+    "batch_plans",
 ]
 
 

@@ -183,7 +183,8 @@ def test_a_missing_manifest_is_refused(box: Path) -> None:
     [
         (b"not json", "manifest_invalid"),
         (b"\xff\xfe", "manifest_invalid"),
-        (b'{"schema_version": 2}\n', "manifest_incompatible"),
+        (b'{"schema_version": 2}\n', "manifest_invalid"),
+        (b'{"schema_version": 3}\n', "manifest_incompatible"),
     ],
 )
 def test_a_corrupt_or_foreign_manifest_is_refused(box: Path, payload: bytes, reason: str) -> None:

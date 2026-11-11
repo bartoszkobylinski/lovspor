@@ -6,7 +6,8 @@ parameters and a release needs more. Each command only calls its ``_impl`` in
 :mod:`lovspor.forarbeider.release_commands`.
 
 Exit 1 is a typed refusal, with nothing written. Exit 2 is a written ``deny``
-report, or a plan or simulation refused because the preflight now denies.
+report, a batch plan that includes no chapter, or a plan or simulation
+refused because the preflight now denies.
 Exit 0 is an ``eligible_preview`` report or a plan, which still authorize no
 publication: no command here writes to ``lovverk`` or any real Git checkout.
 The simulator writes only a disposable sandbox this package made, from the
@@ -21,6 +22,11 @@ from typing import Annotated
 import click
 import typer
 
+from lovspor.forarbeider.batch_commands import (
+    BatchPlanRequest,
+    batch_plan_impl,
+    batch_show_impl,
+)
 from lovspor.forarbeider.corpus_commands import (
     PlanRequest,
     SimulateRequest,
@@ -59,9 +65,11 @@ _SAFE_DETAIL = re.compile(r"[A-Za-z0-9_.,: -]*")
 release_app = typer.Typer(help="Private, offline release preflight. Publishes nothing.")
 chapters_app = typer.Typer(help="Commands on the staged chapters of one proposition.")
 policy_app = typer.Typer(help="The standing release policy: signed once, revocable.")
+batch_app = typer.Typer(help="Private batch plans: read-only, authorize nothing.")
 ops_app.add_typer(release_app, name="forarbeider-release")
 release_app.add_typer(chapters_app, name="chapters")
 release_app.add_typer(policy_app, name="policy")
+release_app.add_typer(batch_app, name="batch")
 
 
 def refusal_line(error: ForarbeiderRefusedError) -> str:
@@ -311,3 +319,47 @@ def policy_show(
     Without a current source proof no automatic clearance is allowed.
     """
     _echo(lambda: policy_show_impl(ctx.obj, policy, at, source_proof))
+
+
+@batch_app.command("plan")
+def batch_plan(
+    request: Annotated[
+        Path,
+        typer.Option(
+            help="The absolute, owner-only batch request file, outside every Git checkout."
+        ),
+    ],
+    policy: Annotated[str, typer.Option(help="The standing policy's sha256.")],
+    source_proof: Annotated[
+        Path, typer.Option(help="The forarbeider-fetch run record: the current source proof.")
+    ],
+    at: Annotated[str, typer.Option(help="The moment evaluated, ISO 8601 with offset.")],
+) -> None:
+    """Plan a batch of at most 25 propositions privately. Publishes and authorizes nothing.
+
+    Exit 0: a plan with included chapters; exit 2: a plan that includes none.
+    """
+    ask = BatchPlanRequest(request=request, policy=policy, source_proof=source_proof, at=at)
+    scope = click.get_current_context().obj
+    run_batch_plan(scope, ask)
+
+
+def run_batch_plan(scope: ReleaseScope, ask: BatchPlanRequest) -> None:
+    """Print the plan; one that includes no chapter exits 2 after it is written."""
+    try:
+        lines, included = batch_plan_impl(scope, ask)
+    except ForarbeiderRefusedError as error:
+        typer.echo(refusal_line(error), err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(lines)
+    if not included:
+        raise typer.Exit(code=DENY_EXIT)
+
+
+@batch_app.command("show")
+def batch_show(
+    ctx: typer.Context,
+    sha: Annotated[str, typer.Argument(help="The batch plan's sha256.")],
+) -> None:
+    """Show a stored batch plan's ids, digests and codes, never paths, names or text."""
+    _echo(lambda: batch_show_impl(ctx.obj, sha))

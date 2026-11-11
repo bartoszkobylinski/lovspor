@@ -26,8 +26,11 @@ from lovspor.forarbeider.corpus_models import (
     RENDERER_VERSION,
     ChapterReceipt,
     DocumentTimes,
+    DocumentTimesV2,
     ForarbeiderManifest,
+    ForarbeiderManifestV2,
     ManifestDocument,
+    ManifestDocumentV2,
 )
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.models import ForarbeidRecord
@@ -59,10 +62,14 @@ _RIGHTS = (
 
 
 class ReleasedChapter(NamedTuple):
-    """A chapter cleared for this rendering and the moment its review approved it."""
+    """A chapter cleared for this rendering and the moment its review approved it.
+
+    ``None`` for a chapter the standing policy cleared, which no person reviewed:
+    a version 1 receipt cannot state that, so :func:`member_of` refuses it.
+    """
 
     result: ChapterResult
-    review_decided_at: datetime
+    review_decided_at: datetime | None
 
 
 class Rendering(NamedTuple):
@@ -70,7 +77,7 @@ class Rendering(NamedTuple):
 
     metadata: ForarbeidRecord
     chapters: tuple[ReleasedChapter, ...]
-    times: DocumentTimes
+    times: DocumentTimes | DocumentTimesV2
 
 
 def _unsafe(detail: str) -> ForarbeiderRefusedError:
@@ -279,7 +286,7 @@ def _receipt(item: ReleasedChapter) -> ChapterReceipt:
     )
 
 
-def _index_line(member: ManifestDocument) -> str:
+def _index_line(member: ManifestDocument | ManifestDocumentV2) -> str:
     numbers = ", ".join(str(item.chapter_number) for item in member.chapters)
     listed = len(member.listed_chapters)
     scope = (
@@ -296,7 +303,7 @@ def _index_line(member: ManifestDocument) -> str:
     return f"- [{label} ({session}): {title}]({target}): chapters {numbers} of {listed} ({scope})"
 
 
-def render_index(manifest: ForarbeiderManifest) -> str:
+def render_index(manifest: ForarbeiderManifest | ForarbeiderManifestV2) -> str:
     """``forarbeider/INDEX.md``: released members in manifest order; withdrawn ones are gone."""
     released = [member for member in manifest.documents if member.release_status == "released"]
     lines = ["# Forarbeider", "", NOT_LAW, "", "Membership is `forarbeider/manifest.json`.", ""]

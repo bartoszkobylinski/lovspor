@@ -8,35 +8,45 @@ by default, and no other reader (``get_law``, MCP, search, site, indexes,
 embeddings) imports it.
 
 The manifest is the only membership authority, and every file under
-``forarbeider/`` must be exactly what it lists (:func:`read_dataset_files`).
-A member is then rendered again from the bundled synthetic pages: its
-manifest entry and its file must be byte-identical to that rendering, so a
-forged entry, an injected line or a real document is refused as not
-synthetic. Only a ``released`` member is served; a withdrawn one never is.
-The bytes served are the ones whose digest was checked, read once.
+``forarbeider/`` must be exactly what it lists (:func:`read_any_dataset_files`).
+A version 1 manifest is read as version 2 (:func:`lift_v1`), so the reader
+has one shape, and each chapter states the path that cleared it. A member is
+then rendered again from the bundled synthetic pages: its manifest entry must
+restate that rendering's identity, chapters and digests, and its file must be
+byte-identical to it, so a forged entry, an injected line or a real document
+is refused as not synthetic whatever clearance it claims. Only the release
+status, the times and the clearances are the entry's own word, and the schema
+still checks their order. Only a ``released`` member is served; a withdrawn
+one never is. The bytes served are the ones whose digest was checked, read once.
 
 Nothing here writes, caches, starts a process or opens a socket.
 """
 
 import os
 from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
 from pydantic import ValidationError
 
 from lovspor.forarbeider.chapter import build_chapter_result
-from lovspor.forarbeider.corpus_models import ManifestDocument
+from lovspor.forarbeider.chapter_models import ChapterResult
+from lovspor.forarbeider.corpus_models import (
+    ChapterClearance,
+    ManifestDocumentV2,
+    ReviewClearance,
+)
 from lovspor.forarbeider.corpus_render import (
     ReleasedChapter,
     Rendering,
-    member_of,
     render_document,
 )
 from lovspor.forarbeider.corpus_transaction import JOURNAL, LOCK
-from lovspor.forarbeider.corpus_tree import read_dataset_files, require_sandbox
+from lovspor.forarbeider.corpus_tree import read_any_dataset_files, require_sandbox
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.page import build_record
+from lovspor.forarbeider.release_models import destination_of, document_of
 from lovspor.forarbeider.synthetic import PROPOSITIONS, RETRIEVED_AT, page_bytes
 
 
@@ -51,7 +61,7 @@ class Lookup(NamedTuple):
 class Member(NamedTuple):
     """A released member, proved to be the synthetic rendering it states."""
 
-    entry: ManifestDocument
+    entry: ManifestDocumentV2
     rendering: Rendering
 
 
@@ -67,12 +77,16 @@ def _not_synthetic() -> ForarbeiderRefusedError:
     return ForarbeiderRefusedError(RefusalReason.INPUT_NOT_SYNTHETIC, "document")
 
 
-def lookup_of(entry: ManifestDocument) -> Lookup:
+def lookup_of(entry: ManifestDocumentV2) -> Lookup:
     document = entry.document
     return Lookup(document.id, document.session, document.document_type)
 
 
-def synthetic_rendering(entry: ManifestDocument) -> Rendering:
+def _review_time(clearance: ChapterClearance) -> datetime | None:
+    return clearance.review_decided_at if isinstance(clearance, ReviewClearance) else None
+
+
+def synthetic_rendering(entry: ManifestDocumentV2) -> Rendering:
     """The rendering the bundled synthetic pages give for ``entry``'s chapters and times.
 
     Raises:
@@ -91,7 +105,7 @@ def synthetic_rendering(entry: ManifestDocument) -> Rendering:
             build_chapter_result(
                 page_bytes(kind, item.chapter_number), pages[item.chapter_number], RETRIEVED_AT
             ),
-            item.review_decided_at,
+            _review_time(item.clearance),
         )
         for item in entry.chapters
     )
@@ -99,7 +113,45 @@ def synthetic_rendering(entry: ManifestDocument) -> Rendering:
     return Rendering(metadata, chapters, times)
 
 
-def _verified(entry: ManifestDocument, files: dict[str, bytes]) -> Member | None:
+def _receipt(result: ChapterResult, clearance: ChapterClearance) -> dict[str, object]:
+    return {
+        "chapter_number": result.chapter_number,
+        "chapter_id": result.id,
+        "chapter_title": result.chapter_title,
+        "source_page_url": result.source_page_url,
+        "source_sha256": result.source_sha256,
+        "text_sha256": result.text_sha256,
+        "extractor_version": result.extractor_version,
+        "normalizer_version": result.normalizer_version,
+        "retrieved_at": result.retrieved_at,
+        "clearance": clearance,
+    }
+
+
+def _restated(entry: ManifestDocumentV2, rendering: Rendering) -> ManifestDocumentV2:
+    """``entry`` as the synthetic pages state it, validated again as a whole.
+
+    Raises:
+        ValidationError: the restated entry breaks the schema, an order above all.
+    """
+    metadata = rendering.metadata
+    document = document_of(metadata)
+    chapters = tuple(
+        _receipt(item.result, receipt.clearance)
+        for item, receipt in zip(rendering.chapters, entry.chapters, strict=True)
+    )
+    derived = {
+        "document": document,
+        "title": metadata.title,
+        "ministry": metadata.ministry,
+        "path": destination_of(document),
+        "listed_chapters": tuple(chapter.chapter_number for chapter in metadata.chapters),
+        "chapters": chapters,
+    }
+    return ManifestDocumentV2.model_validate({**entry.model_dump(), **derived})
+
+
+def _verified(entry: ManifestDocumentV2, files: dict[str, bytes]) -> Member | None:
     """``entry`` as a servable member, ``None`` when withdrawn; refused unless synthetic.
 
     Raises:
@@ -108,15 +160,10 @@ def _verified(entry: ManifestDocument, files: dict[str, bytes]) -> Member | None
     rendering = synthetic_rendering(entry)
     try:
         markdown = render_document(rendering)
-        expected = member_of(rendering, markdown)
+        expected = _restated(entry, rendering)
     except (ForarbeiderRefusedError, ValidationError) as error:
         raise _not_synthetic() from error
-    stated = {
-        "release_status": entry.release_status,
-        "markdown_sha256": entry.markdown_sha256,
-        "times": entry.times,
-    }
-    if expected.model_copy(update=stated) != entry:
+    if expected != entry:
         raise _not_synthetic()
     if entry.release_status != "released":
         return None
@@ -136,7 +183,7 @@ def open_shelf(raw: Path, forbidden: Sequence[Path]) -> Shelf:
     sandbox = require_sandbox(raw, forbidden)
     if any(os.path.lexists(sandbox / name) for name in (LOCK, JOURNAL)):
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_LOCKED, "sandbox")
-    dataset, files = read_dataset_files(sandbox)
+    dataset, files = read_any_dataset_files(sandbox)
     entries = dataset.manifest.documents
     found = [(entry, _verified(entry, files)) for entry in entries]
     members = tuple(member for _, member in found if member is not None)

@@ -9,6 +9,7 @@ import threading
 import time
 from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -144,6 +145,9 @@ def test_chapter_spacing_heading_cap_and_final_text(tmp_path: Path) -> None:
         ("url", "a chapter belongs to another document"),
         ("coverage", "coverage does not match the released chapters"),
         ("late", "a chapter was approved after the owner decided"),
+        ("path", "path is not this document's scoped path"),
+        ("withdrawal", "only a withdrawn document has a withdrawal time"),
+        ("rendering", "a released document has a rendering, a withdrawn one none"),
     ],
 )
 def test_manifest_diagnostics(tmp_path: Path, case: str, message: str) -> None:
@@ -167,6 +171,12 @@ def test_manifest_diagnostics(tmp_path: Path, case: str, message: str) -> None:
         data["coverage"] = "every_listed_chapter"
     elif case == "late":
         data["chapters"][0]["review_decided_at"] = "2101-01-01T00:00:00Z"
+    elif case == "path":
+        data["path"] = "forarbeider/2099-2100/prop-l/9999999.md"
+    elif case == "withdrawal":
+        data["times"] = times("2100-04-11T00:00:00Z")
+    elif case == "rendering":
+        data["markdown_sha256"] = None
     with pytest.raises(ValidationError) as caught:
         models.ManifestDocument.model_validate(data)
     assert [error["msg"] for error in caught.value.errors()] == ["Value error, " + message]
@@ -185,6 +195,24 @@ def test_duplicate_manifest_keys_keep_the_diagnostic() -> None:
     assert caught.value.reason == RefusalReason.MANIFEST_INVALID
     assert isinstance(caught.value.__cause__, ValueError)
     assert str(caught.value.__cause__) == "a key is given twice"
+
+
+def _fake_member(path: str, doc_id: str, source_id: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        path=path, document=SimpleNamespace(id=doc_id, source_document_id=source_id)
+    )
+
+
+def test_require_once_each_diagnostics_and_the_id_or_source_split() -> None:
+    with pytest.raises(ValueError, match=r"^documents must be sorted by path, once each$"):
+        models._require_once_each([_fake_member("b", "x", 1), _fake_member("a", "y", 2)])
+    # Duplicate ids, distinct sources: the "or" in the original still raises.
+    with pytest.raises(ValueError, match=r"^a document is listed twice$"):
+        models._require_once_each([_fake_member("a", "x", 1), _fake_member("b", "x", 2)])
+    # Distinct ids, duplicate sources: the other half of the same "or".
+    with pytest.raises(ValueError, match=r"^a document is listed twice$"):
+        models._require_once_each([_fake_member("a", "x", 1), _fake_member("b", "y", 1)])
+    models._require_once_each([_fake_member("a", "x", 1), _fake_member("b", "y", 2)])
 
 
 def test_transaction_symlink_and_cleanup(tmp_path: Path) -> None:
