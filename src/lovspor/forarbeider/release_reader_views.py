@@ -1,14 +1,16 @@
 """The versioned JSON records the real-release reader prints (#738, B2).
 
 Apart from the synthetic reader's records by type: ``synthetic: false``,
-``publication: committed_on_origin_main``, and a notice that the owner's
-records are integrity-checked, not authenticated. Only what the released
+``publication: owner_attested_commit`` with ``remote_verified: false``, and
+a notice that the owner's records, the attestation included, are
+integrity-checked, not authenticated. Only what the released
 dataset publishes is shown, with the digests the reader verified: identity,
 labels, coverage, chapter receipts and their clearances, the time axes. Never
 an owner handle, evidence, dossier, private path or raw page. Chapter text
 appears only in the ``chapter`` record, for the one chapter asked for.
 """
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -19,9 +21,9 @@ from lovspor.forarbeider.release_models import DocumentIdentity
 from lovspor.forarbeider.release_reader import ReleaseShelf, VerifiedRelease
 
 TRUST_NOTICE = (
-    "Served from a clean lovverk main equal to the last-fetched origin/main, checked against"
-    " the owner's private release records. Those checks prove integrity, not identity:"
-    " a digest proves bytes, not who made them."
+    "Served from a clean local lovverk main whose HEAD the owner attested as published;"
+    " the remote was not verified. Checked against the owner's private release records:"
+    " integrity, not identity. A digest proves bytes, not who made them."
 )
 PARTIAL_NOTICE = "Partial curated excerpt: not every chapter the source lists is included."
 _TYPE_LABELS = {"prop-l": "L", "prop-ls": "LS"}
@@ -34,7 +36,8 @@ class _Record(BaseModel):
 
     schema_version: Literal[1] = 1
     synthetic: Literal[False] = False
-    publication: Literal["committed_on_origin_main"] = "committed_on_origin_main"
+    publication: Literal["owner_attested_commit"] = "owner_attested_commit"
+    remote_verified: Literal[False] = False
     notice: str = NOTICE
     trust_notice: str = TRUST_NOTICE
 
@@ -67,6 +70,8 @@ class ReleaseSummary(BaseModel):
 class ReleaseListRecord(_Record):
     record_type: Literal["forarbeider_release_list"] = "forarbeider_release_list"
     head_commit: str
+    attested_commit: str
+    attested_at: datetime
     manifest_sha256: str | None
     documents: tuple[ReleaseSummary, ...]
 
@@ -148,6 +153,8 @@ def release_list_record(shelf: ReleaseShelf) -> ReleaseListRecord:
     )
     return ReleaseListRecord(
         head_commit=shelf.state.head_commit,
+        attested_commit=shelf.attestation.commit,
+        attested_at=shelf.attestation.attested_at,
         manifest_sha256=shelf.manifest_sha256,
         documents=summaries,
     )

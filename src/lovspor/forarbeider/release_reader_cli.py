@@ -35,7 +35,7 @@ from lovspor.forarbeider.release_reader_views import (
 from lovspor.ops.commands import ops_app
 
 release_read_app = typer.Typer(
-    help="Read-only reader of released forarbeider in a published lovverk checkout."
+    help="Read-only reader of released forarbeider in an owner-attested lovverk checkout."
 )
 ops_app.add_typer(release_read_app, name="forarbeider-release-read")
 
@@ -98,13 +98,16 @@ def read_scope(
     ],
     checkout: Annotated[
         Path,
-        typer.Option("--checkout", help="A lovverk release clone on main, equal to origin/main."),
+        typer.Option(
+            "--checkout", help="A lovverk release clone, clean on an owner-attested main commit."
+        ),
     ],
 ) -> None:
-    """Read released forarbeider from a published lovverk main (issue #738, B2).
+    """Read released forarbeider from an owner-attested lovverk main (issue #738, B2).
 
     Offline and read-only. Preparatory material, not enacted law. A document is
-    served only when its bytes, the commit and the owner's release records agree.
+    served only when its bytes, the attested commit and the owner's release records
+    agree. The remote is never verified.
     """
     ctx.obj = ReadScope(workspace, checkout)
 

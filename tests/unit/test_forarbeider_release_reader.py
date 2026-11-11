@@ -14,11 +14,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import typer
 from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from lovspor.cli import app
-from lovspor.forarbeider import release_reader
+from lovspor.forarbeider import publication, release_reader
 from lovspor.forarbeider.corpus_models import (
     EMPTY_MANIFEST,
     INDEX_PATH,
@@ -34,6 +35,7 @@ from tests.unit.cli_output import said
 from tests.unit.forarbeider_apply_support import (
     DOC1,
     DOC2,
+    NOW,
     PATH1,
     QUOTE,
     TABLE,
@@ -61,12 +63,41 @@ def bench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ApplyBench:
     return ApplyBench(tmp_path, monkeypatch)
 
 
+ATTESTED = "2100-04-10T12:50:00Z"
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(publication, "_now", lambda: NOW)
+
+
+def attest(bench: ApplyBench, commit: str = "", typed: str | None = None) -> Any:
+    """The owner attests the commit they saw on lovverk main, at a terminal."""
+    sha = commit or git(bench.clone, "rev-parse", "HEAD").strip()
+    head = ["ops", "forarbeider-release", "--workspace", str(bench.batch.workspace)]
+    head += ["--ledger", str(bench.batch.ledger), "publication", "attest"]
+    arguments = [
+        "--checkout",
+        str(bench.clone),
+        "--commit",
+        sha,
+        "--decided",
+        f"{OWNER}@{ATTESTED}",
+    ]
+    with pytest.MonkeyPatch.context() as typist:
+        typist.setattr(
+            typer, "prompt", lambda text, **_: typed or text.removeprefix("Type to confirm: ")
+        )
+        return CliRunner().invoke(app, [*head, *arguments])
+
+
 def publish(bench: ApplyBench, message: str = "owner: release batch") -> None:
-    """The owner commits the batch branch, merges it to main and fetches it back."""
+    """The owner commits the batch branch, merges it to main and attests the merged commit."""
     commit_all(bench.clone, message)
     git(bench.clone, "switch", "--quiet", "main")
     git(bench.clone, "merge", "--quiet", "--ff-only", BRANCH)
-    git(bench.clone, "update-ref", "refs/remotes/origin/main", "HEAD")
+    result = attest(bench)
+    assert result.exit_code == 0, result.output
 
 
 def back_to_batch_branch(bench: ApplyBench) -> None:
@@ -112,7 +143,7 @@ def refused(result: Any, reason: str, detail: str) -> None:
 def edit_committed(bench: ApplyBench, path: str, payload: bytes) -> None:
     (bench.clone / path).write_bytes(payload)
     commit_all(bench.clone, "hand edit")
-    git(bench.clone, "update-ref", "refs/remotes/origin/main", "HEAD")
+    attest(bench)  # refused when the guard already refuses the tree; the reader refuses too
 
 
 # --- the pass --------------------------------------------------------------------------------
@@ -123,7 +154,9 @@ def test_a_published_release_is_listed_with_its_labels(released: ApplyBench) -> 
 
     assert record["record_type"] == "forarbeider_release_list"
     assert record["synthetic"] is False
-    assert record["publication"] == "committed_on_origin_main"
+    assert record["publication"] == "owner_attested_commit"
+    assert record["remote_verified"] is False
+    assert record["attested_commit"] == record["head_commit"]
     assert "NOT enacted law" in record["notice"]
     assert "not identity" in record["trust_notice"]
     assert record["head_commit"] == git(released.clone, "rev-parse", "HEAD").strip()
@@ -188,7 +221,7 @@ def test_provenance_names_the_verified_owner_records(released: ApplyBench) -> No
 def test_a_checkout_without_forarbeider_lists_nothing(bench: ApplyBench) -> None:
     bench.batch.workspace.mkdir(mode=0o700)
     git(bench.clone, "switch", "--quiet", "main")
-    git(bench.clone, "update-ref", "refs/remotes/origin/main", "HEAD")
+    assert attest(bench).exit_code == 0
 
     record = loaded(read(bench, "list"))
 
@@ -221,7 +254,6 @@ def test_a_batch_in_the_working_tree_is_never_served(
         target.write_bytes((bench.clone / path).read_bytes())
     git(bench.clone, "stash", "--include-untracked", "--quiet")
     git(bench.clone, "switch", "--quiet", "main")
-    git(bench.clone, "update-ref", "refs/remotes/origin/main", "HEAD")
     for path in (p for p in (bench.root / "copy").rglob("*") if p.is_file()):
         target = bench.clone / path.relative_to(bench.root / "copy")
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -229,11 +261,121 @@ def test_a_batch_in_the_working_tree_is_never_served(
     refused(read(bench, "list"), "checkout_dirty", "untracked")
 
 
-def test_a_commit_not_on_the_fetched_origin_main_is_not_published(released: ApplyBench) -> None:
+def test_a_local_commit_with_origin_main_moved_to_it_is_not_published(
+    released: ApplyBench,
+) -> None:
+    """The finding: a remote-tracking ref moved offline must never stand in for publication."""
     git(released.clone, "commit", "--quiet", "--allow-empty", "-m", "local only")
-    refused(read(released, "list"), "release_not_published", "origin_main")
-    git(released.clone, "update-ref", "-d", "refs/remotes/origin/main")
-    refused(read(released, "list"), "release_not_published", "origin_main")
+    git(released.clone, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+    refused(read(released, "list"), "release_not_published", "attestation")
+
+
+def test_without_an_attestation_for_head_nothing_is_published(released: ApplyBench) -> None:
+    (stored,) = released.records("publications")
+    stored.rename(released.root / "moved-attestation.json")
+
+    refused(read(released, "list"), "release_not_published", "attestation")
+
+
+def test_a_corrupt_or_mismatched_attestation_is_refused(released: ApplyBench) -> None:
+    (stored,) = released.records("publications")
+    saved = stored.read_text()
+    stored.write_text(saved.replace('"commit"', '"commit" ', 1))
+    refused(read(released, "list"), "release_record_corrupt", stored.stem)
+    payload = json.loads(saved)
+    payload["manifest_sha256"] = "0" * 64
+    stored.write_text(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+    refused(read(released, "list"), "release_not_published", "attestation_mismatch")
+
+
+def test_moving_origin_main_during_a_read_changes_nothing_it_is_not_trusted(
+    released: ApplyBench, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = release_reader.read_any_dataset_files
+    root = git(released.clone, "rev-list", "--max-parents=0", "HEAD").strip()
+
+    def read_then_move_the_ref(checkout: Path) -> Any:
+        found = real(checkout)
+        git(released.clone, "update-ref", "refs/remotes/origin/main", root)
+        return found
+
+    monkeypatch.setattr(release_reader, "read_any_dataset_files", read_then_move_the_ref)
+    head = ["ops", "forarbeider-release-read", "--workspace", str(released.batch.workspace)]
+    result = CliRunner().invoke(app, [*head, "--checkout", str(released.clone), "list"])
+
+    record = loaded(result)
+    assert record["remote_verified"] is False
+    assert record["attested_commit"] == git(released.clone, "rev-parse", "HEAD").strip()
+
+
+@pytest.mark.parametrize("change", ["head", "attestation"])
+def test_a_publication_change_while_reading_is_refused(
+    released: ApplyBench, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    real = release_reader.read_any_dataset_files
+
+    def read_then_change(checkout: Path) -> Any:
+        found = real(checkout)
+        if change == "head":
+            git(released.clone, "commit", "--quiet", "--allow-empty", "-m", "moved while reading")
+            assert attest(released).exit_code == 0
+        else:
+            (stored,) = released.records("publications")
+            stored.rename(released.root / "gone.json")
+        return found
+
+    monkeypatch.setattr(release_reader, "read_any_dataset_files", read_then_change)
+    head = ["ops", "forarbeider-release-read", "--workspace", str(released.batch.workspace)]
+    result = CliRunner().invoke(app, [*head, "--checkout", str(released.clone), "list"])
+
+    assert result.exit_code == 1, result.output
+    assert said("refused: corpus_tree_mismatch: concurrent", result.output) or said(
+        "refused: release_not_published: attestation", result.output
+    )
+    assert "{" not in result.output
+
+
+# --- the attestation command -----------------------------------------------------------------
+
+
+def test_an_attestation_records_the_owners_word_and_writes_only_the_workspace(
+    released: ApplyBench,
+) -> None:
+    (stored,) = released.records("publications")
+    record = json.loads(stored.read_text())
+    head = git(released.clone, "rev-parse", "HEAD").strip()
+
+    assert stored.name == f"{head}.json"
+    assert record["commit"] == head
+    assert record["branch"] == "main"
+    assert record["repository"] == "github.com/bartoszkobylinski/lovverk"
+    assert record["basis"] == "owner_asserted_unverified"
+    assert record["remote_verified"] is False
+    assert record["identity_authenticated"] is False
+    assert record["manifest_sha256"] == json.loads(
+        json.dumps(_sha((released.clone / MANIFEST_PATH).read_bytes()))
+    )
+    before = snapshot(released.root)
+    assert attest(released).exit_code == 0, "the same attestation again is a no-op"
+    assert snapshot(released.root) == before
+
+
+def test_an_attestation_names_head_exactly_from_a_clean_main(released: ApplyBench) -> None:
+    git(released.clone, "commit", "--quiet", "--allow-empty", "-m", "not yet attested")
+    before = snapshot(released.root)
+    other = git(released.clone, "rev-list", "--max-parents=0", "HEAD").strip()
+    refused(attest(released, commit=other), "release_not_published", "commit")
+    refused(attest(released, commit="not-a-commit"), "release_invalid", "commit")
+    refused(
+        attest(released, typed="attest something else"), "review_not_interactive", "publication"
+    )
+    assert snapshot(released.root) == before
+    git(released.clone, "switch", "--quiet", BRANCH)
+    refused(attest(released), "checkout_branch_mismatch", "branch")
+    git(released.clone, "switch", "--quiet", "main")
+    (released.clone / "stray.txt").write_text("x\n")
+    refused(attest(released), "checkout_dirty", "untracked")
 
 
 def test_a_wrong_branch_repository_or_path_is_refused(released: ApplyBench) -> None:
@@ -271,7 +413,7 @@ def test_a_change_while_reading_is_refused(
     def read_then_move(checkout: Path) -> Any:
         found = real(checkout)
         git(released.clone, "commit", "--quiet", "--allow-empty", "-m", "moved while reading")
-        git(released.clone, "update-ref", "refs/remotes/origin/main", "HEAD")
+        assert attest(released).exit_code == 0
         return found
 
     monkeypatch.setattr(release_reader, "read_any_dataset_files", read_then_move)

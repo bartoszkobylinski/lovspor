@@ -12,10 +12,13 @@ and starts no process but the read-only Git of :mod:`lovspor.git_read`.
   origin and root commit, safe config, no Git operation, **no forarbeider
   lock, journal or staging**, a clean index and worktree with nothing
   untracked, and the dataset exactly its manifest.
-- HEAD is the commit ``refs/remotes/origin/main`` names: the release is
-  committed and was on lovverk ``main`` when the clone last fetched. A
-  working tree, a local commit or an unmerged branch is never publication.
-- The guard runs again after the dataset is read; a change in between refuses.
+- HEAD has the owner's **publication attestation** in the private workspace
+  (:mod:`lovspor.forarbeider.publication`), naming this commit and this
+  dataset. A working tree, a local commit, an unmerged branch or a moved
+  ``refs/remotes/origin/main`` is never publication; the remote-tracking ref
+  is not read at all, and nothing here verifies the remote.
+- The guard and the attestation are checked again after the dataset is read;
+  a change in between refuses.
 
 **The dataset.** Manifest schema 2 only, in its canonical bytes (version 1
 was written only by the synthetic sandbox; any other version refuses). Every
@@ -58,7 +61,8 @@ from lovspor.forarbeider.corpus_render import NOT_LAW
 from lovspor.forarbeider.corpus_tree import _read_public, read_any_dataset_files
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.policy_models import StandingPolicy
-from lovspor.forarbeider.release_checkout import CheckoutState, require_published, verify_checkout
+from lovspor.forarbeider.publication import PublicationAttestation, attestation_for
+from lovspor.forarbeider.release_checkout import CheckoutState, verify_checkout
 from lovspor.forarbeider.release_commands import stored_record
 from lovspor.forarbeider.release_models import (
     SHA256,
@@ -87,9 +91,10 @@ class VerifiedRelease(NamedTuple):
 
 
 class ReleaseShelf(NamedTuple):
-    """What a verified checkout serves: its state, manifest digest and released documents."""
+    """What a verified checkout serves: its state, the owner's attestation of it, documents."""
 
     state: CheckoutState
+    attestation: PublicationAttestation
     manifest_sha256: str | None
     releases: tuple[VerifiedRelease, ...]
 
@@ -319,7 +324,7 @@ def open_release_shelf(workspace: Path, checkout: Path) -> ReleaseShelf:
             while reading.
     """
     state = verify_checkout(checkout, MAIN)
-    require_published(checkout, state.head_commit)
+    attested = attestation_for(workspace, state)
     dataset, files = read_any_dataset_files(checkout)
     if dataset.manifest_sha256 != state.base_manifest_sha256:
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "concurrent")
@@ -328,9 +333,10 @@ def open_release_shelf(workspace: Path, checkout: Path) -> ReleaseShelf:
         verify_release(workspace, member, files[member.path])
         for member in _released(dataset.manifest)
     )
-    if verify_checkout(checkout, MAIN) != state:
+    again = verify_checkout(checkout, MAIN)
+    if again != state or attestation_for(workspace, again) != attested:
         raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, "concurrent")
-    return ReleaseShelf(state, dataset.manifest_sha256, releases)
+    return ReleaseShelf(state, attested, dataset.manifest_sha256, releases)
 
 
 def find_release(shelf: ReleaseShelf, document: str) -> VerifiedRelease:
