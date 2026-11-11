@@ -148,10 +148,18 @@ Codex, read-only (`codex exec -s read-only`), given the specification and the co
 | 4 | `32bbb1e6` | NOT READY | no production fail-open path; minor: the audit test passes strings to `_row` | false positive: the test calls its own helper `_row`, which builds the operation records; the module called directly with them returns `unbound_date_only_unproven`. No change |
 | 5 | `32bbb1e6` | **READY** | none | — |
 
-MUTATION_TEXT
+After round 5 the CI test author (`3d755a61`, `[agent:codex-tests]`) added 8 cases: another act of a neighbouring date, or the same date-only refid listed twice, never makes a proof ambiguous; and an inline date-only substitution item keeps its locations and needs the header's proof. All pass. The test file has 45 cases.
+
+**Mutation** (CI `mutation` job, PR-scoped, mutmut 3.8.0, head `3d755a61`; targets `_proven`, `header_proves`, `identified`, `item_act`, `canonical_act`, `is_intro`, `_Reader._open_block`, `_Reader._substitution_item`, `_Reader._instruction`): **201 of 201 killed**. 0 survived, 0 timed out, 0 suspicious, 0 without tests, and no equivalent mutant was registered. Two changed lines sit at module level, where mutmut does not measure: `_DATE_ONLY` in `attribution.py`, whose pattern every date-only test exercises, and `REPLAY_VERSION` in `run.py`, which `test_legaltime_mutants.py` pins.
+
+**CI** at `3d755a61`: everything passed. That covers fast-ci, the Test matrix (3.12, 3.13, 3.14), codex-author, codex-tests, mutation, the security audit, publish determinism (digest on three platforms, compare), GitGuardian and ready. Locally: the full unit suite (20,364 passed, 2 skipped, 10 xfailed), the pinned legaltime integration suite (26 passed), the deep gate on push, the fast gate on every commit, and `/security-check` (0 vulnerabilities, 0 leaks, 0 unreadable files; the bandit MEDIUM findings are pre-existing and in files this change does not touch).
 
 ## 6. Limitations
 
 - **A numbered canonical citation still binds without header proof**, as before: the task preserves it. lov/2007-01-26-3 shows the cost, its header omits acts whose numbered blocks still bind (e.g. `lov/1893-07-20-2`). Requiring header proof there would be a separate, measured change.
 - **`nr` without its full stop is not a number.** lov/2021-05-07-33's one straffeloven operation stays unattributed (timing `pending`, so no act-level effect). Accepting the misprint would be a grammar change with its own audit.
 - Header omissions (Phase 4B §7) now leave date-only blocks unattributed too; that is the fail-closed choice.
+
+## 7. Recommendation
+
+**MERGE**, for the owner to decide. The code is final at `3d755a61`; the commit after it changes only this note. The change is strictly fail-closed. It retains every header-proven date-only binding (77), removes the 51 unproven ones, and closes the same hole in substitution items and change addresses. It changes no coverage-act event, applied operation or verdict. The evidence reproduces deterministically, the independent review ended READY, and CI is green with mutation at 201/201. The result is 151 more unattributed entries and 150 more act-level problems. That is the cost of not guessing, not a loss of correct coverage.
