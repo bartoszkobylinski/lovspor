@@ -1143,6 +1143,18 @@ no longer counted as operations, 0 incorrect. Unattributed 1,392 → 175 (451 �
 1,788 → 570; proven stays 0 of 1,540, the blanket is not narrowed, and the four phase-1 acts are
 unchanged in content.
 
+#872 (2026-11-11; note `docs/research/legal-time-replay-872-date-only-2026-11-11.md`, coverage
+`docs/research/data/legal-time-coverage-2026-11-11-872.json`, audit
+`docs/research/data/legal-time-attribution-audit-2026-11-11-872.json`; `REPLAY_VERSION`
+`legaltime-replay-6`): a canonical intro (`INTRO`, `INTRO_SLIK`) citing an act by date alone binds
+only when the member's own `changesToDocuments` lists exactly that date-only refid and no numbered
+act of the same date (`attribution.header_proves`, shared with Phase 4B; a term-substitution list
+item naming its act by date alone follows the same rule). Otherwise it closes the block and what
+follows is unattributed. Fully numbered canonical citations bind as before. Of the
+128 date-only operations in the eight acts' amenders, 77 header-proven are retained and 51 are now
+unattributed (none was ever a coverage-act event). Unattributed 175 → 326 (96 → 147 distinct),
+act-level 570 → 720; events, applied operations and every verdict are unchanged; proven stays 0.
+
 ## How to use this document
 
 - **Before starting a session**: read this + `CLAUDE.md`. Those two together are the full context.
