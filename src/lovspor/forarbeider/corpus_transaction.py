@@ -198,6 +198,18 @@ def _make(sandbox: Path, path: str, sha: str | None) -> None:
 
 
 def _perform(sandbox: Path, operation: Operation) -> None:
+    """Carry ``operation`` forward; only a file holding its old or its new bytes is touched.
+
+    A replayed journal must never overwrite a file edited by hand since it was
+    written: that is a refusal, and the journal stays for the owner.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_tree_mismatch`` for a file holding
+            neither its old nor its new bytes.
+    """
+    current = _current(sandbox / operation.path)
+    if current not in (operation.sha256, operation.previous_sha256):
+        raise ForarbeiderRefusedError(RefusalReason.CORPUS_TREE_MISMATCH, DATASET_ROOT)
     _make(sandbox, operation.path, operation.sha256)
 
 

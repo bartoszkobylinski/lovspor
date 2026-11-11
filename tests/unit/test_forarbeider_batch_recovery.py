@@ -281,3 +281,24 @@ def test_an_interrupted_withdrawal_is_finished_by_recovery_never_undone(
     assert len(bench.records("release_withdrawals")) == 1
     again = bench.withdraw(DOC1, "2,3")
     assert said("refused: document_not_released: document", again.output), again.output
+
+
+def test_finishing_a_withdrawal_never_overwrites_a_file_edited_by_hand(
+    bench: ApplyBench, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A forward replay, like a rollback, touches only a file holding its old or new bytes."""
+    sha, request = _batch(bench, httpx_mock)
+    assert bench.apply(sha, request).exit_code == 0
+    commit_all(bench.clone, "owner: release batch")
+    crash = Crash(monkeypatch, 2)
+    bench.withdraw(DOC1, "2")
+    monkeypatch.setattr(corpus_transaction, "replace", crash.real)
+    index = bench.clone / "forarbeider" / "INDEX.md"
+    index.write_bytes(b"edited by hand\n")
+
+    result = bench.recover()
+
+    assert said("refused: corpus_tree_mismatch: forarbeider", result.output), result.output
+    assert index.read_bytes() == b"edited by hand\n"
+    assert (bench.clone / JOURNAL).exists()
+    assert bench.records("release_withdrawals") == []
