@@ -396,6 +396,7 @@ def test_both_target_puts_are_in_flight_at_the_bucket_at_once(
     assert sorted([a["put_status"], b["put_status"]]) == [200, 412]
 
 
+@pytest.mark.structural
 def test_no_sync_cli_or_server_module_imports_the_race_barrier() -> None:
     importers = [
         path.relative_to(_ROOT)

@@ -1015,6 +1015,7 @@ class TestDocument:
 
 
 class TestNoClock:
+    @pytest.mark.structural
     def test_the_probe_reads_its_clock_only_through_now(self) -> None:
         """observed_at is the injected clock's value (ADR:995-1001); the module
         never calls a clock of its own."""

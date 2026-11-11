@@ -1,0 +1,247 @@
+# Nightly mutation lane: the PR-scoped wrapper (scripts/mutmut-pr.sh) over the
+# range of main that no completed night has measured yet. A REPORT, never a
+# merge gate: mutation left the PR pipeline (docs/agentic-ci.md, "Nightly
+# mutation"). No LLM runs here.
+name: Nightly Mutation
+
+on:
+  schedule:
+    # GitHub cron is UTC. 23:30 UTC is 00:30 Europe/Oslo in winter (CET) and
+    # 01:30 in summer (CEST): the START drifts one hour with DST. It sits after
+    # milamber's 00:00 nightly on purpose. The 06:00 STOP does not drift: the
+    # budget step computes it against Europe/Oslo wall clock, so a summer night
+    # is one hour shorter. GitHub may also start a scheduled run late.
+    - cron: '30 23 * * *'
+  workflow_dispatch:
+
+# One night at a time. Never cancelled: a cancelled run measured nothing it can
+# report, and the next night would redo the same range anyway.
+concurrency:
+  group: nightly-mutation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  nightly-mutation:
+    # Hosted, as the PR mutation job was: lovspor is public, so hosted minutes
+    # are free, and the Mac mini runner stays free for the agent lanes.
+    runs-on: ubuntu-latest
+    # Strictly above the largest wall-clock budget the budget step hands out
+    # (cap=18000 s = 300 min) plus setup and the harvest after the cut, and
+    # below the hosted runner's own 360 min kill. Pinned by
+    # tests/unit/test_nightly_mutation.py.
+    timeout-minutes: 345
+    permissions:
+      # contents: write moves the nightly-mutation-base tag; issues: write
+      # rewrites the rolling report issue. Nothing else is written.
+      contents: write
+      issues: write
+    env:
+      UV_PYTHON: "3.12"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      BASE_TAG: nightly-mutation-base
+      ISSUE_TITLE: Nightly mutation
+      ISSUE_LABEL: mutation-nightly
+    steps:
+      # main at the moment the night starts. fetch-depth 0 brings history and
+      # tags, so the base tag and the 7-day fallback resolve locally. The
+      # persisted GITHUB_TOKEN is what pushes the tag (contents: write above).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.10.0"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      # The range is <base tag>...<head>. The tag names the head of the last
+      # COMPLETED night. Without it — the first night, or a tag deleted by hand
+      # — the base is the last commit of main older than 7 days: a bounded
+      # range, never the whole package. A tag that is not an ancestor of main
+      # (main rewritten) falls back the same way.
+      - name: Resolve the range
+        id: range
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          base=""
+          source=""
+          if tagged="$(git rev-parse -q --verify "refs/tags/$BASE_TAG^{commit}")" \
+            && git merge-base --is-ancestor "$tagged" "$head"; then
+            base="$tagged"
+            source="tag \`$BASE_TAG\` (head of the last completed night)"
+          else
+            base="$(git rev-list -1 --before='7 days ago' "$head")"
+            source="fallback: last commit of main older than 7 days (no usable \`$BASE_TAG\` tag)"
+          fi
+          if [ -z "$base" ]; then
+            echo "::error::no base commit: no $BASE_TAG tag and no commit of main older than 7 days"
+            exit 1
+          fi
+          {
+            echo "head=$head"
+            echo "base=$base"
+            echo "source=$source"
+          } >> "$GITHUB_OUTPUT"
+          echo "range: $base...$head ($source)"
+
+      # One wall-clock budget for the whole run (the wrapper's model, spec
+      # §6a): everything until 06:00 Europe/Oslo, minus 30 min for the harvest,
+      # the report and the tag push. Capped at 300 min (job timeout above) and
+      # floored at 10 min, so a manual run late in the night still reports.
+      - name: Budget until 06:00 Europe/Oslo
+        id: budget
+        run: |
+          set -euo pipefail
+          now="$(date +%s)"
+          deadline="$(TZ=Europe/Oslo date -d 'today 06:00' +%s)"
+          if [ "$deadline" -le "$now" ]; then
+            deadline="$(TZ=Europe/Oslo date -d 'tomorrow 06:00' +%s)"
+          fi
+          cap=18000
+          floor=600
+          seconds=$(( deadline - now - 1800 ))
+          if [ "$seconds" -gt "$cap" ]; then seconds=$cap; fi
+          if [ "$seconds" -lt "$floor" ]; then seconds=$floor; fi
+          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
+          echo "budget: ${seconds}s, the stop is $(TZ=Europe/Oslo date -d "@$deadline" '+%F %R %Z') minus 30 min"
+
+      - name: Nightly-scoped mutation testing (no LLM)
+        id: mut
+        env:
+          MUTMUT_PR_TOTAL_BUDGET_SECONDS: ${{ steps.budget.outputs.seconds }}
+        run: |
+          set +e
+          scripts/mutmut-pr.sh "${{ steps.range.outputs.base }}" 2>&1 | tee mutation-raw.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      # The same harvest the PR mutation job ran, while the shadow tree is
+      # still on disk (#119, #776).
+      - name: Collect survivors, with what each one changed
+        if: always() && steps.mut.outcome != 'skipped'
+        run: |
+          uv run mutmut results > mutation-results.txt 2>/dev/null || true
+          sed -n 's/^    \(.*\): survived$/\1/p' mutation-results.txt > survivors.txt
+          uv run python scripts/ci/mutation_survivors.py \
+            --survivors-file survivors.txt \
+            --out survivors.jsonl || cp survivors.txt survivors.jsonl
+          for bucket in timeout suspicious; do
+            sed -n "s/^    \(.*\): ${bucket}\$/\1/p" mutation-results.txt > "${bucket}.txt"
+            uv run python scripts/ci/mutation_survivors.py \
+              --survivors-file "${bucket}.txt" \
+              --out "${bucket}.jsonl" || cp "${bucket}.txt" "${bucket}.jsonl"
+          done
+
+      - name: Build mutation-result.json
+        if: always() && steps.mut.outcome != 'skipped'
+        run: |
+          python scripts/ci/mutation_to_json.py \
+            --commit "${{ steps.range.outputs.head }}" \
+            --raw mutation-raw.log \
+            --survivors-file survivors.jsonl \
+            --timeouts-file timeout.jsonl \
+            --suspicious-file suspicious.jsonl \
+            --tool-exit-code "${{ steps.mut.outputs.exit_code || '3' }}" \
+            --out mutation-result.json
+
+      - name: Upload mutation artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nightly-mutation-result-${{ steps.range.outputs.head || github.sha }}
+          path: |
+            mutation-result.json
+            mutation-raw.log
+          if-no-files-found: ignore
+
+      # Always yields a verdict: a missing result is `tool_failure`, never clean.
+      # The `[ -x ]` guard is the repo rule for new scripts/ci calls (#381).
+      - name: Verdict
+        id: verdict
+        if: always()
+        run: |
+          if [ -x scripts/ci/nightly_mutation_verdict.py ]; then
+            python3 scripts/ci/nightly_mutation_verdict.py mutation-result.json >> "$GITHUB_OUTPUT"
+          else
+            echo "nightly_mutation_verdict.py is not on this head; reporting tool_failure" >&2
+            printf 'verdict=tool_failure\ncomplete=false\nreason=verdict script missing\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      # Only a COMPLETED night (clean or survivors: every mutant in the range
+      # measured) moves the tag. Partial, budget-exceeded and failed nights
+      # leave it, so the next night measures the same range again.
+      - name: Move the base tag to the measured head
+        id: tag
+        if: steps.verdict.outputs.complete == 'true'
+        run: |
+          git tag -f "$BASE_TAG" "${{ steps.range.outputs.head }}"
+          if [ -x scripts/ci/push_with_retry.sh ]; then
+            scripts/ci/push_with_retry.sh origin "+refs/tags/$BASE_TAG:refs/tags/$BASE_TAG"
+          else
+            git push origin "+refs/tags/$BASE_TAG:refs/tags/$BASE_TAG"
+          fi
+
+      # One rolling issue, its body rewritten every night: GitHub mails on
+      # create, not on edit, so a night costs no notification after the first.
+      - name: Report — rewrite the Nightly mutation issue
+        if: always() && steps.verdict.outcome == 'success'
+        env:
+          VERDICT: ${{ steps.verdict.outputs.verdict }}
+          REASON: ${{ steps.verdict.outputs.reason }}
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
+          SOURCE: ${{ steps.range.outputs.source }}
+          TAG_OUTCOME: ${{ steps.tag.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/nightly-report.md"
+          case "$TAG_OUTCOME" in
+            success) tag_line="moved to \`${HEAD:-unknown}\`" ;;
+            failure) tag_line="NOT moved: the push failed (see the run); the next night measures this range again" ;;
+            *) tag_line="not moved: verdict \`$VERDICT\` did not measure the whole range; the next night measures it again" ;;
+          esac
+          {
+            echo "<!-- lovspor-nightly-mutation -->"
+            echo "## Nightly mutation — $(TZ=Europe/Oslo date '+%F')"
+            echo ""
+            echo "- Verdict: **$VERDICT** (gate reason: \`$REASON\`)"
+            echo "- Range: \`${BASE:-unknown}...${HEAD:-unknown}\` — base from $SOURCE"
+            echo "- Base tag \`$BASE_TAG\`: $tag_line"
+            echo "- Run: $RUN_URL"
+            echo ""
+            if [ "$VERDICT" = "partial" ] || [ "$VERDICT" = "budget_exceeded" ]; then
+              echo "**Partial: not every mutant in the range was measured. This is not a clean night.**"
+              echo ""
+            fi
+            if [ -f mutation-result.json ]; then
+              python3 scripts/ci/mutation_gate.py --summary mutation-result.json \
+                || echo "(the job summary could not be rendered from mutation-result.json)"
+            else
+              echo "No mutation-result.json was produced: the run failed before the gate could read it."
+            fi
+            echo ""
+            echo "Mutation is a nightly report, not a merge gate (docs/agentic-ci.md). Survivors are"
+            echo "killed by a test, or, when provably equivalent, marked \`# pragma: no mutate\` with a"
+            echo "one-line reason or registered in \`mutation-equivalents/\`. Never a \`src/\` rewrite."
+          } > "$body"
+          gh label create "$ISSUE_LABEL" --color BFD4F2 \
+            --description "Rolling nightly mutation report" --force
+          number="$(gh issue list --state open --label "$ISSUE_LABEL" --limit 50 --json number,title \
+            --jq "[.[] | select(.title == \"$ISSUE_TITLE\")][0].number // empty")"
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file "$body"
+            echo "updated issue #$number"
+          else
+            gh issue create --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body-file "$body"
+          fi
+          cat "$body" >> "$GITHUB_STEP_SUMMARY"

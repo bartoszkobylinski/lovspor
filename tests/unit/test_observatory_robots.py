@@ -251,6 +251,7 @@ class TestWhatTheFileSays:
         assert parsed.allows(UA, HOST) is False
 
 
+@pytest.mark.structural
 def test_the_decision_does_not_delegate_to_the_interpreter() -> None:
     """The point of the module: no import of urllib.robotparser, so a Python
     bump cannot change what the crawler fetches."""

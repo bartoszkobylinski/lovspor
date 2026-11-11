@@ -253,9 +253,13 @@ def test_the_push_step_records_the_sha_it_pushed() -> None:
     assert script.index("push_with_retry.sh") < script.index("sha=$(git rev-parse HEAD)")
 
 
-def test_the_mutation_and_ready_gates_are_unchanged() -> None:
+def test_ready_still_stands_down_for_the_follow_up_run() -> None:
+    """A push hands the verdict to the follow-up run; ready must not claim it here.
+
+    Mutation left the PR pipeline (nightly-mutation.yml), so the guard that was
+    on the mutation job now sits on ready itself.
+    """
     jobs = _pipeline()["jobs"]
 
-    assert jobs["ready"]["needs"] == ["fast-ci", "codex-tests", "mutation"]
-    assert jobs["ready"]["if"] == "needs.mutation.result == 'success'"
-    assert "needs.codex-tests.outputs.pushed != 'true'" in jobs["mutation"]["if"]
+    assert jobs["ready"]["needs"] == ["fast-ci", "codex-tests"]
+    assert "needs.codex-tests.outputs.pushed != 'true'" in jobs["ready"]["if"]

@@ -306,14 +306,25 @@ def test_remediation_failure_escalates_only_after_pr_resolution() -> None:
 
 def test_mutation_job_has_a_wallclock_backstop() -> None:
     """Issue #102: without this, a budget-machinery failure means a 6 h
-    grind to GitHub's default kill with no verdict artifact."""
+    grind to GitHub's default kill with no verdict artifact. Mutation runs in
+    the nightly lane now; its backstop sits above the 300-min budget cap and
+    under the hosted 360-min kill."""
+    job = _workflow("nightly-mutation.yml")["jobs"]["nightly-mutation"]
+
+    assert job["timeout-minutes"] == 345
+
+
+def test_the_pr_mutation_check_is_a_trivial_pass_kept_for_the_ruleset() -> None:
+    """The ruleset requires a check named `mutation`; mutation itself is nightly."""
     job = _workflow("pr-pipeline.yml")["jobs"]["mutation"]
 
-    assert job["timeout-minutes"] == 100
+    assert "needs" not in job
+    runs = [step["run"] for step in job["steps"]]
+    assert runs == ['echo "mutation moved to the nightly lane (docs/agentic-ci.md)"']
 
 
 def test_mutation_report_treats_a_missing_tool_exit_code_as_failure() -> None:
-    steps = _steps("pr-pipeline.yml", "mutation")
+    steps = _steps("nightly-mutation.yml", "nightly-mutation")
     build = _named_step(steps, "Build mutation-result.json")["run"]
 
     assert "--tool-exit-code \"${{ steps.mut.outputs.exit_code || '3' }}\"" in build
@@ -745,11 +756,17 @@ def test_pr_pipeline_workflow_scoped_concurrency_still_cancels_stale_runs() -> N
     """The job-level lovspor-codex-subscription group was removed from
     codex-tests (issue #139), but the workflow-scoped pr-<PR#> group must
     remain: it is what still cancels a stale codex-tests run when a new SHA
-    lands on the same PR, now that no other group does."""
+    lands on the same PR, now that no other group does. Since the tiered
+    pipeline it cancels only a draft's run: a ready PR's run carries the agent
+    round and queues the next run behind it. A push to main is grouped per
+    commit, so one post-merge check never evicts another."""
     concurrency = _workflow("pr-pipeline.yml")["concurrency"]
 
-    assert concurrency["group"] == "pr-${{ github.event.pull_request.number }}"
-    assert concurrency["cancel-in-progress"] is True
+    assert concurrency["group"] == (
+        "${{ github.event_name == 'push' && format('main-{0}', github.sha) "
+        "|| format('pr-{0}', github.event.pull_request.number) }}"
+    )
+    assert concurrency["cancel-in-progress"] == "${{ github.event.pull_request.draft == true }}"
 
 
 def _triggers(workflow_name: str) -> dict[str, Any]:
@@ -800,7 +817,10 @@ def _cancel_in_progress_workflows() -> list[str]:
     return sorted(
         path.name
         for path in _WORKFLOWS.glob("*.yml")
-        if (_workflow(path.name).get("concurrency") or {}).get("cancel-in-progress") is True
+        # An expression (pr-pipeline cancels drafts only) can evaluate true too.
+        if (cancel := (_workflow(path.name).get("concurrency") or {}).get("cancel-in-progress"))
+        is True
+        or "${{" in str(cancel)
     )
 
 
@@ -985,13 +1005,22 @@ class TestAGreenRunRetractsItsOwnVerdict:
         assert applied <= retracted, f"never retracted: {sorted(applied - retracted)}"
 
     def test_the_retraction_waits_for_the_gate_it_speaks_for(self) -> None:
-        """READY is a claim about the mutation gate, so it must not be made
-        when that job was skipped — which is what happens on the run where the
-        test author pushed and a fresh run is already starting."""
+        """READY is a claim about fast-ci and the author round (mutation is
+        nightly now), so it must not be made on the run where the test author
+        pushed and a fresh run is already starting, nor on a draft, nor for a
+        fork whose author lane never ran."""
         job = _workflow("pr-pipeline.yml")["jobs"]["ready"]
 
-        assert set(job["needs"]) == {"fast-ci", "codex-tests", "mutation"}
-        assert job["if"] == "needs.mutation.result == 'success'"
+        assert set(job["needs"]) == {"fast-ci", "codex-tests"}
+        assert " ".join(job["if"].split()) == (
+            "!cancelled() && github.event_name == 'pull_request' && "
+            "github.event.pull_request.draft == false && "
+            "needs.fast-ci.result == 'success' && "
+            "(needs.codex-tests.result == 'success' || "
+            "(needs.codex-tests.result == 'skipped' && "
+            "github.event.pull_request.head.repo.full_name == github.repository)) && "
+            "needs.codex-tests.outputs.pushed != 'true'"
+        )
 
     def test_the_retraction_is_allowed_to_write_labels(self) -> None:
         """A step that silently lacks the scope would leave the bug in place
@@ -1872,26 +1901,43 @@ class TestEveryExpressionResolvesInItsOwnJob:
                     )
 
 
-def test_dependabot_prs_skip_the_codex_lanes_and_still_reach_the_mutation_gate() -> None:
+def test_dependabot_prs_skip_the_codex_lanes_and_still_reach_ready() -> None:
     """Issue #361: a dependabot PR carries no repository secrets, so the Codex
     lanes cannot even check out (`Input required and not supplied: token`) and
     every dependency bump landed in `needs-human:pipeline`. The lanes are
-    skipped for that actor, and the mutation gate — which still runs fast-ci
-    and the Test matrix behind it — accepts the skip from that actor only."""
+    skipped for that actor, and `ready` — behind fast-ci — accepts a skipped
+    lane for a same-repo PR (mutation is nightly now, see the ready test).
+    The author also runs only once, when the PR becomes ready."""
     jobs = _workflow("pr-pipeline.yml")["jobs"]
     same_repo_non_dependabot = (
         "github.event.pull_request.head.repo.full_name == github.repository "
         "&& github.actor != 'dependabot[bot]'"
     )
 
-    assert jobs["codex-author"]["if"] == same_repo_non_dependabot
-    assert jobs["codex-tests"]["if"] == f"${{{{ !cancelled() && {same_repo_non_dependabot} }}}}"
-    mutation_condition = " ".join(jobs["mutation"]["if"].split())
-    assert mutation_condition == (
-        "!cancelled() && needs.fast-ci.result == 'success' && (needs.codex-tests.result == "
-        "'success' || (needs.codex-tests.result == 'skipped' && github.actor == "
-        "'dependabot[bot]')) && needs.codex-tests.outputs.pushed != 'true'"
+    author = " ".join(jobs["codex-author"]["if"].split())
+    assert author == (
+        f"github.event_name == 'pull_request' && {same_repo_non_dependabot} && "
+        "(github.event.action == 'ready_for_review' || "
+        "(github.event.action == 'opened' && github.event.pull_request.draft == false))"
     )
+    assert jobs["codex-tests"]["if"] == (
+        f"${{{{ !cancelled() && needs.codex-author.result != 'skipped' && "
+        f"{same_repo_non_dependabot} }}}}"
+    )
+
+
+def test_drafts_get_fast_ci_only_and_the_author_runs_on_ready() -> None:
+    """The tiered pipeline: ready_for_review starts the one author round."""
+    assert "ready_for_review" in _triggers("pr-pipeline.yml")["pull_request"]["types"]
+
+
+def test_fast_ci_also_runs_on_pushes_to_main_only() -> None:
+    """Post-merge check; every other job stays on pull_request."""
+    assert _triggers("pr-pipeline.yml")["push"] == {"branches": ["main"]}
+    jobs = _workflow("pr-pipeline.yml")["jobs"]
+    assert "if" not in jobs["fast-ci"]
+    for name in ("codex-author", "mutation", "ready"):
+        assert "github.event_name == 'pull_request'" in jobs[name]["if"], name
 
 
 _REPO = Path(__file__).resolve().parents[2]

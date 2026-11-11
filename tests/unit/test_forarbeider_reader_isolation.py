@@ -172,11 +172,13 @@ def _names(path: Path) -> set[str]:
     return names
 
 
+@pytest.mark.structural
 @pytest.mark.parametrize("module", READER_MODULES)
 def test_the_reader_modules_hold_no_write_process_or_network_call(module: str) -> None:
     assert _names(PACKAGE / module) & WRITING == set()
 
 
+@pytest.mark.structural
 def test_the_reader_is_reached_only_through_the_ops_mount() -> None:
     importers = {
         path.name

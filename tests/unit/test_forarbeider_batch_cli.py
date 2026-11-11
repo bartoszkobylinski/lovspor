@@ -427,6 +427,7 @@ def test_planning_writes_only_its_plan_and_never_the_corpus(
     assert (batch.workspace / "batch_plans" / f"{sha}.json").stat().st_mode & 0o077 == 0
 
 
+@pytest.mark.structural
 def test_the_batch_modules_hold_no_process_network_or_corpus_write() -> None:
     forbidden = {"subprocess", "httpx", "socket", "requests", "lovspor.regjeringen_fetch.fetch"}
     for name in BATCH_MODULES:

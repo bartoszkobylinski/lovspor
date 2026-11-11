@@ -113,6 +113,7 @@ class TestContext:
         client.close()
 
 
+@pytest.mark.structural
 @pytest.mark.parametrize("module", CONNECTING_MODULES)
 def test_every_connecting_command_module_uses_the_observatory_client(module: str) -> None:
     tree = ast.parse((SRC / module).read_text(encoding="utf-8"))

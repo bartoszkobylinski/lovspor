@@ -14,8 +14,12 @@ fix this file.
 
 ## Who runs it
 
-- The CI `mutation` job (`.github/workflows/pr-pipeline.yml`) runs
-  `scripts/mutmut-pr.sh <base-sha>` on every PR. No LLM is involved.
+- The nightly lane (`.github/workflows/nightly-mutation.yml`) runs
+  `scripts/mutmut-pr.sh <base>` over `main` since the last completed night and reports in
+  the `Nightly mutation` issue. No LLM is involved. Mutation is **not a PR gate** any more:
+  the PR `mutation` check is a trivial pass kept for the ruleset, and no PR needs 0
+  survivors. An equivalent mutant gets `# pragma: no mutate` with a reason or a register
+  entry, never a `src/` rewrite (`docs/agentic-ci.md`, "Nightly mutation").
 - Claude does not run mutmut locally before opening a PR: it duplicates the CI job and
   slows the push cycle. `./scripts/mutmut-pr.sh --list` (prints the scope, runs nothing)
   is fine.

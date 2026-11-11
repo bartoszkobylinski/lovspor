@@ -2464,6 +2464,7 @@ class TestTemplateContract:
 
 
 class TestLayering:
+    @pytest.mark.structural
     def test_the_site_build_imports_no_benchmark_module(self) -> None:
         """Production publication never imports ``lovspor.llhb.*`` (ADR:725-727)."""
         sources = [

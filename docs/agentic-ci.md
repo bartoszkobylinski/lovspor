@@ -16,6 +16,11 @@ branch) is what turns a green pipeline into a merge. It carries four rules:
 | `non_fast_forward` | no force-push |
 | `deletion` | the branch cannot be deleted |
 
+`mutation` is still in the required set, but since the tiered pipeline it is a trivial job
+that passes and prints `mutation moved to the nightly lane (docs/agentic-ci.md)`: mutation is
+not a merge gate any more (see "Nightly mutation" below). It stays by name so the ruleset did
+not have to change.
+
 `codex-tests` is deliberately **not** in the required set: a docs-only PR skips it, and
 a skipped required check blocks a PR forever. It is still read before merging — it is
 the check that says whether the independent author agreed with the implementation.
@@ -56,21 +61,32 @@ gh api "repos/bartoszkobylinski/lovspor/rulesets/rule-suites/$sid" \
 ```
 
 ```text
-PR opened/synchronize
+Draft PR (opened as draft, every push)
   ├─ fast-ci        (ubuntu, 3.12: conflict-marker check, ruff, mypy, security scan,
-  │                  equivalents register check (#535), unit tests)
+  │                  equivalents register check (#535), unit tests with -n auto)
   ├─ Test           (existing workflow, matrix 3.12–3.14 — unchanged)
+  └─ mutation       (trivial pass, required by name only)
+     A newer push cancels a draft's running pipeline (cheap to redo).
+
+Marked "Ready for review" (or opened ready) — the author runs ONCE
+  ├─ fast-ci, Test, mutation (as above)
   ├─ codex-author   (self-hosted `codex-lovspor` runner on the Mac mini: independent test author ONLY)
   │     └─ hands its work to the verdict lane as artifact `agent-tests-<head-sha>`
   ├─ codex-tests    (ubuntu: applies that patch, lints, runs the suite, verdict, push)
-  │     └─ pushes `[agent:codex-tests]` → fresh synchronize run, old run cancelled
+  │     └─ pushes `[agent:codex-tests]` → a synchronize run, queued behind this one
   │           └─ follow-up (ubuntu): waits ≤20 min for that run, else needs-human:pipeline (#798)
-  └─ mutation       (ubuntu, no LLM: scripts/mutmut-pr.sh → mutation-result.json)
-        └─ gate FAIL → Mutation Remediation workflow
-              ├─ budget_exceeded / tool_failed / baseline_tests_failed
-              │     → BLOCKED + needs-human:mutation, no Codex (nothing measured to kill)
-              └─ survivors → Codex, tests only, max 2 cycles
-                    └─ still failing / non-killable → BLOCKED + needs-human:mutation
+  └─ ready          (fast-ci green + author round green or skipped → READY TO MERGE)
+     A ready PR's pipeline is never cancelled mid-run; a newer push queues behind it.
+
+Later pushes to a ready PR (synchronize, the author's own push included)
+  └─ fast-ci, Test, mutation, ready — no new author round.
+
+Merge (owner) → push to main
+  └─ fast-ci on the merged commit (post-merge check: combined breakage of two green PRs)
+
+Nightly, 23:30 UTC (00:30 Oslo winter / 01:30 summer), stop by 06:00 Europe/Oslo
+  └─ nightly-mutation (ubuntu, no LLM): scripts/mutmut-pr.sh over
+     <tag nightly-mutation-base>...main → rolling issue "Nightly mutation"
 ```
 
 ## Roles
@@ -125,7 +141,66 @@ assertion and a gutted one leave the job equally green, and the guard cannot tel
 apart. The report exists so a human reads that diff rather than trusting the check
 colour. Issue #162 is where this gap was written down.
 
-## Mutation policy (unchanged, now automated)
+## Nightly mutation (since the tiered pipeline)
+
+Mutation is a **nightly report on `main`**, not a merge gate. There is no per-PR
+0-survivor requirement: a survivor is a missing test, found the morning after merge, and
+fixed by a test in a follow-up PR. Measured reasons the PR gate went (2026-11-11, last 8
+merged PRs): every push re-mutated the whole PR's surface, mutmut's setup cost is a
+property of the suite and not the diff, and "0 survivors" pushed equivalent mutants into
+`src/` rewrites.
+
+`.github/workflows/nightly-mutation.yml`, hosted `ubuntu-latest`, `schedule` + `workflow_dispatch`:
+
+- **When.** Cron `30 23 * * *`. GitHub cron is UTC, so the start is 00:30 Europe/Oslo in
+  winter and 01:30 in summer (DST drift; it sits after milamber's 00:00 nightly). GitHub can
+  also start a scheduled run late.
+- **Scope.** The same wrapper the PR job used, `scripts/mutmut-pr.sh <base>`, with base = the
+  commit of tag `nightly-mutation-base` and head = `main` at the start of the run. No tag (the
+  first night, or a deleted one) or a tag that is no longer an ancestor of `main`: base = the
+  last commit of `main` older than 7 days. Never the whole package.
+- **Budget.** One wall-clock budget, the wrapper's own model: the job computes the seconds
+  left until 06:00 Europe/Oslo (DST-correct), keeps 30 min for harvest, report and tag push,
+  caps it at 300 min and floors it at 10 min, and hands it over as
+  `MUTMUT_PR_TOTAL_BUDGET_SECONDS`, which replaces the setup + per-file sum. The job's
+  `timeout-minutes: 345` is strictly above the cap and under the hosted 360-min kill.
+- **Verdict.** `scripts/ci/nightly_mutation_verdict.py` buckets the gate reason that
+  `mutation_to_json.py` computed: `clean` (ok, not_applicable, equivalent_mutants_only),
+  `survivors` (surviving/timeout/suspicious/uncovered mutants), `partial` (run_incomplete,
+  unmeasured_mutants), `budget_exceeded`, `tool_failure` (tool_failed,
+  baseline_tests_failed, a missing or unreadable result, any unknown reason). A partial
+  night is never reported as clean.
+- **Tag.** Only a completed night (`clean` or `survivors`) moves `nightly-mutation-base` to
+  the measured head, pushed with the job's `GITHUB_TOKEN` (`contents: write`) through
+  `scripts/ci/push_with_retry.sh`. Any other verdict leaves the tag, so the next night
+  measures the same range again.
+- **Report.** One open issue titled `Nightly mutation`, label `mutation-nightly` (created if
+  missing), body rewritten every night: verdict, range and where its base came from,
+  whether the tag moved, the run link, and `mutation_gate.py --summary` (counts, survivors,
+  timed-out and suspicious mutants). GitHub mails on create, not on edit.
+- **Remediation.** Not wired yet. `mutation-remediation.yml` is built around a PR: it is
+  triggered by a `PR Pipeline` run of a `pull_request` event, downloads the artifact of that
+  run, checks out and pushes to that run's head branch and counts its cycles on that PR. A
+  nightly result has no PR and its head branch is `main`. Until a nightly remediation lane
+  exists, survivors from the issue are fixed by hand (or by an agent) in a normal PR: tests
+  only, never `src/`. With no mutation artifact on PR runs any more, the existing remediation
+  workflow finds nothing and stops at its gate step.
+
+Equivalent mutants are **not** removed by rewriting `src/`. A provably equivalent mutant gets
+`# pragma: no mutate` on its line with a one-line reason after it, or an entry in the
+`mutation-equivalents/` register (below). Log calls are excluded from mutation by
+`do_not_mutate_patterns` in `[tool.mutmut]`; tests marked `@pytest.mark.structural` (they
+read `src/` as text or AST and cannot kill a mutant) are deselected inside mutmut only, by
+`-m "not structural"` in `pytest_add_cli_args`.
+
+PRs are opened as **draft** and marked ready when the implementation is done: a draft gets
+fast-ci only, marking it ready starts the one independent author round.
+
+## Mutation policy: the wrapper (`scripts/mutmut-pr.sh`)
+
+Since the tiered pipeline the wrapper runs in the nightly lane (above); its rules below are
+unchanged. Wherever the text below says "PR" or "gate", read "the nightly range" and "the
+nightly verdict".
 
 `scripts/mutmut-pr.sh <base-sha>` runs mutmut 3.8.0 for functions changed by the PR.
 The script rebuilds the shadow tree for each run, then uses mutmut's warm baseline and
@@ -217,7 +292,12 @@ unchanged.
 
 ## Anti-loop invariants
 
-- `concurrency: pr-<PR#>` + `cancel-in-progress` — stale runs die on new SHA.
+- `concurrency: pr-<PR#>`, `cancel-in-progress` only for a **draft** (`github.event.pull_request.draft
+  == true`): a draft's stale run dies on a new SHA; a ready PR's run, which carries the agent
+  round, is never killed mid-run and the next run queues behind it. A push to `main` gets its own
+  group per commit.
+- The test author runs once per PR: on `ready_for_review`, or on `opened` when the PR is not a
+  draft. `synchronize` and `reopened` skip it, and `ready` accepts the skipped round.
 - **One Codex run at a time is the runner's job, not a concurrency group's.** There is one
   `codex`-labelled runner and one Codex subscription behind it, and GitHub queues jobs for a
   busy runner in a real FIFO. `codex-author` and `remediate` therefore declare no shared group;
@@ -252,8 +332,8 @@ unchanged.
   fork-PR approval policy is set to "all outside collaborators".
 - Codex jobs are also skipped for `dependabot[bot]` (#361): that actor receives no
   repository secrets, so the lanes could not check out and every bump landed in
-  `needs-human:pipeline`. The mutation gate accepts the skipped lane from that actor
-  only; fast-ci and the Test matrix still run on the bump.
+  `needs-human:pipeline`. `ready` accepts a skipped lane for a same-repo PR (dependabot
+  included) but never for a fork; fast-ci and the Test matrix still run on the bump.
 
 ## Two lanes: who runs on the small box (issue #272)
 

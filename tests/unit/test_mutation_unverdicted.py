@@ -265,10 +265,11 @@ _REPO = Path(__file__).parents[2]
 
 
 def _workflow_steps() -> dict[str, str]:
-    workflow = yaml.safe_load((_REPO / ".github/workflows/pr-pipeline.yml").read_text())
+    # The harvest moved with mutation itself, to the nightly lane.
+    workflow = yaml.safe_load((_REPO / ".github/workflows/nightly-mutation.yml").read_text())
     return {
         step["name"]: step["run"]
-        for step in workflow["jobs"]["mutation"]["steps"]
+        for step in workflow["jobs"]["nightly-mutation"]["steps"]
         if "name" in step and "run" in step
     }
 
@@ -298,7 +299,7 @@ def _run_job_steps(tmp_path: Path, results: str, raw: str) -> dict[str, object]:
     }
     steps = _workflow_steps()
     values = {
-        "${{ github.event.pull_request.head.sha }}": FULL_SHA,
+        "${{ steps.range.outputs.head }}": FULL_SHA,
         "${{ steps.mut.outputs.exit_code || '3' }}": "4",
     }
     for name in ("Collect survivors, with what each one changed", "Build mutation-result.json"):
