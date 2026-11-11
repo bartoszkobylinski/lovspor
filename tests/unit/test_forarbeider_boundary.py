@@ -71,4 +71,4 @@ def test_only_the_release_checkout_guard_imports_the_git_reader() -> None:
         for path in SOURCE.rglob("*.py")
         if _imports_git_reader(path)
     }
-    assert importers <= {"forarbeider/release_checkout.py"}
+    assert importers == {"forarbeider/release_checkout.py"}

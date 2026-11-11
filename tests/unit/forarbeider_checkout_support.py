@@ -9,6 +9,7 @@ developer's signing or hook settings cannot change what the tests build.
 
 import json
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -72,11 +73,13 @@ def commit_all(clone: Path, message: str) -> None:
 
 
 def snapshot(*roots: Path) -> dict[str, tuple[bytes | None, int, int]]:
-    """Every entry below ``roots``, ``.git`` included: bytes (files), mode and mtime."""
+    """Every entry below ``roots``, ``.git`` included, links not followed: bytes, mode, mtime."""
     found: dict[str, tuple[bytes | None, int, int]] = {}
     for root in roots:
-        for path in sorted([root, *root.rglob("*")]):
-            status = path.lstat()
-            payload = path.read_bytes() if path.is_file() and not path.is_symlink() else None
-            found[str(path)] = (payload, status.st_mode, status.st_mtime_ns)
+        for folder, directories, files in os.walk(root):
+            for name in [folder, *(str(Path(folder) / item) for item in directories + files)]:
+                status = os.lstat(name)
+                regular = stat.S_ISREG(status.st_mode)
+                payload = Path(name).read_bytes() if regular else None
+                found[name] = (payload, status.st_mode, status.st_mtime_ns)
     return found

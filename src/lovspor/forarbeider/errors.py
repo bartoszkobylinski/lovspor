@@ -75,6 +75,17 @@ class RefusalReason(StrEnum):
     BATCH_TOO_LARGE = "batch_too_large"
     DOCUMENT_DUPLICATE = "document_duplicate"
     TARGET_BRANCH_INVALID = "target_branch_invalid"
+    CHECKOUT_UNSAFE = "checkout_unsafe"
+    CHECKOUT_FORBIDDEN = "checkout_forbidden"
+    CHECKOUT_ALIAS = "checkout_alias"
+    CHECKOUT_UNVERIFIABLE = "checkout_unverifiable"
+    CHECKOUT_CONFIG_UNSAFE = "checkout_config_unsafe"
+    CHECKOUT_REMOTE_UNTRUSTED = "checkout_remote_untrusted"
+    CHECKOUT_IDENTITY_MISMATCH = "checkout_identity_mismatch"
+    CHECKOUT_BRANCH_MISMATCH = "checkout_branch_mismatch"
+    CHECKOUT_OPERATION_IN_PROGRESS = "checkout_operation_in_progress"
+    CHECKOUT_PENDING_CHANGE = "checkout_pending_change"
+    CHECKOUT_DIRTY = "checkout_dirty"
 
 
 class ForarbeiderRefusedError(LovsporError):
