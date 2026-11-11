@@ -423,13 +423,14 @@ class _Reader:
     def _open_block(self, text: str) -> str | tuple[str, str] | None:
         """Name the act an intro opens; the sentence(s) to classify, or None for an intro alone."""
         slik = attribution.INTRO_SLIK.match(text)
-        if slik is not None:
-            self.substitution, self.act = None, act_refid(f"lov {slik.group('date')}")
-            return None
-        intro = attribution.INTRO.match(text)
+        intro = slik or attribution.INTRO.match(text)
         if intro is None:
             return self._inline(text)
-        self.substitution, self.act = None, act_refid(f"lov {intro.group('date')}")
+        changes = self.document.header.changes_to_documents
+        self.substitution, self.act = None, attribution.canonical_act(intro.group("date"), changes)
+        self.unbound = self.unbound or self.act is None  # #872: unproven, so never inherited
+        if slik is not None:
+            return None
         rest = _intro_rest(intro)
         if _INTRO_ONLY.match(rest):
             return None

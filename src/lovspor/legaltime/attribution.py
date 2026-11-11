@@ -14,12 +14,17 @@ its act only when every link of this chain holds:
 
 Otherwise the block stays closed and what follows stays unattributed. A short title alone is
 never an identity, and nothing is matched by similarity.
+
+The two canonical shapes (``INTRO``, ``INTRO_SLIK``) bind a citation by day, month, year and
+number as printed. A citation by date alone binds through the same header proof
+(``header_proves``): only when the header lists exactly that date-only refid and no numbered
+act of the same date (#872).
 """
 
 import re
 
 from lovspor.legaltime.document import Frozen
-from lovspor.legaltime.text import MONTHS, split_sentences
+from lovspor.legaltime.text import MONTHS, act_refid, split_sentences
 
 _MONTH = "|".join(sorted(MONTHS, key=len, reverse=True))
 _CITATION = re.compile(rf"(\d{{1,2}})\.\s*({_MONTH})\s+(\d{{4}})\s+nr\.\s*(\d+)\b", re.I)
@@ -71,6 +76,7 @@ _NOT_A_NAME = re.compile(
 )
 # ``I straffeloven, slik den lyder etter lov …`` / ``… med de endringer som følger av lov …``:
 # a citation in such a clause is the source of a wording, not the act amended
+_DATE_ONLY = re.compile(r"lov/\d{4}-\d{2}-\d{2}")  # Lovdata's refid of an unnumbered act
 _ACT_LED = re.compile(rf"^{_ITEM}(?:I\s+)?[Ll]ov\s+(?:av\s+)?\d{{1,2}}\.\s*(?:{_MONTH})\s", re.I)
 # a numbered list item led by an act citation instructs that act, never the block before it;
 # an unnumbered ``Lov … (privatskolelova)`` is a payload (a new title) and closes nothing
@@ -106,6 +112,29 @@ def citations(text: str) -> list[str]:
     ]
 
 
+def header_proves(refid: str, changes: tuple[str, ...]) -> bool:
+    """The member's own ``changesToDocuments`` lists ``refid``, and nothing else it could mean.
+
+    A date-only refid (an unnumbered act) is proven only when the header lists exactly it and
+    no numbered act of the same date: a date alone may be a citation with its number left out.
+    """
+    if _DATE_ONLY.fullmatch(refid) is None:
+        return refid in changes
+    return {c for c in changes if c == refid or c.startswith(f"{refid}-")} == {refid}
+
+
+def canonical_act(date: str, changes: tuple[str, ...]) -> str | None:
+    """The act a canonical intro's citation names (#872).
+
+    A citation by day, month, year and number binds as printed, as it always has. A date
+    alone binds only when ``header_proves`` its refid; otherwise the intro names no act.
+    """
+    refid = act_refid(f"lov {date}")
+    if refid is None or _DATE_ONLY.fullmatch(refid) is None:
+        return refid
+    return refid if header_proves(refid, changes) else None
+
+
 def _named(lead: str) -> bool:
     """The text before the citation leaves it where the amended act is named.
 
@@ -126,7 +155,7 @@ def proven(sentence: str, changes: tuple[str, ...]) -> str | None:
 
 def _proven(sentence: str, changes: tuple[str, ...]) -> str | None:
     cited = citations(sentence)
-    if len(cited) != 1 or _INDIRECT.search(sentence) or cited[0] not in changes:
+    if len(cited) != 1 or _INDIRECT.search(sentence) or not header_proves(cited[0], changes):
         return None
     first = next(_CITATION.finditer(sentence))  # the one citation ``cited`` holds
     return cited[0] if _named(sentence[: first.start()]) else None
@@ -143,7 +172,7 @@ def _heading(text: str) -> bool:
 
 
 def is_intro(text: str) -> bool:
-    """One of the two canonical intro shapes; ``instructions`` binds those without a proof."""
+    """One of the two canonical intro shapes; ``instructions`` binds them by ``canonical_act``."""
     return INTRO.match(text) is not None or INTRO_SLIK.match(text) is not None
 
 
