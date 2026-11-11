@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 from lxml import etree
 
-from lovspor.legaltime import archive, replay, scopes
+from lovspor.legaltime import archive, attribution, replay, scopes
 from lovspor.legaltime import commencement as c
 from lovspor.legaltime import instructions as ins
 from lovspor.legaltime.text import section_sort_key
@@ -314,6 +314,6 @@ def test_intro_own_repeal_and_inline_repeal():
         ("I lov 14. juni 2019 nr. 99 oppheves.", "lov 14. juni 2019 nr. 99 oppheves"),
         ("I lov 14. juni 2019 nr. 99 oppheves § 2.", "§ 2 oppheves."),
     ]:
-        match = ins._INTRO.match(sentence)
+        match = attribution.INTRO.match(sentence)
         assert match is not None
         assert ins._intro_rest(match) == expected

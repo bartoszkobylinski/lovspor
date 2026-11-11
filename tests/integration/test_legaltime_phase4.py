@@ -42,12 +42,16 @@ def _pinned() -> None:
 
 
 def test_no_militaer_straffelov_or_straffeprosessloven_operation_is_straffeloven_s() -> None:
-    """#856: § 4 (71 operations) and § 5 (145) of the ikraftsettingslov are unattributed."""
+    """#856: § 4 (71 operations) and § 5 (145) of the ikraftsettingslov are never straffeloven's.
+
+    Phase 4A left them unattributed; Phase 4B binds each to the act its intro cites, which the
+    member's header lists (test_legaltime_phase4b.py).
+    """
     document = read_members(ARCHIVES[0], [IKRAFTSETTINGSLOVEN])[IKRAFTSETTINGSLOVEN]
     operations = interpret(document).operations
     hosted = [op for op in operations if op.host_section in ("§4", "§5")]
     assert (len([o for o in hosted if o.host_section == "§4"]), len(hosted)) == (71, 216)
-    assert {op.act for op in hosted} == {None}
+    assert STRAFFELOVEN not in {op.act for op in hosted}
     assert {op.act for op in operations if op.host_section == "§3"} == {STRAFFELOVEN}
 
 
@@ -65,12 +69,10 @@ def test_the_straffeloven_ladder_applies_nothing_from_the_military_or_procedure_
         for e in report["unattributed_events"]
         if e["law"] == "lov/2015-06-19-65"
     }
-    assert sum(op["host_section"] in ("§4", "§5") for op in unattributed.values()) == 216
+    assert sum(op["host_section"] in ("§4", "§5") for op in unattributed.values()) == 0  # 4B
     for state in report["states"]:  # 51c5d702 applied 41 of them (§ 4: 11, § 5: 30) at both
         assert not any(i in unattributed for i in state["applied"])
         assert not any(i in unattributed for p in state["provisions"] for i in p["applied"])
-        blanket = [p for p in state["act_level_problems"] if "unattributed operation" in p]
-        assert any(IKRAFTSETTINGSLOVEN in p for p in blanket), state["at"]
 
 
 def test_the_naturmangfoldloven_decision_keeps_sentence_two() -> None:

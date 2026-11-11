@@ -18,8 +18,9 @@ from typing import Literal
 
 from pydantic import Field
 
+from lovspor.legaltime.attribution import INTRO
 from lovspor.legaltime.document import Document, Frozen, Node, list_statements
-from lovspor.legaltime.instructions import _INTRO, Operation, classify
+from lovspor.legaltime.instructions import Operation, classify
 from lovspor.legaltime.scopes import (
     _PART_LIST,
     _RESERVATION,
@@ -356,7 +357,7 @@ class _ClauseReading:
         self.failure: Timing | None = None
 
     def read(self, document: Document, sentence: str) -> None:
-        if _INTRO.match(sentence):
+        if INTRO.match(sentence):
             return  # an amendment intro sharing the commencement provision, not a clause
         if classify(sentence)[0] != "unsupported":
             return  # an amendment instruction there is not a clause either

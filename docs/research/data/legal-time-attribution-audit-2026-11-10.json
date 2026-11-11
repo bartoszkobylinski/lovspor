@@ -1,0 +1,5341 @@
+{
+ "classes": {
+  "intro_not_an_operation": 7,
+  "new_proven": 371,
+  "rebound_proven": 9,
+  "unbound_was_false": 23
+ },
+ "changed": 410,
+ "operations": [
+  {
+   "op": "lov/2005-12-21-131#2:II:1.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 26 skal lyde:",
+   "governing": "Straffelova 22. mai 1902 nr. 10 vert endra slik:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#2:II:11.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 271 annet ledd skal lyde:",
+   "governing": "Straffelova 22. mai 1902 nr. 10 vert endra slik:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#2:II:13.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 276 annet ledd skal lyde:",
+   "governing": "Straffelova 22. mai 1902 nr. 10 vert endra slik:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#2:II:15.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_punktum",
+   "instruction": "§ 286 første punktum skal lyde:",
+   "governing": "Straffelova 22. mai 1902 nr. 10 vert endra slik:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#2:II:17.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 350 skal lyde:",
+   "governing": "Straffelova 22. mai 1902 nr. 10 vert endra slik:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#2:II:3.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 39 h skal lyde:",
+   "governing": "Straffelova 22. mai 1902 nr. 10 vert endra slik:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#2:II:5.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 219 skal lyde:",
+   "governing": "Straffelova 22. mai 1902 nr. 10 vert endra slik:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#2:II:9.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 256 annet ledd skal lyde:",
+   "governing": "Straffelova 22. mai 1902 nr. 10 vert endra slik:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#4:IV:1.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 67 annet ledd bokstav d skal lyde:",
+   "governing": "Straffeprosesslova 22. mai 1981 nr. 25 vert endra slik:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#4:IV:2.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 76 tredje ledd første punktum skal lyde:",
+   "governing": "Straffeprosesslova 22. mai 1981 nr. 25 vert endra slik:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#4:IV:4.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 96 femte ledd skal lyde:",
+   "governing": "Straffeprosesslova 22. mai 1981 nr. 25 vert endra slik:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#4:IV:6.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 147 a annet punktum skal lyde:",
+   "governing": "Straffeprosesslova 22. mai 1981 nr. 25 vert endra slik:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2005-12-21-131#4:IV:8.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 248 fjerde ledd skal lyde:",
+   "governing": "Straffeprosesslova 22. mai 1981 nr. 25 vert endra slik:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-01-26-3#0::1427.0",
+   "before": "lov/1984-06-08-58",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "83. Lov 7. juni 1985 nr. 51 om utmarkskommisjon for Nordland og Troms oppheves.",
+   "governing": "83. Lov 7. juni 1985 nr. 51 om utmarkskommisjon for Nordland og Troms oppheves.",
+   "cited": [
+    "lov/1985-06-07-51"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2007-01-26-3#0::1639.0",
+   "before": "lov/1993-06-11-101",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "104. Lov 25. mars 1994 nr. 6 om granskingskommisjon for gransking av påstander om ulovlig overvåking av norske borgere oppheves.",
+   "governing": "104. Lov 25. mars 1994 nr. 6 om granskingskommisjon for gransking av påstander om ulovlig overvåking av norske borgere oppheves.",
+   "cited": [
+    "lov/1994-03-25-6"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2007-01-26-3#0::395.0",
+   "before": "lov/1925-07-17-11",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "12. Lov 26. juni 1926 nr. 2 om forandring i lovgivningen om Høiesterett oppheves.",
+   "governing": "12. Lov 26. juni 1926 nr. 2 om forandring i lovgivningen om Høiesterett oppheves.",
+   "cited": [
+    "lov/1926-06-26-2"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2007-04-13-14#1:I:1.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_ledd",
+   "instruction": "§ 201 nytt annet ledd skal lyde:",
+   "governing": "Straffeloven 22. mai 1902 nr. 10 endres slik:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-04-13-14#1:I:3.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_section",
+   "instruction": "Ny § 201 a skal lyde:",
+   "governing": "Straffeloven 22. mai 1902 nr. 10 endres slik:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-04-13-14#2:II:1.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_ledd",
+   "instruction": "§ 68 nytt sjette ledd skal lyde:",
+   "governing": "Lov om rettergangsmåten i straffesaker 22. mai 1981 nr. 25 (straffeprosessloven) endres slik:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-04-13-14#2:II:3.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 76 femte ledd skal lyde:",
+   "governing": "Lov om rettergangsmåten i straffesaker 22. mai 1981 nr. 25 (straffeprosessloven) endres slik:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-04-13-14#2:II:5.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 332 tredje ledd skal lyde:",
+   "governing": "Lov om rettergangsmåten i straffesaker 22. mai 1981 nr. 25 (straffeprosessloven) endres slik:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-04-13-14#2:II:7.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_ledd",
+   "instruction": "§ 333 nytt sjette ledd skal lyde:",
+   "governing": "Lov om rettergangsmåten i straffesaker 22. mai 1981 nr. 25 (straffeprosessloven) endres slik:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-04-13-14#2:II:9.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_punktum",
+   "instruction": "§ 455 første ledd nytt fjerde punktum skal lyde:",
+   "governing": "Lov om rettergangsmåten i straffesaker 22. mai 1981 nr. 25 (straffeprosessloven) endres slik:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-15-21#4:IV:3.0",
+   "before": null,
+   "after": "lov/1991-11-08-76",
+   "kind": "insert_section",
+   "instruction": "I kapittel I skal ny § 4 a lyde:",
+   "governing": "Frå det tidspunktet lova tek til å gjelde, blir desse endringane i lov 8. november 1991 nr. 76 om kommunale og fylkeskommunale eldreråd gjort gjeldande:",
+   "cited": [
+    "lov/1991-11-08-76"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-15-21#4:IV:4.0",
+   "before": null,
+   "after": "lov/1991-11-08-76",
+   "kind": "unsupported",
+   "instruction": "(Skiping av felles råd med menneske med nedsett funksjonsevne)",
+   "governing": "Frå det tidspunktet lova tek til å gjelde, blir desse endringane i lov 8. november 1991 nr. 76 om kommunale og fylkeskommunale eldreråd gjort gjeldande:",
+   "cited": [
+    "lov/1991-11-08-76"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-15-21#4:IV:6.0",
+   "before": null,
+   "after": "lov/1991-11-08-76",
+   "kind": "insert_section",
+   "instruction": "I kapittel II skal ny § 8 a lyde:",
+   "governing": "Frå det tidspunktet lova tek til å gjelde, blir desse endringane i lov 8. november 1991 nr. 76 om kommunale og fylkeskommunale eldreråd gjort gjeldande:",
+   "cited": [
+    "lov/1991-11-08-76"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-15-21#4:IV:7.0",
+   "before": null,
+   "after": "lov/1991-11-08-76",
+   "kind": "unsupported",
+   "instruction": "(Skiping av felles råd med menneske med nedsett funksjonsevne)",
+   "governing": "Frå det tidspunktet lova tek til å gjelde, blir desse endringane i lov 8. november 1991 nr. 76 om kommunale og fylkeskommunale eldreråd gjort gjeldande:",
+   "cited": [
+    "lov/1991-11-08-76"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-81#14:Kapittel 14 Iverksetjing og overgangsreglar. Endringar i andre lover:27.0",
+   "before": "lov/1917-12-14-17",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "5. Lov 25. juni 1936 nr. 4 om enkelte bestemmelser angående meieriselskaper blir oppheva.",
+   "governing": "5. Lov 25. juni 1936 nr. 4 om enkelte bestemmelser angående meieriselskaper blir oppheva.",
+   "cited": [
+    "lov/1936-06-25-4"
+   ],
+   "identity_proven": true,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:1.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "unsupported",
+   "instruction": "§ 7 bokstav i) skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:10.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "insert_ledd",
+   "instruction": "§ 14 nytt fjerde og femte ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:13.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "renumber",
+   "instruction": "Nåværende fjerde og femte ledd blir nye sjette og syvende ledd.",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:14.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "unsupported",
+   "instruction": "§ 16 femte ledd tredje punktum og nytt sjette ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:17.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "insert_ledd",
+   "instruction": "§ 20 nytt annet ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:19.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "replace_ledd",
+   "instruction": "§ 29 annet ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:21.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "replace_ledd",
+   "instruction": "§ 30 syvende ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:23.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "insert_punktum",
+   "instruction": "§ 36 tredje ledd nytt annet punktum skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:25.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "unsupported",
+   "instruction": "§ 40 nytt siste ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:27.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "unsupported",
+   "instruction": "§ 42 syvende ledd nytt annet punktum og nytt åttende ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:3.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "insert_section",
+   "instruction": "Ny § 7a skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:30.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "renumber",
+   "instruction": "Nåværende åttende ledd blir nytt niende ledd.",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:31.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "replace_ledd",
+   "instruction": "§ 47 annet ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:7.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "replace_ledd",
+   "instruction": "§ 8 første ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#1:I:9.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "renumber",
+   "instruction": "Nåværende § 8 tredje punktum blir nytt annet ledd.",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#2:II:1.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_ledd",
+   "instruction": "§ 39 g nytt femte ledd skal lyde:",
+   "governing": "I Alminnelig borgerlig Straffelov 22. mai 1902 nr. 10 (straffeloven) gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#2:II:3.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "renumber",
+   "instruction": "Nåværende femte ledd blir nytt sjette ledd.",
+   "governing": "I Alminnelig borgerlig Straffelov 22. mai 1902 nr. 10 (straffeloven) gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-83#3:III:1.0",
+   "before": null,
+   "after": "lov/2005-05-20-28",
+   "kind": "insert_ledd",
+   "instruction": "§ 45 nytt sjette ledd skal lyde:",
+   "governing": "I lov om straff 20. mai 2005 nr. 28 (straffeloven) gjøres følgende endring:",
+   "cited": [
+    "lov/2005-05-20-28"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#1:I:1.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_bokstav",
+   "instruction": "§ 28 a sjette ledd bokstav b skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#1:I:3.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "unsupported",
+   "instruction": "§ 53 nr. 3 bokstav e skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#1:I:5.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_bokstav",
+   "instruction": "§ 53 nr. 6 skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#2:II:1.0",
+   "before": null,
+   "after": "lov/1965-06-18-4",
+   "kind": "unsupported",
+   "instruction": "§ 31 annet ledd bokstav d siste punktum oppheves.",
+   "governing": "I vegtrafikkloven 18. juni 1965 nr. 4 gjøres følgende endringer:",
+   "cited": [
+    "lov/1965-06-18-4"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#2:II:2.0",
+   "before": null,
+   "after": "lov/1965-06-18-4",
+   "kind": "repeal_punktum",
+   "instruction": "§ 31 tredje ledd fjerde punktum oppheves.",
+   "governing": "I vegtrafikkloven 18. juni 1965 nr. 4 gjøres følgende endringer:",
+   "cited": [
+    "lov/1965-06-18-4"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#2:II:3.0",
+   "before": null,
+   "after": "lov/1965-06-18-4",
+   "kind": "insert_ledd",
+   "instruction": "§ 31 nytt fjerde ledd skal lyde:",
+   "governing": "I vegtrafikkloven 18. juni 1965 nr. 4 gjøres følgende endringer:",
+   "cited": [
+    "lov/1965-06-18-4"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#2:II:5.0",
+   "before": null,
+   "after": "lov/1965-06-18-4",
+   "kind": "renumber",
+   "instruction": "Nåværende fjerde til syvende ledd blir nye femte til åttende ledd.",
+   "governing": "I vegtrafikkloven 18. juni 1965 nr. 4 gjøres følgende endringer:",
+   "cited": [
+    "lov/1965-06-18-4"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#3:III:1.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "replace_punktum",
+   "instruction": "§ 6 annet ledd første punktum skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#3:III:10.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "replace_ledd",
+   "instruction": "§ 31 sjette ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#3:III:12.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "replace_ledd",
+   "instruction": "§ 32 sjette ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#3:III:14.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "insert_ledd",
+   "instruction": "§ 40 nytt syvende ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#3:III:16.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "renumber",
+   "instruction": "Nåværende syvende ledd blir nytt åttende ledd.",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#3:III:3.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "replace_punktum",
+   "instruction": "§ 16 første ledd første punktum skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#3:III:5.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "insert_ledd",
+   "instruction": "§ 16 nytt annet ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#3:III:7.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "renumber",
+   "instruction": "Nåværende annet til femte ledd blir nye tredje til sjette ledd.",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#3:III:8.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "replace_ledd",
+   "instruction": "§ 30 sjette ledd skal lyde:",
+   "governing": "I straffegjennomføringsloven 18. mai 2001 nr. 21 gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#4:IV:1.0",
+   "before": null,
+   "after": "lov/2005-05-20-28",
+   "kind": "replace_bokstav",
+   "instruction": "§ 37 bokstav f skal lyde:",
+   "governing": "I straffeloven 20. mai 2005 nr. 28 gjøres følgende endringer:",
+   "cited": [
+    "lov/2005-05-20-28"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-06-29-84#4:IV:3.0",
+   "before": null,
+   "after": "lov/2005-05-20-28",
+   "kind": "replace_bokstav",
+   "instruction": "§ 51 bokstav a skal lyde:",
+   "governing": "I straffeloven 20. mai 2005 nr. 28 gjøres følgende endringer:",
+   "cited": [
+    "lov/2005-05-20-28"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-12-21-119#18:Kapittel 17 Ikrafttredelse, overgangsbestemmelser og opphevelse av og endringer i andre lover:10.0",
+   "before": null,
+   "after": "lov/1969-06-19-66",
+   "kind": "replace_ledd",
+   "instruction": "§ 64 første ledd skal lyde:",
+   "governing": "I lov 19. juni 1969 nr. 66 om merverdiavgift (merverdiavgiftsloven) gjøres følgende endringer:",
+   "cited": [
+    "lov/1969-06-19-66"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-12-21-119#18:Kapittel 17 Ikrafttredelse, overgangsbestemmelser og opphevelse av og endringer i andre lover:12.0",
+   "before": null,
+   "after": "lov/1969-06-19-66",
+   "kind": "replace_section",
+   "instruction": "§ 65 skal lyde:",
+   "governing": "I lov 19. juni 1969 nr. 66 om merverdiavgift (merverdiavgiftsloven) gjøres følgende endringer:",
+   "cited": [
+    "lov/1969-06-19-66"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-12-21-119#18:Kapittel 17 Ikrafttredelse, overgangsbestemmelser og opphevelse av og endringer i andre lover:17.0",
+   "before": null,
+   "after": "lov/2005-06-17-67",
+   "kind": "replace_bokstav",
+   "instruction": "§ 10-51 bokstav f skal lyde:",
+   "governing": "I lov 17. juni 2005 nr. 67 om betaling og innkreving av skatte- og avgiftskrav (skattebetalingsloven) gjøres følgende endringer:",
+   "cited": [
+    "lov/2005-06-17-67"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-12-21-119#18:Kapittel 17 Ikrafttredelse, overgangsbestemmelser og opphevelse av og endringer i andre lover:18.0",
+   "before": null,
+   "after": "lov/2005-06-17-67",
+   "kind": "replace_section",
+   "instruction": "§ 14-10 skal lyde:",
+   "governing": "I lov 17. juni 2005 nr. 67 om betaling og innkreving av skatte- og avgiftskrav (skattebetalingsloven) gjøres følgende endringer:",
+   "cited": [
+    "lov/2005-06-17-67"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2007-12-21-119#18:Kapittel 17 Ikrafttredelse, overgangsbestemmelser og opphevelse av og endringer i andre lover:8.0",
+   "before": null,
+   "after": "lov/1969-06-19-66",
+   "kind": "replace_punktum",
+   "instruction": "§ 62 første ledd annet punktum skal lyde:",
+   "governing": "I lov 19. juni 1969 nr. 66 om merverdiavgift (merverdiavgiftsloven) gjøres følgende endringer:",
+   "cited": [
+    "lov/1969-06-19-66"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-03-07-4#0:I:220.0",
+   "before": "lov/2001-06-15-65",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "12. I lov 13. april 2007 nr. 14 oppheves del IV og V annet punktum.",
+   "governing": "12. I lov 13. april 2007 nr. 14 oppheves del IV og V annet punktum.",
+   "cited": [
+    "lov/2007-04-13-14"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2008-06-20-47#1:I:1.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "unsupported",
+   "instruction": "§ 54 nr. 1 tredje punktum skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#1:I:3.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "unsupported",
+   "instruction": "§ 54 nr. 2 første ledd annet punktum skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:1.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_bokstav",
+   "instruction": "§ 59 a første ledd nr. 5 oppheves.",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:11.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 455 første ledd fjerde punktum skal lyde:",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:13.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 455 annet ledd skal lyde:",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:15.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_ledd",
+   "instruction": "§ 459 nytt fjerde ledd skal lyde:",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:17.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 461 skal lyde:",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:2.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 68 sjette ledd første punktum skal lyde:",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:20.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 462 første punktum skal lyde:",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:22.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_section",
+   "instruction": "Ny § 462 a skal lyde:",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:4.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_punktum",
+   "instruction": "§ 76 femte ledd nytt annet punktum skal lyde:",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:6.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende annet punktum blir nytt tredje punktum.",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:7.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 332 tredje ledd skal lyde:",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-20-47#2:II:9.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 333 sjette ledd skal lyde:",
+   "governing": "I straffeprosessloven 22. mai 1981 nr. 25 gjøres følgende endringer:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-27-53#5:V:1.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_punktum",
+   "instruction": "§ 220 annet ledd første og annet punktum skal lyde:",
+   "governing": "I alminnelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2008-06-27-53#5:V:3.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 338 skal lyde:",
+   "governing": "I alminnelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2009-06-19-74#1:I:1078.0",
+   "before": "lov/1995-08-25-57",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "172. Lov 15. desember 1995 nr. 74 om forbud mot kjønnslemlestelse oppheves.",
+   "governing": "172. Lov 15. desember 1995 nr. 74 om forbud mot kjønnslemlestelse oppheves.",
+   "cited": [
+    "lov/1995-12-15-74"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2009-06-19-74#1:I:242.0",
+   "before": "lov/2005-05-20-28",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "2. Lov 13. desember 1946 nr. 14 om straff for utlendske krigsbrotsmenn oppheves.",
+   "governing": "2. Lov 13. desember 1946 nr. 14 om straff for utlendske krigsbrotsmenn oppheves.",
+   "cited": [
+    "lov/1946-12-13-14"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2009-06-19-74#1:I:404.0",
+   "before": "lov/1902-05-22-13",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "5 a.",
+   "governing": "Lov 18. august 1914 nr. 3 om forsvarshemmeligheter oppheves.",
+   "cited": [
+    "lov/1914-08-18-3"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2009-06-19-74#1:I:404.1",
+   "before": "lov/1902-05-22-13",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "Lov 18. august 1914 nr. 3 om forsvarshemmeligheter oppheves.",
+   "governing": "Lov 18. august 1914 nr. 3 om forsvarshemmeligheter oppheves.",
+   "cited": [
+    "lov/1914-08-18-3"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2009-06-19-74#1:I:450.0",
+   "before": "lov/1925-07-17-11",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "12. Lov 25. juni 1926 nr. 4 om straff for å delta i og medvirke til smugling på andre land oppheves.",
+   "governing": "12. Lov 25. juni 1926 nr. 4 om straff for å delta i og medvirke til smugling på andre land oppheves.",
+   "cited": [
+    "lov/1926-06-25-4"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2009-06-19-74#1:I:459.0",
+   "before": "lov/1932-05-27-3",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "17. Lov 17. juni 1932 nr. 2 om enkelte bestemmelser om fremmede konsulers rettsstilling oppheves.",
+   "governing": "17. Lov 17. juni 1932 nr. 2 om enkelte bestemmelser om fremmede konsulers rettsstilling oppheves.",
+   "cited": [
+    "lov/1932-06-17-2"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2009-06-19-74#1:I:471.0",
+   "before": "lov/1936-07-16-2",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "22. Lov 19. mars 1937 nr. 1 angående forholdsregler for å hindre deltagelse i krig i fremmed land oppheves.",
+   "governing": "22. Lov 19. mars 1937 nr. 1 angående forholdsregler for å hindre deltagelse i krig i fremmed land oppheves.",
+   "cited": [
+    "lov/1937-03-19-1"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2009-06-19-74#1:I:472.0",
+   "before": "lov/1936-07-16-2",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "23. Lov 13. mai 1937 nr. 1 om forbud mot å bære uniform m.v. oppheves.",
+   "governing": "23. Lov 13. mai 1937 nr. 1 om forbud mot å bære uniform m.v. oppheves.",
+   "cited": [
+    "lov/1937-05-13-1"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2009-06-19-74#1:I:721.0",
+   "before": "lov/1975-06-06-31",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "93 a.",
+   "governing": "I lov 30. mai 1975 nr. 18 sjømannsloven skal ny § 54 C lyde:",
+   "cited": [
+    "lov/1975-05-30-18"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2009-06-19-74#1:I:721.1",
+   "before": "lov/1975-06-06-31",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "I lov 30. mai 1975 nr. 18 sjømannsloven skal ny § 54 C lyde:",
+   "governing": "I lov 30. mai 1975 nr. 18 sjømannsloven skal ny § 54 C lyde:",
+   "cited": [
+    "lov/1975-05-30-18"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2009-06-19-95#5:Kapittel 5. Avsluttende bestemmelser:11.0",
+   "before": null,
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "3) I lov 4. juli 2003 nr. 84 om private skolar med rett til statstilskot gjøres følgende endringer:",
+   "governing": "3) I lov 4. juli 2003 nr. 84 om private skolar med rett til statstilskot gjøres følgende endringer:",
+   "cited": [
+    "lov/2003-07-04-84"
+   ],
+   "identity_proven": true,
+   "class": "intro_not_an_operation"
+  },
+  {
+   "op": "lov/2009-06-19-95#5:Kapittel 5. Avsluttende bestemmelser:12.0",
+   "before": null,
+   "after": "lov/2003-07-04-84",
+   "kind": "replace_ledd",
+   "instruction": "§ 1-2a annet ledd skal lyde:",
+   "governing": "3) I lov 4. juli 2003 nr. 84 om private skolar med rett til statstilskot gjøres følgende endringer:",
+   "cited": [
+    "lov/2003-07-04-84"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2009-06-19-95#5:Kapittel 5. Avsluttende bestemmelser:14.0",
+   "before": null,
+   "after": "lov/2003-07-04-84",
+   "kind": "repeal_punktum",
+   "instruction": "§ 6-1 femte ledd siste punktum oppheves.",
+   "governing": "3) I lov 4. juli 2003 nr. 84 om private skolar med rett til statstilskot gjøres følgende endringer:",
+   "cited": [
+    "lov/2003-07-04-84"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2009-06-19-95#5:Kapittel 5. Avsluttende bestemmelser:9.0",
+   "before": null,
+   "after": "lov/1998-07-17-61",
+   "kind": "replace_ledd",
+   "instruction": "§ 4A-4 annet ledd lyde:",
+   "governing": "2) I lov 17. juli 1998 nr. 61 om grunnskolen og den vidaregåande opplæringa skal § 4A-4 annet ledd lyde:",
+   "cited": [
+    "lov/1998-07-17-61"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2010-06-25-46#1:I:1.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 192 annet ledd skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2010-06-25-46#1:I:11.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 219 første ledd skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2010-06-25-46#1:I:13.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 228 første og annet ledd skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2010-06-25-46#1:I:16.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 229 skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2010-06-25-46#1:I:18.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 231 skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2010-06-25-46#1:I:20.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 233 første ledd skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2010-06-25-46#1:I:3.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 193 første ledd skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2010-06-25-46#1:I:5.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 194 første ledd skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2010-06-25-46#1:I:7.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_punktum",
+   "instruction": "§ 195 første ledd annet punktum skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2010-06-25-46#1:I:9.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 196 første ledd skal lyde:",
+   "governing": "I straffeloven 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2012-06-22-49#1:I:1.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "unsupported",
+   "instruction": "I § 147 a første ledd innleiinga skal «152 a annet ledd» endrast til «152 a første ledd»",
+   "governing": "I almindelig borgerlig straffelov 22. mai 1902 nr. 10 skal desse endringane gjerast:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2012-06-22-49#1:I:2.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 152 a skal lyde:",
+   "governing": "I almindelig borgerlig straffelov 22. mai 1902 nr. 10 skal desse endringane gjerast:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2012-06-22-49#1:I:8.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "unsupported",
+   "instruction": "§ 153 a skal opphevast.",
+   "governing": "I almindelig borgerlig straffelov 22. mai 1902 nr. 10 skal desse endringane gjerast:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-04-05-12#1:I:26.0",
+   "before": "lov/2010-03-26-9",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "1. Lov 28. november 1898 om Umyndiggjørelse oppheves.",
+   "governing": "1. Lov 28. november 1898 om Umyndiggjørelse oppheves.",
+   "cited": [],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2013-04-05-12#1:I:27.0",
+   "before": null,
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "2. I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "governing": "2. I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "intro_not_an_operation"
+  },
+  {
+   "op": "lov/2013-04-05-12#1:I:28.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 78 første ledd skal lyde:",
+   "governing": "2. I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-04-05-12#1:I:30.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 216 første ledd skal lyde:",
+   "governing": "2. I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-04-05-12#1:I:32.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_punktum",
+   "instruction": "§ 300 første punktum skal lyde:",
+   "governing": "2. I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-04-05-12#1:I:43.0",
+   "before": "lov/1925-07-17-11",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "6. Lov 22. april 1927 nr. 3 om vergemål for umyndige oppheves.",
+   "governing": "6. Lov 22. april 1927 nr. 3 om vergemål for umyndige oppheves.",
+   "cited": [
+    "lov/1927-04-22-3"
+   ],
+   "identity_proven": true,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2013-06-21-100#9:Kapittel 9. Ymse reglar:210.0",
+   "before": "lov/2008-06-27-71",
+   "after": "lov/2010-03-26-9",
+   "kind": "replace_bokstav",
+   "instruction": "§ 39 første ledd bokstav e lyde:",
+   "governing": "23. lov 26. mars 2010 nr. 9 om vergemål skal § 39 første ledd bokstav e lyde: å kreve sak etter jordskiftelova,",
+   "cited": [
+    "lov/2010-03-26-9"
+   ],
+   "identity_proven": true,
+   "class": "rebound_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:1.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "unsupported",
+   "instruction": "§ 12 første ledd nr. 3 bokstav a skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:11.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 135 a annet ledd skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:13.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 145 b skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:16.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_section",
+   "instruction": "Ny § 145 c skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:19.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_ledd",
+   "instruction": "§ 147 a nytt annet ledd skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:2.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "unsupported",
+   "instruction": "§ 12 første ledd nr. 4 bokstav a skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:21.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "renumber",
+   "instruction": "Nåværende annet og tredje ledd blir nytt tredje og fjerde ledd.",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:22.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_ledd",
+   "instruction": "§ 147 a nytt femte ledd skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:24.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 147 c første ledd skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:26.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_section",
+   "instruction": "Ny § 147 d skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:28.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_bokstav",
+   "instruction": "§ 150 første ledd bokstav e skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:29.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_ledd",
+   "instruction": "§ 152 b nytt tredje ledd skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:3.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_bokstav",
+   "instruction": "§ 17 første ledd bokstav b skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:31.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "renumber",
+   "instruction": "Nåværende tredje ledd blir nytt fjerde ledd.",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:32.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 161 skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:36.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_section",
+   "instruction": "§ 162 c skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:39.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_punktum",
+   "instruction": "§ 232 tredje punktum skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:4.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_ledd",
+   "instruction": "§ 60 a første og annet ledd skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:41.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_ledd",
+   "instruction": "§ 291 nytt annet ledd skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:43.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "renumber",
+   "instruction": "Nåværende annet og tredje ledd blir nytt tredje og fjerde ledd.",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:44.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_section",
+   "instruction": "I kapittel 28 skal ny § 294 a lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:47.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_punktum",
+   "instruction": "§ 349 a første ledd annet punktum skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:7.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_ledd",
+   "instruction": "§ 66 nytt tredje ledd skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2013-06-21-85#1:I:9.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_ledd",
+   "instruction": "§ 71 nytt femte ledd skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2014-05-09-16#1:I:102.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "unsupported",
+   "instruction": "I § 16 syvende ledd annet punktum erstattes «§ 16 tredje ledd bokstav d) og e)» med «fjerde ledd bokstav d og e».",
+   "governing": "I lov 18. mai 2001 nr. 21 om gjennomføring av straff mv. gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2014-05-09-16#1:I:88.0",
+   "before": null,
+   "after": "lov/1997-06-13-45",
+   "kind": "replace_bokstav",
+   "instruction": "§ 3-8 første ledd nr. 6 skal lyde:",
+   "governing": "17. I lov 13. juni 1997 nr. 45 om allmennaksjeselskaper gjøres følgende endringer:",
+   "cited": [
+    "lov/1997-06-13-45"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2014-05-09-16#1:I:89.0",
+   "before": null,
+   "after": "lov/1997-06-13-45",
+   "kind": "replace_ledd",
+   "instruction": "§ 8-1 annet og tredje ledd skal lyde:",
+   "governing": "17. I lov 13. juni 1997 nr. 45 om allmennaksjeselskaper gjøres følgende endringer:",
+   "cited": [
+    "lov/1997-06-13-45"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2014-05-09-16#1:I:92.0",
+   "before": null,
+   "after": "lov/1997-06-13-45",
+   "kind": "repeal_punktum",
+   "instruction": "§ 9-3 tredje punktum oppheves.",
+   "governing": "17. I lov 13. juni 1997 nr. 45 om allmennaksjeselskaper gjøres følgende endringer:",
+   "cited": [
+    "lov/1997-06-13-45"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2014-05-09-16#1:I:93.0",
+   "before": null,
+   "after": "lov/1997-06-13-45",
+   "kind": "replace_punktum",
+   "instruction": "§ 12-2 første ledd første punktum skal lyde:",
+   "governing": "17. I lov 13. juni 1997 nr. 45 om allmennaksjeselskaper gjøres følgende endringer:",
+   "cited": [
+    "lov/1997-06-13-45"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2014-05-09-16#1:I:95.0",
+   "before": null,
+   "after": "lov/1997-06-13-45",
+   "kind": "replace_ledd",
+   "instruction": "§ 16-9 første ledd skal lyde:",
+   "governing": "17. I lov 13. juni 1997 nr. 45 om allmennaksjeselskaper gjøres følgende endringer:",
+   "cited": [
+    "lov/1997-06-13-45"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2014-05-09-16#1:I:97.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "unsupported",
+   "instruction": "I § 7 bokstav i erstattes «§ 26 sjette ledd» med «§ 16 syvende ledd».",
+   "governing": "I lov 18. mai 2001 nr. 21 om gjennomføring av straff mv. gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2014-05-09-16#1:I:98.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "unsupported",
+   "instruction": "I § 7 b erstattes «§ 16 sjette ledd» med «§ 16 syvende ledd».",
+   "governing": "I lov 18. mai 2001 nr. 21 om gjennomføring av straff mv. gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2014-05-09-16#1:I:99.0",
+   "before": null,
+   "after": "lov/2001-05-18-21",
+   "kind": "replace_ledd",
+   "instruction": "§ 10 fjerde og femte ledd skal lyde:",
+   "governing": "I lov 18. mai 2001 nr. 21 om gjennomføring av straff mv. gjøres følgende endringer:",
+   "cited": [
+    "lov/2001-05-18-21"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-04-24-22#2:II:1.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "insert_ledd",
+   "instruction": "§ 39 b nytt femte ledd skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-04-24-22#2:II:3.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_punktum",
+   "instruction": "§ 73 a fjerde punktum skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-04-24-22#2:II:5.0",
+   "before": null,
+   "after": "lov/1902-05-22-10",
+   "kind": "replace_punktum",
+   "instruction": "§ 73 b annet og tredje punktum skal lyde:",
+   "governing": "I Almindelig borgerlig Straffelov 22. mai 1902 nr. 10 gjøres følgende endringer:",
+   "cited": [
+    "lov/1902-05-22-10"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::100.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 23 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::102.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 25 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::104.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 27 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::106.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 30 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::108.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 32 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::110.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 33 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::112.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "unsupported",
+   "instruction": "Overskriften til annen del skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::114.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 34 tredje ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::116.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 35 fjerde ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::1174.0",
+   "before": null,
+   "after": "lov/2003-06-27-64",
+   "kind": "replace_ledd",
+   "instruction": "§ 9 første ledd skal lyde:",
+   "governing": "197. I lov 27. juni 2003 nr. 64 om alternativ behandling av sykdom mv. gjøres følgende endringer:",
+   "cited": [
+    "lov/2003-06-27-64"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::1176.0",
+   "before": null,
+   "after": "lov/2003-06-27-64",
+   "kind": "repeal_punktum",
+   "instruction": "§ 9 annet ledd annet punktum oppheves.",
+   "governing": "197. I lov 27. juni 2003 nr. 64 om alternativ behandling av sykdom mv. gjøres følgende endringer:",
+   "cited": [
+    "lov/2003-06-27-64"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::118.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 36 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::121.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "unsupported",
+   "instruction": "Overskriften til femte kapittel skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::123.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 38 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::1248.0",
+   "before": null,
+   "after": "lov/2005-12-21-126",
+   "kind": "repeal_punktum",
+   "instruction": "§ 21 annet punktum oppheves.",
+   "governing": "220. I lov 21. desember 2005 nr. 126 om kosmetikk og kroppspleieprodukt m.m. gjøres følgende endring:",
+   "cited": [
+    "lov/2005-12-21-126"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::125.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "repeal_section",
+   "instruction": "§ 40 oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::126.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 41 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::129.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 42 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::132.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 43 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::135.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 44 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::138.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_punktum",
+   "instruction": "§ 46 tredje ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::140.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 47 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::142.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_bokstav",
+   "instruction": "§ 49 bokstav c skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::143.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 50 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::145.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 51 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::148.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 52 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::151.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_punktum",
+   "instruction": "§ 53 annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::153.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_punktum",
+   "instruction": "§ 56 første ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::155.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 58 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::157.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 59 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::159.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 60 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::161.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 61 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::163.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "unsupported",
+   "instruction": "Overskriften til syvende kapittel skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::165.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 63 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::167.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 65 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::169.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 66 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::171.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 67 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::173.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 68 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::175.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 69 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::177.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 70 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::179.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 71 annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::181.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_punktum",
+   "instruction": "§ 74 første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::183.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 76 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::186.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 77 annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::188.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 78 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::190.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 78 tredje ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::192.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "unsupported",
+   "instruction": "§§ 80 til 86 og §§ 90 til 94 a oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::193.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "unsupported",
+   "instruction": "§ 87 innledningen skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::195.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 88 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::197.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 89 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::199.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 95 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::201.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 96 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::204.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 97 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::206.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 99 annet til femte ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::211.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "unsupported",
+   "instruction": "Overskriften til tiende kapittel skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::213.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 100 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::215.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "unsupported",
+   "instruction": "§ 101 innledningen skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::217.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 101 annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::219.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "unsupported",
+   "instruction": "§ 102 innledningen skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::221.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 103 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::223.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 104 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::225.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 105 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::227.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 106 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::229.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "unsupported",
+   "instruction": "§ 108 innledningen skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::231.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "unsupported",
+   "instruction": "Slutningsbestemmelsen oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::234.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 2 første ledd nr. 1 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::235.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_bokstav",
+   "instruction": "§ 2 første ledd nr. 3 oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::235.1",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "Nåværende nr. 4 blir nr. 3.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::236.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 3 første ledd nr. 5 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::237.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 3 første ledd nr. 7 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::238.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 3 annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::240.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 3 fjerde ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::242.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 17 annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::244.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 22 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::246.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_ledd",
+   "instruction": "§ 35 tredje ledd oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::247.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_punktum",
+   "instruction": "§ 38 annet ledd tredje punktum oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::247.1",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende fjerde punktum blir tredje punktum og skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::249.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 40 annet ledd tredje punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::251.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 40 tredje ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::253.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_section",
+   "instruction": "Ny § 43 a skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::257.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 49 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::259.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_punktum",
+   "instruction": "§ 51 første ledd nytt annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::261.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_punktum",
+   "instruction": "§ 51 annet ledd nytt tredje og fjerde punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::263.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_section",
+   "instruction": "I kapittel 6 skal ny § 62 a lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::266.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "§ 64 annet ledd nr. 1 og 2 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::267.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 65 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::270.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 66 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::272.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 67 annet til fjerde ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::276.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 68 annet ledd bokstav b skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::277.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 68 sjette ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::279.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 69 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::283.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 70 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::285.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_punktum",
+   "instruction": "§ 72 annet ledd annet punktum oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::286.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 76 tredje ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::288.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 76 femte ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::290.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_section",
+   "instruction": "I kapittel 7 skal ny § 81 a lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::293.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 84 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::295.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 94 annet ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::297.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 96 syvende ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::299.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_ledd",
+   "instruction": "§ 98 nytt femte ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::301.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 100 annet ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::303.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 100 b skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::306.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_section",
+   "instruction": "Ny § 100 c skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::310.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 106 a tredje ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::312.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 107 a første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::314.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 107 a fjerde ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::316.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "§ 107 i tredje ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::318.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 128 første ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::320.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 130 a første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::322.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 147 a første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::324.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 157 annet ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::326.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "§ 165 annet ledd nr. 1-3 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::327.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 170 annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::329.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_ledd",
+   "instruction": "§ 171 nytt annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::331.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "§ 171 nåværende annet ledd blir tredje ledd og skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::333.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 172 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::335.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_section",
+   "instruction": "Ny § 173 a skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::337.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 184 annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::339.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "§ 186 a tredje ledd bokstav a annet punktum og bokstav b annet punktum oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::339.1",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "I begge bestemmelsene blir nåværende tredje punktum annet punktum.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::340.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 188 annet ledd tredje punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::342.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_ledd",
+   "instruction": "§ 192 nytt annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::344.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende annet ledd blir tredje ledd.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::345.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_ledd",
+   "instruction": "§ 195 nytt annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::347.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende annet ledd blir tredje ledd.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::348.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 196 første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::350.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_ledd",
+   "instruction": "§ 199 a annet ledd oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::351.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 200 a første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::353.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 200 a tredje ledd fjerde punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::355.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 202 b første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::357.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "§ 202 c første ledd første punktum innledningen skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::359.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 202 c første ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::361.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 202 c sjette ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::363.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "§ 202 d første ledd innledningen skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::365.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_punktum",
+   "instruction": "§ 208 a første ledd annet punktum oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::365.1",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende tredje punktum blir annet punktum.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::366.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 208 a annet ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::368.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 210 b første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::370.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 210 c annet ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::372.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_section",
+   "instruction": "Ny § 214 a skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::375.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_section",
+   "instruction": "Ny § 214 b skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::377.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 216 a første ledd bokstav b skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::378.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_punktum",
+   "instruction": "§ 216 a første ledd annet punktum oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::379.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 216 a annet ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::381.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 216 b første ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::383.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 216 b første ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::385.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 216 f første ledd tredje punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::387.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 216 j første ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::389.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "§ 216 m første ledd bokstav a til c skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::390.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 216 m annet ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::392.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 216 n skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::394.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 222 a femte ledd femte punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::396.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 222 d første og annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::399.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 222 d tredje ledd tredje punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::401.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_ledd",
+   "instruction": "§ 229 annet ledd oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::401.1",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende tredje ledd blir annet ledd.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::402.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 234 annet ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::404.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 236 første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::406.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 238 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::408.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 239 første ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::410.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 242 a første ledd bokstav a skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::411.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_ledd",
+   "instruction": "§ 248 annet ledd oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::411.1",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende tredje til sjette ledd blir annet til femte ledd.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::412.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 251 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::414.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 255 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::417.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 256 første ledd nr. 4 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::418.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "insert_ledd",
+   "instruction": "§ 256 annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::420.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende annet ledd blir tredje ledd.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::421.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_section",
+   "instruction": "§ 273 oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::422.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 275 annet ledd bokstav a skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::423.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 276 fjerde ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::425.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 292 a første ledd bokstav a skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::426.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_section",
+   "instruction": "§ 295 oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::427.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 298 første ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::429.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 314 første ledd nr. 1 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::430.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_ledd",
+   "instruction": "§ 315 annet ledd oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::430.1",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende tredje ledd blir annet ledd.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::431.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 321 første ledd tredje punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::433.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 321 tredje ledd annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::435.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_punktum",
+   "instruction": "§ 332 første ledd annet punktum oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::435.1",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende tredje til femte punktum blir annet til fjerde punktum.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::436.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 332 tredje ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::438.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_punktum",
+   "instruction": "§ 333 første ledd annet punktum oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::439.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 333 sjette ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::441.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 352 annet ledd nr. 1 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::442.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 352 annet ledd nr. 2 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::443.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 352 tredje ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::445.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_punktum",
+   "instruction": "§ 353 første ledd tredje punktum oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::446.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "§ 353 annet ledd nr. 1 annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::448.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_bokstav",
+   "instruction": "§ 391 nr. 1 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::449.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "unsupported",
+   "instruction": "§ 391 nr. 3 annet punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::451.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 398 fjerde ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::453.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_ledd",
+   "instruction": "§ 402 annet ledd oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::454.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 403 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::456.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 406 første ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::458.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 406 annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::460.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_section",
+   "instruction": "§ 407 oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::461.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_ledd",
+   "instruction": "§ 409 annet ledd oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::461.1",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "renumber",
+   "instruction": "Nåværende tredje ledd blir annet ledd og skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::463.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 423 første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::465.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "repeal_section",
+   "instruction": "§ 424 oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::466.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 425 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::468.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 436 første ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::470.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 440 annet ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::472.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 453 annet ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::474.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_ledd",
+   "instruction": "§ 455 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::476.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 456 annet ledd første punktum skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::478.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 464 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::480.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 474 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::483.0",
+   "before": null,
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_section",
+   "instruction": "§ 480 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::85.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 1 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::87.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 2 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::89.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 12 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::90.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 13 første ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::92.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "repeal_ledd",
+   "instruction": "§ 13 annet og tredje ledd oppheves.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::92.1",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "renumber",
+   "instruction": "Nåværende fjerde ledd blir nytt annet ledd.",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::93.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 15 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::96.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_ledd",
+   "instruction": "§ 16 tredje ledd skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2015-06-19-65#0::98.0",
+   "before": null,
+   "after": "lov/1902-05-22-13",
+   "kind": "replace_section",
+   "instruction": "§ 20 skal lyde:",
+   "governing": "Med virkning fra den tid straffeloven 2005 trer i kraft gjøres følgende endringer i lov 22. mai 1902 nr. 13 militær straffelov:",
+   "cited": [
+    "lov/1902-05-22-13"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2016-04-22-3#1:I:110.0",
+   "before": "lov/2010-03-26-9",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "28. I lov 28. mai 2010 nr. 16 om behandling av opplysninger i politiet og påtalemyndigheten erstattes i § 40 nr. 7 bokstav e og nr. 8 ordet «tvunget» av «tvungent».",
+   "governing": "28. I lov 28. mai 2010 nr. 16 om behandling av opplysninger i politiet og påtalemyndigheten erstattes i § 40 nr. 7 bokstav e og nr. 8 ordet «tvunget» av «tvungent».",
+   "cited": [
+    "lov/2010-05-28-16"
+   ],
+   "identity_proven": true,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2016-04-22-3#1:I:27.0",
+   "before": "lov/1977-06-10-73",
+   "after": "lov/1980-02-08-2",
+   "kind": "replace_bokstav",
+   "instruction": "§ 6-1 annet ledd bokstav c skal lyde:",
+   "governing": "13. Lov 8. februar 1980 nr. 2 om pant § 6-1 annet ledd bokstav c skal lyde: årsgebyr for vann og avløp etter lov 16. mars 2012 nr. 12 om kommunale vass- og avløpsanlegg.",
+   "cited": [
+    "lov/1980-02-08-2"
+   ],
+   "identity_proven": true,
+   "class": "rebound_proven"
+  },
+  {
+   "op": "lov/2016-05-27-14#16:Kapittel 16 Ikrafttredelse, overgangsbestemmelser og endringer i andre lover:607.0",
+   "before": null,
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "33. I Lov 29. juni 2007 nr. 75 om verdipapirhandel gjøres følgende endringer:",
+   "governing": "33. I Lov 29. juni 2007 nr. 75 om verdipapirhandel gjøres følgende endringer:",
+   "cited": [
+    "lov/2007-06-29-75"
+   ],
+   "identity_proven": true,
+   "class": "intro_not_an_operation"
+  },
+  {
+   "op": "lov/2016-05-27-14#16:Kapittel 16 Ikrafttredelse, overgangsbestemmelser og endringer i andre lover:608.0",
+   "before": null,
+   "after": "lov/2007-06-29-75",
+   "kind": "replace_bokstav",
+   "instruction": "§ 15-3 annet ledd nr. 1 skal lyde:",
+   "governing": "33. I Lov 29. juni 2007 nr. 75 om verdipapirhandel gjøres følgende endringer:",
+   "cited": [
+    "lov/2007-06-29-75"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:10.0",
+   "before": null,
+   "after": "lov/1992-09-25-107",
+   "kind": "unsupported",
+   "instruction": "§ 48 nr. 5 tredje og fjerde punktum oppheves.",
+   "governing": "1. Lov 25. september 1992 nr. 107 om kommuner og fylkeskommuner:",
+   "cited": [
+    "lov/1992-09-25-107"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:11.0",
+   "before": null,
+   "after": "lov/1997-05-23-31",
+   "kind": "replace_section",
+   "instruction": "§ 3 a skal lyde:",
+   "governing": "2. Lov 23. mai 1997 nr. 31 om eierseksjoner § 3 a skal lyde:",
+   "cited": [
+    "lov/1997-05-23-31"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:13.0",
+   "before": null,
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "3. Lov 17. juli 1998 nr. 56 om årsregnskap:",
+   "governing": "3. Lov 17. juli 1998 nr. 56 om årsregnskap:",
+   "cited": [
+    "lov/1998-07-17-56"
+   ],
+   "identity_proven": true,
+   "class": "intro_not_an_operation"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:14.0",
+   "before": null,
+   "after": "lov/1998-07-17-56",
+   "kind": "repeal_ledd",
+   "instruction": "§ 3-3 sjette og syvende ledd oppheves.",
+   "governing": "3. Lov 17. juli 1998 nr. 56 om årsregnskap:",
+   "cited": [
+    "lov/1998-07-17-56"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:15.0",
+   "before": null,
+   "after": "lov/1998-07-17-56",
+   "kind": "repeal_ledd",
+   "instruction": "§ 3-3a tiende og ellevte ledd oppheves.",
+   "governing": "3. Lov 17. juli 1998 nr. 56 om årsregnskap:",
+   "cited": [
+    "lov/1998-07-17-56"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:16.0",
+   "before": null,
+   "after": "lov/1999-03-26-17",
+   "kind": "replace_section",
+   "instruction": "§ 1-8 skal lyde:",
+   "governing": "4. Lov 26. mars 1999 nr. 17 om husleieavtaler § 1-8 skal lyde:",
+   "cited": [
+    "lov/1999-03-26-17"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:18.0",
+   "before": null,
+   "after": "lov/2003-06-06-38",
+   "kind": "replace_section",
+   "instruction": "§ 1-4 skal lyde:",
+   "governing": "5. Lov 6. juni 2003 nr. 38 om bustadbyggjelag § 1-4 skal lyde:",
+   "cited": [
+    "lov/2003-06-06-38"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:20.0",
+   "before": null,
+   "after": "lov/2003-06-06-39",
+   "kind": "replace_section",
+   "instruction": "§ 1-5 skal lyde:",
+   "governing": "6. Lov 6. juni 2003 nr. 39 om burettslag § 1-5 skal lyde:",
+   "cited": [
+    "lov/2003-06-06-39"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:22.0",
+   "before": null,
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "7. Lov 17. juni 2005 nr. 62 om arbeidsmiljø-, arbeidstid og stillingsvern",
+   "governing": "7. Lov 17. juni 2005 nr. 62 om arbeidsmiljø-, arbeidstid og stillingsvern",
+   "cited": [
+    "lov/2005-06-17-62"
+   ],
+   "identity_proven": true,
+   "class": "intro_not_an_operation"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:23.0",
+   "before": null,
+   "after": "lov/2005-06-17-62",
+   "kind": "replace_ledd",
+   "instruction": "§ 13-1 fjerde ledd skal lyde:",
+   "governing": "7. Lov 17. juni 2005 nr. 62 om arbeidsmiljø-, arbeidstid og stillingsvern",
+   "cited": [
+    "lov/2005-06-17-62"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:25.0",
+   "before": null,
+   "after": "lov/2005-06-17-62",
+   "kind": "replace_ledd",
+   "instruction": "§ 13-4 tredje ledd skal lyde:",
+   "governing": "7. Lov 17. juni 2005 nr. 62 om arbeidsmiljø-, arbeidstid og stillingsvern",
+   "cited": [
+    "lov/2005-06-17-62"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:27.0",
+   "before": null,
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "8. Lov 21. juni 2013 nr. 102 om stillingsvern mv. for arbeidstakere på skip",
+   "governing": "8. Lov 21. juni 2013 nr. 102 om stillingsvern mv. for arbeidstakere på skip",
+   "cited": [
+    "lov/2013-06-21-102"
+   ],
+   "identity_proven": true,
+   "class": "intro_not_an_operation"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:28.0",
+   "before": null,
+   "after": "lov/2013-06-21-102",
+   "kind": "replace_ledd",
+   "instruction": "§ 10-1 fjerde ledd skal lyde:",
+   "governing": "8. Lov 21. juni 2013 nr. 102 om stillingsvern mv. for arbeidstakere på skip",
+   "cited": [
+    "lov/2013-06-21-102"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:30.0",
+   "before": null,
+   "after": "lov/2013-06-21-102",
+   "kind": "replace_ledd",
+   "instruction": "§ 10-4 tredje ledd skal lyde:",
+   "governing": "8. Lov 21. juni 2013 nr. 102 om stillingsvern mv. for arbeidstakere på skip",
+   "cited": [
+    "lov/2013-06-21-102"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2017-06-16-51#7:Kapittel 7 Avsluttende bestemmelser:9.0",
+   "before": null,
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "1. Lov 25. september 1992 nr. 107 om kommuner og fylkeskommuner:",
+   "governing": "1. Lov 25. september 1992 nr. 107 om kommuner og fylkeskommuner:",
+   "cited": [
+    "lov/1992-09-25-107"
+   ],
+   "identity_proven": true,
+   "class": "intro_not_an_operation"
+  },
+  {
+   "op": "lov/2019-03-15-6#12:Kapittel 12. Ikrafttredelse, overgangsregler og endringer i andre lover:126.0",
+   "before": "lov/2004-03-26-17",
+   "after": "lov/2005-04-01-14",
+   "kind": "replace_bokstav",
+   "instruction": "§ 7 annet ledd bokstav e skal lyde:",
+   "governing": "18. Lov 1. april 2005 nr. 14 om europeiske selskaper ved gjennomføring av EØS-avtalen vedlegg XXII nr. 10a (rådsforordning (EF) nr. 2157/2001) § 7 annet ledd bokstav e skal lyde: lov 29. juni 2007 nr. 75 om verdipapirhandel § 11-4,",
+   "cited": [
+    "lov/2005-04-01-14"
+   ],
+   "identity_proven": true,
+   "class": "rebound_proven"
+  },
+  {
+   "op": "lov/2019-03-15-6#12:Kapittel 12. Ikrafttredelse, overgangsregler og endringer i andre lover:127.0",
+   "before": "lov/2004-03-26-17",
+   "after": "lov/2005-06-17-90",
+   "kind": "replace_punktum",
+   "instruction": "§ 34-4 fjerde ledd annet punktum skal lyde:",
+   "governing": "19. Lov 17. juni 2005 nr. 90 om mekling og rettergang i sivile tvister § 34-4 fjerde ledd annet punktum skal lyde:",
+   "cited": [
+    "lov/2005-06-17-90"
+   ],
+   "identity_proven": true,
+   "class": "rebound_proven"
+  },
+  {
+   "op": "lov/2019-03-15-6#12:Kapittel 12. Ikrafttredelse, overgangsregler og endringer i andre lover:14.0",
+   "before": "lov/1965-06-25-2",
+   "after": "lov/1979-05-18-18",
+   "kind": "replace_bokstav",
+   "instruction": "§ 5 nr. 1 skal lyde:",
+   "governing": "4. Lov 18. mai 1979 nr. 18 om foreldelse av fordringer § 5 nr. 1 skal lyde: Når det er utstedt gjeldsbrev for en fordring, eller fordringen er registrert i en verdipapirsentral, er foreldelsesfristen 10 år, bortsett fra senere forfalt rente eller selskapsutbytte og senere forfalte terminytelser som omhandlet i § 6.",
+   "cited": [
+    "lov/1979-05-18-18"
+   ],
+   "identity_proven": true,
+   "class": "rebound_proven"
+  },
+  {
+   "op": "lov/2019-03-15-6#12:Kapittel 12. Ikrafttredelse, overgangsregler og endringer i andre lover:154.0",
+   "before": "lov/2015-04-10-17",
+   "after": "lov/2016-05-27-14",
+   "kind": "unsupported",
+   "instruction": "§ 7-3 første ledd bokstav h og i skal lyde:",
+   "governing": "25. Lov 27. mai 2016 nr. 14 om skatteforvaltning § 7-3 første ledd bokstav h og i skal lyde: verdipapirforetak, jf. verdipapirhandelloven § 2-7 første ledd verdipapirsentraler",
+   "cited": [
+    "lov/2016-05-27-14"
+   ],
+   "identity_proven": true,
+   "class": "rebound_proven"
+  },
+  {
+   "op": "lov/2019-03-15-6#12:Kapittel 12. Ikrafttredelse, overgangsregler og endringer i andre lover:35.0",
+   "before": "lov/1980-02-08-2",
+   "after": "lov/1981-05-22-25",
+   "kind": "replace_punktum",
+   "instruction": "§ 230 annet ledd første punktum skal lyde:",
+   "governing": "6. Lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker § 230 annet ledd første punktum skal lyde:",
+   "cited": [
+    "lov/1981-05-22-25"
+   ],
+   "identity_proven": true,
+   "class": "rebound_proven"
+  },
+  {
+   "op": "lov/2019-03-15-6#12:Kapittel 12. Ikrafttredelse, overgangsregler og endringer i andre lover:40.0",
+   "before": "lov/1984-06-08-58",
+   "after": "lov/1985-05-24-28",
+   "kind": "replace_punktum",
+   "instruction": "§ 27 første ledd første punktum skal lyde:",
+   "governing": "8. Lov 24. mai 1985 nr. 28 om Norges Bank og pengevesenet mv. § 27 første ledd første punktum skal lyde:",
+   "cited": [
+    "lov/1985-05-24-28"
+   ],
+   "identity_proven": true,
+   "class": "rebound_proven"
+  },
+  {
+   "op": "lov/2019-03-15-6#12:Kapittel 12. Ikrafttredelse, overgangsregler og endringer i andre lover:42.0",
+   "before": "lov/1984-06-08-58",
+   "after": "lov/1985-06-21-78",
+   "kind": "replace_punktum",
+   "instruction": "§ 5-3 første ledd tredje punktum skal lyde:",
+   "governing": "9. Lov 21. juni 1985 nr. 78 om registrering av foretak § 5-3 første ledd tredje punktum skal lyde:",
+   "cited": [
+    "lov/1985-06-21-78"
+   ],
+   "identity_proven": true,
+   "class": "rebound_proven"
+  },
+  {
+   "op": "lov/2020-11-27-131#0::19.0",
+   "before": "lov/2017-06-16-69",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "3. Lov 29. mars 2019 nr. 9 om overgangsregler mv. ved Storbritannias uttreden fra Den europeiske union oppheves.",
+   "governing": "3. Lov 29. mars 2019 nr. 9 om overgangsregler mv. ved Storbritannias uttreden fra Den europeiske union oppheves.",
+   "cited": [
+    "lov/2019-03-29-9"
+   ],
+   "identity_proven": true,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2023-12-20-110#11:XIInkurieopprettinger:42.0",
+   "before": "lov/2010-03-26-8",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "13. Lov 18. juni 2010 nr. 25 om endring i lov 16. juli 1999 nr. 66 om Schengen informasjonssystem (SIS) oppheves.",
+   "governing": "13. Lov 18. juni 2010 nr. 25 om endring i lov 16. juli 1999 nr. 66 om Schengen informasjonssystem (SIS) oppheves.",
+   "cited": [
+    "lov/2010-06-18-25",
+    "lov/1999-07-16-66"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2023-12-20-110#11:XIInkurieopprettinger:49.0",
+   "before": "lov/2018-06-01-24",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "17. I lov 20. desember 2018 nr. 115 om endringer i sjøloven mv. (fjerning av vrak) oppheves del II.",
+   "governing": "17. I lov 20. desember 2018 nr. 115 om endringer i sjøloven mv. (fjerning av vrak) oppheves del II.",
+   "cited": [
+    "lov/2018-12-20-115"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2025-04-25-12#9:Kapittel 9. Sluttbestemmelser:28.0",
+   "before": null,
+   "after": "lov/1992-06-26-86",
+   "kind": "insert_section",
+   "instruction": "Ny § 5-20 skal lyde:",
+   "governing": "Fra den tid Kongen fastsetter, gjøres følgende endringer i lov 26. juni 1992 nr. 86 om tvangsfullbyrdelse:",
+   "cited": [
+    "lov/1992-06-26-86"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2025-04-25-12#9:Kapittel 9. Sluttbestemmelser:30.0",
+   "before": null,
+   "after": "lov/1992-06-26-86",
+   "kind": "insert_section",
+   "instruction": "Ny § 5-21 skal lyde:",
+   "governing": "Fra den tid Kongen fastsetter, gjøres følgende endringer i lov 26. juni 1992 nr. 86 om tvangsfullbyrdelse:",
+   "cited": [
+    "lov/1992-06-26-86"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2025-04-25-12#9:Kapittel 9. Sluttbestemmelser:32.0",
+   "before": null,
+   "after": "lov/1992-06-26-86",
+   "kind": "insert_section",
+   "instruction": "Ny § 5-22 skal lyde:",
+   "governing": "Fra den tid Kongen fastsetter, gjøres følgende endringer i lov 26. juni 1992 nr. 86 om tvangsfullbyrdelse:",
+   "cited": [
+    "lov/1992-06-26-86"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  },
+  {
+   "op": "lov/2025-04-25-12#9:Kapittel 9. Sluttbestemmelser:367.0",
+   "before": "lov/2005-06-17-67",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "45. Lov 17. juni 2005 nr. 89 om endringar i lov 26. juni 1992 nr. 86 om tvangsfullbyrdelse og midlertidig sikring og andre lover oppheves.",
+   "governing": "45. Lov 17. juni 2005 nr. 89 om endringar i lov 26. juni 1992 nr. 86 om tvangsfullbyrdelse og midlertidig sikring og andre lover oppheves.",
+   "cited": [
+    "lov/2005-06-17-89",
+    "lov/1992-06-26-86"
+   ],
+   "identity_proven": false,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2025-04-25-12#9:Kapittel 9. Sluttbestemmelser:400.0",
+   "before": "lov/2012-08-24-64",
+   "after": null,
+   "kind": "unsupported",
+   "instruction": "57. Lov 11. januar 2013 nr. 3 om Statens innkrevingssentral oppheves.",
+   "governing": "57. Lov 11. januar 2013 nr. 3 om Statens innkrevingssentral oppheves.",
+   "cited": [
+    "lov/2013-01-11-3"
+   ],
+   "identity_proven": true,
+   "class": "unbound_was_false"
+  },
+  {
+   "op": "lov/2025-04-25-12#9:Kapittel 9. Sluttbestemmelser:73.0",
+   "before": null,
+   "after": "lov/1992-06-26-86",
+   "kind": "renumber",
+   "instruction": "§ 10-7 nåværende fjerde punktum blir nytt femte punktum.",
+   "governing": "Fra den tid Kongen fastsetter, gjøres følgende endringer i lov 26. juni 1992 nr. 86 om tvangsfullbyrdelse:",
+   "cited": [
+    "lov/1992-06-26-86"
+   ],
+   "identity_proven": true,
+   "class": "new_proven"
+  }
+ ]
+}

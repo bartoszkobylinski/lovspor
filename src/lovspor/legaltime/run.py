@@ -19,7 +19,7 @@ from lovspor.legaltime.instructions import Operation, interpret
 from lovspor.legaltime.replay import Event, ReplayState, replay
 from lovspor.legaltime.verify import verify
 
-REPLAY_VERSION = "legaltime-replay-4"  # phase 4A: attribution and D7 blanket inputs (#856-#859)
+REPLAY_VERSION = "legaltime-replay-5"  # phase 4B: proven attribution of other intros (#861)
 
 
 def _stamp(value: datetime | None) -> str | None:
