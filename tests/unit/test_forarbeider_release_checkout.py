@@ -21,8 +21,11 @@ from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.release_checkout import (
     TRUSTED_ROOT_COMMITS,
     CheckoutState,
+    require_changes,
+    status_path,
     verify_checkout,
 )
+from lovspor.forarbeider.release_lock import HeldLock, release_lock
 from lovspor.forarbeider.release_models import digest
 from lovspor.git_read import GitReadError, GitReading
 from tests.unit.forarbeider_checkout_support import (
@@ -725,3 +728,120 @@ def test_a_merge_with_both_trusted_and_foreign_roots_is_refused(clone: Path) -> 
     assert git(clone, "status", "--porcelain") == ""
 
     refused(clone, "checkout_identity_mismatch", "root_commit")
+
+
+# --- B1b regressions -------------------------------------------------------------------------
+
+
+def test_a_real_worktree_config_extension_is_refused_though_its_file_hides_a_hook(
+    clone: Path,
+) -> None:
+    """``config --local`` never lists ``.git/config.worktree``; the extension alone must refuse.
+
+    With ``extensions.worktreeConfig`` on, Git reads a second, per-worktree file
+    the guard's ``config --local --list`` does not show, so a hooks path or a
+    filter written there would run unseen. The guard refuses the extension in a
+    real clone, whatever that file holds.
+    """
+    git(clone, "config", "extensions.worktreeConfig", "true")
+    git(clone, "config", "--worktree", "core.hooksPath", "/elsewhere")
+    assert (clone / ".git" / "config.worktree").exists()
+    assert "hookspath" not in git(clone, "config", "--local", "--list").lower()
+
+    refused(clone, "checkout_config_unsafe", "extensions.worktreeconfig")
+
+
+# --- B1b: the caller's own lock and the paths it just wrote ----------------------------------
+
+
+def _dataset(clone: Path) -> None:
+    """An empty v1 dataset committed, so a later write can modify tracked files."""
+    (clone / "forarbeider").mkdir()
+    (clone / "forarbeider" / "manifest.json").write_text(manifest_text(EMPTY_MANIFEST))
+    (clone / "forarbeider" / "INDEX.md").write_text(render_index(EMPTY_MANIFEST))
+    commit_all(clone, "empty dataset")
+
+
+def test_the_lock_the_caller_holds_is_accepted_and_no_other(clone: Path) -> None:
+
+    with release_lock(clone) as held:
+        state = verify_checkout(clone, BRANCH, held)
+        assert state.branch == BRANCH
+        with pytest.raises(ForarbeiderRefusedError) as caught:
+            verify_checkout(clone, BRANCH)
+        assert caught.value.detail == "lock"
+        with pytest.raises(ForarbeiderRefusedError) as caught:
+            verify_checkout(clone, BRANCH, HeldLock(held.device, held.inode + 1))
+        assert caught.value.detail == "lock"
+
+
+def test_a_held_lock_never_excuses_a_journal_or_staging(clone: Path) -> None:
+
+    for name, detail in (
+        ("lovspor-forarbeider-journal.json", "journal"),
+        ("lovspor-forarbeider-staging", "staging"),
+    ):
+        (clone / ".git" / name).write_text("{}")
+        with release_lock(clone) as held, pytest.raises(ForarbeiderRefusedError) as caught:
+            verify_checkout(clone, BRANCH, held)
+        assert (caught.value.reason.value, caught.value.detail) == (
+            "checkout_pending_change",
+            detail,
+        )
+        (clone / ".git" / name).unlink()
+
+
+def test_exactly_the_written_paths_are_accepted(clone: Path) -> None:
+    _dataset(clone)
+    (clone / "forarbeider" / "INDEX.md").write_text("changed\n")
+    new = clone / "forarbeider" / "2099-2100" / "prop-l"
+    new.mkdir(parents=True)
+    (new / "9000101.md").write_text("new\n")
+    written = frozenset({"forarbeider/INDEX.md", "forarbeider/2099-2100/prop-l/9000101.md"})
+
+    require_changes(clone, written)
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        require_changes(clone, written - {"forarbeider/INDEX.md"})
+    assert (caught.value.reason.value, caught.value.detail) == ("checkout_dirty", "worktree")
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        require_changes(clone, written | {"forarbeider/manifest.json"})
+    assert (caught.value.reason.value, caught.value.detail) == ("corpus_tree_mismatch", "status")
+
+
+def test_a_deleted_tracked_file_counts_as_written_but_a_staged_change_never(clone: Path) -> None:
+
+    _dataset(clone)
+    (clone / "forarbeider" / "INDEX.md").unlink()
+    require_changes(clone, frozenset({"forarbeider/INDEX.md"}))
+    git(clone, "add", "-A")
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        require_changes(clone, frozenset({"forarbeider/INDEX.md"}))
+    assert (caught.value.reason.value, caught.value.detail) == ("checkout_dirty", "index")
+
+
+def test_a_write_outside_the_named_paths_is_dirty(clone: Path) -> None:
+
+    _dataset(clone)
+    (clone / "lover" / "README.md").write_text("touched\n")
+    with pytest.raises(ForarbeiderRefusedError) as caught:
+        require_changes(clone, frozenset({"lover/README.md"} - {"lover/README.md"}))
+    assert caught.value.detail == "worktree"
+
+
+@pytest.mark.parametrize(
+    ("record", "path"),
+    [
+        (b"? forarbeider/a b.md", "forarbeider/a b.md"),
+        (b"1 .M N... 100644 100644 100644 " + b"0" * 40 + b" " + b"0" * 40 + b" f/x y", "f/x y"),
+        (b"1 .D N... 100644 100644 000000 " + b"0" * 40 + b" " + b"0" * 40 + b" f/z", "f/z"),
+        (b"1 M. N... 100644 100644 100644 " + b"0" * 40 + b" " + b"0" * 40 + b" f/z", None),
+        (b"1 .A N... 100644 100644 100644 " + b"0" * 40 + b" " + b"0" * 40 + b" f/z", None),
+        (b"2 .M N... 100644 100644 100644 h h R100 f/z", None),
+        (b"u UU N... 1 2 3 4 h h h f/z", None),
+        (b"? \xff", None),
+        (b"1 .M short", None),
+    ],
+)
+def test_only_unstaged_changes_and_new_files_name_a_path(record: bytes, path: str | None) -> None:
+
+    assert status_path(record) == path

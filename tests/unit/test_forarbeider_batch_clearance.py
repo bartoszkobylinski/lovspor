@@ -441,7 +441,9 @@ def test_clean_reasons_handles_a_chapter_the_fresh_report_does_not_list(
 
     reasons = clean_reasons(forged, _verdict(desk), observed)
 
-    assert reasons == set(evidence.fresh.document_reasons) - REVIEW_PATH
+    # B1b: a missing fresh outcome excludes; it was silently cleared before.
+    expected = set(evidence.fresh.document_reasons) - REVIEW_PATH
+    assert reasons == expected | {BatchReason.PREFLIGHT_OUTCOME_MISSING}
 
 
 def test_review_reasons_handles_a_chapter_the_fresh_report_does_not_list(
@@ -568,3 +570,38 @@ def test_document_input_reflects_the_metadata_page_and_report(batch: BatchDesk) 
     assert built.metadata_page_sha256 == hashlib.sha256(evidence.inputs.metadata_page).hexdigest()
     assert built.report_sha256 == evidence.report.sha256
     assert built.report_sha256 is not None
+
+
+def test_a_clean_chapter_the_fresh_preflight_has_no_outcome_for_is_excluded(
+    batch: BatchDesk,
+) -> None:
+    """B1b regression: a missing fresh outcome is not silence; the policy clears nothing then."""
+    desk = batch.add(1)
+    evidence = _evidence(desk)
+    fresh = evidence.fresh.model_copy(
+        update={"chapters": tuple(i for i in evidence.fresh.chapters if i.chapter_number != 2)}
+    )
+    missing = evidence._replace(fresh=fresh)
+
+    chapter = _chapter(missing, _verdict(desk), 2)
+
+    assert chapter.included is False
+    assert chapter.clearance is None
+    assert BatchReason.PREFLIGHT_OUTCOME_MISSING in chapter.reasons
+    assert _chapter(evidence, _verdict(desk), 2).included is True
+
+
+def test_a_flagged_chapter_the_fresh_preflight_has_no_outcome_for_is_excluded(
+    batch: BatchDesk,
+) -> None:
+    desk = batch.add(2, extras={3: QUOTE})
+    review = batch.flagged_report(2, (3,))
+    evidence = _evidence(desk, review)
+    fresh = evidence.fresh.model_copy(
+        update={"chapters": tuple(i for i in evidence.fresh.chapters if i.chapter_number != 3)}
+    )
+
+    chapter = _chapter(evidence._replace(fresh=fresh), _verdict(desk), 3)
+
+    assert chapter.included is False
+    assert BatchReason.PREFLIGHT_OUTCOME_MISSING in chapter.reasons

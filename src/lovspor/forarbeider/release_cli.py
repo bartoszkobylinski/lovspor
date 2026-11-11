@@ -9,25 +9,31 @@ Exit 1 is a typed refusal, with nothing written. Exit 2 is a written ``deny``
 report, a batch plan that includes no chapter, a plan or simulation refused
 because the preflight now denies, or a batch plan that no longer reproduces.
 Exit 0 is an ``eligible_preview`` report or a plan, which still authorize no
-publication: no command here writes to ``lovverk`` or any real Git checkout.
-The simulator writes only a disposable sandbox this package made, from the
-bundled synthetic propositions (PR3B-2).
+publication. The simulator writes only a disposable sandbox this package
+made, from the bundled synthetic propositions (PR3B-2). ``batch apply``,
+``batch withdraw`` and ``batch recover`` (B1b) write only ``forarbeider/`` in
+the working tree of a guarded lovverk release clone, after a typed phrase
+(apply, withdraw); none runs ``git add``, commit or push.
 """
 
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 import click
 import typer
 
 from lovspor.forarbeider.apply_preflight import ApplyPreflightRequest, apply_preflight_impl
+from lovspor.forarbeider.batch_apply import BatchApplyRequest, batch_apply_impl
 from lovspor.forarbeider.batch_commands import (
     BatchPlanRequest,
     batch_plan_impl,
     batch_show_impl,
 )
+from lovspor.forarbeider.batch_records import WithdrawalReason
+from lovspor.forarbeider.batch_recover import RecoverRequest, batch_recover_impl
+from lovspor.forarbeider.batch_withdraw import ReleaseWithdrawRequest, release_withdraw_impl
 from lovspor.forarbeider.corpus_commands import (
     PlanRequest,
     SimulateRequest,
@@ -61,14 +67,23 @@ from lovspor.ops.commands import ops_app
 
 DENY_EXIT = 2
 #: Refusals that mean "the evidence now denies", not "the input could not be read".
-DENY_REASONS = frozenset({RefusalReason.PROMOTION_DENIED, RefusalReason.PLAN_NOT_REPRODUCED})
+DENY_REASONS = frozenset(
+    {
+        RefusalReason.PROMOTION_DENIED,
+        RefusalReason.PLAN_NOT_REPRODUCED,
+        RefusalReason.CONFIRMATION_MISMATCH,
+    }
+)
 #: Reason codes, roles, chapter ids and digests. A path has a separator and is never printed.
 _SAFE_DETAIL = re.compile(r"[A-Za-z0-9_.,: -]*")
 
 release_app = typer.Typer(help="Private, offline release preflight. Publishes nothing.")
 chapters_app = typer.Typer(help="Commands on the staged chapters of one proposition.")
 policy_app = typer.Typer(help="The standing release policy: signed once, revocable.")
-batch_app = typer.Typer(help="Private batch plans: read-only, authorize nothing.")
+batch_app = typer.Typer(
+    help="Private batch plans and their preflight authorize nothing;"
+    " release-clone writes a batch only after the owner's typed confirmation."
+)
 ops_app.add_typer(release_app, name="forarbeider-release")
 release_app.add_typer(chapters_app, name="chapters")
 release_app.add_typer(policy_app, name="policy")
@@ -394,3 +409,113 @@ def batch_preflight(
     )
     scope = click.get_current_context().obj
     _echo(lambda: apply_preflight_impl(scope, ask))
+
+
+clone_app = typer.Typer(
+    help="One dedicated lovverk release clone: apply a confirmed batch, withdraw, recover."
+)
+batch_app.add_typer(clone_app, name="release-clone")
+
+
+class CloneScope(NamedTuple):
+    """The release scope, the release clone and the branch the owner names for it."""
+
+    release: ReleaseScope
+    checkout: Path
+    branch: str
+
+
+@clone_app.callback()
+def clone_scope(
+    ctx: typer.Context,
+    checkout: Annotated[
+        Path,
+        typer.Option(
+            "--checkout", help="The dedicated lovverk release clone (absolute, owner-only)."
+        ),
+    ],
+    branch: Annotated[
+        str, typer.Option("--branch", help="The forarbeider/ branch the clone is on.")
+    ],
+) -> None:
+    """Commands that write only forarbeider/ in this clone's working tree (issue #738, B1b).
+
+    None runs git add, commit or push: the owner commits, pushes and opens the
+    lovverk PR, and merging it is the publication.
+    """
+    ctx.obj = CloneScope(ctx.obj, checkout, branch)
+
+
+@clone_app.command("apply")
+def batch_apply(
+    plan: Annotated[str, typer.Argument(help="The stored batch plan's sha256.")],
+    request: Annotated[
+        Path, typer.Option(help="The private batch request file the plan was made from.")
+    ],
+    source_proof: Annotated[
+        Path, typer.Option(help="The forarbeider-fetch run record the plan was made from.")
+    ],
+    decided: _Actor,
+) -> None:
+    """Write a confirmed batch to the clone's forarbeider/, working tree only.
+
+    Re-runs the preflight under the clone's lock, asks the owner to type a phrase
+    naming the plan and binding digests, the counts and the branch, then runs the
+    preflight again and writes all or nothing. No git add, commit or push.
+    Exit 0: applied or unchanged; exit 2: the plan or the binding moved; exit 1: refused.
+    """
+    clone: CloneScope = click.get_current_context().obj
+    ask = BatchApplyRequest(
+        plan=plan,
+        checkout=clone.checkout,
+        branch=clone.branch,
+        request=request,
+        source_proof=source_proof,
+        decided=decided,
+    )
+    _echo(lambda: batch_apply_impl(clone.release, ask))
+
+
+@clone_app.command("recover")
+def batch_recover() -> None:
+    """Settle an interrupted apply or withdrawal: a release is rolled back, a withdrawal finished.
+
+    Takes over the clone's lock only when no process holds it. Publishes nothing new.
+    """
+    clone: CloneScope = click.get_current_context().obj
+    ask = RecoverRequest(checkout=clone.checkout, branch=clone.branch)
+    _echo(lambda: batch_recover_impl(clone.release, ask))
+
+
+@clone_app.command("withdraw")
+def batch_withdraw(
+    document: Annotated[str, typer.Option(help="The released document's id.")],
+    chapters: Annotated[
+        str, typer.Option(help="The chapter numbers to take down, e.g. 2,3; the file goes whole.")
+    ],
+    reason: Annotated[WithdrawalReason, typer.Option(help="Why, as a code; never free text.")],
+    decided: _Actor,
+) -> None:
+    """Withdraw one released document, forward only, at a terminal. History is not rewritten.
+
+    Marks the member withdrawn, removes its file and rewrites the index and the
+    manifest in the working tree. Earlier commits and copies keep the bytes.
+    """
+    clone: CloneScope = click.get_current_context().obj
+    ask = ReleaseWithdrawRequest(
+        checkout=clone.checkout,
+        branch=clone.branch,
+        document=document,
+        chapters=_chapter_numbers(chapters),
+        reason=reason,
+        decided=decided,
+    )
+    _echo(lambda: release_withdraw_impl(clone.release, ask))
+
+
+def _chapter_numbers(text: str) -> tuple[int, ...]:
+    """``2,3``: a usage error unless every item is a number."""
+    items = text.split(",")
+    if not all(item.isdecimal() for item in items):
+        raise typer.BadParameter("chapters are numbers separated by commas")
+    return tuple(int(item) for item in items)

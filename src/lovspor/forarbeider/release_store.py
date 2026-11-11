@@ -48,6 +48,10 @@ Folder = Literal[
     "policies",
     "policy_revocations",
     "batch_plans",
+    "batch_confirmations",
+    "batch_releases",
+    "release_withdrawal_intents",
+    "release_withdrawals",
 ]
 
 

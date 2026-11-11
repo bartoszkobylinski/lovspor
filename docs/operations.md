@@ -3187,7 +3187,7 @@ Then `show` judges the **current source proof** (Amendment 1 point 8). `--source
 
 ## Forarbeider: private batch plan (issue #738, contract Amendment 1, A2b)
 
-[Amendment 1](proposals/forarbeider-pr3b-release-contract.md#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release) points 2–4 and 7. `batch plan` decides, for at most 25 propositions, which chapters a later batch release could carry and by which path. **It publishes, authorizes, confirms and applies nothing**: the plan states `publication_authorized: false`, `writes_corpus: false`, `applies: false` and `owner_confirmation: required_not_given` by type, and no command reads a plan to write anything. `batch preflight` (B1a, below) re-checks a plan read-only; the batch confirmation and apply are slice B1b.
+[Amendment 1](proposals/forarbeider-pr3b-release-contract.md#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release) points 2–4 and 7. `batch plan` decides, for at most 25 propositions, which chapters a later batch release could carry and by which path. **It publishes, authorizes, confirms and applies nothing**: the plan states `publication_authorized: false`, `writes_corpus: false`, `applies: false` and `owner_confirmation: required_not_given` by type, and no command reads a plan to write anything. `batch preflight` (B1a, below) re-checks a plan read-only; `batch release-clone apply` (B1b, below) is the one command that confirms and writes it.
 
 ```bash
 uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> batch plan \
@@ -3234,7 +3234,7 @@ The request is the owner's private JSON file (absolute, owner-only, outside ever
 
 **Storage and determinism.** The plan is `<ws>/batch_plans/<sha256>.json`, owner-only, named by the digest of its exact bytes and never replaced; planning the same request again writes nothing new. `inputs_sha256` is the digest of every staged byte and named record the plan read (metadata, results, pages, review chain heads, report, checkpoints, policy, source proof, `--at` as its UTC instant, target branch), never a path, so the same instant given with another offset is the same plan and `batch preflight` can replay it; the request's document order does not matter. The C3 sample is the five policy-cleared chapters with the lowest `sha256(inputs_sha256 + "\n" + chapter_id)`, so the same inputs always give the same sample and any changed input reshuffles it. The plan's validator recomputes the sample, the counts and the coverage. Planning reads only private files, makes no request, starts no process and has no corpus or checkout argument: `lovverk` and the sync clone are never touched.
 
-**Manifest schema 2** (`corpus_models.py`; nothing writes it yet, the batch apply in B1 will). Each chapter receipt carries `clearance`, one of:
+**Manifest schema 2** (`corpus_models.py`; written only by `batch release-clone apply` and `withdraw`, B1b). Each chapter receipt carries `clearance`, one of:
 - `cleared_by: standing_policy`, `policy_sha256`, `source_proof_sha256`, `individually_reviewed: false`; no review field is allowed;
 - `cleared_by: owner_review`, `review_decided_at`, `review` (subject key, revision, head), `authorization_sha256`, `report_sha256`, `provenance`, `individually_reviewed: true`; no policy digest is allowed. `provenance: recorded` has all three references; `provenance: manifest_v1` has all three `null`.
 
@@ -3281,7 +3281,7 @@ Times add `policy_decided_at`, `null` exactly when no chapter was policy-cleared
 
 ## Forarbeider: read-only apply preflight (issue #738, contract Amendment 1, B1a)
 
-[Amendment 1](proposals/forarbeider-pr3b-release-contract.md#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release) points 4, 5 and 8. `batch preflight` answers one question before a batch release may write: **does this stored plan still hold, exactly, against this release clone, now?** It writes nothing at all, runs only read-only Git, makes no request, asks no confirmation and applies nothing. The batch confirmation, apply and withdrawal are slice B1b. The architecture they follow is in the contract's [B1 appendix](proposals/forarbeider-pr3b-release-contract.md#appendix-b1-implementation-architecture-non-normative).
+[Amendment 1](proposals/forarbeider-pr3b-release-contract.md#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release) points 4, 5 and 8. `batch preflight` answers one question before a batch release may write: **does this stored plan still hold, exactly, against this release clone, now?** It writes nothing at all, runs only read-only Git, makes no request, asks no confirmation and applies nothing. The batch confirmation, apply, recovery and withdrawal (B1b) follow below. The architecture is in the contract's [B1 appendix](proposals/forarbeider-pr3b-release-contract.md#appendix-b1-implementation-architecture-non-normative).
 
 **The release clone** is a dedicated lovverk clone, used for nothing else, on the plan's target branch. Make it once, by hand, outside every other repository:
 
@@ -3378,6 +3378,110 @@ The planner's own refusals for the request, staged files, policy and proof apply
 | Excluded and withheld never in the binding | `tests/unit/test_forarbeider_apply_preflight.py::test_the_binding_lists_only_included_chapters` |
 | One function for the CLI and B1b; stable binding | `tests/unit/test_forarbeider_apply_preflight.py::test_the_command_prints_what_apply_preflight_returns_and_the_binding_is_stable` |
 | Writes nothing anywhere, on a pass and on every refusal; no text or private path printed | every test in `tests/unit/test_forarbeider_apply_preflight.py` (whole `tmp_path` snapshot, markers and paths absent), every refusal in `tests/unit/test_forarbeider_release_checkout.py`; `test_forarbeider_apply_preflight.py::test_a_missing_workspace_is_refused_and_never_created` |
+
+## Forarbeider: batch apply, recovery and withdrawal (issue #738, contract Amendment 1, B1b)
+
+[Amendment 1](proposals/forarbeider-pr3b-release-contract.md#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release) points 4, 5 and 7. Three commands write, and only `forarbeider/` in the **working tree** of the dedicated release clone the B1a guard accepts (see the preflight section for how to make it). **None runs `git add`, commit or push.** The owner reviews the diff, commits, pushes and opens the lovverk PR; merging that PR is the publication. Nothing here touches the root `manifest.json`, `lover/`, `forskrifter/`, `lokale-forskrifter/`, the sync clone, `$LOVVERK_CORPUS_PATH` or the engine.
+
+```bash
+CLONE="--checkout /abs/lovverk-release --branch forarbeider/batch-2026-12-01"
+uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> batch release-clone $CLONE \
+  apply <plan sha256> --request /abs/private/batch.json \
+  --source-proof <fetch out>/fetch-run-<start>.json --decided owner@2026-12-01T13:00:00+01:00
+uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> batch release-clone $CLONE recover
+uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> batch release-clone $CLONE \
+  withdraw --document regjeringen-3172654 --chapters 9 --reason privacy --decided owner@2026-12-02T09:00:00+01:00
+```
+
+`--branch` is the owner's own statement of the target: apply refuses it unless it is the plan's branch (`target_branch_mismatch: branch`), and every command refuses a branch outside `forarbeider/<name>` (`target_branch_invalid: branch`) and a clone on another branch (`checkout_branch_mismatch: branch`). `--decided` is `HANDLE@ISO-8601`, the operator's word, never after the machine clock (`invalid_timestamp: decided`).
+
+### `apply`: one confirmed batch, all or nothing
+
+In order; the first failure refuses, and before step 7 nothing in the clone has changed.
+
+1. The workspace exists, `--decided` is not in the future, the plan names `--branch`, and the path is safe to lock (canonical, not the engine, sync clone or corpus path, owner-only, its own `.git`).
+2. **The lock.** `.git/lovspor-forarbeider.lock` is created exclusively and held by an advisory `flock` for the whole run. One already there is `corpus_locked: checkout`, whether its holder is alive or died: apply never takes a lock over.
+3. **Already applied?** If the clone's manifest is the one a stored confirmation of this plan leads to, and status lists exactly that confirmation's files (or the owner has committed them and the tree is clean), the run prints `UNCHANGED`, writes the receipt if a crash lost it, asks no phrase and writes nothing.
+4. **Preflight under the lock.** `apply_preflight` (B1a) runs whole: the guard, with this run's own lock the only one accepted (by device and inode; a journal or staging still refuses), and the plan evaluated again now, which must reproduce byte for byte. A stored eligible plan never approves by itself.
+5. **The draft.** Only included chapters are rendered, by the existing deterministic renderer, with each chapter's clearance from the plan (`standing_policy` or `owner_review`) into manifest schema 2. A document the manifest already lists, released or withdrawn, is `release_conflict: <id>`: a batch only adds documents. Labels are fixed by type: `forarbeid`, `normative: false`, `åndsverkloven § 14`, `source_license: null`, NOT enacted law, `partial_curated_excerpt` where chapters are missing.
+6. **The owner's confirmation.** The preflight lines and every file to be written (path, SHA-256, size) are printed, then one phrase is typed at a terminal: `apply <plan prefix> binding <binding prefix> documents <n> chapters <n> to <branch>`. A wrong phrase, a pipe or cron is `review_not_interactive: batch_confirmation`. The confirmation is stored in `<workspace>/batch_confirmations/<result manifest sha256>.json`: plan and binding digests, the binding itself (branch, HEAD, base manifest, remote, every included chapter id with its text digest, counts), document ids, chapter count, the phrase, owner handle and time, the result manifest digest and every planned file, and `identity_authenticated: false`. It is the owner's dated, written sign-off, not authenticated identity.
+7. **Preflight again, then the transaction.** Immediately before staging, the preflight runs once more; its binding must be the confirmed one and the redrafted files the confirmed files (`confirmation_mismatch: binding|files`, exit 2). Then the journal is written in `.git` before the first operation, every new file's bytes and every replaced file's previous bytes are staged in `.git`, and documents, then the index, then the manifest are moved into place.
+8. **Read-back.** Before the journal is cleared: `git status` (read-only) lists exactly the written paths, each an unstaged change or a new file, nothing else; HEAD has not moved; the lock is still ours; the dataset read back is exactly the new manifest (every member file's digest, the index, no symlink, hard link or stray file). Then the journal and staging are removed, the whole guard runs once more on the result, and the receipt is stored in `<workspace>/batch_releases/<confirmation sha256>.json`.
+
+Exit 0 prints `BATCH APPLIED plan <sha> confirmation <sha> receipt <sha>` (or `UNCHANGED ...`), the target, head, base and result manifest, the counts, every `wrote <path> <sha256>`, and the two notices: not committed, and `identity_authenticated=false`. Exit 2 is `plan_not_reproduced` or `confirmation_mismatch`; exit 1 any other refusal (the B1a table applies, plus `release_conflict`, `corpus_locked`, `checkout_unsafe: lock`, `output_write_failed`, `corpus_tree_mismatch: status|head|forarbeider/manifest.json`, `review_not_interactive`). Never printed: chapter text, a handle, evidence or a private path.
+
+**Times.** Each document's manifest times keep their axes: `policy_decided_at` (the policy's signature, when a chapter was policy-cleared), `reviewed_at` (the latest review decision, when a chapter was owner-reviewed), `owner_decided_at` and `released_at` (both the batch confirmation's `--decided`). The publication itself is the owner's merge, which Git records (`recorded_at: git_commit_time`). A confirmation before the policy or a review it rests on is `release_invalid: decided`.
+
+### Transaction invariants
+
+- **One writer at a time.** The `flock`-held lock; whoever holds the `flock` owns it. A second apply, a withdrawal, a preflight and a recovery all refuse while it is held.
+- **Validate before modifying.** Every input, the guard, the reproduction, the draft and the confirmation are settled before the journal exists. Paths come only from the dataset grammar (`forarbeider/<session>/prop-l|prop-ls/<id>.md`, `INDEX.md`, `manifest.json`), re-checked when a journal is read back from disk, so an edited journal cannot steer a write elsewhere.
+- **No overwrite of unrelated or hand-edited files.** The tree must be clean and exactly its manifest before; a document path that already exists is a conflicting release; a rollback refuses a file holding neither its old nor its new bytes.
+- **Never silently half-published.** Once the journal exists, every command but `recover` refuses the clone (`checkout_pending_change: journal|staging|lock`), and so does the B1a preflight.
+- **Zero writes outside `forarbeider/`.** Besides the dataset, only the lock, journal and staging inside the clone's `.git` (all removed on success) and the private records in the workspace.
+
+### `recover`: settle an interrupted run
+
+Run it when a command refuses with `corpus_locked` or `checkout_pending_change`. First make sure no apply or withdrawal is still running (`pgrep -fl forarbeider-release`).
+
+- It takes over the lock only when no process holds its `flock` (the holder died); a live one is `corpus_locked: checkout`.
+- It runs every identity check of the guard (path, not forbidden, owner-only, trusted origin and root, no Git operation, the branch); a dirty tree and the journal are what it settles.
+- A **release** journal is always **rolled back**, never completed: completing it would publish on a confirmation whose world may have moved. Run `apply` again afterwards; it re-checks everything and asks the phrase again (with a later `--decided`).
+- A **withdrawal** journal is **finished** and its receipt written: a confirmed takedown is never undone.
+- The journal must name a decision the workspace holds (the confirmation or intent stored under the manifest it leads to, with the digest it names), or it is `corpus_tree_mismatch: journal` and nothing is touched. A file edited by hand since, holding neither its old nor its new bytes, is `corpus_tree_mismatch: forarbeider` on both a rollback and a forward finish; it is never overwritten.
+- Staging with no journal is removed (`RECOVERED orphaned staging removed`); a clean clone prints `RECOVERED nothing pending`.
+
+### `withdraw`: forward-only takedown
+
+Against a clean, committed clone (commit the release first). The owner names the document, the chapters that triggered the takedown and a reason code (`privacy`, `rights`, `correction`, `source_withdrawn`, `owner_decision`; never free text). The document's file holds all its released chapters, so **the whole document is withdrawn**; the phrase names every chapter withdrawn: `withdraw <id> chapters <all> from <branch>`. The intent is stored first (`release_withdrawal_intents/<result manifest sha256>.json`), then the same transaction: the member is kept with its chapter receipts and clearances as provenance, marked `withdrawn` with `withdrawn_at`, its rendering digest cleared, its file removed, the index no longer listing it. The receipt follows (`release_withdrawals/`). A document is withdrawn once (`document_not_released: document` after); a withdrawn document is never released again by a batch (`release_conflict`). Withdrawal needs no release grant and no current source proof.
+
+Refusals: `document_not_released: document` (no such released member), `chapter_not_released: chapters` (a chapter not released, or named twice), `manifest_invalid: withdrawn_at` (before the release), `review_not_interactive: withdrawal`, and the guard's.
+
+**Git history is never rewritten.** The command says so on every run: earlier commits, forks, clones, caches and any copy already served keep the bytes. A revert does not erase them either.
+
+### Takedown runbook
+
+When a correction or takedown request arrives at `kontakt@lovspor.no`, or the owner finds a problem in a released chapter:
+
+1. **Identify** the document id and chapters from the request (the INDEX.md entry or the file's front matter `id`, `released_chapters`). Do not copy the requester's personal data into any issue, PR, commit message or log.
+2. **Freeze new releases**: do not run `apply` until this is settled.
+3. **Withdraw** in the release clone, on a fresh `forarbeider/takedown-<date>` branch from current lovverk `main`:
+   ```bash
+   git -C /abs/lovverk-release fetch origin
+   git -C /abs/lovverk-release switch -c forarbeider/takedown-2026-12-02 origin/main
+   uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> batch release-clone \
+     --checkout /abs/lovverk-release --branch forarbeider/takedown-2026-12-02 \
+     withdraw --document <id> --chapters <n,...> --reason <code> --decided owner@<now>
+   ```
+4. **Publish the removal**: `git -C /abs/lovverk-release diff --stat` must show only the document file deleted and `forarbeider/INDEX.md`, `forarbeider/manifest.json` modified. Commit, push, open the lovverk PR, merge it. Merging is the takedown.
+5. **Downstream**: after the merge, the sync clone and every server pull the corpus as usual; the dataset reader serves only `released` members, and a withdrawn document's file returning without its manifest entry is refused (`corpus_tree_mismatch`).
+6. **History exposure.** The earlier commit still holds the bytes, and so do forks, clones and caches. If that is unacceptable (for example special-category personal data), escalate: GitHub support for cached views and forks, search-engine removal requests for indexed copies. Rewriting lovverk history is the owner's separate decision and is not done by any command here.
+7. **Answer the requester** from `kontakt@lovspor.no` with what was removed and when, and that earlier public copies may persist.
+8. **Record** the case privately (date, document id, reason code, PR link); the intent and receipt in the workspace are the machine record.
+
+### Acceptance matrix (B1b)
+
+| Requirement | Test |
+|---|---|
+| Writes only `forarbeider/` in the working tree; no add, commit or push; HEAD and index untouched; every other byte below `tmp_path` identical | `tests/unit/test_forarbeider_batch_apply.py::test_a_confirmed_batch_writes_only_the_dataset_and_commits_nothing`, `test_forarbeider_batch_withdraw.py::test_a_withdrawal_removes_the_file_keeps_provenance_and_warns` |
+| Phrase names plan and binding digests, counts and branch; dated confirmation bound to exact inputs and files; `identity_authenticated: false` | `test_forarbeider_batch_apply.py::test_the_phrase_names_both_digests_the_counts_and_the_branch` |
+| Invalid confirmation, no terminal, future or too-early moment | `::test_a_wrong_phrase_writes_nothing_and_stores_no_confirmation`, `::test_no_terminal_no_apply`, `::test_a_moment_after_the_clock_or_before_the_policy_is_refused` |
+| Invalid branch, HEAD or binding; world moved while the owner typed | `::test_a_wrong_branch_an_unknown_plan_or_another_request_is_refused`, `::test_a_head_moved_while_the_owner_typed_is_a_confirmation_mismatch`, `::test_a_policy_revoked_while_the_owner_typed_is_not_reproduced` |
+| Expired policy, stale proof, changed inputs, review veto | `::test_a_changed_input_is_refused_before_the_phrase` (page, veto, stale_proof, weeks_later), `::test_a_policy_window_that_ended_since_the_plan_is_not_reproduced` |
+| Mixed clean/flagged/withheld: only included chapters, clearance and labels preserved | `::test_only_included_chapters_are_written`, `::test_the_manifest_records_each_clearance_and_every_label`, `test_forarbeider_batch_release.py::test_a_mixed_document_keeps_each_chapters_own_path_and_review_time`, `::test_a_policy_cleared_document_is_written_with_every_fixed_label` |
+| 25-document boundary | `test_forarbeider_batch_apply.py::test_twenty_five_documents_apply_as_one_batch`, `test_forarbeider_batch_release.py::test_twenty_five_documents_are_one_draft` |
+| Malformed manifest, symlink, hard link, traversal | `test_forarbeider_batch_apply.py::test_a_malformed_base_manifest_is_refused_before_the_phrase`, `::test_a_symlink_hard_link_or_stray_file_in_the_dataset_is_refused`, `test_forarbeider_batch_recovery.py::test_a_journal_edited_to_escape_the_dataset_is_refused`, `test_forarbeider_release_lock.py::test_a_symlinked_or_hard_linked_lock_is_refused`, `::test_a_symlinked_git_directory_is_refused` |
+| Crash at every phase, recovery, retry | `test_forarbeider_batch_recovery.py::test_a_crash_after_the_journal_is_rolled_back_by_recovery_then_retried[2-5]`, `::test_a_crash_while_installing_the_journal_leaves_only_orphaned_staging`, `::test_a_failed_read_back_keeps_the_journal_for_recovery`, `::test_a_crash_after_the_journal_is_cleared_is_completed_by_the_retry`, `::test_a_killed_process_leaves_its_lock_which_only_recovery_takes_over` |
+| Concurrent apply, lock and journal conflicts; B1a never bypassed | `test_forarbeider_batch_apply.py::test_a_second_apply_is_refused_while_one_holds_the_lock`, `::test_the_preflight_refuses_a_clone_while_an_apply_holds_it`, `test_forarbeider_release_lock.py` (all), `test_forarbeider_release_checkout.py::test_the_lock_the_caller_holds_is_accepted_and_no_other`, `::test_a_held_lock_never_excuses_a_journal_or_staging`, `test_forarbeider_batch_recovery.py::test_recovery_refuses_a_journal_no_stored_decision_names` |
+| Existing files, conflicting releases, rollback safety | `test_forarbeider_batch_apply.py::test_a_plan_whose_document_is_already_released_is_a_conflicting_release`, `test_forarbeider_batch_release.py::test_a_document_the_manifest_already_lists_is_a_conflicting_release`, `test_forarbeider_batch_recovery.py::test_recovery_never_overwrites_a_file_edited_by_hand`, `::test_finishing_a_withdrawal_never_overwrites_a_file_edited_by_hand` |
+| Idempotent retry | `test_forarbeider_batch_apply.py::test_a_second_run_after_the_write_or_after_the_owners_commit_is_unchanged`, `test_forarbeider_batch_release.py::test_the_same_batch_gives_the_same_bytes` |
+| Post-write status lists exactly the written paths | `test_forarbeider_release_checkout.py::test_exactly_the_written_paths_are_accepted`, `::test_a_deleted_tracked_file_counts_as_written_but_a_staged_change_never`, `::test_a_write_outside_the_named_paths_is_dirty`, `::test_only_unstaged_changes_and_new_files_name_a_path` |
+| Withdrawal: provenance, reason, once, refused from a wrong or dirty clone, phrase and terminal | `test_forarbeider_batch_withdraw.py` (all), `test_forarbeider_batch_release.py::test_a_withdrawal_keeps_provenance_and_removes_only_the_file`, `::test_a_withdrawal_refuses_an_unknown_a_withdrawn_or_a_too_early_document` |
+| Withdrawn content is not served; never re-released by a batch | `test_forarbeider_batch_withdraw.py::test_withdrawn_content_is_no_longer_served`, `::test_a_withdrawn_document_is_never_released_again_by_a_batch` |
+| Interrupted withdrawal is finished, never undone | `test_forarbeider_batch_recovery.py::test_an_interrupted_withdrawal_is_finished_by_recovery_never_undone` |
+| No chapter text, private note, handle or path in output | every CLI call through `tests/unit/forarbeider_apply_support.py::ApplyBench.invoke` |
+| Regression: `extensions.worktreeConfig` in a real clone | `test_forarbeider_release_checkout.py::test_a_real_worktree_config_extension_is_refused_though_its_file_hides_a_hook` |
+| Regression: a missing fresh preflight chapter outcome never clears | `test_forarbeider_batch_clearance.py::test_a_clean_chapter_the_fresh_preflight_has_no_outcome_for_is_excluded`, `::test_a_flagged_chapter_the_fresh_preflight_has_no_outcome_for_is_excluded`, `test_forarbeider_batch_apply.py::test_an_included_chapter_the_fresh_evaluation_has_no_result_for_is_refused` |
 
 ## Idempotency
 

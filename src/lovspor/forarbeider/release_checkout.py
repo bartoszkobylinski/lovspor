@@ -20,11 +20,14 @@ before anything may be written there, and refuses everything it cannot prove:
 - Git agrees it is a full, non-bare, non-shallow repository rooted here, and
   its history starts at the lovverk root commit;
 - no merge, rebase, cherry-pick, revert, bisect, ``am`` or sequencer is in
-  progress, and no forarbeider change is unfinished;
+  progress, and no forarbeider change is unfinished; the one lock accepted is
+  the one the caller holds (B1b), proved by device and inode;
 - HEAD is the plan's branch, born, never detached;
 - index and worktree are clean, nothing is untracked, no index flag hides an
   edit, nothing is ignored inside ``forarbeider/``, and the dataset there is
-  exactly what its manifest lists.
+  exactly what its manifest lists. A caller that just wrote names its paths
+  (B1b): then status must list exactly those, each an unstaged change or a new
+  untracked file, and nothing else.
 
 Git is run only through :mod:`lovspor.git_read`: read-only commands, no
 optional locks, a minimal environment. Nothing here writes, creates a clone
@@ -39,10 +42,12 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.forarbeider.corpus_transaction import JOURNAL, LOCK, STAGING
+from lovspor.forarbeider.corpus_models import MANIFEST_PATH
+from lovspor.forarbeider.corpus_transaction import JOURNAL, LOCK, STAGING, ReadBack
 from lovspor.forarbeider.corpus_tree import read_any_dataset_files
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.release_commands import forbidden_trees
+from lovspor.forarbeider.release_lock import HeldLock, held_by_us
 from lovspor.git_read import GitReadError, GitReading, read_git
 
 #: lovverk's initial commit, "chore: initialize corpus repository" (2026-04-22, no parent).
@@ -79,6 +84,8 @@ _REMOTE_KEY_DOTS = 2
 MIN_GIT_VERSION = (2, 32)
 _GIT_VERSION = re.compile(r"git version (\d+)\.(\d+)(?:\.\d+)?(?:[ .].*)?")
 _COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+#: ``1 XY sub mH mI mW hH hI path``: an ordinary changed entry, the path last.
+_ORDINARY_FIELDS = 9
 _LAYOUT = (
     "rev-parse",
     "--path-format=absolute",
@@ -292,18 +299,27 @@ def require_layout(path: Path) -> None:
         raise _refused(RefusalReason.CHECKOUT_IDENTITY_MISMATCH, "shallow")
 
 
-def require_no_operation(path: Path) -> None:
+def require_no_git_operation(path: Path) -> None:
+    """Raises: ForarbeiderRefusedError: ``checkout_operation_in_progress: <kind>``."""
+    for marker, kind in OPERATIONS:
+        if os.path.lexists(path / ".git" / marker):
+            raise _refused(RefusalReason.CHECKOUT_OPERATION_IN_PROGRESS, kind)
+
+
+def require_no_operation(path: Path, held: HeldLock | None = None) -> None:
     """No Git operation in progress and no unfinished forarbeider change.
+
+    The lock is accepted only when it is the very file ``held`` names: the
+    caller's own, taken before this check, never one another run left.
 
     Raises:
         ForarbeiderRefusedError: ``checkout_operation_in_progress: <kind>`` or
             ``checkout_pending_change: lock|journal|staging``.
     """
-    for marker, kind in OPERATIONS:
-        if os.path.lexists(path / ".git" / marker):
-            raise _refused(RefusalReason.CHECKOUT_OPERATION_IN_PROGRESS, kind)
+    require_no_git_operation(path)
     for relative, kind in PENDING:
-        if os.path.lexists(path / relative):
+        ours = kind == "lock" and held is not None and held_by_us(path, held)
+        if os.path.lexists(path / relative) and not ours:
             raise _refused(RefusalReason.CHECKOUT_PENDING_CHANGE, kind)
 
 
@@ -393,16 +409,50 @@ def status_fault(record: bytes) -> str:
     raise _refused(RefusalReason.CHECKOUT_UNVERIFIABLE, "status")
 
 
-def require_clean(path: Path) -> None:
-    """Clean index and worktree, nothing untracked, hidden or ignored in the dataset.
+def status_path(record: bytes) -> str | None:
+    """The path of a record that may be a just-written dataset file, ``None`` for any other.
+
+    Only an unstaged change to a tracked file (``1 .M``, ``1 .D``) or an
+    untracked file qualifies: a staged change, a rename or a conflict never does.
+    """
+    fields = record.split(b" ", 8)
+    if record[:2] == b"? ":
+        raw = record[2:]
+    elif fields[0] == b"1" and len(fields) == _ORDINARY_FIELDS and fields[1] in (b".M", b".D"):
+        raw = fields[8]
+    else:
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def require_changes(path: Path, changed: frozenset[str]) -> None:
+    """Status lists exactly ``changed``, each an unstaged change or a new file; nothing else.
+
+    Raises:
+        ForarbeiderRefusedError: ``checkout_dirty: <kind>`` for any other record,
+            ``corpus_tree_mismatch: status`` when a named path is not changed.
+    """
+    seen: set[str] = set()
+    for record in (item for item in _git(path, _STATUS).split(b"\0") if item):
+        found = status_path(record)
+        if found is None or found not in changed:
+            raise _refused(RefusalReason.CHECKOUT_DIRTY, status_fault(record))
+        seen.add(found)
+    if seen != changed:
+        raise _refused(RefusalReason.CORPUS_TREE_MISMATCH, "status")
+
+
+def require_clean(path: Path, changed: frozenset[str] = frozenset()) -> None:
+    """Clean index and worktree but ``changed``, nothing hidden or ignored in the dataset.
 
     Raises:
         ForarbeiderRefusedError: ``checkout_dirty: index|worktree|untracked|hidden_flag|``
-            ``ignored_dataset``.
+            ``ignored_dataset``, or ``corpus_tree_mismatch: status``.
     """
-    first = next((item for item in _git(path, _STATUS).split(b"\0") if item), None)
-    if first is not None:
-        raise _refused(RefusalReason.CHECKOUT_DIRTY, status_fault(first))
+    require_changes(path, changed)
     for entry in _git(path, ("ls-files", "-v", "-z")).split(b"\0"):
         tag = entry[:1]
         if tag.islower() or tag == b"S":
@@ -411,19 +461,100 @@ def require_clean(path: Path) -> None:
         raise _refused(RefusalReason.CHECKOUT_DIRTY, "ignored_dataset")
 
 
-def _repository(path: Path) -> None:
-    """Everything that makes ``path`` a trustworthy, idle lovverk clone, branch aside."""
+def _trusted(path: Path) -> None:
+    """A lovverk clone of its own, run by nothing its configuration names, branch aside."""
     require_own_git_dir(path)
     require_git_version(path)
     config = local_config(path)
     require_safe_config(config)
     require_trusted_remote(config)
     require_layout(path)
-    require_no_operation(path)
 
 
-def verify_checkout(raw: Path, target_branch: str) -> CheckoutState:
+def _repository(path: Path, held: HeldLock | None) -> None:
+    """Everything that makes ``path`` a trustworthy, idle lovverk clone, branch aside."""
+    _trusted(path)
+    require_no_operation(path, held)
+
+
+def _on_branch(path: Path, target_branch: str) -> tuple[str, tuple[str, ...]]:
+    """HEAD's commit and the root commits, refused unless HEAD is ``target_branch`` of lovverk.
+
+    Raises:
+        ForarbeiderRefusedError: ``checkout_branch_mismatch``, ``checkout_identity_mismatch``
+            or ``checkout_unsafe: grafts|replace_refs``.
+    """
+    branch, head = current_branch(path)
+    if branch != target_branch:
+        raise _refused(RefusalReason.CHECKOUT_BRANCH_MISMATCH, "branch")
+    require_structure(path)
+    roots = trusted_roots(path)
+    require_no_history_overrides(path)
+    return head, roots
+
+
+def verify_identity(raw: Path, target_branch: str, held: HeldLock) -> str:
+    """The guard for recovery: every identity check, but a journal and its changes are expected.
+
+    The caller holds the lock it took over. A Git operation in progress still
+    refuses; the dataset and the status are what the journal settles, so they
+    are proved by the read-back after it, not here. Returns HEAD's commit.
+
+    Raises:
+        ForarbeiderRefusedError: the first identity condition it cannot prove.
+    """
+    path = canonical_checkout(raw)
+    require_not_forbidden(path)
+    require_private(path)
+    _trusted(path)
+    require_no_git_operation(path)
+    if not held_by_us(path, held):
+        raise _refused(RefusalReason.CHECKOUT_PENDING_CHANGE, "lock")
+    return _on_branch(path, target_branch)[0]
+
+
+def read_back_of(branch: str, head: str, held: HeldLock) -> ReadBack:
+    """The release clone's read-back after a change, run before its journal is cleared.
+
+    Status lists exactly the paths written, HEAD has not moved, the lock is
+    still ours, and the dataset is exactly the manifest ``expected``'s.
+    """
+
+    def read_back(root: Path, expected: str | None, changed: frozenset[str]) -> None:
+        require_changes(root, changed)
+        if current_branch(root) != (branch, head):
+            raise _refused(RefusalReason.CORPUS_TREE_MISMATCH, "head")
+        if not held_by_us(root, held):
+            raise _refused(RefusalReason.CORPUS_LOCKED, "checkout")
+        if read_any_dataset_files(root)[0].manifest_sha256 != expected:
+            raise _refused(RefusalReason.CORPUS_TREE_MISMATCH, MANIFEST_PATH)
+
+    return read_back
+
+
+def lockable_checkout(raw: Path) -> Path:
+    """A path safe to make the lock in: canonical, not forbidden, private, its own ``.git``.
+
+    Raises:
+        ForarbeiderRefusedError: the guard's code for the first that fails.
+    """
+    path = canonical_checkout(raw)
+    require_not_forbidden(path)
+    require_private(path)
+    require_own_git_dir(path)
+    return path
+
+
+def verify_checkout(
+    raw: Path,
+    target_branch: str,
+    held: HeldLock | None = None,
+    changed: frozenset[str] = frozenset(),
+) -> CheckoutState:
     """Prove ``raw`` is a dedicated, clean lovverk release clone on ``target_branch``.
+
+    ``held`` is the caller's own lock, the one lock accepted; ``changed`` the
+    dataset files the caller just wrote, the only changes accepted.
 
     Raises:
         ForarbeiderRefusedError: the first condition it cannot prove, with a fixed code.
@@ -431,17 +562,12 @@ def verify_checkout(raw: Path, target_branch: str) -> CheckoutState:
     path = canonical_checkout(raw)
     require_not_forbidden(path)
     require_private(path)
-    _repository(path)
-    branch, head = current_branch(path)
-    if branch != target_branch:
-        raise _refused(RefusalReason.CHECKOUT_BRANCH_MISMATCH, "branch")
-    require_structure(path)
-    roots = trusted_roots(path)
-    require_no_history_overrides(path)
-    require_clean(path)
+    _repository(path, held)
+    head, roots = _on_branch(path, target_branch)
+    require_clean(path, changed)
     dataset, _ = read_any_dataset_files(path)
     return CheckoutState(
-        branch=branch,
+        branch=target_branch,
         head_commit=head,
         base_manifest_sha256=dataset.manifest_sha256,
         root_commits=roots,

@@ -29,7 +29,7 @@ from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.forarbeider.batch_clearance import plan_of
+from lovspor.forarbeider.batch_clearance import Batch, plan_of
 from lovspor.forarbeider.batch_commands import BatchPlanRequest, batch_evidence, read_request
 from lovspor.forarbeider.batch_models import BatchCounts, BatchPlan
 from lovspor.forarbeider.corpus_models import MANIFEST_PATH
@@ -41,6 +41,7 @@ from lovspor.forarbeider.release_commands import (
     forbidden_trees,
     stored_record,
 )
+from lovspor.forarbeider.release_lock import HeldLock
 from lovspor.forarbeider.release_models import digest, record_text
 from lovspor.forarbeider.release_store import refused_as
 from lovspor.forarbeider.staging import checked_directory, private_directory_exists
@@ -87,6 +88,7 @@ class ApplyVerdict(NamedTuple):
     binding: ApplyBinding
     binding_sha256: str
     evaluated_at: datetime
+    batch: Batch
 
 
 def _now() -> datetime:
@@ -134,8 +136,10 @@ def _difference(replayed: BatchPlan, plan: BatchPlan) -> str:
 
 def reproduce(
     scope: ReleaseScope, ask: ApplyPreflightRequest, stored: tuple[str, BatchPlan], now: datetime
-) -> BatchPlan:
+) -> tuple[BatchPlan, Batch]:
     """The plan evaluated again at ``now`` and stamped with its own moment: it must be the plan.
+
+    Returned with the evidence it was evaluated from, which a batch apply renders.
 
     Raises:
         ForarbeiderRefusedError: ``target_branch_mismatch: request``, ``plan_not_reproduced``,
@@ -151,14 +155,15 @@ def reproduce(
         source_proof=ask.source_proof,
         at=now.isoformat(),
     )
-    replayed = plan_of(batch_evidence(scope, evaluation, batch)._replace(at=plan.at))
+    evidence = batch_evidence(scope, evaluation, batch)._replace(at=plan.at)
+    replayed = plan_of(evidence)
     if replayed.source_proof_sha256 != plan.source_proof_sha256:
         raise ForarbeiderRefusedError(RefusalReason.PLAN_NOT_REPRODUCED, "source_proof")
     if digest(record_text(replayed).encode()) != sha:
         raise ForarbeiderRefusedError(
             RefusalReason.PLAN_NOT_REPRODUCED, _difference(replayed, plan)
         )
-    return replayed
+    return replayed, evidence
 
 
 def binding_of(sha: str, plan: BatchPlan, state: CheckoutState) -> ApplyBinding:
@@ -185,19 +190,24 @@ def binding_of(sha: str, plan: BatchPlan, state: CheckoutState) -> ApplyBinding:
     )
 
 
-def apply_preflight(scope: ReleaseScope, ask: ApplyPreflightRequest, now: datetime) -> ApplyVerdict:
+def apply_preflight(
+    scope: ReleaseScope, ask: ApplyPreflightRequest, now: datetime, held: HeldLock | None = None
+) -> ApplyVerdict:
     """The whole preflight, read-only: the one function a batch apply must call before it writes.
+
+    ``held`` is the batch apply's own lock on the clone, the one lock the
+    guard then accepts; every other check runs exactly as without it.
 
     Raises:
         ForarbeiderRefusedError: the first condition that does not hold; nothing was written.
     """
     workspace = existing_workspace(scope)
     sha, plan = stored_plan(workspace, ask.plan)
-    state = verify_checkout(ask.checkout, plan.target_branch)
-    replayed = reproduce(scope, ask, (sha, plan), now)
+    state = verify_checkout(ask.checkout, plan.target_branch, held)
+    replayed, evidence = reproduce(scope, ask, (sha, plan), now)
     binding = binding_of(sha, replayed, state)
     bound = digest(record_text(binding).encode())
-    return ApplyVerdict(sha, replayed, state, binding, bound, now)
+    return ApplyVerdict(sha, replayed, state, binding, bound, now, evidence)
 
 
 def apply_preflight_impl(scope: ReleaseScope, ask: ApplyPreflightRequest) -> str:

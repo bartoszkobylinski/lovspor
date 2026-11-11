@@ -18,8 +18,9 @@ digests) or ``owner_review`` (the per-chapter path, with its review
 provenance). A version 1 manifest is read as version 2 by :func:`lift_v1`:
 v1 was written only by the per-chapter path, so each chapter is
 ``owner_review``, and what v1 never recorded stays ``null`` under
-``provenance: manifest_v1``, never filled in. Nothing writes version 2 yet;
-:func:`parse_manifest` stays version 1 only.
+``provenance: manifest_v1``, never filled in. Only the B1b batch apply and
+withdrawal write version 2 (:func:`manifest_v2_text`); :func:`parse_manifest`
+stays version 1 only, and :func:`parse_any_manifest` reads both.
 """
 
 from __future__ import annotations
