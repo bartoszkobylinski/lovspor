@@ -221,6 +221,11 @@ def _commit(repo: Path, message: str, date: str | None = None) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
+def _ago(delta: timedelta) -> str:
+    """A date `delta` before now; the one-hour margins dwarf the test's own runtime."""
+    return (datetime.now(UTC) - delta).isoformat(timespec="seconds")
+
+
 def _git(repo: Path, *args: str) -> str:
     done = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True)
     return done.stdout.strip()
@@ -280,7 +285,9 @@ def test_a_rerun_of_an_incomplete_night_measures_the_same_range(main_repo: Path)
 
 @pytest.mark.parametrize("tag", ["missing", "not-an-ancestor"])
 def test_an_unusable_tag_falls_back_to_the_last_week_old_commit(main_repo: Path, tag: str) -> None:
-    old = _commit(main_repo, "old", OLD)
+    _commit(main_repo, "old", OLD)
+    old = _commit(main_repo, "just over a week", _ago(timedelta(days=7, hours=1)))
+    _commit(main_repo, "just under a week", _ago(timedelta(days=6, hours=23)))
     if tag == "not-an-ancestor":
         _git(main_repo, "checkout", "-q", "-b", "rewritten")
         _git(main_repo, "tag", "nightly-mutation-base", _commit(main_repo, "elsewhere"))
@@ -296,11 +303,56 @@ def test_an_unusable_tag_falls_back_to_the_last_week_old_commit(main_repo: Path,
 
 def test_no_tag_and_no_week_old_commit_fails_the_range_step(main_repo: Path) -> None:
     """A failed range step leaves no result: the verdict is tool_failure, so the run is red."""
-    three_days = (datetime.now(UTC) - timedelta(days=3)).isoformat(timespec="seconds")
-    _commit(main_repo, "inside the week", three_days)
+    _commit(main_repo, "just under a week", _ago(timedelta(days=6, hours=23)))
     _commit(main_repo, "new")
 
     status, out = _resolve_range(main_repo)
 
     assert status == 1
     assert "base" not in out
+
+
+def _move_tag(repo: Path, head: str) -> int:
+    """The workflow's own tag step, for a night whose verdict was complete."""
+    body = str(_step("Move the base tag")["run"]).replace("${{ steps.range.outputs.head }}", head)
+    done = subprocess.run(
+        ["bash", "-e", "-c", body],
+        cwd=repo,
+        capture_output=True,
+        env={"PATH": os.environ["PATH"], "BASE_TAG": "nightly-mutation-base"},
+        check=False,
+    )
+    return done.returncode
+
+
+def test_the_night_after_an_incomplete_one_still_measures_its_commits(main_repo: Path) -> None:
+    _commit(main_repo, "old", OLD)
+    tagged = _commit(main_repo, "measured")
+    _git(main_repo, "tag", "nightly-mutation-base", tagged)
+    _commit(main_repo, "night 1 head: budget exceeded, the tag step is skipped")
+    later = _commit(main_repo, "landed the next day")
+
+    status, out = _resolve_range(main_repo)
+
+    assert status == 0
+    assert (out["base"], out["head"]) == (tagged, later)
+    assert _git(main_repo, "rev-parse", "nightly-mutation-base") == tagged
+
+
+def test_a_completed_night_moves_the_tag_and_the_next_range_starts_there(
+    main_repo: Path, tmp_path: Path
+) -> None:
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    _git(main_repo, "remote", "add", "origin", str(origin))
+    _commit(main_repo, "old", OLD)
+    _git(main_repo, "tag", "nightly-mutation-base", _commit(main_repo, "measured"))
+    night = _commit(main_repo, "night head")
+    _, first = _resolve_range(main_repo)
+
+    assert _move_tag(main_repo, first["head"]) == 0
+    later = _commit(main_repo, "landed after the night")
+    _, second = _resolve_range(main_repo)
+
+    assert _git(origin, "rev-parse", "nightly-mutation-base") == night
+    assert (second["base"], second["head"]) == (night, later)
