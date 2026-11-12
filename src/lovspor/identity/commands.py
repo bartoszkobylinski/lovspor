@@ -8,9 +8,15 @@ applying the repair to lovverk is a separate owner decision (migration plan
 :mod:`lovspor.cli` sits at its size ratchet; the decorated command only
 calls :func:`identity_plan_impl`, so the body stays inside the mutation gate.
 
+``--u1-threshold`` is required and recorded in the report: a slug reused at
+or before that manifest revision keeps its public URL (its owner is the
+holder at the threshold, earlier holders recorded as prior holders); a reuse
+after it falls under U1 (owner decision on #871: lovverk ``f6d7e25bb``).
+
 Exit codes: 0 the report is written; 3 the report is written but the plan is
-blocked (a ``doc_id`` no manifest revision ever held, or a registry
-conflict); 2 the input could not be read and nothing was written.
+blocked (a ``doc_id`` no manifest revision ever held, a registry conflict, or
+a threshold that is not a manifest revision reachable from the base); 2 the
+input could not be read and nothing was written.
 """
 
 import json
@@ -36,14 +42,19 @@ def _ensure_outside(repo: Path, out: Path) -> None:
         raise IdentityMigrationError(f"--out {out} is inside the corpus checkout {repo}")
 
 
-def identity_plan_impl(repo: Path, base: str, out: Path) -> tuple[int, str]:
+def identity_plan_impl(repo: Path, base: str, threshold: str, out: Path) -> tuple[int, str]:
     """Plan the repair and write the report; ``(exit code, summary line)``."""
     _ensure_outside(repo, out)
-    plan = plan_migration(repo, base)
+    plan = plan_migration(repo, base, threshold)
     out.mkdir(parents=True, exist_ok=True)
     sums = write_report(plan, out)
     data = report_data(plan)
-    summary = {"base_commit": plan.base.commit, "counts": data["counts"], "sha256": sums}
+    summary = {
+        "base_commit": plan.base.commit,
+        "u1_threshold": data["u1_threshold"],
+        "counts": data["counts"],
+        "sha256": sums,
+    }
     code = EXIT_BLOCKED if plan.blocked else 0
     return code, json.dumps(summary, sort_keys=True, ensure_ascii=False)
 
@@ -52,11 +63,18 @@ def identity_plan_impl(repo: Path, base: str, out: Path) -> tuple[int, str]:
 def identity_plan(
     repo: Annotated[Path, typer.Option(help="A lovverk checkout; read through git only.")],
     base: Annotated[str, typer.Option(help="Base commit the repair would build on.")],
+    u1_threshold: Annotated[
+        str,
+        typer.Option(
+            "--u1-threshold",
+            help="Manifest revision up to which a slug reuse keeps its public URL.",
+        ),
+    ],
     out: Annotated[Path, typer.Option(help="Report directory, outside the checkout.")],
 ) -> None:
     """Dry-run the #871 identity repair: tombstones, slug registry, U1 renames."""
     try:
-        code, summary = identity_plan_impl(repo, base, out)
+        code, summary = identity_plan_impl(repo, base, u1_threshold, out)
     except IdentityMigrationError as error:
         typer.echo(f"identity-plan: {error}", err=True)
         raise typer.Exit(EXIT_UNREADABLE) from error

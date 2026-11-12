@@ -37,13 +37,30 @@ DIRECTORY_OF_DATASET = {
 }
 
 
+class PriorHolder(BaseModel):
+    """A document that held a slug before its owner, with the manifest evidence.
+
+    Recorded when the migration's U1 threshold keeps a slug with the document
+    that held it at the threshold although an earlier document held it first:
+    the earlier identity violation is kept on record, never dropped (#871).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    doc_id: str
+    first_commit: str
+    last_commit: str
+
+
 class SlugOwner(BaseModel):
-    """Who owns one slug, and since which manifest (its ``generated_at``)."""
+    """Who owns one slug, since which manifest (its ``generated_at``), and who held
+    it before the owner (``prior_holders``, oldest first; usually none)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     owner: str
     assigned_at: str
+    prior_holders: tuple[PriorHolder, ...] = ()
 
 
 class SlugRegistry(BaseModel):
@@ -102,14 +119,19 @@ def with_manifest(registry: SlugRegistry, manifest: Manifest) -> SlugRegistry:
 
 
 def ensure_append_only(prior: SlugRegistry, new: SlugRegistry) -> None:
-    """Raise unless ``new`` keeps every entry of ``prior`` with the same owner."""
+    """Raise unless ``new`` keeps every entry of ``prior`` unchanged.
+
+    An entry is immutable as a whole: its owner, its ``assigned_at`` and its
+    recorded prior holders.
+    """
     for directory, entries in sorted(prior.slugs.items()):
         for slug, entry in sorted(entries.items()):
-            held = new.owner_of(directory, slug)
-            if held != entry.owner:
+            kept = new.slugs.get(directory, {}).get(slug)
+            if kept != entry:
+                held = None if kept is None else kept.owner
                 raise SlugOwnershipError(
-                    f"{directory}/{slug}: owner {entry.owner} would become {held} — "
-                    "a registry entry is never deleted and never changes owner (#871)",
+                    f"{directory}/{slug}: entry owned by {entry.owner} would become {held} "
+                    "or change — a registry entry is never deleted or rewritten (#871)",
                 )
 
 
@@ -125,8 +147,16 @@ def read_registry(repo: Path) -> SlugRegistry | None:
 
 
 def registry_json(registry: SlugRegistry) -> str:
-    """``slugs.json`` as written: sorted keys, two-space indent, final newline."""
+    """``slugs.json`` as written: sorted keys, two-space indent, final newline.
+
+    An entry without prior holders omits the key, so the common entry stays
+    ``{"assigned_at": …, "owner": …}``.
+    """
     data = registry.model_dump(mode="json")
+    for entries in data["slugs"].values():
+        for entry in entries.values():
+            if not entry["prior_holders"]:
+                del entry["prior_holders"]
     return json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
 
 

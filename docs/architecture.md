@@ -101,7 +101,7 @@ facade.
 | `identity/records.py` | A manifest record never disappears: every sync manifest write refuses to drop a prior `doc_id`. | `replace_manifest()`, `ensure_no_record_loss()` |
 | `identity/registry.py` | `slugs.json`: `directory → slug → first owner`, append-only, owners immutable; laid over manifest ownership for `resolve_collisions`; extended (never bootstrapped) by sync. | `SlugRegistry`, `update_slug_registry()`, `registered_ownership()` |
 | `identity/history.py` | `history/by-id/<doc_id>.json`, append-only, each event with its path; `history/<slug>.json` written only for the slug's owner. | `write_document_history()`, `merge_append_only()` |
-| `identity/corpus_git.py`, `walk.py`, `migration.py`, `plan.py`, `report.py`, `commands.py`, `apply.py` | Offline repair plan of a pre-#871 corpus from its manifest history (read-only git); deterministic dry-run report. `apply.py` is test-only in this change. | `plan_migration()`, `write_report()`; command `lovspor ops identity-plan` |
+| `identity/corpus_git.py`, `walk.py`, `migration.py`, `audit.py`, `plan.py`, `report.py`, `commands.py`, `apply.py` | Offline repair plan of a pre-#871 corpus from its manifest history (read-only git), with a recorded U1 threshold (`--u1-threshold`): a reuse at or before it keeps its URL and records the prior holders, a later one is renamed. Reused-slug fate table, restored-tombstone collision audit, deterministic dry-run report. `apply.py` is test-only in this change. | `plan_migration()`, `write_report()`; command `lovspor ops identity-plan` |
 
 ### `sync/` — orchestration + IO + git
 

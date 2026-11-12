@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from lovspor.errors import IdentityMigrationError
-from lovspor.identity.migration import build_registry
+from lovspor.identity.migration import build_registry, threshold_owner
 from lovspor.identity.plan import plan_migration
 from lovspor.identity.registry import SlugOwner, SlugRegistry, registry_json
 from lovspor.identity.walk import parse_revision, raw_address, walk_manifests
@@ -69,8 +69,13 @@ def test_the_smallest_doc_id_wins_a_slug_first_held_by_two(tmp_path: Path) -> No
 
     walk = walk_manifests(repo, sha)
 
-    assert walk.first_holder["forskrifter"]["x"].doc_id == "sf-1"
-    assert walk.holders["forskrifter"]["x"] == ["sf-1", "sf-2"]
+    spans = walk.holders["forskrifter"]["x"]
+    assert [(s.doc_id, s.first_commit, s.last_commit) for s in spans] == [
+        ("sf-1", sha, sha),
+        ("sf-2", sha, sha),
+    ]
+    assert threshold_owner(spans, walk, -1).doc_id == "sf-1"
+    assert threshold_owner(spans, walk, 0).doc_id == "sf-1"
 
 
 def test_a_document_that_comes_back_is_not_missing(tmp_path: Path) -> None:
@@ -96,10 +101,10 @@ def test_an_existing_registry_is_kept_and_a_disagreeing_first_holder_is_a_confli
     sha = commit_all(repo, "seed")
     existing = SlugRegistry().assign("forskrifter", "x", SlugOwner(owner="sf-9", assigned_at="t"))
 
-    registry, conflicts = build_registry(walk_manifests(repo, sha), existing)
+    registry, conflicts = build_registry(walk_manifests(repo, sha), existing, -1)
 
     assert registry.owner_of("forskrifter", "x") == "sf-9"
-    assert [(c.slug, c.registered_owner, c.first_holder) for c in conflicts] == [
+    assert [(c.slug, c.registered_owner, c.planned_owner) for c in conflicts] == [
         ("x", "sf-9", "sf-1")
     ]
 
@@ -137,3 +142,24 @@ def test_an_invalid_base_manifest_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(IdentityMigrationError, match="invalid manifest.json"):
         plan_migration(repo, "HEAD")
+
+
+def test_a_span_runs_from_first_to_last_revision_holding_the_address(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path / "lovverk")
+    write_manifest_json(repo, {"sf-1": record("sf-1", "x")}, "2026-05-01T00:00:00Z")
+    first = commit_all(repo, "r1")
+    write_manifest_json(repo, {"sf-1": record("sf-1", "x")}, "2026-05-02T00:00:00Z")
+    last = commit_all(repo, "r2")
+    write_manifest_json(repo, {"sf-2": record("sf-2", "x")}, "2026-05-03T00:00:00Z")
+    sha = commit_all(repo, "r3")
+
+    walk = walk_manifests(repo, sha)
+
+    spans = walk.holders["forskrifter"]["x"]
+    assert [(s.doc_id, s.first_commit, s.last_commit) for s in spans] == [
+        ("sf-1", first, last),
+        ("sf-2", sha, sha),
+    ]
+    assert spans[1].assigned_at == "2026-05-03T00:00:00+00:00"
+    assert threshold_owner(spans, walk, walk.position(last)).doc_id == "sf-1"
+    assert threshold_owner(spans, walk, walk.position(sha)).doc_id == "sf-2"

@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from lovspor.errors import IdentityMigrationError
+from lovspor.identity.audit import CollisionAudit, PlanFacts, SlugFate, collision_audit, slug_fates
 from lovspor.identity.corpus_git import (
     MANIFEST_PATH,
     list_files,
@@ -18,12 +19,9 @@ from lovspor.identity.corpus_git import (
     resolve_commit,
 )
 from lovspor.identity.migration import (
-    Collision,
-    LaterHolder,
     RegistryConflict,
     Rename,
     RestoredTombstone,
-    ReusedSlug,
     build_registry,
     renamed_record,
     restored_record,
@@ -35,7 +33,6 @@ from lovspor.identity.registry import (
     REGISTRY_FILENAME,
     SlugOwner,
     SlugRegistry,
-    record_address,
 )
 from lovspor.identity.walk import ManifestWalk, walk_manifests
 from lovspor.storage.manifest import Manifest
@@ -64,18 +61,31 @@ class BaseState(BaseModel):
     history: dict[str, str | None]
 
 
+class Threshold(BaseModel):
+    """The U1 threshold as given, resolved, and placed in the manifest walk."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ref: str | None
+    commit: str | None
+    position: int
+    problem: str | None
+
+
 class MigrationPlan(BaseModel):
     """Everything the repair would change, and everything it found."""
 
     model_config = ConfigDict(frozen=True)
 
     base: BaseState
+    threshold: Threshold
     manifest_revisions: int
     restored: list[RestoredTombstone]
-    reused: list[ReusedSlug]
+    fates: list[SlugFate]
     renames: list[Rename]
-    collisions: list[Collision]
+    collisions: list[CollisionAudit]
     history_mismatches: list[HistoryMismatch]
+    orphan_history_doc_ids: list[str]
     unrecoverable: list[str]
     registry_conflicts: list[RegistryConflict]
     planned_manifest: Manifest
@@ -92,8 +102,15 @@ class MigrationPlan(BaseModel):
 
     @property
     def blocked(self) -> bool:
-        """True when the walk cannot answer for every identity the corpus names."""
-        return bool(self.unrecoverable or self.registry_conflicts)
+        """True when the walk cannot answer for every identity the corpus names,
+        or the U1 threshold is not a manifest revision of the walk."""
+        return bool(self.unrecoverable or self.registry_conflicts or self.threshold.problem)
+
+    @property
+    def orphans_not_restored(self) -> list[str]:
+        """Orphan-history ``doc_id``s the plan does not restore (expected: none)."""
+        restored = {tomb.doc_id for tomb in self.restored}
+        return [doc_id for doc_id in self.orphan_history_doc_ids if doc_id not in restored]
 
 
 def _json_blob(blob: bytes, what: str) -> object:
@@ -155,6 +172,26 @@ def read_base(repo: Path, base_ref: str) -> BaseState:
     )
 
 
+def resolve_threshold(repo: Path, ref: str | None, walk: ManifestWalk) -> Threshold:
+    """Place ``ref`` among the walked manifest revisions; a miss is a problem, not an error.
+
+    ``None`` grandfathers nothing (position -1): every reuse falls under U1.
+    A threshold that is not a manifest revision reachable from the base is
+    recorded as a problem, which blocks the plan; the plan is still computed
+    without grandfathering so the report shows what is at stake.
+    """
+    if ref is None:
+        return Threshold(ref=None, commit=None, position=-1, problem=None)
+    try:
+        commit = resolve_commit(repo, ref)
+    except IdentityMigrationError:
+        return Threshold(ref=ref, commit=None, position=-1, problem=f"{ref} is not a commit")
+    if commit not in walk.revisions:
+        problem = f"{commit} is not a manifest revision reachable from the base"
+        return Threshold(ref=ref, commit=commit, position=-1, problem=problem)
+    return Threshold(ref=ref, commit=commit, position=walk.position(commit), problem=None)
+
+
 class _Repair(BaseModel):
     """What the repair decides at the base: restored records, owners and renames."""
 
@@ -165,54 +202,6 @@ class _Repair(BaseModel):
     renames: list[Rename]
     manifest: Manifest
     registry: SlugRegistry
-
-
-def _later_holders(holders: list[str], owner: str, repair: _Repair) -> list[LaterHolder]:
-    restored = {tomb.doc_id for tomb in repair.restored}
-    return [
-        LaterHolder(doc_id=h, status=repair.manifest.documents[h].status, restored=h in restored)
-        for h in holders
-        if h != owner
-    ]
-
-
-def _reused(walk: ManifestWalk, repair: _Repair) -> list[ReusedSlug]:
-    """Every address more than one document held, with its owner and later holders."""
-    reused: list[ReusedSlug] = []
-    for directory, by_slug in sorted(walk.holders.items()):
-        for slug, holders in sorted(by_slug.items()):
-            owner = repair.registry.owner_of(directory, slug)
-            later = [] if owner is None else _later_holders(holders, owner, repair)
-            if owner is not None and later:
-                since = walk.first_holder[directory][slug].commit
-                reused.append(
-                    ReusedSlug(
-                        directory=directory,
-                        slug=slug,
-                        owner=owner,
-                        owner_since_commit=since,
-                        later_holders=later,
-                    ),
-                )
-    return reused
-
-
-def _collisions(restored: list[RestoredTombstone], base: Manifest) -> list[Collision]:
-    """Restored tombstones whose address the base gives another document."""
-    by_address: dict[tuple[str, str], list[str]] = {}
-    for doc_id in sorted(base.documents):
-        by_address.setdefault(record_address(base.documents[doc_id]), []).append(doc_id)
-    return [
-        Collision(
-            restored_doc_id=tomb.doc_id,
-            directory=tomb.directory,
-            slug=tomb.slug,
-            holder_at_base=holder,
-            holder_status=base.documents[holder].status,
-        )
-        for tomb in restored
-        for holder in by_address.get((tomb.directory, tomb.slug), [])
-    ]
 
 
 def _history_mismatches(
@@ -246,8 +235,8 @@ def _registry_with_renames(
     return registry
 
 
-def _repair(base: BaseState, walk: ManifestWalk) -> _Repair:
-    registry, conflicts = build_registry(walk, base.registry)
+def _repair(base: BaseState, walk: ManifestWalk, threshold: Threshold) -> _Repair:
+    registry, conflicts = build_registry(walk, base.registry, threshold.position)
     renames = u1_renames(base.manifest, registry)
     since = base.manifest.generated_at.isoformat()
     return _Repair(
@@ -280,22 +269,57 @@ def _changed_paths(repo: Path, base: BaseState, repair: _Repair) -> list[str]:
     return sorted(paths)
 
 
-def plan_migration(repo: Path, base_ref: str) -> MigrationPlan:
+def _orphans(base: BaseState) -> list[str]:
+    """``doc_id``s a slug history names that have no manifest record at the base."""
+    named = {doc_id for doc_id in base.history.values() if doc_id is not None}
+    return sorted(named - set(base.manifest.documents))
+
+
+class _Findings(BaseModel):
+    """What the plan reports beside the repair itself."""
+
+    model_config = ConfigDict(frozen=True)
+
+    fates: list[SlugFate]
+    collisions: list[CollisionAudit]
+    history_mismatches: list[HistoryMismatch]
+    orphan_history_doc_ids: list[str]
+    unrecoverable: list[str]
+
+
+def _findings(base: BaseState, walk: ManifestWalk, repair: _Repair, threshold: int) -> _Findings:
+    facts = PlanFacts(
+        walk=walk,
+        registry=repair.registry,
+        planned=repair.manifest,
+        restored=repair.restored,
+        renames=repair.renames,
+        threshold=threshold,
+    )
+    return _Findings(
+        fates=slug_fates(facts),
+        collisions=collision_audit(facts, base.manifest),
+        history_mismatches=_history_mismatches(base.history, repair.registry),
+        orphan_history_doc_ids=_orphans(base),
+        unrecoverable=sorted(set(_orphans(base)) - set(walk.last_seen)),
+    )
+
+
+def plan_migration(repo: Path, base_ref: str, threshold_ref: str | None = None) -> MigrationPlan:
     """The full repair plan for ``repo`` at ``base_ref``; reads, never writes."""
     base = read_base(repo, base_ref)
     walk = walk_manifests(repo, base.commit)
-    repair = _repair(base, walk)
+    threshold = resolve_threshold(repo, threshold_ref, walk)
+    repair = _repair(base, walk, threshold)
     return MigrationPlan(
         base=base,
+        threshold=threshold,
         manifest_revisions=len(walk.revisions),
         restored=repair.restored,
-        reused=_reused(walk, repair),
         renames=repair.renames,
-        collisions=_collisions(repair.restored, base.manifest),
-        history_mismatches=_history_mismatches(base.history, repair.registry),
-        unrecoverable=sorted({i for i in base.history.values() if i and i not in walk.last_seen}),
         registry_conflicts=repair.conflicts,
         planned_manifest=repair.manifest,
         planned_registry=repair.registry,
         changed_paths=_changed_paths(repo, base, repair),
+        **dict(_findings(base, walk, repair, threshold.position)),
     )

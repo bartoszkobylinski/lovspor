@@ -95,10 +95,16 @@ def test_the_first_holder_owns_the_slug(base: tuple[Path, dict[str, str]]) -> No
     registry = plan.planned_registry
     assert registry.owner_of("forskrifter", "x") == OLD
     assert registry.slugs["forskrifter"]["x"].assigned_at == "2026-05-01T00:00:00+00:00"
-    assert [(r.slug, r.owner, r.owner_since_commit) for r in plan.reused] == [
-        ("x", OLD, shas["r1"])
+    assert registry.slugs["forskrifter"]["x"].prior_holders == ()
+    assert [(f.slug, f.owner, f.reuse) for f in plan.fates] == [("x", OLD, ["post-threshold"])]
+    holders = [
+        (h.doc_id, h.role, h.first_commit, h.last_commit, h.renamed_to)
+        for h in plan.fates[0].holders
     ]
-    assert [(h.doc_id, h.status) for h in plan.reused[0].later_holders] == [(NEW, "current")]
+    assert holders == [
+        (OLD, "owner", shas["r1"], shas["r2"], None),
+        (NEW, "later", shas["r4"], shas["r4"], "x-2026"),
+    ]
 
 
 def test_the_later_holder_gets_a_distinct_slug_by_the_collision_rule(
@@ -120,7 +126,10 @@ def test_lists_collisions_mismatched_histories_and_changed_paths(
 
     plan = plan_migration(repo, "HEAD")
 
-    assert [(c.restored_doc_id, c.holder_at_base) for c in plan.collisions] == [(OLD, NEW)]
+    assert [
+        (c.restored_doc_id, c.holder_at_base, c.owner, c.owning_side, c.outcome)
+        for c in plan.collisions
+    ] == [(OLD, NEW, OLD, "restored", f"the holder moves to x-2026; the slug stays with {OLD}")]
     assert [(m.path, m.doc_id_in_file, m.owner) for m in plan.history_mismatches] == [
         ("forskrifter/history/x.json", NEW, OLD)
     ]
@@ -254,7 +263,19 @@ def test_cli_writes_the_report_and_prints_the_checksums(
     out = tmp_path / "report"
 
     result = CliRunner().invoke(
-        app, ["ops", "identity-plan", "--repo", str(repo), "--base", "HEAD", "--out", str(out)]
+        app,
+        [
+            "ops",
+            "identity-plan",
+            "--repo",
+            str(repo),
+            "--base",
+            "HEAD",
+            "--u1-threshold",
+            "HEAD",
+            "--out",
+            str(out),
+        ],
     )
 
     assert result.exit_code == 0, result.output
@@ -278,6 +299,8 @@ def test_cli_exits_3_on_a_blocked_plan(base: tuple[Path, dict[str, str]], tmp_pa
             str(repo),
             "--base",
             "HEAD",
+            "--u1-threshold",
+            "HEAD",
             "--out",
             str(tmp_path / "r"),
         ],
@@ -294,7 +317,19 @@ def test_cli_refuses_an_output_directory_inside_the_checkout(
     out = repo / "reports"
 
     result = CliRunner().invoke(
-        app, ["ops", "identity-plan", "--repo", str(repo), "--base", "HEAD", "--out", str(out)]
+        app,
+        [
+            "ops",
+            "identity-plan",
+            "--repo",
+            str(repo),
+            "--base",
+            "HEAD",
+            "--u1-threshold",
+            "HEAD",
+            "--out",
+            str(out),
+        ],
     )
 
     assert result.exit_code == 2
@@ -315,6 +350,8 @@ def test_cli_exits_2_on_an_unreadable_base(
             "--repo",
             str(repo),
             "--base",
+            "nope",
+            "--u1-threshold",
             "nope",
             "--out",
             str(tmp_path / "r"),
@@ -391,6 +428,8 @@ def test_cli_refuses_output_through_a_symlink_into_the_checkout(
             str(repo),
             "--base",
             "HEAD",
+            "--u1-threshold",
+            "HEAD",
             "--out",
             str(alias / "reports"),
         ],
@@ -400,3 +439,99 @@ def test_cli_refuses_output_through_a_symlink_into_the_checkout(
     assert "inside the corpus checkout" in result.output  # Plain typer.echo error line.
     assert not (repo / "reports").exists()
     assert git(repo, "status", "--porcelain") == before
+
+
+# --- U1 threshold (owner decision on #871: lovverk f6d7e25bb) ---
+
+
+def test_a_reuse_after_the_threshold_is_renamed(base: tuple[Path, dict[str, str]]) -> None:
+    repo, shas = base
+
+    plan = plan_migration(repo, "HEAD", shas["r3"])
+
+    assert plan.threshold.commit == shas["r3"]
+    assert plan.threshold.problem is None
+    assert [(r.doc_id, r.to_slug) for r in plan.renames] == [(NEW, "x-2026")]
+    assert plan.planned_registry.owner_of("forskrifter", "x") == OLD
+    assert not plan.blocked
+
+
+def test_a_reuse_at_the_threshold_keeps_the_url_and_records_the_prior_holder(
+    base: tuple[Path, dict[str, str]],
+) -> None:
+    repo, shas = base
+
+    plan = plan_migration(repo, "HEAD", shas["r4"])
+
+    entry = plan.planned_registry.slugs["forskrifter"]["x"]
+    assert entry.owner == NEW
+    assert entry.assigned_at == "2026-10-10T00:00:00+00:00"
+    assert [(p.doc_id, p.first_commit, p.last_commit) for p in entry.prior_holders] == [
+        (OLD, shas["r1"], shas["r2"])
+    ]
+    assert plan.renames == []
+    assert plan.planned_manifest.documents[NEW].markdown_path == "forskrifter/x.md"
+    assert [(f.owner, f.reuse) for f in plan.fates] == [(NEW, ["pre-threshold"])]
+    assert [c.outcome for c in plan.collisions] == [
+        "the holder keeps the slug; the restored document is recorded as a prior holder"
+    ]
+    assert plan.history_mismatches == []
+
+
+def test_recorded_prior_holders_reach_the_registry_file_and_the_report(
+    base: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
+    repo, shas = base
+
+    write_report(plan_migration(repo, "HEAD", shas["r4"]), tmp_path)
+
+    registry = json.loads((tmp_path / "planned/slugs.json").read_text(encoding="utf-8"))
+    assert registry["slugs"]["forskrifter"]["x"]["prior_holders"] == [
+        {"doc_id": OLD, "first_commit": shas["r1"], "last_commit": shas["r2"]}
+    ]
+    assert "prior_holders" not in registry["slugs"]["forskrifter"]["c"]
+    data = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert data["u1_threshold"]["commit"] == shas["r4"]
+    assert data["counts"]["pre_threshold_violations_recorded"] == 1
+    assert [v["slug"] for v in data["pre_threshold_violations"]] == ["x"]
+
+
+@pytest.mark.parametrize("threshold", ["no-such-ref", "readme-commit"])
+def test_a_threshold_missing_from_the_manifest_history_blocks_the_plan(
+    base: tuple[Path, dict[str, str]], tmp_path: Path, threshold: str
+) -> None:
+    repo, _ = base
+    write_doc(repo, "README.md", "x\n")
+    commit_all(repo, "a commit that does not touch the manifest")
+    git(repo, "tag", "readme-commit")
+
+    plan = plan_migration(repo, "HEAD", threshold)
+
+    assert plan.blocked
+    assert plan.threshold.problem is not None
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "identity-plan",
+            "--repo",
+            str(repo),
+            "--base",
+            "HEAD",
+            "--u1-threshold",
+            threshold,
+            "--out",
+            str(tmp_path / "r"),
+        ],
+    )
+    assert result.exit_code == 3
+    assert json.loads((tmp_path / "r" / "report.json").read_bytes())["blocked"] is True
+
+
+def test_every_orphan_history_doc_id_is_restored(base: tuple[Path, dict[str, str]]) -> None:
+    repo, _ = base
+
+    plan = plan_migration(repo, "HEAD")
+
+    assert plan.orphan_history_doc_ids == [LOST]  # x.json was rewritten to name NEW
+    assert plan.orphans_not_restored == []

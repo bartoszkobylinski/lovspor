@@ -10,6 +10,7 @@ from lovspor.errors import CorpusStateError, ParseError, SlugOwnershipError
 from lovspor.identity.registry import (
     DIRECTORY_OF_DATASET,
     REGISTRY_FILENAME,
+    PriorHolder,
     SlugOwner,
     SlugRegistry,
     ensure_append_only,
@@ -202,3 +203,28 @@ def test_a_newer_document_never_gets_a_registered_slug(tmp_path: Path) -> None:
 def test_directory_map_matches_where_documents_are_written(tmp_path: Path) -> None:
     for dataset, directory in DIRECTORY_OF_DATASET.items():
         assert document_io.dataset_dir(tmp_path, dataset) == tmp_path / directory
+
+
+_PRIOR = PriorHolder(doc_id="sf-20250101-0001", first_commit="c1", last_commit="c2")
+
+
+def test_prior_holders_are_part_of_the_immutable_entry() -> None:
+    recorded = SlugRegistry().assign(
+        "forskrifter", SLUG, OWNER.model_copy(update={"prior_holders": (_PRIOR,)})
+    )
+
+    with pytest.raises(SlugOwnershipError, match="never deleted or rewritten"):
+        ensure_append_only(recorded, _registry())
+
+
+def test_registry_json_records_prior_holders_only_where_there_are_some(tmp_path: Path) -> None:
+    recorded = _registry().assign(
+        "lover", "x", SlugOwner(owner="nl-2", assigned_at="t", prior_holders=(_PRIOR,))
+    )
+
+    data = json.loads(registry_json(recorded))
+
+    assert data["slugs"]["lover"]["x"]["prior_holders"] == [_PRIOR.model_dump()]
+    assert "prior_holders" not in data["slugs"]["forskrifter"][SLUG]
+    replace_registry(recorded, tmp_path)
+    assert read_registry(tmp_path) == recorded

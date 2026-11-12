@@ -32,7 +32,7 @@ touched.
 | `<dataset>/history/by-id/<doc_id>.json` | One document's events only, append-only, each with the path it had (#871) | `IdentityHistory` |
 | `<dataset>/embeddings/<slug>.bin` | int8-quantized per-section vectors (LSPE) | `EmbeddingFile` — see [`embeddings.md`](embeddings.md) |
 | `manifest.json` (corpus root) | The change-detection ledger; a record is tombstoned, never dropped (#871) | `Manifest` + `ManifestRecord` |
-| `slugs.json` (corpus root) | Slug ownership registry: `directory → slug → {owner, assigned_at}`, append-only; written only once the #871 migration has created it | `SlugRegistry` |
+| `slugs.json` (corpus root) | Slug ownership registry: `directory → slug → {owner, assigned_at, prior_holders?}`, entries immutable and append-only. `prior_holders` lists the documents that held a slug before an owner kept by the migration's U1 threshold. Written only once the #871 migration has created it | `SlugRegistry` |
 
 `<dataset>` is `lover` or `forskrifter`. Only the three `.md` kinds carry YAML
 front matter; the `.json` and `.bin` files do not.

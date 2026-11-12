@@ -22,13 +22,19 @@ Address = tuple[str, str]
 Documents = dict[str, dict[str, object]]
 
 
-class SlugClaim(BaseModel):
-    """The first holder of an address: which document, in which revision."""
+class HolderSpan(BaseModel):
+    """One document's tenure on an address: the first and last revision holding it.
+
+    ``assigned_at`` is the first revision's ``generated_at``. A document that
+    left the address and came back keeps one span, from its first to its last
+    revision there.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     doc_id: str
-    commit: str
+    first_commit: str
+    last_commit: str
     assigned_at: str
 
 
@@ -49,8 +55,11 @@ class ManifestWalk(BaseModel):
 
     revisions: list[str]
     last_seen: dict[str, LastSeen]
-    first_holder: dict[str, dict[str, SlugClaim]]
-    holders: dict[str, dict[str, list[str]]]
+    holders: dict[str, dict[str, list[HolderSpan]]]
+
+    def position(self, commit: str) -> int:
+        """The index of a manifest revision in walk order (oldest is 0)."""
+        return self.revisions.index(commit)
 
 
 @dataclass
@@ -58,8 +67,7 @@ class _State:
     previous: set[str] = field(default_factory=set)
     seen: dict[str, tuple[str, dict[str, object]]] = field(default_factory=dict)
     missing_since: dict[str, str] = field(default_factory=dict)
-    first: dict[Address, SlugClaim] = field(default_factory=dict)
-    holders: dict[Address, list[str]] = field(default_factory=dict)
+    spans: dict[Address, dict[str, HolderSpan]] = field(default_factory=dict)
 
 
 def raw_address(doc_id: str, record: object, commit: str) -> Address:
@@ -93,12 +101,13 @@ def _observe(state: _State, commit: str, generated_at: str, documents: Documents
         address = raw_address(doc_id, record, commit)
         state.seen[doc_id] = (commit, record)
         state.missing_since.pop(doc_id, None)
-        state.first.setdefault(
-            address, SlugClaim(doc_id=doc_id, commit=commit, assigned_at=generated_at)
-        )
-        held = state.holders.setdefault(address, [])
-        if doc_id not in held:
-            held.append(doc_id)
+        held = state.spans.setdefault(address, {})
+        span = held.get(doc_id)
+        if span is None:
+            span = HolderSpan(
+                doc_id=doc_id, first_commit=commit, last_commit=commit, assigned_at=generated_at
+            )
+        held[doc_id] = span.model_copy(update={"last_commit": commit})
     for gone in sorted(state.previous - documents.keys()):
         state.missing_since[gone] = commit
     state.previous = set(documents)
@@ -121,8 +130,7 @@ def _result(state: _State, revisions: list[str]) -> ManifestWalk:
     return ManifestWalk(
         revisions=revisions,
         last_seen=last_seen,
-        first_holder=_nest(state.first),  # type: ignore[arg-type]
-        holders=_nest(state.holders),  # type: ignore[arg-type]
+        holders=_nest({a: list(spans.values()) for a, spans in state.spans.items()}),  # type: ignore[arg-type]
     )
 
 
