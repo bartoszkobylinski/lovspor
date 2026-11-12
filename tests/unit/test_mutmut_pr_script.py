@@ -722,15 +722,15 @@ class TestInheritedTotalBudget:
         assert "budget: 1s for mutmut's setup + 1s x 1 changed file(s) = 2s" in result.stdout
         assert "mutation budget exceeded: after 2s" in result.stdout
 
-    @pytest.mark.parametrize("inherited", [None, INHERITED_TOTAL])
     def test_a_failed_stats_pass_never_reports_a_score(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inherited: str | None
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The shape of the failure #896 hit: mutmut cannot collect stats and exits 1."""
-        if inherited is None:
-            monkeypatch.delenv(TOTAL_BUDGET, raising=False)
-        else:
-            monkeypatch.setenv(TOTAL_BUDGET, inherited)
+        """The shape of the failure #896 hit: mutmut cannot collect stats and exits 1.
+
+        This pins goal item "no score from a failed stats pass"; it is not an isolation
+        test (the fake fails either way), which is why it is not parametrized on the
+        inherited budget.
+        """
         repo = _repo_with_one_changed_function(tmp_path, STATS_FAILED_MUTMUT)
 
         result = _run_script(repo)
