@@ -152,6 +152,7 @@ def test_an_unreadable_by_id_file_is_a_parse_error(tmp_path: Path) -> None:
 
 
 def test_write_document_history_writes_slug_and_by_id_files(tmp_path: Path) -> None:
+    init_repo(tmp_path)
     dataset = tmp_path / "forskrifter"
     lineage = _lineage()
 

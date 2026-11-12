@@ -781,6 +781,7 @@ def test_the_severity_registers_are_disjoint_and_cover_every_emitted_kind() -> N
     emitted = {
         "duplicate_path_ownership",
         "identity_mismatch",
+        "identity_schema",
         "malformed_language",
         "missing_document",
         "missing_embedding",

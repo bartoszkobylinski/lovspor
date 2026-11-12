@@ -18,6 +18,7 @@ from lovspor.identity.corpus_git import (
     read_blobs,
     resolve_commit,
 )
+from lovspor.identity.history_marker import refuse_downgrade
 from lovspor.identity.migration import (
     RegistryConflict,
     Rename,
@@ -30,12 +31,18 @@ from lovspor.identity.migration import (
 )
 from lovspor.identity.registry import (
     DIRECTORY_OF_DATASET,
-    REGISTRY_FILENAME,
     SlugOwner,
     SlugRegistry,
     require_consistent,
+    require_registry_covers,
 )
-from lovspor.identity.schema import ENFORCED_IDENTITY_SCHEMA, IDENTITY_FILENAME, parse_declaration
+from lovspor.identity.schema import (
+    ENFORCED_IDENTITY_SCHEMA,
+    IDENTITY_FILENAME,
+    LEGACY_IDENTITY_SCHEMA,
+    REGISTRY_FILENAME,
+    parse_declaration,
+)
 from lovspor.identity.walk import ManifestWalk, walk_manifests
 from lovspor.storage.manifest import Manifest
 
@@ -148,13 +155,17 @@ def _read_identity_schema(repo: Path, commit: str, registry: SlugRegistry | None
     """The identity schema the base declares, consistent with its registry.
 
     The same rules the sync enforces: a declared base without ``slugs.json``,
-    a ``slugs.json`` no declaration covers and an unknown declaration are
-    refused, so the plan never builds on a corpus the sync would not run on.
+    a ``slugs.json`` no declaration covers, an unknown declaration and an
+    undeclared base whose history shows it was migrated (a reverted or deleted
+    declaration) are refused, so the plan never builds on a corpus the sync
+    would not run on.
     """
     where = f"{commit}:{IDENTITY_FILENAME}"
     try:
         schema = parse_declaration(read_blob(repo, commit, IDENTITY_FILENAME), where)
         require_consistent(schema, registry is not None, commit)
+        if schema == LEGACY_IDENTITY_SCHEMA:
+            refuse_downgrade(repo, commit)
     except IdentitySchemaError as exc:
         raise IdentityMigrationError(str(exc)) from exc
     return schema
@@ -181,14 +192,27 @@ def _read_history(repo: Path, commit: str) -> dict[str, str | None]:
     return {path: _history_doc_id(blob) for path, blob in read_blobs(repo, commit, paths).items()}
 
 
+def _require_covered(registry: SlugRegistry | None, manifest: Manifest, commit: str) -> None:
+    """Refuse a base registry that misses an address of the base manifest (truncation)."""
+    if registry is None:
+        return
+    try:
+        require_registry_covers(registry, manifest, commit)
+    except IdentitySchemaError as exc:
+        raise IdentityMigrationError(str(exc)) from exc
+
+
 def read_base(repo: Path, base_ref: str) -> BaseState:
     """The manifest, registry and slug histories at ``base_ref``."""
     commit = resolve_commit(repo, base_ref)
     registry = _read_registry(repo, commit)
+    schema = _read_identity_schema(repo, commit, registry)
+    manifest = _read_manifest(repo, commit)
+    _require_covered(registry, manifest, commit)
     return BaseState(
         commit=commit,
-        identity_schema=_read_identity_schema(repo, commit, registry),
-        manifest=_read_manifest(repo, commit),
+        identity_schema=schema,
+        manifest=manifest,
         registry=registry,
         history=_read_history(repo, commit),
     )

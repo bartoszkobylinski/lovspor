@@ -75,10 +75,11 @@ class ManifestRecordLossError(CorpusStateError):
 class SlugOwnershipError(CorpusStateError):
     """A slug would change owner (#871, ADR-0023 draft point 2).
 
-    ``slugs.json`` maps every slug the corpus has published to the first
-    ``doc_id`` that held it; an entry is never deleted and its owner never
-    changes, so a later document never answers at an earlier document's
-    address.
+    ``slugs.json`` maps every slug the corpus has published to its owning
+    ``doc_id`` and the basis of that ownership (``first-holder``, or
+    ``threshold-exception`` with the earlier holders recorded as prior
+    holders); an entry is never deleted and its owner never changes, so no
+    other document ever answers at the owner's address.
     """
 
 
@@ -92,7 +93,9 @@ class IdentitySchemaError(CorpusStateError):
     ``identity.json`` declares the identity schema the corpus is at. A corpus
     that declares the enforced schema and lacks a readable ``slugs.json``, a
     declaration that is unreadable or names a version this engine does not
-    know, and a ``slugs.json`` that no declaration covers all fail closed:
+    know, a ``slugs.json`` that no declaration covers, an undeclared corpus
+    whose git history shows it was migrated (or cannot be read in full), and
+    a registry that misses an address the manifest holds all fail closed:
     slug ownership is never silently left unenforced.
     """
 

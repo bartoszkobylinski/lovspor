@@ -74,7 +74,7 @@ from lovspor.errors import (
 )
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_lineage
-from lovspor.identity import corpus_identity, registered_ownership, replace_manifest
+from lovspor.identity import registered_ownership, replace_manifest, verified_corpus_identity
 from lovspor.identity.history import FILES_PER_HISTORY, write_document_history
 from lovspor.parsing.placeholder import is_content_placeholder
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
@@ -661,7 +661,7 @@ def _ensure_clean_corpus(path: Path) -> None:
     clones lovverk fresh each run, so this only fires on a persistent
     checkout carrying crash residue; the operator inspects ``git status``
     and, if it is residue, ``git reset --hard`` + ``git clean`` and re-runs.
-    Then the declared identity schema must be enforceable, before any write (#871).
+    Then the identity schema must be enforceable, before any write (#871, N1).
     """
     if has_uncommitted_changes(path):
         raise CorpusStateError(
@@ -670,7 +670,7 @@ def _ensure_clean_corpus(path: Path) -> None:
             f"committing. Inspect `git -C {path} status`; if this is crash "
             "residue, `git reset --hard` and `git clean -fd`, then re-run.",
         )
-    corpus_identity(path)
+    verified_corpus_identity(path)
 
 
 _REMOVAL_GUARD_MIN_DOCS = 20

@@ -38,6 +38,7 @@ from lovspor.identity.schema import (
     write_declaration,
 )
 from lovspor.storage.manifest import Manifest, ManifestRecord
+from tests.unit.identity_git_fixtures import init_repo
 
 AT = datetime(2026, 11, 1, tzinfo=UTC)
 SLUG = "endr-i-tollavgift"
@@ -211,6 +212,7 @@ def test_a_declared_corpus_with_a_registry_is_enforced(tmp_path: Path) -> None:
 
 
 def test_an_undeclared_corpus_is_the_named_legacy_mode(tmp_path: Path) -> None:
+    init_repo(tmp_path)
     identity = corpus_identity(tmp_path)
 
     assert isinstance(identity, LegacyCorpus)
@@ -220,6 +222,7 @@ def test_an_undeclared_corpus_is_the_named_legacy_mode(tmp_path: Path) -> None:
 def test_legacy_mode_syncs_on_manifest_ownership_and_says_so_once(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
+    init_repo(tmp_path)
     caplog.set_level(logging.INFO, logger="lovspor.identity.registry")
 
     assert registered_ownership(tmp_path, OWNERS) == OWNERS
@@ -233,6 +236,7 @@ def test_legacy_mode_syncs_on_manifest_ownership_and_says_so_once(
 
 
 def test_the_sync_writers_never_create_the_declaration_or_the_registry(tmp_path: Path) -> None:
+    init_repo(tmp_path)
     update_slug_registry(tmp_path, _manifest())
     registered_ownership(tmp_path, OWNERS)
     _write_history(tmp_path)

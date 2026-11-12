@@ -1,7 +1,7 @@
 """Read-only git access to a lovverk checkout for the identity migration (#871).
 
-Every command here reads: ``rev-parse``, ``log``, ``ls-tree`` and
-``cat-file``. ``--no-optional-locks`` keeps git from refreshing the index on
+Every command here reads: ``rev-parse``, ``rev-list``, ``log``, ``ls-tree``
+and ``cat-file``. ``--no-optional-locks`` keeps git from refreshing the index on
 the way, so a dry run against an operator's clone leaves no trace in it.
 List arguments only, never a shell.
 """
@@ -12,7 +12,9 @@ from pathlib import Path
 from lovspor.errors import IdentityMigrationError
 
 MANIFEST_PATH = "manifest.json"
-_GIT = ("git", "--no-optional-locks", "-c", "core.quotePath=false")
+#: ``--no-replace-objects``: a ``refs/replace/`` entry must not rewrite the
+#: history the identity guards read (#871, N1).
+_GIT = ("git", "--no-optional-locks", "--no-replace-objects", "-c", "core.quotePath=false")
 _BATCH_MISSING = b" missing\n"
 
 
@@ -34,6 +36,32 @@ def _git(repo: Path, *args: str, stdin: bytes | None = None) -> bytes:
 def resolve_commit(repo: Path, ref: str) -> str:
     """``ref`` as a full commit sha, so the plan names its input exactly."""
     return _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").decode().strip()
+
+
+def toplevel(repo: Path) -> Path:
+    """The root of the work tree ``repo`` lies in."""
+    return Path(_git(repo, "rev-parse", "--show-toplevel").decode().strip())
+
+
+def is_shallow(repo: Path) -> bool:
+    """True when ``repo`` is a shallow clone, whose history is cut off."""
+    return _git(repo, "rev-parse", "--is-shallow-repository").decode().strip() == "true"
+
+
+def has_commits(repo: Path) -> bool:
+    """False only for a repository no ref points into: nothing was ever committed."""
+    return bool(_git(repo, "rev-list", "-n", "1", "--all").strip())
+
+
+def last_commit_touching(repo: Path, rev: str, path: str) -> str | None:
+    """The newest commit reachable from ``rev`` that added, changed or deleted ``path``.
+
+    ``--full-history`` follows every parent of a merge, so a merge that drops
+    the file does not hide the side that added it; ``-1`` stops at the first
+    match, so a corpus that has the file pays for a short walk only.
+    """
+    out = _git(repo, "log", "-1", "--full-history", "--format=%H", rev, "--", path)
+    return out.decode().strip() or None
 
 
 def manifest_commits(repo: Path, base: str) -> list[str]:

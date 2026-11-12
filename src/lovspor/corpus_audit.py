@@ -19,9 +19,12 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from lovspor.errors import IdentitySchemaError
 from lovspor.headings import SECTION_HEADING
+from lovspor.identity import verified_corpus_identity
+from lovspor.identity.schema import IDENTITY_FILENAME
 from lovspor.rendering.document import LANGUAGE_TAG
-from lovspor.storage.manifest import Manifest, ManifestRecord
+from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.sync.document_io import dataset_dir
 
 _EMBEDDINGS_SUBDIR = "embeddings"
@@ -47,6 +50,7 @@ INTEGRITY_KINDS = frozenset(
     {
         "duplicate_path_ownership",
         "identity_mismatch",
+        "identity_schema",
         "missing_document",
         "missing_embedding",
         "orphan_document",
@@ -551,3 +555,28 @@ def audit_corpus(
         documents_checked=sum(1 for r in manifest.documents.values() if r.status == "current"),
         findings=tuple(findings),
     )
+
+
+def _identity_schema_findings(corpus_root: Path) -> list[AuditFinding]:
+    """The corpus's identity state, read as the sync reads it at start (#871, N1).
+
+    A corpus the sync would refuse (a deleted or reverted declaration, a
+    truncated registry, a history that cannot prove legacy) is an integrity
+    finding here, so a run that left it that way never reaches the push.
+    """
+    try:
+        verified_corpus_identity(corpus_root)
+    except IdentitySchemaError as exc:
+        return [AuditFinding(kind="identity_schema", path=IDENTITY_FILENAME, detail=str(exc))]
+    return []
+
+
+def audit_published_corpus(corpus_root: Path, renderer_version: int | None) -> AuditReport:
+    """``audit_corpus`` against the corpus's own manifest, with its identity state checked."""
+    manifest = read_manifest(corpus_root / "manifest.json")
+    report = audit_corpus(corpus_root, manifest, renderer_version)
+    findings = sorted(
+        [*report.findings, *_identity_schema_findings(corpus_root)],
+        key=lambda f: (f.kind, f.path),
+    )
+    return report.model_copy(update={"findings": tuple(findings)})
