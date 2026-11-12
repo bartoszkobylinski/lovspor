@@ -14,7 +14,7 @@ otherwise ``unresolved``. ADR-0020 D6: no precedence rule between instruments is
 The markup is synthetic; the sentences that carry the rule are the archive's.
 """
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -684,3 +684,56 @@ def test_collect_reads_no_host_evidence_without_a_host(tmp_path: Path) -> None:
     )
     evidence = collect(TARGET, [archive], cache_dir=tmp_path)
     assert (evidence.hosts, evidence.host_decisions) == ((), ())
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_conflicting_host_dates_are_unresolved_in_either_document_order(reverse: bool) -> None:
+    """R4/D6: conflicting instruments cannot prove a host commencement by precedence."""
+    conflicting = _decision(
+        "lti/2010/sf-20100401-0002.xml", "forskrift/2010-04-01-2", "2010-08-01",
+        "2010-04-01 12:00", "Ikraftsetting av lov 2. januar 2000 nr. 1 om verge",
+        "Loven trer i kraft 1. august 2010.",
+    )  # fmt: skip
+    decisions = (conflicting, FULL) if reverse else (FULL, conflicting)
+    timings = _timings(_evidence(_outer(REGION), host_decisions=decisions))
+    nested = timings[("§3", TARGET)]
+    assert (nested.status, nested.effective) == ("unresolved", None)
+    assert nested.reason.startswith(NESTED)
+    assert {OUTER, FULL.header.refid, conflicting.header.refid} <= {
+        proof.refid for proof in nested.proofs
+    }
+    assert timings[("§5", TARGET)].effective == date(2010, 1, 5)
+
+
+def test_known_from_uses_the_outer_publication_when_it_is_later_than_the_hosts() -> None:
+    """The two-instrument proof is known only after both instruments were published."""
+    outer = _outer(REGION)
+    outer = outer.model_copy(
+        update={"header": outer.header.model_copy(update={"published_at": datetime(2010, 8, 1)})}
+    )
+    timing = _nested(_evidence(outer))
+    assert (timing.status, timing.effective) == ("dated", date(2010, 7, 1))
+    assert timing.known_from == date(2010, 8, 1)
+    assert timing.retroactive is True
+
+
+def test_nested_date_stays_the_hosts_while_replay_waits_for_the_target_act() -> None:
+    """R1/R4: target commencement gates application without redating the nested item."""
+    target = _act(
+        TARGET, TARGET_ACT.member, ("§3", "Gammel tekst."), ("§5", "Femte."),
+        in_force="2011-01-01",
+    )  # fmt: skip
+    evidence = _evidence(_outer(REGION), act=target)
+    events = events_for(evidence)
+    nested = next(event for event in events if event.operation.address.section == "§3")
+    assert nested.timing.effective == date(2010, 7, 1)
+    commencement = commencement_for(evidence, events)
+    before = replay(target, commencement, events, date(2010, 12, 31))
+    assert before.status == "not_yet_in_force"
+    assert nested.operation.id in before.withheld
+    assert nested.operation.id not in before.applied
+    assert before.provisions == ()  # replay's existing pre-commencement contract
+    after = replay(target, commencement, events, date(2011, 1, 1))
+    assert after.status == "replayed"
+    assert nested.operation.id in after.applied
+    assert next(p for p in after.provisions if p.key == "§3").ledd[0].text == "Ny tekst."
