@@ -210,3 +210,27 @@ def test_the_budget_does_not_depend_on_the_start_time() -> None:
     run = str(step["run"])
     assert "date" not in run  # no deadline arithmetic: a late start keeps the full budget
     assert "cap=18000" in run
+
+
+@pytest.mark.parametrize("timezone", ["Europe/Oslo", "UTC"])
+def test_the_budget_step_publishes_300_minutes(tmp_path: Path, timezone: str) -> None:
+    """The documented fixed budget must reach GITHUB_OUTPUT, not just a variable."""
+    output = tmp_path / "github-output"
+    output.write_text("existing=value\n", encoding="utf-8")
+    step = _step("Budget")
+    done = subprocess.run(
+        ["bash", "-c", str(step["run"])],
+        capture_output=True,
+        text=True,
+        env={"GITHUB_OUTPUT": str(output), "TZ": timezone},
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    assert output.read_text(encoding="utf-8") == "existing=value\nseconds=18000\n"
+
+
+def test_the_mutation_step_receives_the_published_total_budget() -> None:
+    budget = _step("Budget")
+    assert budget["id"] == "budget"
+    step = _step("Nightly-scoped mutation testing")
+    assert step["env"] == {"MUTMUT_PR_TOTAL_BUDGET_SECONDS": "${{ steps.budget.outputs.seconds }}"}
