@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.parametrize("inherited_total", [None, "17", "invalid"])
 @pytest.mark.parametrize(
     ("count", "setup", "per_file", "expected_setup", "expected_file", "expected_total"),
     [
@@ -26,8 +27,15 @@ def test_setup_is_added_once_to_the_changed_files_budget(
     expected_setup: int,
     expected_file: int,
     expected_total: int,
+    inherited_total: str | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Enforce the default and override formula documented in decisions.md §9a."""
+    # Reproduce the nightly environment even when pytest runs outside that job.
+    if inherited_total is None:
+        monkeypatch.delenv("MUTMUT_PR_TOTAL_BUDGET_SECONDS", raising=False)
+    else:
+        monkeypatch.setenv("MUTMUT_PR_TOTAL_BUDGET_SECONDS", inherited_total)
     script = Path(__file__).resolve().parents[2] / "scripts" / "mutmut-pr.sh"
     body = script.read_text(encoding="utf-8")
     # Execute only assignments and the budget notice, never the runner or cleanup.
@@ -35,6 +43,9 @@ def test_setup_is_added_once_to_the_changed_files_budget(
     end = body.index('max_children="', start)
     budget_block = body[start:end]
     env = os.environ.copy()
+    # The nightly job exports a whole-run wall-clock budget, which replaces this formula
+    # in mutmut-pr.sh; mutmut's baseline pytest run inherits it, so drop it here.
+    env.pop("MUTMUT_PR_TOTAL_BUDGET_SECONDS", None)
     for name, value in (
         ("MUTMUT_PR_SETUP_BUDGET_SECONDS", setup),
         ("MUTMUT_PR_FILE_BUDGET_SECONDS", per_file),
