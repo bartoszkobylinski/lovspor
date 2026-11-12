@@ -191,6 +191,10 @@ The ladder's digest is `c3f7df65…` → `bac215f61775ae1324169630f923bf9019cd05
 - the Phase-1 pilot reproduction `tests/integration/test_legaltime_pilot.py`: **9 passed**, byte-for-byte against the regenerated files;
 - `tests/unit/test_legaltime_893_nested_timing.py`: **55 passed**, including the 3 cases the Codex test author added in `4a0a38c8`.
 
+**The same seven files against the pre-fix source** (frozen `src/` of `ed804724`): **210 passed**. They hold on both sides, as preservation tests must.
+
+**Pilots, field by field.** For each of arveloven, personopplysningsloven, sivilombudsloven and språklova, the B0 report and the after report differ in exactly one top-level key, `replay_version` (`legaltime-replay-6` → `legaltime-replay-7`). Every other key is equal: states, events, verification, commencement, members, inputs, archives and oracle.
+
 **Preserved:**
 - the #856–#859, Phase 4B and #872 tests (the legaltime unit suite: 1,249 before this file, all passing);
 - the four Phase-1 pilots (byte-identical apart from the version line);
