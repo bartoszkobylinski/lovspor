@@ -22,7 +22,7 @@ from lovspor.legaltime.archive import Evidence
 from lovspor.legaltime.commencement import Timing
 from lovspor.legaltime.document import Document, parse_document
 from lovspor.legaltime.instructions import interpret
-from lovspor.legaltime.nesting import nesting
+from lovspor.legaltime.nesting import _place, nesting
 from lovspor.legaltime.replay import replay
 from lovspor.legaltime.run import commencement_for, events_for, unattributed_for
 
@@ -421,3 +421,65 @@ def test_falsely_dating_the_item_would_change_the_historical_text() -> None:
     nested_id = next(e.operation.id for e in events if e.operation.address.section == "§3")
     assert nested_id not in section_3(date(2010, 3, 1))  # replay-6 had applied it here
     assert nested_id in section_3(date(2010, 7, 1))
+
+
+# ------------------------------------------------------------- review round 1 (Codex)
+
+
+def test_a_region_that_does_not_open_with_a_numbered_item_is_unproven() -> None:
+    """After the host, an unnumbered instruction may be the outer law's own: never guessed."""
+    region = (_p("§ 10 oppheves."), *REGION)
+    outer = _outer(region)
+    (nest,) = nesting(outer, interpret(outer)).nests
+    assert nest.problem is not None and nest.problem.startswith(NESTED)
+    assert _nested(_evidence(outer)).status == "unresolved"
+
+
+def test_an_item_naming_the_host_act_itself_leaves_the_region_unproven() -> None:
+    region = (
+        *REGION,
+        _p("3. I lov 2. januar 2000 nr. 1 om verge skal § 1 lyde:"),
+        _future("§1", "E", "F."),
+    )
+    timing = _nested(_evidence(_outer(region)))
+    assert (timing.status, timing.effective) == ("unresolved", None)
+
+
+def test_a_payload_sentence_equal_to_the_outer_clause_neither_moves_nor_refuses_it() -> None:
+    """An item's replacement may read "Loven trer i kraft straks."; it is text, not a clause."""
+    item = (_p("3. I lov 3. mars 2002 nr. 3 om annet skal § 6 lyde:"),
+            _future("§6", "Ikraft", "Loven trer i kraft straks."))  # fmt: skip
+    timings = _timings(_evidence(_outer((*REGION, *item))))
+    assert (timings[("§3", TARGET)].status, timings[("§3", TARGET)].effective) == (
+        "dated",
+        date(2010, 7, 1),
+    )
+    assert timings[("§5", TARGET)].effective == date(2010, 1, 5)
+
+
+def test_a_clause_read_both_inside_and_outside_stays_the_outer_laws_and_refuses_the_region() -> (
+    None
+):
+    region = (*REGION, _p("Loven trer i kraft straks."))
+    timings = _timings(_evidence(_outer(region)))
+    assert timings[("§3", TARGET)].status == "unresolved"
+    assert (timings[("§5", TARGET)].status, timings[("§5", TARGET)].effective) == (
+        "dated",
+        date(2010, 1, 5),
+    )
+
+
+@pytest.mark.parametrize(
+    ("op_id", "place"),
+    [
+        ("lov/2013-04-05-12#1:I:253.0", (1, 253)),
+        ("lov/2021-06-18-97#18:Kapittel 18. Avsluttende bestemmelser:101.0", (18, 101)),
+        ("lov/2008-03-07-4#0:I:18.0-40", (0, 18)),  # a structure operation's provision suffix
+        ("lov/2010-01-05-5#0:I:7.1.0", (0, 7)),  # a substitution item's offset
+        ("lov/2010-01-05-5#2:A: B:9.0", (2, 9)),  # a part label holding a colon
+    ],
+)
+def test_every_operation_id_form_is_placed_on_its_part_and_node(
+    op_id: str, place: tuple[int, int]
+) -> None:
+    assert _place(op_id) == place

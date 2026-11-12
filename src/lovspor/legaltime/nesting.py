@@ -13,10 +13,12 @@ other than the verified one is refused, never guessed.
 """
 
 import re
+from collections import Counter
 
 from lovspor.legaltime import attribution
-from lovspor.legaltime.document import Document, Frozen, Provision
+from lovspor.legaltime.document import Document, Frozen, Node, Provision
 from lovspor.legaltime.instructions import Interpretation, Operation
+from lovspor.legaltime.text import split_sentences
 
 # A host's last ledd introduces a list of amendments to other acts (broad: opens a region).
 _LIST_INTRO = re.compile(
@@ -35,6 +37,8 @@ WORDING = NESTED + "host provision's wording outside the grammar"
 BOUNDARY = NESTED + "region boundary not proven (an unnumbered intro inside the list)"
 OWN_CLAUSE = NESTED + "region states a commencement of its own"
 SECOND_HOST = NESTED + "region holds a second host provision"
+LEADING = NESTED + "region does not open with a numbered item"
+CONTINUES = NESTED + "region names the host act itself"
 HOST_MISSING = NESTED + "host act's enacting announcement not in the archives"
 SECTION_MISSING = NESTED + "host section not in the host act's enacted text"
 REPLACEMENT_UNDATED = NESTED + "replacement of the host provision is not dated"
@@ -63,8 +67,8 @@ class Nesting(Frozen):
 def _place(op_id: str) -> tuple[int, int]:
     """(part index, node index) from an operation's tag ``#<part>:<label>:<node>[.<offset>]``."""
     tag = op_id.split("#", 1)[1]
-    part, _, rest = tag.split(":", 2)
-    return int(part), int(rest.split(".", 1)[0])
+    node = tag.rsplit(":", 1)[1]  # a part label may itself hold a colon
+    return int(tag.split(":", 1)[0]), int(node.split(".", 1)[0].split("-", 1)[0])
 
 
 def _opens(op: Operation) -> bool:
@@ -98,20 +102,37 @@ def nesting(document: Document, reading: Interpretation) -> Nesting:
         nest = _region(document, reading, host)
         taken.update(nest.members)
         nests.append(nest)
-    region_text = [t for n in nests for t in _region_texts(document, n)]
-    own = [c for c in reading.clauses if any(c in text for text in region_text)]
-    nests = [_clause_refusal(n, document, own) for n in nests]
-    return Nesting(nests=tuple(nests), clauses=tuple(c for c in reading.clauses if c not in own))
+    inside = {n.host_op: set(_sentences(_region_nodes(document, n))) for n in nests}
+    outside = Counter(_sentences(_outside_nodes(document, nests)))
+    nests = [_clause_refusal(n, inside[n.host_op], reading.clauses) for n in nests]
+    return Nesting(nests=tuple(nests), clauses=_outer_clauses(reading.clauses, inside, outside))
+
+
+def _outer_clauses(
+    clauses: tuple[str, ...], inside: dict[str, set[str]], outside: Counter[str]
+) -> tuple[str, ...]:
+    """Each copy of a clause read in a list is the host's; only copies read outside stay ours."""
+    kept: list[str] = []
+    for clause in clauses:
+        key = _norm(clause)
+        in_list = any(key in found for found in inside.values())
+        if not in_list or kept.count(clause) < outside[key]:
+            kept.append(clause)
+    return tuple(kept)
 
 
 def _region(document: Document, reading: Interpretation, host: Operation) -> Nest:
     part, start = _place(host.id)
     members = [op for op in reading.operations if _after(op, part, start)]
-    problem = _wording(host.new_provision)
-    if any(_opens(op) for op in members):
-        problem = problem or SECOND_HOST
-    if any(_unnumbered_intro(node.text) for node in document.parts[part].nodes[start + 1 :]):
-        problem = problem or BOUNDARY
+    nodes = [n for n in document.parts[part].nodes[start + 1 :] if n.kind == "paragraph"]
+    checks = (
+        (_wording(host.new_provision) is not None, WORDING),
+        (any(_opens(op) for op in members), SECOND_HOST),
+        (not nodes or not _NUMBERED.match(nodes[0].text), LEADING),
+        (any(_unnumbered_intro(node.text) for node in nodes), BOUNDARY),
+        (any(op.act == host.act for op in members), CONTINUES),
+    )
+    problem = next((reason for failed, reason in checks if failed), None)
     return Nest(
         host_op=host.id, host_act=host.act, host_section=host.address.section,
         members=tuple(op.id for op in members), problem=problem,
@@ -128,14 +149,36 @@ def _unnumbered_intro(text: str) -> bool:
     return intro and not _NUMBERED.match(text)
 
 
-def _region_texts(document: Document, nest: Nest) -> list[str]:
+def _region_nodes(document: Document, nest: Nest) -> list[Node]:
     part, start = _place(nest.host_op)
-    return [node.text for node in document.parts[part].nodes[start + 1 :]]
+    return list(document.parts[part].nodes[start + 1 :])
 
 
-def _clause_refusal(nest: Nest, document: Document, own: list[str]) -> Nest:
-    """A commencement read inside the list is not the outer law's; no precedence is invented."""
-    texts = _region_texts(document, nest)
-    if nest.problem is None and any(c in text for c in own for text in texts):
+def _outside_nodes(document: Document, nests: list[Nest]) -> list[Node]:
+    regions = {_place(n.host_op) for n in nests}
+    return [
+        node
+        for index, part in enumerate(document.parts)
+        for position, node in enumerate(part.nodes)
+        if not any(p == index and position > start for p, start in regions)
+    ]
+
+
+def _sentences(nodes: list[Node]) -> list[str]:
+    """Instruction paragraphs' sentences, whole and split, once per node; payload never counts."""
+    found: list[str] = []
+    for node in nodes:
+        if node.kind == "paragraph":
+            found.extend({" ".join(node.text.split()), *split_sentences(node.text)})
+    return found
+
+
+def _norm(clause: str) -> str:
+    return " ".join(clause.split())
+
+
+def _clause_refusal(nest: Nest, inside: set[str], clauses: tuple[str, ...]) -> Nest:
+    """A commencement read inside the list refuses it; no precedence is invented (D6)."""
+    if nest.problem is None and any(_norm(c) in inside for c in clauses):
         return nest.model_copy(update={"problem": OWN_CLAUSE})
     return nest
