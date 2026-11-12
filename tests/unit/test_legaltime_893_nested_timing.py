@@ -445,11 +445,19 @@ def test_falsely_dating_the_item_would_change_the_historical_text() -> None:
 
 def test_a_region_that_does_not_open_with_a_numbered_item_is_unproven() -> None:
     """After the host, an unnumbered instruction may be the outer law's own: never guessed."""
-    region = (_p("§ 10 oppheves."), *REGION)
-    outer = _outer(region)
+    later = (_p("2. I lov 2. februar 2001 nr. 2 om mål skal § 6 lyde:"),)  # a numbered item after
+    outer = _outer((_p("§ 3 skal lyde:"), _future("§3", "Ny", "Ny tekst."), *later))
     (nest,) = nesting(outer, interpret(outer)).nests
-    assert nest.problem is not None and nest.problem.startswith(NESTED)
-    assert _nested(_evidence(outer)).status == "unresolved"
+    assert nest.problem == "nested amendment: region does not open with a numbered item"
+
+
+def test_a_host_with_nothing_after_it_in_its_part_is_an_unproven_region() -> None:
+    outer = _outer(())
+    (nest,) = nesting(outer, interpret(outer)).nests
+    assert (nest.members, nest.problem) == (
+        (),
+        "nested amendment: region does not open with a numbered item",
+    )
 
 
 def test_an_item_naming_the_host_act_itself_leaves_the_region_unproven() -> None:
