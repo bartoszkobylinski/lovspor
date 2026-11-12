@@ -16,7 +16,7 @@ rather than being silently dropped. The render- and result-side models (e.g.
 
 ## On-disk artifacts
 
-The engine writes six kinds of file into the `lovverk` clone, and one block of
+The engine writes eight kinds of file into the `lovverk` clone, and one block of
 a seventh: the corpus-status block of `README.md`, between
 `<!-- lovspor:corpus-status:start -->` and `<!-- lovspor:corpus-status:end -->`,
 re-rendered by sync and by every `promote` write from both manifests
@@ -29,8 +29,10 @@ touched.
 | `<dataset>/INDEX.md` | Alphabetical discovery list for a dataset | `_IndexFrontMatter` |
 | `<dataset>/history/<slug>.json` | Machine-readable per-act change history | `HistoryRecord` |
 | `<dataset>/history/<slug>.md` | Human-readable twin of the above | `_HistoryFrontMatter` |
+| `<dataset>/history/by-id/<doc_id>.json` | One document's events only, append-only, each with the path it had (#871) | `IdentityHistory` |
 | `<dataset>/embeddings/<slug>.bin` | int8-quantized per-section vectors (LSPE) | `EmbeddingFile` — see [`embeddings.md`](embeddings.md) |
-| `manifest.json` (corpus root) | The change-detection ledger | `Manifest` + `ManifestRecord` |
+| `manifest.json` (corpus root) | The change-detection ledger; a record is tombstoned, never dropped (#871) | `Manifest` + `ManifestRecord` |
+| `slugs.json` (corpus root) | Slug ownership registry: `directory → slug → {owner, assigned_at}`, append-only; written only once the #871 migration has created it | `SlugRegistry` |
 
 `<dataset>` is `lover` or `forskrifter`. Only the three `.md` kinds carry YAML
 front matter; the `.json` and `.bin` files do not.
