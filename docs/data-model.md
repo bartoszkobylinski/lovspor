@@ -160,6 +160,39 @@ first). Serialized to `history/<slug>.json`.
 | `from_path` / `to_path` | `str \| None` | set only on `renamed` |
 | `lines_added` / `lines_removed` | `int \| None` | |
 
+**History repair in the identity migration (#871).** A pre-#871 corpus has
+slug histories that name a document other than the slug's registry owner
+(`history_owner_mismatches` in the plan report). Their contents are the defect:
+the old extractor overwrote the owner's events with the later holder's, and
+filed some owner deletions under the later holder. `lovspor ops identity-plan`
+therefore rebuilds each of them from git, never from the file
+(`identity/repair.py`, `identity/repair_plan.py`):
+
+- Path list: the slug's `<dataset>/<slug>.md`, plus each path a file was moved
+  from into it (git rename detection at the commit that added it), walked back
+  from that commit. No `--follow`; every walked path is in the report.
+- Attribution, per commit C on path P: the front-matter `id` of P at C
+  (`id-at-commit`); otherwise, for a deletion or an overwrite by a file with no
+  `id`, the `id` of P at C's parent (`id-at-parent`). A commit neither names is
+  excluded and listed, and so is a commit that is no history event (a re-render).
+  The event itself is classified by the sync's own rules (`classify_commit`).
+- Planned files, all under `planned/`: `history/<slug>.json` and `.md` (schema 1,
+  `doc_id` = owner, the owner's events only); `history/<new-slug>.json` and `.md`
+  for a later holder the plan renames (U1); and `history/by-id/<doc_id>.json` for
+  every document the chain attributes an event to, merged append-only into the
+  file at the base. A by-id event at the base that the attribution gives another
+  document, or a new slug's history at the base that names another document,
+  blocks the plan (exit 3).
+- Provenance lives in the report, never in the history files: each event's
+  commit, path, `id` before and after, rule and role; the excluded commits; the
+  events the base file held with the document each now belongs to; the sha256
+  of each planned file. Invariant, checked: each attributed event is in exactly
+  one document's by-id history, the one the attribution names.
+- On a repaired corpus no slug history names a non-owner, so the plan has no
+  history to repair (`nothing_to_do`). Rollback is `git revert` of the one
+  migration commit: the rebuilt files return to their base content and the
+  new ones are deleted.
+
 ### Upstream source
 
 **`LovdataArchive`** (`sources/lovdata.py`) — one `/list` catalogue entry;
