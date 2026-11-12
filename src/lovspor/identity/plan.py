@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from lovspor.errors import IdentityMigrationError
+from lovspor.errors import IdentityMigrationError, IdentitySchemaError
 from lovspor.identity.audit import CollisionAudit, PlanFacts, SlugFate, collision_audit, slug_fates
 from lovspor.identity.corpus_git import (
     MANIFEST_PATH,
@@ -33,7 +33,9 @@ from lovspor.identity.registry import (
     REGISTRY_FILENAME,
     SlugOwner,
     SlugRegistry,
+    require_consistent,
 )
+from lovspor.identity.schema import ENFORCED_IDENTITY_SCHEMA, IDENTITY_FILENAME, parse_declaration
 from lovspor.identity.walk import ManifestWalk, walk_manifests
 from lovspor.storage.manifest import Manifest
 
@@ -56,6 +58,7 @@ class BaseState(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     commit: str
+    identity_schema: int
     manifest: Manifest
     registry: SlugRegistry | None
     history: dict[str, str | None]
@@ -98,6 +101,7 @@ class MigrationPlan(BaseModel):
         return (
             self.planned_manifest.documents == self.base.manifest.documents
             and self.planned_registry == self.base.registry
+            and self.base.identity_schema == ENFORCED_IDENTITY_SCHEMA
         )
 
     @property
@@ -140,6 +144,22 @@ def _read_registry(repo: Path, commit: str) -> SlugRegistry | None:
         raise IdentityMigrationError(f"{commit}: invalid {REGISTRY_FILENAME}: {exc}") from exc
 
 
+def _read_identity_schema(repo: Path, commit: str, registry: SlugRegistry | None) -> int:
+    """The identity schema the base declares, consistent with its registry.
+
+    The same rules the sync enforces: a declared base without ``slugs.json``,
+    a ``slugs.json`` no declaration covers and an unknown declaration are
+    refused, so the plan never builds on a corpus the sync would not run on.
+    """
+    where = f"{commit}:{IDENTITY_FILENAME}"
+    try:
+        schema = parse_declaration(read_blob(repo, commit, IDENTITY_FILENAME), where)
+        require_consistent(schema, registry is not None, commit)
+    except IdentitySchemaError as exc:
+        raise IdentityMigrationError(str(exc)) from exc
+    return schema
+
+
 def _history_doc_id(blob: bytes | None) -> str | None:
     """The ``doc_id`` a history file names; ``None`` for an unreadable one."""
     try:
@@ -164,10 +184,12 @@ def _read_history(repo: Path, commit: str) -> dict[str, str | None]:
 def read_base(repo: Path, base_ref: str) -> BaseState:
     """The manifest, registry and slug histories at ``base_ref``."""
     commit = resolve_commit(repo, base_ref)
+    registry = _read_registry(repo, commit)
     return BaseState(
         commit=commit,
+        identity_schema=_read_identity_schema(repo, commit, registry),
         manifest=_read_manifest(repo, commit),
-        registry=_read_registry(repo, commit),
+        registry=registry,
         history=_read_history(repo, commit),
     )
 
@@ -264,6 +286,8 @@ def _changed_paths(repo: Path, base: BaseState, repair: _Repair) -> list[str]:
         paths.add(MANIFEST_PATH)
     if repair.registry != base.registry:
         paths.add(REGISTRY_FILENAME)
+    if base.identity_schema != ENFORCED_IDENTITY_SCHEMA:
+        paths.add(IDENTITY_FILENAME)
     for rename in repair.renames:
         paths |= _rename_paths(repo, base.commit, rename)
     return sorted(paths)

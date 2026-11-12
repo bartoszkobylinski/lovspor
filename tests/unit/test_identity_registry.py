@@ -9,7 +9,9 @@ import pytest
 from lovspor.errors import CorpusStateError, ParseError, SlugOwnershipError
 from lovspor.identity.registry import (
     DIRECTORY_OF_DATASET,
+    FIRST_HOLDER,
     REGISTRY_FILENAME,
+    THRESHOLD_EXCEPTION,
     PriorHolder,
     SlugOwner,
     SlugRegistry,
@@ -21,6 +23,7 @@ from lovspor.identity.registry import (
     update_slug_registry,
     with_manifest,
 )
+from lovspor.identity.schema import write_declaration
 from lovspor.rendering.slug import resolve_collisions
 from lovspor.storage.manifest import Manifest, ManifestRecord
 from lovspor.sync import document_io
@@ -44,6 +47,12 @@ def _record(slug: str, status: str = "current", directory: str = "forskrifter") 
 
 def _registry() -> SlugRegistry:
     return SlugRegistry().assign("forskrifter", SLUG, OWNER)
+
+
+def _enforced(repo: Path) -> None:
+    """A migrated corpus: the registry and the declaration that enforces it."""
+    replace_registry(_registry(), repo)
+    write_declaration(repo)
 
 
 def test_assign_records_the_first_holder() -> None:
@@ -162,7 +171,7 @@ def test_update_never_bootstraps_a_registry(tmp_path: Path) -> None:
 
 
 def test_update_extends_an_existing_registry(tmp_path: Path) -> None:
-    replace_registry(_registry(), tmp_path)
+    _enforced(tmp_path)
     manifest = Manifest(generated_at=AT, documents={"sf-1": _record("ny")})
 
     paths = update_slug_registry(tmp_path, manifest)
@@ -180,7 +189,7 @@ def test_registered_ownership_without_a_registry_is_the_manifest_ownership(tmp_p
 
 
 def test_registered_owner_wins_over_the_manifest(tmp_path: Path) -> None:
-    replace_registry(_registry(), tmp_path)
+    _enforced(tmp_path)
     owners = {"gjeldende-sentrale-forskrifter": {SLUG: "sf-20261002-1999"}}
 
     merged = registered_ownership(tmp_path, owners)
@@ -192,7 +201,7 @@ def test_registered_owner_wins_over_the_manifest(tmp_path: Path) -> None:
 def test_a_newer_document_never_gets_a_registered_slug(tmp_path: Path) -> None:
     """U1: the owner is in no manifest at all (a lost record), yet its slug
     stays taken and the newer document is deflected by the collision rule."""
-    replace_registry(_registry(), tmp_path)
+    _enforced(tmp_path)
     owners = registered_ownership(tmp_path, {})["gjeldende-sentrale-forskrifter"]
 
     resolved = resolve_collisions({"sf-20261002-1999": SLUG}, owners)
@@ -209,23 +218,30 @@ _PRIOR = PriorHolder(doc_id="sf-20250101-0001", first_commit="c1", last_commit="
 
 
 def test_prior_holders_are_part_of_the_immutable_entry() -> None:
-    recorded = SlugRegistry().assign(
-        "forskrifter", SLUG, OWNER.model_copy(update={"prior_holders": (_PRIOR,)})
+    exception = SlugOwner(
+        owner=OWNER.owner,
+        assigned_at=OWNER.assigned_at,
+        basis=THRESHOLD_EXCEPTION,
+        prior_holders=(_PRIOR,),
     )
+    recorded = SlugRegistry().assign("forskrifter", SLUG, exception)
 
     with pytest.raises(SlugOwnershipError, match="never deleted or rewritten"):
         ensure_append_only(recorded, _registry())
 
 
 def test_registry_json_records_prior_holders_only_where_there_are_some(tmp_path: Path) -> None:
-    recorded = _registry().assign(
-        "lover", "x", SlugOwner(owner="nl-2", assigned_at="t", prior_holders=(_PRIOR,))
+    exception = SlugOwner(
+        owner="nl-2", assigned_at="t", basis=THRESHOLD_EXCEPTION, prior_holders=(_PRIOR,)
     )
+    recorded = _registry().assign("lover", "x", exception)
 
     data = json.loads(registry_json(recorded))
 
     assert data["slugs"]["lover"]["x"]["prior_holders"] == [_PRIOR.model_dump()]
+    assert data["slugs"]["lover"]["x"]["basis"] == THRESHOLD_EXCEPTION
     assert "prior_holders" not in data["slugs"]["forskrifter"][SLUG]
+    assert data["slugs"]["forskrifter"][SLUG]["basis"] == FIRST_HOLDER
     replace_registry(recorded, tmp_path)
     assert read_registry(tmp_path) == recorded
 
@@ -255,3 +271,48 @@ def test_replace_registry_preserves_an_unreadable_prior_file(
         replace_registry(_registry(), tmp_path)
 
     assert path.read_bytes() == payload
+
+
+def test_every_entry_states_its_ownership_basis() -> None:
+    data = json.loads(registry_json(_registry()))
+
+    assert data["slugs"]["forskrifter"][SLUG] == {
+        "assigned_at": OWNER.assigned_at,
+        "basis": FIRST_HOLDER,
+        "owner": OWNER.owner,
+    }
+
+
+@pytest.mark.parametrize(
+    ("basis", "prior"),
+    [(THRESHOLD_EXCEPTION, ()), (FIRST_HOLDER, (_PRIOR,)), ("first-owner", ())],
+)
+def test_the_basis_must_match_the_prior_holders(basis: str, prior: tuple[PriorHolder, ...]) -> None:
+    """Prior holders exist exactly on a threshold exception, never on a first holder."""
+    with pytest.raises(ValueError, match="basis|literal"):
+        SlugOwner.model_validate(
+            {"owner": "sf-1", "assigned_at": "t", "basis": basis, "prior_holders": prior}
+        )
+
+
+def test_the_basis_is_part_of_the_immutable_entry() -> None:
+    relabelled = SlugRegistry().assign(
+        "forskrifter",
+        SLUG,
+        SlugOwner(
+            owner=OWNER.owner,
+            assigned_at=OWNER.assigned_at,
+            basis=THRESHOLD_EXCEPTION,
+            prior_holders=(_PRIOR,),
+        ),
+    )
+
+    with pytest.raises(SlugOwnershipError, match="never deleted or rewritten"):
+        ensure_append_only(_registry(), relabelled)
+
+
+def test_an_unknown_registry_schema_version_is_unreadable(tmp_path: Path) -> None:
+    (tmp_path / REGISTRY_FILENAME).write_text('{"schema_version": 2, "slugs": {}}', "utf-8")
+
+    with pytest.raises(ParseError, match="unknown slug registry schema_version 2"):
+        read_registry(tmp_path)

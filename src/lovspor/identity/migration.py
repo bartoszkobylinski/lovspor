@@ -12,7 +12,9 @@ computes, without writing anything:
    reuse at or before the threshold is history the public URL already
    follows, so the owner is the document that took the address last at or
    before the threshold, and every earlier holder is recorded on the entry
-   as a prior holder with its manifest evidence. An address nobody held by
+   as a prior holder with its manifest evidence. Such an entry is labelled
+   ``basis: threshold-exception``: a migration exception, not a claim that
+   its owner held the address first. An address nobody held by
    the threshold is owned by its first holder; a takeover after the threshold
    never changes the owner (U1). An existing ``slugs.json`` at the base is
    kept as it is and only extended.
@@ -33,7 +35,14 @@ from pathlib import PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.identity.registry import PriorHolder, SlugOwner, SlugRegistry, record_address
+from lovspor.identity.registry import (
+    FIRST_HOLDER,
+    THRESHOLD_EXCEPTION,
+    PriorHolder,
+    SlugOwner,
+    SlugRegistry,
+    record_address,
+)
 from lovspor.identity.walk import HolderSpan, ManifestWalk
 from lovspor.rendering.slug import identity_candidates, resolve_collisions
 from lovspor.storage.manifest import Manifest, ManifestRecord
@@ -132,12 +141,13 @@ def threshold_owner(spans: list[HolderSpan], walk: ManifestWalk, threshold: int)
 
 
 def owner_entry(spans: list[HolderSpan], walk: ManifestWalk, threshold: int) -> SlugOwner:
-    """The registry entry of one address: its owner and every holder before it."""
+    """The registry entry of one address: its owner, on what basis, and every holder before it."""
     owner = threshold_owner(spans, walk, threshold)
     prior = spans[: spans.index(owner)]
     return SlugOwner(
         owner=owner.doc_id,
         assigned_at=owner.assigned_at,
+        basis=THRESHOLD_EXCEPTION if prior else FIRST_HOLDER,
         prior_holders=tuple(
             PriorHolder(doc_id=s.doc_id, first_commit=s.first_commit, last_commit=s.last_commit)
             for s in prior

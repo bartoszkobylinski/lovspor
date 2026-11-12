@@ -86,6 +86,17 @@ class HistoryIdentityError(CorpusStateError):
     """A per-document history record would change identity or lose events (#871)."""
 
 
+class IdentitySchemaError(CorpusStateError):
+    """The corpus's identity schema cannot be enforced as declared (#871).
+
+    ``identity.json`` declares the identity schema the corpus is at. A corpus
+    that declares the enforced schema and lacks a readable ``slugs.json``, a
+    declaration that is unreadable or names a version this engine does not
+    know, and a ``slugs.json`` that no declaration covers all fail closed:
+    slug ownership is never silently left unenforced.
+    """
+
+
 class IdentityMigrationError(LovsporError):
     """The offline identity migration cannot read its input (#871).
 

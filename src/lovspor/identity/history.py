@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import HistoryIdentityError, ParseError, SlugOwnershipError
 from lovspor.history import HistoryEvent, HistoryRecord, Lineage, write_history
-from lovspor.identity.registry import read_registry
+from lovspor.identity.registry import LegacyCorpus, corpus_identity
 
 BY_ID_DIRNAME = "by-id"
 IDENTITY_HISTORY_SCHEMA_VERSION = 1
@@ -118,9 +118,15 @@ def write_identity_history(history: IdentityHistory, dataset_dir: Path) -> Path:
 
 
 def _ensure_slug_owner(repo: Path, directory: str, record: HistoryRecord) -> None:
-    """Refuse a ``history/<slug>.json`` that would name a document other than the owner."""
-    registry = read_registry(repo)
-    owner = None if registry is None else registry.owner_of(directory, record.slug)
+    """Refuse a ``history/<slug>.json`` that would name a document other than the owner.
+
+    A legacy corpus (identity schema 0) has no owners to check; a corpus that
+    declares the enforced schema without a readable registry is refused.
+    """
+    identity = corpus_identity(repo)
+    if isinstance(identity, LegacyCorpus):
+        return
+    owner = identity.registry.owner_of(directory, record.slug)
     if owner is not None and owner != record.doc_id:
         raise SlugOwnershipError(
             f"{directory}/history/{record.slug}.json belongs to {owner}; refusing to "

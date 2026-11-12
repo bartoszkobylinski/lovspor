@@ -1,8 +1,9 @@
 """Write the identity-migration dry-run report (#871, migration plan §3.6).
 
 The output directory receives the files the repair would write
-(``planned/manifest.json``, ``planned/slugs.json``), ``report.json``,
-``report.md`` and ``SHA256SUMS`` over all four. Every byte is a function of
+(``planned/manifest.json``, ``planned/slugs.json`` and ``planned/identity.json``,
+the declaration that moves the corpus to the enforced identity schema),
+``report.json``, ``report.md`` and ``SHA256SUMS`` over all five. Every byte is a function of
 the plan: no clock, no host path, sorted keys and lists, so two runs on one
 base give byte-identical directories.
 """
@@ -15,10 +16,11 @@ from pathlib import Path
 from lovspor.atomic_io import atomic_write_text
 from lovspor.identity.audit import POST, PRE, outcome_counts
 from lovspor.identity.plan import MigrationPlan
-from lovspor.identity.registry import registry_json
+from lovspor.identity.registry import THRESHOLD_EXCEPTION, registry_json
+from lovspor.identity.schema import ENFORCED_IDENTITY_SCHEMA, IDENTITY_FILENAME, declaration_json
 from lovspor.storage.manifest import Manifest
 
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 PLANNED_DIR = "planned"
 SUMS_FILENAME = "SHA256SUMS"
 
@@ -38,6 +40,7 @@ def planned_files(plan: MigrationPlan) -> dict[str, str]:
     return {
         "manifest.json": manifest_json(plan.planned_manifest),
         "slugs.json": registry_json(plan.planned_registry),
+        IDENTITY_FILENAME: declaration_json(),
     }
 
 
@@ -68,7 +71,7 @@ def _slug_counts(plan: MigrationPlan) -> dict[str, int]:
     return {
         "registry_entries": sum(len(e) for e in plan.planned_registry.slugs.values()),
         "registry_conflicts": len(plan.registry_conflicts),
-        "pre_threshold_violations_recorded": len(_violations(plan)),
+        "threshold_exceptions": len(_threshold_exceptions(plan)),
         "reused_slugs": len(plan.fates),
         "reused_slugs_pre_threshold": sum(1 for f in plan.fates if PRE in f.reuse),
         "reused_slugs_post_threshold": sum(1 for f in plan.fates if POST in f.reuse),
@@ -79,14 +82,15 @@ def _slug_counts(plan: MigrationPlan) -> dict[str, int]:
     }
 
 
-def _violations(plan: MigrationPlan) -> list[dict[str, object]]:
-    """Registry entries whose owner was not the first holder: the recorded
-    pre-threshold identity violations, with their manifest evidence."""
+def _threshold_exceptions(plan: MigrationPlan) -> list[dict[str, object]]:
+    """Registry entries whose owner the U1 threshold set although an earlier
+    document held the slug (``basis: threshold-exception``), with the prior
+    holders' manifest evidence. Migration exceptions, not first ownership."""
     return [
         {"directory": directory, "slug": slug, **entry.model_dump(mode="json")}
         for directory, entries in sorted(plan.planned_registry.slugs.items())
         for slug, entry in sorted(entries.items())
-        if entry.prior_holders
+        if entry.basis == THRESHOLD_EXCEPTION
     ]
 
 
@@ -94,12 +98,17 @@ HISTORY_REBUILD_NOTE = (
     "not part of this plan: history_owner_mismatches lists the slug histories "
     "the follow-up rebuild must regenerate for their owner"
 )
+THRESHOLD_EXCEPTION_NOTE = (
+    "threshold_exceptions are migration exceptions: the U1 threshold kept the "
+    "holder at the threshold as owner although the prior holders held the slug "
+    "first; the entry records that basis and is not a claim of first ownership"
+)
 _SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("Fate of every reused slug", "slug_fates", ("directory", "slug", "owner", "reuse", "holders")),
     (
-        "Pre-threshold violations recorded in the registry",
-        "pre_threshold_violations",
-        ("directory", "slug", "owner", "prior_holders"),
+        "Threshold exceptions (owner set by the U1 threshold, not the first holder)",
+        "threshold_exceptions",
+        ("directory", "slug", "owner", "basis", "prior_holders"),
     ),
     (
         "U1 rename plan",
@@ -135,12 +144,22 @@ def _review_lists(plan: MigrationPlan) -> dict[str, list[dict[str, object]]]:
     """The lists the owner reviews, as JSON rows."""
     return {
         "slug_fates": [f.model_dump(mode="json") for f in plan.fates],
-        "pre_threshold_violations": _violations(plan),
+        "threshold_exceptions": _threshold_exceptions(plan),
         "u1_renames": [r.model_dump(mode="json") for r in plan.renames],
         "restored_tombstone_collisions": [c.model_dump(mode="json") for c in plan.collisions],
         "history_owner_mismatches": [m.model_dump(mode="json") for m in plan.history_mismatches],
         "registry_conflicts": [c.model_dump(mode="json") for c in plan.registry_conflicts],
         "restored_tombstones": [t.model_dump(mode="json") for t in plan.restored],
+    }
+
+
+def _identity_fields(plan: MigrationPlan) -> dict[str, object]:
+    """The identity schema the base declares and the plan moves it to."""
+    return {
+        "base_registry_present": plan.base.registry is not None,
+        "base_identity_schema": plan.base.identity_schema,
+        "planned_identity_schema": ENFORCED_IDENTITY_SCHEMA,
+        "threshold_exception_note": THRESHOLD_EXCEPTION_NOTE,
     }
 
 
@@ -152,7 +171,7 @@ def report_data(plan: MigrationPlan) -> dict[str, object]:
         "issue": 871,
         "mode": "dry-run",
         "base_commit": plan.base.commit,
-        "base_registry_present": plan.base.registry is not None,
+        **_identity_fields(plan),
         "nothing_to_do": plan.nothing_to_do,
         "blocked": plan.blocked,
         "counts": _counts(plan),
@@ -222,10 +241,23 @@ def _header(plan: MigrationPlan) -> list[str]:
     ]
 
 
+def _identity_schema_lines(plan: MigrationPlan) -> list[str]:
+    return [
+        "## Identity schema",
+        "",
+        f"Declared at the base: `{plan.base.identity_schema}`. Applying the plan writes "
+        f"`{IDENTITY_FILENAME}` declaring `{ENFORCED_IDENTITY_SCHEMA}`, from which point the "
+        f"sync refuses to run without a readable `slugs.json`.",
+        "",
+        f"{THRESHOLD_EXCEPTION_NOTE}.",
+        "",
+    ]
+
+
 def render_markdown(plan: MigrationPlan) -> str:
     """``report.md``: counts, checksums and the review lists of ``report.json``."""
     lists = _review_lists(plan)
-    lines = _header(plan)
+    lines = [*_header(plan), *_identity_schema_lines(plan)]
     for title, key, columns in _SECTIONS:
         lines += [f"## {title}", "", *_table(lists[key], columns)]
     unrecoverable = [{"doc_id": doc_id} for doc_id in plan.unrecoverable]

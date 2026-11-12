@@ -9,6 +9,7 @@ from lovspor.errors import IdentityMigrationError
 from lovspor.identity.migration import build_registry, threshold_owner
 from lovspor.identity.plan import plan_migration
 from lovspor.identity.registry import SlugOwner, SlugRegistry, registry_json
+from lovspor.identity.schema import declaration_json
 from lovspor.identity.walk import parse_revision, raw_address, walk_manifests
 from tests.unit.identity_git_fixtures import (
     commit_all,
@@ -114,6 +115,7 @@ def test_a_registry_conflict_at_the_base_blocks_the_plan(tmp_path: Path) -> None
     write_manifest_json(repo, {"sf-1": record("sf-1", "x")}, "2026-05-01T00:00:00Z")
     existing = SlugRegistry().assign("forskrifter", "x", SlugOwner(owner="sf-9", assigned_at="t"))
     write_doc(repo, "slugs.json", registry_json(existing))
+    write_doc(repo, "identity.json", declaration_json())
     commit_all(repo, "seed")
 
     plan = plan_migration(repo, "HEAD")

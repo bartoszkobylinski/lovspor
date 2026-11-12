@@ -136,6 +136,7 @@ def test_lists_collisions_mismatched_histories_and_changed_paths(
     assert plan.changed_paths == [
         "forskrifter/x-2026.md",
         "forskrifter/x.md",
+        "identity.json",
         "manifest.json",
         "slugs.json",
     ]
@@ -155,6 +156,7 @@ def test_two_runs_write_byte_identical_reports(
     files = sorted(p.relative_to(first) for p in first.rglob("*") if p.is_file())
     assert [str(p) for p in files] == [
         SUMS_FILENAME,
+        "planned/identity.json",
         "planned/manifest.json",
         "planned/slugs.json",
         "report.json",
@@ -492,8 +494,17 @@ def test_recorded_prior_holders_reach_the_registry_file_and_the_report(
     assert "prior_holders" not in registry["slugs"]["forskrifter"]["c"]
     data = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
     assert data["u1_threshold"]["commit"] == shas["r4"]
-    assert data["counts"]["pre_threshold_violations_recorded"] == 1
-    assert [v["slug"] for v in data["pre_threshold_violations"]] == ["x"]
+    assert registry["slugs"]["forskrifter"]["x"]["basis"] == "threshold-exception"
+    assert registry["slugs"]["forskrifter"]["c"]["basis"] == "first-holder"
+    assert data["counts"]["threshold_exceptions"] == 1
+    assert [(v["slug"], v["basis"]) for v in data["threshold_exceptions"]] == [
+        ("x", "threshold-exception")
+    ]
+    assert "not a claim of first ownership" in data["threshold_exception_note"]
+    report_md = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "## Threshold exceptions (owner set by the U1 threshold, not the first holder)" in (
+        report_md
+    )
 
 
 @pytest.mark.parametrize("threshold", ["no-such-ref", "readme-commit"])

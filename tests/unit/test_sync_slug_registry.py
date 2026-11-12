@@ -11,8 +11,9 @@ from pathlib import Path
 import pytest
 
 import lovspor.sync.orchestrator as orchestrator_module
-from lovspor.errors import SlugOwnershipError
+from lovspor.errors import IdentitySchemaError, SlugOwnershipError
 from lovspor.identity.registry import SlugOwner, SlugRegistry, read_registry, replace_registry
+from lovspor.identity.schema import IDENTITY_FILENAME, write_declaration
 from lovspor.sources.lovdata import LovdataArchive
 from lovspor.storage.manifest import Manifest
 from lovspor.sync.document_io import write_derived_views
@@ -24,9 +25,18 @@ _LOST_OWNER = SlugOwner(owner="lov-0", assigned_at="2026-05-01T00:00:00+00:00")
 
 
 def _seed_registry(repo: Path, registry: SlugRegistry) -> None:
+    """A migrated corpus: the registry and the declaration that enforces it, committed."""
     replace_registry(registry, repo)
+    write_declaration(repo)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "registry")
+
+
+def _head(repo: Path) -> str:
+    out = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    )
+    return out.stdout.strip()
 
 
 def _clean(repo: Path) -> bool:
@@ -65,6 +75,50 @@ def test_a_sync_without_a_registry_does_not_create_one(
     run_sync(settings)
 
     assert read_registry(settings.lovverk_repo_path) is None
+    assert _stored(settings)["lov-2"].slug == "beta"
+
+
+@pytest.mark.parametrize(
+    ("declaration", "message"),
+    [
+        ('{"schema_version": 1}\n', "no slugs.json"),
+        ('{"schema_version": 2}\n', "unknown identity schema version 2"),
+    ],
+)
+def test_a_declared_corpus_that_cannot_be_enforced_refuses_to_sync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    declaration: str,
+    message: str,
+) -> None:
+    """Fail closed at sync start, before any per-document commit."""
+    settings = _corpus(tmp_path, [_ALFA])
+    repo = settings.lovverk_repo_path
+    (repo / IDENTITY_FILENAME).write_text(declaration, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "declared, registry lost")
+    head = _head(repo)
+    _serve(monkeypatch, [_ALFA, _BETA])
+
+    with pytest.raises(IdentitySchemaError, match=message):
+        run_sync(settings)
+
+    assert _head(repo) == head
+    assert _clean(repo)
+    assert not (repo / "slugs.json").exists()
+
+
+def test_a_legacy_sync_creates_neither_the_declaration_nor_the_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _corpus(tmp_path, [_ALFA])
+    _serve(monkeypatch, [_ALFA, _BETA])
+
+    run_sync(settings)
+
+    assert not (settings.lovverk_repo_path / IDENTITY_FILENAME).exists()
+    assert not (settings.lovverk_repo_path / "slugs.json").exists()
     assert _stored(settings)["lov-2"].slug == "beta"
 
 
@@ -131,6 +185,7 @@ def test_collect_upstream_deflects_a_registered_slug_whose_owner_left_the_manife
     replace_registry(
         SlugRegistry().assign("lover", "alfa", _LOST_OWNER), settings.lovverk_repo_path
     )
+    write_declaration(settings.lovverk_repo_path)
     archives = [
         LovdataArchive(
             filename=f"{name}.tar.bz2",

@@ -7,7 +7,9 @@ the repair lands as one commit, a second plan on the result finds nothing to
 do, and ``git revert`` of that commit restores the base tree exactly.
 
 It writes the planned ``manifest.json`` and ``slugs.json`` (through the same
-guards the sync uses) and moves each renamed document's Markdown and
+guards the sync uses), then ``identity.json`` declaring the enforced identity
+schema, last, so a corpus is never declared before its registry exists; and
+it moves each renamed document's Markdown and
 embedding sidecar to its new slug, rewriting the front matter ``slug``. It
 does not regenerate history; that is the follow-up rebuild the report lists.
 """
@@ -19,6 +21,7 @@ from lovspor.identity.migration import Rename
 from lovspor.identity.plan import MigrationPlan
 from lovspor.identity.records import replace_manifest
 from lovspor.identity.registry import replace_registry
+from lovspor.identity.schema import write_declaration
 
 _SLUG_LINE = re.compile(r'^slug: ".*"$', re.MULTILINE)
 
@@ -43,3 +46,4 @@ def apply_plan(repo: Path, plan: MigrationPlan) -> None:
     for rename in plan.renames:
         _move_markdown(repo, rename)
         _move_sidecar(repo, rename)
+    write_declaration(repo)

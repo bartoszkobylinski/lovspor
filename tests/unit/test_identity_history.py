@@ -20,6 +20,7 @@ from lovspor.identity.history import (
     write_identity_history,
 )
 from lovspor.identity.registry import SlugOwner, SlugRegistry, replace_registry
+from lovspor.identity.schema import write_declaration
 from tests.unit.identity_git_fixtures import commit_all, doc_text, git, init_repo, write_doc
 
 OLD = "sf-20260612-1085"
@@ -168,6 +169,7 @@ def test_write_document_history_writes_slug_and_by_id_files(tmp_path: Path) -> N
 def test_slug_history_is_written_only_for_the_slugs_owner(tmp_path: Path) -> None:
     owner = SlugOwner(owner=OLD, assigned_at="2026-06-18T00:00:00+00:00")
     replace_registry(SlugRegistry().assign("forskrifter", SLUG, owner), tmp_path)
+    write_declaration(tmp_path)
     lineage = _lineage()
 
     with pytest.raises(SlugOwnershipError, match=OLD):
