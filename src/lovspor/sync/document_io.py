@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from lovspor.atomic_io import atomic_write_text
 from lovspor.corpus_readme import README_NAME, ReadmeOutcome, refresh_readme
+from lovspor.identity.registry import update_slug_registry
 from lovspor.rendering.document import (
     FrontmatterContext,
     build_frontmatter,
@@ -173,14 +174,22 @@ def write_derived_views(
     manifest: Manifest,
     datasets: Sequence[str],
 ) -> list[Path]:
-    """Every dataset's INDEX.md and the README's corpus-status block; the paths to stage.
+    """Every dataset's INDEX.md, the README's corpus-status block and the slug
+    registry; the paths to stage.
 
     The README block is read from the manifests on disk, so ``manifest`` must
     already be written. The README is staged only when its block changed; a
     README whose markers are broken is left alone and logged, because a
     hand-edit gone wrong in a derived view must not stop the corpus sync.
+
+    ``slugs.json`` is not a view but append-only state; it rides here because
+    every sync commit that writes the manifest stages these paths. An existing
+    registry is extended with the manifest's new slugs, and a current record on
+    a slug another document owns raises ``SlugOwnershipError`` before the
+    commit (#871, guard 5b). A corpus without a registry gets none.
     """
     paths = [generate_index(corpus_root, dataset, manifest) for dataset in datasets]
+    paths.extend(update_slug_registry(corpus_root, manifest))
     outcome = refresh_readme(corpus_root)
     if outcome is ReadmeOutcome.MALFORMED:
         logger.warning("%s: corpus-status markers are broken; left unchanged", README_NAME)

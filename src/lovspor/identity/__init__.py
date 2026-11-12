@@ -7,3 +7,8 @@ manifest record never disappears (``records``), a slug never changes owner
 ``doc_id`` (``history``). ``migration`` plans the one-off repair of a corpus
 written before these guards existed.
 """
+
+from lovspor.identity.records import replace_manifest
+from lovspor.identity.registry import registered_ownership
+
+__all__ = ["registered_ownership", "replace_manifest"]

@@ -74,7 +74,7 @@ from lovspor.errors import (
 )
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_history, write_history
-from lovspor.identity.records import replace_manifest
+from lovspor.identity import registered_ownership, replace_manifest
 from lovspor.parsing.placeholder import is_content_placeholder
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.rendering.document import (
@@ -743,11 +743,11 @@ def _collect_upstream(
     a law and a regulation share a kortform.
 
     ``prior`` supplies permanent slug ownership (ADR-0003): every slug in
-    the prior manifest — current AND removed records — stays reserved for
-    its original doc_id, so a replacement act sharing a repealed act's
+    the prior manifest (current AND removed records) and in the corpus slug
+    registry (``slugs.json``, #871, which outlives a lost record) stays
+    reserved for its owner, so a replacement act sharing a repealed act's
     kortform gets an identity-suffixed slug instead of overwriting the
-    tombstone's file and fusing two documents' histories (root-cause
-    analysis 2026-07-30, defect 3). ``None`` means no prior corpus.
+    tombstone's file (RCA 2026-07-30, defect 3). ``None``: no prior corpus.
     """
     client = LovdataClient(
         timeout_seconds=settings.http_timeout_seconds,
@@ -764,11 +764,11 @@ def _collect_upstream(
             tar_path = client.download(archive, cache_dir).path
             by_dataset[dataset] = _index_tarball(tar_path, dataset)
 
-    owners_by_dataset = _prior_slug_ownership(prior)
+    owners = registered_ownership(settings.lovverk_repo_path, _prior_slug_ownership(prior))
     upstream: dict[str, _UpstreamDoc] = {}
     for dataset, docs in by_dataset.items():
         base_slugs = {doc.doc_id: doc.slug for doc in docs}
-        final_slugs = resolve_collisions(base_slugs, owners_by_dataset.get(dataset, {}))
+        final_slugs = resolve_collisions(base_slugs, owners.get(dataset, {}))
         for doc in docs:
             upstream[doc.doc_id] = _with_slug(doc, final_slugs[doc.doc_id])
     return upstream, drift
