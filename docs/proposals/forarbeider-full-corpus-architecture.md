@@ -71,48 +71,74 @@ The unit is a **document version**, not a chapter excerpt.
 - **Version**: one observed, content-addressed state of the whole document, with the ordered list of its parts and attachments and each part's text digest. A changed source (a correction, an errata, a reissued PDF) is a new version; old versions stay.
 - **Part**: a chapter or section, as an ordered list of **spans** (heading, paragraph, list item, quote, table, footnote). Each span carries its own text digest and **rights class** (§3.4) and its own **privacy state** (§3.5).
 - **Attachment**: an annex, figure, image or PDF, with a digest, media type, rights state and a reason when absent.
-- **Gap**: an explicit record of anything expected but not present: a chapter not fetched, an annex not supported, a span withheld for rights or privacy, an extraction failure. A gap has a code, a scope (document, part or span) and a since-version.
+- **Gap**: an explicit record of anything expected but not present: a chapter not fetched, an annex not supported, a span withheld for rights or privacy, an extraction failure. A gap has a code and a scope (document, part or span). It does **not** record the version it belongs to: the version manifest contains the gap, never the reverse (§2.2).
 
 Today's `ForarbeidRecord`, `ChapterResult` and `TextBlock` map onto Document, Part and Span; the migration is in §5 [O].
 
 ### 2.2 Versioning and identity
 
 - Identity is `<source>:<family>:<numeric id>` (today: `regjeringen-<id>`) [O]. It never changes across versions.
-- A version id is the SHA-256 of a canonical version manifest (parts, spans, attachments and gaps by digest). It is deterministic: the same inputs give the same id.
+- **Version identity is content-only and acyclic.** `version_id = SHA-256(canonical version content)`, where the canonical content is, in a fixed order:
+  - the document identity;
+  - the raw SHA-256 of every source response the version was extracted from (§4.2);
+  - the extractor and normalizer versions;
+  - the ordered parts, each with its spans' text digests, rights class and privacy state;
+  - the attachments by raw digest;
+  - the gaps by `(code, scope locator)`.
+
+  Nothing inside the hashed content may name a version id: no `since_version`, no `previous_version` and no release reference.
+- **Lineage lives outside the hash.** A separate, append-only *version history* record per document lists the version ids in observed order, each with its retrieval time and the gaps that first appeared in it (a gap's "since" is derived by comparing consecutive versions, never stored inside one). Release, withdrawal and attestation records reference version ids; none is referenced by them.
+- Determinism: the same raw responses and the same extractor versions give the same `version_id`. A rerun that changes nothing adds no version.
 - Release history is the sequence of released versions per document, plus withdrawals. Git is the recording time, never the legal or publication time [O, today's time axes].
 
-### 2.3 Completeness, document by document
+### 2.3 Two completeness axes, document by document
 
-Each released version carries `completeness`, computed and never typed by a person:
+Completeness has **two independent axes**. Both are computed from records and never typed by a person. They are never merged into one flag.
+
+**Source completeness** (ingestion and extraction): did we capture and faithfully extract everything the source publishes?
 
 | Field | Meaning |
 |---|---|
 | `parts_expected` | from the source's own table of contents (chapter navigation, PDF bookmarks) |
-| `parts_present` | parts rendered in full |
-| `spans_withheld` | count by gap code (`rights_unresolved`, `privacy_unresolved`, `unsupported_structure`) |
-| `attachments_expected`, `attachments_present` | counted the same way |
+| `parts_extracted` | parts whose every span was extracted |
+| `attachments_expected`, `attachments_captured` | annexes and figures captured in the raw cache |
+| `extraction_gaps` | gaps with an extraction code (`not_fetched`, `unsupported_structure`, `parse_failed`) |
 | `extraction_fidelity` | measured against the source (§2.4) |
-| `state` | `complete` only when every expected part, span and attachment is present and there are zero gaps; otherwise `incomplete`, with the gap list |
+| `source_state` | `source_complete` only when parts and attachments are all extracted or captured and `extraction_gaps` is empty; otherwise `source_incomplete` |
 
-**Rule:** no reader, index, MCP tool or rendering may present an `incomplete` version as complete. The NOT-enacted-law label and the gap list appear in every rendering [O, today's labels carry over].
+**Publication completeness** (release eligibility): of what we extracted, how much may be published?
 
-### 2.4 Corpus-level completeness metrics
-
-Published per release and per family:
-
-| Metric | Definition |
+| Field | Meaning |
 |---|---|
-| `documents_discovered` | documents in the source's official catalogue for the scope (§4.1) |
-| `documents_ingested` | at least one version staged |
-| `documents_released` | at least one version released |
-| `documents_complete` | the latest released version's `state` is `complete` |
-| `parts_expected` / `parts_present` | summed over documents |
-| `extraction_fidelity` | share of source text tokens present in spans, plus span-verbatim precision (Pilot-0 measured 100% and 100% on 5 clean chapters [O]) |
-| `attachments_missing` | expected minus present |
-| `spans_rights_unresolved`, `spans_privacy_unresolved` | open gaps by class |
-| `source_coverage` | sessions × families covered, with the oldest session reached |
+| `spans_publishable` | spans whose rights class is cleared by the signed policy and whose privacy state is clear |
+| `release_gaps` | gaps with a release code (`rights_unresolved`, `privacy_unresolved`, `third_party_work`, `withdrawn`) |
+| `attachments_publishable` | captured attachments whose rights class is cleared |
+| `publication_state` | `publication_complete` only when `source_state` is `source_complete` **and** `release_gaps` is empty; otherwise `publication_incomplete` |
 
-A metric is computed from records, never estimated. A metric whose input is missing is reported as `unknown`, never as 0.
+**Invariants.**
+
+1. `publication_complete` implies `source_complete`; the converse never holds by default.
+2. A document can be `source_complete` and `publication_incomplete`: everything extracted, with third-party consultation quotes unresolved. That is a normal, reportable state, not an error.
+3. No reader, index, MCP tool or rendering may present a `publication_incomplete` version as complete. Every rendering states `publication_state` and lists its release gaps; the NOT-enacted-law label always appears [O, today's labels carry over].
+4. Release gaps are never filled by shortening the expectation: `parts_expected` and `attachments_expected` come only from the source.
+
+### 2.4 Corpus-level metrics, per axis
+
+Published per release and per family. Each metric is computed from records, never estimated. A metric whose input is missing is reported as `unknown`, never as 0.
+
+| Axis | Metric | Definition |
+|---|---|---|
+| source | `documents_discovered` | documents in the source's official catalogue for the scope (§4.1) |
+| source | `documents_ingested` | at least one version staged |
+| source | `documents_source_complete` | the latest version is `source_complete` |
+| source | `parts_expected` / `parts_extracted` | summed over documents |
+| source | `extraction_fidelity` | share of source text tokens present in spans, plus span-verbatim precision (Pilot-0 measured 100% and 100% on 5 clean chapters [O]) |
+| source | `attachments_missing` | expected minus captured |
+| source | `source_coverage` | sessions × families covered, with the oldest session reached |
+| publication | `documents_released` | at least one version released |
+| publication | `documents_publication_complete` | the latest released version is `publication_complete` |
+| publication | `spans_rights_unresolved`, `spans_privacy_unresolved` | open release gaps by class |
+| publication | `attachments_unpublishable` | captured but not cleared |
 
 ### 2.5 Links to laws and parliamentary history
 
@@ -128,7 +154,8 @@ flowchart LR
     CAT[Official catalogue pages / APIs] --> INV[Inventory record\nper family + session]
   end
   subgraph Fetch["Fetch (private staging)"]
-    INV --> F[Polite fetcher\nrobots, spacing, UA] --> CAS[(Content-addressed\nraw cache, owner-only)]
+    INV --> F[Polite fetcher\nrobots, spacing, UA] --> CAS[(Raw cache keyed by\nraw SHA-256, owner-only)]
+    CAS --> NIDX[Normalized-digest index\ncomparison only]
     F --> PROOF[Fetch-run record\nraw + normalized digests]
   end
   subgraph Extract["Extract (offline, deterministic)"]
@@ -172,11 +199,29 @@ One owner-signed policy per **source × family** (for example regjeringen.no × 
 
 **Signature:** today's typed phrase plus the crosswalk's real anchor. The policy is signed with `ssh-keygen -Y sign`, and the signer must appear in a repository-pinned `allowed_signers` file the owner merged, as `src/lovspor/crosswalk/approval-signers` already works [O, crosswalk #840]. That gives authenticated identity where today the record says `identity_authenticated: false`. The same key signs the **publication attestation** (B2) and **release manifests** [D].
 
+**SSH signing trust boundary (PROPOSED).**
+
+- **What a signature proves:** the signed bytes were signed by a private key whose public key is listed, for this namespace, in `allowed_signers` at the trusted commit. It proves nothing about who held the key, or about whether the owner understood what they signed.
+- **Trust root:** the `allowed_signers` file in the engine repository, changed only by an owner-authored, owner-merged PR, pinned by SHA-256 in a test (as `test_crosswalk_shipped_signers.py` pins the crosswalk file [O]). Verification reads the file from the engine's own checked-out tree, never from a path a command argument names.
+- **Namespaces:** one per purpose (`lovspor-forarbeider-policy`, `lovspor-forarbeider-release`, `lovspor-forarbeider-publication`), so a signature for one purpose never verifies for another.
+- **Validity window:** each entry carries OpenSSH `valid-after` and `valid-before`. Verification uses the time the record states, which must also be no later than the machine clock. A record dated outside the key's window denies.
+- **Rotation:** a new key is added by an owner-merged PR *before* it is used, with an overlap; the old key's `valid-before` is then set to the cut-over moment. Records signed by the old key inside its window stay valid.
+- **Revocation:** a revoked key is moved to a pinned revocation list (`revoked_keys`, used with `ssh-keygen -Y verify -r`). Every verification consults it.
+- **Compromise:**
+  - revoke the key, with its `valid-before` set to the last moment it is trusted;
+  - list every record signed after that moment as untrusted;
+  - re-verify all records and treat any signed after the cut-over as unsigned;
+  - withdraw affected releases forward-only (§3.6);
+  - publish an incident note.
+
+  Records signed before the cut-over stay valid only if the owner states that the key was safe until then. Otherwise the cut-over is the key's first use.
+- **Residual risk:** the engine repository and the owner's GitHub account are the trust root. Whoever can merge to the engine can change `allowed_signers`; branch protection and owner-only merge are therefore part of the boundary.
+
 ### 3.2 Documented absence of website terms
 
 As of 2026-11-12, regjeringen.no publishes **no text-reuse terms**. The only reuse page is for images and video (id2715005, updated 27.02.2026) [O, owner-private terms dossier, 2026-11-12].
 
-- `terms_basis: none_identified` requires a signed `terms_search_record`: pages searched with URLs and read dates, the method, the finding, and an expiry no later than the policy's `valid_until` and at most 90 days.
+- `terms_basis: none_identified` requires a signed `terms_search_record`: pages searched with URLs and read dates, the method, the finding, and an expiry no later than the policy's `valid_until` and **at most 30 days by default** (Pilot-1). A longer validity, up to 90 days, needs its own separate owner decision recorded in the policy; it is not implied by signing.
 - The policy names a **terms locus** (`https://www.regjeringen.no/no/om-nettstedet/`) that every current proof reads. A changed locus denies automatic clearance (`terms_locus_changed`) until the owner searches and signs again.
 - The absence of terms is **never** treated as a licence: the rights basis remains the statute, and the record says so.
 
@@ -189,7 +234,7 @@ Observed: two fetches 28 s apart differed only in `<meta name="csp-nonce" conten
   - the `content` value of the one `<meta name="csp-nonce">` element.
 
   Each is replaced with the fixed token `NONCE`, by a byte-level grammar (ASCII attribute syntax, base64 alphabet plus `&#x2B;` and `=`). Nothing else is touched.
-- The raw digest and the raw bytes are still recorded and stored. Readers see both digests.
+- The raw digest and the raw bytes are still recorded and stored, and the cache is keyed by the raw digest (§4.2). The normalized digest is a comparison value only. Readers see both digests.
 - **Fail-closed:** a byte that differs anywhere else, or a nonce outside that grammar, means the normalized digests differ, and the evaluation denies.
 - **Scope:** it applies to HTML evidence pages (a terms page or the locus) and to the source pages' `source_sha256` equality across runs. It never applies to robots.txt, which is compared raw.
 
@@ -229,7 +274,9 @@ Detecting quote boundaries is reliable (`blockquote` is structural [O]). Detecti
 
 ### 4.2 Resumable, deduplicated, deterministic
 
-- **Raw cache:** content-addressed by normalized digest (§3.3), owner-only, outside Git. Re-fetching an unchanged page adds nothing.
+- **Raw cache:** keyed by the **raw SHA-256** of each response body, exactly as served, owner-only, outside Git. Every response is kept; two fetches of the same URL are two entries when their bytes differ (each has its own nonce). The raw bytes and the per-response identity (URL, retrieval time, status, raw digest) are never discarded or rewritten.
+- **Normalized index:** a separate, derived index `normalized_sha256 → [raw_sha256, …]`, built by the §3.3 rule and recorded with the rule's version. It is used only to *compare*: is this response the same page as that one, nonce aside? It never names a stored object, never replaces a raw digest in a version, and never serves bytes.
+- **Provenance:** every version, proof and comparison names the raw digests it used. A comparison result also records the normalized digests and the rule version that produced them, so it can be recomputed from the raw bytes.
 - **Runs** are resumable: a run record lists done, pending and failed URLs; a restart skips done ones.
 - **Extraction** is a pure function of (raw bytes, extractor version). Same inputs, same version manifest [O, today's determinism carries over].
 
@@ -257,7 +304,7 @@ PDF annexes and figures are stored in the raw cache with their digests. They are
 | PR3A review ledger, dossier, authorization | **retain** for exceptions only |
 | A2a standing policy | **extend**: families, `terms_basis`, SSH signature, span classes |
 | A2b batch plan | **extend** to release manifests over versions and gaps; the 25-document cap becomes a size bound |
-| B1a checkout guard | **retain** unchanged |
+| B1a checkout guard | **retain**; extend the trusted roots to a per-repository table (FC9b) |
 | B1b transaction, lock, journal, recovery | **retain**; extend operations to version files and attachments |
 | B1b withdrawal | **extend** to version, part, span and attachment scope |
 | B2 reader and publication attestation | **retain**; extend to versions and completeness; attestation signed with SSH (§3.1) |
@@ -266,7 +313,7 @@ PDF annexes and figures are stored in the raw cache with their digests. They are
 
 ### 5.2 Compatibility
 
-- Readers read v2 and v3. A v2 member is lifted to a single-version v3 document, with `completeness.state = incomplete` and gaps for its unreleased chapters, never `complete` [O, the v1 → v2 lifting precedent].
+- Readers read v2 and v3. A v2 member is lifted to a single-version v3 document with `source_state = source_incomplete` (v2 never recorded the full extraction) and `publication_state = publication_incomplete`, with release gaps for its unreleased chapters. It is never complete [O, the v1 → v2 lifting precedent].
 - Existing B1b receipts, confirmations and plans stay valid for v2 releases. New releases write v3 only.
 - Existing withdrawals stay. A v2 tombstone is carried as a document-scope tombstone in v3.
 
@@ -278,7 +325,7 @@ The owner's act covers one **release manifest**: versions, gaps, counts and a si
 
 - Pilot-0: 9 chapters, about 24 KB of extracted text across the 5 clean chapters [O]. A full proposition is roughly 50–500 KB of Markdown [A].
 - About 300 relevant documents a year across families [A]. Over 20 sessions that is about 6,000 documents, roughly 0.3–3 GB of Markdown before history.
-- That growth argues for a **separate repository** (`lovverk-forarbeider`) rather than `lovverk/forarbeider/` **[D]**. It keeps lovverk clones small and the Lovdata law readers untouched. Shard by `family/session/`. No Git LFS; attachments that are too large stay as source links with gaps.
+- That growth argues for a **separate repository** (`lovverk-forarbeider`) rather than `lovverk/forarbeider/` **[D]**, bootstrapped before the first public release (FC9b), because content published in lovverk could never leave its history. It keeps lovverk clones small and the Lovdata law readers untouched. Shard by `family/session/`. No Git LFS; attachments that are too large stay as source links with gaps.
 
 ### 5.5 Rollback
 
@@ -288,25 +335,38 @@ The owner's act covers one **release manifest**: versions, gaps, counts and a si
 
 ## 6. Roadmap (dependency-ordered, bounded PRs)
 
-Priority: **one legally cleared, COMPLETE Prop. L before mass ingestion.** Ingestion completeness (FC1–FC6) is separate from release eligibility (FC7–FC10).
+Priority: **one legally cleared, COMPLETE Prop. L before mass ingestion.** Source completeness (FC1–FC6) is separate from publication completeness (FC7–FC10).
+
+**Repository first (recommended, conditional on [D] 9).** If the owner accepts a separate `lovverk-forarbeider` repository, it is bootstrapped and trusted (FC9b) **before** any first public release (FC10). Nothing is ever published into `lovverk/forarbeider/` first and migrated later: migrating published content would leave it in lovverk's permanent history. If the owner declines the separate repository, FC9b is skipped and FC10 targets `lovverk/forarbeider/` under today's B1a guard.
 
 | PR | Scope and interfaces | Migration | Red-first acceptance tests | Fail-closed | Completeness impact |
 |---|---|---|---|---|---|
 | **FC0** (this PR) | This document only | none | — | — | — |
-| **FC1** Normalized page digest | `regjeringen_fetch`: `normalized_sha256` beside `sha256`; `policy_source` compares normalized for HTML evidence | run records get one more field (schema 3) | a nonce-only change matches; any other byte change denies; robots.txt stays raw | grammar mismatch denies | unblocks every policy comparison (B7) |
-| **FC2** `terms_basis: none_identified` | `policy_models`, `policy sign`, `policy_source`: `terms_search_record`, locus URL, expiry; faults `terms_locus_changed`, `terms_search_expired` | policies stay `terms_basis: page` by default | sign refuses without a record; expiry denies; a changed locus denies | yes | unblocks clean clearance on regjeringen.no (B6) |
+| **FC1** Normalized comparison digest | `regjeringen_fetch`: `normalized_sha256` recorded beside the raw `sha256`, with the rule version; `policy_source` compares normalized for HTML evidence; storage stays keyed by raw digest | run records get one more field (schema 3) | a nonce-only change matches; any other byte change denies; robots.txt stays raw; stored files are still named by raw digest | grammar mismatch denies | unblocks every policy comparison (B7) |
+| **FC2** `terms_basis: none_identified` | `policy_models`, `policy sign`, `policy_source`: `terms_search_record`, locus URL, expiry (30 days by default, longer only with an explicit recorded owner decision, at most 90); faults `terms_locus_changed`, `terms_search_expired` | policies stay `terms_basis: page` by default | sign refuses without a record; expiry denies; a 31-day validity without the extra decision refuses; a changed locus denies | yes | unblocks clean clearance on regjeringen.no (B6) |
 | **FC3** Span model and quote groups | `chapter_body`: spans with group boundaries; renderer separator | `ChapterResult` schema 2 (spans); v1 results still read | adjacent quotes give separate spans; render round-trip; no merge | unknown structure becomes a span gap | Pilot-0: the 4 withheld chapters become representable (B1) |
 | **FC4** Tables and footnotes | span types; Markdown rendering; attachment fallback | none | synthetic tables and footnotes render deterministically | an unsupported shape becomes a gap | removes B3 for government tables and footnotes |
 | **FC5** Span rights classes and detectors | classifier per span; detectors with domain exemptions; precision report | `PlannedChapter` gets a span classification | every class has a fixture; `biometrisk risiko` exempt; real-personal-data fixtures still fire | `unknown` is a gap | removes B4 and B5 false positives |
-| **FC6** Version manifest v3 and completeness | Document, Version, Part, Span, Attachment, Gap; completeness computed | readers read v2 and v3; v2 lifts to incomplete | `complete` only with zero gaps; a lifted v2 is never complete | missing input becomes `unknown` | measured completeness (B10) |
-| **FC7** Source policy v2 and SSH signatures | families, span classes, `ssh-keygen -Y` verification against pinned signers | v1 policies keep working until expiry | an unsigned or untrusted signer denies; a signature over other bytes denies | yes | scalable authorization (B8) |
+| **FC6** Version manifest v3, both completeness axes | Document, Version, Part, Span, Attachment, Gap; acyclic `version_id` and separate version history (§2.2); source and publication completeness computed | readers read v2 and v3; v2 lifts to source- and publication-incomplete | `publication_complete` only with `source_complete` and zero release gaps; no version id inside hashed content; a lifted v2 is never complete | missing input becomes `unknown` | measured completeness on both axes (B10) |
+| **FC7** Source policy v2 and SSH signatures | families, span classes, `ssh-keygen -Y verify` against the pinned `allowed_signers` and `revoked_keys`, per-purpose namespaces, validity windows (§3.1) | v1 policies keep working until expiry | an unsigned or untrusted signer denies; a signature over other bytes denies; another namespace denies; a revoked key denies; a record dated outside the key window denies | yes | scalable authorization (B8) |
 | **FC8** Release manifest over versions | plan, confirm and apply on versions and gaps; size bound | B1b receipts v2 kept | an over-size manifest refuses; gaps recorded; idempotent retry | yes | removes B9 and B11 |
 | **FC9** Withdrawal v2 | version, part, span and attachment tombstones | v2 withdrawals carried over | a tombstoned span is never served; history warning | yes | precise takedown (B16) |
-| **FC10** First complete Prop. L | an operator run on one proposition: fetch, extract, classify, owner policy (FC7), release to a disposable then the real repo **after owner authorization** | none | documented run; completeness `complete` or an explicit gap list | any unresolved span is a gap | first `complete` document |
+| **FC9b** Repository bootstrap and trusted root (prerequisite of FC10 if [D] 9 is accepted) | the owner creates `lovverk-forarbeider` (empty, owner-only merge, branch protection) and records its initial commit; the B1a guard gets a per-repository trusted-root table (lovverk root, forarbeider root); release-clone commands take the target repository explicitly | B1a `TRUSTED_ROOT_COMMITS` becomes per repository; lovverk's entry unchanged | a clone of the new repo with the pinned root passes; lovverk's root is refused for forarbeider writes and vice versa; an unknown root is refused | yes | removes B14 before anything is public |
+| **FC10** First complete Prop. L | an operator run on one proposition: fetch, extract, classify, owner policy (FC7), release to a disposable clone, then to the release repository **only after owner authorization** | none | see the acceptance rule below the table | any unresolved span or attachment is a release gap | first `publication_complete` document, or a documented NO-GO |
 | **FC11** Discovery and resumable ingestion | inventory per family and session; resumable runs | none | a resumed run skips done URLs; inventory digests recorded | robots refusal stops | `documents_discovered`, `source_coverage` |
 | **FC12** More families | NOU, Ot.prp., Prop. S, Innst. (stortinget.no; own terms and policy [D]) | none | per-family extractor fixtures | an unknown family refuses | family coverage |
-| **FC13** Separate repository | `lovverk-forarbeider` (if chosen [D]); B1a guard pinned to its root | migrate v3 data; lovverk `forarbeider/` deprecated | guard trusts only the new root; old readers unaffected | yes | scale (B14) |
+| **FC13** Repository growth controls | sharding by `family/session/`, size budgets per release, clone-size monitoring in `lovverk-forarbeider` (bootstrapped in FC9b) | none: there is no lovverk `forarbeider/` content to migrate, because nothing was ever released there | an over-budget release refuses; shard paths deterministic | yes | scale |
 | **FC14** Search, MCP, API | opt-in reader tools over released versions only | none | tombstones never served; completeness banner always shown | yes | access |
+
+**FC10 acceptance rule (unambiguous).** FC10 succeeds only if one Prop. L is released whose latest version is `source_complete` **and** `publication_complete`: every expected part and attachment is extracted and cleared, and there are zero release gaps. A partial release is **not** an FC10 success, whatever its share of chapters.
+
+If unresolved rights, privacy or extraction gaps prevent that, FC10 reports **NO-GO**, with:
+- the candidate;
+- both completeness records;
+- every gap by code;
+- what would clear each gap.
+
+The criterion is never redefined, and choosing a different candidate is a new FC10 attempt, reported as such.
 
 ## 7. Open owner and legal decisions
 
@@ -315,10 +375,10 @@ Priority: **one legally cleared, COMPLETE Prop. L before mass ingestion.** Inges
 3. **[L]** The § 24 position of regjeringen.no and stortinget.no as databases, for discovery-scale extraction, given § 24's "§ 14 gjelder tilsvarende".
 4. **[L] [D]** § 29: may third-party consultation quotes be republished as part of a complete proposition? If not, they stay gaps.
 5. **[L]** Personal data in consultation lists and quoted statements: the processing basis, and whether span-level redaction suffices.
-6. **[D]** `terms_basis: none_identified` with a terms locus, for regjeringen.no.
+6. **[D]** `terms_basis: none_identified` with a terms locus, for regjeringen.no; terms-search validity 30 days by default, with any longer validity (at most 90 days) a separate decision.
 7. **[D]** Discovery from official catalogues instead of owner-typed lists (changes Amendment 1 point 6).
-8. **[D]** SSH-signed policies, release manifests and publication attestations (the crosswalk mechanism).
-9. **[D]** A separate `lovverk-forarbeider` repository instead of `lovverk/forarbeider/`.
+8. **[D]** SSH-signed policies, release manifests and publication attestations, with the trust boundary in §3.1 (namespaces, validity windows, rotation, revocation list, compromise procedure).
+9. **[D]** A separate `lovverk-forarbeider` repository instead of `lovverk/forarbeider/`. **Recommended before any first public release** (FC9b before FC10).
 10. **[D]** Stortinget documents (Innst.): source terms (stortinget.no or data.stortinget.no) and their own policy.
 
 ## 8. What this proposal does not change
