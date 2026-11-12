@@ -228,3 +228,30 @@ def test_registry_json_records_prior_holders_only_where_there_are_some(tmp_path:
     assert "prior_holders" not in data["slugs"]["forskrifter"][SLUG]
     replace_registry(recorded, tmp_path)
     assert read_registry(tmp_path) == recorded
+
+
+def test_replace_registry_refuses_a_changed_assignment_time(tmp_path: Path) -> None:
+    """An entry is immutable as a whole, even if its owner stays the same."""
+    path = replace_registry(_registry(), tmp_path)
+    before = path.read_bytes()
+    rewritten = SlugRegistry().assign(
+        "forskrifter", SLUG, OWNER.model_copy(update={"assigned_at": "2026-11-01"})
+    )
+
+    with pytest.raises(SlugOwnershipError, match="never deleted or rewritten"):
+        replace_registry(rewritten, tmp_path)
+
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("payload", [b"{", b'{"slugs": []}', b"\xff"])
+def test_replace_registry_preserves_an_unreadable_prior_file(
+    tmp_path: Path, payload: bytes
+) -> None:
+    path = tmp_path / REGISTRY_FILENAME
+    path.write_bytes(payload)
+
+    with pytest.raises(ParseError):
+        replace_registry(_registry(), tmp_path)
+
+    assert path.read_bytes() == payload

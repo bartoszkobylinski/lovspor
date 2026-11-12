@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.errors import CorpusStateError, ManifestRecordLossError
+from lovspor.errors import CorpusStateError, ManifestRecordLossError, ParseError
 from lovspor.identity.records import ensure_no_record_loss, replace_manifest
 from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
 
@@ -76,3 +76,17 @@ def test_replace_manifest_writes_a_first_manifest(tmp_path: Path) -> None:
     replace_manifest(_manifest(a=_record("a")), path)
 
     assert path.exists()
+
+
+@pytest.mark.parametrize("payload", [b"{", b'{"documents": []}', b"\xff"])
+def test_replace_manifest_fails_closed_on_an_unreadable_prior_file(
+    tmp_path: Path, payload: bytes
+) -> None:
+    """The record-loss guard cannot establish membership from corrupt input."""
+    path = tmp_path / "manifest.json"
+    path.write_bytes(payload)
+
+    with pytest.raises(ParseError):
+        replace_manifest(_manifest(a=_record("a")), path)
+
+    assert path.read_bytes() == payload

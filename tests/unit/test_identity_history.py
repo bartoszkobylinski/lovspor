@@ -116,6 +116,31 @@ def test_write_merges_into_the_file_on_disk(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8").endswith("}\n")
 
 
+def test_write_refuses_a_prior_file_with_another_identity(tmp_path: Path) -> None:
+    """The filename's identity cannot replace a conflicting stored doc_id."""
+    path = by_id_path(tmp_path, NEW)
+    path.parent.mkdir(parents=True)
+    path.write_text(_history(_event("a", 1), doc_id=OLD).model_dump_json(), encoding="utf-8")
+    before = path.read_bytes()
+
+    with pytest.raises(HistoryIdentityError, match=OLD):
+        write_identity_history(_history(_event("b", 2)), tmp_path)
+
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("payload", [b"{", b'{"events": []}', b"\xff"])
+def test_write_preserves_an_unreadable_prior_history(tmp_path: Path, payload: bytes) -> None:
+    path = by_id_path(tmp_path, NEW)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(payload)
+
+    with pytest.raises(ParseError, match="per-document history"):
+        write_identity_history(_history(_event("b", 2)), tmp_path)
+
+    assert path.read_bytes() == payload
+
+
 def test_an_unreadable_by_id_file_is_a_parse_error(tmp_path: Path) -> None:
     path = by_id_path(tmp_path, NEW)
     path.parent.mkdir(parents=True)
