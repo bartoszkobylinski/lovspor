@@ -210,3 +210,40 @@ def test_each_event_keeps_the_path_it_had_across_a_rename(tmp_path: Path) -> Non
         (rename[:7], "forskrifter/ny.md"),
         (add[:7], "forskrifter/gammel.md"),
     ]
+
+
+def test_the_same_commit_and_path_with_another_type_is_another_event() -> None:
+    """Append-only event identity includes type as well as commit and path."""
+    written = _event("b", 2).model_copy(update={"type": "removed"})
+    extracted = _event("b", 2)
+
+    merged = merge_append_only(_history(written), _history(extracted))
+
+    assert merged.events == [extracted, written]
+
+
+def test_an_empty_extraction_keeps_written_history_byte_identical(tmp_path: Path) -> None:
+    """A truncated git walk cannot erase events already stored for the id."""
+    prior = _history(_event("b", 2), _event("a", 1))
+    path = write_identity_history(prior, tmp_path)
+    before = path.read_bytes()
+
+    write_identity_history(_history(), tmp_path)
+
+    assert read_identity_history(path) == prior
+    assert path.read_bytes() == before
+
+
+def test_repeated_history_merge_is_byte_identical(tmp_path: Path) -> None:
+    """Re-extraction preserves written metadata and does not duplicate events."""
+    written = _event("a", 1)
+    path = write_identity_history(_history(written), tmp_path)
+    reextracted = written.model_copy(update={"subject": "changed extraction subject"})
+    incoming = _history(_event("b", 2), reextracted)
+    write_identity_history(incoming, tmp_path)
+    before = path.read_bytes()
+
+    write_identity_history(incoming, tmp_path)
+
+    assert read_identity_history(path) == _history(_event("b", 2), written)
+    assert path.read_bytes() == before
