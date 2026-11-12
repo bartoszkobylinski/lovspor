@@ -134,6 +134,26 @@ The ladder's digest is `c3f7df65…` → `bac215f61775ae1324169630f923bf9019cd05
 **Determinism.** Three rebuilds of the fifteen files (eight per-act reports, the coverage reduction, two ladders, four pilots), each from its own frozen copy of `src/`:
 - **B0** at `ed804724`: reproduces every before digest.
 - **C and D**, run independently and sequentially at `c50f975d`'s `src/`: identical digests for all fifteen files. **E and F**, at the reviewed source `bf54c13d`, are identical to C and D.
+**The fifteen digests**, one line each. C, D, E and F agree byte for byte; the before column is B0:
+
+| file | before (B0, `ed804724`) | after (C = D at `c50f975d` = E = F at `bf54c13d`) |
+|---|---|---|
+| `cov-arbeidsmiljoloven.json` | `a520546acaeca106…` | `fe964b68c5048f01a064effa6c20fe5b34fe01286d4f475bb4d89781c17d2a74` |
+| `cov-barnevernsloven.json` | `fd9c7e86659b1c09…` | `a968f7fe78da210891bd77464677df4f41095f35b74ef592df93ecd84f416c91` |
+| `cov-friskolelova.json` | `f42acee8d8104df6…` | `3d212a3ef2589f34fb47d237ae1c2a154af998836f061650b3d6a4957d5427a9` |
+| `cov-merverdiavgiftsloven.json` | `6e1c416596fc58c0…` | `9a51d3fa3e91cc6bfcff28eba7255351880ce557ddf617a0e9e90206dd822967` |
+| `cov-naturmangfoldloven.json` | `ee4ac2ddddf1147f…` | `87f3ce6efb1696a6ecbe2d71aa826f66c1dc49330c37ee80ba40c75a221d7d41` |
+| `cov-straffeloven.json` | `0bba894ce97990e3…` | `7046760f037c5bbb239a5fcb5b48a78761457b7f3583de85a1f9b85939f2b5dc` |
+| `cov-tvisteloven.json` | `86a7bd522df8fcdd…` | `7b4176d0411919116917189acf53247592cadde9cad708187791429cde49070a` |
+| `cov-utlendingsloven.json` | `8cdfb3d277f04b7c…` | `96c049522558e414df9e4cce99a07f04e8ac0aed9abaca6def8c939942f29bee` |
+| `coverage.json` | `f82d04959afb7fbf…` | `c47a129a480e6cde66e73ad10f32f42f10f4d3dcec93cfbf3f6c9d16cbac62c2` |
+| `ladder-barnevernsloven.json` | `a559bec6222e2f5f…` | `c7548647c4b7bf9dcab069ab2f6ac8519b70d5e6c892f6f2a1e9a48e5fabd1ae` |
+| `ladder-straffeloven.json` | `c3f7df6538b853b5…` | `bac215f61775ae1324169630f923bf9019cd0518001475cf8375a21f4854c8a8` |
+| `pilot-arveloven.json` | `5b101e528230d1a2…` | `b729e784a4027db323d24f175fca85e1798c08dd80ece17254aa603ed3c800ca` |
+| `pilot-personopplysningsloven.json` | `0d42b5c39b964ad5…` | `0c4e4e805f8a612bea92bb5687002e50c97e3acb7c75ce0d62a4e49245a582f4` |
+| `pilot-sivilombudsloven.json` | `1684d54cb77c8a36…` | `7af5304f1d71d25713a521c3333c9676b43a0ec80e8fb6d3946dccf52d88e365` |
+| `pilot-spraklova.json` | `123e32790b8f9d2c…` | `6b5fdf7efb7f7ada163eefd00ddbd3d57ff3c785ed560335e4bc019129e25bf5` |
+
 - An earlier pair, A and B, ran at a first version whose refusals carried no `known_from`. They were identical to each other, but raised act-level problems by 2 at the 2008 and 2012 rungs, a #858 knowledge leak. The fix (refusals known from the outer law's publication, tested) removed it before C and D.
 
 ## 5. Tests
@@ -165,6 +185,11 @@ The ladder's digest is `c3f7df65…` → `bac215f61775ae1324169630f923bf9019cd05
 - `#1:I:253.0` is never 2013-04-05, is `unresolved` with the host reason (`partial decision outside the grammar`), and names `forskrift/2013-04-05-338` among its proofs;
 - tvisteloven's three 2013 items are `unresolved`;
 - `lov/2020-12-18-149#1:I:183.0` is `dated` 2021-01-01, known 2020-12-18, with proofs `[lov/2020-12-18-149, forskrift/2020-02-28-200]`.
+
+**Named regression run** at head `4a0a38c8`, after the Codex test author's commit:
+- the #856–#859, Phase 4/4B and #872 unit files: `test_legaltime_phase4_attribution.py`, `…_phase4_blanket.py`, `…_phase4_commencement.py`, `…_phase4_mutants.py`, `…_phase4b_attribution.py`, `…_phase4b_mutants.py`, `…_872_date_only_attribution.py`: **210 passed**;
+- the Phase-1 pilot reproduction `tests/integration/test_legaltime_pilot.py`: **9 passed**, byte-for-byte against the regenerated files;
+- `tests/unit/test_legaltime_893_nested_timing.py`: **55 passed**, including the 3 cases the Codex test author added in `4a0a38c8`.
 
 **Preserved:**
 - the #856–#859, Phase 4B and #872 tests (the legaltime unit suite: 1,249 before this file, all passing);
@@ -233,10 +258,16 @@ The other 17 are argued equivalent here. **They are not registered in `mutation-
 | `nesting._outside_nodes` | `position >= start` | Removes only node `start`, the host's instruction, from "outside": never a clause, as above. |
 | `nesting._sentences` | `"XX XX".join(...)` on the whole-node entry | Clauses are single sentences, and `split_sentences` yields every single-sentence node's text unchanged. The whole-node entry only matters for a clause spanning several sentences of one paragraph. None was seen; the argument rests on how `instructions` captures clauses, not on Python alone. |
 | `hosts._from_host` | `parts=None` | `section_timing` reads `parts` only for a part-qualified unit, and those are refused (SPLIT) before this line. |
-| `hosts._from_host` | `Decisions(...)` without `chapter_of` | Not shown to be equivalent. With `events=[]`, the host's `baseline_commencement` reads chapter units from the decisions and places the section through `section_timing(…, chapters.get(section), …)`, which the chapter test kills. Whether `chapter_of` can change a host result through `_Fold`'s own-section scopes was not established. **Listed, not claimed.** |
+| `hosts._from_host` | `Decisions(...)` without `chapter_of` | Equivalent by construction. The map passed is `{p.key: p.chapter for p in host.provisions if p.chapter}`. `_Fold.__init__` (`baseline.py:244-248`) unions exactly that map from the act it is given, so `chapter_of`, `chapters` and `sections` come out identical. `_Decision.chapter_of` is read only by `_Decision.answer(op)` (`commencement.py:598`), which `baseline_commencement` never calls (no `.answer(` in `baseline.py`). |
 | `archive._host_evidence` | `if refids or True` | `_decision_names(index, set())` returns `[]` for any index: no title cites an empty set of laws, and no `changesToDocuments` intersects it. |
 
-So the measured surface ends at 463 of 481 killed by mutmut. One further mutant is killed by a test confirmed by hand. 16 are argued equivalent, and 1 (`chapter_of`) is open.
+So the measured surface ends at 463 of 481 killed by mutmut. One further mutant is killed by a test confirmed by hand. The other **17 are argued equivalent; none is open**.
+
+They are argued here, not registered in `mutation-equivalents/`, for two reasons:
+- mutation is not a PR gate (#877);
+- several arguments rest on the operation-id format or on how `instructions` captures clauses, not on Python semantics alone, which the register's "provably equivalent" bar is meant for.
+
+If the nightly lane reports them, the four pure-semantics `maxsplit` cases, the `parts=None` case and the `or True` case are candidates for registration.
 
 ## 7. Limits and follow-ups
 
@@ -262,6 +293,5 @@ So the measured surface ends at 463 of 481 killed by mutmut. One further mutant 
 **Conditions:** the PR Pipeline (fast-ci, Test matrix, codex-tests) is green on the final head.
 
 **Not blocking:**
-- the open `chapter_of` survivor (§6);
 - the vergemålsloven partial-decision grammar (§7), which would turn 6 refusals into 2013-07-01 dates once read;
 - the mutation-harness environment leak (§6, out of scope).
