@@ -388,3 +388,156 @@ The criterion is never redefined, and choosing a different candidate is a new FC
 - The owner merges every release; nothing publishes without that merge.
 - Law readers, MCP law tools, search and embeddings stay unchanged until FC14, and FC14 is opt-in.
 - Votes and debates stay in Politik; forarbeid → act links follow ADR-0017.
+
+## 9. Amendment A: policy-driven automatic publication (PROPOSED)
+
+**Status:** PROPOSED. It records the owner's direction of 2026-11-12, stated in session: *manual approval of each document, batch, PR or merge is rejected; human approval is required for source-level policy, legal scope, security trust roots and material policy changes, not routine releases.* Formal approval is pending (decision D11 in [the owner decision gate](forarbeider-owner-decisions.md)).
+
+This amendment replaces §5.3 and the owner-act steps of §2.6 ("Release (owner act)", "Owner commit + merge = publication"). Nothing else in §§1–8 changes. Rights, privacy, provenance and integrity gates are unchanged, and **unresolved content is never published**.
+
+### 9.1 Authorities, kept apart
+
+| Authority | Holder | May | May never |
+|---|---|---|---|
+| **Policy** | the owner's SSH key (namespace `lovspor-forarbeider-policy`) | sign source/family policies, including `automated_publication`, scope, budgets and legal-assessment references; sign exception clearances; sign withdrawals; sign stop and resume records | — |
+| **Trust roots** | the owner, by owner-merged changes to the engine and by repository settings | change `allowed_signers`, `revoked_keys`, the bot's public keys, the trusted root commits, branch protection and repository visibility | be exercised by any automated process |
+| **Execution** | the release runner: a dedicated macOS user account on the owner's Mac, run by launchd | fetch within the signed scope, extract, classify, plan, apply, commit, sign release manifests and commits with the **bot key**, push with the **bot credential** | sign a policy, clear an exception, change a trust root, push anywhere but the release branch, force-push |
+| **Repository write** | a bot credential: a GitHub App installation token or a fine-grained token scoped to `lovverk-forarbeider` contents only | fast-forward push to `main` of that one repository | administration, settings, other repositories, deleting branches or tags, force-push |
+
+The bot key is listed in `allowed_signers` with **only** the namespaces `lovspor-forarbeider-release` and `lovspor-forarbeider-publication`. A bot signature in the policy namespace fails verification by construction. A compromised runner therefore cannot widen its own authority: the policy, trust roots and credential scope all live outside it.
+
+### 9.2 Eligibility (unchanged gates, now automatic)
+
+A document version is **eligible** for automatic publication only if:
+
+1. an unrevoked, unexpired, owner-signed policy covers its source and family and states `automated_publication: true`, with a reference to a completed legal assessment (D10). No assessment reference, no automated publication;
+2. a current source proof (fresh within the policy's window, nonce-normalized comparison per §3.3) matches the policy;
+3. it is `source_complete` **and** `publication_complete` (§2.3). A version with any release gap is not eligible. Its eligible content is never published as a partial document under the automatic path; it waits in quarantine;
+4. its integrity checks pass: raw digests re-hash, extraction reproduces, and the version id recomputes.
+
+Everything else is **quarantined** (§9.6), never silently cleared and never silently dropped.
+
+**[D] (open):** may the automatic path ever publish `publication_incomplete` documents with explicit gap notices? This amendment says **no** by default. Changing that is a material policy change and needs owner approval.
+
+### 9.3 The automated release transaction
+
+One **release run** is a loop of bounded batches. Each batch is a transaction, and every step is idempotent and keyed by the batch's **release manifest digest**.
+
+1. **Pre-checks.** Each step stops, with nothing written, when its condition fails:
+   - the kill switch is off (§9.5);
+   - the policy is valid now;
+   - the daily budgets have room (§9.5);
+   - the release clone passes the B1a guard (§9.8);
+   - the local `main` equals the remote `main` (one read-only `ls-remote`).
+2. **Plan.** Select eligible versions not yet released, in deterministic order (family, session, id, version id), until a batch bound is reached: **100 files or 25 MB, whichever comes first** (recommended answer, pending). The release manifest lists:
+   - the versions with their digests;
+   - the base commit;
+   - the policy digest;
+   - the source-proof digests;
+   - the counts.
+
+   It is signed with the bot key. Same inputs, same manifest, same digest.
+3. **Apply.** The B1b transaction (lock, journal, staged bytes, documents then index then manifest, read-back) writes the working tree.
+4. **Commit.** One commit by the bot identity, signed with the bot key. The message carries the manifest digest, and the manifest file itself is in the tree (`releases/<manifest digest>.json`).
+5. **Verify before push.** The B2 checks run on the local commit: every file is the manifest's, the receipts are consistent, and nothing outside the dataset changed.
+6. **Push.** Fast-forward to `main` only. A rejected push (the remote moved) aborts the batch: reset to the remote, re-plan from the new base. Never force, never rebase published commits.
+7. **Verify after push.** `ls-remote main` must equal the pushed commit.
+8. **Receipt.** An immutable, append-only receipt in the runner's private workspace records the manifest digest, commit, push time, remote ref, policy and the bot key fingerprint. A publication attestation is signed by the bot key, namespace `lovspor-forarbeider-publication`; it replaces the owner's manual attestation of B2.
+
+**Recovery, by the last completed step:**
+
+| Last completed step | Recovery |
+|---|---|
+| before 3 | nothing to undo |
+| 3 (journal exists) | roll back (B1b recover) |
+| 4 (committed, not pushed) | re-run 5–8 on the existing commit; if verification fails, reset the local branch to the remote and quarantine the batch |
+| 6 (pushed, no receipt) | 7–8 are re-run from the remote state |
+
+A batch whose manifest digest is already on the remote is `UNCHANGED`.
+
+### 9.4 Failure isolation
+
+- A failure attributable to a document (a render failure, an integrity mismatch, a detector anomaly in its spans) quarantines **that document** with a reason code. The batch is re-planned without it, so unrelated eligible documents proceed.
+- A failure not attributable to a document stops the run and trips the kill switch:
+  - trust or policy (a signature, revocation or expiry);
+  - repository (guard, push protection);
+  - source (robots refused, a proof mismatch for the whole source).
+- No retry loop republishes a quarantined document. Only an owner-signed exception clearance releases it from quarantine.
+
+### 9.5 Kill switch, budgets, anomalies, notification
+
+- **Kill switch, three independent levels.** Any one stops publication before the next push:
+  1. a local stop file in the runner's private workspace, checked before every step;
+  2. an owner-signed `stop` record (policy namespace). Revoking the policy has the same effect;
+  3. revoking the bot credential on GitHub (immediate, outside the runner).
+
+  Resuming needs an owner-signed `resume` record, or a new policy.
+- **Budgets per day and per source:** documents, files, bytes, commits, fetch requests. Budgets are part of the signed policy. Reaching one ends the run cleanly, with no partial batch.
+- **Anomaly detection.** Each item halts the run and notifies. Thresholds are in the policy:
+  - the quarantine rate per run above a threshold;
+  - a detector hit-rate shift;
+  - extraction fidelity below a floor;
+  - a sudden change in a source page's size or structure distribution;
+  - a robots.txt or terms-locus change;
+  - a policy nearing expiry;
+  - a push rejected twice.
+- **Notification** goes through the existing alert channel (`LOVSPOR_ALERT_WEBHOOK`, a secret ntfy topic; its value is never logged) plus a daily summary. The summary gives counts and codes only: no text, names or paths.
+
+### 9.6 Quarantine
+
+A quarantine record holds the document or version id, the scope (document, part, span or attachment), the reason code, the first time seen and the evidence digests. It lives in the runner's private workspace, is never published and never expires silently.
+
+Owner actions on quarantine are **exceptions**, by design rare:
+- sign a clearance for a specific span class or span;
+- sign a permanent exclusion with a reason;
+- change the policy (a material change).
+
+### 9.7 Git model and visibility
+
+- **Repository:** `bartoszkobylinski/lovverk-forarbeider`, private during preparation (recommended answer, pending). Making it public is an owner act (trust root), not a release step.
+- **`main` protection:**
+  - no force-push and no deletion;
+  - linear history and signed commits required;
+  - pushes allowed only to the bot app/credential and the owner;
+  - the bot has no admin rights and cannot change protection.
+- **Releases become visible** when the push lands on `main`, and publicly once the repository is public. Each release is one commit with a manifest, so `git log` is the release log.
+- **Provenance in the commit:**
+  - the bot identity and its signature;
+  - the manifest digest in the message;
+  - the manifest in the tree, naming the policy digest, the source-proof digests and every version digest.
+- **Withdrawal** is a new commit by the same pipeline. It executes an **owner-signed** withdrawal record: the tombstone, the removal and the index update. It cannot erase history:
+  - the earlier commit remains reachable in `main`'s history;
+  - every clone, fork, mirror, cache and package made before the withdrawal keeps the bytes;
+  - rewriting `main` would break every downstream clone, is forbidden by protection, and still would not reach existing copies.
+
+  That is why every gate runs **before** the first push, and why unresolved content is quarantined, never published.
+
+### 9.8 What changes in shipped and planned slices
+
+| Slice | Change |
+|---|---|
+| **B1a** guard | the release clone belongs to the runner account; trusted root per repository (FC9b); `main` is the release branch of `lovverk-forarbeider` (today the guard refuses `main` only through the plan's `forarbeider/` branch grammar, which the automatic path replaces) |
+| **B1b** apply/recover/withdraw | the typed-phrase confirmation is replaced, on the automatic path only, by "the plan is the signed policy's"; the manual mode stays for exceptions; the transaction, lock, journal and recovery are unchanged; commit and push are added as steps 4–8 |
+| **B2** reader and attestation | the owner attestation is replaced by the bot-signed publication attestation, verified against the pinned bot key; the reader verifies policy → manifest → commit → attestation |
+| **FC7** policy v2 | adds `automated_publication`, budgets, anomaly thresholds, the legal-assessment reference, stop and resume records |
+| **FC8** release manifest | becomes the automatic planner and batch transaction (§9.3), bot-signed |
+| **FC9** withdrawal v2 | executed by the pipeline from an owner-signed withdrawal record |
+| **FC9b** bootstrap | creates the repository, branch protection, the bot credential and pins the bot keys: all owner acts, documented and checked by a read-only verifier |
+| **FC10** | the first complete Prop. L is published by the automatic path, once D10 is done and the policy enables it; the acceptance rule is unchanged |
+| **FC11** discovery | feeds the automatic path; its scope is part of the signed policy |
+
+### 9.9 Implementation PRs (bounded; each red-first, fail-closed)
+
+| PR | Scope | Red-first tests | Fail-closed |
+|---|---|---|---|
+| **AR1** Policy v2 automation fields | `automated_publication`, budgets, thresholds, legal-assessment reference; stop and resume records; namespace checks (bot key never verifies as policy) | a bot-signed policy is refused; no legal reference means not automated; an expired or revoked policy denies | yes |
+| **AR2** Deterministic automatic planner | eligibility (§9.2), ordering, batch bounds, manifest | same inputs give the same digest; an incomplete version is never planned; a 101-file batch splits | yes |
+| **AR3** Quarantine and failure isolation | quarantine records, per-document attribution, re-plan without the failing document | one bad document does not block the others; quarantine is never auto-cleared | yes |
+| **AR4** Commit, push and verify transaction | steps 4–8 against a **local bare remote** in tests; idempotency by manifest digest; recovery table | a crash at each step recovers; non-fast-forward aborts; a re-run is `UNCHANGED` | yes |
+| **AR5** Kill switch, budgets, anomalies, notification | three-level stop, budget accounting, anomaly checks, an alert sink | the stop file halts before push; a budget hit ends the run cleanly; an anomaly halts and notifies (sink mocked; no secret in logs) | yes |
+| **AR6** Bot-signed publication attestation and reader | the B2 reader verifies the bot attestation chain | an attestation by an unlisted key or wrong namespace is refused | yes |
+| **AR7** Bootstrap verifier (read-only) | checks branch protection, bot permissions and pinned keys against the expected settings, through the GitHub API | an over-privileged bot, missing protection or an unknown key refuses the run | yes |
+
+**Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR7 land. No release has happened yet [O], so nothing published needs migrating.
+
+**Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).

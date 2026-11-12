@@ -16,11 +16,12 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
 |---|---|---|---|---|---|
 | D1 | Full-corpus direction | T | **ACCEPT** | now, before FC3 | all |
 | D2 | Successor ADR rather than Amendment 2 | T | **ACCEPT** | now, together with D1 | documentation only |
-| D3 | Separate `lovverk-forarbeider` repository before the first release | T, S | **ACCEPT** | before FC9b; not needed for FC1–FC8 | FC9b, FC10, FC13 |
+| D3 | Separate `lovverk-forarbeider` repository before the first release; private during preparation; bot fast-forward push to protected `main` (D11) | T, S | **ACCEPT** | before FC9b; not needed for FC1–FC8 | FC9b, AR7, FC10, FC13 |
 | D4 | `terms_basis: none_identified`, terms locus, 30-day default | T, L | **ACCEPT**, rule only | before FC2 merges | FC1b, FC2, FC7 |
 | D5 | Discovery from official catalogues | S, L | **DEFER** | before FC11 | FC11, FC12 |
-| D6 | SSH signatures and trust boundary | S | **ACCEPT** | before FC7 merges | FC7, FC8, B2 attestation |
-| D7 | Release strategy | S | **ACCEPT** | before FC8 merges | FC8, FC9, FC10 |
+| D6 | SSH signatures and trust boundary (revised for D11: separate owner and bot keys) | S | **ACCEPT** | before FC7 and AR1 merge | FC7, AR1, AR4, AR6 |
+| D7 | Release strategy (owner-merged manifests) | S | **SUPERSEDED by D11** (owner direction 2026-11-12) | — | — |
+| D11 | Policy-driven automatic publication | S, T | **ACCEPT** (as the owner directed); formal approval pending | before AR1 merges | AR1–AR7, FC7–FC11, B1a, B1b, B2 |
 | D8 | Two completeness axes, `unknown` and never a false zero | T | **ACCEPT** | now, together with D1 | FC6, FC10, FC14 |
 | D9 | Staged document families | T, L | **MODIFY** | Prop. L and LS now; later families each at their own gate | FC10, FC12 |
 | D10 | Legal assessment (§§ 14, 24, 29; privacy; quotes; attachments) | L | **record unresolved; commission an assessment** | the assessment must come before FC10's release step | FC5, FC7, FC10 |
@@ -39,13 +40,13 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
 - **Rationale:** it is the stated product goal. Pilot-0 showed the excerpt model withholds 4 of 9 chapters of an ordinary proposition [O] and cannot tell a gap from a design choice.
 - **Consequences:**
   - FC3–FC9 extend A1–B2; nothing shipped is discarded;
-  - release volume per document grows, so D7 and D10 matter more.
+  - release volume per document grows, so D11 and D10 matter more.
 - **Reversibility:** high until FC10. Every slice before FC10 is offline or additive.
 - **Approve now:** yes, because it decides what FC3 and FC6 build.
 
 ### D2: successor ADR rather than Amendment 2 (ACCEPT)
 
-- **Recommended:** write a successor ADR, "Forarbeider full corpus", in `lovspor-notebook`, under the next free number (ADR-0020 if still free; not checked here). It supersedes ADR-0018's excerpt-release model, keeps ADR-0018's isolation and labelling rules by reference, and links the PR3B contract and Amendment 1 as historical.
+- **Recommended:** write a successor ADR, "Forarbeider full corpus", in `lovspor-notebook`, under **ADR-0025**. Checked 2026-11-12: ADR-0020, 0021, 0023 and 0024 exist in `lovspor-notebook/docs/adr`, and ADR-0022 is taken by open lovspor-notebook PR #167. It supersedes ADR-0018's excerpt-release model, keeps ADR-0018's isolation and labelling rules by reference, and links the PR3B contract and Amendment 1 as historical.
 - **Alternative:** Amendment 2 to ADR-0018.
 - **Rationale:** the change concerns the product (complete documents, versions, two axes, a new repository), not one release rule. Stacking a second amendment on a contract whose base text is about excerpts makes the "amendment wins" reading fragile.
 - **Consequences:** one ADR to write. The PR3B contract gets a "superseded in scope by the successor ADR" note, and nothing in it is deleted.
@@ -114,6 +115,10 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
   - one namespace per purpose (policy, release, publication);
   - `valid-after` and `valid-before` windows; rotation with overlap; a compromise procedure;
   - reusing the crosswalk mechanism (#840) [O].
+- **Revised for D11:**
+  - two keys: the owner key (namespace `lovspor-forarbeider-policy`) and the **bot key** (namespaces `lovspor-forarbeider-release` and `lovspor-forarbeider-publication` only);
+  - the bot key can never verify as a policy signature;
+  - the bot key is rotated and revoked through the same `allowed_signers` and `revoked_keys`, by owner-merged changes.
 - **No false identity claim:**
   - a signature proves only that a listed key signed the bytes;
   - records state `signature_verified: true` and the key fingerprint, never "the owner did X";
@@ -128,20 +133,34 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
 - **Reversibility:** medium. Records signed under a key stay tied to it.
 - **Approve:** before FC7 merges. Code can be built and tested with test keys earlier.
 
-### D7: release strategy (ACCEPT)
+### D7: release strategy (SUPERSEDED by D11)
 
-- **Recommended:**
-  - a release is a bounded, signed **release manifest**: versions, gaps, counts, and a size bound in bytes and files;
-  - applied by the B1b transaction to the release repository's working tree;
-  - the owner commits, opens the PR and merges;
-  - **no automatic merging, no scheduled release, no CI-triggered release**;
-  - withdrawal is forward-only (FC9).
+The owner rejected manual approval of each document, batch, PR or merge (2026-11-12). The owner-merged, per-release manifest model described here earlier is withdrawn. D11 replaces it.
+
+### D11: policy-driven automatic publication (ACCEPT, as directed; formal approval pending)
+
+- **Owner direction (2026-11-12, stated in session):** manual approval of each document, batch, PR or merge is rejected. Human approval is required for source-level policy, legal scope, security trust roots and material policy changes, not routine releases.
+- **Recommended model:** [architecture §9](forarbeider-full-corpus-architecture.md#9-amendment-a-policy-driven-automatic-publication-proposed):
+  - an owner-signed source/family policy with `automated_publication: true`, budgets, anomaly thresholds and a reference to a completed legal assessment (D10);
+  - eligibility only for `source_complete` and `publication_complete` versions; everything else quarantined;
+  - bounded batches;
+  - a bot-signed release manifest and commit, fast-forward pushed by a minimally scoped bot credential, verified before and after the push;
+  - immutable receipts;
+  - a three-level kill switch;
+  - per-document failure isolation.
+- **Authorities separated:**
+  - the owner holds policy and trust roots;
+  - the runner (a dedicated macOS user on the owner's Mac, run by launchd) holds execution;
+  - the bot credential holds push to one repository's `main` only.
 - **Alternatives:**
-  - per-document confirmations (today);
-  - automatic releases after policy clearance. **Rejected:** a merge must stay an owner act.
-- **Consequences:** FC8 generalizes the B1b plan, confirm and apply flow to versions and gaps. The 25-document cap is replaced by the size bound.
-- **Reversibility:** high.
-- **Approve:** before FC8 merges.
+  - the owner merges each release (D7, rejected);
+  - CI publishes. Rejected: it adds a trust root outside the owner's machine, and recommended answer 8 asks for no CI publishing.
+- **Consequences:**
+  - AR1–AR7 replace the manual release steps;
+  - FC10 becomes an automatic release once D10 and the policy allow it;
+  - the manual B1b path stays for exceptions.
+- **Reversibility:** stop file, then policy revocation, then credential revocation. Published commits are withdrawn forward only and cannot be erased from history (architecture §9.7).
+- **Open [D]:** may the automatic path ever publish `publication_incomplete` documents with gap notices? The recommended answer is no. Changing it is a material policy change.
 
 ### D8: two completeness axes; `unknown`, never a false zero (ACCEPT)
 
@@ -180,11 +199,11 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
 
 ## 3. Questions for the owner (answer each)
 
-1. **D1/D2:** do you approve the full-corpus direction and a successor ADR in `lovspor-notebook` (next free number)?
+1. **D1/D2:** do you approve the full-corpus direction and a successor ADR in `lovspor-notebook` (ADR-0025)?
 2. **D3:** do you approve a separate `lovverk-forarbeider` repository, created by you, with branch protection and owner-only merge, before any release? What name and visibility?
 3. **D4:** do you approve `terms_basis: none_identified` with the locus page, a 30-day default validity, and the narrow nonce normalization replacing the raw comparison for HTML evidence?
 4. **D6:** will you generate a dedicated signing key for forarbeider (separate from the crosswalk key, or the same key under new namespaces)? Where is it held, and what is the rotation interval?
-5. **D7:** what size bound per release (files and bytes)? What is the minimum gap between apply and merge, if any?
+5. **D11:** what batch bound (files and bytes), daily budgets and anomaly thresholds?
 6. **D9:** do you approve stage 1 (Prop. L and LS) now, with each later family at its own gate?
 7. **D10:** who performs the legal assessment, and by when? Do you accept that FC10's release step waits for it?
 8. **Operations:** which machine and account run the release clone and hold the private workspace? Today that is the owner's Mac [O].
@@ -201,10 +220,13 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
 | FC5 span rights classes and detectors | yes (code) | D1 | classifies only; clears nothing | which classes the policy clears is a D10 matter |
 | FC6 version manifest v3, two axes | **yes** | D1, D8 | no | |
 | FC7 source policy v2 and SSH | yes (code, test keys) | **D6** before merge | signing a real policy needs D10 | |
-| FC8 release manifest | yes (code) | **D7** before merge | no | |
-| FC9 withdrawal v2 | yes | D7 | no | |
+| FC8 release manifest (becomes AR2–AR4) | yes (code) | **D11** before merge | no | tests against a local bare remote |
+| FC9 withdrawal v2 (executed by the pipeline from an owner-signed record) | yes | D11 | no | |
+| AR1 policy v2 automation fields | yes (code, test keys) | **D11**, D6 | a real automated policy needs D10 | |
+| AR5 kill switch, budgets, anomalies | **yes** | D11 | no | |
+| AR7 bootstrap verifier (read-only) | after D3 | D3, D11 | no | owner sets repository settings |
 | FC9b repository bootstrap | after D3 | **D3** | no | the owner creates the repository |
-| **FC10** first complete Prop. L | source part yes; release part no | D1–D8 | **D10 and a publication authorization** | |
+| **FC10** first complete Prop. L | source part yes; release part no | D1–D6, D8, D11 | **D10**; a signed policy with `automated_publication` | no per-release owner act |
 | FC11 discovery | no | **D5** | § 24 volume [L] | |
 | FC12 more families | per gate | D9 | § 14 per family [L] | |
 | FC13 growth controls | after FC9b | D3 | no | |
@@ -222,7 +244,7 @@ FC1a → FC3 → (FC4 if the candidate has tables or footnotes; Prop. 31 L has n
 
 **B. First `publication_complete` release.**
 
-A → FC1b + FC2 (D4) → FC5 → FC7 (D6) → FC8 (D7) → FC9 → FC9b (D3) → D10 assessment → owner signs the policy → fresh fetch with proof → FC10.
+A → FC1b + FC2 (D4) → FC5 → FC7 + AR1 (D6, D11) → AR2–AR5 → FC9 → FC9b + AR7 (D3) → AR6 → D10 assessment → the owner signs a policy enabling automated publication → the automatic run publishes FC10.
 
 FC10 acceptance stays as merged: one Prop. L that is both `source_complete` and `publication_complete` with zero release gaps, or a NO-GO with every gap. If third-party consultation quotes remain unresolved, FC10 is NO-GO by definition [O, architecture §6].
 
@@ -267,8 +289,25 @@ None of these is answered here, and no slice may assume an answer:
 
 **Not in FC1a:** any change to `policy_source`, policy signing or the release path.
 
-## 7. What stays unchanged until approved
+## 7. Answers received 2026-11-12 (recommended; PENDING owner confirmation)
+
+These answers arrived in session under the headings "Rekomendacja" and "Rekomendowana odpowiedź". They are recorded as **recommended answers**, not as approvals. They become the owner's decisions when the owner confirms them, for example by merging this PR or by a comment on #738.
+
+| # | Recommended answer | Effect if confirmed |
+|---|---|---|
+| D1 / Q1 | full corpus; new ADR, numbered after checking the register | D1, D2; ADR-0025 (§D2) |
+| D3 / Q2 | `bartoszkobylinski/lovverk-forarbeider`, private during preparation, public only when ready to release | D3; making it public is an owner act (trust root) |
+| D4 / Q3 | approve none_identified, 30 days, nonce rule; absence of terms grants no right to publish | D4 |
+| D5 | defer to FC11 | D5 |
+| D6 / Q4 | a separate Ed25519 key for forarbeider on the owner's Mac, passphrase-protected, in the system Keychain; rotation every 12 months and immediately on suspicion | D6 owner key; the bot key (D11) is a second key on the runner account |
+| D7 / Q5 | 100 files or 25 MB per batch, whichever comes first; no required gap between apply and merge; mandatory re-validation before merge | under D11: the batch bound of architecture §9.3; "re-validation before merge" becomes the automatic verification before push (§9.3 step 5) |
+| D8 | accept | D8 |
+| D9 / Q6 | stage 1 Prop. L/LS; later NOU, Ot.prp., Innst. and the rest | D9 |
+| D10 / Q7 | commission an independent assessment before full documents go public; do not block FC1–FC6; no artificial deadline; start before FC10 | D10 |
+| Q8 | the owner's Mac, the owner's user account; private staging and keys outside the repository; no CI publishing | under D11: a **dedicated** runner user on the owner's Mac (§9.1), so the bot credential is not in the owner's own account; still no CI publishing |
+
+## 8. What stays unchanged until approved
 
 - Nothing is fetched, signed, created, released or merged by this document.
 - A1–B2 behaviour, labels (`normative: false`, `source_license: null`, § 14, NOT enacted law), private staging and the owner-only merge are unchanged.
-- Every decision above stays **PROPOSED / PENDING** until the owner approves it in writing (an issue comment on #738 or the successor ADR merge).
+- Every decision above stays **PROPOSED / PENDING** until the owner approves it in writing (a comment on #738, the merge of this PR, or the successor ADR merge).
