@@ -15,16 +15,18 @@ The markup is synthetic; the sentences that carry the rule are the archive's.
 """
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
-from lovspor.legaltime.archive import Evidence
+from lovspor.legaltime.archive import Evidence, collect
 from lovspor.legaltime.commencement import Timing
 from lovspor.legaltime.document import Document, parse_document
 from lovspor.legaltime.instructions import interpret
-from lovspor.legaltime.nesting import _place, nesting
+from lovspor.legaltime.nesting import _place, _wording, nesting
 from lovspor.legaltime.replay import replay
 from lovspor.legaltime.run import commencement_for, events_for, unattributed_for
+from tests.unit.test_legaltime_archive import make_archive
 
 HOST = "lov/2000-01-02-1"  # the act whose "Endringer i andre lover" section is replaced
 TARGET = "lov/2001-02-02-2"  # an act a nested item amends
@@ -43,8 +45,22 @@ def _header(refid: str, in_force: str, published: str, title: str, changes: tupl
     )
 
 
+def _xml(header: str, main: str) -> bytes:
+    return f"<html><body>{header}<main>{main}</main></body></html>".encode()
+
+
+_BYTES: dict[tuple[str, str], bytes] = {}  # (member, sha256) → the bytes it was parsed from
+
+
 def _doc(name: str, header: str, main: str) -> Document:
-    return parse_document(f"<html><body>{header}<main>{main}</main></body></html>".encode(), name)
+    body = _xml(header, main)
+    document = parse_document(body, name)
+    _BYTES[(name, document.sha256)] = body
+    return document
+
+
+def _bytes_of(document: Document) -> bytes:
+    return _BYTES[(document.member, document.sha256)]
 
 
 def _p(text: str) -> str:
@@ -107,6 +123,7 @@ def _outer(
     host_ledd: tuple[str, ...] = (HOST_LIST,),
     in_force: str = "2010-01-05",
     tail: tuple[str, ...] = (),
+    closing: tuple[str, ...] = (_p("Loven trer i kraft straks."),),
 ) -> Document:
     """OUTER: part I replaces HOST § 9 by a host list; region items; part II direct; part III."""
     main = (
@@ -123,7 +140,7 @@ def _outer(
             _p("§ 5 oppheves."),
             *tail,
         )
-        + _part("III", _p("Loven trer i kraft straks."))
+        + (_part("III", *closing) if closing else "")
     )
     header = _header(
         OUTER, in_force, "2010-01-05 14:00", "Lov om endringer i vergeloven", (HOST, TARGET, OTHER)
@@ -477,9 +494,185 @@ def test_a_clause_read_both_inside_and_outside_stays_the_outer_laws_and_refuses_
         ("lov/2008-03-07-4#0:I:18.0-40", (0, 18)),  # a structure operation's provision suffix
         ("lov/2010-01-05-5#0:I:7.1.0", (0, 7)),  # a substitution item's offset
         ("lov/2010-01-05-5#2:A: B:9.0", (2, 9)),  # a part label holding a colon
+        ("lov/2010-01-05-5#2:A#B:9.0", (2, 9)),  # a part label holding a hash
+        ("lov/2010-01-05-5#3:A#B#C:4.1", (3, 4)),  # and two
     ],
 )
 def test_every_operation_id_form_is_placed_on_its_part_and_node(
     op_id: str, place: tuple[int, int]
 ) -> None:
     assert _place(op_id) == place
+
+
+# ------------------------------------------------- mutation evidence (targeted run, #893)
+
+CHAPTERED_HOST = _doc(
+    "lti/2000/nl-20000102-001.xml",
+    _header(HOST, "Kongen bestemmer.", "2000-01-01 12:00", "Lov om verge", ()),
+    '<section class="section" data-name="kap2"><h3>Kapittel 2.</h3>'
+    '<article class="legalArticle" data-name="§9"><span class="legalArticleHeader">§ 9.</span>'
+    + _ledd("A.")
+    + _ledd("B.")
+    + "</article></section>",
+)
+
+
+def _partial(body: str, published: str = "2010-03-01 12:00") -> Document:
+    return _decision(
+        "lti/2010/sf-20100301-0009.xml", "forskrift/2010-03-01-9", "2010-07-01", published,
+        "Delvis ikraftsetting av lov 2. januar 2000 nr. 1 om verge", body,
+    )  # fmt: skip
+
+
+def _chaptered(body: str) -> Timing:
+    return _nested(
+        _evidence(_outer(REGION), hosts=(CHAPTERED_HOST,), host_decisions=(_partial(body),))
+    )
+
+
+def test_a_decision_dating_the_host_sections_chapter_proves_the_section() -> None:
+    timing = _chaptered("Loven kapittel 2 trer i kraft 1. juli 2010.")
+    assert (timing.status, timing.effective) == ("dated", date(2010, 7, 1))
+
+
+@pytest.mark.parametrize(
+    "split",
+    [
+        "Loven § 9 annet ledd trer i kraft 1. august 2010.",  # a ledd dated apart
+        "Loven § 9 første ledd annet punktum trer i kraft 1. august 2010.",  # below ledd
+        "Lovvedtaket del I kapittel 2 trer i kraft 1. juli 2010.",  # a part-qualified unit
+    ],
+)
+def test_a_host_section_dated_whole_but_also_split_is_refused_with_its_proofs(split: str) -> None:
+    timing = _chaptered(f"Loven § 9 trer i kraft 1. juli 2010. {split}")
+    assert (timing.status, timing.effective) == ("unresolved", None)
+    assert (
+        timing.reason
+        == "nested amendment: host section's commencement is split below the section or by part"
+    )
+    assert OUTER in {p.refid for p in timing.proofs}
+    assert timing.known_from == date(2010, 1, 5)
+
+
+def test_an_unproven_host_names_the_host_state_and_keeps_both_proofs() -> None:
+    timing = _nested(_evidence(_outer(REGION), host_decisions=(CONDITIONAL,)))
+    assert timing.reason.startswith("nested amendment: host provision's commencement not proven (")
+    assert {OUTER, "forskrift/2010-03-01-4"} <= {p.refid for p in timing.proofs}
+    pending = _nested(_evidence(_outer(REGION), host_decisions=()))
+    assert pending.reason == "nested amendment: host provision's commencement not proven (pending)"
+
+
+def test_a_replacement_on_the_host_commencement_day_is_in_time() -> None:
+    timing = _nested(_evidence(_outer(REGION, in_force="2010-07-01")))
+    assert (timing.status, timing.effective) == ("dated", date(2010, 7, 1))
+
+
+def test_a_late_replacement_keeps_both_proofs() -> None:
+    timing = _nested(_evidence(_outer(REGION, in_force="2011-01-01")))
+    assert timing.reason == "nested amendment: host provision replaced after it commenced"
+    assert {OUTER, "forskrift/2010-03-01-1"} <= {p.refid for p in timing.proofs}
+
+
+@pytest.mark.parametrize(
+    ("published", "retroactive"),
+    [("2010-07-01 09:00", False), ("2010-08-01 09:00", True)],
+)
+def test_retroactive_only_when_the_host_date_was_published_after_it(
+    published: str, retroactive: bool
+) -> None:
+    decision = _decision(
+        "lti/2010/sf-20100701-0001.xml", "forskrift/2010-07-01-1", "2010-07-01", published,
+        "Ikraftsetting av lov 2. januar 2000 nr. 1 om verge", "Loven trer i kraft 1. juli 2010.",
+    )  # fmt: skip
+    timing = _nested(_evidence(_outer(REGION), host_decisions=(decision,)))
+    assert (timing.effective, timing.retroactive) == (date(2010, 7, 1), retroactive)
+    assert timing.known_from == date.fromisoformat(published[:10])
+
+
+def test_no_known_publication_on_either_side_leaves_known_from_empty() -> None:
+    def unpublished(document: Document) -> Document:
+        header = document.header.model_copy(update={"published_at": None})
+        return document.model_copy(update={"header": header})
+
+    evidence = _evidence(unpublished(_outer(REGION)), host_decisions=(unpublished(FULL),))
+    timing = _nested(evidence)
+    assert (timing.status, timing.effective, timing.known_from) == ("dated", date(2010, 7, 1), None)
+    assert timing.retroactive is False
+
+
+def test_a_later_host_after_a_refused_inner_host_still_opens_its_own_region() -> None:
+    """A host inside an earlier host's list is skipped; hosts after it are still read."""
+    host_list = ("Endringer i andre lover", HOST_LIST)
+    main = _part(
+        "I", _p("I lov 2. januar 2000 nr. 1 om verge gjøres følgende endringer:"),
+        _p("§ 9 skal lyde:"), _future("§9", *host_list), *ITEM_1,
+        _p("§ 7 skal lyde:"), _future("§7", *host_list),
+    ) + _part(
+        "II", _p("I lov 2. januar 2000 nr. 1 om verge gjøres følgende endringer:"),
+        _p("§ 8 skal lyde:"), _future("§8", *host_list), *ITEM_2,
+    )  # fmt: skip
+    header = _header(OUTER, "2010-01-05", "2010-01-05 14:00", "Lov", (HOST, TARGET, OTHER))
+    outer = _doc("lti/2010/nl-20100105-005.xml", header, main)
+    nests = nesting(outer, interpret(outer)).nests
+    assert [(n.host_section, n.problem) for n in nests] == [
+        ("§9", "nested amendment: region holds a second host provision"),
+        ("§8", None),
+    ]
+
+
+def test_a_shared_clause_in_a_later_part_stays_the_outer_laws() -> None:
+    """The outside copy sits in part II after other nodes; only the inside copy is the host's."""
+    clause = "Loven trer i kraft 1. februar 2010."
+    outer = _outer((*REGION, _p(clause)), tail=(_p(clause),), closing=())
+    timings = _timings(_evidence(outer))
+    assert timings[("§3", TARGET)].status == "unresolved"
+    assert (timings[("§5", TARGET)].status, timings[("§5", TARGET)].effective) == (
+        "dated",
+        date(2010, 2, 1),
+    )
+
+
+def test_wording_of_a_missing_provision_is_refused() -> None:
+    assert _wording(None) == "nested amendment: host provision's wording outside the grammar"
+
+
+def test_collect_gathers_each_host_and_its_decisions_apart_from_the_acts_own(
+    tmp_path: Path,
+) -> None:
+    outer = _outer(REGION)
+    unrelated = _doc(
+        "lti/2010/sf-20100301-0005.xml",
+        _header("forskrift/2010-03-01-5", "2010-07-01", "2010-03-01 12:00",
+                "Ikraftsetting av lov 3. mars 2002 nr. 3 om annet", (OTHER,)),
+        _p("Loven trer i kraft 1. juli 2010."),
+    )  # fmt: skip
+    members = {d.member: d for d in (TARGET_ACT, outer, HOST_ACT, FULL, unrelated)}
+    archive = make_archive(
+        tmp_path / "lovtidend-avd1-2001-2025.tar.bz2",
+        layout={},
+        extra={name: _bytes_of(doc) for name, doc in members.items()},
+    )
+    evidence = collect(TARGET, [archive], cache_dir=tmp_path)
+    assert [d.header.refid for d in evidence.amenders] == [OUTER]
+    assert [d.header.refid for d in evidence.hosts] == [HOST]
+    assert [d.header.refid for d in evidence.host_decisions] == ["forskrift/2010-03-01-1"]
+    assert "forskrift/2010-03-01-1" not in {d.header.refid for d in evidence.decisions}
+    timing = _nested(evidence)
+    assert (timing.status, timing.effective) == ("dated", date(2010, 7, 1))
+
+
+def test_collect_reads_no_host_evidence_without_a_host(tmp_path: Path) -> None:
+    plain = _doc(
+        "lti/2010/nl-20100105-005.xml",
+        _header(OUTER, "2010-01-05", "2010-01-05 14:00", "Lov", (TARGET,)),
+        _part("I", _p("I lov 2. februar 2001 nr. 2 om mål gjøres følgende endringer:"),
+              _p("§ 5 oppheves."), _p("Loven trer i kraft straks.")),
+    )  # fmt: skip
+    members = {d.member: d for d in (TARGET_ACT, plain, HOST_ACT, FULL)}
+    archive = make_archive(
+        tmp_path / "lovtidend-avd1-2001-2025.tar.bz2",
+        layout={},
+        extra={name: _bytes_of(doc) for name, doc in members.items()},
+    )
+    evidence = collect(TARGET, [archive], cache_dir=tmp_path)
+    assert (evidence.hosts, evidence.host_decisions) == ((), ())
