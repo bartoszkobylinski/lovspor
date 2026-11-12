@@ -14,6 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from lovspor.errors import IdentityMigrationError
 from lovspor.history import HistoryRecord, extract_lineage
 from lovspor.identity.apply import apply_plan
 from lovspor.identity.history import IdentityHistory
@@ -383,3 +384,28 @@ def test_cli_exits_3_on_a_conflicting_by_id_history(
 
     assert result.exit_code == 3
     assert json.loads(result.output)["counts"]["history_repair_conflicts"] == 1
+
+
+def test_an_unreadable_by_id_history_at_the_base_is_refused(
+    corpus: tuple[Path, dict[str, str]],
+) -> None:
+    repo, shas = corpus
+    write_doc(repo, _owner_by_id(), "{not json\n")
+    commit_all(repo, "sync: update manifest, index, and history")
+
+    with pytest.raises(IdentityMigrationError, match="unreadable per-document history"):
+        plan_migration(repo, "HEAD", shas["threshold"])
+
+
+def test_an_unreadable_slug_history_at_the_base_is_still_rebuilt(
+    corpus: tuple[Path, dict[str, str]],
+) -> None:
+    repo, shas = corpus
+    write_doc(repo, SLUG_JSON, "{not json\n")
+    commit_all(repo, "sync: update manifest, index, and history")
+
+    plan = plan_migration(repo, "HEAD", shas["threshold"])
+
+    [repair] = plan.history_repair.repairs
+    assert (repair.target.file_doc_id, repair.base_file_events) == (None, [])
+    assert HistoryRecord.model_validate(_json(plan, SLUG_JSON)).doc_id == OWNER
