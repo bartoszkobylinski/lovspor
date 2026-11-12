@@ -6,6 +6,7 @@ slug is then handed to a newer document whose history file overwrites the old
 ``doc_id`` (the ``endr-i-høstingsforskriften`` shape).
 """
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -322,3 +323,80 @@ def test_cli_exits_2_on_an_unreadable_base(
 
     assert result.exit_code == 2
     assert not (tmp_path / "r").exists()
+
+
+def test_report_checksums_match_every_written_byte(
+    base: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
+    """The report's integrity claims must describe the artifacts on disk."""
+    repo, _ = base
+    out = tmp_path / "checksums"
+    sums = write_report(plan_migration(repo, "HEAD"), out)
+
+    actual = {
+        path.relative_to(out).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in out.rglob("*")
+        if path.is_file() and path.name != SUMS_FILENAME
+    }
+    assert sums == actual
+    assert (out / SUMS_FILENAME).read_text(encoding="utf-8") == "".join(
+        f"{digest}  {name}\n" for name, digest in sorted(actual.items())
+    )
+    data = json.loads((out / "report.json").read_bytes())
+    assert data["planned_files_sha256"] == {
+        name: digest for name, digest in actual.items() if name.startswith("planned/")
+    }
+    changed_paths = "".join(f"{path}\n" for path in data["changed_paths"])
+    assert data["changed_paths_sha256"] == hashlib.sha256(changed_paths.encode("utf-8")).hexdigest()
+
+
+def test_historical_base_excludes_later_commits_and_dirty_files(
+    base: tuple[Path, dict[str, str]],
+) -> None:
+    """The plan reads the named commit through git, not HEAD or working files."""
+    repo, shas = base
+    expected = plan_migration(repo, shas["r2"])
+    (repo / "manifest.json").write_bytes(b"not JSON\xff")
+    (repo / "slugs.json").write_text("broken registry", encoding="utf-8")
+    _history(repo, "untracked", "unknown-id")
+    before = git(repo, "status", "--porcelain")
+
+    actual = plan_migration(repo, shas["r2"])
+
+    assert actual == expected
+    assert actual.manifest_revisions == 2
+    assert set(actual.planned_manifest.documents) == {OLD, KEEP, LOST}
+    assert actual.restored == []
+    assert actual.renames == []
+    assert actual.unrecoverable == []
+    assert git(repo, "status", "--porcelain") == before
+    assert (repo / "manifest.json").read_bytes() == b"not JSON\xff"
+
+
+def test_cli_refuses_output_through_a_symlink_into_the_checkout(
+    base: tuple[Path, dict[str, str]], tmp_path: Path
+) -> None:
+    """The documented outside-checkout restriction applies to resolved paths."""
+    repo, _ = base
+    alias = tmp_path / "corpus-alias"
+    alias.symlink_to(repo, target_is_directory=True)
+    before = git(repo, "status", "--porcelain")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "identity-plan",
+            "--repo",
+            str(repo),
+            "--base",
+            "HEAD",
+            "--out",
+            str(alias / "reports"),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "inside the corpus checkout" in result.output  # Plain typer.echo error line.
+    assert not (repo / "reports").exists()
+    assert git(repo, "status", "--porcelain") == before
