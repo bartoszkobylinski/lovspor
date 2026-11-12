@@ -909,7 +909,7 @@ def test_commit_with_history_bulk_path_writes_manifest_indexes_and_followup(
     ) -> None:
         followups.append(target_doc_ids)
 
-    monkeypatch.setattr(orchestrator_module, "write_manifest", fake_write_manifest)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", fake_write_manifest)
     monkeypatch.setattr(orchestrator_module, "write_derived_views", fake_write_derived_views)
     monkeypatch.setattr(orchestrator_module, "_commit_bulk", fake_commit_bulk)
     monkeypatch.setattr(
@@ -999,7 +999,7 @@ def test_commit_with_history_per_doc_path_generates_history_and_final_commit(
         "write_derived_views",
         lambda repo, _manifest, datasets: [repo / dataset / "INDEX.md" for dataset in datasets],
     )
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
         "git_add",
@@ -1064,7 +1064,7 @@ def test_commit_history_followup_updates_manifest_and_commits_document_count(
     )
     monkeypatch.setattr(
         orchestrator_module,
-        "write_manifest",
+        "replace_manifest",
         lambda manifest, _path: written_manifests.append(manifest),
     )
     monkeypatch.setattr(
@@ -1104,7 +1104,7 @@ def test_commit_history_followup_skips_when_no_history_paths(
     )
     monkeypatch.setattr(
         orchestrator_module,
-        "write_manifest",
+        "replace_manifest",
         lambda *_args: called.append("write"),
     )
     monkeypatch.setattr(orchestrator_module, "git_add", lambda *_args: called.append("add"))
@@ -1230,7 +1230,7 @@ def test_run_sprint5_history_migration_filters_targets_and_commits(
         return updated_records, [repo / "lover" / "history" / "current.json"]
 
     monkeypatch.setattr(orchestrator_module, "_generate_and_apply_history", fake_generate)
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda *_args: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda *_args: None)
     monkeypatch.setattr(orchestrator_module, "git_add", lambda *_args: None)
     monkeypatch.setattr(orchestrator_module, "has_staged_changes", lambda _repo: True)
     monkeypatch.setattr(
@@ -1413,7 +1413,7 @@ def test_run_sprint8_eu_basis_migration_skips_unsafe_records_and_commits(
         return written_record, [written_path]
 
     monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda *_args: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda *_args: None)
     monkeypatch.setattr(
         orchestrator_module,
         "git_add",
@@ -2062,7 +2062,9 @@ def test_tombstone_defaults_to_no_reason() -> None:
     assert orchestrator_module._tombstone(old).removed_reason is None
 
 
-def test_carry_tombstones_keeps_only_absent_removed_records() -> None:
+def test_carry_tombstones_keeps_every_removed_record() -> None:
+    """Every tombstone is carried, one whose id is back upstream included: a
+    successful re-add overwrites it, a failed one must not lose it (#871)."""
     prior = Manifest(
         generated_at=datetime(2026, 5, 1, tzinfo=UTC),
         documents={
@@ -2072,9 +2074,9 @@ def test_carry_tombstones_keeps_only_absent_removed_records() -> None:
         },
     )
 
-    carried = orchestrator_module._carry_tombstones(prior, {"back", "other"})
+    carried = orchestrator_module._carry_tombstones(prior)
 
-    assert carried == {"gone": prior.documents["gone"]}
+    assert carried == {"gone": prior.documents["gone"], "back": prior.documents["back"]}
 
 
 # --- repair under-embedded docs (flat ## § acts embedded before the parser fix) ---

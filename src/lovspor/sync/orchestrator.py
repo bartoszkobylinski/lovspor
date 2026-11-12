@@ -74,6 +74,7 @@ from lovspor.errors import (
 )
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_history, write_history
+from lovspor.identity.records import replace_manifest
 from lovspor.parsing.placeholder import is_content_placeholder
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.rendering.document import (
@@ -88,7 +89,6 @@ from lovspor.storage.manifest import (
     Manifest,
     ManifestRecord,
     read_manifest,
-    write_manifest,
 )
 from lovspor.sync.change_detector import (
     detect_changes,
@@ -133,6 +133,7 @@ logger = logging.getLogger(__name__)
 # ``ManifestRecord.removed_reason`` for a doc Lovdata still lists as current but
 # serves as an error notice rather than legal text.
 _PLACEHOLDER_REASON = "upstream_placeholder"
+_TAKEN_OVER_REASON = "render_failed_path_taken"  # a record is tombstoned, never dropped (#871)
 
 _TRACKED_DATASETS = (
     "gjeldende-lover",
@@ -360,7 +361,7 @@ def run_sync(  # noqa: PLR0912, PLR0915
         )
 
     new_records = _carry_unchanged(prior, changes.unchanged)
-    new_records.update(_carry_tombstones(prior, set(upstream)))
+    new_records.update(_carry_tombstones(prior))
     actions: list[_DocAction] = []
 
     # All paths written by ANY action this sync. The two delete sites
@@ -466,20 +467,20 @@ def run_sync(  # noqa: PLR0912, PLR0915
     # Markdown path was not written by a successful action this sync. If it was
     # (e.g. a rename moved into the failed doc's slug), carrying it would leave
     # two current records at one file — and that file now holds the OTHER doc's
-    # content. Drop it instead: it re-appears as ``new`` and is re-added once it
-    # renders on a future sync. A rename was already carried as unchanged, so it
-    # is un-carried (#421). Same invariant the phase-2 delete guards enforce (Codex #104).
+    # content. Tombstone it instead (never drop it, #871): it re-appears as ``new``
+    # and is re-added once it renders. A rename was already carried as unchanged,
+    # so it is un-carried (#421). Same invariant the phase-2 delete guards enforce (Codex #104).
     for doc_id, prior_record in deferred_carries:
         if settings.lovverk_repo_path / prior_record.markdown_path not in written_paths:
             new_records[doc_id] = prior_record
             continue
         logger.warning(
-            "dropping %s this sync: its file %s was taken over by another "
+            "tombstoning %s this sync: its file %s was taken over by another "
             "document; it will be re-added once it renders on a future sync",
             doc_id,
             prior_record.markdown_path,
         )
-        new_records.pop(doc_id, None)
+        new_records[doc_id] = _tombstone(prior_record, _TAKEN_OVER_REASON)
 
     # Phase 2a: changed-action deletes + action build. ``written_paths``
     # now reflects every write from new + changed + rename loops, so
@@ -1284,26 +1285,19 @@ def _withhold_content_placeholders(
     return kept, withheld
 
 
-def _carry_tombstones(
-    prior: Manifest,
-    upstream_ids: set[str],
-) -> dict[str, ManifestRecord]:
-    """Preserve ``removed`` records across syncs so a removal stays a
-    permanent audit record.
+def _carry_tombstones(prior: Manifest) -> dict[str, ManifestRecord]:
+    """Preserve every ``removed`` record across syncs: a removal is a
+    permanent audit record and a record never disappears (#871).
 
     ``detect_changes`` excludes tombstones from its ``current`` set, so a
     tombstoned doc lands in none of new/changed/removed/unchanged and would
     be dropped from the rewritten manifest on the next sync that commits
-    anything — surviving exactly one sync instead of forever. A tombstone
-    still absent upstream is carried verbatim. One whose ``doc_id`` reappears
-    upstream is a ``new`` doc this sync and is deliberately NOT carried — the
-    new-doc write replaces it with a fresh ``current`` record.
+    anything. Every tombstone is carried verbatim, including one whose
+    ``doc_id`` reappears upstream: that doc is ``new`` this sync, and a
+    successful write replaces the tombstone with a fresh ``current`` record,
+    while a failed one keeps it instead of losing the record and its slug.
     """
-    return {
-        doc_id: rec
-        for doc_id, rec in prior.documents.items()
-        if rec.status == "removed" and doc_id not in upstream_ids
-    }
+    return {doc_id: rec for doc_id, rec in prior.documents.items() if rec.status == "removed"}
 
 
 def _tombstone(old: ManifestRecord, reason: str | None = None) -> ManifestRecord:
@@ -1438,7 +1432,7 @@ def _commit_with_history(
             else _single_message(other_actions)
         )
         manifest = Manifest(generated_at=now, documents=new_records)
-        write_manifest(manifest, manifest_path)
+        replace_manifest(manifest, manifest_path)
         index_paths = write_derived_views(repo, manifest, _TRACKED_DATASETS)
         _commit_bulk(repo, other_actions, [manifest_path, *index_paths], message)
         _commit_history_followup(repo, manifest_path, new_records, target_doc_ids, now)
@@ -1447,7 +1441,7 @@ def _commit_with_history(
     _commit_per_doc_actions_only(repo, other_actions)
     new_records, history_paths = _generate_and_apply_history(repo, new_records, target_doc_ids)
     manifest = Manifest(generated_at=now, documents=new_records)
-    write_manifest(manifest, manifest_path)
+    replace_manifest(manifest, manifest_path)
     index_paths = write_derived_views(repo, manifest, _TRACKED_DATASETS)
     git_add(repo, [manifest_path, *index_paths, *history_paths])
     if has_staged_changes(repo):
@@ -1470,7 +1464,7 @@ def _commit_history_followup(
     if not history_paths:
         return
     manifest = Manifest(generated_at=now, documents=new_records)
-    write_manifest(manifest, manifest_path)
+    replace_manifest(manifest, manifest_path)
     git_add(repo, [manifest_path, *history_paths])
     if has_staged_changes(repo):
         git_commit_msg(
@@ -1615,7 +1609,7 @@ def _run_sprint5_history_migration(
     if not history_paths:
         return prior
     new_manifest = Manifest(generated_at=now, documents=new_records)
-    write_manifest(new_manifest, manifest_path)
+    replace_manifest(new_manifest, manifest_path)
     git_add(repo, [manifest_path, *history_paths])
     if has_staged_changes(repo):
         git_commit_msg(
@@ -1712,7 +1706,7 @@ def _run_sprint8_eu_basis_migration(
     if not written_paths:
         return prior
     new_manifest = Manifest(generated_at=now, documents=new_records)
-    write_manifest(new_manifest, manifest_path)
+    replace_manifest(new_manifest, manifest_path)
     git_add(settings.lovverk_repo_path, [manifest_path, *written_paths])
     if has_staged_changes(settings.lovverk_repo_path):
         git_commit_msg(
@@ -1994,7 +1988,7 @@ def _run_sprint9_embeddings_migration(
             },
         )
     new_manifest = Manifest(generated_at=now, documents=new_records)
-    write_manifest(new_manifest, manifest_path)
+    replace_manifest(new_manifest, manifest_path)
     git_add(repo, [manifest_path, *written])
     if has_staged_changes(repo):
         git_commit_msg(
@@ -2075,7 +2069,7 @@ def mark_undersized_embeddings_stale(settings: Settings) -> int:
     new_records = dict(prior.documents)
     for doc_id in flagged:
         new_records[doc_id] = new_records[doc_id].model_copy(update={"embedding_hash": None})
-    write_manifest(Manifest(generated_at=datetime.now(UTC), documents=new_records), manifest_path)
+    replace_manifest(Manifest(generated_at=datetime.now(UTC), documents=new_records), manifest_path)
     git_add(repo, [manifest_path])
     git_commit_msg(repo, f"migration: flag {len(flagged)} under-embedded documents for re-embed")
     return len(flagged)
