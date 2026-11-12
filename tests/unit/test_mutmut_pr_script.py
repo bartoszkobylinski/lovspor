@@ -21,6 +21,7 @@ def probe(*args: str) -> str:
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
+        env=_harness_env(),
         check=True,
     )
     return result.stdout.strip()
@@ -166,6 +167,22 @@ class TestBudget:
         assert "budget_exceeded=1" in body
 
 
+TOTAL_BUDGET = "MUTMUT_PR_TOTAL_BUDGET_SECONDS"
+
+
+def _harness_env(overrides: dict[str, str] | None = None) -> dict[str, str]:
+    """The child environment for a mutmut-pr.sh run under test (#896).
+
+    The nightly lane exports MUTMUT_PR_TOTAL_BUDGET_SECONDS on the step that runs
+    mutmut, and mutmut's stats pass runs this suite with it. Inherited, it replaces
+    the setup + per-file budget a test sets, so it is dropped unless the test sets
+    it itself (#888 did the same for test_mutation_setup_budget.py).
+    """
+    env = {name: value for name, value in os.environ.items() if name != TOTAL_BUDGET}
+    env.update(overrides or {})
+    return env
+
+
 SILENT_MUTMUT = "#!/bin/sh\nexec sleep 30\n"
 NO_SETUP_ALLOWANCE = {"MUTMUT_PR_SETUP_BUDGET_SECONDS": "0"}
 SPINNER_BUDGET_SECONDS = 20
@@ -233,7 +250,7 @@ class TestBudgetKillBeforeFirstTally:
             cwd=repo,
             capture_output=True,
             text=True,
-            env={**os.environ, **NO_SETUP_ALLOWANCE, "MUTMUT_PR_FILE_BUDGET_SECONDS": "1"},
+            env=_harness_env({**NO_SETUP_ALLOWANCE, "MUTMUT_PR_FILE_BUDGET_SECONDS": "1"}),
             timeout=60,
             check=False,
         )
@@ -254,7 +271,7 @@ class TestBudgetKillBeforeFirstTally:
             cwd=repo,
             capture_output=True,
             text=True,
-            env={**os.environ, **budgets},
+            env=_harness_env(budgets),
             timeout=60,
             check=False,
         )
@@ -277,7 +294,7 @@ class TestBudgetKillBeforeFirstTally:
             cwd=repo,
             capture_output=True,
             text=True,
-            env={**os.environ, **budgets},
+            env=_harness_env(budgets),
             timeout=60,
             check=False,
         )
@@ -298,7 +315,7 @@ class TestBudgetKillBeforeFirstTally:
             cwd=repo,
             capture_output=True,
             text=True,
-            env={**os.environ, "MUTMUT_PR_TOTAL_BUDGET_SECONDS": value},
+            env=_harness_env({TOTAL_BUDGET: value}),
             timeout=60,
             check=False,
         )
@@ -355,12 +372,13 @@ class TestBudgetVerdictAfterSpinner:
             ["bash", "scripts/mutmut-pr.sh", "base"],
             cwd=repo,
             capture_output=True,
-            env={
-                **os.environ,
-                **NO_SETUP_ALLOWANCE,
-                "MUTMUT_PR_FILE_BUDGET_SECONDS": str(SPINNER_BUDGET_SECONDS),
-                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            },
+            env=_harness_env(
+                {
+                    **NO_SETUP_ALLOWANCE,
+                    "MUTMUT_PR_FILE_BUDGET_SECONDS": str(SPINNER_BUDGET_SECONDS),
+                    "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                }
+            ),
             timeout=60,
             check=False,
         )
@@ -428,7 +446,7 @@ def _run_with_uv(
         cwd=repo,
         capture_output=True,
         text=True,
-        env={**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}"},
+        env=_harness_env({"PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}"}),
         timeout=60,
         check=False,
     )
@@ -559,6 +577,7 @@ def _run_script(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         cwd=repo,
         capture_output=True,
         text=True,
+        env=_harness_env(),
         timeout=180,
         check=False,
     )
@@ -611,3 +630,148 @@ class TestLegacyCarveOut:
         )
         assert "scoped to 0 mutation target(s) and 1 legacy function(s)" in result.stdout
         assert not (repo / "mutants").exists()
+
+
+INHERITED_TOTAL = "3600"  # the nightly lane's kind of value: far above any test's budget
+STATS_FAILED_MUTMUT = (
+    "#!/bin/sh\n"
+    '[ "$1" = run ] || exit 0\n'
+    "printf 'failed to collect stats. runner returned 1\\n'\n"
+    "exit 1\n"
+)
+
+
+class TestInheritedTotalBudget:
+    """#896: an inherited MUTMUT_PR_TOTAL_BUDGET_SECONDS never reaches a harness run.
+
+    Each test sets the variable in this process, as the nightly lane does, and
+    expects exactly the result the same test gets without it.
+    """
+
+    def test_isolation_preserves_other_budgets_and_the_parent_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(TOTAL_BUDGET, INHERITED_TOTAL)
+        monkeypatch.setenv("MUTMUT_PR_SETUP_BUDGET_SECONDS", "17")
+        monkeypatch.setenv("MUTMUT_PR_FILE_BUDGET_SECONDS", "19")
+        parent = dict(os.environ)
+        overrides = {"MUTMUT_PR_FILE_BUDGET_SECONDS": "2", TOTAL_BUDGET: "1"}
+
+        child = _harness_env(overrides)
+
+        assert child == {**parent, **overrides}
+        assert dict(os.environ) == parent
+        assert _harness_env() == {
+            key: value for key, value in parent.items() if key != TOTAL_BUDGET
+        }
+        assert overrides == {"MUTMUT_PR_FILE_BUDGET_SECONDS": "2", TOTAL_BUDGET: "1"}
+
+    def test_child_environments_are_independent_snapshots(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(TOTAL_BUDGET, raising=False)
+        parent = dict(os.environ)
+
+        child = _harness_env()
+        assert child == parent
+        child[TOTAL_BUDGET] = "1"
+        child["PATH"] = "child-only-path"
+
+        assert dict(os.environ) == parent
+        assert _harness_env() == parent
+
+    def test_the_child_environment_drops_it_and_keeps_an_explicit_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(TOTAL_BUDGET, INHERITED_TOTAL)
+
+        assert TOTAL_BUDGET not in _harness_env()
+        assert _harness_env({TOTAL_BUDGET: "1"})[TOTAL_BUDGET] == "1"
+        assert _harness_env({"A": "b"})["A"] == "b"
+
+    @pytest.mark.skipif(shutil.which("timeout") is None, reason="needs timeout(1)")
+    @pytest.mark.parametrize("inherited", [None, INHERITED_TOTAL])
+    def test_a_budget_kill_is_the_budget_with_or_without_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inherited: str | None
+    ) -> None:
+        """Timeout vs missing progress (#365), identical under the nightly environment."""
+        if inherited is None:
+            monkeypatch.delenv(TOTAL_BUDGET, raising=False)
+        else:
+            monkeypatch.setenv(TOTAL_BUDGET, inherited)
+
+        result = TestBudgetKillBeforeFirstTally()._run(tmp_path)
+
+        assert "budget: 0s for mutmut's setup + 1s x 1 changed file(s) = 1s" in result.stdout
+        assert "mutation budget exceeded: after 1s" in result.stdout
+        assert "no progress line" not in result.stderr
+        assert result.returncode == 16
+
+    @pytest.mark.skipif(shutil.which("timeout") is None, reason="needs timeout(1)")
+    def test_an_explicit_total_still_replaces_the_sum_under_an_inherited_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(TOTAL_BUDGET, INHERITED_TOTAL)
+        repo = _repo_with_one_changed_function(tmp_path, SILENT_MUTMUT)
+        budgets = {
+            "MUTMUT_PR_SETUP_BUDGET_SECONDS": "100",
+            "MUTMUT_PR_FILE_BUDGET_SECONDS": "100",
+            TOTAL_BUDGET: "1",
+        }
+
+        result = subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "base"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=_harness_env(budgets),
+            timeout=60,
+            check=False,
+        )
+
+        assert "budget: 1s wall clock for the whole run" in result.stdout
+        assert "mutation budget exceeded: after 1s" in result.stdout
+        assert result.returncode == 16
+
+    @pytest.mark.skipif(shutil.which("timeout") is None, reason="needs timeout(1)")
+    def test_the_setup_allowance_is_counted_once_under_an_inherited_total(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(TOTAL_BUDGET, INHERITED_TOTAL)
+        repo = _repo_with_one_changed_function(tmp_path, SILENT_MUTMUT)
+        budgets = {"MUTMUT_PR_SETUP_BUDGET_SECONDS": "1", "MUTMUT_PR_FILE_BUDGET_SECONDS": "1"}
+
+        result = subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "base"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=_harness_env(budgets),
+            timeout=60,
+            check=False,
+        )
+
+        assert "budget: 1s for mutmut's setup + 1s x 1 changed file(s) = 2s" in result.stdout
+        assert "mutation budget exceeded: after 2s" in result.stdout
+
+    def test_a_failed_stats_pass_never_reports_a_score(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The shape of the failure #896 hit: mutmut cannot collect stats and exits 1.
+
+        This pins goal item "no score from a failed stats pass"; it is not an isolation
+        test (the fake fails either way), which is why it is not parametrized on the
+        inherited budget.
+        """
+        repo = _repo_with_one_changed_function(tmp_path, STATS_FAILED_MUTMUT)
+
+        result = _run_script(repo)
+        monkeypatch.chdir(tmp_path)
+        verdict = _mutation_to_json().build_result(
+            "0" * 40, result.stdout + result.stderr, result.returncode
+        )
+
+        assert result.returncode == 3
+        assert "no score for this PR — do not report one" in result.stderr
+        assert "killed:" not in result.stdout
+        assert verdict["gate"] == {"passed": False, "reason": "tool_failed"}
