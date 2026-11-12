@@ -73,8 +73,9 @@ from lovspor.errors import (
     RenderError,
 )
 from lovspor.extraction.tarball import iter_tarball_xml
-from lovspor.history import HistoryRecord, extract_history, write_history
+from lovspor.history import HistoryRecord, extract_lineage
 from lovspor.identity import registered_ownership, replace_manifest
+from lovspor.identity.history import FILES_PER_HISTORY, write_document_history
 from lovspor.parsing.placeholder import is_content_placeholder
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.rendering.document import (
@@ -1469,7 +1470,7 @@ def _commit_history_followup(
     if has_staged_changes(repo):
         git_commit_msg(
             repo,
-            f"sync: update history for {len(history_paths) // 2} documents",
+            f"sync: update history for {len(history_paths) // FILES_PER_HISTORY} documents",
         )
 
 
@@ -1523,8 +1524,8 @@ def _generate_and_apply_history(
     target_doc_ids: list[str],
 ) -> tuple[dict[str, ManifestRecord], list[Path]]:
     """For each target ``doc_id``, extract history from git, write the
-    history files, and return updated records with ``total_changes`` /
-    ``last_changed`` populated plus all written paths for staging.
+    history files (slug and by-id, #871), and return updated records with
+    ``total_changes`` / ``last_changed`` populated plus all written paths.
 
     Tombstones (``status='removed'``) and slug-less records (legacy
     Sprint 3 format) are skipped — see decisions.md §12d for the
@@ -1538,12 +1539,8 @@ def _generate_and_apply_history(
         record = updated[doc_id]
         if record.status == "removed" or record.slug is None:
             continue
-        history = extract_history(
-            repo_path=repo,
-            current_path=record.markdown_path,
-            doc_id=doc_id,
-            slug=record.slug,
-        )
+        lineage = extract_lineage(repo, record.markdown_path, doc_id)
+        history = lineage.record(record.slug)
         if not history.events and record.total_changes is not None:
             # An empty extraction can only mean every commit touching the
             # file is history-exempt (e.g. "migration: re-render"). Never
@@ -1551,8 +1548,7 @@ def _generate_and_apply_history(
             # overwrite the doc's history files with an empty record.
             continue
         history_target_dir = dataset_dir(repo, record.source_dataset)
-        json_path, md_path = write_history(history, history_target_dir)
-        written_paths.extend([json_path, md_path])
+        written_paths.extend(write_document_history(repo, lineage, history, history_target_dir))
         updated[doc_id] = _record_with_history(record, history)
     return updated, written_paths
 

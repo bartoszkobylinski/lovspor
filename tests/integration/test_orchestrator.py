@@ -35,6 +35,7 @@ from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import EMBEDDING_DIM, read_embeddings, write_embeddings
 from lovspor.errors import ConfigError, MassReembedError, RenderError
+from lovspor.history import Lineage
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings
@@ -1400,6 +1401,7 @@ def test_commit_history_followup_commits_exact_document_count_message(
     history_paths = [
         repo / "lover" / "history" / "current.json",
         repo / "lover" / "history" / "current.md",
+        repo / "lover" / "history" / "by-id" / "lov-current.json",
     ]
     staged: list[Path] = []
     messages: list[str] = []
@@ -3641,34 +3643,31 @@ def test_generate_and_apply_history_skips_non_targets_without_stopping(
         ),
         "lov-current": _current_law_record(xml=xml, slug="current", title="Current"),
     }
-    extracted: list[tuple[str, str, str]] = []
+    extracted: list[tuple[str, str]] = []
 
-    def fake_extract_history(
-        *,
-        repo_path: Path,
-        current_path: str,
-        doc_id: str,
-        slug: str,
-    ) -> orchestrator_module.HistoryRecord:
+    def fake_extract_lineage(repo_path: Path, current_path: str, doc_id: str) -> Lineage:
         assert repo_path == repo
         assert doc_id == "lov-current"
-        assert slug == "current"
-        extracted.append((current_path, doc_id, slug))
-        return orchestrator_module.HistoryRecord(slug=slug, doc_id=doc_id, events=[])
+        extracted.append((current_path, doc_id))
+        return Lineage(doc_id=doc_id, steps=[])
 
-    def fake_write_history(
+    def fake_write_document_history(
+        repo_path: Path,
+        lineage: Lineage,
         history: orchestrator_module.HistoryRecord,
         target_dir: Path,
-    ) -> tuple[Path, Path]:
-        assert history.doc_id == "lov-current"
+    ) -> list[Path]:
+        assert repo_path == repo
+        assert lineage.doc_id == history.doc_id == "lov-current"
+        assert history.slug == "current"
         assert target_dir == repo / "lover"
-        return (
+        return [
             target_dir / "history" / f"{history.slug}.json",
             target_dir / "history" / f"{history.slug}.md",
-        )
+        ]
 
-    monkeypatch.setattr(orchestrator_module, "extract_history", fake_extract_history)
-    monkeypatch.setattr(orchestrator_module, "write_history", fake_write_history)
+    monkeypatch.setattr(orchestrator_module, "extract_lineage", fake_extract_lineage)
+    monkeypatch.setattr(orchestrator_module, "write_document_history", fake_write_document_history)
 
     updated, written_paths = orchestrator_module._generate_and_apply_history(
         repo,
@@ -3676,7 +3675,7 @@ def test_generate_and_apply_history_skips_non_targets_without_stopping(
         ["lov-missing", "lov-removed", "lov-slugless", "lov-current"],
     )
 
-    assert extracted == [("lover/current.md", "lov-current", "current")]
+    assert extracted == [("lover/current.md", "lov-current")]
     assert written_paths == [
         repo / "lover" / "history" / "current.json",
         repo / "lover" / "history" / "current.md",

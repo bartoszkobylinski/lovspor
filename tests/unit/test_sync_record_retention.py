@@ -6,6 +6,7 @@ cannot be rendered: before #871 the tombstone was not carried (the re-add was
 expected to replace it), so a failed re-add lost the record and freed its slug.
 """
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,7 +17,14 @@ from lovspor.errors import ManifestRecordLossError
 from lovspor.storage.manifest import ManifestRecord
 from lovspor.sync import orchestrator as orchestrator_module
 from lovspor.sync.orchestrator import run_sync
-from tests.unit.test_sync_orchestrator_actions import _ALFA, _BETA, _corpus, _serve, _stored
+from tests.unit.test_sync_orchestrator_actions import (
+    _ALFA,
+    _BETA,
+    _corpus,
+    _serve,
+    _stored,
+    _tracked,
+)
 from tests.unit.test_sync_orchestrator_render_failures import _UNRENDERABLE_XML
 
 
@@ -71,3 +79,19 @@ def test_a_commit_that_would_drop_a_record_is_refused(
         )
 
     assert manifest_path.read_bytes() == before
+
+
+def test_a_sync_writes_and_commits_the_per_document_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _corpus(tmp_path, [_ALFA])
+    repo = settings.lovverk_repo_path
+    _serve(monkeypatch, [_ALFA, _BETA])
+
+    run_sync(settings)
+
+    by_id = json.loads((repo / "lover" / "history" / "by-id" / "lov-2.json").read_text("utf-8"))
+    assert by_id["doc_id"] == "lov-2"
+    assert [event["path"] for event in by_id["events"]] == ["lover/beta.md"]
+    assert "lover/history/by-id/lov-2.json" in _tracked(repo)
