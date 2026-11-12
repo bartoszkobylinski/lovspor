@@ -648,6 +648,38 @@ class TestInheritedTotalBudget:
     expects exactly the result the same test gets without it.
     """
 
+    def test_isolation_preserves_other_budgets_and_the_parent_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(TOTAL_BUDGET, INHERITED_TOTAL)
+        monkeypatch.setenv("MUTMUT_PR_SETUP_BUDGET_SECONDS", "17")
+        monkeypatch.setenv("MUTMUT_PR_FILE_BUDGET_SECONDS", "19")
+        parent = dict(os.environ)
+        overrides = {"MUTMUT_PR_FILE_BUDGET_SECONDS": "2", TOTAL_BUDGET: "1"}
+
+        child = _harness_env(overrides)
+
+        assert child == {**parent, **overrides}
+        assert dict(os.environ) == parent
+        assert _harness_env() == {
+            key: value for key, value in parent.items() if key != TOTAL_BUDGET
+        }
+        assert overrides == {"MUTMUT_PR_FILE_BUDGET_SECONDS": "2", TOTAL_BUDGET: "1"}
+
+    def test_child_environments_are_independent_snapshots(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(TOTAL_BUDGET, raising=False)
+        parent = dict(os.environ)
+
+        child = _harness_env()
+        assert child == parent
+        child[TOTAL_BUDGET] = "1"
+        child["PATH"] = "child-only-path"
+
+        assert dict(os.environ) == parent
+        assert _harness_env() == parent
+
     def test_the_child_environment_drops_it_and_keeps_an_explicit_value(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
