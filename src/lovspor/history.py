@@ -352,6 +352,23 @@ def _blob_text(repo_path: Path, revision_path: str) -> str | None:
     return result.stdout
 
 
+def frontmatter_id(text: str) -> str | None:
+    """The front-matter ``id`` of a corpus Markdown file, by the walk's own scan."""
+    return _scan_frontmatter_id(text)
+
+
+def classify_commit(
+    sha: str, iso_date: str, subject: str, stat_lines: list[str]
+) -> HistoryEvent | None:
+    """The event one commit is for one file, by the walk's own rules; ``None`` for no event."""
+    return _classify_commit(sha, iso_date, subject, stat_lines)
+
+
+def parse_rename_paths(stat_lines: list[str]) -> tuple[str | None, str | None]:
+    """The from and to paths of the first numstat rename row, by the walk's own parse."""
+    return _parse_rename_paths(stat_lines)
+
+
 def _scan_frontmatter_id(text: str) -> str | None:
     """Cheap scan for the frontmatter ``id`` field — no full YAML parse.
 

@@ -2,8 +2,9 @@
 
 The output directory receives the files the repair would write
 (``planned/manifest.json``, ``planned/slugs.json`` and ``planned/identity.json``,
-the declaration that moves the corpus to the enforced identity schema),
-``report.json``, ``report.md`` and ``SHA256SUMS`` over all five. Every byte is a function of
+the declaration that moves the corpus to the enforced identity schema), each
+repaired history file under ``planned/<corpus path>``, ``report.json``,
+``report.md`` and ``SHA256SUMS`` over all of them. Every byte is a function of
 the plan: no clock, no host path, sorted keys and lists, so two runs on one
 base give byte-identical directories.
 """
@@ -17,10 +18,16 @@ from lovspor.atomic_io import atomic_write_text
 from lovspor.identity.audit import POST, PRE, outcome_counts
 from lovspor.identity.plan import MigrationPlan
 from lovspor.identity.registry import THRESHOLD_EXCEPTION, registry_json
+from lovspor.identity.repair_report import (
+    HISTORY_REPAIR_NOTE,
+    REPAIR_SECTIONS,
+    repair_counts,
+    repair_rows,
+)
 from lovspor.identity.schema import ENFORCED_IDENTITY_SCHEMA, IDENTITY_FILENAME, declaration_json
 from lovspor.storage.manifest import Manifest
 
-REPORT_SCHEMA_VERSION = 3
+REPORT_SCHEMA_VERSION = 4
 PLANNED_DIR = "planned"
 SUMS_FILENAME = "SHA256SUMS"
 
@@ -36,16 +43,18 @@ def sha256_text(text: str) -> str:
 
 
 def planned_files(plan: MigrationPlan) -> dict[str, str]:
-    """``relative path -> content`` of the files the repair would write at the corpus root."""
+    """``corpus-relative path -> content`` of every file the repair plans: the root
+    files, and each repaired history file under its corpus path."""
     return {
         "manifest.json": manifest_json(plan.planned_manifest),
         "slugs.json": registry_json(plan.planned_registry),
         IDENTITY_FILENAME: declaration_json(),
+        **plan.history_repair.files,
     }
 
 
 def _counts(plan: MigrationPlan) -> dict[str, int]:
-    return {**_record_counts(plan), **_slug_counts(plan)}
+    return {**_record_counts(plan), **_slug_counts(plan), **repair_counts(plan.history_repair)}
 
 
 def _record_counts(plan: MigrationPlan) -> dict[str, int]:
@@ -94,10 +103,6 @@ def _threshold_exceptions(plan: MigrationPlan) -> list[dict[str, object]]:
     ]
 
 
-HISTORY_REBUILD_NOTE = (
-    "not part of this plan: history_owner_mismatches lists the slug histories "
-    "the follow-up rebuild must regenerate for their owner"
-)
 THRESHOLD_EXCEPTION_NOTE = (
     "threshold_exceptions are migration exceptions: the U1 threshold kept the "
     "holder at the threshold as owner although the prior holders held the slug "
@@ -150,6 +155,7 @@ def _review_lists(plan: MigrationPlan) -> dict[str, list[dict[str, object]]]:
         "history_owner_mismatches": [m.model_dump(mode="json") for m in plan.history_mismatches],
         "registry_conflicts": [c.model_dump(mode="json") for c in plan.registry_conflicts],
         "restored_tombstones": [t.model_dump(mode="json") for t in plan.restored],
+        **repair_rows(plan.history_repair),
     }
 
 
@@ -178,7 +184,8 @@ def report_data(plan: MigrationPlan) -> dict[str, object]:
         "planned_files_sha256": _planned_sha256(plan),
         "changed_paths": plan.changed_paths,
         "changed_paths_sha256": sha256_text(changed),
-        "history_rebuild": HISTORY_REBUILD_NOTE,
+        "history_repair_note": HISTORY_REPAIR_NOTE,
+        "history_repair_invariant_ok": not plan.history_repair.invariant_violations,
         "u1_threshold": plan.threshold.model_dump(mode="json"),
         "unrecoverable_doc_ids": plan.unrecoverable,
         "orphan_history_doc_ids_not_restored": plan.orphans_not_restored,
@@ -258,13 +265,16 @@ def render_markdown(plan: MigrationPlan) -> str:
     """``report.md``: counts, checksums and the review lists of ``report.json``."""
     lists = _review_lists(plan)
     lines = [*_header(plan), *_identity_schema_lines(plan)]
-    for title, key, columns in _SECTIONS:
+    for title, key, columns in (*_SECTIONS, *REPAIR_SECTIONS):
         lines += [f"## {title}", "", *_table(lists[key], columns)]
     unrecoverable = [{"doc_id": doc_id} for doc_id in plan.unrecoverable]
     lines += ["## Unrecoverable doc_ids", "", *_table(unrecoverable, ("doc_id",))]
     not_restored = [{"doc_id": doc_id} for doc_id in plan.orphans_not_restored]
     lines += ["## Orphan-history doc_ids not restored", "", *_table(not_restored, ("doc_id",))]
-    lines += ["## History", "", f"{HISTORY_REBUILD_NOTE}.", ""]
+    violations = plan.history_repair.invariant_violations
+    lines += ["## History repair", "", f"{HISTORY_REPAIR_NOTE}.", ""]
+    lines += [f"Invariant (each event in exactly one document's history): `{not violations}`."]
+    lines += [*(f"- {violation}" for violation in violations), ""]
     return "\n".join(lines)
 
 

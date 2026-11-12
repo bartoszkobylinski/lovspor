@@ -192,8 +192,12 @@ def test_after_the_repair_the_later_holder_never_writes_the_owners_slug_history(
     repo, _ = corpus
     apply_plan(repo, _plan(corpus))
     lineage = extract_lineage(repo, PATH, LATER)
+    by_id = by_id_path(repo / "forskrifter", LATER)
+    repaired = by_id.read_bytes()  # the repair wrote the later holder's own by-id history
 
     with pytest.raises(SlugOwnershipError, match=OWNER):
         write_document_history(repo, lineage, lineage.record(SLUG), repo / "forskrifter")
 
-    assert not by_id_path(repo / "forskrifter", LATER).exists()
+    assert by_id.read_bytes() == repaired
+    slug_history = json.loads((repo / f"forskrifter/history/{SLUG}.json").read_text("utf-8"))
+    assert slug_history["doc_id"] == OWNER

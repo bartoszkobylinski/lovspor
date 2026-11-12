@@ -35,6 +35,7 @@ from lovspor.identity.registry import (
     SlugRegistry,
     require_consistent,
 )
+from lovspor.identity.repair_plan import HistoryRepair, RepairTarget, plan_history_repair
 from lovspor.identity.schema import ENFORCED_IDENTITY_SCHEMA, IDENTITY_FILENAME, parse_declaration
 from lovspor.identity.walk import ManifestWalk, walk_manifests
 from lovspor.storage.manifest import Manifest
@@ -93,6 +94,7 @@ class MigrationPlan(BaseModel):
     registry_conflicts: list[RegistryConflict]
     planned_manifest: Manifest
     planned_registry: SlugRegistry
+    history_repair: HistoryRepair
     changed_paths: list[str]
 
     @property
@@ -102,13 +104,22 @@ class MigrationPlan(BaseModel):
             self.planned_manifest.documents == self.base.manifest.documents
             and self.planned_registry == self.base.registry
             and self.base.identity_schema == ENFORCED_IDENTITY_SCHEMA
+            and not self.history_repair.changed
         )
 
     @property
     def blocked(self) -> bool:
         """True when the walk cannot answer for every identity the corpus names,
-        or the U1 threshold is not a manifest revision of the walk."""
-        return bool(self.unrecoverable or self.registry_conflicts or self.threshold.problem)
+        the U1 threshold is not a manifest revision of the walk, or the history
+        repair would rewrite an append-only event or break its invariant."""
+        history = self.history_repair
+        return bool(
+            self.unrecoverable
+            or self.registry_conflicts
+            or self.threshold.problem
+            or history.conflicts
+            or history.invariant_violations
+        )
 
     @property
     def orphans_not_restored(self) -> list[str]:
@@ -329,12 +340,36 @@ def _findings(base: BaseState, walk: ManifestWalk, repair: _Repair, threshold: i
     )
 
 
+def _repair_targets(mismatches: list[HistoryMismatch], renames: list[Rename]) -> list[RepairTarget]:
+    """The mismatched slug histories the plan rebuilds: every one whose slug has an owner."""
+    targets: list[RepairTarget] = []
+    for mismatch in mismatches:
+        directory, slug = PurePosixPath(mismatch.path).parts[0], PurePosixPath(mismatch.path).stem
+        if mismatch.owner is None:
+            continue
+        moved = {
+            r.doc_id: r.to_slug for r in renames if (r.directory, r.from_slug) == (directory, slug)
+        }
+        target = RepairTarget(
+            directory=directory,
+            slug=slug,
+            owner=mismatch.owner,
+            file_doc_id=mismatch.doc_id_in_file,
+            renamed=moved,
+        )
+        targets.append(target)
+    return targets
+
+
 def plan_migration(repo: Path, base_ref: str, threshold_ref: str | None = None) -> MigrationPlan:
     """The full repair plan for ``repo`` at ``base_ref``; reads, never writes."""
     base = read_base(repo, base_ref)
     walk = walk_manifests(repo, base.commit)
     threshold = resolve_threshold(repo, threshold_ref, walk)
     repair = _repair(base, walk, threshold)
+    findings = _findings(base, walk, repair, threshold.position)
+    targets = _repair_targets(findings.history_mismatches, repair.renames)
+    history = plan_history_repair(repo, base.commit, targets)
     return MigrationPlan(
         base=base,
         threshold=threshold,
@@ -344,6 +379,7 @@ def plan_migration(repo: Path, base_ref: str, threshold_ref: str | None = None) 
         registry_conflicts=repair.conflicts,
         planned_manifest=repair.manifest,
         planned_registry=repair.registry,
-        changed_paths=_changed_paths(repo, base, repair),
-        **dict(_findings(base, walk, repair, threshold.position)),
+        history_repair=history,
+        changed_paths=sorted({*_changed_paths(repo, base, repair), *history.changed}),
+        **dict(findings),
     )
