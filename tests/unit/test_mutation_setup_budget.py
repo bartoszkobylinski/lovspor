@@ -35,6 +35,9 @@ def test_setup_is_added_once_to_the_changed_files_budget(
     end = body.index('max_children="', start)
     budget_block = body[start:end]
     env = os.environ.copy()
+    # The nightly job exports a whole-run wall-clock budget, which replaces this formula
+    # in mutmut-pr.sh; mutmut's baseline pytest run inherits it, so drop it here.
+    env.pop("MUTMUT_PR_TOTAL_BUDGET_SECONDS", None)
     for name, value in (
         ("MUTMUT_PR_SETUP_BUDGET_SECONDS", setup),
         ("MUTMUT_PR_FILE_BUDGET_SECONDS", per_file),
