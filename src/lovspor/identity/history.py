@@ -65,9 +65,11 @@ def _event_key(event: IdentityEvent) -> tuple[str, str, str]:
 def merge_append_only(prior: IdentityHistory | None, new: IdentityHistory) -> IdentityHistory:
     """``new`` plus every event of ``prior`` it lacks; refuses an identity change.
 
-    With nothing to add, ``new`` is returned as extracted. Otherwise the kept
-    events are merged in and the list re-sorted newest first by date (a
-    stable sort, so events of one date keep their order).
+    An event already written is never rewritten: where ``new`` re-extracts an
+    event of ``prior`` (same commit, type and path), the written one is kept.
+    With nothing to add or keep, ``new`` is returned as extracted. Otherwise
+    the list is re-sorted newest first by date (a stable sort, so events of
+    one date keep their order).
     """
     if prior is None:
         return new
@@ -76,11 +78,13 @@ def merge_append_only(prior: IdentityHistory | None, new: IdentityHistory) -> Id
             f"history of {prior.doc_id} would be rewritten as {new.doc_id} — "
             "a per-document history never changes identity (#871)",
         )
+    written = {_event_key(event): event for event in prior.events}
+    events = [written.get(_event_key(event), event) for event in new.events]
     known = {_event_key(event) for event in new.events}
     kept = [event for event in prior.events if _event_key(event) not in known]
-    if not kept:
+    if not kept and events == new.events:
         return new
-    merged = sorted([*new.events, *kept], key=lambda event: event.date, reverse=True)
+    merged = sorted([*events, *kept], key=lambda event: event.date, reverse=True)
     return new.model_copy(update={"events": merged})
 
 

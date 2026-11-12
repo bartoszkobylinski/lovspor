@@ -24,8 +24,9 @@ from lovspor import __version__
 from lovspor.embeddings.inputs import build_embedding_inputs, hash_embedding_inputs
 from lovspor.embeddings.store import read_embeddings
 from lovspor.errors import CorpusStateError
+from lovspor.identity.records import replace_manifest
 from lovspor.settings import Settings
-from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest, write_manifest
+from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.sync.git_commit import add as git_add
 from lovspor.sync.git_commit import commit as git_commit_msg
 from lovspor.sync.git_commit import has_staged_changes
@@ -206,7 +207,7 @@ def _apply_annotation(
         return 0, already
     _verify_basis_unchanged(repo, head_before, hashes)
     manifest_path = repo / _MANIFEST_FILENAME
-    write_manifest(Manifest(generated_at=datetime.now(UTC), documents=new_records), manifest_path)
+    replace_manifest(Manifest(generated_at=datetime.now(UTC), documents=new_records), manifest_path)
     git_add(repo, [manifest_path])
     if has_staged_changes(repo):
         git_commit_msg(repo, _COMMIT_SUBJECT)

@@ -75,6 +75,15 @@ def test_the_same_commit_at_another_path_is_another_event() -> None:
     assert len(merged.events) == 2
 
 
+def test_an_event_already_written_is_never_rewritten() -> None:
+    written = _event("b", 2)
+    reextracted = written.model_copy(update={"subject": "a different subject"})
+
+    merged = merge_append_only(_history(written), _history(_event("c", 3), reextracted))
+
+    assert merged.events == [_event("c", 3), written]
+
+
 def test_an_identity_change_is_refused() -> None:
     with pytest.raises(HistoryIdentityError, match=OLD):
         merge_append_only(_history(doc_id=OLD), _history(doc_id=NEW))
