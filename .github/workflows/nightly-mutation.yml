@@ -5,13 +5,10 @@
 name: Nightly Mutation
 
 on:
-  schedule:
-    # GitHub cron is UTC. 23:30 UTC is 00:30 Europe/Oslo in winter (CET) and
-    # 01:30 in summer (CEST): the START drifts one hour with DST. It sits after
-    # milamber's 00:00 nightly on purpose. The 06:00 STOP does not drift: the
-    # budget step computes it against Europe/Oslo wall clock, so a summer night
-    # is one hour shorter. GitHub may also start a scheduled run late.
-    - cron: '30 23 * * *'
+  # Started by launchd on the Mac mini (`gh workflow run nightly-mutation.yml`,
+  # 00:30 Europe/Oslo), not by `schedule:`. GitHub started the cron run of
+  # 2026-11-12 four and a half hours late (23:30 UTC cron, 04:01 UTC start),
+  # and a scheduled start has no guaranteed time. See docs/agentic-ci.md.
   workflow_dispatch:
 
 # One night at a time. Never cancelled: a cancelled run measured nothing it can
@@ -95,25 +92,18 @@ jobs:
           echo "range: $base...$head ($source)"
 
       # One wall-clock budget for the whole run (the wrapper's model, spec
-      # §6a): everything until 06:00 Europe/Oslo, minus 30 min for the harvest,
-      # the report and the tag push. Capped at 300 min (job timeout above) and
-      # floored at 10 min, so a manual run late in the night still reports.
-      - name: Budget until 06:00 Europe/Oslo
+      # §6a): a fixed 300 min, whatever the start time. The job runs on a hosted
+      # runner, so no morning deadline protects anything here; the old "until
+      # 06:00 Europe/Oslo" stop left 28 min on 2026-11-12, when GitHub started the
+      # night at 04:01 UTC. 300 min + harvest stays under timeout-minutes (345)
+      # and the hosted 360 min kill.
+      - name: Budget of 300 min wall clock
         id: budget
         run: |
           set -euo pipefail
-          now="$(date +%s)"
-          deadline="$(TZ=Europe/Oslo date -d 'today 06:00' +%s)"
-          if [ "$deadline" -le "$now" ]; then
-            deadline="$(TZ=Europe/Oslo date -d 'tomorrow 06:00' +%s)"
-          fi
           cap=18000
-          floor=600
-          seconds=$(( deadline - now - 1800 ))
-          if [ "$seconds" -gt "$cap" ]; then seconds=$cap; fi
-          if [ "$seconds" -lt "$floor" ]; then seconds=$floor; fi
-          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
-          echo "budget: ${seconds}s, the stop is $(TZ=Europe/Oslo date -d "@$deadline" '+%F %R %Z') minus 30 min"
+          echo "seconds=$cap" >> "$GITHUB_OUTPUT"
+          echo "budget: ${cap}s wall clock, independent of the start time"
 
       - name: Nightly-scoped mutation testing (no LLM)
         id: mut

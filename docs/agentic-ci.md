@@ -84,7 +84,7 @@ Later pushes to a ready PR (synchronize, the author's own push included)
 Merge (owner) → push to main
   └─ fast-ci on the merged commit (post-merge check: combined breakage of two green PRs)
 
-Nightly, 23:30 UTC (00:30 Oslo winter / 01:30 summer), stop by 06:00 Europe/Oslo
+Nightly, 00:30 Europe/Oslo, dispatched by launchd on the Mac mini (not `schedule:`), 300 min budget
   └─ nightly-mutation (ubuntu, no LLM): scripts/mutmut-pr.sh over
      <tag nightly-mutation-base>...main → rolling issue "Nightly mutation"
 ```
@@ -150,18 +150,17 @@ merged PRs): every push re-mutated the whole PR's surface, mutmut's setup cost i
 property of the suite and not the diff, and "0 survivors" pushed equivalent mutants into
 `src/` rewrites.
 
-`.github/workflows/nightly-mutation.yml`, hosted `ubuntu-latest`, `schedule` + `workflow_dispatch`:
+`.github/workflows/nightly-mutation.yml`, hosted `ubuntu-latest`, `workflow_dispatch` only:
 
-- **When.** Cron `30 23 * * *`. GitHub cron is UTC, so the start is 00:30 Europe/Oslo in
-  winter and 01:30 in summer (DST drift; it sits after milamber's 00:00 nightly). GitHub can
-  also start a scheduled run late.
 - **Scope.** The same wrapper the PR job used, `scripts/mutmut-pr.sh <base>`, with base = the
   commit of tag `nightly-mutation-base` and head = `main` at the start of the run. No tag (the
   first night, or a deleted one) or a tag that is no longer an ancestor of `main`: base = the
   last commit of `main` older than 7 days. Never the whole package.
-- **Budget.** One wall-clock budget, the wrapper's own model: the job computes the seconds
-  left until 06:00 Europe/Oslo (DST-correct), keeps 30 min for harvest, report and tag push,
-  caps it at 300 min and floors it at 10 min, and hands it over as
+- **Trigger.** `workflow_dispatch` only, fired at 00:30 Europe/Oslo by a launchd agent on the
+  Mac mini (`gh workflow run nightly-mutation.yml --ref main`). GitHub's `schedule:` started
+  the 2026-11-12 night at 04:01 UTC for a 23:30 UTC cron, so it is not used.
+- **Budget.** One wall-clock budget, the wrapper's own model: a fixed 300 min whatever the
+  start time (the runner is hosted, so no morning deadline protects anything), handed over as
   `MUTMUT_PR_TOTAL_BUDGET_SECONDS`, which replaces the setup + per-file sum. The job's
   `timeout-minutes: 345` is strictly above the cap and under the hosted 360-min kill.
 - **Verdict.** `scripts/ci/nightly_mutation_verdict.py` buckets the gate reason that

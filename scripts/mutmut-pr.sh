@@ -180,8 +180,8 @@ file_budget="${MUTMUT_PR_FILE_BUDGET_SECONDS:-1200}"
 # per-file allowance, it left a one-file PR no time for any mutant.
 setup_budget="${MUTMUT_PR_SETUP_BUDGET_SECONDS:-2400}"
 total_budget=$((setup_budget + file_budget * count))
-# The nightly lane hands over one wall-clock budget, the seconds left until its
-# 06:00 stop (nightly-mutation.yml): it replaces the setup + per-file sum.
+# The nightly lane hands over one wall-clock budget, a fixed 300 min
+# (nightly-mutation.yml): it replaces the setup + per-file sum.
 total_override="${MUTMUT_PR_TOTAL_BUDGET_SECONDS:-}"
 if [ -n "$total_override" ]; then
   if ! [[ "$total_override" =~ ^[1-9][0-9]*$ ]]; then
