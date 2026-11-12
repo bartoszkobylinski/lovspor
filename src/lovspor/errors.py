@@ -62,6 +62,50 @@ class CorpusStateError(LovsporError):
     """
 
 
+class ManifestRecordLossError(CorpusStateError):
+    """A manifest write would drop a ``doc_id`` the manifest it replaces holds.
+
+    A record keyed by ``doc_id`` may change status but never disappear
+    (#871, ADR-0023 draft point 1): a lost record frees its slug for the next
+    document and loses the document's identity. The write is refused before
+    anything reaches disk; the message names the missing ``doc_id``s.
+    """
+
+
+class SlugOwnershipError(CorpusStateError):
+    """A slug would change owner (#871, ADR-0023 draft point 2).
+
+    ``slugs.json`` maps every slug the corpus has published to the first
+    ``doc_id`` that held it; an entry is never deleted and its owner never
+    changes, so a later document never answers at an earlier document's
+    address.
+    """
+
+
+class HistoryIdentityError(CorpusStateError):
+    """A per-document history record would change identity or lose events (#871)."""
+
+
+class IdentitySchemaError(CorpusStateError):
+    """The corpus's identity schema cannot be enforced as declared (#871).
+
+    ``identity.json`` declares the identity schema the corpus is at. A corpus
+    that declares the enforced schema and lacks a readable ``slugs.json``, a
+    declaration that is unreadable or names a version this engine does not
+    know, and a ``slugs.json`` that no declaration covers all fail closed:
+    slug ownership is never silently left unenforced.
+    """
+
+
+class IdentityMigrationError(LovsporError):
+    """The offline identity migration cannot read its input (#871).
+
+    A missing ``manifest.json`` at the base, an unreadable revision, or a
+    base that is not a commit: the plan is refused rather than computed from
+    a partial walk.
+    """
+
+
 class ReadmeBlockError(LovsporError):
     """The corpus README's generated corpus-status markers are not one ordered pair.
 

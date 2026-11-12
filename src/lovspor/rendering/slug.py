@@ -170,6 +170,11 @@ def _claim_slug(
     return fallback[-1]
 
 
+def identity_candidates(slug: str, doc_id: str) -> tuple[str, ...]:
+    """The ownership-disambiguation slugs ``resolve_collisions`` tries, in order."""
+    return _identity_candidates(slug, doc_id)
+
+
 def _identity_candidates(slug: str, doc_id: str) -> tuple[str, ...]:
     """Deterministic disambiguation suffixes from the doc's own identity.
 

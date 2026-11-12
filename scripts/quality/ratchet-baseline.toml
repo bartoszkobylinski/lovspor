@@ -813,7 +813,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/sync/orchestrator.py"
-value = 2167
+value = 2157
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -849,13 +849,6 @@ rule = "function-params"
 path = "src/lovspor/sync/orchestrator.py"
 name = "_commit_with_history"
 value = 9
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "function-lines"
-path = "src/lovspor/sync/orchestrator.py"
-name = "_generate_and_apply_history"
-value = 21
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]

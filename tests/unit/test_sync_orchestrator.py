@@ -14,7 +14,7 @@ from lovspor.embeddings.model import split_to_token_chunks
 from lovspor.embeddings.sections import iter_sections
 from lovspor.embeddings.store import write_embeddings
 from lovspor.errors import ConfigError, CorpusStateError, MassRemovalError
-from lovspor.history import HistoryRecord
+from lovspor.history import HistoryRecord, Lineage, LineageStep
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings
 from lovspor.sources.lovdata import LovdataArchive
@@ -64,6 +64,25 @@ def _record(
         eu_basis=[],
         renderer_version=renderer_version,
     )
+
+
+def _lineage_of(history: HistoryRecord) -> Lineage:
+    """The lineage whose ``record(slug)`` is ``history`` (each step at one path)."""
+    steps = [LineageStep(event=event, path=f"lover/{history.slug}.md") for event in history.events]
+    return Lineage(doc_id=history.doc_id, steps=steps)
+
+
+def _fake_write_document_history(
+    _repo: Path,
+    _lineage: Lineage,
+    record: HistoryRecord,
+    target_dir: Path,
+) -> list[Path]:
+    return [
+        target_dir / "history" / f"{record.slug}.json",
+        target_dir / "history" / f"{record.slug}.md",
+        target_dir / "history" / "by-id" / f"{record.doc_id}.json",
+    ]
 
 
 def _upstream(
@@ -701,25 +720,14 @@ def test_record_with_history_and_generate_history_skip_rules(
         ],
     )
 
-    extracted: list[tuple[Path, str, str, str]] = []
+    extracted: list[tuple[Path, str, str]] = []
 
-    def fake_extract_history(
-        repo_path: Path,
-        current_path: str,
-        doc_id: str,
-        slug: str,
-    ) -> HistoryRecord:
-        extracted.append((repo_path, current_path, doc_id, slug))
-        return history
+    def fake_extract_lineage(repo_path: Path, current_path: str, doc_id: str) -> Lineage:
+        extracted.append((repo_path, current_path, doc_id))
+        return _lineage_of(history)
 
-    def fake_write_history(record: HistoryRecord, target_dir: Path) -> tuple[Path, Path]:
-        return (
-            target_dir / "history" / f"{record.slug}.json",
-            target_dir / "history" / f"{record.slug}.md",
-        )
-
-    monkeypatch.setattr(orchestrator_module, "extract_history", fake_extract_history)
-    monkeypatch.setattr(orchestrator_module, "write_history", fake_write_history)
+    monkeypatch.setattr(orchestrator_module, "extract_lineage", fake_extract_lineage)
+    monkeypatch.setattr(orchestrator_module, "write_document_history", _fake_write_document_history)
 
     updated, written = orchestrator_module._generate_and_apply_history(
         tmp_path,
@@ -727,10 +735,11 @@ def test_record_with_history_and_generate_history_skip_rules(
         ["active", "removed", "legacy", "missing"],
     )
 
-    assert extracted == [(tmp_path, "lover/active.md", "active", "active")]
+    assert extracted == [(tmp_path, "lover/active.md", "active")]
     assert written == [
         tmp_path / "lover" / "history" / "active.json",
         tmp_path / "lover" / "history" / "active.md",
+        tmp_path / "lover" / "history" / "by-id" / "active.json",
     ]
     assert updated["active"].total_changes == 2
     assert updated["active"].last_changed == "2026-05-02"
@@ -754,14 +763,15 @@ def test_empty_extracted_history_preserves_prior_record_and_files(
 
     monkeypatch.setattr(
         orchestrator_module,
-        "extract_history",
-        lambda **kwargs: empty_history,
+        "extract_lineage",
+        lambda *_args: _lineage_of(empty_history),
     )
     monkeypatch.setattr(
         orchestrator_module,
-        "write_history",
-        lambda record, target_dir: (
-            writes.append(record.slug) or (target_dir / "x.json", target_dir / "x.md")
+        "write_document_history",
+        lambda _repo, _lineage, record, target_dir: (
+            writes.append(record.slug)
+            or _fake_write_document_history(_repo, _lineage, record, target_dir)
         ),
     )
 
@@ -803,14 +813,10 @@ def test_nonempty_history_on_record_with_prior_state_still_updates(
 
     monkeypatch.setattr(
         orchestrator_module,
-        "extract_history",
-        lambda **kwargs: fresh_history,
+        "extract_lineage",
+        lambda *_args: _lineage_of(fresh_history),
     )
-    monkeypatch.setattr(
-        orchestrator_module,
-        "write_history",
-        lambda record, target_dir: (target_dir / "x.json", target_dir / "x.md"),
-    )
+    monkeypatch.setattr(orchestrator_module, "write_document_history", _fake_write_document_history)
 
     updated, written = orchestrator_module._generate_and_apply_history(
         tmp_path,
@@ -820,7 +826,7 @@ def test_nonempty_history_on_record_with_prior_state_still_updates(
 
     assert updated["doc-3"].total_changes == 1
     assert updated["doc-3"].last_changed == "2026-06-01"
-    assert len(written) == 2
+    assert len(written) == 3
 
 
 def test_empty_extracted_history_on_record_without_prior_state_stamps_zero(
@@ -835,14 +841,10 @@ def test_empty_extracted_history_on_record_without_prior_state_stamps_zero(
 
     monkeypatch.setattr(
         orchestrator_module,
-        "extract_history",
-        lambda **kwargs: empty_history,
+        "extract_lineage",
+        lambda *_args: _lineage_of(empty_history),
     )
-    monkeypatch.setattr(
-        orchestrator_module,
-        "write_history",
-        lambda record, target_dir: (target_dir / "x.json", target_dir / "x.md"),
-    )
+    monkeypatch.setattr(orchestrator_module, "write_document_history", _fake_write_document_history)
 
     updated, written = orchestrator_module._generate_and_apply_history(
         tmp_path,
@@ -852,7 +854,7 @@ def test_empty_extracted_history_on_record_without_prior_state_stamps_zero(
 
     assert updated["doc-2"].total_changes == 0
     assert updated["doc-2"].last_changed is None
-    assert len(written) == 2
+    assert len(written) == 3
 
 
 def test_commit_with_history_bulk_path_writes_manifest_indexes_and_followup(
@@ -909,7 +911,7 @@ def test_commit_with_history_bulk_path_writes_manifest_indexes_and_followup(
     ) -> None:
         followups.append(target_doc_ids)
 
-    monkeypatch.setattr(orchestrator_module, "write_manifest", fake_write_manifest)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", fake_write_manifest)
     monkeypatch.setattr(orchestrator_module, "write_derived_views", fake_write_derived_views)
     monkeypatch.setattr(orchestrator_module, "_commit_bulk", fake_commit_bulk)
     monkeypatch.setattr(
@@ -999,7 +1001,7 @@ def test_commit_with_history_per_doc_path_generates_history_and_final_commit(
         "write_derived_views",
         lambda repo, _manifest, datasets: [repo / dataset / "INDEX.md" for dataset in datasets],
     )
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
         "git_add",
@@ -1052,6 +1054,7 @@ def test_commit_history_followup_updates_manifest_and_commits_document_count(
     history_paths = [
         repo / "lover" / "history" / "a.json",
         repo / "lover" / "history" / "a.md",
+        repo / "lover" / "history" / "by-id" / "a.json",
     ]
     written_manifests: list[Manifest] = []
     added_paths: list[list[Path]] = []
@@ -1064,7 +1067,7 @@ def test_commit_history_followup_updates_manifest_and_commits_document_count(
     )
     monkeypatch.setattr(
         orchestrator_module,
-        "write_manifest",
+        "replace_manifest",
         lambda manifest, _path: written_manifests.append(manifest),
     )
     monkeypatch.setattr(
@@ -1104,7 +1107,7 @@ def test_commit_history_followup_skips_when_no_history_paths(
     )
     monkeypatch.setattr(
         orchestrator_module,
-        "write_manifest",
+        "replace_manifest",
         lambda *_args: called.append("write"),
     )
     monkeypatch.setattr(orchestrator_module, "git_add", lambda *_args: called.append("add"))
@@ -1164,24 +1167,12 @@ def test_generate_history_continues_after_missing_removed_and_slugless_targets(
     )
     extracted: list[str] = []
 
-    def fake_extract_history(
-        repo_path: Path,
-        current_path: str,
-        doc_id: str,
-        slug: str,
-    ) -> HistoryRecord:
+    def fake_extract_lineage(_repo_path: Path, _current_path: str, doc_id: str) -> Lineage:
         extracted.append(doc_id)
-        return HistoryRecord(slug=slug, doc_id=doc_id, events=[])
+        return Lineage(doc_id=doc_id, steps=[])
 
-    monkeypatch.setattr(orchestrator_module, "extract_history", fake_extract_history)
-    monkeypatch.setattr(
-        orchestrator_module,
-        "write_history",
-        lambda record, target_dir: (
-            target_dir / "history" / f"{record.slug}.json",
-            target_dir / "history" / f"{record.slug}.md",
-        ),
-    )
+    monkeypatch.setattr(orchestrator_module, "extract_lineage", fake_extract_lineage)
+    monkeypatch.setattr(orchestrator_module, "write_document_history", _fake_write_document_history)
 
     updated, written = orchestrator_module._generate_and_apply_history(
         tmp_path,
@@ -1197,7 +1188,7 @@ def test_generate_history_continues_after_missing_removed_and_slugless_targets(
     assert extracted == ["active", "later"]
     assert updated["active"].total_changes == 0
     assert updated["later"].total_changes == 0
-    assert len(written) == 4
+    assert len(written) == 6
 
 
 def test_run_sprint5_history_migration_filters_targets_and_commits(
@@ -1230,7 +1221,7 @@ def test_run_sprint5_history_migration_filters_targets_and_commits(
         return updated_records, [repo / "lover" / "history" / "current.json"]
 
     monkeypatch.setattr(orchestrator_module, "_generate_and_apply_history", fake_generate)
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda *_args: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda *_args: None)
     monkeypatch.setattr(orchestrator_module, "git_add", lambda *_args: None)
     monkeypatch.setattr(orchestrator_module, "has_staged_changes", lambda _repo: True)
     monkeypatch.setattr(
@@ -1413,7 +1404,7 @@ def test_run_sprint8_eu_basis_migration_skips_unsafe_records_and_commits(
         return written_record, [written_path]
 
     monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda *_args: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda *_args: None)
     monkeypatch.setattr(
         orchestrator_module,
         "git_add",
@@ -2062,7 +2053,9 @@ def test_tombstone_defaults_to_no_reason() -> None:
     assert orchestrator_module._tombstone(old).removed_reason is None
 
 
-def test_carry_tombstones_keeps_only_absent_removed_records() -> None:
+def test_carry_tombstones_keeps_every_removed_record() -> None:
+    """Every tombstone is carried, one whose id is back upstream included: a
+    successful re-add overwrites it, a failed one must not lose it (#871)."""
     prior = Manifest(
         generated_at=datetime(2026, 5, 1, tzinfo=UTC),
         documents={
@@ -2072,9 +2065,9 @@ def test_carry_tombstones_keeps_only_absent_removed_records() -> None:
         },
     )
 
-    carried = orchestrator_module._carry_tombstones(prior, {"back", "other"})
+    carried = orchestrator_module._carry_tombstones(prior)
 
-    assert carried == {"gone": prior.documents["gone"]}
+    assert carried == {"gone": prior.documents["gone"], "back": prior.documents["back"]}
 
 
 # --- repair under-embedded docs (flat ## § acts embedded before the parser fix) ---

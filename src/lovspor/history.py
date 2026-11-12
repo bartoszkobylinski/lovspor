@@ -145,6 +145,39 @@ class HistoryRecord(BaseModel):
         return value
 
 
+class LineageStep(BaseModel):
+    """One event of a document's lineage and the path the file had at it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event: HistoryEvent
+    path: str
+
+
+class Lineage(BaseModel):
+    """A document's events, newest first, each with the path it had (#871).
+
+    The per-document history (``history/by-id/<doc_id>.json``) records the
+    path of every event, because one document can hold several paths over
+    its life and one path can be held by several documents.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    doc_id: str
+    steps: list[LineageStep]
+
+    def record(self, slug: str) -> HistoryRecord:
+        """The ``history/<slug>.json`` record of this lineage."""
+        return HistoryRecord(slug=slug, doc_id=self.doc_id, events=[s.event for s in self.steps])
+
+
+def extract_lineage(repo_path: Path, current_path: str, doc_id: str) -> Lineage:
+    """``extract_history``'s walk, keeping the path each event had."""
+    raw = _run_git_log(repo_path, current_path)
+    return Lineage(doc_id=doc_id, steps=_lineage(repo_path, current_path, doc_id, raw))
+
+
 def extract_history(
     repo_path: Path,
     current_path: str,
@@ -168,17 +201,19 @@ def extract_history(
     to the other identity and are excluded. Renames of the SAME id are
     still followed.
 
+    A revision that deleted the path is judged by the blob it deleted (the
+    one at ``sha^``), so a previous holder's removal ends the lineage
+    instead of being filed under the next holder (#871).
+
     Revisions with no parseable frontmatter ``id`` (pre-frontmatter-era
-    files, or a blob absent at that revision) are treated as
+    files, or no blob at that revision nor its parent) are treated as
     same-identity. The rule is safe because such revisions are only
     reachable while the lineage from HEAD is unbroken: the walk has
     already stopped if any newer revision on the path carried a foreign
     id, so a foreign identity excludes every id-less revision below the
     boundary along with the boundary revision itself.
     """
-    raw = _run_git_log(repo_path, current_path)
-    events = _events_within_identity(repo_path, current_path, doc_id, raw)
-    return HistoryRecord(slug=slug, doc_id=doc_id, events=events)
+    return extract_lineage(repo_path, current_path, doc_id).record(slug)
 
 
 class _HistoryFrontMatter(BaseModel):
@@ -261,22 +296,17 @@ def _run_git_log(repo_path: Path, file_path: str) -> str:
     return result.stdout
 
 
-def _events_within_identity(
-    repo_path: Path,
-    current_path: str,
-    doc_id: str,
-    raw: str,
-) -> list[HistoryEvent]:
+def _lineage(repo_path: Path, current_path: str, doc_id: str, raw: str) -> list[LineageStep]:
     """Build events from raw git log, stopping at the identity boundary.
 
     Walks the parsed commits newest-first while tracking the path the
     file had at each revision (numstat rename rows move the tracked path
-    back to ``from_path`` for older commits). At every revision the
-    blob's frontmatter ``id`` is compared against ``doc_id``; the first
-    mismatch ends the lineage — see ``extract_history`` for the rule on
-    revisions without a parseable id.
+    back to ``from_path`` for older commits); each event keeps that path.
+    At every revision the blob's frontmatter ``id`` is compared against
+    ``doc_id``; the first mismatch ends the lineage — see
+    ``extract_history`` for the rule on revisions without a parseable id.
     """
-    events: list[HistoryEvent] = []
+    steps: list[LineageStep] = []
     path = current_path
     for sha, iso_date, subject, stat_lines in _parse_blocks(raw):
         blob_id = _frontmatter_id_at(repo_path, sha, path)
@@ -284,22 +314,33 @@ def _events_within_identity(
             break
         event = _classify_commit(sha, iso_date, subject, stat_lines)
         if event is not None:
-            events.append(event)
+            steps.append(LineageStep(event=event, path=path))
         from_path, to_path = _parse_rename_paths(stat_lines)
         if from_path and to_path:
             path = from_path
-    return events
+    return steps
 
 
 def _frontmatter_id_at(repo_path: Path, sha: str, file_path: str) -> str | None:
-    """Frontmatter ``id`` of ``file_path``'s blob at revision ``sha``.
+    """Frontmatter ``id`` of the document ``file_path`` held at revision ``sha``.
 
-    ``None`` when the blob does not exist at that revision (e.g. the
-    commit deleted the file) or carries no parseable frontmatter ``id``
+    A commit that deleted the path has no blob there, so the document it
+    removed is read from the parent, ``sha^`` (#871, ADR-0023 point 4):
+    without this the deletion of a previous holder of the path entered the
+    next holder's history as its own event. ``None`` when neither revision
+    has a blob, or the blob carries no parseable frontmatter ``id``
     (pre-frontmatter-era files). Callers treat ``None`` as same-identity.
     """
+    text = _blob_text(repo_path, f"{sha}:{file_path}")
+    if text is None:
+        text = _blob_text(repo_path, f"{sha}^:{file_path}")
+    return None if text is None else _scan_frontmatter_id(text)
+
+
+def _blob_text(repo_path: Path, revision_path: str) -> str | None:
+    """The text of the blob ``<rev>:<path>``, or ``None`` when there is none."""
     result = subprocess.run(  # noqa: S603
-        ["git", "show", f"{sha}:{file_path}"],  # noqa: S607
+        ["git", "show", revision_path],  # noqa: S607
         cwd=repo_path,
         capture_output=True,
         text=True,
@@ -308,7 +349,7 @@ def _frontmatter_id_at(repo_path: Path, sha: str, file_path: str) -> str | None:
     )
     if result.returncode != 0:
         return None
-    return _scan_frontmatter_id(result.stdout)
+    return result.stdout
 
 
 def _scan_frontmatter_id(text: str) -> str | None:

@@ -23,6 +23,7 @@ from lovspor.forarbeider import reader_cli as _forarbeider_reader  # noqa: F401
 from lovspor.forarbeider import release_cli as _forarbeider_release  # noqa: F401
 from lovspor.forarbeider import release_reader_cli as _forarbeider_release_read  # noqa: F401
 from lovspor.forarbeider import review_commands as _forarbeider_review  # noqa: F401
+from lovspor.identity import commands as _identity_commands  # noqa: F401
 from lovspor.legaltime import commands as _legaltime_commands  # noqa: F401
 from lovspor.ops.commands import ops_app
 from lovspor.regjeringen_fetch import commands as _regjeringen_fetch  # noqa: F401
