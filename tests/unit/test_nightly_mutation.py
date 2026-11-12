@@ -90,10 +90,12 @@ def _step(name_prefix: str) -> dict[str, object]:
     return matches[0]
 
 
-def test_the_lane_runs_nightly_and_on_demand() -> None:
+def test_the_lane_is_dispatched_not_scheduled() -> None:
+    # launchd on the Mac mini dispatches it at a fixed time; GitHub's own
+    # schedule started the 2026-11-12 night 4.5 h late.
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     triggers = workflow[True]  # PyYAML reads the bare `on:` key as boolean True
-    assert triggers["schedule"] == [{"cron": "30 23 * * *"}]
+    assert "schedule" not in triggers
     assert "workflow_dispatch" in triggers
     assert "pull_request" not in triggers and "push" not in triggers
 
@@ -201,3 +203,10 @@ def test_the_red_step_fires_exactly_on_an_incomplete_verdict(
     step = _step("Fail a night that did not measure its range")
     assert step["if"] == "always() && steps.verdict.outputs.complete != 'true'"
     assert (complete != "true") is red
+
+
+def test_the_budget_does_not_depend_on_the_start_time() -> None:
+    step = _step("Budget")
+    run = str(step["run"])
+    assert "date" not in run  # no deadline arithmetic: a late start keeps the full budget
+    assert "cap=18000" in run
