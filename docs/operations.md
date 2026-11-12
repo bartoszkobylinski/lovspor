@@ -3483,6 +3483,78 @@ When a correction or takedown request arrives at `kontakt@lovspor.no`, or the ow
 | Regression: `extensions.worktreeConfig` in a real clone | `test_forarbeider_release_checkout.py::test_a_real_worktree_config_extension_is_refused_though_its_file_hides_a_hook` |
 | Regression: a missing fresh preflight chapter outcome never clears | `test_forarbeider_batch_clearance.py::test_a_clean_chapter_the_fresh_preflight_has_no_outcome_for_is_excluded`, `::test_a_flagged_chapter_the_fresh_preflight_has_no_outcome_for_is_excluded`, `test_forarbeider_batch_apply.py::test_an_included_chapter_the_fresh_evaluation_has_no_result_for_is_refused` |
 
+## Forarbeider: receipt-verified reader of a real release (issue #738, contract Amendment 1, B2)
+
+`forarbeider-release-read` reads released forarbeider from a lovverk `main` in a release clone whose HEAD **the owner has attested as published**, and only after verifying them against the owner's private release records.
+
+**What "published" means here, exactly.** Three levels, kept apart:
+
+1. *A clean, committed local checkout*: the B1a guard on `main`. Local state only.
+2. *A matching local remote-tracking ref* (`refs/remotes/origin/main`): a file `git update-ref` moves offline. It proves nothing about the remote, so **the reader never reads it**.
+3. *Independently verified remote publication*: needs the network or a signature the remote makes. Neither is available, so the reader **never claims it** (`remote_verified: false`).
+
+What the reader requires instead is the owner's **publication attestation**: after the owner has seen the merge commit on lovverk `main` (on GitHub, by their own means) and pulled it, they attest that commit at a terminal. The record lives in the private workspace (`publications/<commit>.json`, outside the mutable checkout, written once) and names the repository, `main`, the commit and the forarbeider manifest digest at it, with `basis: owner_asserted_unverified`, `remote_verified: false`, `identity_authenticated: false`. `attest` refuses unless the clone is clean on `main` with HEAD exactly the commit the owner typed (`release_not_published: commit`), so the attestation binds the bytes in front of them. It is the owner's word, not a verification.
+
+```bash
+git -C /abs/lovverk-release switch main && git -C /abs/lovverk-release pull --ff-only
+uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> publication attest \
+  --checkout /abs/lovverk-release --commit <the main commit you saw on GitHub> --decided owner@<now>
+```
+
+The typed phrase is `attest <commit prefix> on main of github.com/bartoszkobylinski/lovverk manifest <digest prefix>`. Attesting the same commit and dataset again prints `UNCHANGED` and writes nothing. Every later commit on `main` needs its own attestation before the reader serves it. It is separate from the synthetic `forarbeider-read` by command, module (`release_reader*.py`) and record type (`forarbeider_release_*`, `synthetic: false`). No existing law reader, MCP tool, search, embedding or default index sees it; only `ops_cli.py` mounts it.
+
+```bash
+uv run lovspor ops forarbeider-release-read --workspace <ws> --checkout /abs/lovverk-release list
+uv run lovspor ops forarbeider-release-read --workspace <ws> --checkout /abs/lovverk-release show --document regjeringen-3172654
+uv run lovspor ops forarbeider-release-read --workspace <ws> --checkout /abs/lovverk-release chapter --document regjeringen-3172654 --chapter 9
+uv run lovspor ops forarbeider-release-read --workspace <ws> --checkout /abs/lovverk-release provenance --document regjeringen-3172654
+```
+
+Each call prints one JSON record (`forarbeider_release_list|document|chapter|provenance`, `schema_version: 1`, `synthetic: false`, `publication: owner_attested_commit`, `remote_verified: false`, the NOT-enacted-law notice and the trust notice). `show` gives identity, the fixed labels (`forarbeid`, `normative: false`, `regjeringen.no`, `åndsverkloven § 14`, `source_license: null`, `asserts_complete_proposition: false`), coverage with the partial-excerpt notice, every chapter receipt with its clearance (`standing_policy` with policy and source-proof digests and `individually_reviewed: false`, or `owner_review` with the review pin, report and authorization digests and `individually_reviewed: true`), and the separate time axes. `chapter` prints that one chapter's Markdown, cut from the verified file at its `Source: <url>` line. `provenance` adds the confirmation, receipt and plan digests it verified. Never printed: an owner handle, evidence, a dossier, a private path. A refusal is `refused: <reason>: <detail>` on stderr, exit 1, with no text and no path (a path is shown as `input`).
+
+### What it verifies before serving anything
+
+In order; the first failure refuses and nothing is printed but the code.
+
+1. **The checkout** passes the B1a guard on `main`: canonical owner-only path, not the engine, sync clone or `$LOVVERK_CORPUS_PATH`, its own `.git`, Git ≥ 2.32, safe config, trusted `origin`, not shallow, lovverk root commit, no graft or replace ref, **no Git operation and no forarbeider lock, journal or staging**, clean index and worktree with nothing untracked or hidden, and the `forarbeider/` dataset exactly its manifest (no symlink, hard link, special or stray file; every member file's SHA-256; the index the manifest's).
+2. **The owner's attestation of HEAD** is stored in the workspace and names this commit, `main` and this dataset's manifest digest (`release_not_published: attestation` for none, `release_record_corrupt: <commit>` for edited bytes, `release_not_published: attestation_mismatch` otherwise). A working tree, a local commit, a branch or a moved `origin/main` is never publication.
+3. **Manifest schema 2** in canonical bytes; version 1 (only ever written by the synthetic sandbox) or any other version is `manifest_incompatible`.
+4. **Each released document's file restates its member** (`corpus_tree_mismatch: front_matter`): id, labels, release status, coverage, listed and released chapters and their text digests, and the NOT-enacted-law block.
+5. **The owner's records** in `--workspace` (`release_record_missing`, `release_record_corrupt`, `receipt_mismatch`):
+   - exactly one stored batch confirmation wrote this member's path with these bytes and names the document (`ambiguous` for two);
+   - its receipt in `batch_releases/` is exactly the one `batch apply` writes for it;
+   - the stored plan it names includes exactly the member's chapters (number, id, source URL and digest, text digest) with exactly the member's clearances (`chapters`);
+   - the binding lists each chapter with its text digest (`binding`); the owner's moment is the document's (`times`);
+   - every record a clearance cites is stored and intact: the standing policy, or the review report and authorization.
+6. **No change while reading.** The guard and the attestation are checked again after the dataset is read and must be the same (`corpus_tree_mismatch: concurrent`).
+
+Withdrawn members are listed nowhere and served by no command (`document_not_released: document`), whatever Git history keeps; a withdrawn file put back is a stray file and refuses.
+
+### Trust assumptions and security analysis
+
+- **The private workspace is the trust mechanism**, and its boundary is the owner-only directory. The reader checks the integrity and mutual consistency of the owner's own records (confirmation, receipt, plan, policy, report, authorization), never their authenticity: nothing is signed, a digest proves bytes, not who made them, and anyone able to write that directory could write a consistent set. Without the workspace, or without a record, the reader refuses; it never infers a clearance or a review.
+- **Publication is the owner's attestation, nothing more.** The reader proves a clean committed local `main` and that the owner attested exactly that commit and dataset; it never verifies the remote, never reads the remote-tracking ref, and never authenticates the owner. If the owner attests a commit that is not on GitHub, the reader serves it.
+- **Read-only.** No write to the checkout, Git, or the workspace (every test compares the whole `tmp_path` tree, `.git` included, byte for byte and mtime for mtime), no network, and only the existing read-only Git allowlist (B2 adds no Git command). `publication attest` writes only the workspace. Files are read through no-follow descriptors with size bounds.
+- **Chapter text** appears only in a successful `chapter` (one chapter) or never at all; refusals carry codes only.
+- **Residual risks:** a consistent forgery inside the owner-only workspace is accepted; the chapter cut relies on the renderer's escaped `<`, so it is exact only for files the renderer wrote (which the front-matter and digest checks require); a document re-released after withdrawal is impossible by B1b and unsupported here; the reader needs a dedicated release clone (the guard refuses the sync clone).
+
+### Acceptance matrix (B2)
+
+| Requirement | Test (`tests/unit/test_forarbeider_release_reader.py::`) |
+|---|---|
+| Valid committed release: list, show, chapter, provenance; both clearance paths; labels | `test_a_published_release_is_listed_with_its_labels`, `test_show_states_labels_coverage_times_and_both_clearance_paths`, `test_a_chapter_is_served_alone_under_its_source_line`, `test_provenance_names_the_verified_owner_records`, `test_a_checkout_without_forarbeider_lists_nothing` |
+| Uncommitted and dirty checkout | `test_a_batch_in_the_working_tree_is_never_served` |
+| Publication: a local commit with `origin/main` moved to it; missing, corrupt or mismatched attestation; valid attestation; `origin/main` is not a trust input; HEAD or attestation changing while reading | `test_a_local_commit_with_origin_main_moved_to_it_is_not_published`, `test_without_an_attestation_for_head_nothing_is_published`, `test_a_corrupt_or_mismatched_attestation_is_refused`, `test_a_published_release_is_listed_with_its_labels`, `test_moving_origin_main_during_a_read_changes_nothing_it_is_not_trusted`, `test_a_publication_change_while_reading_is_refused` (head, attestation) |
+| Attestation command: owner's word only, workspace-only write, exact clean `main` HEAD, phrase | `test_an_attestation_records_the_owners_word_and_writes_only_the_workspace`, `test_an_attestation_names_head_exactly_from_a_clean_main` |
+| Wrong branch, repository or path | `test_a_wrong_branch_repository_or_path_is_refused` |
+| Interrupted transaction, concurrent change | `test_an_interrupted_transaction_is_never_read_through`, `test_a_change_while_reading_is_refused` |
+| Modified manifest, index or chapter bytes; unsupported versions | `test_edited_chapter_or_index_bytes_are_refused`, `test_a_file_that_does_not_restate_its_member_is_refused`, `test_a_version_1_or_unknown_manifest_is_refused` |
+| Missing, forged, mismatched, stale or ambiguous receipts | `test_without_the_workspace_or_its_records_nothing_is_served`, `test_a_forged_or_mismatched_receipt_is_refused`, `test_a_confirmation_naming_a_plan_that_is_gone_is_refused`, `test_two_confirmations_for_the_same_bytes_are_ambiguous` |
+| Missing or incorrect clearance provenance | `test_a_clearance_whose_cited_record_is_gone_is_refused` (policies, reports, authorizations), `test_a_clearance_rewritten_in_the_manifest_is_refused` |
+| Withdrawn and partially released documents | `test_a_withdrawn_document_is_never_served_again`, `test_a_partial_release_carries_its_notice_and_serves_only_its_chapters` |
+| Read-only, nothing private printed | every call through `read()` (whole-tree snapshot; marker, handle and path absent) |
+| Isolation from law readers, MCP, search; root manifest unchanged | `test_the_reader_is_reached_only_through_its_own_ops_command`, `tests/unit/test_forarbeider_boundary.py`, the snapshot in `read()` (root `manifest.json` included) |
+
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.
