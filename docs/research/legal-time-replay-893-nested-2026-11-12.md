@@ -247,7 +247,7 @@ Between run 1 and run 2, the 40 killed survivors were:
 
 **Of run 2's 18 survivors, one was a real gap:** `_region` `not nodes and not …` for `or`, which crashes on an empty region. `808b2f9b` kills it. Its two tests fail with the mutant applied by hand to a copy of the source. mutmut was not re-run for it: a re-run recomputes the ~25 min stats pass.
 
-The other 17 are argued equivalent here. **They are not registered in `mutation-equivalents/`.**
+The other 17 are equivalent; each is argued below and registered.
 
 | function | mutants | argument |
 |---|---|---|
@@ -263,11 +263,11 @@ The other 17 are argued equivalent here. **They are not registered in `mutation-
 
 So the measured surface ends at 463 of 481 killed by mutmut. One further mutant is killed by a test confirmed by hand. The other **17 are argued equivalent; none is open**.
 
-They are argued here, not registered in `mutation-equivalents/`, for two reasons:
-- mutation is not a PR gate (#877);
-- several arguments rest on the operation-id format or on how `instructions` captures clauses, not on Python semantics alone, which the register's "provably equivalent" bar is meant for.
+All 17 are **registered** in `mutation-equivalents/`, one file each, under `legaltime.nesting/`, `legaltime.hosts/` and `legaltime.archive/`. Each entry is keyed by its `-`/`+` lines and carries the argument above. `scripts/ci/mutation_to_json.py --check-equivalents`: 406 registered, 0 refused, 0 stale.
+- Four entries argue from Python semantics alone: the `maxsplit` cases.
+- The others argue from this code's own invariants: the operation-id format `instructions` writes; how it captures clauses; `_Fold`'s merge; the SPLIT guard before `section_timing`. They cite those lines.
 
-If the nightly lane reports them, the four pure-semantics `maxsplit` cases, the `parts=None` case and the `or True` case are candidates for registration.
+A registered entry moves only the nightly gate's verdict: the mutants are still counted and listed.
 
 ## 7. Limits and follow-ups
 
