@@ -5,6 +5,7 @@
 **Authority:** Accepted [ADR-0018](https://github.com/bartoszkobylinski/lovspor-notebook/blob/main/docs/adr/ADR-0018-government-forarbeider-corpus.md), [ADR-0017](https://github.com/bartoszkobylinski/lovspor-notebook/blob/main/docs/adr/ADR-0017-source-backed-legislative-crosswalk.md)  
 **Tracking:** [#738](https://github.com/bartoszkobylinski/lovspor/issues/738); [PR1 #741](https://github.com/bartoszkobylinski/lovspor/pull/741), [PR2 #752](https://github.com/bartoszkobylinski/lovspor/pull/752), [PR3A #754](https://github.com/bartoszkobylinski/lovspor/pull/754)  
 **Division of responsibility:** Owner chooses release policy, authorizes each live pilot and merges. Architecture reviewer owns this contract and independent code review. Coding agent implements bounded PRs.  
+**Proposed successor direction (2026-11-12, PROPOSED, not adopted):** [full-corpus architecture reset](forarbeider-full-corpus-architecture.md).  
 **Amended:** 2026-11-09 by owner decision. See [Amendment 1](#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release). Where it conflicts with the text below, the amendment wins.
 
 ## Amendment 1 (2026-11-09): standing policy, automatic clearance, batch release
