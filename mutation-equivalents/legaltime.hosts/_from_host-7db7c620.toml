@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/hosts.py"
+symbol = "_from_host"
+registered = "2026-11-12, PR #894, from a local scoped mutmut 3.8.0 run at commit 4793b0d9"
+mutation = """
+-    own = commencement.section_timing(section, chapters.get(section), ())
++    own = commencement.section_timing(section, chapters.get(section), None)
+"""
+justification = """
+`Commencement.section_timing` reads `parts` only in
+`entry.part is None or _part_name(entry.part) in parts or entry.part in parts`,
+which short-circuits on `entry.part is None`. Any unit with a part qualifier
+is refused as SPLIT two lines earlier
+(`any(entry.part is not None for entry in commencement.units)`), so at this
+call every entry has `part is None` and `parts` is never read.
+"""

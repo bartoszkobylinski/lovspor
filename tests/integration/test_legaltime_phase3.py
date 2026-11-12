@@ -125,10 +125,14 @@ def test_straffeloven_is_commenced_by_its_ikraftsettingslov_and_chapter_16_contr
     # nr. 14 om straff for utlendske krigsbrotsmenn oppheves.`` repeals another act; Phase 4A
     # credited it to the straffeloven block before it, a numbered item naming an act now closes
     # that block.
+    # #893: 391 → 390 and 335 → 334. lov/2013-04-05-12#1:I:253.0 (§ 261 første ledd) is item 50
+    # of the vergemålsloven § 102 that law replaces; it takes effect with vergemålsloven, whose
+    # partial decision the grammar does not read, so it is unresolved, no longer dated by the
+    # outer law's "straks" and withheld.
     assert [(len(s["withheld"]), len(s["applied"]), len(s["provisions"])) for s in states] == [
         (4, 0, 0),
         (99, 0, 0),
-        (391, 0, 0),
-        (0, 335, 358),
+        (390, 0, 0),
+        (0, 334, 358),
     ]
     assert all(s["unresolved_commencement"] == [] for s in states)

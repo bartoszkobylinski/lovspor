@@ -15,11 +15,13 @@ from lovspor.legaltime.archive import Evidence, pins
 from lovspor.legaltime.baseline import Commencement, baseline_commencement
 from lovspor.legaltime.commencement import Decisions, resolve_timings
 from lovspor.legaltime.document import Document
+from lovspor.legaltime.hosts import nested_timings
 from lovspor.legaltime.instructions import Operation, interpret
+from lovspor.legaltime.nesting import nesting
 from lovspor.legaltime.replay import Event, ReplayState, replay
 from lovspor.legaltime.verify import verify
 
-REPLAY_VERSION = "legaltime-replay-6"  # #872: a date-only canonical citation binds on header proof
+REPLAY_VERSION = "legaltime-replay-7"  # #893: a nested amendment is dated by its host provision
 
 
 def _stamp(value: datetime | None) -> str | None:
@@ -44,7 +46,9 @@ def chapter_map(evidence: Evidence) -> dict[str, str]:
 def _events_of(amender: Document, act: str | None, decisions: Decisions, start: int) -> list[Event]:
     """The member's operations aimed at ``act``; ``None`` selects those naming no act."""
     result = interpret(amender)
-    timings = resolve_timings(amender, result.clauses, result.operations, decisions)
+    regions = nesting(amender, result)  # #893: an item's date is its host's, not this law's
+    timings = resolve_timings(amender, regions.clauses, result.operations, decisions)
+    timings = nested_timings(regions, timings, decisions)
     events = []
     for index, op in enumerate(result.operations):
         if op.act != act:
@@ -63,7 +67,10 @@ def _events_of(amender: Document, act: str | None, decisions: Decisions, start: 
 
 
 def decisions_for(evidence: Evidence) -> Decisions:
-    return Decisions(documents=evidence.decisions, chapter_of=chapter_map(evidence))
+    return Decisions(
+        documents=evidence.decisions, chapter_of=chapter_map(evidence),
+        host_acts=evidence.hosts, host_decisions=evidence.host_decisions,
+    )  # fmt: skip
 
 
 def _collect(evidence: Evidence, act: str | None) -> list[Event]:

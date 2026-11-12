@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/nesting.py"
+symbol = "_sentences"
+registered = "2026-11-12, PR #894, from a local scoped mutmut 3.8.0 run at commit 4793b0d9"
+mutation = """
+-            found.extend({" ".join(node.text.split()), *split_sentences(node.text)})
++            found.extend({"XX XX".join(node.text.split()), *split_sentences(node.text)})
+"""
+justification = """
+Clauses are captured one sentence at a time (`_sentence` appends a piece;
+`_bound` appends the intro sentence). For a single-sentence paragraph,
+`split_sentences` yields the same whitespace-collapsed text as the whole-node
+entry, so mutating the whole-node entry removes nothing a clause can equal;
+for a multi-sentence paragraph the whole-node string is never a captured
+clause. The collection only answers "is this captured clause read here".
+"""

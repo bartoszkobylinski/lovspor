@@ -20,6 +20,8 @@ from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.legaltime.commencement import is_decision_for
 from lovspor.legaltime.document import Document, Frozen, parse_document
 from lovspor.legaltime.errors import LegalTimeDocumentError, LegalTimeInputError
+from lovspor.legaltime.instructions import interpret
+from lovspor.legaltime.nesting import nesting
 
 INDEX_VERSION = "legaltime-index-2"
 
@@ -54,6 +56,8 @@ class Evidence(Frozen):
     baseline: Document
     amenders: tuple[Document, ...]
     decisions: tuple[Document, ...]
+    hosts: tuple[Document, ...] = ()  # #893: enacting announcements of nested-amendment hosts
+    host_decisions: tuple[Document, ...] = ()  # and the decisions citing them, apart
 
 
 Indexed = list[tuple[Path, ArchiveIndex]]
@@ -228,10 +232,28 @@ def collect(act: str, archives: list[Path], cache_dir: Path | None = None) -> Ev
     indexed: Indexed = [(path, index_archive(path, cache_dir)) for path in archives]
     baseline = _baseline(indexed, act)
     amenders, decisions, enacting = _read_evidence(_wanted(indexed, act), baseline)
+    hosts, host_decisions = _host_evidence(indexed, amenders)
     return Evidence(
         act=act, archives=tuple(i for _, i in indexed), baseline=enacting,
         amenders=_ordered(amenders), decisions=_ordered(decisions),
+        hosts=_ordered(hosts), host_decisions=_ordered(host_decisions),
     )  # fmt: skip
+
+
+def _host_evidence(
+    indexed: Indexed, amenders: list[Document]
+) -> tuple[list[Document], list[Document]]:
+    """#893: each nested-amendment host's enacting member (when in reach) and its decisions."""
+    refids = {n.host_act for a in amenders for n in nesting(a, interpret(a)).nests if n.host_act}
+    hosts: list[Document] = []
+    decisions: list[Document] = []
+    for path, index in indexed:
+        enacting = [m.name for m in index.members if m.refid in refids and _is_law(m)]
+        names = _decision_names(index, refids) if refids else []
+        documents = read_members(path, {*enacting, *names})
+        hosts.extend(documents[n] for n in enacting)
+        decisions.extend(documents[n] for n in names)
+    return hosts, decisions
 
 
 def load_oracle(archive: Path, act: str) -> Document:

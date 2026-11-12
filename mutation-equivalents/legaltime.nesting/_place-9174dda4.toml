@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/nesting.py"
+symbol = "_place"
+registered = "2026-11-12, PR #894, from a local scoped mutmut 3.8.0 run at commit 4793b0d9"
+mutation = """
+-    return int(tag.split(":", 1)[0]), int(node.split(".", 1)[0].split("-", 1)[0])
++    return int(tag.split(":", 1)[0]), int(node.split(".", 1)[0].split("-", 2)[0])
+"""
+justification = """
+The input is the node field already cut at its first "." (`"18"` of
+`"18.0-40"`). Every operation id `instructions` writes has the tag
+`#<part>:<label>:<node>.<offset>`, and a structure operation's `-N` suffix
+follows the offset (`_structure`, e.g. `lov/2008-03-07-4#0:I:18.0-40`). So
+the string reaching this `.split("-", 1)[0]` is the node index's digits,
+which hold no "-" and no whitespace. Splitting on "-", "XX-XX" or None, with
+any maxsplit, or with rsplit, returns those digits unchanged.
+"""
