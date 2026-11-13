@@ -26,7 +26,7 @@ computes, without writing anything:
 
 The plan also lists the fate of every reused address (``audit``), every
 ``history/<slug>.json`` at the base whose ``doc_id`` is not the address's
-owner (the history rebuild this plan does not perform), and every
+owner (rebuilt from git by ``lovspor.identity.repair_plan``), and every
 ``doc_id`` named by a history file that no manifest revision ever held: the
 one fact the walk cannot restore, which blocks the plan.
 """

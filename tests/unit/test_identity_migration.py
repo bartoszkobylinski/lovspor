@@ -134,6 +134,12 @@ def test_lists_collisions_mismatched_histories_and_changed_paths(
         ("forskrifter/history/x.json", NEW, OLD)
     ]
     assert plan.changed_paths == [
+        f"forskrifter/history/by-id/{OLD}.json",
+        f"forskrifter/history/by-id/{NEW}.json",
+        "forskrifter/history/x-2026.json",
+        "forskrifter/history/x-2026.md",
+        "forskrifter/history/x.json",
+        "forskrifter/history/x.md",
         "forskrifter/x-2026.md",
         "forskrifter/x.md",
         "identity.json",
@@ -156,6 +162,12 @@ def test_two_runs_write_byte_identical_reports(
     files = sorted(p.relative_to(first) for p in first.rglob("*") if p.is_file())
     assert [str(p) for p in files] == [
         SUMS_FILENAME,
+        f"planned/forskrifter/history/by-id/{OLD}.json",
+        f"planned/forskrifter/history/by-id/{NEW}.json",
+        "planned/forskrifter/history/x-2026.json",
+        "planned/forskrifter/history/x-2026.md",
+        "planned/forskrifter/history/x.json",
+        "planned/forskrifter/history/x.md",
         "planned/identity.json",
         "planned/manifest.json",
         "planned/slugs.json",
