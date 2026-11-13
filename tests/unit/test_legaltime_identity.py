@@ -706,3 +706,66 @@ def test_two_repeals_of_one_label_are_conflicting_and_one_is_not() -> None:
     single = Step(act=ACT, member=L2008, effective=date(2008, 3, 7),
                   repeals=(Repeal(label="§1", proof=P2008),))  # fmt: skip
     assert apply_step(_enacted("§1"), single).refusals == ()
+
+
+@pytest.mark.parametrize("replacement", ["rename", "insertion"])
+def test_a_label_repealed_in_the_step_can_be_assigned_to_another_identity(
+    replacement: str,
+) -> None:
+    """R4(b): repeal reads P; the replacement holds the vacated label in Q."""
+    ledger = _enacted("§1", "§2")
+    before = ledger.canonical_json()
+    step = Step(
+        act=ACT,
+        member=L2008,
+        effective=P2008.effective,
+        repeals=(Repeal(label="§1", proof=P2008),),
+        renames=(Rename(source=enacted_id(ACT, ENACTING, "§2"), target="§1", proof=P2008),)
+        if replacement == "rename"
+        else (),
+        insertions=(Insertion(label="§1", proof=P2008),) if replacement == "insertion" else (),
+    )
+    result = apply_step(ledger, step)
+    assert result.refusals == ()
+    old = result.ledger.get(enacted_id(ACT, ENACTING, "§1"))
+    assert old is not None
+    assert not old.live
+    assert old.intervals[-1].end == _end(P2008, "repeal")
+    expected = (
+        enacted_id(ACT, ENACTING, "§2")
+        if replacement == "rename"
+        else inserted_id(ACT, L2008, date(2008, 3, 7), "§1")
+    )
+    assert result.ledger.live_map() == (
+        {"§1": expected}
+        if replacement == "rename"
+        else {"§1": expected, "§2": enacted_id(ACT, ENACTING, "§2")}
+    )
+    assert len(result.ledger.identities) == (2 if replacement == "rename" else 3)
+    assert ledger.canonical_json() == before
+    restored = Ledger.model_validate_json(result.ledger.canonical_json())
+    assert restored == result.ledger
+    assert restored.canonical_json() == result.ledger.canonical_json()
+
+
+def test_a_rename_and_insertion_competing_for_a_target_refuse_the_whole_step() -> None:
+    """R4(b): writers of different kinds still cannot assign one Q label twice."""
+    ledger = _enacted("§1", "§2")
+    insertion_proof = P2008.model_copy(update={"op_id": "distinct-insertion"})
+    step = Step(
+        act=ACT,
+        member=L2008,
+        effective=P2008.effective,
+        renames=(Rename(source=enacted_id(ACT, ENACTING, "§1"), target="§9", proof=P2008),),
+        insertions=(Insertion(label="§9", proof=insertion_proof),),
+        repeals=(Repeal(label="§2", proof=P2008),),
+    )
+    result = apply_step(ledger, step)
+    assert result.ledger == ledger
+    assert sorted((r.op_id, r.asserted_label, r.reason) for r in result.refusals) == sorted(
+        [
+            (P2008.op_id, "§9", "label collision"),
+            (insertion_proof.op_id, "§9", "label collision"),
+            (P2008.op_id, "§2", "refused with its step"),
+        ]
+    )
