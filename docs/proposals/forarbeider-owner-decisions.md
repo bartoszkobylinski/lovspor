@@ -57,7 +57,8 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
 
 - **Recommended:**
   - a new repository, created by the owner, holding only released forarbeider;
-  - the GitHub rulesets of architecture §9.7: R-integrity with no bypass, and R-writers with only the bot and the admin as bypass actors; releases are pushed by the bot under D11, with no manual merge;
+  - the GitHub rulesets of architecture §9.7: R-integrity with no bypass, and R-writers with only the bot (preferably a GitHub App, bypass by App id) and the admin as bypass actors;
+  - releases are pushed by the bot under D11, with no manual merge. Owner-only merging applies to engine and trust-root changes, not to releases;
   - its initial commit is pinned in the engine (FC9b);
   - the engine and every command stay in lovspor;
   - lovverk keeps law text only.
@@ -150,7 +151,9 @@ The owner rejected manual approval of each document, batch, PR or merge (2026-11
   - per-document failure isolation;
   - authorization re-checked immediately before every push, with a persistent stop latch;
   - recovery from the remote history after a crash (architecture §9.3a);
-  - GitHub-enforced rulesets plus an independent read-only auditor (§9.7);
+  - GitHub-enforced rulesets (with claims limited to what GitHub enforces), a preferred GitHub App bot, AR7 refusing any unexpected bypass actor or write deploy key, and the pipeline disabled while settings cannot be verified (§9.7);
+  - recovery that separates remote integrity from publication authorization; uncertain authorization is recorded as published, never republished, reported, and halts further releases (§9.3a);
+  - an independent read-only auditor (§9.7);
   - each batch counted against the budgets exactly once;
   - quarantined documents kept visible in the metrics;
   - owner keys never on the runner.
@@ -206,7 +209,7 @@ The owner rejected manual approval of each document, batch, PR or merge (2026-11
 ## 3. Questions for the owner (answer each)
 
 1. **D1/D2:** do you approve the full-corpus direction and a successor ADR in `lovspor-notebook` (ADR-0025)?
-2. **D3:** do you approve a separate `lovverk-forarbeider` repository, created by you, with the §9.7 rulesets (R-integrity with no bypass; R-writers with bypass for the bot and the admin only), before any release? Do you accept a dedicated machine user for the bot, and its credential type (deploy key or classic token)?
+2. **D3:** do you approve a separate `lovverk-forarbeider` repository, created by you, with the §9.7 rulesets (R-integrity with no bypass; R-writers with bypass for the bot and the admin only), before any release? Do you accept a GitHub App as the bot (Contents: write on this repository only), with a machine user or a single write deploy key only as a tested fallback?
 3. **D4:** do you approve `terms_basis: none_identified` with the locus page, a 30-day default validity, and the narrow nonce normalization replacing the raw comparison for HTML evidence?
 4. **D6:** will you generate a dedicated signing key for forarbeider (separate from the crosswalk key, or the same key under new namespaces)? Where is it held, and what is the rotation interval?
 5. **D11:** what batch bound (files and bytes), daily budgets and anomaly thresholds?

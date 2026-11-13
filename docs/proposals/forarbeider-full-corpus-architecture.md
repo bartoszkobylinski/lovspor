@@ -173,14 +173,14 @@ flowchart LR
     REV --> ELIG
     POL -- unresolved --> GAP[Explicit gap]
   end
-  subgraph Release["Release (owner act)"]
+  subgraph Release["Release (automatic under an owner-signed policy, §9)"]
     ELIG --> PLAN[Release manifest\nversions + gaps]
     GAP --> PLAN
     PLAN --> TXN[B1b transaction\nlock, journal, read-back] --> REPO[(forarbeider repo\nworking tree)]
     REPO --> MERGE[Commit + push to main\n= publication (§9)]
   end
   subgraph Read["Read"]
-    MERGE --> ATT[Owner publication\nattestation, SSH-signed] --> RDR[B2 reader / later MCP, search]
+    MERGE --> ATT[Bot-signed publication\nattestation, §9.3] --> RDR[B2 reader / later MCP, search]
   end
   PROOF --> POL
 ```
@@ -197,7 +197,7 @@ One owner-signed policy per **source × family** (for example regjeringen.no × 
 - the **span rights classes** this policy clears (§3.4) and the ones it never clears;
 - `terms_basis` (§3.2).
 
-**Signature:** today's typed phrase plus the crosswalk's real anchor. The policy is signed with `ssh-keygen -Y sign`, and the signer must appear in a repository-pinned `allowed_signers` file the owner merged, as `src/lovspor/crosswalk/approval-signers` already works [O, crosswalk #840]. That gives authenticated identity where today the record says `identity_authenticated: false`. The same key signs the **publication attestation** (B2) and **release manifests** [D].
+**Signature:** today's typed phrase plus the crosswalk's real anchor. The policy is signed with `ssh-keygen -Y sign`, and the signer must appear in a repository-pinned `allowed_signers` file the owner merged, as `src/lovspor/crosswalk/approval-signers` already works [O, crosswalk #840]. That gives authenticated identity where today the record says `identity_authenticated: false`. Under §9 (D11), the owner key signs policies, exceptions, withdrawals and stop/resume records only. Release manifests and publication attestations are signed by a separate **bot key**, never by the owner key [D].
 
 **SSH signing trust boundary (PROPOSED).**
 
@@ -401,8 +401,8 @@ This amendment replaces §5.3 and the owner-act steps of §2.6 ("Release (owner 
 |---|---|---|---|
 | **Policy** | the owner's SSH key (namespace `lovspor-forarbeider-policy`) | sign source/family policies, including `automated_publication`, scope, budgets and legal-assessment references; sign exception clearances; sign withdrawals; sign stop and resume records | — |
 | **Trust roots** | the owner, by owner-merged changes to the engine and by repository settings | change `allowed_signers`, `revoked_keys`, the bot's public keys, the trusted root commits, branch protection and repository visibility | be exercised by any automated process |
-| **Execution** | the release runner: a dedicated macOS user account on the owner's Mac, run by launchd | fetch within the signed scope, extract, classify, plan, apply, commit, sign release manifests and commits with the **bot key**, push with the **bot credential** | sign a policy, clear an exception, change a trust root, push anywhere but the release branch, force-push |
-| **Repository write** | a bot credential: a GitHub App installation token or a fine-grained token scoped to `lovverk-forarbeider` contents only | fast-forward push to `main` of that one repository | administration, settings, other repositories, deleting branches or tags, force-push |
+| **Execution** | the release runner: a dedicated macOS user account on the owner's Mac, run by launchd | fetch within the signed scope, extract, classify, plan, apply, commit, sign release manifests and publication attestations with the **bot key** (commit signatures come from GitHub on the App path, §9.7), push with the **bot credential** | sign a policy, clear an exception, change a trust root, push anywhere but the release branch, force-push |
+| **Repository write** | the bot credential: a GitHub App installation token with Contents: write on `lovverk-forarbeider` only (preferred), or the tested alternative of §9.7 | fast-forward push to `main` of that one repository | administration, settings, other repositories, deleting branches or tags, force-push |
 
 **Owner policy keys never reach the runner.**
 - The owner key lives in the owner's macOS account Keychain, passphrase-protected. The runner is a separate macOS user with no access to that Keychain or agent.
@@ -445,7 +445,7 @@ One **release run** is a loop of bounded batches. Each batch is a transaction, a
 
    It is signed with the bot key. Same inputs, same manifest, same digest.
 3. **Apply.** The B1b transaction (lock, journal, staged bytes, documents then index then manifest, read-back) writes the working tree.
-4. **Commit.** One commit by the bot identity, signed with the bot key. The message carries the manifest digest, and the manifest file itself is in the tree (`releases/<manifest digest>.json`).
+4. **Commit.** One commit by the bot identity: signed by GitHub as the App on the API path, or with the bot key on a tested alternative (§9.7). The message carries the manifest digest, and the manifest file itself is in the tree (`releases/<manifest digest>.json`).
 5. **Verify the commit.** The B2 checks run on the local commit: every file is the manifest's, the receipts are consistent, and nothing outside the dataset changed.
 6. **Authorize the push, immediately before it.** The runner re-reads and re-checks, in this order:
    - the stop latch and the stop file;
@@ -456,6 +456,8 @@ One **release run** is a loop of bounded batches. Each batch is a transaction, a
    - the source proof, still inside its window;
    - the local integrity (commit, tree, manifest, signatures);
    - the remote `main` still equal to the manifest's base commit (`ls-remote`).
+
+   These checks are local. They are evidence that the runner *believed* the push was authorized when it decided; they are **not cryptographic proof** of authorization at the moment GitHub accepted the push (§9.3a).
 
    Any failure aborts without pushing. A stop or revocation **sets a persistent stop latch** in the runner's workspace. Once set, no step initiates another push until an owner-signed `resume` record clears it.
 7. **Push.** Fast-forward to `main` only, at once after step 6. A rejected push (the remote moved) aborts the batch: reset to the remote, then run recovery (§9.3a) before any re-plan. Never force, never rebase published commits.
@@ -479,20 +481,44 @@ One **release run** is a loop of bounded batches. Each batch is a transaction, a
 A runner that fails after a push may not know whether the push landed. The remote is the record of what was published, so recovery reads it before anything else and before any new plan:
 
 1. Read `main` from the remote (fetch and `ls-remote`). Take every commit after the last commit with a receipt.
-2. For each such commit, oldest first, **verify, do not assume**:
+2. For each such commit, oldest first, establish **integrity** (step 2a) and, separately, **authorization** (step 2b).
+
+**2a. Integrity: is this a well-formed pipeline commit?** Verify, do not assume:
    - it is a fast-forward descendant of the last receipted commit;
    - its signature verifies against the bot key in `allowed_signers` (namespace `lovspor-forarbeider-release`), with the key valid at the commit's stated time;
    - the tree holds exactly one new `releases/<digest>.json`, whose digest matches the commit message;
    - the manifest's own bot signature verifies;
    - every file the commit changed is listed in the manifest, and no file outside the dataset changed;
-   - **historical policy binding:** the manifest names a policy that verifies against the owner key and was valid (signed, unexpired, unrevoked) at the manifest's planning time.
-3. A commit that verifies is a **completed publication**:
-   - recovery writes its receipt (`recovered_from_remote: true`) and counts its budget (§9.5);
-   - this is bookkeeping for something already public, **not a new publication authorization**, so it needs no current policy.
+   - the manifest names a policy that verifies against the owner key.
+
+**2b. Authorization: did the policy still hold when GitHub accepted the push?** This is a separate question. A policy valid at *planning* time proves nothing about the moment of acceptance: a revocation, an expiry or a stop can land in between.
+
+- **Commit author and committer timestamps are not authoritative.** They are set by the client and say nothing about when GitHub accepted the push.
+- **Evidence used, each with its limit:**
+  - **(i) the runner's pre-push receipt:** step 6 passed, at the runner's clock, for exactly this manifest digest and base commit. A local record, not proof.
+  - **(ii) GitHub's own record of the push:** the repository activity API entry for the ref update (actor, `before` and `after` commits, timestamp). It is asserted by GitHub, not signed for us, and its retention is limited [A, verify].
+  - **(iii) the owner-signed times on revocation and stop records:** the owner's claim of when they took effect, signed but not timestamped by any third party.
+- **Classification:**
+  - `authorized`: (i) exists for this manifest, (ii) exists, and (ii)'s timestamp is earlier than every revocation, expiry and stop time in (iii) that applies to the policy;
+  - `unauthorized`: (ii)'s timestamp is later than an applicable revocation, expiry or stop time, or the policy was not valid at planning time;
+  - `authorization_unknown`: anything else. That includes a missing (i), a missing or expired (ii), and an ordering within the uncertainty of the clocks involved.
+- **What cannot be proven:**
+  - the exact moment GitHub accepted a push, by any cryptographic means available to us;
+  - that an owner-signed revocation was signed at the time it states;
+  - that no push happened in the check-to-push window of §9.3 step 7.
+
+  The classification is therefore an evidence-based judgement, recorded with its inputs, **never a proof**.
+
+3. **Outcome, by integrity and authorization:**
+   - **integrity valid, `authorized`:** a completed publication. Recovery writes its receipt (`recovered_from_remote: true`) and counts its budget (§9.5). This is bookkeeping for something already public, **not a new publication authorization**.
+   - **integrity valid, `authorization_unknown` or `unauthorized`:**
+     - the commit is recorded as **published**, because it is public, and **never republished**;
+     - it is counted against budgets once, and **reported** to the owner with the evidence;
+     - the **stop latch is set**: no further release until an owner-signed record resolves the anomaly (acknowledge, or withdraw forward-only).
 4. Even when the policy is expired or revoked *now*:
    - nothing is republished, re-planned or re-pushed on its authority;
    - a policy revoked with a withdrawal-relevant reason makes recovery **report** the affected commit for an owner-signed withdrawal decision (§9.7), which it never performs on its own.
-5. A commit that fails any check, or a commit not made by the bot (for example a manual push), **halts the pipeline**: the stop latch is set and the owner is notified as for a possible compromise. Nothing further is pushed until an owner-signed `resume` record clears the latch.
+5. A commit that fails an **integrity** check, or a commit not made by the bot (for example a manual push), **halts the pipeline**: the stop latch is set and the owner is notified as for a possible compromise. Nothing further is pushed until an owner-signed `resume` record clears the latch.
 6. Only after recovery has receipted or halted on every new remote commit may a new batch be planned, against the recovered base.
 
 **Crash boundaries and races (AR4 tests every one):**
@@ -504,7 +530,9 @@ A runner that fails after a push may not know whether the push landed. The remot
 - a remote advanced by a valid bot commit we did not record;
 - a remote advanced by a foreign or unverifiable commit;
 - a remote advanced between step 6 and the push (rejected non-fast-forward);
-- the policy expired between a landed push and recovery.
+- the policy expired between a landed push and recovery;
+- **the policy revoked after planning but before the push.** Step 6 must refuse. If the revocation lands in the race window, recovery classifies the commit `unauthorized` or `authorization_unknown`, records it as published, reports it and sets the latch;
+- **a valid remote commit with unknown authorization** (no pre-push receipt, or no GitHub activity record): recorded as published, never republished, reported, latch set.
 
 A batch whose manifest digest is already on the remote and verified is `UNCHANGED`.
 
@@ -556,30 +584,49 @@ Owner actions on quarantine are **exceptions**, by design rare:
 ### 9.7 Git model and visibility
 
 - **Repository:** `bartoszkobylinski/lovverk-forarbeider`, private during preparation (recommended answer, pending). Making it public is an owner act (trust root), not a release step.
-- **Bot identity:** a dedicated GitHub **machine user** (for example `lovspor-forarbeider-bot`):
-  - a collaborator with **write** permission on `lovverk-forarbeider` only;
-  - its SSH *signing* key is registered on that account, so GitHub can verify its commit signatures;
-  - its push credential is the narrowest GitHub supports for a collaborator. A fine-grained token cannot target another user's personal repository [A, verify], so the credential is a **deploy key with write access** on that one repository, or a classic token on a machine user that is a collaborator nowhere else.
-  - It has no admin role, so it cannot change settings or rulesets.
-- **Two rulesets on `main`.** GitHub enforces both; client code only checks them:
+- **Bot identity, preferred: a GitHub App** owned by the owner's account and installed on `lovverk-forarbeider` only:
+  - its only repository permission is **Contents: write**, plus the read-only metadata permission every App has;
+  - it uses short-lived installation tokens;
+  - its identity is specific: a ruleset bypass actor of type `Integration` names this App by its id, so it bypasses for this App and no other actor [A, verify against current GitHub docs and on a disposable test repository before AR7];
+  - it commits through the API (for example GraphQL `createCommitOnBranch`, whose `expectedHeadOid` gives GitHub-enforced compare-and-swap on the base commit). GitHub signs such commits as the App, which satisfies "require signed commits" without a machine user's key [A, verify: request size limits for 25 MB batches; if too small, the Git Data API with a non-forced ref update, verified the same way].
+  - Our own provenance signature is the **bot key's signature on the release manifest and the publication attestation** (§9.1), independent of GitHub's commit signature.
+- **Alternatives, only if the App path fails the test:**
+  - a **machine user** with write on this repository only and its SSH signing key registered, as a bypass actor by its user identity;
+  - a **deploy key** with write access. **Caution:** a ruleset bypass actor of type `DeployKey` carries `actor_id: null`, which means **every** deploy key with write access on the repository bypasses, not one chosen key [A, verify]. If used:
+    - exactly one write deploy key may exist;
+    - AR7 refuses on any second write key;
+    - no deploy key may sit on any other bypass list.
+
+  Whichever path is used, it is documented with the test that proved its permissions.
+- **Two rulesets on `main`.** GitHub enforces both:
 
   | Ruleset | Rules | Bypass actors |
   |---|---|---|
   | **R-integrity** | block force pushes; restrict deletions; require linear history; require signed commits | **none** (not the bot, not the owner, not admins) |
-  | **R-writers** | restrict updates (only bypass actors may update `main`) | the bot's deploy key (or the machine user) and the repository admin (the owner) |
+  | **R-writers** | restrict updates (only bypass actors may update `main`) | the bot (the App by id, or the tested alternative) and the repository admin (the owner) |
 
-  - The bot's bypass applies **only** to R-writers ("who may update"). It never bypasses R-integrity, so the bot cannot force-push, delete or push unsigned commits.
-  - No pull request rule is configured: releases are direct fast-forward pushes, with no per-batch PR or merge.
-  - [A, verify before AR7] rulesets on a *private* personal repository may require a paid plan. If they are unavailable, the repository stays private and the pipeline stays off until they are.
-- **What GitHub enforces:**
+  - The bot's bypass applies **only** to R-writers. It never bypasses R-integrity.
+  - No pull request rule is configured: releases are direct fast-forward updates, with no per-batch PR or merge.
+- **Claims are limited to what GitHub enforces:**
   - who may update `main`;
   - no force-push or deletion;
   - linear history;
-  - that commits carry a signature GitHub verifies against the account's registered key;
-  - the credential's repository scope.
-- **What only client code checks:** policy validity, eligibility, budgets, stop state, manifest correctness, source proof and completeness. A stolen bot credential plus a stolen bot signing key could push well-formed commits that skip every client check. That risk is mitigated by:
-  - (a) revoking the credential;
-  - (b) the **independent auditor** below;
+  - commits carrying a signature GitHub verifies;
+  - the credential's repository and permission scope;
+  - `expectedHeadOid` when the API path is used.
+
+  Nothing else restricts the bot on GitHub's side. Policy validity, eligibility, budgets, stop state, manifest correctness, source proof and completeness are **client checks only**. The documentation never states that GitHub restricts the bot to "valid releases".
+- **The pipeline stays disabled** unless AR7 can read and verify the actual settings:
+  - rulesets and every bypass actor;
+  - the App installation's permissions and repository selection;
+  - deploy keys and their write flag;
+  - collaborators and roles;
+  - visibility.
+
+  Unverifiable is treated as wrong.
+- **Stolen-credential risk:** a stolen bot credential (and, for the manifest signature, the bot key) could push well-formed commits that skip every client check. That risk is mitigated by:
+  - (a) revoking the credential or uninstalling the App: immediate, enforced by GitHub;
+  - (b) the independent auditor below;
   - (c) withdrawal.
 - **Independent auditor (read-only).** A job under the *owner's* account, not the runner's:
   - it re-verifies every new commit on `main` by the rules of §9.3a step 2 (bot signature, manifest, file set, historical policy binding);
@@ -619,11 +666,11 @@ Owner actions on quarantine are **exceptions**, by design rare:
 | **AR1** Policy v2 automation fields | `automated_publication`, budgets, thresholds, legal-assessment reference; stop and resume records; namespace checks (bot key never verifies as policy) | a bot-signed policy is refused; no legal reference means not automated; an expired or revoked policy denies | yes |
 | **AR2** Deterministic automatic planner | eligibility (§9.2), ordering, batch bounds, manifest | same inputs give the same digest; an incomplete version is never planned; a 101-file batch splits | yes |
 | **AR3** Quarantine and failure isolation | quarantine records, per-document attribution, re-plan without the failing document | one bad document does not block the others; quarantine is never auto-cleared | yes |
-| **AR4** Commit, pre-push authorization, push, verify and remote recovery | steps 4–9 and §9.3a against a **local bare remote** in tests; idempotency by manifest digest; stop latch | every crash boundary and race listed in §9.3a; no push after a stop or revocation; a landed batch is recovered from the remote, never republished; a foreign remote commit halts; a batch is counted exactly once | yes |
+| **AR4** Commit, pre-push authorization, push, verify and remote recovery | steps 4–9 and §9.3a against a **local bare remote** in tests; idempotency by manifest digest; stop latch | every crash boundary and race listed in §9.3a; **a policy revoked after planning but before the push** is refused at step 6 and, if it lands in the race window, classified and latched in recovery; **a valid remote commit with unknown publication authorization** is recorded as published, never republished, reported and latched; no push after a stop or revocation; a foreign remote commit halts; a batch is counted exactly once | yes |
 | **AR5** Kill switch, budgets, anomalies, notification | three-level stop, budget accounting, anomaly checks, an alert sink | the stop file halts before push; a budget hit ends the run cleanly; an anomaly halts and notifies (sink mocked; no secret in logs) | yes |
 | **AR6** Bot-signed publication attestation and reader | the B2 reader verifies the bot attestation chain | an attestation by an unlisted key or wrong namespace is refused | yes |
-| **AR7** Bootstrap and settings verifier (read-only) | before every run, reads the **actual** remote settings through the GitHub API (repository rulesets and their bypass actors, the effective rules on `main`, collaborators and roles, deploy keys and their write flag, visibility) and compares them with the expected configuration of §9.7 | a missing rule, an extra bypass actor, bypass on R-integrity, a bot with admin, an extra write key or an unexpected visibility refuses the run; a fixture of API responses per case | yes |
-| **AR8** Independent auditor | the owner-account, read-only re-verification of every new `main` commit (§9.7) | a forged, unsigned, out-of-manifest or wrongly policy-bound commit alerts; a valid one passes | alerts on failure |
+| **AR7** Bootstrap and settings verifier (read-only) | before every run, reads the **actual** remote settings through the GitHub API (repository rulesets and their bypass actors, the effective rules on `main`, collaborators and roles, deploy keys and their write flag, visibility) and compares them with the expected configuration of §9.7 | a missing rule, bypass on R-integrity, a bot with admin or an unexpected visibility refuses the run; **an unexpected ruleset bypass actor** (any actor beyond the expected App id and the admin role, including a `DeployKey` actor with `actor_id: null` when the App path is used) refuses; **an unexpected write-enabled deploy key** refuses; App permissions wider than Contents: write, or installed on other repositories, refuse; any API read that fails refuses; a fixture of API responses per case | yes |
+| **AR8** Independent auditor | the owner-account, read-only re-verification of every new `main` commit (§9.7) | a forged, unsigned, out-of-manifest or wrongly policy-bound commit alerts; a commit with valid integrity but `authorization_unknown` or `unauthorized` alerts; a valid, authorized one passes | alerts on failure |
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
