@@ -35,6 +35,7 @@ from lovspor.legaltime.identity import (
     inserted_id,
     mint_enacted,
 )
+from lovspor.legaltime.text import section_key
 
 ACT = "lov/2005-05-20-28"
 ENACTING = "lti/2005/nl-20050520-028.xml"
@@ -553,6 +554,17 @@ def test_an_interval_cannot_end_before_it_starts() -> None:
 def test_a_refused_id_component_is_named_in_the_error(build: object, message: str) -> None:
     with pytest.raises(IdentityError, match=message):
         build()  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    "printed", ["§ 101", "§ 15-7", "§ 99 a", "§ 6A", "§ 9 A-1", "§ 9A-1", "§ 14-1 b"]
+)
+def test_every_engine_section_key_gets_an_id(printed: str) -> None:
+    """R1 takes the label as the engine keys it (``text.section_key``), capitals included."""
+    key = section_key(printed)
+    assert key is not None
+    assert enacted_id(ACT, ENACTING, key).endswith(f"|{key}")
+    assert inserted_id(ACT, L2008, date(2008, 3, 7), key).endswith(f"|{key}")
 
 
 def test_step_0_errors_say_what_was_wrong() -> None:

@@ -31,7 +31,9 @@ from lovspor.legaltime.errors import LegalTimeError
 
 _ACT = re.compile(r"lov/\d{4}-\d{2}-\d{2}(?:-\d+)?")
 _MEMBER = re.compile(r"lti/\d{4}/(?:nl|sf)-\d{8}-\d{3,4}\.xml")
-_LABEL = re.compile(r"§\d[0-9a-zæøå-]*")  # the engine's section key: ``§101``, ``§15-7``, ``§99a``
+# The engine's section key, exactly what ``text.section_key`` returns: ``§101``,
+# ``§15-7``, ``§99a``, ``§6A``, ``§9A-1``.
+_LABEL = re.compile(r"§\d+[A-Z]?(?:-\d+)?[a-hj-zæøå]?")
 _DIGEST = r"^[0-9a-f]{64}$"
 
 EndedBy = Literal["rename", "repeal"]
