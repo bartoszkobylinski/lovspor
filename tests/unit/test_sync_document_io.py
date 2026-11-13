@@ -18,6 +18,7 @@ from lovspor.sync.document_io import (
     write_derived_views,
     write_document,
 )
+from tests.unit.identity_git_fixtures import init_repo
 
 _TINY_FIXTURE = (Path(__file__).parent.parent / "fixtures" / "synthetic-flat-law.xml").read_bytes()
 
@@ -362,6 +363,7 @@ _DATASETS = ("gjeldende-lover", "gjeldende-sentrale-forskrifter")
 
 
 def _written_corpus(tmp_path: Path, readme: str | None) -> Manifest:
+    init_repo(tmp_path)
     manifest = _manifest({"lov-1": _record(slug="skatteloven", title="Skatteloven")})
     write_manifest(manifest, tmp_path / "manifest.json")
     if readme is not None:

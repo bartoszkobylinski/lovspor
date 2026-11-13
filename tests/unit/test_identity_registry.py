@@ -27,6 +27,7 @@ from lovspor.identity.schema import write_declaration
 from lovspor.rendering.slug import resolve_collisions
 from lovspor.storage.manifest import Manifest, ManifestRecord
 from lovspor.sync import document_io
+from tests.unit.identity_git_fixtures import init_repo
 
 AT = datetime(2026, 11, 1, tzinfo=UTC)
 OWNER = SlugOwner(owner="sf-20251125-2415", assigned_at="2026-05-01T00:00:00+00:00")
@@ -164,6 +165,7 @@ def test_an_unreadable_registry_is_a_parse_error(tmp_path: Path, text: str) -> N
 
 
 def test_update_never_bootstraps_a_registry(tmp_path: Path) -> None:
+    init_repo(tmp_path)
     manifest = Manifest(generated_at=AT, documents={"sf-1": _record("x")})
 
     assert update_slug_registry(tmp_path, manifest) == []
@@ -183,6 +185,7 @@ def test_update_extends_an_existing_registry(tmp_path: Path) -> None:
 
 
 def test_registered_ownership_without_a_registry_is_the_manifest_ownership(tmp_path: Path) -> None:
+    init_repo(tmp_path)
     owners = {"gjeldende-sentrale-forskrifter": {SLUG: "sf-20261002-1999"}}
 
     assert registered_ownership(tmp_path, owners) == owners

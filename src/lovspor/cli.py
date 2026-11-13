@@ -19,7 +19,7 @@ from lovspor.access import (
     revoke_credential,
     write_credential_file,
 )
-from lovspor.corpus_audit import AuditFinding, AuditReport, audit_corpus
+from lovspor.corpus_audit import AuditFinding, AuditReport, audit_published_corpus
 from lovspor.corpus_fetch import default_corpus_path, fetch_corpus, is_corpus
 from lovspor.errors import ConfigError
 from lovspor.github_output import append_step_summary, set_output
@@ -58,7 +58,6 @@ from lovspor.site.probe import (
     require_http_url,
 )
 from lovspor.site.probe_credential import ProbeTokenFileOption, load_probe_token
-from lovspor.storage.manifest import read_manifest
 from lovspor.sync.input_annotation import annotate_embedding_input_identity
 from lovspor.sync.lspe_cutover import migrate_lspe_v2
 from lovspor.sync.orchestrator import mark_undersized_embeddings_stale, run_sync
@@ -795,8 +794,9 @@ def audit(
     file (`missing_document`), embedding sidecars no current record owns
     (`orphan_embedding`) or missing in an embedded corpus (`missing_embedding`),
     renderer-bump leftovers (`stale_render`), a path with two owners or an owner
-    with two paths (`duplicate_path_ownership`), and frontmatter ids that
-    contradict their owning record (`identity_mismatch`).
+    with two paths (`duplicate_path_ownership`), frontmatter ids that contradict
+    their owning record (`identity_mismatch`), and an identity schema the sync
+    would refuse to start on (`identity_schema`, #871).
 
     ADVISORY findings are registered follow-up work, not corruption — today
     that is `unparsed_section_heading` (18 pre-existing findings). They are
@@ -808,7 +808,7 @@ def audit(
     findings (or on any finding with `--fail-on all`), so it can gate CI.
     """
     root = corpus_path or Settings.from_env().lovverk_repo_path
-    report = audit_corpus(root, read_manifest(root / "manifest.json"), RENDERER_VERSION)
+    report = audit_published_corpus(root, RENDERER_VERSION)
     _echo_audit(report)
     blocking = report.findings if fail_on is AuditFailOn.all else report.integrity_findings
     if blocking:

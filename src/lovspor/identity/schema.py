@@ -29,6 +29,8 @@ from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import IdentitySchemaError
 
 IDENTITY_FILENAME = "identity.json"
+#: The slug registry the enforced schema requires (``lovspor.identity.registry``).
+REGISTRY_FILENAME = "slugs.json"
 #: The schema of a corpus without a declaration: no slug registry is enforced.
 LEGACY_IDENTITY_SCHEMA: Final = 0
 #: The schema the #871 migration moves a corpus to: ``slugs.json`` is required.
