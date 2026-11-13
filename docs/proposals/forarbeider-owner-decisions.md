@@ -21,7 +21,7 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
 | D5 | Discovery from official catalogues | S, L | **DEFER** | before FC11 | FC11, FC12 |
 | D6 | SSH signatures and trust boundary (revised for D11: separate owner and bot keys) | S | **ACCEPT** | before FC7 and AR1 merge | FC7, AR1, AR4, AR6 |
 | D7 | Release strategy (owner-merged manifests) | S | **SUPERSEDED by D11** (owner direction 2026-11-12) | — | — |
-| D11 | Policy-driven automatic publication | S, T | **ACCEPT** (as the owner directed); formal approval pending | before AR1 merges | AR1–AR7, FC7–FC11, B1a, B1b, B2 |
+| D11 | Policy-driven automatic publication | S, T | **ACCEPT** (as the owner directed); formal approval pending | before AR1 merges | AR1–AR8, FC7–FC11, B1a, B1b, B2 |
 | D8 | Two completeness axes, `unknown` and never a false zero | T | **ACCEPT** | now, together with D1 | FC6, FC10, FC14 |
 | D9 | Staged document families | T, L | **MODIFY** | Prop. L and LS now; later families each at their own gate | FC10, FC12 |
 | D10 | Legal assessment (§§ 14, 24, 29; privacy; quotes; attachments) | L | **record unresolved; commission an assessment** | the assessment must come before FC10's release step | FC5, FC7, FC10 |
@@ -57,7 +57,7 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
 
 - **Recommended:**
   - a new repository, created by the owner, holding only released forarbeider;
-  - branch protection, and only the owner merges;
+  - the GitHub rulesets of architecture §9.7: R-integrity with no bypass, and R-writers with only the bot and the admin as bypass actors; releases are pushed by the bot under D11, with no manual merge;
   - its initial commit is pinned in the engine (FC9b);
   - the engine and every command stay in lovspor;
   - lovverk keeps law text only.
@@ -147,7 +147,13 @@ The owner rejected manual approval of each document, batch, PR or merge (2026-11
   - a bot-signed release manifest and commit, fast-forward pushed by a minimally scoped bot credential, verified before and after the push;
   - immutable receipts;
   - a three-level kill switch;
-  - per-document failure isolation.
+  - per-document failure isolation;
+  - authorization re-checked immediately before every push, with a persistent stop latch;
+  - recovery from the remote history after a crash (architecture §9.3a);
+  - GitHub-enforced rulesets plus an independent read-only auditor (§9.7);
+  - each batch counted against the budgets exactly once;
+  - quarantined documents kept visible in the metrics;
+  - owner keys never on the runner.
 - **Authorities separated:**
   - the owner holds policy and trust roots;
   - the runner (a dedicated macOS user on the owner's Mac, run by launchd) holds execution;
@@ -156,7 +162,7 @@ The owner rejected manual approval of each document, batch, PR or merge (2026-11
   - the owner merges each release (D7, rejected);
   - CI publishes. Rejected: it adds a trust root outside the owner's machine, and recommended answer 8 asks for no CI publishing.
 - **Consequences:**
-  - AR1–AR7 replace the manual release steps;
+  - AR1–AR8 replace the manual release steps;
   - FC10 becomes an automatic release once D10 and the policy allow it;
   - the manual B1b path stays for exceptions.
 - **Reversibility:** stop file, then policy revocation, then credential revocation. Published commits are withdrawn forward only and cannot be erased from history (architecture §9.7).
@@ -200,7 +206,7 @@ The owner rejected manual approval of each document, batch, PR or merge (2026-11
 ## 3. Questions for the owner (answer each)
 
 1. **D1/D2:** do you approve the full-corpus direction and a successor ADR in `lovspor-notebook` (ADR-0025)?
-2. **D3:** do you approve a separate `lovverk-forarbeider` repository, created by you, with branch protection and owner-only merge, before any release? What name and visibility?
+2. **D3:** do you approve a separate `lovverk-forarbeider` repository, created by you, with the §9.7 rulesets (R-integrity with no bypass; R-writers with bypass for the bot and the admin only), before any release? Do you accept a dedicated machine user for the bot, and its credential type (deploy key or classic token)?
 3. **D4:** do you approve `terms_basis: none_identified` with the locus page, a 30-day default validity, and the narrow nonce normalization replacing the raw comparison for HTML evidence?
 4. **D6:** will you generate a dedicated signing key for forarbeider (separate from the crosswalk key, or the same key under new namespaces)? Where is it held, and what is the rotation interval?
 5. **D11:** what batch bound (files and bytes), daily budgets and anomaly thresholds?
@@ -300,7 +306,7 @@ These answers arrived in session under the headings "Rekomendacja" and "Rekomend
 | D4 / Q3 | approve none_identified, 30 days, nonce rule; absence of terms grants no right to publish | D4 |
 | D5 | defer to FC11 | D5 |
 | D6 / Q4 | a separate Ed25519 key for forarbeider on the owner's Mac, passphrase-protected, in the system Keychain; rotation every 12 months and immediately on suspicion | D6 owner key; the bot key (D11) is a second key on the runner account |
-| D7 / Q5 | 100 files or 25 MB per batch, whichever comes first; no required gap between apply and merge; mandatory re-validation before merge | under D11: the batch bound of architecture §9.3; "re-validation before merge" becomes the automatic verification before push (§9.3 step 5) |
+| D7 / Q5 | 100 files or 25 MB per batch, whichever comes first; no required gap between apply and merge; mandatory re-validation before merge | under D11: the batch bound of architecture §9.3; "re-validation before merge" becomes the automatic verification and authorization before push (§9.3 steps 5–6) |
 | D8 | accept | D8 |
 | D9 / Q6 | stage 1 Prop. L/LS; later NOU, Ot.prp., Innst. and the rest | D9 |
 | D10 / Q7 | commission an independent assessment before full documents go public; do not block FC1–FC6; no artificial deadline; start before FC10 | D10 |
@@ -309,5 +315,5 @@ These answers arrived in session under the headings "Rekomendacja" and "Rekomend
 ## 8. What stays unchanged until approved
 
 - Nothing is fetched, signed, created, released or merged by this document.
-- A1–B2 behaviour, labels (`normative: false`, `source_license: null`, § 14, NOT enacted law), private staging and the owner-only merge are unchanged.
+- A1–B2 behaviour, labels (`normative: false`, `source_license: null`, § 14, NOT enacted law) and private staging are unchanged until the AR slices land. Releases are authorized by owner-signed policy (D11), never by a per-release owner act. Owner-only merging still governs *engine* changes, including trust roots.
 - Every decision above stays **PROPOSED / PENDING** until the owner approves it in writing (a comment on #738, the merge of this PR, or the successor ADR merge).

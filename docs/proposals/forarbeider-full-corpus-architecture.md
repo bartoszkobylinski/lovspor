@@ -177,7 +177,7 @@ flowchart LR
     ELIG --> PLAN[Release manifest\nversions + gaps]
     GAP --> PLAN
     PLAN --> TXN[B1b transaction\nlock, journal, read-back] --> REPO[(forarbeider repo\nworking tree)]
-    REPO --> MERGE[Owner commit + merge\n= publication]
+    REPO --> MERGE[Commit + push to main\n= publication (§9)]
   end
   subgraph Read["Read"]
     MERGE --> ATT[Owner publication\nattestation, SSH-signed] --> RDR[B2 reader / later MCP, search]
@@ -215,7 +215,7 @@ One owner-signed policy per **source × family** (for example regjeringen.no × 
   - publish an incident note.
 
   Records signed before the cut-over stay valid only if the owner states that the key was safe until then. Otherwise the cut-over is the key's first use.
-- **Residual risk:** the engine repository and the owner's GitHub account are the trust root. Whoever can merge to the engine can change `allowed_signers`; branch protection and owner-only merge are therefore part of the boundary.
+- **Residual risk:** the engine repository and the owner's GitHub account are the trust root. Whoever can merge to the engine can change `allowed_signers`; the engine's branch protection, with only the owner merging *engine* changes, is therefore part of the boundary. This concerns the engine repository, not forarbeider releases, which §9 automates.
 
 ### 3.2 Documented absence of website terms
 
@@ -351,7 +351,7 @@ Priority: **one legally cleared, COMPLETE Prop. L before mass ingestion.** Sourc
 | **FC7** Source policy v2 and SSH signatures | families, span classes, `ssh-keygen -Y verify` against the pinned `allowed_signers` and `revoked_keys`, per-purpose namespaces, validity windows (§3.1) | v1 policies keep working until expiry | an unsigned or untrusted signer denies; a signature over other bytes denies; another namespace denies; a revoked key denies; a record dated outside the key window denies | yes | scalable authorization (B8) |
 | **FC8** Release manifest over versions | plan, confirm and apply on versions and gaps; size bound | B1b receipts v2 kept | an over-size manifest refuses; gaps recorded; idempotent retry | yes | removes B9 and B11 |
 | **FC9** Withdrawal v2 | version, part, span and attachment tombstones | v2 withdrawals carried over | a tombstoned span is never served; history warning | yes | precise takedown (B16) |
-| **FC9b** Repository bootstrap and trusted root (prerequisite of FC10 if [D] 9 is accepted) | the owner creates `lovverk-forarbeider` (empty, owner-only merge, branch protection) and records its initial commit; the B1a guard gets a per-repository trusted-root table (lovverk root, forarbeider root); release-clone commands take the target repository explicitly | B1a `TRUSTED_ROOT_COMMITS` becomes per repository; lovverk's entry unchanged | a clone of the new repo with the pinned root passes; lovverk's root is refused for forarbeider writes and vice versa; an unknown root is refused | yes | removes B14 before anything is public |
+| **FC9b** Repository bootstrap and trusted root (prerequisite of FC10 if [D] 9 is accepted) | the owner creates `lovverk-forarbeider` (empty, the rulesets of §9.7) and records its initial commit; the B1a guard gets a per-repository trusted-root table (lovverk root, forarbeider root); release-clone commands take the target repository explicitly | B1a `TRUSTED_ROOT_COMMITS` becomes per repository; lovverk's entry unchanged | a clone of the new repo with the pinned root passes; lovverk's root is refused for forarbeider writes and vice versa; an unknown root is refused | yes | removes B14 before anything is public |
 | **FC10** First complete Prop. L | an operator run on one proposition: fetch, extract, classify, owner policy (FC7), release to a disposable clone, then to the release repository **only after owner authorization** | none | see the acceptance rule below the table | any unresolved span or attachment is a release gap | first `publication_complete` document, or a documented NO-GO |
 | **FC11** Discovery and resumable ingestion | inventory per family and session; resumable runs | none | a resumed run skips done URLs; inventory digests recorded | robots refusal stops | `documents_discovered`, `source_coverage` |
 | **FC12** More families | NOU, Ot.prp., Prop. S, Innst. (stortinget.no; own terms and policy [D]) | none | per-family extractor fixtures | an unknown family refuses | family coverage |
@@ -385,7 +385,7 @@ The criterion is never redefined, and choosing a different candidate is a new FC
 
 - No chapter text, evidence bytes or personal data in this repository, CI, issues or PRs.
 - `normative: false`, `source_license: null`, the § 14 basis (never NLOD), the NOT-enacted-law label, deterministic rendering.
-- The owner merges every release; nothing publishes without that merge.
+- Nothing publishes without an owner-signed policy that authorizes it: under §9, the owner authorizes the policy, not each release.
 - Law readers, MCP law tools, search and embeddings stay unchanged until FC14, and FC14 is opt-in.
 - Votes and debates stay in Politik; forarbeid → act links follow ADR-0017.
 
@@ -404,6 +404,11 @@ This amendment replaces §5.3 and the owner-act steps of §2.6 ("Release (owner 
 | **Execution** | the release runner: a dedicated macOS user account on the owner's Mac, run by launchd | fetch within the signed scope, extract, classify, plan, apply, commit, sign release manifests and commits with the **bot key**, push with the **bot credential** | sign a policy, clear an exception, change a trust root, push anywhere but the release branch, force-push |
 | **Repository write** | a bot credential: a GitHub App installation token or a fine-grained token scoped to `lovverk-forarbeider` contents only | fast-forward push to `main` of that one repository | administration, settings, other repositories, deleting branches or tags, force-push |
 
+**Owner policy keys never reach the runner.**
+- The owner key lives in the owner's macOS account Keychain, passphrase-protected. The runner is a separate macOS user with no access to that Keychain or agent.
+- The runner receives only signed records: policies, stop, resume, clearances and withdrawals.
+- AR7 also checks that the runner's ssh-agent and key files hold no key whose fingerprint is an owner key in `allowed_signers`; if one is found, the run refuses.
+
 The bot key is listed in `allowed_signers` with **only** the namespaces `lovspor-forarbeider-release` and `lovspor-forarbeider-publication`. A bot signature in the policy namespace fails verification by construction. A compromised runner therefore cannot widen its own authority: the policy, trust roots and credential scope all live outside it.
 
 ### 9.2 Eligibility (unchanged gates, now automatic)
@@ -416,6 +421,8 @@ A document version is **eligible** for automatic publication only if:
 4. its integrity checks pass: raw digests re-hash, extraction reproduces, and the version id recomputes.
 
 Everything else is **quarantined** (§9.6), never silently cleared and never silently dropped.
+
+**Default, restated:** automatic release is `publication_complete` only.
 
 **[D] (open):** may the automatic path ever publish `publication_incomplete` documents with explicit gap notices? This amendment says **no** by default. Changing that is a material policy change and needs owner approval.
 
@@ -439,10 +446,24 @@ One **release run** is a loop of bounded batches. Each batch is a transaction, a
    It is signed with the bot key. Same inputs, same manifest, same digest.
 3. **Apply.** The B1b transaction (lock, journal, staged bytes, documents then index then manifest, read-back) writes the working tree.
 4. **Commit.** One commit by the bot identity, signed with the bot key. The message carries the manifest digest, and the manifest file itself is in the tree (`releases/<manifest digest>.json`).
-5. **Verify before push.** The B2 checks run on the local commit: every file is the manifest's, the receipts are consistent, and nothing outside the dataset changed.
-6. **Push.** Fast-forward to `main` only. A rejected push (the remote moved) aborts the batch: reset to the remote, re-plan from the new base. Never force, never rebase published commits.
-7. **Verify after push.** `ls-remote main` must equal the pushed commit.
-8. **Receipt.** An immutable, append-only receipt in the runner's private workspace records the manifest digest, commit, push time, remote ref, policy and the bot key fingerprint. A publication attestation is signed by the bot key, namespace `lovspor-forarbeider-publication`; it replaces the owner's manual attestation of B2.
+5. **Verify the commit.** The B2 checks run on the local commit: every file is the manifest's, the receipts are consistent, and nothing outside the dataset changed.
+6. **Authorize the push, immediately before it.** The runner re-reads and re-checks, in this order:
+   - the stop latch and the stop file;
+   - an owner-signed `stop` record;
+   - the signed policy: still unrevoked, unexpired, and the one the manifest names;
+   - the revocation lists;
+   - the daily budgets, counting this batch;
+   - the source proof, still inside its window;
+   - the local integrity (commit, tree, manifest, signatures);
+   - the remote `main` still equal to the manifest's base commit (`ls-remote`).
+
+   Any failure aborts without pushing. A stop or revocation **sets a persistent stop latch** in the runner's workspace. Once set, no step initiates another push until an owner-signed `resume` record clears it.
+7. **Push.** Fast-forward to `main` only, at once after step 6. A rejected push (the remote moved) aborts the batch: reset to the remote, then run recovery (§9.3a) before any re-plan. Never force, never rebase published commits.
+   - **Check-to-push race:** a stop, revocation or policy expiry that lands between step 6 and the push cannot be seen by the runner. That window is short (one local check and one network round trip) but cannot be closed by client code.
+   - The authoritative emergency stop is therefore **revoking the bot credential on GitHub**: GitHub then rejects the push whatever the runner does.
+   - A batch that slipped through the race is a completed publication. It is reported, and withdrawn forward-only if the owner decides (§9.7).
+8. **Verify after push.** `ls-remote main` must equal the pushed commit.
+9. **Receipt.** An immutable, append-only receipt in the runner's private workspace records the manifest digest, commit, push time, remote ref, policy and the bot key fingerprint. A publication attestation is signed by the bot key, namespace `lovspor-forarbeider-publication`; it replaces the owner's manual attestation of B2.
 
 **Recovery, by the last completed step:**
 
@@ -450,10 +471,42 @@ One **release run** is a loop of bounded batches. Each batch is a transaction, a
 |---|---|
 | before 3 | nothing to undo |
 | 3 (journal exists) | roll back (B1b recover) |
-| 4 (committed, not pushed) | re-run 5–8 on the existing commit; if verification fails, reset the local branch to the remote and quarantine the batch |
-| 6 (pushed, no receipt) | 7–8 are re-run from the remote state |
+| 4 or 5 (committed, not pushed) | re-run from step 5 on the existing commit, **including the full step 6 authorization**; if verification fails, reset the local branch to the remote and quarantine the batch |
+| 7 (push sent, outcome unknown) or later | **§9.3a**: recover from the remote history, never from local state alone |
 
-A batch whose manifest digest is already on the remote is `UNCHANGED`.
+### 9.3a Recovery from the remote history
+
+A runner that fails after a push may not know whether the push landed. The remote is the record of what was published, so recovery reads it before anything else and before any new plan:
+
+1. Read `main` from the remote (fetch and `ls-remote`). Take every commit after the last commit with a receipt.
+2. For each such commit, oldest first, **verify, do not assume**:
+   - it is a fast-forward descendant of the last receipted commit;
+   - its signature verifies against the bot key in `allowed_signers` (namespace `lovspor-forarbeider-release`), with the key valid at the commit's stated time;
+   - the tree holds exactly one new `releases/<digest>.json`, whose digest matches the commit message;
+   - the manifest's own bot signature verifies;
+   - every file the commit changed is listed in the manifest, and no file outside the dataset changed;
+   - **historical policy binding:** the manifest names a policy that verifies against the owner key and was valid (signed, unexpired, unrevoked) at the manifest's planning time.
+3. A commit that verifies is a **completed publication**:
+   - recovery writes its receipt (`recovered_from_remote: true`) and counts its budget (§9.5);
+   - this is bookkeeping for something already public, **not a new publication authorization**, so it needs no current policy.
+4. Even when the policy is expired or revoked *now*:
+   - nothing is republished, re-planned or re-pushed on its authority;
+   - a policy revoked with a withdrawal-relevant reason makes recovery **report** the affected commit for an owner-signed withdrawal decision (§9.7), which it never performs on its own.
+5. A commit that fails any check, or a commit not made by the bot (for example a manual push), **halts the pipeline**: the stop latch is set and the owner is notified as for a possible compromise. Nothing further is pushed until an owner-signed `resume` record clears the latch.
+6. Only after recovery has receipted or halted on every new remote commit may a new batch be planned, against the recovered base.
+
+**Crash boundaries and races (AR4 tests every one):**
+- a crash before the commit;
+- a crash after the commit and before the push;
+- a push sent with no answer;
+- a push that landed and then a crash before the receipt;
+- a crash during the receipt write;
+- a remote advanced by a valid bot commit we did not record;
+- a remote advanced by a foreign or unverifiable commit;
+- a remote advanced between step 6 and the push (rejected non-fast-forward);
+- the policy expired between a landed push and recovery.
+
+A batch whose manifest digest is already on the remote and verified is `UNCHANGED`.
 
 ### 9.4 Failure isolation
 
@@ -473,6 +526,8 @@ A batch whose manifest digest is already on the remote is `UNCHANGED`.
 
   Resuming needs an owner-signed `resume` record, or a new policy.
 - **Budgets per day and per source:** documents, files, bytes, commits, fetch requests. Budgets are part of the signed policy. Reaching one ends the run cleanly, with no partial batch.
+- **Each batch is counted exactly once.** The budget ledger is keyed by the release manifest digest. A batch is counted when its commit is confirmed on the remote: after the push (step 8), or by recovery (§9.3a). A retried, recovered or `UNCHANGED` batch never counts twice. A batch that never reached the remote never counts against publication budgets.
+- Step 6 checks the ledger *plus* the batch about to be pushed, so a push never exceeds a budget.
 - **Anomaly detection.** Each item halts the run and notifies. Thresholds are in the policy:
   - the quarantine rate per run above a threshold;
   - a detector hit-rate shift;
@@ -485,6 +540,12 @@ A batch whose manifest digest is already on the remote is `UNCHANGED`.
 
 ### 9.6 Quarantine
 
+Quarantined documents **stay visible in the completeness metrics**:
+- they count in `documents_ingested`, and in `documents_source_complete` when that holds;
+- each reason is a release gap in `spans_rights_unresolved`, `spans_privacy_unresolved` or `attachments_unpublishable`;
+- a separate `documents_quarantined` count is reported;
+- nothing is dropped from the denominators.
+
 A quarantine record holds the document or version id, the scope (document, part, span or attachment), the reason code, the first time seen and the evidence digests. It lives in the runner's private workspace, is never published and never expires silently.
 
 Owner actions on quarantine are **exceptions**, by design rare:
@@ -495,11 +556,36 @@ Owner actions on quarantine are **exceptions**, by design rare:
 ### 9.7 Git model and visibility
 
 - **Repository:** `bartoszkobylinski/lovverk-forarbeider`, private during preparation (recommended answer, pending). Making it public is an owner act (trust root), not a release step.
-- **`main` protection:**
-  - no force-push and no deletion;
-  - linear history and signed commits required;
-  - pushes allowed only to the bot app/credential and the owner;
-  - the bot has no admin rights and cannot change protection.
+- **Bot identity:** a dedicated GitHub **machine user** (for example `lovspor-forarbeider-bot`):
+  - a collaborator with **write** permission on `lovverk-forarbeider` only;
+  - its SSH *signing* key is registered on that account, so GitHub can verify its commit signatures;
+  - its push credential is the narrowest GitHub supports for a collaborator. A fine-grained token cannot target another user's personal repository [A, verify], so the credential is a **deploy key with write access** on that one repository, or a classic token on a machine user that is a collaborator nowhere else.
+  - It has no admin role, so it cannot change settings or rulesets.
+- **Two rulesets on `main`.** GitHub enforces both; client code only checks them:
+
+  | Ruleset | Rules | Bypass actors |
+  |---|---|---|
+  | **R-integrity** | block force pushes; restrict deletions; require linear history; require signed commits | **none** (not the bot, not the owner, not admins) |
+  | **R-writers** | restrict updates (only bypass actors may update `main`) | the bot's deploy key (or the machine user) and the repository admin (the owner) |
+
+  - The bot's bypass applies **only** to R-writers ("who may update"). It never bypasses R-integrity, so the bot cannot force-push, delete or push unsigned commits.
+  - No pull request rule is configured: releases are direct fast-forward pushes, with no per-batch PR or merge.
+  - [A, verify before AR7] rulesets on a *private* personal repository may require a paid plan. If they are unavailable, the repository stays private and the pipeline stays off until they are.
+- **What GitHub enforces:**
+  - who may update `main`;
+  - no force-push or deletion;
+  - linear history;
+  - that commits carry a signature GitHub verifies against the account's registered key;
+  - the credential's repository scope.
+- **What only client code checks:** policy validity, eligibility, budgets, stop state, manifest correctness, source proof and completeness. A stolen bot credential plus a stolen bot signing key could push well-formed commits that skip every client check. That risk is mitigated by:
+  - (a) revoking the credential;
+  - (b) the **independent auditor** below;
+  - (c) withdrawal.
+- **Independent auditor (read-only).** A job under the *owner's* account, not the runner's:
+  - it re-verifies every new commit on `main` by the rules of §9.3a step 2 (bot signature, manifest, file set, historical policy binding);
+  - any violation alerts the owner at once.
+
+  It holds no write credential.
 - **Releases become visible** when the push lands on `main`, and publicly once the repository is public. Each release is one commit with a manifest, so `git log` is the release log.
 - **Provenance in the commit:**
   - the bot identity and its signature;
@@ -517,7 +603,7 @@ Owner actions on quarantine are **exceptions**, by design rare:
 | Slice | Change |
 |---|---|
 | **B1a** guard | the release clone belongs to the runner account; trusted root per repository (FC9b); `main` is the release branch of `lovverk-forarbeider` (today the guard refuses `main` only through the plan's `forarbeider/` branch grammar, which the automatic path replaces) |
-| **B1b** apply/recover/withdraw | the typed-phrase confirmation is replaced, on the automatic path only, by "the plan is the signed policy's"; the manual mode stays for exceptions; the transaction, lock, journal and recovery are unchanged; commit and push are added as steps 4–8 |
+| **B1b** apply/recover/withdraw | the typed-phrase confirmation is replaced, on the automatic path only, by "the plan is the signed policy's"; the manual mode stays for exceptions; the transaction, lock, journal and recovery are unchanged; commit, pre-push authorization and push are added as steps 4–9 with remote recovery (§9.3a) |
 | **B2** reader and attestation | the owner attestation is replaced by the bot-signed publication attestation, verified against the pinned bot key; the reader verifies policy → manifest → commit → attestation |
 | **FC7** policy v2 | adds `automated_publication`, budgets, anomaly thresholds, the legal-assessment reference, stop and resume records |
 | **FC8** release manifest | becomes the automatic planner and batch transaction (§9.3), bot-signed |
@@ -533,11 +619,12 @@ Owner actions on quarantine are **exceptions**, by design rare:
 | **AR1** Policy v2 automation fields | `automated_publication`, budgets, thresholds, legal-assessment reference; stop and resume records; namespace checks (bot key never verifies as policy) | a bot-signed policy is refused; no legal reference means not automated; an expired or revoked policy denies | yes |
 | **AR2** Deterministic automatic planner | eligibility (§9.2), ordering, batch bounds, manifest | same inputs give the same digest; an incomplete version is never planned; a 101-file batch splits | yes |
 | **AR3** Quarantine and failure isolation | quarantine records, per-document attribution, re-plan without the failing document | one bad document does not block the others; quarantine is never auto-cleared | yes |
-| **AR4** Commit, push and verify transaction | steps 4–8 against a **local bare remote** in tests; idempotency by manifest digest; recovery table | a crash at each step recovers; non-fast-forward aborts; a re-run is `UNCHANGED` | yes |
+| **AR4** Commit, pre-push authorization, push, verify and remote recovery | steps 4–9 and §9.3a against a **local bare remote** in tests; idempotency by manifest digest; stop latch | every crash boundary and race listed in §9.3a; no push after a stop or revocation; a landed batch is recovered from the remote, never republished; a foreign remote commit halts; a batch is counted exactly once | yes |
 | **AR5** Kill switch, budgets, anomalies, notification | three-level stop, budget accounting, anomaly checks, an alert sink | the stop file halts before push; a budget hit ends the run cleanly; an anomaly halts and notifies (sink mocked; no secret in logs) | yes |
 | **AR6** Bot-signed publication attestation and reader | the B2 reader verifies the bot attestation chain | an attestation by an unlisted key or wrong namespace is refused | yes |
-| **AR7** Bootstrap verifier (read-only) | checks branch protection, bot permissions and pinned keys against the expected settings, through the GitHub API | an over-privileged bot, missing protection or an unknown key refuses the run | yes |
+| **AR7** Bootstrap and settings verifier (read-only) | before every run, reads the **actual** remote settings through the GitHub API (repository rulesets and their bypass actors, the effective rules on `main`, collaborators and roles, deploy keys and their write flag, visibility) and compares them with the expected configuration of §9.7 | a missing rule, an extra bypass actor, bypass on R-integrity, a bot with admin, an extra write key or an unexpected visibility refuses the run; a fixture of API responses per case | yes |
+| **AR8** Independent auditor | the owner-account, read-only re-verification of every new `main` commit (§9.7) | a forged, unsigned, out-of-manifest or wrongly policy-bound commit alerts; a valid one passes | alerts on failure |
 
-**Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR7 land. No release has happened yet [O], so nothing published needs migrating.
+**Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
 **Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).
