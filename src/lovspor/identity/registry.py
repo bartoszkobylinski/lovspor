@@ -1,10 +1,13 @@
 """The slug ownership registry, ``slugs.json`` (#871, ADR-0023 draft point 2).
 
-Every slug the corpus has published maps to the first ``doc_id`` that held
-it. An entry is never deleted and its owner never changes, whatever the
-owner's status: a removed document keeps its address, and a later document
-whose natural slug is taken gets a distinct one by the existing collision
-rule (``resolve_collisions``; owner decision U1, 2026-11-11).
+Every slug the corpus has published maps to its owning ``doc_id`` and the
+basis of that ownership: ``first-holder`` when the owner held the slug first,
+``threshold-exception`` when the migration's U1 threshold kept it with a later
+holder and recorded the earlier ones as ``prior_holders``. An entry is never
+deleted and its owner never changes, whatever the owner's status: a removed
+document keeps its address, and a later document whose natural slug is taken
+gets a distinct one by the existing collision rule (``resolve_collisions``;
+owner decision U1, 2026-11-11).
 
 The file sits at the corpus root beside ``manifest.json``: like the manifest
 it is corpus-wide membership state, not a per-dataset view. Slugs are unique
@@ -19,7 +22,9 @@ the full manifest history.
 
 Whether the registry is enforced is decided by the corpus's declared
 identity schema (``lovspor.identity.schema``), read through
-``corpus_identity``: never by whether ``slugs.json`` happens to exist.
+``corpus_identity``: never by whether ``slugs.json`` happens to exist. A
+corpus whose git history shows it was ever migrated never reads as legacy
+again (``lovspor.identity.history_marker``).
 """
 
 import json
@@ -32,17 +37,18 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, mo
 
 from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import IdentitySchemaError, ParseError, SlugOwnershipError
+from lovspor.identity.history_marker import refuse_downgrade, refuse_empty_registry
 from lovspor.identity.schema import (
     ENFORCED_IDENTITY_SCHEMA,
     IDENTITY_FILENAME,
     LEGACY_IDENTITY_SCHEMA,
+    REGISTRY_FILENAME,
     declared_schema,
 )
 from lovspor.storage.manifest import Manifest, ManifestRecord
 
 logger = logging.getLogger(__name__)
 
-REGISTRY_FILENAME = "slugs.json"
 REGISTRY_SCHEMA_VERSION = 1
 #: The corpus directory of each tracked dataset (``document_io`` writes there).
 DIRECTORY_OF_DATASET = {
@@ -218,7 +224,8 @@ def replace_registry(registry: SlugRegistry, repo: Path) -> Path:
 
 
 class LegacyCorpus(BaseModel):
-    """A corpus at identity schema 0 (no ``identity.json``): no registry is enforced."""
+    """A corpus at identity schema 0: no ``identity.json``, and no commit in its
+    history ever touched one. No registry is enforced."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -255,8 +262,10 @@ def corpus_identity(repo: Path) -> CorpusIdentity:
     """The corpus's declared identity schema, with its registry when enforced.
 
     Fails closed (``IdentitySchemaError``) on an unknown or unreadable
-    declaration, a declared corpus without a readable registry, and a registry
-    no declaration covers.
+    declaration, a declared corpus without a readable registry, a registry no
+    declaration covers, an undeclared corpus whose history shows it was
+    migrated or cannot be read in full, and an empty registry beside a
+    committed manifest with records.
     """
     schema = declared_schema(repo)
     try:
@@ -268,8 +277,29 @@ def corpus_identity(repo: Path) -> CorpusIdentity:
             raise IdentitySchemaError(f"{exc}; identity schema {schema} requires it") from exc
     require_consistent(schema, (repo / REGISTRY_FILENAME).exists(), str(repo))
     if registry is None:
+        refuse_downgrade(repo)
         return LegacyCorpus()
+    refuse_empty_registry(repo, sum(map(len, registry.slugs.values())))
     return EnforcedCorpus(registry=registry)
+
+
+def require_registry_covers(registry: SlugRegistry, manifest: Manifest, where: str) -> None:
+    """Refuse a registry that misses an address ``manifest`` holds.
+
+    Every sync commit registers its manifest's addresses, and the migration
+    registers every address any manifest revision held, so a gap means the
+    registry was truncated or replaced.
+    """
+    registered = {(d, slug) for d, entries in registry.slugs.items() for slug in entries}
+    missing = sorted({record_address(r) for r in manifest.documents.values()} - registered)
+    if missing:
+        directory, slug = missing[0]
+        raise IdentitySchemaError(
+            f"{where}: {REGISTRY_FILENAME} has {len(registered)} slugs registered but misses "
+            f"{len(missing)} address(es) the manifest holds, first {directory}/{slug}: a "
+            f"registry never loses an entry, so it was truncated or replaced; restore it "
+            f"from the corpus history (#871)",
+        )
 
 
 def update_slug_registry(repo: Path, manifest: Manifest) -> list[Path]:
@@ -289,8 +319,10 @@ def registered_ownership(
 ) -> dict[str, dict[str, str]]:
     """``owners_by_dataset`` with the registry's owners laid over it.
 
-    The registry names the first holder, so it wins over ownership derived
-    from the current manifest, which cannot see a record the manifest lost.
+    The registry names each slug's owner on the record (its first holder, or
+    the U1 threshold exception with its prior holders), so it wins over
+    ownership derived from the current manifest, which cannot see a record the
+    manifest lost.
     """
     merged = {dataset: dict(owners) for dataset, owners in owners_by_dataset.items()}
     identity = corpus_identity(repo)

@@ -130,7 +130,9 @@ def test_a_sync_refuses_to_serve_a_document_at_another_documents_slug(
     upstream that still arrives on a registered slug is refused, not committed."""
     settings = _corpus(tmp_path, [_ALFA])
     repo = settings.lovverk_repo_path
-    _seed_registry(repo, SlugRegistry().assign("lover", "beta", _LOST_OWNER))
+    alfa_owner = SlugOwner(owner="lov-1", assigned_at="2026-08-01T04:00:00+00:00")
+    registry = SlugRegistry().assign("lover", "alfa", alfa_owner)
+    _seed_registry(repo, registry.assign("lover", "beta", _LOST_OWNER))
     _serve(monkeypatch, [_ALFA, _BETA])
 
     with pytest.raises(SlugOwnershipError, match="lov-0"):
@@ -140,8 +142,12 @@ def test_a_sync_refuses_to_serve_a_document_at_another_documents_slug(
 def test_write_derived_views_stages_the_extended_registry(tmp_path: Path) -> None:
     settings = _corpus(tmp_path, [_ALFA])
     repo = settings.lovverk_repo_path
-    _seed_registry(repo, SlugRegistry())
-    manifest = Manifest(generated_at=datetime(2026, 11, 1, tzinfo=UTC), documents=_stored(settings))
+    alfa_owner = SlugOwner(owner="lov-1", assigned_at="2026-08-01T04:00:00+00:00")
+    _seed_registry(repo, SlugRegistry().assign("lover", "alfa", alfa_owner))
+    stored = _stored(settings)
+    ny = stored["lov-1"].model_copy(update={"slug": "ny", "markdown_path": "lover/ny.md"})
+    documents = {**stored, "lov-9": ny}
+    manifest = Manifest(generated_at=datetime(2026, 11, 1, tzinfo=UTC), documents=documents)
 
     paths = write_derived_views(repo, manifest, ("gjeldende-lover",))
 
@@ -149,6 +155,7 @@ def test_write_derived_views_stages_the_extended_registry(tmp_path: Path) -> Non
     registry = read_registry(repo)
     assert registry is not None
     assert registry.owner_of("lover", "alfa") == "lov-1"
+    assert registry.owner_of("lover", "ny") == "lov-9"
 
 
 def _fake_client(archives: list[LovdataArchive]) -> type:
