@@ -54,6 +54,9 @@ _PLACEMENT = re.compile(
     r"(?P<after>\.?|,?\s+og\s+(?:som\s+)?skal\s+lyde(?:\s+slik)?:)"
 )
 _RENAME_SHAPED = re.compile(r"§.*\bblir\b.*§")
+_PARTIAL_LABELS = re.compile(
+    rf"De delene av (?P<source>{_SEC})\b.*?\bblir\s+(?:ny\s+)?(?P<target>{_SEC}).*"
+)
 
 PARTIAL = "partial rename: extent not in the source"
 SEVERAL = "range or several sections: unsupported"
@@ -88,6 +91,8 @@ class RenameRefusal(Frozen):
     member_sha256: str | None
     sentence_sha256: str
     act: str | None
+    source: str | None  # the labels R3 read, when it read them (a partial rename keeps both)
+    target: str | None
     reason: str
     placement: str | None
     timing_status: str
@@ -155,7 +160,7 @@ def _projected_step(candidate: dict[str, object]) -> dict[str, object]:
 def parse_rename(sentence: str) -> ParsedRename:
     """R3's closed grammar over one instruction sentence; anything else is a refusal."""
     if sentence.startswith("De delene av"):
-        return ParsedRename(refusal=PARTIAL)
+        return _partial(sentence)
     if "§§" in sentence:
         return ParsedRename(refusal=SEVERAL)
     match = _KEYWORD_SHAPE.fullmatch(sentence) or _CITATION_SHAPE.fullmatch(sentence)
@@ -169,6 +174,16 @@ def parse_rename(sentence: str) -> ParsedRename:
     if source == target:
         return parsed.model_copy(update={"refusal": NO_OP})
     return _with_rest(parsed, match["rest"])
+
+
+def _partial(sentence: str) -> ParsedRename:
+    """A partial rename is refused, with both labels named when the sentence names them (R3)."""
+    labels = _PARTIAL_LABELS.fullmatch(sentence)
+    if labels is None:
+        return ParsedRename(refusal=PARTIAL)
+    return ParsedRename(
+        source=section_key(labels["source"]), target=section_key(labels["target"]), refusal=PARTIAL
+    )
 
 
 def _with_rest(parsed: ParsedRename, rest: str) -> ParsedRename:
@@ -217,17 +232,19 @@ def adapt_evidence(evidence: Evidence) -> Research:
 
 
 def _adapted(event: Event, documents: Mapping[str, Document]) -> Rename | RenameRefusal:
+    read = parse_rename(event.operation.instruction)
     document = documents.get(event.member)
     if document is None:
-        return _refusal(event, None, UNKNOWN_MEMBER)
+        return _refusal(event, None, UNKNOWN_MEMBER, read)
     if event.operation.act is None:
-        return _refusal(event, document, UNBOUND)
-    parsed = _checked(event, parse_rename(event.operation.instruction))
+        return _refusal(event, document, UNBOUND, read)
+    parsed = _checked(event, read)
     if parsed.refusal is not None:
-        return _refusal(event, document, parsed.refusal, parsed.placement)
+        return _refusal(event, document, parsed.refusal, parsed)
     timing = event.timing
     if timing.status != "dated":
-        return _refusal(event, document, f"timing not proven: {timing.status}: {timing.reason}")
+        reason = f"timing not proven: {timing.status}: {timing.reason}"
+        return _refusal(event, document, reason, parsed)
     return _rename(event, document, parsed)
 
 
@@ -265,14 +282,16 @@ def _rename(event: Event, document: Document, parsed: ParsedRename) -> Rename:
 
 
 def _refusal(
-    event: Event, document: Document | None, reason: str, placement: str | None = None
+    event: Event, document: Document | None, reason: str, parsed: ParsedRename | None = None
 ) -> RenameRefusal:
     timing = event.timing
+    read = parsed or ParsedRename()
     return RenameRefusal(
         op_id=event.operation.id, instrument=event.law, member=event.member,
         member_sha256=None if document is None else document.sha256,
         sentence_sha256=_sha(event.operation.instruction), act=event.operation.act,
-        reason=reason, placement=placement, timing_status=timing.status,
+        source=read.source, target=read.target, reason=reason, placement=read.placement,
+        timing_status=timing.status,
         effective=timing.dated_on, known_from=timing.known_from,
     )  # fmt: skip
 

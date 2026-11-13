@@ -86,6 +86,16 @@ def test_straffeloven_yields_no_executable_step(straffeloven: Research) -> None:
     assert straffeloven.steps == ()
 
 
+def test_straffelovens_rename_shaped_sentences_are_exactly_these(straffeloven: Research) -> None:
+    """Every rename-shaped event the adapter sees, bound or not: none dropped, none extra."""
+    assert sorted(r.op_id for r in straffeloven.refusals) == [
+        "lov/2008-03-07-4#0:I:112.0",
+        "lov/2008-03-07-4#0:I:114.0",
+        "lov/2009-06-19-74#1:I:239.0",
+        "lov/2009-06-19-74#1:I:252.0",  # "Nåværende § 9 blir ny § 10.", unbound
+    ]
+
+
 @pytest.mark.parametrize(
     ("op_id", "sentence_sha256", "act", "reason", "placement"),
     [

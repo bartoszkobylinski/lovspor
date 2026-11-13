@@ -21,6 +21,7 @@ from lovspor.legaltime.commencement import Decisions, Event
 from lovspor.legaltime.document import Document, parse_document
 from lovspor.legaltime.identity import LabelProof, enacted_id, mint_enacted
 from lovspor.legaltime.rename_research import (
+    PARTIAL,
     Research,
     adapt,
     parse_rename,
@@ -136,6 +137,20 @@ def test_the_two_r3_shapes_are_read_with_engine_section_keys(
 )  # fmt: skip
 def test_anything_else_is_a_structured_refusal(sentence: str, reason: str) -> None:
     assert parse_rename(sentence).refusal == reason
+
+
+def test_a_partial_rename_is_refused_with_both_labels_named() -> None:
+    parsed = parse_rename(
+        "De delene av § 102 i lov 20. mai 2005 nr. 28 som ikke allerede er satt i kraft, "
+        "blir § 402, og skal lyde slik:"
+    )
+    assert (parsed.source, parsed.target, parsed.refusal) == ("§102", "§402", PARTIAL)
+
+
+def test_a_refusal_carries_the_labels_r3_read() -> None:
+    research = _run(_p(INTRO) + _p("Nåværende § 21 blir ny § 22."), part_two=KONGEN)
+    (refusal,) = research.refusals
+    assert (refusal.source, refusal.target) == ("§21", "§22")
 
 
 def test_a_placement_clause_is_recorded_not_dropped() -> None:
