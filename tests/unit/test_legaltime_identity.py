@@ -10,8 +10,10 @@ import os
 import random
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
@@ -61,7 +63,7 @@ def _proof(member: str, op: str, effective: date, refid: str) -> LabelProof:
     )  # fmt: skip
 
 
-def _end(proof: LabelProof, ended_by: str) -> EndProof:
+def _end(proof: LabelProof, ended_by: Literal["rename", "repeal"]) -> EndProof:
     return EndProof(**proof.model_dump(), ended_by=ended_by)
 
 
@@ -409,9 +411,9 @@ def test_the_canonical_serialization_is_byte_stable_across_processes() -> None:
 def test_snapshots_are_immutable() -> None:
     ledger = _enacted("§1")
     with pytest.raises(ValidationError):
-        ledger.act = "lov/2000-01-01-1"  # type: ignore[misc]
+        ledger.act = "lov/2000-01-01-1"
     with pytest.raises(ValidationError):
-        ledger.identities[0].intervals[0].label = "§2"  # type: ignore[misc]
+        ledger.identities[0].intervals[0].label = "§2"
     assert isinstance(ledger.identities, tuple)
     assert isinstance(ledger.identities[0].intervals, tuple)
 
@@ -534,7 +536,7 @@ def test_step_0_errors_say_what_was_wrong() -> None:
         {**_start0("§1").model_dump(), "instrument": "lov/2000-01-01-1"}
     )
     with pytest.raises(
-        IdentityError, match="step 0's proof names another member, act or publication date"
+        IdentityError, match="^step 0's proof names another member, act or publication date$"
     ):
         mint_enacted(ACT, ENACTING, PUBLISHED, [("§1", other)])
     with pytest.raises(IdentityError, match="I2: a provision_id is held twice"):
@@ -580,6 +582,14 @@ def _interval(label: str, start: LabelProof, end: EndProof | None = None) -> Lab
     return LabelInterval(label=label, start=start, end=end)
 
 
+def _refused_by(build: Callable[[], object]) -> str:
+    """The one rule a model validator refused with, as its whole message (not a substring)."""
+    with pytest.raises(ValidationError) as caught:
+        build()
+    (error,) = caught.value.errors()
+    return str(error["ctx"]["error"])
+
+
 def _history(*intervals: LabelInterval) -> Identity:
     return Identity(
         provision_id=enacted_id(ACT, ENACTING, intervals[0].label), act=ACT,
@@ -588,22 +598,28 @@ def _history(*intervals: LabelInterval) -> Identity:
 
 
 def test_nothing_follows_a_repeal() -> None:
-    with pytest.raises(ValidationError, match="a repeal ends the identity: nothing follows it"):
-        _history(
+    refused = _refused_by(
+        lambda: _history(
             _interval("§1", _start0("§1"), _end(P2008, "repeal")),
             _interval("§2", P2008),
         )
+    )
+    assert refused == "a repeal ends the identity: nothing follows it"
 
 
 def test_only_the_last_interval_may_be_open() -> None:
-    with pytest.raises(ValidationError, match="only the last label interval may be open"):
-        _history(_interval("§1", _start0("§1")), _interval("§2", P2008))
+    refused = _refused_by(lambda: _history(_interval("§1", _start0("§1")), _interval("§2", P2008)))
+    assert refused == "only the last label interval may be open"
 
 
 def test_an_interval_ends_no_earlier_than_it_starts_and_may_end_that_day() -> None:
     early = _proof(L2008, "0:I:2.0", date(2004, 1, 1), "lov/2008-03-07-4")
-    with pytest.raises(ValidationError, match="an interval ends before it starts"):
-        _history(_interval("§1", _start0("§1"), _end(early, "rename")), _interval("§2", early))
+    refused = _refused_by(
+        lambda: _history(
+            _interval("§1", _start0("§1"), _end(early, "rename")), _interval("§2", early)
+        )
+    )
+    assert refused == "an interval ends before it starts"
     same_day = _proof(L2008, "0:I:2.0", PUBLISHED, "lov/2008-03-07-4")
     identity = _history(
         _interval("§1", _start0("§1"), _end(same_day, "rename")), _interval("§2", same_day)
@@ -612,17 +628,21 @@ def test_an_interval_ends_no_earlier_than_it_starts_and_may_end_that_day() -> No
 
 
 def test_a_later_interval_cannot_carry_a_step_0_proof() -> None:
-    with pytest.raises(ValidationError, match="only the minting interval may carry a step-0 proof"):
-        _history(
+    refused = _refused_by(
+        lambda: _history(
             _interval("§1", _start0("§1"), _end(P2008, "rename")), _interval("§2", _start0("§2"))
         )
+    )
+    assert refused == "only the minting interval may carry a step-0 proof"
 
 
 def test_a_renamed_interval_on_another_proof_is_named() -> None:
-    with pytest.raises(
-        ValidationError, match="a renamed interval starts on another proof than its rename's"
-    ):
-        _history(_interval("§1", _start0("§1"), _end(P2008, "rename")), _interval("§2", P2009))
+    refused = _refused_by(
+        lambda: _history(
+            _interval("§1", _start0("§1"), _end(P2008, "rename")), _interval("§2", P2009)
+        )
+    )
+    assert refused == "a renamed interval starts on another proof than its rename's"
 
 
 def test_an_identity_that_is_not_its_own_id_is_named() -> None:
