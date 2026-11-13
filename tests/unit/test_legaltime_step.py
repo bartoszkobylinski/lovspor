@@ -122,6 +122,48 @@ def test_an_intrinsically_refused_rename_claims_no_target() -> None:
     assert result.ledger.live_map() == {"§3": _old("§3"), "§9": _old("§4")}
 
 
+def test_an_intrinsically_refused_bridge_joins_no_component() -> None:
+    """Phase 1 removes edges before R5 spreads a relational refusal."""
+    ledger = _ledger("§1", "§2", "§3")
+    step = _step(
+        renames=(
+            _rename(1, "§1", "§2"),  # collides with the kept holder
+            Rename(source="§2", target="§3", proof=_p(2), partial=True),
+            _rename(3, "§3", "§4"),
+        ),
+        insertions=(Insertion(label="§3", proof=_p(4)),),
+    )
+    before = ledger.canonical_json()
+    result = apply_step(ledger, step)
+    assert _why(result) == {
+        _p(1).op_id: ("relational", "label collision"),
+        _p(2).op_id: ("intrinsic", "partial rename: extent not in the source"),
+    }
+    assert result.accepted == (_p(3).op_id, _p(4).op_id)
+    assert result.ledger.live_map() == {
+        "§1": _old("§1"), "§2": _old("§2"), "§3": _new("§3"), "§4": _old("§3"),
+    }  # fmt: skip
+    assert ledger.canonical_json() == before
+
+
+@pytest.mark.parametrize("rival", ["replacement", "repeal"])
+def test_a_whole_section_replacement_has_only_one_fate(rival: str) -> None:
+    """R5 rejects two whole-section operations, preserving unrelated insertions."""
+    ledger = _ledger("§1")
+    first = Replace(label="§1", proof=_p(1), payload_sha256=_hex("x"))
+    other = (
+        {"replaces": (first, Replace(label="§1", proof=_p(2), payload_sha256=_hex("y")))}
+        if rival == "replacement"
+        else {"replaces": (first,), "repeals": (Repeal(label="§1", proof=_p(2)),)}
+    )
+    result = apply_step(ledger, _step(**other, insertions=(Insertion(label="§9", proof=_p(3)),)))
+    conflict = ("relational", "conflicting operations within instrument")
+    assert _why(result) == {_p(1).op_id: conflict, _p(2).op_id: conflict}
+    assert result.accepted == (_p(3).op_id,)
+    assert result.ledger.get(_old("§1")) == ledger.get(_old("§1"))
+    assert result.ledger.live_map() == {"§1": _old("§1"), "§9": _new("§9")}
+
+
 @pytest.mark.parametrize(
     ("rename", "reason"),
     [
