@@ -19,8 +19,10 @@ from pydantic import ValidationError
 from lovspor.legaltime.errors import LegalTimeError
 from lovspor.legaltime.identity import (
     EndProof,
+    Identity,
     IdentityError,
     Insertion,
+    LabelInterval,
     LabelProof,
     Ledger,
     Rename,
@@ -143,7 +145,9 @@ def test_step_0_mints_without_an_effective_date() -> None:
 
 
 def test_step_0_refuses_a_proof_carrying_an_effective_date() -> None:
-    dated = _start0("§101").model_copy(update={"effective": PUBLISHED})
+    dated = LabelProof.model_validate(
+        {**_start0("§101").model_dump(), "effective": PUBLISHED, "label_minted_at": None}
+    )
     with pytest.raises(IdentityError):
         mint_enacted(ACT, ENACTING, PUBLISHED, [("§101", dated)])
 
@@ -340,7 +344,10 @@ def test_a_proof_from_another_member_or_date_is_refused_by_the_step() -> None:
 def test_a_ledger_holding_one_label_twice_cannot_be_built() -> None:
     """I1 is a property of every ledger, not only of what apply_step produces."""
     a = _enacted("§1").identities[0]
-    b = a.model_copy(update={"provision_id": enacted_id(ACT, ENACTING, "§2")})
+    b = Identity(
+        provision_id=inserted_id(ACT, L2008, date(2008, 3, 7), "§1"), act=ACT,
+        text_member=L2008, intervals=(LabelInterval(label="§1", start=P2008),),
+    )  # fmt: skip
     with pytest.raises(ValidationError):
         Ledger(act=ACT, identities=(a, b))
 
@@ -367,7 +374,9 @@ def test_permuting_a_steps_operations_gives_the_same_ledger() -> None:
         shuffled = renames[:]
         random.Random(seed).shuffle(shuffled)  # noqa: S311 - input-order shuffle, not security
         step = Step(act=ACT, member=L2008, effective=date(2008, 3, 7), renames=tuple(shuffled))
-        outputs.add(apply_step(base, step).ledger.canonical_json())
+        result = apply_step(base, step)
+        assert result.refusals == ()  # every permutation is accepted, not refused alike
+        outputs.add(result.ledger.canonical_json())
     assert len(outputs) == 1
 
 
@@ -405,3 +414,90 @@ def test_snapshots_are_immutable() -> None:
         ledger.identities[0].intervals[0].label = "§2"  # type: ignore[misc]
     assert isinstance(ledger.identities, tuple)
     assert isinstance(ledger.identities[0].intervals, tuple)
+
+
+# ------------------------------------------------- review round 1 (independent review)
+
+
+def test_model_copy_cannot_skip_an_invariant() -> None:
+    ledger = _step_2008(_enacted("§101", "§102"))
+    chain = ledger.get(enacted_id(ACT, ENACTING, "§101"))
+    assert chain is not None
+    with pytest.raises(ValidationError):  # I2: one id held twice
+        ledger.model_copy(update={"identities": (*ledger.identities, ledger.identities[0])})
+    with pytest.raises(ValidationError):  # I1: a second live holder of §401
+        ledger.model_copy(
+            update={"identities": (*ledger.identities, _enacted("§401").identities[0])}
+        )
+    with pytest.raises(ValidationError):  # I3: an open interval before the last
+        chain.model_copy(update={"intervals": (chain.intervals[1], chain.intervals[0])})
+    with pytest.raises(ValidationError):
+        chain.model_copy(update={"intervals": ()})
+
+
+def test_an_identity_is_only_its_own_r1_id() -> None:
+    first = _enacted("§1").identities[0]
+    with pytest.raises(ValidationError):
+        first.model_copy(update={"provision_id": "arbitrary"})
+    with pytest.raises(ValidationError):
+        first.model_copy(update={"provision_id": enacted_id(ACT, ENACTING, "§2")})
+    with pytest.raises(ValidationError):
+        first.model_copy(update={"text_member": L2008})
+
+
+def test_a_later_interval_starts_only_on_its_renames_own_proof() -> None:
+    chain = _step_2008(_enacted("§101")).get(enacted_id(ACT, ENACTING, "§101"))
+    assert chain is not None
+    elsewhere = chain.intervals[1].model_copy(update={"start": P2009})
+    with pytest.raises(ValidationError):
+        chain.model_copy(update={"intervals": (chain.intervals[0], elsewhere)})
+
+
+def test_a_no_op_rename_is_refused() -> None:
+    step = Step(
+        act=ACT, member=L2008, effective=date(2008, 3, 7),
+        renames=(Rename(source=enacted_id(ACT, ENACTING, "§1"), target="§1", proof=P2008),),
+    )  # fmt: skip
+    assert _refused(_enacted("§1"), step) == ("no-op rename",)
+
+
+@pytest.mark.parametrize(
+    "update",
+    [{"instrument": "lov/2008-03-07-4"}, {"known_from": date(2005, 6, 1)}],
+)
+def test_step_0_provenance_must_name_its_own_act_and_publication(update: dict[str, object]) -> None:
+    proof = LabelProof.model_validate({**_start0("§1").model_dump(), **update})
+    with pytest.raises(IdentityError):
+        mint_enacted(ACT, ENACTING, PUBLISHED, [("§1", proof)])
+
+
+def test_a_rename_and_a_repeal_of_one_identity_are_conflicting() -> None:
+    step = Step(
+        act=ACT, member=L2008, effective=date(2008, 3, 7),
+        renames=(Rename(source=enacted_id(ACT, ENACTING, "§1"), target="§9", proof=P2008),),
+        repeals=(Repeal(label="§1", proof=P2008),),
+    )  # fmt: skip
+    assert _refused(_enacted("§1"), step) == ("conflicting operations within instrument",)
+
+
+def test_two_insertions_under_one_label_are_a_collision() -> None:
+    step = Step(
+        act=ACT, member=L2008, effective=date(2008, 3, 7),
+        insertions=(Insertion(label="§9", proof=P2008), Insertion(label="§9", proof=P2008)),
+    )  # fmt: skip
+    assert _refused(_enacted("§1"), step) == ("label collision",)
+
+
+def test_an_insertion_into_a_label_its_step_renames_away_is_valid() -> None:
+    """straffeloven 2008: § 101 blir § 401 and a new § 101 in one step (R5)."""
+    ledger = _step_2008(_enacted("§101"))
+    assert ledger.holder("§101") is not None and ledger.holder("§401") is not None
+
+
+def test_an_interval_cannot_end_before_it_starts() -> None:
+    chain = _step_2008(_enacted("§101")).get(enacted_id(ACT, ENACTING, "§101"))
+    assert chain is not None
+    early = _proof(L2008, "0:I:2.0", date(2004, 1, 1), "lov/2008-03-07-4")
+    closed = chain.intervals[0].model_copy(update={"end": _end(early, "rename")})
+    with pytest.raises(ValidationError):
+        chain.model_copy(update={"intervals": (closed, chain.intervals[1])})

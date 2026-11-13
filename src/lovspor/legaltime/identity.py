@@ -20,9 +20,9 @@ violation refuses the whole step, a stricter answer than R4's per-component refu
 import json
 import re
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import date
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -60,7 +60,20 @@ def inserted_id(act: str, member: str, effective: date, label: str) -> str:
     return f"{parts[0]}|{parts[1]}|{effective.isoformat()}|{label}"
 
 
-class LabelProof(Frozen):
+class _Validated(Frozen):
+    """A frozen model whose ``model_copy`` re-validates: no update can skip an invariant.
+
+    Pydantic's own ``model_copy`` copies without validation, which would let an update
+    build an identity or ledger that breaks I1-I3.
+    """
+
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+        del deep  # every copy is rebuilt from validated data, so depth does not matter
+        fields = {name: getattr(self, name) for name in type(self).model_fields}
+        return type(self).model_validate({**fields, **(update or {})})
+
+
+class LabelProof(_Validated):
     """The evidence that starts a label interval (R2).
 
     ``sentence_sha256`` is the engine's digest of the sentence (ADR-0020 D9, the
@@ -98,7 +111,7 @@ class EndProof(LabelProof):
         return self
 
 
-class FormerKey(Frozen):
+class FormerKey(_Validated):
     """A label the identity no longer holds, with the proof of what ended it (R2)."""
 
     label: str
@@ -111,7 +124,7 @@ class FormerKey(Frozen):
     known_from: date | None
 
 
-class LabelInterval(Frozen):
+class LabelInterval(_Validated):
     label: str = Field(pattern=_LABEL.pattern)
     start: LabelProof
     end: EndProof | None = None
@@ -128,7 +141,7 @@ class LabelInterval(Frozen):
         )  # fmt: skip
 
 
-class Identity(Frozen):
+class Identity(_Validated):
     """One provision slot: its id, its text-existence member (D3a) and its label history."""
 
     provision_id: str
@@ -153,22 +166,60 @@ class Identity(Frozen):
     @model_validator(mode="after")
     def _sourced(self) -> Self:
         _check_history(self.intervals)
+        first = self.intervals[0]
+        if first.start.member != self.text_member:
+            raise ValueError("the minting proof names another member than the text's")
+        if self.provision_id != _minting_id(self.act, self.text_member, first):
+            raise ValueError(f"not the R1 id of its own minting: {self.provision_id}")
         return self
 
 
+def _minting_id(act: str, member: str, first: "LabelInterval") -> str:
+    """R1, derived from the minting interval itself, so an id can only be its own."""
+    try:
+        if first.start.effective is None:
+            return enacted_id(act, member, first.label)
+        return inserted_id(act, member, first.start.effective, first.label)
+    except IdentityError as error:
+        raise ValueError(str(error)) from error
+
+
 def _check_history(intervals: tuple[LabelInterval, ...]) -> None:
-    """I3: only the last interval may be open; a repeal ends history; step 0 starts it."""
+    """I3: a gap-free, sourced chain: open only at its end, each move on its own proof."""
     for index, interval in enumerate(intervals):
         last = index == len(intervals) - 1
         if interval.end is None and not last:
             raise ValueError("only the last label interval may be open")
         if interval.end is not None and interval.end.ended_by == "repeal" and not last:
             raise ValueError("a repeal ends the identity: nothing follows it")
-        if index > 0 and interval.start.effective is None:
-            raise ValueError("only the minting interval may carry a step-0 proof")
+        ended = interval.end.effective if interval.end is not None else None
+        if ended is not None and ended < _start_date(interval):
+            raise ValueError("an interval ends before it starts")
+        if index > 0:
+            _check_link(intervals[index - 1], interval)
 
 
-class Refusal(Frozen):
+def _start_date(interval: LabelInterval) -> date:
+    """The start date R10 uses: ``effective``, or ``label_minted_at`` for step 0."""
+    start = interval.start
+    placed = start.effective if start.effective is not None else start.label_minted_at
+    if placed is None:
+        raise ValueError("a start proof is dated by effective or label_minted_at")
+    return placed
+
+
+def _check_link(previous: LabelInterval, interval: LabelInterval) -> None:
+    """A later interval starts on the very rename proof that ended the one before (R2)."""
+    end = previous.end
+    if interval.start.effective is None:
+        raise ValueError("only the minting interval may carry a step-0 proof")
+    if end is None or end.ended_by != "rename":
+        raise ValueError("a label interval follows only a rename")
+    if end.model_dump(exclude={"ended_by"}) != interval.start.model_dump():
+        raise ValueError("a renamed interval starts on another proof than its rename's")
+
+
+class Refusal(_Validated):
     """An operation the label layer did not apply, with its provenance (R1, R5)."""
 
     op_id: str
@@ -178,7 +229,7 @@ class Refusal(Frozen):
     reason: str
 
 
-class Ledger(Frozen):
+class Ledger(_Validated):
     """One act's identities, sorted by id, with I1 and I2 checked on construction."""
 
     act: str = Field(pattern=_ACT.pattern)
@@ -232,8 +283,8 @@ def mint_enacted(
     for label, proof in labels:
         if proof.effective is not None or proof.label_minted_at != published:
             raise IdentityError(f"step 0 proves no effective date and sits at {published}")
-        if proof.member != member:
-            raise IdentityError(f"step 0's proof names another member: {proof.member}")
+        if (proof.member, proof.instrument, proof.known_from) != (member, act, published):
+            raise IdentityError("step 0's proof names another member, act or publication date")
         interval = LabelInterval(label=label, start=proof)
         pid = enacted_id(act, member, label)
         identities.append(Identity(provision_id=pid, act=act, text_member=member,
@@ -241,7 +292,7 @@ def mint_enacted(
     return _ledger(act, identities)
 
 
-class Rename(Frozen):
+class Rename(_Validated):
     """An accepted rename: the identity ``source`` (resolved in ``P``) takes ``target``."""
 
     source: str
@@ -249,19 +300,19 @@ class Rename(Frozen):
     proof: LabelProof
 
 
-class Repeal(Frozen):
+class Repeal(_Validated):
     label: str = Field(pattern=_LABEL.pattern)
     proof: LabelProof
 
 
-class Insertion(Frozen):
+class Insertion(_Validated):
     """An accepted insertion: mints a new identity under ``label`` (R1, R4(c))."""
 
     label: str = Field(pattern=_LABEL.pattern)
     proof: LabelProof
 
 
-class Step(Frozen):
+class Step(_Validated):
     """One member's operations on one act with one effective date (R4).
 
     The operations are the ones Phase B's acceptance has already accepted. An undated
@@ -285,7 +336,7 @@ class Step(Frozen):
         return self
 
 
-class StepResult(Frozen):
+class StepResult(_Validated):
     ledger: Ledger
     refusals: tuple[Refusal, ...] = ()
 
@@ -343,6 +394,10 @@ def _sources(ledger: Ledger, step: Step) -> list[Refusal]:
     live = set(ledger.live_map().values())
     held = ledger.live_map()
     missing = [_refusal(r, "rename source missing") for r in step.renames if r.source not in live]
+    labels = {pid: label for label, pid in held.items()}
+    missing += [
+        _refusal(r, "no-op rename") for r in step.renames if labels.get(r.source) == r.target
+    ]
     return missing + [
         _refusal(x, "repeal target missing") for x in step.repeals if x.label not in held
     ]
