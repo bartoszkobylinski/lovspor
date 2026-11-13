@@ -189,9 +189,14 @@ therefore rebuilds each of them from git, never from the file
   of each planned file. Invariant, checked: each attributed event is in exactly
   one document's by-id history, the one the attribution names.
 - On a repaired corpus no slug history names a non-owner, so the plan has no
-  history to repair (`nothing_to_do`). Rollback is `git revert` of the one
-  migration commit: the rebuilt files return to their base content and the
-  new ones are deleted.
+  history to repair (`nothing_to_do`). `git revert` of the one migration
+  commit restores the base tree byte for byte (tested), but it is **not** a
+  supported rollback once pushed: the reverted corpus still shows
+  `identity.json` in its history, so sync, `lovspor audit` and the planner
+  refuse it (N1) instead of falling back to legacy. Recovery after a pushed
+  migration is forward: restore both files (`git checkout <migration commit> --
+  identity.json slugs.json`) and commit. Before the push, discarding the local
+  migration commit is the rollback.
 
 ### Upstream source
 

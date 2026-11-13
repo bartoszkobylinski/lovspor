@@ -14,11 +14,12 @@ import pytest
 from typer.testing import CliRunner
 
 from lovspor.cli import app
-from lovspor.errors import IdentityMigrationError
+from lovspor.errors import IdentityMigrationError, IdentitySchemaError
 from lovspor.history import HistoryRecord, extract_lineage
 from lovspor.identity.apply import apply_plan
 from lovspor.identity.history import IdentityHistory
 from lovspor.identity.plan import MigrationPlan, plan_migration
+from lovspor.identity.registry_history import verified_corpus_identity
 from lovspor.identity.repair import NO_IDENTITY, NOT_AN_EVENT
 from lovspor.identity.report import SUMS_FILENAME, write_report
 from tests.unit.identity_git_fixtures import (
@@ -256,6 +257,18 @@ def test_the_repair_commit_reverts_as_a_unit(corpus: tuple[Path, dict[str, str]]
     git(repo, "revert", "--no-edit", "HEAD")
 
     assert tree_of(repo) == tree_of(repo, shas["history"])
+
+
+def test_a_reverted_repair_is_refused_not_downgraded(corpus: tuple[Path, dict[str, str]]) -> None:
+    # The revert restores the base tree byte for byte, but the corpus history now
+    # shows identity.json: the sync must refuse it rather than fall back to legacy.
+    repo, _ = corpus
+    apply_plan(repo, _plan(corpus))
+    commit_all(repo, "migration: repair document identity (#871)")
+    git(repo, "revert", "--no-edit", "HEAD")
+
+    with pytest.raises(IdentitySchemaError):
+        verified_corpus_identity(repo)
 
 
 def _by_id_at_base(repo: Path, rel_path: str, history: dict) -> str:

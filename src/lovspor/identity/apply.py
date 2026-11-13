@@ -4,7 +4,9 @@ Not reachable from the CLI in this change: the command is dry-run only, and
 applying the repair to lovverk is a separate owner decision (migration plan
 §7). It exists so the plan's promises are tested on synthetic repositories:
 the repair lands as one commit, a second plan on the result finds nothing to
-do, and ``git revert`` of that commit restores the base tree exactly.
+do, and ``git revert`` of that commit restores the base tree exactly (the
+reverted corpus is then refused by the downgrade guard, N1: a revert is not a
+supported rollback once pushed).
 
 It writes the planned ``manifest.json`` and ``slugs.json`` (through the same
 guards the sync uses), then ``identity.json`` declaring the enforced identity
