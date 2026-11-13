@@ -472,8 +472,13 @@ _op = st.one_of(
 
 
 def _build(drawn: list[tuple[str, str, str]]) -> Step:
+    return _build_numbered(list(enumerate(drawn)))
+
+
+def _build_numbered(numbered: list[tuple[int, tuple[str, str, str]]]) -> Step:
+    """One operation per drawn sentence; each keeps the proof of its own number."""
     ops: dict[str, list[object]] = {"renames": [], "repeals": [], "finer": [], "insertions": []}
-    for n, (kind, a, b) in enumerate(drawn):
+    for n, (kind, a, b) in numbered:
         proof = _p(n)
         if kind == "rename":
             ops["renames"].append(Rename(source=a, target=b, proof=proof))
@@ -504,9 +509,38 @@ def test_every_operation_is_accepted_or_refused_once_and_the_ledger_stays_valid(
         if r in {_p(n).op_id for n, d in enumerate(drawn) if d[0] == "insertion"}
     }
     assert len(moved) == len(inserted_ok)  # only accepted insertions mint
-    refused_sources = {
-        r.address for r in result.refusals if r.kind in {"rename", "repeal"} and r.address in held
+    # A relational refusal blocks its identity: no accepted operation reaches it. (An
+    # intrinsic refusal blocks nothing: "§ 1 blir § 1" beside "§ 1 blir § 2" leaves
+    # the second one valid, R5.)
+    blocked = {
+        r.address
+        for r in result.refusals
+        if r.phase == "relational" and r.kind in {"rename", "repeal"}
     }
-    for label in refused_sources:
-        pid = ledger.live_map()[label]
-        assert result.ledger.get(pid) == ledger.get(pid)  # a refused operation changes nothing
+    for label in blocked:
+        pid = ledger.live_map()[str(label)]
+        assert result.ledger.get(pid) == ledger.get(pid)
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    held=st.sets(_label),
+    drawn=st.lists(_op, max_size=7),
+    seed=st.integers(min_value=0, max_value=2**32 - 1),
+)
+def test_any_document_order_of_a_steps_sentences_gives_one_result(
+    held: set[str], drawn: list[tuple[str, str, str]], seed: int
+) -> None:
+    """I6: permuting the sentences of a random step (each keeps its own proof) changes nothing.
+
+    A ``Step`` holds one tuple per operation kind, so order across kinds is not an input;
+    this permutes the whole sentence list, which reorders every kind's tuple at once.
+    """
+    ledger = _ledger(*sorted(held))
+    numbered = list(enumerate(drawn))
+    shuffled = random.Random(seed).sample(numbered, len(numbered))  # noqa: S311 - test permutation
+    first = apply_step(ledger, _build_numbered(numbered))
+    again = apply_step(ledger, _build_numbered(shuffled))
+    assert (first.ledger.canonical_json(), first.accepted, first.refusals) == (
+        again.ledger.canonical_json(), again.accepted, again.refusals,
+    )  # fmt: skip
