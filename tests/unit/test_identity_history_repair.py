@@ -409,3 +409,77 @@ def test_an_unreadable_slug_history_at_the_base_is_still_rebuilt(
     [repair] = plan.history_repair.repairs
     assert (repair.target.file_doc_id, repair.base_file_events) == (None, [])
     assert HistoryRecord.model_validate(_json(plan, SLUG_JSON)).doc_id == OWNER
+
+
+@pytest.mark.parametrize("has_id", [True, False], ids=["new-holder", "no-id"])
+def test_overwrite_attribution_prefers_the_new_id_and_falls_back_to_the_parent(
+    corpus: tuple[Path, dict[str, str]], has_id: bool
+) -> None:
+    """docs/data-model.md: id-at-commit, or id-at-parent for an id-less overwrite."""
+    repo, _ = corpus
+    text = doc_text(KEEP, "x", "replacement") if has_id else "replacement without an id\n"
+    write_doc(repo, PATH, text)
+    overwrite = commit_all(repo, "update(forskrift): x")
+
+    plan = _plan(corpus)
+
+    [repair] = plan.history_repair.repairs
+    event = next(e for e in repair.trace.events if e.commit == overwrite)
+    expected_id = KEEP if has_id else LATER
+    assert (event.before_doc, event.after_doc, event.doc_id, event.rule) == (
+        LATER,
+        KEEP if has_id else None,
+        expected_id,
+        "id-at-commit" if has_id else "id-at-parent",
+    )
+    assert event.event.type == "updated"
+    history = IdentityHistory.model_validate(
+        _json(plan, f"forskrifter/history/by-id/{expected_id}.json")
+    )
+    assert (overwrite[:7], PATH) in [(e.commit, e.path) for e in history.events]
+    assert not plan.blocked
+
+
+def test_rename_source_is_walked_only_before_the_move(
+    corpus: tuple[Path, dict[str, str]],
+) -> None:
+    """The documented path walk starts at the move, not the source path's later tip."""
+    repo, shas = corpus
+    write_doc(repo, OLD_PATH, doc_text(KEEP, OWNER, "unrelated later occupant"))
+    reuse = commit_all(repo, "add(forskrift): unrelated later occupant")
+
+    plan = _plan(corpus)
+
+    [repair] = plan.history_repair.repairs
+    assert reuse not in [e.commit for e in repair.trace.events]
+    assert reuse not in [e.commit for e in repair.trace.excluded]
+    assert shas["owner_add"] in [e.commit for e in repair.trace.events]
+    assert [(s.path, s.tip) for s in repair.trace.segments[1:]] == [
+        (OLD_PATH, git(repo, "rev-parse", f"{shas['owner_move']}^"))
+    ]
+    assert f"forskrifter/history/by-id/{KEEP}.json" not in plan.history_repair.files
+
+
+def test_repair_preserves_every_field_of_an_already_written_by_id_event(
+    corpus: tuple[Path, dict[str, str]],
+) -> None:
+    """Append-only means a re-extracted event cannot replace its stored metadata."""
+    repo, shas = corpus
+    stored = _event(shas["owner_add"][:7], OLD_PATH, "added")
+    stored.update(date="2025-01-01", subject="original stored subject", lines_added=99)
+    _by_id_at_base(
+        repo,
+        _owner_by_id(),
+        {"doc_id": OWNER, "events": [stored], "schema_version": 1},
+    )
+
+    plan = _plan(corpus)
+
+    owner = IdentityHistory.model_validate(_json(plan, _owner_by_id()))
+    [preserved] = [e for e in owner.events if e.commit == shas["owner_add"][:7]]
+    expected = IdentityHistory.model_validate(
+        {"doc_id": OWNER, "events": [stored], "schema_version": 1}
+    ).events[0]
+    assert preserved == expected
+    assert len(owner.events) == 3
+    assert not plan.blocked
