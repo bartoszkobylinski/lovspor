@@ -194,9 +194,17 @@ therefore rebuilds each of them from git, never from the file
   supported rollback once pushed: the reverted corpus still shows
   `identity.json` in its history, so sync, `lovspor audit` and the planner
   refuse it (N1) instead of falling back to legacy. Recovery after a pushed
-  migration is forward: restore both files (`git checkout <migration commit> --
-  identity.json slugs.json`) and commit. Before the push, discarding the local
-  migration commit is the rollback.
+  migration is forward: restore a **matched pair** of `identity.json` and
+  `slugs.json` from one commit — the last commit on `main` that held both and
+  that `lovspor audit` accepted — never `slugs.json` from the migration commit
+  alone (the registry-history check refuses any entry added since then and
+  later missing), and never one file without the other. Take both from the same
+  commit (`git checkout <last good commit> -- identity.json slugs.json`), run
+  `lovspor audit --corpus-path <repo>` before committing, and name that commit
+  in the commit message, so the restored pair's provenance stays traceable.
+  Nothing is rewritten or bypassed: the history keeps the bad commit and the
+  restore. Before the push, discarding the local migration commit is the
+  rollback.
 
 ### Upstream source
 
