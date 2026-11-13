@@ -51,6 +51,7 @@ from lovspor.errors import RegjeringenFetchError
 from lovspor.observatory.fetch import CaptureSettings, RateLimiter
 from lovspor.observatory.robots import RobotsPolicy
 from lovspor.regjeringen_fetch.models import (
+    SCHEMA_BEFORE_NORMALIZATION,
     FetchOutcome,
     FetchRecord,
     FetchRun,
@@ -407,6 +408,25 @@ def check_source_proof(run: FetchRun) -> None:
         _check_terms(run.terms)
         if run.terms.retrieved_at < run.robots.retrieved_at:
             raise RegjeringenFetchError(_PROOF, "terms_before_robots")
+    _check_normalized(run)
+
+
+def _check_normalized(run: FetchRun) -> None:
+    """Schema 3: a normalized digest on every stored HTML page and nowhere else; schema 2: none.
+
+    Checked last, so every fault above keeps its precedence. Only presence is
+    checked: the value is a comparison digest no check uses yet (FC1a).
+    """
+    html = [
+        (page.outcome is FetchOutcome.FETCHED and page.sha256 is not None, page)
+        for page in run.records
+    ]
+    pages: list[tuple[bool, FetchRecord | SourceEvidence]] = [*html, (False, run.robots)]
+    if run.terms is not None:
+        pages.append((run.terms.state is SourceState.PUBLISHED, run.terms))
+    recorded = run.schema_version != SCHEMA_BEFORE_NORMALIZATION
+    if any(page.normalized != (recorded and stored) for stored, page in pages):
+        raise RegjeringenFetchError(_PROOF, "normalized_digest")
 
 
 def _check_robots(evidence: SourceEvidence) -> None:

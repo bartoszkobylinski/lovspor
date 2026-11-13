@@ -5,7 +5,9 @@ page, never robots.txt), a ``normalized_sha256`` and the ``normalization_rule``
 that produced it (:mod:`lovspor.regjeringen_fetch.normalize`). It is a
 comparison value only: the raw ``sha256`` names the stored file and is what
 every check and comparison uses. Schema 2 records carry neither field and are
-read as written; nothing is filled in for them.
+read as written; nothing is filled in for them. Where the pair may appear is
+checked by ``check_source_proof``, after every earlier check, so a malformed
+record is refused for the same reason it was before schema 3.
 """
 
 from datetime import datetime
@@ -17,7 +19,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 NormalizedDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 # The rules a reader accepts; ``normalize.NORMALIZATION_RULE`` is the one written.
 NormalizationRule = Literal["regjeringen-csp-nonce/1"]
-_SCHEMA_BEFORE_NORMALIZATION = 2
+SCHEMA_BEFORE_NORMALIZATION = 2
 
 
 class _Normalized(BaseModel):
@@ -64,12 +66,6 @@ class FetchRecord(_Normalized):
     sha256: str | None = None
     size: int | None = None
     location: str | None = None
-
-    @model_validator(mode="after")
-    def _normalized_only_when_stored(self) -> "FetchRecord":
-        if self.normalized and self.sha256 is None:
-            raise ValueError("a normalized digest belongs to a stored page only")
-        return self
 
 
 class SourceKind(StrEnum):
@@ -122,10 +118,6 @@ class SourceEvidence(_Normalized):
             self.state is not SourceState.PUBLISHED and not bare
         ):
             raise ValueError("a digest and size belong to published evidence only")
-        if self.normalized and self.kind is SourceKind.ROBOTS_TXT:
-            raise ValueError("robots.txt is compared raw and has no normalized digest")
-        if self.normalized and not stored:
-            raise ValueError("a normalized digest belongs to stored evidence only")
         return self
 
 
@@ -146,20 +138,6 @@ class FetchRun(BaseModel):
     terms: SourceEvidence | None
     delay_seconds: float
     records: tuple[FetchRecord, ...]
-
-    @model_validator(mode="after")
-    def _normalized_by_schema(self) -> "FetchRun":
-        """Schema 2: no page carries a normalized digest. Schema 3: every stored HTML page does."""
-        html: list[_Normalized] = [record for record in self.records if record.sha256 is not None]
-        if self.terms is not None and self.terms.sha256 is not None:
-            html.append(self.terms)
-        normalized = [page.normalized for page in html]
-        if self.schema_version == _SCHEMA_BEFORE_NORMALIZATION:
-            if any(normalized):
-                raise ValueError("schema 2 records carry no normalized digest")
-        elif not all(normalized):
-            raise ValueError("schema 3 records a normalized digest for every stored HTML page")
-        return self
 
 
 def all_fetched(run: FetchRun) -> bool:

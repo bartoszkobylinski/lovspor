@@ -111,15 +111,18 @@ def test_storage_stays_keyed_by_the_raw_digest_with_the_bytes_as_served(
     assert names == {f"{one.sha256}.html", f"{two.sha256}.html"}
 
 
-def test_robots_never_carries_a_normalized_digest(httpx_mock: HTTPXMock, tmp_path: Path) -> None:
+def test_robots_never_carries_a_normalized_digest_and_the_proof_refuses_one(
+    httpx_mock: HTTPXMock, tmp_path: Path
+) -> None:
     run = _fetch(httpx_mock, tmp_path / "pages", {CH1: _page("QUJD")})
     assert run.robots.state is SourceState.PUBLISHED
     assert run.robots.normalized_sha256 is None
     assert run.robots.normalization_rule is None
     doc: Doc = json.loads(run.model_dump_json())
     doc["robots"] |= {"normalized_sha256": "0" * 64, "normalization_rule": NORMALIZATION_RULE}
-    with pytest.raises(ValidationError, match="robots"):
-        FetchRun.model_validate(doc)
+    run = FetchRun.model_validate(doc)
+    with pytest.raises(RegjeringenFetchError, match="source_proof_inconsistent: normalized_digest"):
+        check_source_proof(run)
 
 
 def test_published_terms_carry_a_normalized_digest(httpx_mock: HTTPXMock, tmp_path: Path) -> None:
@@ -226,12 +229,13 @@ def test_a_schema_2_record_written_by_the_fetcher_still_reads_through_policy_sou
 
 
 @pytest.mark.parametrize("where", ["record", "terms"])
-def test_schema_2_refuses_a_normalized_digest(where: str) -> None:
+def test_the_proof_refuses_a_schema_2_record_with_a_normalized_digest(where: str) -> None:
     doc = _copy(SCHEMA_2)
     target = doc["records"][0] if where == "record" else doc["terms"]
     target |= {"normalized_sha256": "c" * 64, "normalization_rule": NORMALIZATION_RULE}
-    with pytest.raises(ValidationError, match="schema 2"):
-        FetchRun.model_validate(doc)
+    run = FetchRun.model_validate(doc)
+    with pytest.raises(RegjeringenFetchError, match="source_proof_inconsistent: normalized_digest"):
+        check_source_proof(run)
 
 
 def _schema_3() -> Doc:
@@ -251,12 +255,13 @@ def test_a_schema_3_record_validates_and_keeps_raw_provenance() -> None:
 
 
 @pytest.mark.parametrize("where", ["record", "terms"])
-def test_schema_3_requires_a_normalized_digest_on_every_stored_html_page(where: str) -> None:
+def test_the_proof_refuses_a_schema_3_page_without_a_normalized_digest(where: str) -> None:
     doc = _schema_3()
     target = doc["records"][0] if where == "record" else doc["terms"]
     del target["normalized_sha256"], target["normalization_rule"]
-    with pytest.raises(ValidationError, match="schema 3"):
-        FetchRun.model_validate(doc)
+    run = FetchRun.model_validate(doc)
+    with pytest.raises(RegjeringenFetchError, match="source_proof_inconsistent: normalized_digest"):
+        check_source_proof(run)
 
 
 @pytest.mark.parametrize(
@@ -276,11 +281,12 @@ def test_a_malformed_normalized_pair_is_refused(fields: Doc) -> None:
         FetchRun.model_validate(doc)
 
 
-def test_an_unstored_page_refuses_a_normalized_digest() -> None:
+def test_the_proof_refuses_a_normalized_digest_on_an_unstored_page() -> None:
     doc = _schema_3()
     doc["records"][0] |= {"outcome": "http_status", "status": 500, "sha256": None, "size": None}
-    with pytest.raises(ValidationError, match="stored"):
-        FetchRun.model_validate(doc)
+    run = FetchRun.model_validate(doc)
+    with pytest.raises(RegjeringenFetchError, match="source_proof_inconsistent: normalized_digest"):
+        check_source_proof(run)
 
 
 def test_an_unknown_schema_version_is_refused() -> None:
@@ -325,3 +331,19 @@ def test_a_nonce_only_terms_change_still_denies_automatic_clearance(
 
 def test_the_rule_written_is_a_rule_the_reader_accepts() -> None:
     assert get_args(NormalizationRule) == (NORMALIZATION_RULE,)
+
+
+def test_an_earlier_proof_fault_keeps_precedence_over_the_normalized_check() -> None:
+    """Placement is checked last: a record malformed before schema 3 is refused as before."""
+    doc = _schema_3()
+    doc["terms"] |= {"kind": "robots_txt"}
+    with pytest.raises(RegjeringenFetchError, match="source_proof_inconsistent: terms_identity"):
+        check_source_proof(FetchRun.model_validate(doc))
+
+
+def test_the_proof_refuses_a_normalized_digest_on_unpublished_terms() -> None:
+    doc = _schema_3()
+    doc["terms"] |= {"state": "absent", "status": 404, "sha256": None, "size": None}
+    doc["terms"]["hops"][0]["status"] = 404
+    with pytest.raises(RegjeringenFetchError, match="normalized_digest"):
+        check_source_proof(FetchRun.model_validate(doc))
