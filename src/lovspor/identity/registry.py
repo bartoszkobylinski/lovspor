@@ -37,7 +37,6 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, mo
 
 from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import IdentitySchemaError, ParseError, SlugOwnershipError
-from lovspor.identity.corpus_git import MANIFEST_PATH
 from lovspor.identity.history_marker import refuse_downgrade, refuse_empty_registry
 from lovspor.identity.schema import (
     ENFORCED_IDENTITY_SCHEMA,
@@ -46,7 +45,7 @@ from lovspor.identity.schema import (
     REGISTRY_FILENAME,
     declared_schema,
 )
-from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
+from lovspor.storage.manifest import Manifest, ManifestRecord
 
 logger = logging.getLogger(__name__)
 
@@ -301,19 +300,6 @@ def require_registry_covers(registry: SlugRegistry, manifest: Manifest, where: s
             f"registry never loses an entry, so it was truncated or replaced; restore it "
             f"from the corpus history (#871)",
         )
-
-
-def verified_corpus_identity(repo: Path) -> CorpusIdentity:
-    """``corpus_identity``, and an enforced registry covers the working-tree manifest.
-
-    For a clean tree (sync start, the audit): mid-sync the manifest on disk is
-    ahead of the registry until the commit that stages both.
-    """
-    identity = corpus_identity(repo)
-    manifest_path = repo / MANIFEST_PATH
-    if isinstance(identity, EnforcedCorpus) and manifest_path.exists():
-        require_registry_covers(identity.registry, read_manifest(manifest_path), str(repo))
-    return identity
 
 
 def update_slug_registry(repo: Path, manifest: Manifest) -> list[Path]:

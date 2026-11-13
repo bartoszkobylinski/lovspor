@@ -31,8 +31,8 @@ from lovspor.identity.registry import (
     registered_ownership,
     registry_json,
     update_slug_registry,
-    verified_corpus_identity,
 )
+from lovspor.identity.registry_history import verified_corpus_identity
 from lovspor.identity.schema import IDENTITY_FILENAME, declaration_json
 from lovspor.storage.manifest import Manifest
 from lovspor.sync.orchestrator import _ensure_clean_corpus
@@ -310,14 +310,17 @@ def test_a_shallow_clone_cannot_prove_legacy(tmp_path: Path) -> None:
         plan_migration(clone, "HEAD")
 
 
-def test_a_shallow_clone_of_a_declared_corpus_is_enforced(
+def test_a_shallow_clone_of_a_declared_corpus_is_enforced_but_not_verified(
     migrated: tuple[Path, str], tmp_path: Path
 ) -> None:
+    """Enforced mid-run, but the entry points cannot check the registry's history."""
     repo, _ = migrated
     clone = tmp_path / "clone"
     git(tmp_path, "clone", "-q", "--depth", "1", f"file://{repo}", str(clone))
 
-    assert isinstance(verified_corpus_identity(clone), EnforcedCorpus)
+    assert isinstance(corpus_identity(clone), EnforcedCorpus)
+    with pytest.raises(IdentitySchemaError, match="shallow"):
+        verified_corpus_identity(clone)
 
 
 def test_a_directory_without_git_history_cannot_prove_legacy(tmp_path: Path) -> None:

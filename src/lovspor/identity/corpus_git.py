@@ -7,11 +7,13 @@ List arguments only, never a shell.
 """
 
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 from lovspor.errors import IdentityMigrationError
 
 MANIFEST_PATH = "manifest.json"
+_REVISION_CHUNK = 16
 #: ``--no-replace-objects``: a ``refs/replace/`` entry must not rewrite the
 #: history the identity guards read (#871, N1).
 _GIT = ("git", "--no-optional-locks", "--no-replace-objects", "-c", "core.quotePath=false")
@@ -62,6 +64,54 @@ def last_commit_touching(repo: Path, rev: str, path: str) -> str | None:
     """
     out = _git(repo, "log", "-1", "--full-history", "--format=%H", rev, "--", path)
     return out.decode().strip() or None
+
+
+def first_commit_adding(repo: Path, rev: str, path: str) -> str | None:
+    """The oldest commit reachable from ``rev`` that added ``path``, every merge side followed."""
+    out = _git(
+        repo,
+        "log",
+        "--full-history",
+        "--topo-order",
+        "--diff-filter=A",
+        "--format=%H",
+        rev,
+        "--",
+        path,
+    )
+    commits = out.decode().split()
+    return commits[-1] if commits else None
+
+
+def commits_touching_since(repo: Path, rev: str, since: str, path: str) -> list[str]:
+    """``since``, then every later commit ``rev`` reaches that touched ``path``, oldest first.
+
+    "After" is everything ``rev`` reaches that ``since``'s parents do not, so a
+    side branch merged after ``since`` is walked too.
+    """
+    args = ("--full-history", "--topo-order", "--reverse", "--format=%H")
+    out = _git(repo, "log", *args, rev, "--not", f"{since}^@", "--", path)
+    later = [commit for commit in out.decode().split() if commit != since]
+    return [since, *later]
+
+
+def iter_revisions(repo: Path, commits: list[str], path: str) -> Iterator[bytes | None]:
+    """``path`` at each of ``commits`` in order, through one ``cat-file --batch`` per chunk.
+
+    Chunked so that hundreds of revisions of a megabyte-sized file never sit in
+    memory at once.
+    """
+    for start in range(0, len(commits), _REVISION_CHUNK):
+        chunk = commits[start : start + _REVISION_CHUNK]
+        yield from read_blobs_at(repo, [(commit, path) for commit in chunk])
+
+
+def read_blobs_at(repo: Path, objects: list[tuple[str, str]]) -> list[bytes | None]:
+    """``commit:path`` for each pair through one ``cat-file --batch``; ``None`` when missing."""
+    if not objects:
+        return []
+    request = "".join(f"{commit}:{path}\n" for commit, path in objects).encode()
+    return _parse_batch(_git(repo, "cat-file", "--batch", stdin=request), len(objects))
 
 
 def manifest_commits(repo: Path, base: str) -> list[str]:

@@ -36,6 +36,7 @@ from lovspor.identity.registry import (
     require_consistent,
     require_registry_covers,
 )
+from lovspor.identity.registry_history import require_registry_history
 from lovspor.identity.schema import (
     ENFORCED_IDENTITY_SCHEMA,
     IDENTITY_FILENAME,
@@ -192,12 +193,16 @@ def _read_history(repo: Path, commit: str) -> dict[str, str | None]:
     return {path: _history_doc_id(blob) for path, blob in read_blobs(repo, commit, paths).items()}
 
 
-def _require_covered(registry: SlugRegistry | None, manifest: Manifest, commit: str) -> None:
-    """Refuse a base registry that misses an address of the base manifest (truncation)."""
+def _require_covered(
+    repo: Path, registry: SlugRegistry | None, manifest: Manifest, commit: str
+) -> None:
+    """Refuse a base registry that misses an address of the base manifest (truncation),
+    or drops or rewrites an entry committed since the migration."""
     if registry is None:
         return
     try:
         require_registry_covers(registry, manifest, commit)
+        require_registry_history(repo, registry, commit)
     except IdentitySchemaError as exc:
         raise IdentityMigrationError(str(exc)) from exc
 
@@ -208,7 +213,7 @@ def read_base(repo: Path, base_ref: str) -> BaseState:
     registry = _read_registry(repo, commit)
     schema = _read_identity_schema(repo, commit, registry)
     manifest = _read_manifest(repo, commit)
-    _require_covered(registry, manifest, commit)
+    _require_covered(repo, registry, manifest, commit)
     return BaseState(
         commit=commit,
         identity_schema=schema,

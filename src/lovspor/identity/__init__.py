@@ -7,16 +7,14 @@ manifest record never disappears (``records``), a slug never changes owner
 ``doc_id`` (``history``). Whether the corpus is held to them is its declared
 identity schema (``schema``, ``identity.json``), and a corpus whose git
 history shows it was migrated never reads as legacy again
-(``history_marker``). ``migration`` plans the one-off repair of a corpus
+(``history_marker``), nor drops or rewrites a registry entry its history
+committed (``registry_history``). ``migration`` plans the one-off repair of a corpus
 written before these guards existed.
 """
 
 from lovspor.identity.records import replace_manifest
-from lovspor.identity.registry import (
-    corpus_identity,
-    registered_ownership,
-    verified_corpus_identity,
-)
+from lovspor.identity.registry import corpus_identity, registered_ownership
+from lovspor.identity.registry_history import verified_corpus_identity
 
 __all__ = [
     "corpus_identity",

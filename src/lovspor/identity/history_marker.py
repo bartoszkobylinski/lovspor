@@ -21,6 +21,7 @@ what this evidence can see: ``docs/data-model.md`` lists that residual.
 """
 
 import json
+from functools import lru_cache
 from pathlib import Path
 
 from lovspor.errors import IdentityMigrationError, IdentitySchemaError
@@ -62,7 +63,24 @@ def migration_evidence(repo: Path, rev: str = "HEAD") -> str | None:
     """The newest commit reachable from ``rev`` that touched ``identity.json``.
 
     ``None`` when no commit ever did, including a repository with no commits.
+    Every history write reads the identity, so a verdict for a resolved commit
+    is memoised per repository: one ``rev-parse`` then, instead of four git
+    processes. A refusal is never memoised.
     """
+    try:
+        commit = resolve_commit(repo, rev)
+    except IdentityMigrationError:
+        return _evidence(repo, rev)
+    return _evidence_at(repo.resolve(), commit)
+
+
+@lru_cache(maxsize=64)
+def _evidence_at(repo: Path, commit: str) -> str | None:
+    """``_evidence`` for a resolved repository and a full sha, whose answer is fixed."""
+    return _evidence(repo, commit)
+
+
+def _evidence(repo: Path, rev: str) -> str | None:
     try:
         if not _readable_history(repo):
             return None
