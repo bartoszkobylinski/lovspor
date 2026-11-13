@@ -264,3 +264,44 @@ def test_adversarial_markup_is_scanned_in_linear_time(unit: bytes) -> None:
     started = time.perf_counter()
     assert normalize_regjeringen_html(page) == page
     assert time.perf_counter() - started < 2.0
+
+
+@pytest.mark.parametrize(
+    "element",
+    ["script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript"],
+)
+def test_raw_text_preserves_embedded_markup_and_resumes_after_closing_tag(element: str) -> None:
+    """The rule excludes raw text, including apparent CSP metadata inside it."""
+    embedded = b'<meta name="csp-nonce" content="QUJD"><b nonce="QUJD">'
+    prefix = f'<{element.upper()} nonce="QUJD">'.encode()
+    closing = f"</{element.capitalize()} >".encode()
+    tail = b'<meta name="csp-nonce" content="WFla"><b nonce="WFla">'
+    page = prefix + embedded + closing + tail
+    expected = (
+        prefix.replace(b'nonce="QUJD"', b'nonce="NONCE"')
+        + embedded
+        + closing
+        + b'<meta name="csp-nonce" content="NONCE"><b nonce="NONCE">'
+    )
+    assert normalize_regjeringen_html(page) == expected
+    assert normalize_regjeringen_html(expected) == expected
+
+
+def test_plaintext_keeps_all_remaining_markup_as_served() -> None:
+    page = b'<PLAINTEXT nonce="QUJD"><b nonce="WFla"></plaintext><b nonce="WFla">'
+    expected = b'<PLAINTEXT nonce="NONCE"><b nonce="WFla"></plaintext><b nonce="WFla">'
+    assert normalize_regjeringen_html(page) == expected
+
+
+@pytest.mark.parametrize("duplicate", [b'NONCE="WFla"', b"Nonce='WFla'", b"nonce=WFla", b"NoNcE"])
+def test_duplicate_nonce_in_any_spelling_prevents_replacement(duplicate: bytes) -> None:
+    page = b'<b nonce="QUJD" ' + duplicate + b'><i nonce="WFla">'
+    expected = b'<b nonce="QUJD" ' + duplicate + b'><i nonce="NONCE">'
+    assert normalize_regjeringen_html(page) == expected
+
+
+def test_meta_nonce_and_content_are_replaced_without_losing_intervening_bytes() -> None:
+    page = b'<meta nonce="QUJDRA==" data-x="keep" content="WFla&#x2B;" name="csp-nonce">'
+    expected = b'<meta nonce="NONCE" data-x="keep" content="NONCE" name="csp-nonce">'
+    assert normalize_regjeringen_html(page) == expected
+    assert normalize_regjeringen_html(expected) == expected

@@ -347,3 +347,24 @@ def test_the_proof_refuses_a_normalized_digest_on_unpublished_terms() -> None:
     doc["terms"]["hops"][0]["status"] = 404
     with pytest.raises(RegjeringenFetchError, match="normalized_digest"):
         check_source_proof(FetchRun.model_validate(doc))
+
+
+def test_schema_3_json_round_trip_preserves_both_digests_and_source_proof() -> None:
+    original = FetchRun.model_validate(_schema_3())
+    restored = FetchRun.model_validate_json(original.model_dump_json())
+    assert restored == original
+    expected = _schema_3()
+    expected["robots"].update(normalized_sha256=None, normalization_rule=None)
+    assert restored.model_dump(mode="json") == expected
+    check_source_proof(restored)
+
+
+def test_terms_timing_fault_precedes_missing_normalized_digest() -> None:
+    """FC1a explicitly checks placement after all pre-existing source-proof checks."""
+    doc = _schema_3()
+    doc["terms"]["retrieved_at"] = "2026-11-09T11:59:59Z"
+    del doc["terms"]["normalized_sha256"], doc["terms"]["normalization_rule"]
+    with pytest.raises(
+        RegjeringenFetchError, match="source_proof_inconsistent: terms_before_robots"
+    ):
+        check_source_proof(FetchRun.model_validate(doc))
