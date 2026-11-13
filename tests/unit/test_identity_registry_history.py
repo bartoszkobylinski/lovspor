@@ -294,3 +294,48 @@ def test_an_empty_repository_is_never_memoised(tmp_path: Path) -> None:
 
     assert isinstance(corpus_identity(repo), LegacyCorpus)
     assert _evidence_at.cache_info().currsize == 0
+
+
+def test_a_merge_cannot_hide_an_entry_committed_on_its_other_parent(migrated: Path) -> None:
+    """The full-history contract includes entries discarded by an ours merge."""
+    git(migrated, "checkout", "-q", "-b", "side-sync")
+    _write(migrated, _registry().assign("forskrifter", "side-only", _owner(THIRD)))
+    side_commit = commit_all(migrated, "publish an address on the side branch")
+    git(migrated, "checkout", "-q", "main")
+    git(migrated, "merge", "-q", "-s", "ours", "--no-edit", "side-sync")
+
+    with pytest.raises(IdentitySchemaError, match=f"side-only: drops.*{side_commit}"):
+        verified_corpus_identity(migrated)
+    with pytest.raises(IdentityMigrationError, match="side-only: drops"):
+        plan_migration(migrated, "HEAD")
+
+
+def test_entries_after_the_first_revision_batch_are_still_protected(migrated: Path) -> None:
+    """More than sixteen revisions must preserve the entry-to-commit alignment."""
+    registry = _registry()
+    for index in range(17):
+        registry = registry.assign("forskrifter", f"extra-{index}", _owner(THIRD))
+        _write(migrated, registry)
+        added = commit_all(migrated, f"append address {index}")
+    assert isinstance(verified_corpus_identity(migrated), EnforcedCorpus)
+    _write(migrated, _set(registry, "extra-16", None))
+    commit_all(migrated, "drop the last address")
+
+    with pytest.raises(IdentitySchemaError, match=f"extra-16: drops.*{added}"):
+        verified_corpus_identity(migrated)
+
+
+@pytest.mark.parametrize("field", ["doc_id", "first_commit", "last_commit"])
+def test_each_prior_holder_field_is_immutable(migrated: Path, field: str) -> None:
+    """Prior holders are part of the immutable entry (docs/data-model.md)."""
+    registry = _registry().assign("forskrifter", "exception", THRESHOLD)
+    _write(migrated, registry)
+    original = commit_all(migrated, "append a threshold exception")
+    replacement = FIRST if field == "doc_id" else "c" * 40
+    holder = THRESHOLD.prior_holders[0].model_copy(update={field: replacement})
+    changed = THRESHOLD.model_copy(update={"prior_holders": (holder,)})
+    _write(migrated, _set(registry, "exception", changed))
+    commit_all(migrated, f"rewrite prior holder {field}")
+
+    with pytest.raises(IdentitySchemaError, match=f"exception: rewrites.*{original}"):
+        verified_corpus_identity(migrated)
