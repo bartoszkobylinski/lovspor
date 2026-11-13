@@ -496,3 +496,59 @@ def test_repair_preserves_every_field_of_an_already_written_by_id_event(
     assert preserved == expected
     assert len(owner.events) == 3
     assert not plan.blocked
+
+
+def test_history_repair_uses_the_requested_base_not_head_or_worktree(
+    corpus: tuple[Path, dict[str, str]],
+) -> None:
+    """The offline plan describes files and events at its resolved base commit."""
+    repo, shas = corpus
+    expected = _plan(corpus).history_repair
+    write_doc(repo, PATH, doc_text(KEEP, "x", "replacement after the requested base"))
+    write_doc(repo, _owner_by_id(), "not JSON at HEAD\n")
+    commit_all(repo, "update(forskrift): replacement")
+    write_doc(repo, SLUG_JSON, "uncommitted broken history\n")
+    before = git(repo, "status", "--porcelain")
+
+    plan = plan_migration(repo, shas["history"], shas["threshold"])
+
+    assert plan.history_repair == expected
+    assert git(repo, "status", "--porcelain") == before
+    assert (repo / SLUG_JSON).read_text(encoding="utf-8") == "uncommitted broken history\n"
+
+
+def test_byte_identical_planned_histories_are_not_reported_as_changed(
+    corpus: tuple[Path, dict[str, str]],
+) -> None:
+    """Repair files may already exist even while the owner's slug file is wrong."""
+    repo, _ = corpus
+    original = _plan(corpus).history_repair
+    unchanged = [_owner_by_id(), _later_by_id(), NEW_JSON, "forskrifter/history/x-2026.md"]
+    for path in unchanged:
+        write_doc(repo, path, original.files[path])
+    commit_all(repo, "sync: update manifest, index, and history")
+
+    plan = _plan(corpus)
+
+    assert plan.history_repair.files == original.files
+    assert plan.history_repair.changed == [SLUG_JSON, "forskrifter/history/x.md"]
+    assert set(unchanged).isdisjoint(plan.changed_paths)
+    assert not plan.blocked
+
+
+@pytest.mark.parametrize("contents", ["{not json\n", "[]\n", '{"events": []}\n'])
+def test_an_existing_new_slug_history_without_an_owner_blocks_repair(
+    corpus: tuple[Path, dict[str, str]], contents: str
+) -> None:
+    """An occupied new slug must name its intended holder before being replaced."""
+    repo, _ = corpus
+    write_doc(repo, NEW_JSON, contents)
+    commit_all(repo, "sync: update manifest, index, and history")
+
+    plan = _plan(corpus)
+
+    assert [(c.file, c.doc_in_file, c.attributed_to) for c in plan.history_repair.conflicts] == [
+        (NEW_JSON, None, LATER)
+    ]
+    assert plan.blocked
+    assert (repo / NEW_JSON).read_text(encoding="utf-8") == contents
