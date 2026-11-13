@@ -187,11 +187,12 @@ class EntryWalker:
         inner = replace(inner, list_group=group)
         self._loose(element.text, element)
         for item in element:
-            if item.tag == "li":
+            if item.tag == "li" and _gap_code(item) is None:
                 self._items[group] = self._items.get(group, 0) + 1
                 self._leaf_or_flow(item, replace(inner, list_item=self._items[group]))
             elif isinstance(item.tag, str):
-                self._gap(GapCode.UNSUPPORTED_STRUCTURE, item, _text_of(item))
+                code = _gap_code(item) or GapCode.UNSUPPORTED_STRUCTURE
+                self._gap(code, item, _text_of(item))
             self._loose(item.tail, element)
 
     def _leaf_or_flow(self, element: html.HtmlElement, style: _Style) -> None:

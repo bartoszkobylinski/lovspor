@@ -244,6 +244,17 @@ def test_unsupported_structure_is_one_gap_and_the_rest_of_the_part_is_kept(
     assert part(body).coverage.exact
 
 
+@pytest.mark.parametrize("attribute", ['hidden=""', 'aria-hidden="true"', 'style="display:none"'])
+def test_hidden_list_item_is_a_hidden_gap_in_place(attribute: str) -> None:
+    body = HEAD + section(f"<ul><li>a</li><li {attribute}>b</li><li>c</li></ul>")
+    assert [(entry.entry, entry.text) for entry in part(body).entries][1:] == [
+        ("span", "a"),
+        ("gap", "b"),
+        ("span", "c"),
+    ]
+    assert [gap.code for gap in gaps(body)] == [GapCode.HIDDEN_CONTENT]
+
+
 def test_gap_keeps_the_unstructured_text_it_could_not_shape() -> None:
     """As served, whitespace collapsed: no cell separator is invented (shaping tables is FC4)."""
     body = HEAD + section("<table><tr><td>celle én</td>\n<td>celle to</td></tr></table>")
