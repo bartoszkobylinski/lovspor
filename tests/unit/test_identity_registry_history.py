@@ -270,6 +270,48 @@ def test_a_memoised_verdict_does_not_outlive_its_commit(migrated: Path) -> None:
         verified_corpus_identity(migrated)
 
 
+def test_cached_history_still_checks_working_tree_edits_and_recovery(migrated: Path) -> None:
+    """Only git evidence is cached; working-tree entries are checked on every read."""
+    head = git(migrated, "rev-parse", "HEAD")
+    assert isinstance(verified_corpus_identity(migrated), EnforcedCorpus)
+    _write(migrated, _set(_registry(), "old-a", None))
+
+    with pytest.raises(IdentitySchemaError, match="forskrifter/old-a: drops"):
+        verified_corpus_identity(migrated)
+
+    _write(migrated, _registry())
+    assert isinstance(verified_corpus_identity(migrated), EnforcedCorpus)
+    assert git(migrated, "rev-parse", "HEAD") == head
+    assert git(migrated, "status", "--porcelain") == ""
+
+
+def test_planning_an_enforced_base_ignores_later_registry_damage(migrated: Path) -> None:
+    """The planner checks the base commit (docs/architecture.md), not HEAD's registry."""
+    base = git(migrated, "rev-parse", "HEAD")
+    _write(migrated, _set(_registry(), "old-a", None))
+    commit_all(migrated, "drop a historical address after the chosen base")
+
+    plan = plan_migration(migrated, base)
+
+    assert plan.base.commit == base
+    assert plan.base.registry == _registry()
+    assert plan.nothing_to_do
+    with pytest.raises(IdentityMigrationError, match="old-a: drops"):
+        plan_migration(migrated, "HEAD")
+
+
+def test_repair_at_head_does_not_validate_a_damaged_historical_base(migrated: Path) -> None:
+    """Restoration recovers HEAD, but cannot alter the selected base's contents."""
+    _write(migrated, _set(_registry(), "old-a", None))
+    damaged = commit_all(migrated, "drop a historical address")
+    _write(migrated, _registry())
+    commit_all(migrated, "restore the historical address")
+
+    assert plan_migration(migrated, "HEAD").nothing_to_do
+    with pytest.raises(IdentityMigrationError, match="old-a: drops"):
+        plan_migration(migrated, damaged)
+
+
 def test_a_memoised_legacy_verdict_does_not_outlive_its_commit(tmp_path: Path) -> None:
     repo = _seeded(tmp_path)
     _evidence_at.cache_clear()
