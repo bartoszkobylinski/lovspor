@@ -270,14 +270,6 @@ def test_image_is_a_gap_without_invented_text() -> None:
     assert (gap.code, gap.text, gap.detail) == (GapCode.IMAGE, None, "img")
 
 
-def test_inline_element_outside_the_allowlist_keeps_its_text_in_the_span() -> None:
-    body = HEAD + section("<p>Før <code>kode</code> etter.</p>")
-    assert texts(body)[1] == "Før kode etter."
-    (gap,) = gaps(body)
-    assert (gap.code, gap.text, gap.detail) == (GapCode.UNSUPPORTED_INLINE, None, "code")
-    assert part(body).coverage.exact
-
-
 def test_text_outside_any_known_element_is_a_gap_not_dropped() -> None:
     body = HEAD + section("løs tekst<p>Avsnitt.</p>")
     (gap,) = gaps(body)
@@ -444,10 +436,94 @@ def test_pages_of_two_documents_are_refused() -> None:
     assert raised.value.reason is RefusalReason.CONFLICTING_IDENTITY
 
 
-def test_hidden_inline_text_stays_in_the_span_and_is_noted() -> None:
-    body = HEAD + section('<p>Synlig <span aria-hidden="true">skjult</span> slutt.</p>')
-    assert texts(body)[1] == "Synlig skjult slutt."
-    assert [(gap.code, gap.text) for gap in gaps(body)] == [(GapCode.HIDDEN_CONTENT, None)]
+def shape(body: str) -> list[tuple[str, str | None]]:
+    """Entries after the chapter heading, as (span text | gap code, gap text or None)."""
+    return [
+        (entry.text, None) if isinstance(entry, Span) else (entry.code.value, entry.text)
+        for entry in part(body).entries[1:]
+    ]
+
+
+@pytest.mark.parametrize(
+    "attribute",
+    ['hidden=""', 'aria-hidden="true"', 'style="display:none"', 'style="visibility: hidden"'],
+)
+def test_hidden_inline_text_is_its_own_gap_between_two_spans(attribute: str) -> None:
+    body = HEAD + section(f"<p>Før <span {attribute}>HEMMELIG</span> etter.</p>")
+    assert shape(body) == [("Før", None), ("hidden_content", "HEMMELIG"), ("etter.", None)]
+    assert all("HEMMELIG" not in span.text for span in spans(body))
+    assert part(body).coverage.exact
+
+
+def test_hidden_inline_inside_an_allowed_inline_element_is_cut_out_in_place() -> None:
+    body = HEAD + section('<p>A <i>b <b>c <span hidden="">d <em>e</em></span> f</b> g</i> h</p>')
+    assert shape(body) == [("A b c", None), ("hidden_content", "d e"), ("f g h", None)]
+    assert part(body).coverage.exact
+
+
+def test_element_inside_a_hidden_element_never_reaches_a_span() -> None:
+    body = HEAD + section('<p>x <span hidden=""><code>y</code><i>z</i></span></p>')
+    assert shape(body) == [("x", None), ("hidden_content", "yz")]
+
+
+@pytest.mark.parametrize("tag", ["code", "kbd", "abbr", "mark", "small"])
+def test_unsupported_inline_element_is_a_gap_carrying_its_text(tag: str) -> None:
+    body = HEAD + section(f"<p>Før <{tag}>innhold</{tag}> etter.</p>")
+    assert shape(body) == [("Før", None), ("unsupported_inline", "innhold"), ("etter.", None)]
+    (gap,) = gaps(body)
+    assert gap.detail == tag
+    assert gap.locator == f'div[@id="kap2-1"]/p[1]/{tag}[1]'
+    assert part(body).coverage.exact
+
+
+def test_inline_gap_at_the_start_or_end_leaves_one_span() -> None:
+    assert shape(HEAD + section("<p><code>k</code> resten.</p>")) == [
+        ("unsupported_inline", "k"),
+        ("resten.", None),
+    ]
+    assert shape(HEAD + section("<p>Starten <code>k</code></p>")) == [
+        ("Starten", None),
+        ("unsupported_inline", "k"),
+    ]
+
+
+def test_empty_inline_element_is_a_gap_without_text() -> None:
+    body = HEAD + section('<p>Se <img src="/x.png" alt="Figur"> her.</p>')
+    assert shape(body) == [("Se", None), ("image", None), ("her.", None)]
+
+
+def test_split_spans_keep_their_context_and_number_their_segments() -> None:
+    body = HEAD + section(
+        '<blockquote><ul><li>før <span hidden="">skjult</span> etter</li></ul></blockquote>'
+    )
+    pieces = spans(body)[1:]
+    assert [span.segment for span in pieces] == [1, 2]
+    context = {
+        (s.kind, s.level, s.quote_group, s.quote_depth, s.list_group, s.list_item) for s in pieces
+    }
+    assert context == {("list_item", 1, 1, 1, 1, 1)}
+    assert {span.locator for span in pieces} == {'div[@id="kap2-1"]/blockquote[1]/ul[1]/li[1]'}
+    (gap,) = gaps(body)
+    assert gap.locator == 'div[@id="kap2-1"]/blockquote[1]/ul[1]/li[1]/span[1]'
+
+
+def test_an_unsplit_span_has_no_segment_number() -> None:
+    assert {span.segment for span in spans()} == {None}
+
+
+def test_repeated_identical_text_around_inline_gaps_keeps_distinct_ids() -> None:
+    body = HEAD + section(
+        '<p>Samme <span hidden="">X</span> Samme</p><p>Samme <span hidden="">X</span> Samme</p>'
+    )
+    entries = part(body).entries[1:]
+    assert [entry.text for entry in entries] == ["Samme", "X", "Samme"] * 2
+    ids = [entry.id for entry in entries]
+    assert ids == [f"regjeringen-9000001-ch2/kap2-1/{n}" for n in range(1, 7)]
+
+
+def test_inline_gap_replay_is_byte_identical() -> None:
+    body = HEAD + section('<p>a <span hidden="">b</span> c <code>d</code> e</p>')
+    assert extraction_text(extract(body)) == extraction_text(extract(body))
 
 
 def test_span_ids_and_text_never_depend_on_retrieval_time() -> None:

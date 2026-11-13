@@ -53,7 +53,7 @@ _SPECIAL_CATEGORY = re.compile(
     re.IGNORECASE,
 )
 _THIRD_PARTY_MARKER = re.compile(r"©|copyright|gjengitt med tillatelse", re.IGNORECASE)
-#: Part gaps that leave the part's spans without a proved place in the source.
+#: Part-scope gaps that leave the part's spans without a proved place in the source.
 _UNPROVED_PART = frozenset(
     {
         GapCode.MALFORMED_MARKUP,
@@ -118,7 +118,9 @@ def classify_document(extraction: DocumentExtraction) -> DocumentClassification:
 
 
 def _part_labels(part: Part) -> list[EntryLabel]:
-    unproved = any(isinstance(e, Gap) and e.code in _UNPROVED_PART for e in part.entries)
+    unproved = any(
+        isinstance(e, Gap) and e.scope == "part" and e.code in _UNPROVED_PART for e in part.entries
+    )
     return [
         _span_label(entry, unproved=unproved, annex=part.annex)
         if isinstance(entry, Span)

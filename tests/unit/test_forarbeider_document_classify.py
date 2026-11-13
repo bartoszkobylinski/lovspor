@@ -157,3 +157,50 @@ def test_nothing_here_is_a_clearance_or_release_eligibility() -> None:
 
 def test_classification_is_deterministic() -> None:
     assert classify_document(extracted(QUOTED)) == classify_document(extracted(QUOTED))
+
+
+@pytest.mark.parametrize(
+    "markup", ['<span hidden="">Skjult tekst</span>', "<code>Kode tekst</code>"]
+)
+def test_problematic_inline_content_is_never_an_official_text_candidate(markup: str) -> None:
+    body = HEAD + section(f"<p>Departementet skriver {markup} her.</p>")
+    document = extracted(body)
+    entries = {entry.id: entry for item in document.parts for entry in item.entries}
+    by_text = {
+        entries[label.entry_id].text: label
+        for label in classify_document(document).entries
+        if label.entry_id in entries
+    }
+    inner = "Skjult tekst" if "hidden" in markup else "Kode tekst"
+    assert by_text[inner].rights is RightsCandidate.UNRESOLVED
+    assert by_text[inner].signals[0].startswith("gap:")
+    assert by_text["Departementet skriver"].rights is RightsCandidate.OFFICIAL_TEXT_CANDIDATE
+    assert all(
+        inner not in entries[label.entry_id].text
+        for label in classify_document(document).entries
+        if label.entry_id in entries and label.rights is RightsCandidate.OFFICIAL_TEXT_CANDIDATE
+    )
+
+
+def test_inline_gap_privacy_is_read_from_its_own_text() -> None:
+    body = HEAD + section('<p>Nøytral <span hidden="">ola@example.invalid</span> tekst.</p>')
+    document = extracted(body)
+    gap = next(e for e in document.parts[0].entries if not isinstance(e, Span))
+    label = next(item for item in classify_document(document).entries if item.entry_id == gap.id)
+    assert (label.rights, label.privacy) == (
+        RightsCandidate.UNRESOLVED,
+        PrivacyCandidate.PRIVACY_REVIEW_REQUIRED,
+    )
+    assert label.signals == ("gap:hidden_content", "personal_data_pattern")
+
+
+def test_hidden_ancestor_of_the_region_leaves_every_span_unresolved() -> None:
+    raw = page().replace(b'<div class="contentArea', b'<div hidden="" class="contentArea')
+    document = extract_document([SourcePage(payload=raw, url=URL, retrieved_at=WHEN)])
+    codes = {(e.code.value, e.scope) for e in document.parts[0].entries if not isinstance(e, Span)}
+    assert ("hidden_content", "part") in codes
+    in_part = {e.id for e in document.parts[0].entries if isinstance(e, Span)}
+    rights = {
+        item.rights for item in classify_document(document).entries if item.entry_id in in_part
+    }
+    assert rights == {RightsCandidate.UNRESOLVED}

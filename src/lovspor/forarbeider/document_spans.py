@@ -72,6 +72,20 @@ class _Style:
     list_item: int | None = None
 
 
+_Segment = str | tuple[GapCode, html.HtmlElement]
+
+
+def _merged(segments: list[_Segment]) -> list[_Segment]:
+    """Neighbouring text segments joined, gap segments kept in place."""
+    merged: list[_Segment] = []
+    for segment in segments:
+        if isinstance(segment, str) and merged and isinstance(merged[-1], str):
+            merged[-1] += segment
+        else:
+            merged.append(segment)
+    return merged
+
+
 def is_hidden(element: html.HtmlElement) -> bool:
     """Hidden by an explicit statement on the element, never by a class or a style sheet."""
     stated = str(element.get("aria-hidden")).strip().lower() == "true"
@@ -202,9 +216,25 @@ class EntryWalker:
             self._flow(element, style)
 
     def _emit(self, element: html.HtmlElement, style: _Style) -> None:
-        text = normalized(self._inline(element))
-        if not text.strip():
-            return
+        """Text of ``element`` as spans, cut around every inline element that is a gap.
+
+        A hidden or unsupported inline element becomes one gap carrying its own
+        text at its place, so its text is never inside a span. The spans either
+        side are numbered by ``segment``; an uncut element is one span without.
+        """
+        pieces = _merged(self._segments(element))
+        cut = any(not isinstance(piece, str) for piece in pieces)
+        segment = 0
+        for piece in pieces:
+            if not isinstance(piece, str):
+                self._gap(piece[0], piece[1], _text_of(piece[1]))
+            elif text := normalized(piece):
+                segment += 1
+                self._span(element, style, text, segment if cut else None)
+
+    def _span(
+        self, element: html.HtmlElement, style: _Style, text: str, segment: int | None
+    ) -> None:
         self.entries.append(
             Span(
                 id=self._next_id(),
@@ -213,26 +243,27 @@ class EntryWalker:
                 section_id=self._section,
                 locator=self._locator(element),
                 source_line=element.sourceline,
+                segment=segment,
                 **vars(style),
             )
         )
 
-    def _inline(self, element: html.HtmlElement) -> str:
-        parts = [element.text or ""]
+    def _segments(self, element: html.HtmlElement) -> list[_Segment]:
+        segments: list[_Segment] = [element.text or ""]
         for child in element:
-            parts.extend((self._inline_child(child), child.tail or ""))
-        return "".join(parts)
+            segments += self._child_segments(child)
+            segments.append(child.tail or "")
+        return segments
 
-    def _inline_child(self, child: html.HtmlElement) -> str:
-        """Inline text; an element outside the allowlist keeps its text and is noted as a gap."""
+    def _child_segments(self, child: html.HtmlElement) -> list[_Segment]:
+        """An allowed inline child's own segments; any other element is one gap segment."""
         if not isinstance(child.tag, str):
-            return ""
+            return []
         if child.tag == "br":
-            return " "
+            return [" "]
         if child.tag in _INLINE and not is_hidden(child):
-            return self._inline(child)
-        self._gap(_gap_code(child) or GapCode.UNSUPPORTED_INLINE, child, None)
-        return str(child.text_content())
+            return self._segments(child)
+        return [(_gap_code(child) or GapCode.UNSUPPORTED_INLINE, child)]
 
     def _gap(
         self, code: GapCode, element: html.HtmlElement, text: str | None, scope: GapScope = "span"

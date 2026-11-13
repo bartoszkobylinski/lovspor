@@ -69,7 +69,9 @@ class Span(BaseModel):
     1 within its part, so two adjacent quotations never merge; ``quote_depth``
     counts the quotations around it. ``list_group`` does the same for lists,
     and ``list_item`` numbers the ``li`` within its group, so two paragraphs of
-    one item are told from two items.
+    one item are told from two items. ``segment`` numbers the spans of one
+    element cut apart by an inline gap (hidden or unsupported markup, which is
+    never inside a span); an element not cut has none.
     ``locator`` is the element's path below the chapter region, ``source_line``
     the line of the served page it starts on.
     """
@@ -89,6 +91,7 @@ class Span(BaseModel):
     quote_depth: int = Field(default=0, ge=0)
     list_group: int | None = Field(default=None, ge=1)
     list_item: int | None = Field(default=None, ge=1)
+    segment: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
