@@ -373,8 +373,9 @@ def apply_step(ledger: Ledger, step: Step) -> StepResult:
 
     Every source is read in ``P`` and every target written in ``Q``, so chains and
     cycles need no order. A structural violation (missing source, conflicting renames,
-    a label assigned twice in ``Q``, an undated step) refuses every offending operation
-    and applies none; the ledger is returned unchanged (I4). Allocating an id that
+    a label assigned twice in ``Q``, an undated step) refuses the whole step: each
+    offending operation with its reason, every other one as ``refused with its step``.
+    Nothing applies and the ledger is returned unchanged (I4). Allocating an id that
     already exists is a hard failure (I2).
     """
     if step.act != ledger.act:
@@ -391,7 +392,22 @@ def _structural(ledger: Ledger, step: Step) -> tuple[Refusal, ...]:
     found = [*_sources(ledger, step), *_fates(step)]
     if not found:
         found = _collisions(ledger, step)
+    found += _with_its_step(step, found)
     return tuple(sorted(found, key=lambda r: (r.op_id, r.reason)))
+
+
+def _with_its_step(step: Step, found: list[Refusal]) -> list[Refusal]:
+    """Every other operation of a refused step: not applied, so reported (R1, I4).
+
+    R4 refuses a relational conflict's component; Phase A has no components yet and
+    refuses the whole step, so an operation that broke no rule is refused with it.
+    """
+    offending = {(r.op_id, r.asserted_label) for r in found}
+    return [
+        _refusal(op, "refused with its step")
+        for op in _operations(step)
+        if found and (op.proof.op_id, _asserted(op)) not in offending
+    ]
 
 
 def _sources(ledger: Ledger, step: Step) -> list[Refusal]:
@@ -426,9 +442,11 @@ def _collisions(ledger: Ledger, step: Step) -> list[Refusal]:
     moved = {r.source for r in step.renames}
     vacated = {label for label, pid in held.items() if pid in moved}
     vacated |= {x.label for x in step.repeals}
-    if moved & {held[x.label] for x in step.repeals}:
-        both = [x for x in step.repeals if held[x.label] in moved]
-        return [_refusal(x, "conflicting operations within instrument") for x in both]
+    ended = {held[x.label] for x in step.repeals}
+    if moved & ended:
+        both: list[Operation] = [x for x in step.repeals if held[x.label] in moved]
+        both += [r for r in step.renames if r.source in ended]
+        return [_refusal(op, "conflicting operations within instrument") for op in both]
     kept = [label for label in held if label not in vacated]
     assigned = Counter(
         [*kept, *(r.target for r in step.renames), *(n.label for n in step.insertions)]

@@ -305,6 +305,35 @@ def test_a_rejected_step_leaves_its_insertion_unminted() -> None:
     assert refusal.sentence_sha256 == P2008.sentence_sha256
 
 
+def test_every_operation_of_a_refused_step_is_reported_not_only_the_offending_one() -> None:
+    """Phase A refuses the whole step; an operation that broke no rule is refused with it."""
+    clean = _proof(L2008, "0:I:9.0", date(2008, 3, 7), "lov/2008-03-07-4")
+    step = Step(
+        act=ACT, member=L2008, effective=date(2008, 3, 7),
+        insertions=(Insertion(label="§101", proof=P2008), Insertion(label="§500", proof=clean)),
+    )  # fmt: skip
+    ledger = _enacted("§101")
+    result = apply_step(ledger, step)
+    assert result.ledger == ledger
+    assert sorted((r.op_id, r.asserted_label, r.reason) for r in result.refusals) == sorted(
+        [
+            (P2008.op_id, "§101", "label collision"),
+            (clean.op_id, "§500", "refused with its step"),
+        ]
+    )
+
+
+def test_an_accepted_step_reports_no_collateral_refusal() -> None:
+    clean = _proof(L2008, "0:I:9.0", date(2008, 3, 7), "lov/2008-03-07-4")
+    step = Step(
+        act=ACT, member=L2008, effective=date(2008, 3, 7),
+        insertions=(Insertion(label="§500", proof=clean),),
+    )  # fmt: skip
+    result = apply_step(_enacted("§101"), step)
+    assert result.refusals == ()
+    assert result.ledger.holder("§500") is not None
+
+
 def test_minting_an_existing_id_again_is_a_hard_failure() -> None:
     """I2: the same step applied twice would allocate one id twice."""
     ledger = _step_2008(_enacted("§101", "§102"))
@@ -480,6 +509,8 @@ def test_a_rename_and_a_repeal_of_one_identity_are_conflicting() -> None:
         repeals=(Repeal(label="§1", proof=P2008),),
     )  # fmt: skip
     assert _refused(_enacted("§1"), step) == ("conflicting operations within instrument",)
+    kinds = {r.asserted_label for r in apply_step(_enacted("§1"), step).refusals}
+    assert kinds == {"§1", "§9"}  # the repeal and the rename, both refused as conflicting
 
 
 def test_two_insertions_under_one_label_are_a_collision() -> None:
