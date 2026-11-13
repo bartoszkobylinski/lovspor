@@ -16,7 +16,7 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
 |---|---|---|---|---|---|
 | D1 | Full-corpus direction | T | **ACCEPT** | now, before FC3 | all |
 | D2 | Successor ADR rather than Amendment 2 | T | **ACCEPT** | now, together with D1 | documentation only |
-| D3 | Separate `lovverk-forarbeider` repository before the first release; private during preparation; bot fast-forward push to protected `main` (D11) | T, S | **ACCEPT** | before FC9b; not needed for FC1–FC8 | FC9b, AR7, FC10, FC13 |
+| D3 | Separate `lovverk-forarbeider` repository before the first release; private during preparation; the bot (preferably a GitHub App) updates protected `main` (D11) | T, S | **ACCEPT** | before FC9b; not needed for FC1–FC8 | FC9b, AR7, FC10, FC13 |
 | D4 | `terms_basis: none_identified`, terms locus, 30-day default | T, L | **ACCEPT**, rule only | before FC2 merges | FC1b, FC2, FC7 |
 | D5 | Discovery from official catalogues | S, L | **DEFER** | before FC11 | FC11, FC12 |
 | D6 | SSH signatures and trust boundary (revised for D11: separate owner and bot keys) | S | **ACCEPT** | before FC7 and AR1 merge | FC7, AR1, AR4, AR6 |
@@ -58,7 +58,7 @@ Kind: **T** technical architecture, **S** operational or security, **L** legal (
 - **Recommended:**
   - a new repository, created by the owner, holding only released forarbeider;
   - the GitHub rulesets of architecture §9.7: R-integrity with no bypass, and R-writers with only the bot (preferably a GitHub App, bypass by App id) and the admin as bypass actors;
-  - releases are pushed by the bot under D11, with no manual merge. Owner-only merging applies to engine and trust-root changes, not to releases;
+  - releases are published by the bot under D11, with no manual merge. Owner-only merging applies to engine and trust-root changes, not to releases;
   - its initial commit is pinned in the engine (FC9b);
   - the engine and every command stay in lovspor;
   - lovverk keeps law text only.
@@ -145,11 +145,12 @@ The owner rejected manual approval of each document, batch, PR or merge (2026-11
   - an owner-signed source/family policy with `automated_publication: true`, budgets, anomaly thresholds and a reference to a completed legal assessment (D10);
   - eligibility only for `source_complete` and `publication_complete` versions; everything else quarantined;
   - bounded batches;
-  - a bot-signed release manifest and commit, fast-forward pushed by a minimally scoped bot credential, verified before and after the push;
+  - a bot-signed release manifest. Publication, preferably by a GitHub App through `createCommitOnBranch` with `expectedHeadOid` (GitHub creates and signs the commit and moves `main` atomically); a bot-key-signed commit and fast-forward push only as a tested fallback;
+  - the proposed bytes validated before publication, the actual GitHub commit verified after it, and a receipt only then;
   - immutable receipts;
   - a three-level kill switch;
   - per-document failure isolation;
-  - authorization re-checked immediately before every push, with a persistent stop latch;
+  - authorization re-checked immediately before every publication call, with a persistent stop latch;
   - recovery from the remote history after a crash (architecture §9.3a);
   - GitHub-enforced rulesets (with claims limited to what GitHub enforces), a preferred GitHub App bot, AR7 refusing any unexpected bypass actor or write deploy key, and the pipeline disabled while settings cannot be verified (§9.7);
   - recovery that separates remote integrity from publication authorization; uncertain authorization is recorded as published, never republished, reported, and halts further releases (§9.3a);
@@ -160,7 +161,7 @@ The owner rejected manual approval of each document, batch, PR or merge (2026-11
 - **Authorities separated:**
   - the owner holds policy and trust roots;
   - the runner (a dedicated macOS user on the owner's Mac, run by launchd) holds execution;
-  - the bot credential holds push to one repository's `main` only.
+  - the bot credential (preferably the App, Contents: write) can update `main` of one repository only.
 - **Alternatives:**
   - the owner merges each release (D7, rejected);
   - CI publishes. Rejected: it adds a trust root outside the owner's machine, and recommended answer 8 asks for no CI publishing.
@@ -309,7 +310,7 @@ These answers arrived in session under the headings "Rekomendacja" and "Rekomend
 | D4 / Q3 | approve none_identified, 30 days, nonce rule; absence of terms grants no right to publish | D4 |
 | D5 | defer to FC11 | D5 |
 | D6 / Q4 | a separate Ed25519 key for forarbeider on the owner's Mac, passphrase-protected, in the system Keychain; rotation every 12 months and immediately on suspicion | D6 owner key; the bot key (D11) is a second key on the runner account |
-| D7 / Q5 | 100 files or 25 MB per batch, whichever comes first; no required gap between apply and merge; mandatory re-validation before merge | under D11: the batch bound of architecture §9.3; "re-validation before merge" becomes the automatic verification and authorization before push (§9.3 steps 5–6) |
+| D7 / Q5 | 100 files or 25 MB per batch, whichever comes first; no required gap between apply and merge; mandatory re-validation before merge | under D11: the batch bound of architecture §9.3; "re-validation before merge" becomes pre-publication validation of the proposed bytes and the authorization gate immediately before the publication call (§9.3 steps 3–5) |
 | D8 | accept | D8 |
 | D9 / Q6 | stage 1 Prop. L/LS; later NOU, Ot.prp., Innst. and the rest | D9 |
 | D10 / Q7 | commission an independent assessment before full documents go public; do not block FC1–FC6; no artificial deadline; start before FC10 | D10 |
