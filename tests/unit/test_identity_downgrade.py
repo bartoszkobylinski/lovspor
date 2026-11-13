@@ -365,3 +365,89 @@ def test_a_migrated_corpus_passes_every_point(migrated: tuple[Path, str]) -> Non
     assert json.loads((repo / IDENTITY_FILENAME).read_text(encoding="utf-8")) == {
         "schema_version": 1
     }
+
+
+def test_a_git_replacement_cannot_hide_migration_evidence(tmp_path: Path) -> None:
+    """corpus_git explicitly forbids replacement objects from rewriting evidence."""
+    repo = _seeded(tmp_path)
+    legacy = git(repo, "rev-parse", "HEAD")
+    _migrate(repo)
+    (repo / IDENTITY_FILENAME).unlink()
+    (repo / REGISTRY_FILENAME).unlink()
+    deletion = commit_all(repo, "delete identity state")
+    git(repo, "replace", deletion, legacy)
+    assert git(repo, "log", "--format=%H", "--", IDENTITY_FILENAME) == ""
+
+    with pytest.raises(IdentitySchemaError, match="never returns to legacy"):
+        corpus_identity(repo)
+    with pytest.raises(IdentityMigrationError, match="never returns to legacy"):
+        plan_migration(repo, "HEAD")
+
+
+def test_an_unmerged_migration_does_not_change_legacy_head(tmp_path: Path) -> None:
+    """The evidence contract is reachability from HEAD, not from every ref."""
+    repo = _seeded(tmp_path)
+    git(repo, "checkout", "-q", "-b", "migration")
+    _migrate(repo)
+    git(repo, "checkout", "-q", "main")
+
+    assert isinstance(verified_corpus_identity(repo), LegacyCorpus)
+    assert plan_migration(repo, "HEAD").base.identity_schema == 0
+
+
+def test_planning_a_legacy_base_ignores_later_migration(
+    migrated: tuple[Path, str],
+) -> None:
+    repo, migration = migrated
+
+    plan = plan_migration(repo, f"{migration}^")
+
+    assert plan.base.identity_schema == 0
+    assert plan.base.commit == git(repo, "rev-parse", f"{migration}^")
+    assert isinstance(verified_corpus_identity(repo), EnforcedCorpus)
+
+
+@pytest.mark.parametrize("point", ["verified_corpus_identity", "sync_start", "plan_migration"])
+def test_registry_coverage_includes_removed_document_addresses(
+    migrated: tuple[Path, str], point: str
+) -> None:
+    """Removed records retain their addresses (docs/architecture.md, identity/registry)."""
+    repo, _ = migrated
+    docs = {**DOCS, SECOND: record(SECOND, "b", status="removed")}
+    write_manifest_json(repo, docs, "2026-06-02T00:00:00Z")
+    (repo / REGISTRY_FILENAME).write_text(_registry_text({FIRST: DOCS[FIRST]}), encoding="utf-8")
+    commit_all(repo, "drop the tombstone's registry entry")
+    call, error = POINTS[point]
+
+    with pytest.raises(error, match="forskrifter/b"):
+        call(repo)
+
+
+def test_an_empty_working_manifest_cannot_hide_committed_registry_truncation(
+    migrated: tuple[Path, str],
+) -> None:
+    repo, _ = migrated
+    write_manifest_json(repo, {}, "2026-06-02T00:00:00Z")
+    (repo / REGISTRY_FILENAME).write_text(registry_json(SlugRegistry()), encoding="utf-8")
+
+    with pytest.raises(IdentitySchemaError, match="committed manifest.json holds 2 record"):
+        corpus_identity(repo)
+
+
+def test_registry_can_be_extended_for_the_first_uncommitted_documents(tmp_path: Path) -> None:
+    """history_marker requires HEAD evidence so the mid-sync write order remains valid."""
+    repo = init_repo(tmp_path / "lovverk")
+    write_manifest_json(repo, {}, "2026-06-01T00:00:00Z")
+    (repo / REGISTRY_FILENAME).write_text(registry_json(SlugRegistry()), encoding="utf-8")
+    (repo / IDENTITY_FILENAME).write_text(declaration_json(), encoding="utf-8")
+    commit_all(repo, "migration of an empty corpus")
+    write_manifest_json(repo, DOCS, "2026-06-02T00:00:00Z")
+    manifest = Manifest.model_validate_json((repo / "manifest.json").read_bytes())
+
+    paths = update_slug_registry(repo, manifest)
+
+    assert paths == [repo / REGISTRY_FILENAME]
+    identity = verified_corpus_identity(repo)
+    assert isinstance(identity, EnforcedCorpus)
+    assert identity.registry.owner_of("forskrifter", "a") == FIRST
+    assert identity.registry.owner_of("forskrifter", "b") == SECOND
