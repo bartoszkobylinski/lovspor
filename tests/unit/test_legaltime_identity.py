@@ -23,18 +23,14 @@ from lovspor.legaltime.identity import (
     EndProof,
     Identity,
     IdentityError,
-    Insertion,
     LabelInterval,
     LabelProof,
     Ledger,
-    Rename,
-    Repeal,
-    Step,
-    apply_step,
     enacted_id,
     inserted_id,
     mint_enacted,
 )
+from lovspor.legaltime.step import Insertion, Rename, Repeal, Step, apply_step
 from lovspor.legaltime.text import section_key
 
 ACT = "lov/2005-05-20-28"
@@ -78,10 +74,9 @@ P2009 = _proof(L2009, "1:I:9.0", date(2009, 6, 19), "lov/2009-06-19-74")
 
 def _step_2008(ledger: Ledger) -> Ledger:
     """§ 101 i lov 20. mai 2005 nr. 28 blir § 401; Annen del inserts a new § 101."""
-    old = enacted_id(ACT, ENACTING, "§101")
     step = Step(
         act=ACT, member=L2008, effective=date(2008, 3, 7),
-        renames=(Rename(source=old, target="§401", proof=P2008),),
+        renames=(Rename(source="§101", target="§401", proof=P2008),),
         insertions=(Insertion(label="§101", proof=P2008),),
     )  # fmt: skip
     result = apply_step(ledger, step)
@@ -91,10 +86,9 @@ def _step_2008(ledger: Ledger) -> Ledger:
 
 def _step_2009(ledger: Ledger) -> Ledger:
     """Nåværende § 401 blir § 411."""
-    chain = enacted_id(ACT, ENACTING, "§101")
     step = Step(
         act=ACT, member=L2009, effective=date(2009, 6, 19),
-        renames=(Rename(source=chain, target="§411", proof=P2009),),
+        renames=(Rename(source="§401", target="§411", proof=P2009),),
     )  # fmt: skip
     result = apply_step(ledger, step)
     assert result.refusals == ()
@@ -203,7 +197,7 @@ def test_a_cycle_within_one_step_is_one_simultaneous_assignment() -> None:
     step = Step(
         act=ACT, member=L2008, effective=date(2008, 3, 7),
         renames=tuple(
-            Rename(source=enacted_id(ACT, ENACTING, f"§{s}"), target=f"§{t}", proof=P2008)
+            Rename(source=f"§{s}", target=f"§{t}", proof=P2008)
             for s, t in moves.items()
         ),
     )  # fmt: skip
@@ -257,8 +251,8 @@ def test_two_targets_onto_one_label_are_a_collision() -> None:
     step = Step(
         act=ACT, member=L2008, effective=date(2008, 3, 7),
         renames=(
-            Rename(source=enacted_id(ACT, ENACTING, "§1"), target="§9", proof=P2008),
-            Rename(source=enacted_id(ACT, ENACTING, "§2"), target="§9", proof=P2008),
+            Rename(source="§1", target="§9", proof=P2008),
+            Rename(source="§2", target="§9", proof=P2008),
         ),
     )  # fmt: skip
     assert _refused(ledger, step) == ("label collision",)
@@ -267,14 +261,15 @@ def test_two_targets_onto_one_label_are_a_collision() -> None:
 def test_a_missing_rename_source_and_a_missing_repeal_target_are_refused() -> None:
     missing = Step(
         act=ACT, member=L2008, effective=date(2008, 3, 7),
-        renames=(Rename(source=enacted_id(ACT, ENACTING, "§7"), target="§8", proof=P2008),),
+        renames=(Rename(source="§7", target="§8", proof=P2008),),
         repeals=(Repeal(label="§6", proof=P2008),),
     )  # fmt: skip
-    assert _refused(_enacted("§1"), missing) == ("rename source missing", "repeal target missing")
+    refused = _refused(_enacted("§1"), missing)
+    assert refused == ("rename source missing", "target provision missing")
 
 
 def test_two_renames_of_one_source_are_conflicting() -> None:
-    source = enacted_id(ACT, ENACTING, "§1")
+    source = "§1"
     step = Step(
         act=ACT, member=L2008, effective=date(2008, 3, 7),
         renames=(
@@ -306,8 +301,8 @@ def test_a_rejected_step_leaves_its_insertion_unminted() -> None:
     assert refusal.sentence_sha256 == P2008.sentence_sha256
 
 
-def test_every_operation_of_a_refused_step_is_reported_not_only_the_offending_one() -> None:
-    """Phase A refuses the whole step; an operation that broke no rule is refused with it."""
+def test_an_insertion_outside_the_colliding_component_is_still_applied() -> None:
+    """B1 replaced Phase A's whole-step refusal: only the collision's component is refused."""
     clean = _proof(L2008, "0:I:9.0", date(2008, 3, 7), "lov/2008-03-07-4")
     step = Step(
         act=ACT, member=L2008, effective=date(2008, 3, 7),
@@ -315,13 +310,14 @@ def test_every_operation_of_a_refused_step_is_reported_not_only_the_offending_on
     )  # fmt: skip
     ledger = _enacted("§101")
     result = apply_step(ledger, step)
-    assert result.ledger == ledger
-    assert sorted((r.op_id, r.asserted_label, r.reason) for r in result.refusals) == sorted(
-        [
-            (P2008.op_id, "§101", "label collision"),
-            (clean.op_id, "§500", "refused with its step"),
-        ]
-    )
+    assert result.ledger.live_map() == {
+        "§101": enacted_id(ACT, ENACTING, "§101"),
+        "§500": inserted_id(ACT, L2008, date(2008, 3, 7), "§500"),
+    }
+    assert [(r.op_id, r.asserted_label, r.reason) for r in result.refusals] == [
+        (P2008.op_id, "§101", "label collision")
+    ]
+    assert result.accepted == (clean.op_id,)
 
 
 def test_an_accepted_step_reports_no_collateral_refusal() -> None:
@@ -398,7 +394,7 @@ def test_permuting_a_steps_operations_gives_the_same_ledger() -> None:
         ACT, ENACTING, PUBLISHED, [(f"§{n}", _start0(f"§{n}")) for n in (21, 22, 23, 25)]
     )
     renames = [
-        Rename(source=enacted_id(ACT, ENACTING, f"§{s}"), target=f"§{t}", proof=P2008)
+        Rename(source=f"§{s}", target=f"§{t}", proof=P2008)
         for s, t in {21: 22, 22: 23, 23: 25, 25: 21}.items()
     ]
     outputs = set()
@@ -488,9 +484,9 @@ def test_a_later_interval_starts_only_on_its_renames_own_proof() -> None:
 def test_a_no_op_rename_is_refused() -> None:
     step = Step(
         act=ACT, member=L2008, effective=date(2008, 3, 7),
-        renames=(Rename(source=enacted_id(ACT, ENACTING, "§1"), target="§1", proof=P2008),),
+        renames=(Rename(source="§1", target="§1", proof=P2008),),
     )  # fmt: skip
-    assert _refused(_enacted("§1"), step) == ("no-op rename",)
+    assert _refused(_enacted("§1"), step) == ("rename to the same label",)
 
 
 @pytest.mark.parametrize(
@@ -506,12 +502,12 @@ def test_step_0_provenance_must_name_its_own_act_and_publication(update: dict[st
 def test_a_rename_and_a_repeal_of_one_identity_are_conflicting() -> None:
     step = Step(
         act=ACT, member=L2008, effective=date(2008, 3, 7),
-        renames=(Rename(source=enacted_id(ACT, ENACTING, "§1"), target="§9", proof=P2008),),
+        renames=(Rename(source="§1", target="§9", proof=P2008),),
         repeals=(Repeal(label="§1", proof=P2008),),
     )  # fmt: skip
     assert _refused(_enacted("§1"), step) == ("conflicting operations within instrument",)
-    kinds = {r.asserted_label for r in apply_step(_enacted("§1"), step).refusals}
-    assert kinds == {"§1", "§9"}  # the repeal and the rename, both refused as conflicting
+    refused = {(r.kind, r.address) for r in apply_step(_enacted("§1"), step).refusals}
+    assert refused == {("rename", "§1"), ("repeal", "§1")}  # both refused as conflicting
 
 
 def test_two_insertions_under_one_label_are_a_collision() -> None:
@@ -612,7 +608,7 @@ def test_former_keys_carry_the_end_proofs_known_from() -> None:
     late = P2008.model_copy(update={"known_from": date(2008, 3, 11)})
     step = Step(
         act=ACT, member=L2008, effective=date(2008, 3, 7),
-        renames=(Rename(source=enacted_id(ACT, ENACTING, "§1"), target="§9", proof=late),),
+        renames=(Rename(source="§1", target="§9", proof=late),),
     )  # fmt: skip
     moved = apply_step(_enacted("§1"), step).ledger.holder("§9")
     assert moved is not None
@@ -720,9 +716,7 @@ def test_a_label_repealed_in_the_step_can_be_assigned_to_another_identity(
         member=L2008,
         effective=P2008.effective,
         repeals=(Repeal(label="§1", proof=P2008),),
-        renames=(Rename(source=enacted_id(ACT, ENACTING, "§2"), target="§1", proof=P2008),)
-        if replacement == "rename"
-        else (),
+        renames=(Rename(source="§2", target="§1", proof=P2008),) if replacement == "rename" else (),
         insertions=(Insertion(label="§1", proof=P2008),) if replacement == "insertion" else (),
     )
     result = apply_step(ledger, step)
@@ -748,7 +742,7 @@ def test_a_label_repealed_in_the_step_can_be_assigned_to_another_identity(
     assert restored.canonical_json() == result.ledger.canonical_json()
 
 
-def test_a_rename_and_insertion_competing_for_a_target_refuse_the_whole_step() -> None:
+def test_a_rename_and_insertion_competing_for_a_target_refuse_their_component() -> None:
     """R4(b): writers of different kinds still cannot assign one Q label twice."""
     ledger = _enacted("§1", "§2")
     insertion_proof = P2008.model_copy(update={"op_id": "distinct-insertion"})
@@ -756,16 +750,16 @@ def test_a_rename_and_insertion_competing_for_a_target_refuse_the_whole_step() -
         act=ACT,
         member=L2008,
         effective=P2008.effective,
-        renames=(Rename(source=enacted_id(ACT, ENACTING, "§1"), target="§9", proof=P2008),),
+        renames=(Rename(source="§1", target="§9", proof=P2008),),
         insertions=(Insertion(label="§9", proof=insertion_proof),),
         repeals=(Repeal(label="§2", proof=P2008),),
     )
     result = apply_step(ledger, step)
-    assert result.ledger == ledger
     assert sorted((r.op_id, r.asserted_label, r.reason) for r in result.refusals) == sorted(
         [
             (P2008.op_id, "§9", "label collision"),
             (insertion_proof.op_id, "§9", "label collision"),
-            (P2008.op_id, "§2", "refused with its step"),
         ]
     )
+    # the repeal of § 2 is its own component and applies; § 1 keeps its label
+    assert result.ledger.live_map() == {"§1": enacted_id(ACT, ENACTING, "§1")}
