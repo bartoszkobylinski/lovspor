@@ -95,6 +95,18 @@ def commits_touching_since(repo: Path, rev: str, since: str, path: str) -> list[
     return [since, *later]
 
 
+def parents_since(repo: Path, rev: str, since: str) -> list[tuple[str, list[str]]]:
+    """``(commit, parents)`` for ``since`` and everything after it ``rev`` reaches, oldest first.
+
+    Not limited to a path, so no parent is rewritten: ancestry read from it is exact.
+    """
+    out = _git(
+        repo, "rev-list", "--topo-order", "--reverse", "--parents", rev, "--not", f"{since}^@"
+    )
+    lines = (line.split() for line in out.decode().splitlines())
+    return [(commit, parents) for commit, *parents in lines]
+
+
 def iter_revisions(repo: Path, commits: list[str], path: str) -> Iterator[bytes | None]:
     """``path`` at each of ``commits`` in order, through one ``cat-file --batch`` per chunk.
 

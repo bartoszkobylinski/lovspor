@@ -23,6 +23,19 @@ history is a function of the commit, so it is memoised per repository and
 commit. Measured on a registry of 11 036 entries (2 MB) with 300 later
 revisions: 3.5 s cold (about 12 ms a revision, linear), 0.02 s memoised.
 
+"First committed" is not read from the order ``git log`` lists concurrent
+branches in: that follows a merge's parent order, the operator's choice. A
+stale clone's sync that adds an address its ``main`` already published for
+another document, merged with the local side kept, would otherwise re-own a
+published address through a fast-forward push (B1b). So one ``rev-list
+--parents`` gives the exact ancestry between the revisions (a bitset per
+commit), and a revision that does not contain every earlier one has its
+entries compared with the first adds it does not contain: the same address
+first added with different content on two commits neither of which contains
+the other is refused, whichever side a merge kept. Identical adds pass. A
+linear history pays for the one ``rev-list`` only (11 236 entries, 261
+revisions with five merged side branches: 2.7 s cold, unchanged).
+
 The comparison is by content, so:
 
 * a formatting-only rewrite is tolerated: ownership is the content, and the
@@ -39,6 +52,7 @@ not the root of its repository, git failing) fails closed.
 """
 
 import json
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -51,6 +65,7 @@ from lovspor.identity.corpus_git import (
     first_commit_adding,
     is_shallow,
     iter_revisions,
+    parents_since,
     resolve_commit,
     toplevel,
 )
@@ -65,8 +80,10 @@ from lovspor.identity.registry import (
 from lovspor.identity.schema import ENFORCED_IDENTITY_SCHEMA, IDENTITY_FILENAME, REGISTRY_FILENAME
 from lovspor.storage.manifest import read_manifest
 
+#: An entry and the commit that held it.
+Version = tuple[SlugOwner, str]
 #: ``directory -> slug -> (the entry as first committed, that commit)``.
-FirstEntries = dict[str, dict[str, tuple[SlugOwner, str]]]
+FirstEntries = dict[str, dict[str, Version]]
 
 
 def _unreadable(repo: Path, detail: str) -> IdentitySchemaError:
@@ -104,14 +121,82 @@ def _entry(raw: object) -> SlugOwner | None:
         return None
 
 
-def _absorb(first: FirstEntries, blob: bytes | None, commit: str) -> None:
-    """Keep each valid entry ``blob`` holds that no earlier revision did."""
+@dataclass
+class _Walk:
+    """The revisions absorbed so far, in ``--topo-order``, with the ancestry between them."""
+
+    first: FirstEntries = field(default_factory=dict)
+    #: ``commit -> bit``, and ``commit -> the bits of the revisions it contains``.
+    bit: dict[str, int] = field(default_factory=dict)
+    ancestors: dict[str, int] = field(default_factory=dict)
+    absorbed: int = 0
+    #: ``(directory, slug) -> each distinct version first added, with its first commit``.
+    divergent: dict[tuple[str, str], list[Version]] = field(default_factory=dict)
+
+
+def _ancestor_bits(graph: list[tuple[str, list[str]]], bit: dict[str, int]) -> dict[str, int]:
+    """``commit -> the bits of the revisions it contains``, one pass in ``--topo-order``."""
+    contains: dict[str, int] = {}
+    for commit, parents in graph:
+        mask = 0
+        for parent in parents:
+            mask |= contains.get(parent, 0) | bit.get(parent, 0)
+        contains[commit] = mask
+    return contains
+
+
+def _divergence(key: tuple[str, str], versions: list[Version]) -> str:
+    adds = " and as ".join(
+        f"{entry.owner} ({entry.basis}, {entry.assigned_at}) in {commit}"
+        for entry, commit in versions
+    )
+    return (
+        f"{key[0]}/{key[1]}: first added as {adds}, on commits neither of which contains the "
+        f"other: which one was published cannot be told from the history, and a merge's parent "
+        f"order would decide it"
+    )
+
+
+def _check_unrelated(walk: _Walk, directory: str, entries: dict[str, object], commit: str) -> None:
+    """Record each entry of ``commit`` that differs from a first add ``commit`` does not contain."""
+    unrelated = walk.absorbed & ~walk.ancestors[commit]
+    held = walk.first.get(directory, {})
+    for slug in entries.keys() & held.keys():
+        _first, first_commit = held[slug]
+        if not unrelated & walk.bit[first_commit]:
+            continue
+        rival = _entry(entries[slug])
+        versions = walk.divergent.setdefault((directory, slug), [held[slug]])
+        if rival is not None and all(rival != version for version, _ in versions):
+            versions.append((rival, commit))
+
+
+def _absorb(walk: _Walk, blob: bytes | None, commit: str) -> None:
+    """Keep each valid entry ``blob`` holds that no earlier revision did; note divergent adds."""
+    linear = not walk.absorbed & ~walk.ancestors[commit]
     for directory, entries in _slug_entries(blob).items():
-        held = first.setdefault(directory, {})
+        if not linear:
+            _check_unrelated(walk, directory, entries, commit)
+        held = walk.first.setdefault(directory, {})
         for slug in entries.keys() - held.keys():
             entry = _entry(entries[slug])
             if entry is not None:
                 held[slug] = (entry, commit)
+    walk.absorbed |= walk.bit[commit]
+
+
+def _refuse_divergent(repo: Path, walk: _Walk) -> None:
+    found = sorted(
+        _divergence(key, versions) for key, versions in walk.divergent.items() if len(versions) > 1
+    )
+    if not found:
+        return
+    raise IdentitySchemaError(
+        f"{repo}: {REGISTRY_FILENAME} {found[0]} ({len(found)} entr(y/ies) in all). Keep the "
+        f"published branch: reset the other to it (`git -C {repo} reset --hard <published "
+        f"commit>`) and re-run the sync there, which gives its document a fresh address; if "
+        f"both were published, the owner decides (#871)",
+    )
 
 
 @lru_cache(maxsize=8)
@@ -120,18 +205,22 @@ def first_entries(repo: Path, commit: str) -> FirstEntries:
 
     ``repo`` resolved and ``commit`` a full sha: the answer is then fixed, and
     memoised. Callers must not mutate it. Empty when no commit added
-    ``identity.json``.
+    ``identity.json``. Refuses an entry first added with different content on
+    two commits neither of which contains the other.
     """
     _require_full_history(repo)
-    first: FirstEntries = {}
     migration = first_commit_adding(repo, commit, IDENTITY_FILENAME)
     if migration is None:
-        return first
+        return {}
     commits = commits_touching_since(repo, commit, migration, REGISTRY_FILENAME)
-    blobs = iter_revisions(repo, commits, REGISTRY_FILENAME)
-    for revision, blob in zip(commits, blobs, strict=True):
-        _absorb(first, blob, revision)
-    return first
+    walk = _Walk(bit={revision: 1 << index for index, revision in enumerate(commits)})
+    walk.ancestors = _ancestor_bits(parents_since(repo, commit, migration), walk.bit)
+    for revision, blob in zip(
+        commits, iter_revisions(repo, commits, REGISTRY_FILENAME), strict=True
+    ):
+        _absorb(walk, blob, revision)
+    _refuse_divergent(repo, walk)
+    return walk.first
 
 
 def _violations(first: FirstEntries, registry: SlugRegistry) -> list[str]:
