@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/identity.py"
+symbol = "_Validated.model_copy"
+registered = "2026-11-13, PR #901, from a local scoped mutmut 3.8.0 run at commit 9f16cb7d"
+mutation = """
+-def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
++def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = True) -> Self:
+"""
+justification = """
+The override's first statement is `del deep`: the argument is never read, because every
+copy is rebuilt by `model_validate` from the instance's fields plus the update. Its
+default value therefore changes nothing a caller can observe.
+"""

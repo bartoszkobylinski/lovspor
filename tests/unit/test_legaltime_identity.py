@@ -501,3 +501,145 @@ def test_an_interval_cannot_end_before_it_starts() -> None:
     closed = chain.intervals[0].model_copy(update={"end": _end(early, "rename")})
     with pytest.raises(ValidationError):
         chain.model_copy(update={"intervals": (closed, chain.intervals[1])})
+
+
+# ------------------------------------------- mutation evidence (local targeted run)
+
+
+@pytest.mark.parametrize(
+    ("build", "message"),
+    [
+        (lambda: enacted_id("forskrift/1", ENACTING, "§1"), "not a act refid: 'forskrift/1'"),
+        (lambda: enacted_id(ACT, "x.xml", "§1"), "not a member path: 'x.xml'"),
+        (lambda: enacted_id(ACT, ENACTING, "1"), "not a section label: '1'"),
+        (lambda: inserted_id("forskrift/1", L2008, date(2008, 3, 7), "§1"), "not a act refid"),
+        (lambda: inserted_id(ACT, "x.xml", date(2008, 3, 7), "§1"), "not a member path"),
+        (lambda: inserted_id(ACT, L2008, date(2008, 3, 7), "1"), "not a section label"),
+    ],
+)
+def test_a_refused_id_component_is_named_in_the_error(build: object, message: str) -> None:
+    with pytest.raises(IdentityError, match=message):
+        build()  # type: ignore[operator]
+
+
+def test_step_0_errors_say_what_was_wrong() -> None:
+    dated = LabelProof.model_validate(
+        {**_start0("§1").model_dump(), "effective": PUBLISHED, "label_minted_at": None}
+    )
+    with pytest.raises(
+        IdentityError, match="step 0 proves no effective date and sits at 2005-05-20"
+    ):
+        mint_enacted(ACT, ENACTING, PUBLISHED, [("§1", dated)])
+    other = LabelProof.model_validate(
+        {**_start0("§1").model_dump(), "instrument": "lov/2000-01-01-1"}
+    )
+    with pytest.raises(
+        IdentityError, match="step 0's proof names another member, act or publication date"
+    ):
+        mint_enacted(ACT, ENACTING, PUBLISHED, [("§1", other)])
+    with pytest.raises(IdentityError, match="I2: a provision_id is held twice"):
+        _enacted("§1", "§1")
+
+
+def test_a_step_on_another_act_is_a_hard_failure() -> None:
+    step = Step(act="lov/2000-01-01-1", member=L2008, effective=date(2008, 3, 7))
+    with pytest.raises(
+        IdentityError, match="a step on lov/2000-01-01-1 applied to lov/2005-05-20-28"
+    ):
+        apply_step(_enacted("§1"), step)
+
+
+def test_re_minting_names_the_id() -> None:
+    ledger = _step_2008(_enacted("§101"))
+    held = ledger.holder("§101")
+    assert held is not None
+    vacate = Step(
+        act=ACT, member=L2015, effective=date(2015, 6, 19),
+        repeals=(Repeal(label="§101", proof=_proof(L2015, "0::1.0", date(2015, 6, 19), "x")),),
+    )  # fmt: skip
+    again = Step(act=ACT, member=L2008, effective=date(2008, 3, 7),
+                 insertions=(Insertion(label="§101", proof=P2008),))  # fmt: skip
+    with pytest.raises(IdentityError, match=f"I2: {held.provision_id} would be minted twice"):
+        apply_step(apply_step(ledger, vacate).ledger, again)
+
+
+def test_former_keys_carry_the_end_proofs_known_from() -> None:
+    late = P2008.model_copy(update={"known_from": date(2008, 3, 11)})
+    step = Step(
+        act=ACT, member=L2008, effective=date(2008, 3, 7),
+        renames=(Rename(source=enacted_id(ACT, ENACTING, "§1"), target="§9", proof=late),),
+    )  # fmt: skip
+    moved = apply_step(_enacted("§1"), step).ledger.holder("§9")
+    assert moved is not None
+    assert [
+        (k.known_from, k.sentence_sha256, k.member_sha256, k.op_id) for k in moved.former_keys
+    ] == [(date(2008, 3, 11), late.sentence_sha256, late.member_sha256, late.op_id)]
+
+
+def _interval(label: str, start: LabelProof, end: EndProof | None = None) -> LabelInterval:
+    return LabelInterval(label=label, start=start, end=end)
+
+
+def _history(*intervals: LabelInterval) -> Identity:
+    return Identity(
+        provision_id=enacted_id(ACT, ENACTING, intervals[0].label), act=ACT,
+        text_member=ENACTING, intervals=intervals,
+    )  # fmt: skip
+
+
+def test_nothing_follows_a_repeal() -> None:
+    with pytest.raises(ValidationError, match="a repeal ends the identity: nothing follows it"):
+        _history(
+            _interval("§1", _start0("§1"), _end(P2008, "repeal")),
+            _interval("§2", P2008),
+        )
+
+
+def test_only_the_last_interval_may_be_open() -> None:
+    with pytest.raises(ValidationError, match="only the last label interval may be open"):
+        _history(_interval("§1", _start0("§1")), _interval("§2", P2008))
+
+
+def test_an_interval_ends_no_earlier_than_it_starts_and_may_end_that_day() -> None:
+    early = _proof(L2008, "0:I:2.0", date(2004, 1, 1), "lov/2008-03-07-4")
+    with pytest.raises(ValidationError, match="an interval ends before it starts"):
+        _history(_interval("§1", _start0("§1"), _end(early, "rename")), _interval("§2", early))
+    same_day = _proof(L2008, "0:I:2.0", PUBLISHED, "lov/2008-03-07-4")
+    identity = _history(
+        _interval("§1", _start0("§1"), _end(same_day, "rename")), _interval("§2", same_day)
+    )
+    assert identity.label == "§2"
+
+
+def test_a_later_interval_cannot_carry_a_step_0_proof() -> None:
+    with pytest.raises(ValidationError, match="only the minting interval may carry a step-0 proof"):
+        _history(
+            _interval("§1", _start0("§1"), _end(P2008, "rename")), _interval("§2", _start0("§2"))
+        )
+
+
+def test_a_renamed_interval_on_another_proof_is_named() -> None:
+    with pytest.raises(
+        ValidationError, match="a renamed interval starts on another proof than its rename's"
+    ):
+        _history(_interval("§1", _start0("§1"), _end(P2008, "rename")), _interval("§2", P2009))
+
+
+def test_an_identity_that_is_not_its_own_id_is_named() -> None:
+    with pytest.raises(ValidationError, match="not the R1 id of its own minting"):
+        Identity(provision_id="x", act=ACT, text_member=ENACTING,
+                 intervals=(_interval("§1", _start0("§1")),))  # fmt: skip
+    with pytest.raises(ValidationError, match="not a act refid"):
+        Identity(provision_id="x", act="forskrift/1", text_member=ENACTING,
+                 intervals=(_interval("§1", _start0("§1")),))  # fmt: skip
+
+
+def test_two_repeals_of_one_label_are_conflicting_and_one_is_not() -> None:
+    double = Step(
+        act=ACT, member=L2008, effective=date(2008, 3, 7),
+        repeals=(Repeal(label="§1", proof=P2008), Repeal(label="§1", proof=P2008)),
+    )  # fmt: skip
+    assert _refused(_enacted("§1"), double) == ("conflicting operations within instrument",)
+    single = Step(act=ACT, member=L2008, effective=date(2008, 3, 7),
+                  repeals=(Repeal(label="§1", proof=P2008),))  # fmt: skip
+    assert apply_step(_enacted("§1"), single).refusals == ()

@@ -203,8 +203,10 @@ def _start_date(interval: LabelInterval) -> date:
     """The start date R10 uses: ``effective``, or ``label_minted_at`` for step 0."""
     start = interval.start
     placed = start.effective if start.effective is not None else start.label_minted_at
-    if placed is None:
-        raise ValueError("a start proof is dated by effective or label_minted_at")
+    if placed is None:  # pragma: no mutate - unreachable: LabelProof proves exactly one date
+        raise ValueError(
+            "a start proof is dated by effective or label_minted_at"
+        )  # pragma: no mutate
     return placed
 
 
@@ -213,8 +215,8 @@ def _check_link(previous: LabelInterval, interval: LabelInterval) -> None:
     end = previous.end
     if interval.start.effective is None:
         raise ValueError("only the minting interval may carry a step-0 proof")
-    if end is None or end.ended_by != "rename":
-        raise ValueError("a label interval follows only a rename")
+    if end is None or end.ended_by != "rename":  # pragma: no mutate - refused at the previous index
+        raise ValueError("a label interval follows only a rename")  # pragma: no mutate
     if end.model_dump(exclude={"ended_by"}) != interval.start.model_dump():
         raise ValueError("a renamed interval starts on another proof than its rename's")
 
