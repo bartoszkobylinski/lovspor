@@ -53,6 +53,14 @@ Publishing a dataset needs a separate owner decision.
 
 All commands sit on the `ops` group (`lovspor.cli` is at its size ratchet).
 
+The inputs `--laws`, `--previous` and `--input` may be a regular file or a pipe: a process substitution
+(`--laws <(...)`), `/dev/stdin` fed by a pipe, or a named FIFO. A pipe is read up
+to its size limit plus one byte, never to end of file. A FIFO whose writer has not
+opened it within two seconds is refused (`is a pipe with no writer`) instead of
+waited on forever (#817). A directory, a terminal, `/dev/null` or any other device
+is refused (`is not a regular file or pipe`). The approval proof files under
+`--approval-proof` and the signature stay regular files only.
+
 Every write (the capture cache, its staging directory, every output file) is
 checked on the fully resolved path before anything is created
 (`lovspor.crosswalk.paths`). It is refused inside a Git clone, worktree or
