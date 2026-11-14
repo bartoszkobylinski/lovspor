@@ -12,8 +12,10 @@ pass by assumption.
     "De delene av § 102 …" stand under "I straffeloven 2005 tredje del gjøres følgende
     endringer:", which the D7/phase-4B chain does not bind. Act unbound, so both are refused.
   * 2009 "Nåværende § 401 blir § 411 som innleder tredje del og som skal lyde:" is bound and
-    dated 2009-06-19, but carries a placement. With no structure map ``S`` the whole rename
-    is refused, and the clause is kept.
+    dated 2009-06-19, and carries a placement. Since Phase B3 the clause rides on the rename
+    into the 2009 step candidate, which stays incomplete (the member's other operations are
+    not represented); B1 refuses it without ``S_P``, and with ``S_P`` its source § 401 is
+    not proven (``test_legaltime_structure_pinned``).
   * 2009 "Nåværende § 402 blir § 412 og skal lyde:" follows item 3 of the list § 411's
     replacement announces. Main ``c582f4d6`` bound it to ``lov/1975-06-13-39``, the act item 3
     cites (#907). Since #907 the engine binds it to no act: the source does not state where
@@ -83,7 +85,17 @@ def atomenergiloven() -> Research:
 
 
 def test_straffeloven_yields_no_executable_step(straffeloven: Research) -> None:
-    assert straffeloven.steps == ()
+    (candidate,) = straffeloven.steps  # the 2009 rename with its placement clause (B3)
+    assert (candidate.member, str(candidate.effective)) == (L2009, "2009-06-19")
+    assert not candidate.complete
+    (rename,) = candidate.step.renames
+    assert (rename.proof.op_id, rename.placement) == (
+        "lov/2009-06-19-74#1:I:239.0", "som innleder tredje del",
+    )  # fmt: skip
+    assert rename.proof.sentence_sha256 == (
+        "bbbac519dcb305364cd56dcfebf96675ca010466f7d33ed5f0ec81c000fdc926"
+    )
+    assert rename.proof.member_sha256 == MEMBERS[L2009]
 
 
 def test_straffelovens_rename_shaped_sentences_are_exactly_these(straffeloven: Research) -> None:
@@ -91,7 +103,6 @@ def test_straffelovens_rename_shaped_sentences_are_exactly_these(straffeloven: R
     assert sorted(r.op_id for r in straffeloven.refusals) == [
         "lov/2008-03-07-4#0:I:112.0",
         "lov/2008-03-07-4#0:I:114.0",
-        "lov/2009-06-19-74#1:I:239.0",
         "lov/2009-06-19-74#1:I:245.0",  # § 402 → § 412 after § 411's list, unbound (#907)
         "lov/2009-06-19-74#1:I:252.0",  # "Nåværende § 9 blir ny § 10.", unbound
     ]
@@ -106,9 +117,6 @@ def test_straffelovens_rename_shaped_sentences_are_exactly_these(straffeloven: R
         ("lov/2008-03-07-4#0:I:114.0",
          "5bf83c5ad9864b5cd2daf3b50458a03843e13601506e41a6ec634252b50fba79",
          None, "act not bound by the D7/phase-4B chain", None),
-        ("lov/2009-06-19-74#1:I:239.0",
-         "bbbac519dcb305364cd56dcfebf96675ca010466f7d33ed5f0ec81c000fdc926",
-         STRAFFELOVEN, "placement incomplete: no structure map S", "som innleder tredje del"),
         ("lov/2009-06-19-74#1:I:245.0",
          "57a9640b483586ee7503faed2e6875d9073ecac65d62387f3100d797bb3947c9",
          None, "act not bound by the D7/phase-4B chain", None),
@@ -129,10 +137,12 @@ def test_each_straffeloven_rename_is_refused_with_its_proof(
 
 
 def test_the_2009_rename_is_bound_and_dated_but_still_not_executed(straffeloven: Research) -> None:
-    refusal = {r.op_id: r for r in straffeloven.refusals}["lov/2009-06-19-74#1:I:239.0"]
-    assert (refusal.timing_status, str(refusal.effective), str(refusal.known_from)) == (
-        "dated", "2009-06-19", "2009-06-19",
+    (candidate,) = straffeloven.steps
+    (rename,) = candidate.step.renames
+    assert (str(rename.proof.effective), str(rename.proof.known_from)) == (
+        "2009-06-19", "2009-06-19",
     )  # fmt: skip
+    assert candidate.gaps  # an incomplete step must not be executed
 
 
 def test_the_unbound_2009_rename_is_absent_from_straffelovens_events() -> None:

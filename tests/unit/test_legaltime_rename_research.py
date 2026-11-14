@@ -130,9 +130,6 @@ def test_the_two_r3_shapes_are_read_with_engine_section_keys(
         ("Nåværende § 5 blir § 6;", "rename outside the grammar"),
         ("Nåværende § 20 blir ny § 19, som skal lyde:", "rename outside the grammar"),
         ("Nåværende § 5 a blir § 5a.", "rename to the same label"),
-        ("Nåværende § 401 blir § 411 som innleder tredje del og som skal lyde:",
-         "placement incomplete: no structure map S"),
-        ("Nåværende § 7 blir § 8 under kapittel 3.", "placement incomplete: no structure map S"),
     ],
 )  # fmt: skip
 def test_anything_else_is_a_structured_refusal(sentence: str, reason: str) -> None:
@@ -153,10 +150,20 @@ def test_a_refusal_carries_the_labels_r3_read() -> None:
     assert (refusal.source, refusal.target) == ("§21", "§22")
 
 
-def test_a_placement_clause_is_recorded_not_dropped() -> None:
-    parsed = parse_rename("Nåværende § 401 blir § 411 som innleder tredje del og som skal lyde:")
-    assert parsed.placement == "som innleder tredje del"
-    assert (parsed.source, parsed.target) == ("§401", "§411")
+@pytest.mark.parametrize(
+    ("sentence", "clause", "replacement"),
+    [
+        ("Nåværende § 401 blir § 411 som innleder tredje del og som skal lyde:",
+         "som innleder tredje del", True),
+        ("Nåværende § 7 blir § 8 under kapittel 3.", "under kapittel 3", False),
+    ],
+)  # fmt: skip
+def test_a_placement_clause_is_carried_for_b1_not_refused_here(
+    sentence: str, clause: str, replacement: bool
+) -> None:
+    """B3: the adapter proves no pair; B1 reads the clause against ``S_P`` (or refuses)."""
+    parsed = parse_rename(sentence)
+    assert (parsed.placement, parsed.replacement, parsed.refusal) == (clause, replacement, None)
 
 
 # ------------------------------------------------------- source-backed adapter output
@@ -226,14 +233,23 @@ def test_a_rename_no_chain_binds_is_refused_not_guessed() -> None:
     assert research.steps == ()
 
 
-def test_a_placement_refuses_the_whole_rename_and_keeps_the_clause() -> None:
+def test_a_placement_rides_on_the_rename_and_b1_refuses_it_without_s() -> None:
+    """The clause reaches the step whole; executed without ``S_P`` the rename is refused."""
     sentence = "Nåværende § 401 blir § 411 som innleder tredje del og som skal lyde:"
     research = _run(_p(INTRO) + _p(sentence) + _future("§411"))
-    (refusal,) = research.refusals
-    assert refusal.reason == "placement incomplete: no structure map S"
-    assert refusal.placement == "som innleder tredje del"
-    assert refusal.sentence_sha256 == _sha(sentence)
-    assert research.steps == ()
+    assert research.refusals == ()
+    (candidate,) = research.steps
+    (rename,) = candidate.step.renames
+    assert (rename.placement, rename.proof.sentence_sha256) == (
+        "som innleder tredje del", _sha(sentence),
+    )  # fmt: skip
+    enacting = "lti/2005/nl-20050520-028.xml"
+    ledger = mint_enacted(STRAFFELOVEN, enacting, date(2005, 5, 20), [("§401", _start0("§401"))])
+    (refusal,) = apply_step(ledger, candidate.step).refusals
+    assert (refusal.phase, refusal.reason) == (
+        "intrinsic",
+        "placement incomplete: no structure map S",
+    )
 
 
 def test_an_undated_rename_is_recorded_outside_every_step() -> None:
