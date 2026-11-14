@@ -1,0 +1,1520 @@
+{
+ "acts_compared": [
+  "lov/2003-07-04-84",
+  "lov/2005-05-20-28",
+  "lov/2005-06-17-62",
+  "lov/2005-06-17-90",
+  "lov/2008-05-15-35",
+  "lov/2009-06-19-100",
+  "lov/2009-06-19-58",
+  "lov/2021-06-18-97"
+ ],
+ "archives": {
+  "lovtidend-avd1-2001-2025.tar.bz2": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0",
+  "lovtidend-avd1-2026.tar.bz2": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+ },
+ "fields_compared": [
+  "role",
+  "kind",
+  "act",
+  "section",
+  "status",
+  "effective",
+  "known_from",
+  "reason",
+  "proofs",
+  "member"
+ ],
+ "fields_unchanged_on_every_record": [
+  "act",
+  "kind",
+  "section",
+  "known_from",
+  "proofs",
+  "member",
+  "role"
+ ],
+ "issue": 918,
+ "main": "f23a3c04178f861d8658cba6cc00908a7763a14b",
+ "member": {
+  "name": "lti/2009/nl-20090619-074.xml",
+  "refid": "lov/2009-06-19-74",
+  "sha256": "7ec6a1b4ae319b86ae6735eb2e969022e827afad552c9f9e8a9e4e12db1304d4"
+ },
+ "operations": {
+  "lov/2009-06-19-74#1:I:1078.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:1095.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:1134.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:1332.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_section",
+   "section": "§15"
+  },
+  "lov/2009-06-19-74#1:I:1361.0": {
+   "act": "lov/2005-06-17-62",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "attributed"
+    }
+   ],
+   "kind": "repeal_punktum",
+   "section": "§19-2"
+  },
+  "lov/2009-06-19-74#1:I:1362.0": {
+   "act": "lov/2005-06-17-62",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "attributed"
+    }
+   ],
+   "kind": "insert_punktum",
+   "section": "§19-4"
+  },
+  "lov/2009-06-19-74#1:I:1364.0": {
+   "act": "lov/2005-06-17-62",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "attributed"
+    }
+   ],
+   "kind": "replace_section",
+   "section": "§19-5"
+  },
+  "lov/2009-06-19-74#1:I:1366.0": {
+   "act": "lov/2005-06-17-62",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "attributed"
+    }
+   ],
+   "kind": "repeal_section",
+   "section": "§19-7"
+  },
+  "lov/2009-06-19-74#1:I:1417.0": {
+   "act": "lov/2008-05-15-35",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "attributed"
+    }
+   ],
+   "kind": "replace_bokstav",
+   "section": "§66"
+  },
+  "lov/2009-06-19-74#1:I:1418.0": {
+   "act": "lov/2008-05-15-35",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "attributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:1419.0": {
+   "act": "lov/2008-05-15-35",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "attributed"
+    }
+   ],
+   "kind": "replace_bokstav",
+   "section": "§68"
+  },
+  "lov/2009-06-19-74#1:I:1420.0": {
+   "act": "lov/2008-05-15-35",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "attributed"
+    }
+   ],
+   "kind": "replace_punktum",
+   "section": "§77"
+  },
+  "lov/2009-06-19-74#1:I:1422.0": {
+   "act": "lov/2008-05-15-35",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "attributed"
+    }
+   ],
+   "kind": "replace_punktum",
+   "section": "§97"
+  },
+  "lov/2009-06-19-74#1:I:1424.0": {
+   "act": "lov/2008-05-15-35",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "attributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:1425.0": {
+   "act": "lov/2008-05-15-35",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "attributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:1426.0": {
+   "act": "lov/2008-05-15-35",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "attributed"
+    }
+   ],
+   "kind": "insert_ledd",
+   "section": "§108"
+  },
+  "lov/2009-06-19-74#1:I:1428.0": {
+   "act": "lov/2008-05-15-35",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "attributed"
+    }
+   ],
+   "kind": "repeal_ledd",
+   "section": "§108"
+  },
+  "lov/2009-06-19-74#1:I:1428.1": {
+   "act": "lov/2008-05-15-35",
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "attributed"
+    }
+   ],
+   "kind": "renumber",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:241.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:242.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:245.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "renumber",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:247.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_punktum",
+   "section": "§19"
+  },
+  "lov/2009-06-19-74#1:I:249.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:249.1": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:250.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "insert_section",
+   "section": "§9"
+  },
+  "lov/2009-06-19-74#1:I:252.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "renumber",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:404.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:404.1": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:431.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_ledd",
+   "section": "§1"
+  },
+  "lov/2009-06-19-74#1:I:433.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_section",
+   "section": "§2"
+  },
+  "lov/2009-06-19-74#1:I:435.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_ledd",
+   "section": "§3"
+  },
+  "lov/2009-06-19-74#1:I:437.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_section",
+   "section": "§4"
+  },
+  "lov/2009-06-19-74#1:I:450.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:459.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:462.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "repeal_punktum",
+   "section": "§4"
+  },
+  "lov/2009-06-19-74#1:I:471.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:472.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:487.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:565.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "repeal_ledd",
+   "section": "§20"
+  },
+  "lov/2009-06-19-74#1:I:584.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:585.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "repeal_ledd",
+   "section": "§61"
+  },
+  "lov/2009-06-19-74#1:I:587.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_ledd",
+   "section": "§1"
+  },
+  "lov/2009-06-19-74#1:I:589.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_punktum",
+   "section": "§5"
+  },
+  "lov/2009-06-19-74#1:I:591.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_punktum",
+   "section": "§8"
+  },
+  "lov/2009-06-19-74#1:I:593.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_punktum",
+   "section": "§8"
+  },
+  "lov/2009-06-19-74#1:I:595.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_section",
+   "section": "§9"
+  },
+  "lov/2009-06-19-74#1:I:597.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_ledd",
+   "section": "§11"
+  },
+  "lov/2009-06-19-74#1:I:637.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_punktum",
+   "section": "§13b"
+  },
+  "lov/2009-06-19-74#1:I:639.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "replace_punktum",
+   "section": "§13e"
+  },
+  "lov/2009-06-19-74#1:I:721.0": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  },
+  "lov/2009-06-19-74#1:I:721.1": {
+   "act": null,
+   "after": {
+    "effective": "None",
+    "reason": "nested amendment: host provision's wording outside the grammar",
+    "status": "unresolved"
+   },
+   "before": {
+    "effective": "2009-06-19",
+    "reason": "",
+    "status": "dated"
+   },
+   "host_op_after": "lov/2009-06-19-74#1:I:239.0",
+   "in_reports": [
+    {
+     "act": "lov/2005-05-20-28",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2005-06-17-62",
+     "role": "unattributed"
+    },
+    {
+     "act": "lov/2008-05-15-35",
+     "role": "unattributed"
+    }
+   ],
+   "kind": "unsupported",
+   "section": null
+  }
+ },
+ "operations_changed": 51,
+ "operations_changed_attributed": 14,
+ "operations_changed_unattributed": 37,
+ "records_added": [],
+ "records_changed": 125,
+ "records_compared": 2911,
+ "records_dropped": [],
+ "records_per_act": {
+  "lov/2003-07-04-84": {
+   "fix": 320,
+   "main": 320
+  },
+  "lov/2005-05-20-28": {
+   "fix": 748,
+   "main": 748
+  },
+  "lov/2005-06-17-62": {
+   "fix": 445,
+   "main": 445
+  },
+  "lov/2005-06-17-90": {
+   "fix": 227,
+   "main": 227
+  },
+  "lov/2008-05-15-35": {
+   "fix": 602,
+   "main": 602
+  },
+  "lov/2009-06-19-100": {
+   "fix": 51,
+   "main": 51
+  },
+  "lov/2009-06-19-58": {
+   "fix": 331,
+   "main": 331
+  },
+  "lov/2021-06-18-97": {
+   "fix": 187,
+   "main": 187
+  }
+ },
+ "region": {
+  "host_act": "lov/2005-05-20-28",
+  "host_kind": "renumber",
+  "host_op": "lov/2009-06-19-74#1:I:239.0",
+  "host_provision": "§411",
+  "members": 623,
+  "note": "before: no region (nesting read replace_section hosts only); every member op was dated by part II's straks",
+  "problem_after": "nested amendment: host provision's wording outside the grammar",
+  "problem_before": null,
+  "second_host_inside": "lov/2009-06-19-74#1:I:245.0 (renumber, act None, §412)"
+ },
+ "replay": {
+  "after": "legaltime-replay-9",
+  "before": "legaltime-replay-8"
+ }
+}

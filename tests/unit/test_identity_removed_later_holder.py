@@ -88,7 +88,9 @@ def test_each_holder_keeps_its_own_manifest_record(corpus: tuple[Path, dict[str,
     documents = _plan(corpus).planned_manifest.documents
 
     assert documents[OWNER].status == documents[LATER].status == "removed"
-    assert documents[OWNER].markdown_path == documents[LATER].markdown_path == PATH
+    assert documents[OWNER].slug == documents[LATER].slug == SLUG
+    assert documents[OWNER].markdown_path == PATH  # the owner keeps the path (#912)
+    assert documents[LATER].markdown_path == f"forskrifter/removed/{LATER}.md"
     assert (documents[OWNER].xml_hash, documents[LATER].xml_hash) == (
         f"hash-{OWNER}",
         f"hash-{LATER}",

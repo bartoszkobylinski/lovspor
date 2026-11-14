@@ -1,0 +1,335 @@
+{
+ "archives": {
+  "lovtidend-avd1-2001-2025.tar.bz2": "d55f8a382bba3c0827da3df6041ed6e47fca855fbf685155abcf5d794fed0cb0",
+  "lovtidend-avd1-2026.tar.bz2": "600c5e4191efa1c36190df66f967a14333111518bae48273abfea39c0c18f6d2"
+ },
+ "baseline": "origin/main 76d93b6905825ac13070ef376cc410bc41abf2a8",
+ "changed_operations": [
+  {
+   "act_after": null,
+   "act_before": "lov/2005-05-20-28",
+   "class": "item no longer inherits the outer act",
+   "kind": "unsupported",
+   "member": "lti/2009/nl-20090619-074.xml",
+   "member_sha256": "7ec6a1b4ae319b86ae6735eb2e969022e827afad552c9f9e8a9e4e12db1304d4",
+   "op": "lov/2009-06-19-74#1:I:241.0",
+   "reports": {
+    "arbeidsmiljoloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "straffeloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     },
+     "before": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "events",
+      "status": "dated"
+     }
+    },
+    "utlendingsloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    }
+   },
+   "section": null,
+   "sentence": "1. Militær straffelov 22. mai 1902 nr. 13 § 107 oppheves.",
+   "sentence_sha256": "7869a79a332963b986537722c5ff8d030bd112fbd89a50af11ab0a372d9a3363"
+  },
+  {
+   "act_after": null,
+   "act_before": "lov/1975-06-13-39",
+   "class": "wrong act removed; the list's end is not stated, so no act is proven",
+   "kind": "renumber",
+   "member": "lti/2009/nl-20090619-074.xml",
+   "member_sha256": "7ec6a1b4ae319b86ae6735eb2e969022e827afad552c9f9e8a9e4e12db1304d4",
+   "op": "lov/2009-06-19-74#1:I:245.0",
+   "reports": {
+    "arbeidsmiljoloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "straffeloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "utlendingsloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    }
+   },
+   "section": null,
+   "sentence": "Nåværende § 402 blir § 412 og skal lyde:",
+   "sentence_sha256": "57a9640b483586ee7503faed2e6875d9073ecac65d62387f3100d797bb3947c9"
+  },
+  {
+   "act_after": null,
+   "act_before": "lov/1932-06-17-6",
+   "class": "item continuation no longer bound; the list's end is not stated",
+   "kind": "repeal_punktum",
+   "member": "lti/2009/nl-20090619-074.xml",
+   "member_sha256": "7ec6a1b4ae319b86ae6735eb2e969022e827afad552c9f9e8a9e4e12db1304d4",
+   "op": "lov/2009-06-19-74#1:I:462.0",
+   "reports": {
+    "arbeidsmiljoloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "straffeloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "utlendingsloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    }
+   },
+   "section": "§4",
+   "sentence": "§ 4 annet ledd annet punktum oppheves.",
+   "sentence_sha256": "3ecc081e3643bf1455394f12715b059e6c4afa28ac4efbf670f636dc8d070c96"
+  },
+  {
+   "act_after": null,
+   "act_before": "lov/1950-07-14-2",
+   "class": "item no longer inherits the previous item's act",
+   "kind": "unsupported",
+   "member": "lti/2009/nl-20090619-074.xml",
+   "member_sha256": "7ec6a1b4ae319b86ae6735eb2e969022e827afad552c9f9e8a9e4e12db1304d4",
+   "op": "lov/2009-06-19-74#1:I:487.0",
+   "reports": {
+    "arbeidsmiljoloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "straffeloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "utlendingsloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    }
+   },
+   "section": null,
+   "sentence": "31. Utgår.",
+   "sentence_sha256": "91cc23d3f5f460627d6fbf3b9d079e3b61f08561dfdbe8a1a7f325a82c7e5eca"
+  },
+  {
+   "act_after": null,
+   "act_before": "lov/1997-02-28-19",
+   "class": "item no longer inherits the previous item's act",
+   "kind": "unsupported",
+   "member": "lti/2009/nl-20090619-074.xml",
+   "member_sha256": "7ec6a1b4ae319b86ae6735eb2e969022e827afad552c9f9e8a9e4e12db1304d4",
+   "op": "lov/2009-06-19-74#1:I:1095.0",
+   "reports": {
+    "arbeidsmiljoloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "straffeloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "utlendingsloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    }
+   },
+   "section": null,
+   "sentence": "180. Utgår.",
+   "sentence_sha256": "fdef239f4c23955196e41d9fa7cf333941a0a7162f4929de668a9aafac209c6e"
+  },
+  {
+   "act_after": null,
+   "act_before": "lov/1997-06-19-82",
+   "class": "item no longer inherits the previous item's act",
+   "kind": "unsupported",
+   "member": "lti/2009/nl-20090619-074.xml",
+   "member_sha256": "7ec6a1b4ae319b86ae6735eb2e969022e827afad552c9f9e8a9e4e12db1304d4",
+   "op": "lov/2009-06-19-74#1:I:1134.0",
+   "reports": {
+    "arbeidsmiljoloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "straffeloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "utlendingsloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    }
+   },
+   "section": null,
+   "sentence": "191. Utgår.",
+   "sentence_sha256": "a76033525d247dd42120a7973c7c522bc377b1d69d06325fe1bb7081a1e0a5ff"
+  },
+  {
+   "act_after": null,
+   "act_before": "lov/2004-11-19-73",
+   "class": "item continuation no longer bound; the list's end is not stated",
+   "kind": "replace_section",
+   "member": "lti/2009/nl-20090619-074.xml",
+   "member_sha256": "7ec6a1b4ae319b86ae6735eb2e969022e827afad552c9f9e8a9e4e12db1304d4",
+   "op": "lov/2009-06-19-74#1:I:1332.0",
+   "reports": {
+    "arbeidsmiljoloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "straffeloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "utlendingsloven": {
+     "after": {
+      "effective": "2009-06-19",
+      "known_from": "2009-06-19",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    }
+   },
+   "section": "§15",
+   "sentence": "§ 15 skal lyde:",
+   "sentence_sha256": "7d30d1a3d4666a6ff3259a5ba199dfa2a7ef190331b1f12a024565f857643e34"
+  },
+  {
+   "act_after": null,
+   "act_before": "lov/2010-03-26-9",
+   "class": "item continuation no longer bound; the list's end is not stated",
+   "kind": "renumber",
+   "member": "lti/2024/nl-20240621-046.xml",
+   "member_sha256": "3b3ba2b0ef3eaeaa4e2c360da7f97650304bad66e672995e49dce98cfcf5f85a",
+   "op": "lov/2024-06-21-46#1:I:64.0",
+   "reports": {
+    "straffeloven": {
+     "after": {
+      "effective": "2024-06-21",
+      "known_from": "2024-06-21",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    },
+    "tvisteloven": {
+     "after": {
+      "effective": "2024-06-21",
+      "known_from": "2024-06-21",
+      "list": "unattributed",
+      "status": "dated"
+     }
+    }
+   },
+   "section": "§65",
+   "sentence": "§ 65 nåværende andre ledd blir tredje ledd.",
+   "sentence_sha256": "b7aa6030a1119f0e983274eb6c27f4a86c9c7e7ca6a014858dd7595ed409da3d"
+  }
+ ],
+ "issue": 907,
+ "replay_version": {
+  "after": "legaltime-replay-8",
+  "before": "legaltime-replay-7"
+ },
+ "scope": {
+  "acts": [
+   "lov/2003-07-04-84",
+   "lov/2005-05-20-28",
+   "lov/2005-06-17-62",
+   "lov/2005-06-17-90",
+   "lov/2008-05-15-35",
+   "lov/2009-06-19-100",
+   "lov/2009-06-19-58",
+   "lov/2021-06-18-97"
+  ],
+  "added": 0,
+  "changed": 8,
+  "dropped": 0,
+  "kind_or_text_changed": 0,
+  "members": 404,
+  "operations": 10761
+ },
+ "timing": "no timing changes: every changed operation keeps its status, effective date and known_from"
+}

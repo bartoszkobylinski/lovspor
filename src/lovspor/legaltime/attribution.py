@@ -23,7 +23,7 @@ act of the same date (#872).
 
 import re
 
-from lovspor.legaltime.document import Frozen
+from lovspor.legaltime.document import Document, Frozen
 from lovspor.legaltime.text import MONTHS, act_refid, split_sentences
 
 _MONTH = "|".join(sorted(MONTHS, key=len, reverse=True))
@@ -219,3 +219,23 @@ def inline(text: str, changes: tuple[str, ...]) -> tuple[str, str] | None:
         return None
     act = _proven(text[: match.start("rest")], changes)
     return (act, match.group("rest")) if act is not None else None
+
+
+_COMMENCEMENT_HEADING = re.compile(r"ikraft|iverkset|i\s+kraft", re.I)
+
+
+def commencement_provisions(document: Document) -> list[str]:
+    """An enacting act states its commencement in a provision headed Ikrafttredelse or alike.
+
+    From the first amendment intro on, a provision's ledd are an instruction and its
+    payload about another act (straffelovens ikraftsettingslov § 1), never this act's clause.
+    """
+    texts: list[str] = []
+    for provision in document.provisions:
+        if not _COMMENCEMENT_HEADING.search(provision.heading):
+            continue
+        for ledd in provision.ledd:
+            if is_intro(ledd.text):
+                break
+            texts.append(ledd.text)
+    return texts

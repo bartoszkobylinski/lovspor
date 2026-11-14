@@ -143,6 +143,16 @@ A `removed` record is a **tombstone** — `status` is flipped to
 `embedding_space` / `embedding_space_id` / `embedding_input_hash` revert to `None` — a tombstone claims no
 embedding identity because it has no current sidecar to describe.
 
+**Detached tombstone paths (#871 migration, #912).** One `markdown_path` has one
+record. The identity migration restores tombstones whose last path another record
+still holds (a current threshold-exception owner, or another tombstone). Such a
+removed record that is not its address's `slugs.json` owner keeps its `slug`, and
+so its address, but its `markdown_path` becomes `<directory>/removed/<doc_id>.md`:
+a path no renderer writes and no corpus check globs, so it is never a file on disk.
+The path it last had is `<directory>/<slug>.md`, so nothing is lost. The plan
+report lists them (`detached_tombstones`). Only a removed non-owner is detached;
+a path shared by two current records is still a `duplicate_path_ownership` finding.
+
 ### History
 
 **`HistoryRecord`** (`history.py`) — `schema_version: int` (`== 1`), `slug: str`
@@ -205,6 +215,10 @@ therefore rebuilds each of them from git, never from the file
   Nothing is rewritten or bypassed: the history keeps the bad commit and the
   restore. Before the push, discarding the local migration commit is the
   rollback.
+- Applying: `lovspor ops identity-apply` writes a reviewed plan directory into
+  a clean checkout at its base, pinned by the sha256 of its `SHA256SUMS`
+  (`--expect-sha256`; `--dry-run` checks without writing), and verifies every file against the plan
+  (`docs/operations.md`, "Identity migration: plan, then apply"). It never commits.
 
 ### Upstream source
 

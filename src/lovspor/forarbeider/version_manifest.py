@@ -1,31 +1,39 @@
-"""Build, read and verify a version manifest v3 from raw evidence only (#738, FC6).
+"""Build, read and verify a version manifest v3 from raw evidence only (#738, FC6, FC6b).
 
-:func:`build_version_manifest` takes the saved chapter pages, the attachment
-inventory if there is one, and the raw bytes of anything else the inventory
-names. It extracts and classifies the pages itself (FC3), so no extraction,
-label or completeness flag is ever taken from the caller; it hashes every byte
-string it is given and refuses one that does not hash to its name.
+:func:`build_version_manifest` takes raw bytes and nothing else: the saved
+chapter pages, the landing page if it was saved, and the captured attachment
+responses. It extracts and classifies the pages itself (FC3) and discovers the
+attachments itself with the trusted reader
+(:mod:`lovspor.forarbeider.attachment_discovery`), so no extraction, label,
+inventory or completeness flag is ever taken from the caller.
 
-An attachment counts as captured only when its bytes are given, hash to the
-listed digest and are a supported format. Hashing proves the bytes, never that
-the list is whole: the inventory is the caller's observation, kept as given and
-never promoted to verified, whatever its reader name, its pages or its length.
-An absent inventory is no inventory, and an empty one is not a zero.
+A discovered attachment counts as captured only when bytes were given for its
+URL, hashed here, and are a supported format. A capture for a URL discovery did
+not find is not an attachment; two different captures of one URL are a
+conflict, not a choice.
 
 :func:`parse_version_manifest` reads stored bytes back and recomputes the
 version id and both axes from the content, so a hand-edited verdict is refused.
-:func:`verify_version_manifest` goes further: it rebuilds the manifest from the
-evidence and requires the very same bytes.
+It cannot see the pages, so it cannot tell a consistent forgery from a real
+discovery: :func:`verify_version_manifest` rebuilds the manifest from the
+evidence and requires the very same bytes, and only that proves a verified
+inventory.
 
 Nothing is fetched, written, signed or published here.
 """
 
 import hashlib
 from collections.abc import Mapping
-from typing import Literal, NamedTuple, Self
+from typing import NamedTuple
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import ValidationError
 
+from lovspor.forarbeider.attachment_discovery import (
+    AttachmentDiscovery,
+    DiscoveredAttachment,
+    canonical_url,
+    discover_attachments,
+)
 from lovspor.forarbeider.corpus_models import _loaded
 from lovspor.forarbeider.document_classify import EntryLabel, classify_document
 from lovspor.forarbeider.document_extract import SourcePage, extract_document
@@ -45,11 +53,9 @@ from lovspor.forarbeider.version_completeness import (
 from lovspor.forarbeider.version_models import (
     MANIFEST_SCHEMA_VERSION,
     AttachmentState,
-    Digest,
-    Frozen,
-    NonBlank,
     PageProvenance,
     Provenance,
+    SupportingProvenance,
     VersionAttachment,
     VersionAttachments,
     VersionContent,
@@ -79,54 +85,26 @@ _DOCUMENT_FIELDS = (
 )
 
 
-class AttachmentListing(Frozen):
-    """One attachment as an inventory lists it: where, on which page, and its claimed digest."""
-
-    url: NonBlank
-    listed_on: Digest
-    raw_sha256: Digest | None
-
-
-class AttachmentInventory(Frozen):
-    """What a caller says an attachment reader listed, and the pages it read.
-
-    Observations only. The listed attachments are checked against their bytes;
-    the claim that the list is whole is never believed, so the manifest records
-    the inventory as unverified discovery and states no attachment count.
-    """
-
-    record_type: Literal["forarbeider_attachment_inventory"] = "forarbeider_attachment_inventory"
-    reader: NonBlank
-    read_from: tuple[Digest, ...] = Field(min_length=1)
-    attachments: tuple[AttachmentListing, ...]
-
-    @model_validator(mode="after")
-    def _listed_on_the_basis(self) -> Self:
-        if any(item.listed_on not in self.read_from for item in self.attachments):
-            raise ValueError("an attachment is listed on a page outside read_from")
-        return self
-
-
 class Evidence(NamedTuple):
-    """Everything a version is built from: pages, the inventory, raw bytes by digest."""
+    """Everything a version is built from, as raw responses: no list, label or flag."""
 
     pages: tuple[SourcePage, ...]
-    inventory: AttachmentInventory | None
-    raw: Mapping[str, bytes]
+    landing: SourcePage | None
+    captures: tuple[SourcePage, ...]
 
 
 def build_version_manifest(evidence: Evidence) -> VersionManifest:
     """The manifest of the version ``evidence`` shows, both axes computed.
 
     Raises:
-        ForarbeiderRefusedError: ``manifest_invalid`` when a byte string does
-            not hash to its digest; the page refusals of FC3 extraction.
+        ForarbeiderRefusedError: the page refusals of FC3 extraction.
     """
-    raw = _hashed(evidence)
     extraction = extract_document(evidence.pages)
     classification = classify_document(extraction)
     labels = {label.entry_id: label for label in classification.entries}
-    content = _content(extraction, labels, _attachments(evidence.inventory, raw))
+    pages = {_sha(page.payload): page for page in evidence.pages}
+    discovery = discover_attachments(extraction, pages, evidence.landing)
+    content = _content(extraction, labels, _attachments(discovery, evidence.captures))
     source = source_completeness(content)
     return VersionManifest(
         version_id=text_digest(canonical_text(content)),
@@ -135,6 +113,7 @@ def build_version_manifest(evidence: Evidence) -> VersionManifest:
             extraction_sha256=text_digest(extraction_text(extraction)),
             classification_sha256=text_digest(canonical_text(classification)),
             pages=tuple(_page_provenance(part) for part in extraction.parts),
+            supporting=_supporting(evidence),
         ),
         source=source,
         publication=publication_completeness(content, source),
@@ -194,19 +173,14 @@ def _require_consistent(manifest: VersionManifest) -> None:
         raise _invalid("completeness")
 
 
-def _hashed(evidence: Evidence) -> dict[str, bytes]:
-    """Every byte string given, by its own digest; one under another name is refused."""
-    for digest, payload in evidence.raw.items():
-        if hashlib.sha256(payload).hexdigest() != digest:
-            raise _invalid("evidence digest")
-    pages = {hashlib.sha256(page.payload).hexdigest(): page.payload for page in evidence.pages}
-    return {**evidence.raw, **pages}
+def _sha(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _content(
     extraction: DocumentExtraction,
     labels: Mapping[str, EntryLabel],
-    attachments: VersionAttachments | None,
+    attachments: VersionAttachments,
 ) -> VersionContent:
     document = extraction.model_dump(include=set(_DOCUMENT_FIELDS))
     return VersionContent(
@@ -265,37 +239,58 @@ def _page_provenance(part: Part) -> PageProvenance:
     )
 
 
+def _supporting(evidence: Evidence) -> tuple[SupportingProvenance, ...]:
+    landing = [("landing", evidence.landing)] if evidence.landing is not None else []
+    given = [*landing, *(("capture", page) for page in evidence.captures)]
+    records = {
+        SupportingProvenance.model_validate(
+            {
+                "role": role,
+                "url": page.url,
+                "raw_sha256": _sha(page.payload),
+                "retrieved_at": page.retrieved_at,
+            }
+        )
+        for role, page in given
+    }
+    return tuple(sorted(records, key=lambda item: (item.role, item.url, item.raw_sha256)))
+
+
 def _attachments(
-    inventory: AttachmentInventory | None, raw: Mapping[str, bytes]
-) -> VersionAttachments | None:
-    if inventory is None:
-        return None
+    discovery: AttachmentDiscovery, captures: tuple[SourcePage, ...]
+) -> VersionAttachments:
+    """The discovered inventory, each attachment with what its captured bytes show."""
+    by_url: dict[str, dict[str, bytes]] = {}
+    for page in captures:
+        by_url.setdefault(canonical_url(page.url, page.url), {})[_sha(page.payload)] = page.payload
     return VersionAttachments(
-        reader=inventory.reader,
-        read_from=tuple(sorted(set(inventory.read_from))),
+        discovery="verified" if discovery.exhaustive else "unverified",
+        pages_required=discovery.pages_required,
+        pages_scanned=discovery.pages_scanned,
         attachments=tuple(
-            sorted(
-                (_attachment(item, raw) for item in inventory.attachments),
-                key=lambda item: (item.url, item.listed_on, item.raw_sha256 or ""),
-            )
+            _attachment(item, by_url.get(item.url, {})) for item in discovery.attachments
         ),
+        renditions=discovery.renditions,
+        gaps=discovery.gaps,
     )
 
 
-def _attachment(item: AttachmentListing, raw: Mapping[str, bytes]) -> VersionAttachment:
-    """What the bytes show: not captured, unverified, unsupported, or captured as a format."""
-    media_type = None
-    if item.raw_sha256 is None:
+def _attachment(item: DiscoveredAttachment, captured: Mapping[str, bytes]) -> VersionAttachment:
+    """What the bytes given for the URL show: none, a conflict, unsupported, or captured."""
+    media_type, digest = None, None
+    if not captured:
         state = AttachmentState.NOT_CAPTURED
-    elif item.raw_sha256 not in raw:
-        state = AttachmentState.UNVERIFIED
+    elif len(captured) > 1:
+        state = AttachmentState.CONFLICTING
     else:
-        media_type = _media_type(raw[item.raw_sha256])
+        ((digest, payload),) = captured.items()
+        media_type = _media_type(payload)
         state = AttachmentState.UNSUPPORTED if media_type is None else AttachmentState.CAPTURED
     return VersionAttachment(
         url=item.url,
-        listed_on=item.listed_on,
-        raw_sha256=item.raw_sha256,
+        kind=item.kind,
+        found_at=item.found_at,
+        raw_sha256=digest,
         media_type=media_type,
         state=state,
     )

@@ -28,6 +28,14 @@ from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from lovspor.forarbeider.attachment_discovery import (
+    AttachmentKind,
+    DiscoveryGap,
+    FoundAt,
+    Rendition,
+    RequiredPage,
+    ScannedPage,
+)
 from lovspor.forarbeider.document_classify import (
     PrivacyCandidate,
     RightsCandidate,
@@ -106,40 +114,57 @@ class VersionPart(Frozen):
 
 
 class AttachmentState(StrEnum):
-    """What the raw evidence shows of one listed attachment."""
+    """What the captured bytes show of one discovered attachment."""
 
     CAPTURED = "captured"
     NOT_CAPTURED = "not_captured"
-    UNVERIFIED = "unverified"
     UNSUPPORTED = "unsupported"
+    CONFLICTING = "conflicting"
 
 
 class VersionAttachment(Frozen):
-    """One listed attachment: where it was listed, its raw digest, what its bytes are."""
+    """One discovered attachment, where it is referenced, and what its captured bytes are.
+
+    Discovery says the attachment exists; only bytes given for its URL, hashed
+    here, say it was captured.
+    """
 
     url: NonBlank
-    listed_on: Digest
+    kind: AttachmentKind
+    found_at: tuple[FoundAt, ...] = Field(min_length=1)
     raw_sha256: Digest | None
     media_type: str | None
     state: AttachmentState
 
 
 class VersionAttachments(Frozen):
-    """An attachment inventory as the caller observed it, never proof that it is whole.
+    """The attachment inventory the trusted reader discovered, with its proof and gaps.
 
-    The listed attachments, their URLs, digests and capture states are kept as
-    observations. Nothing given here can show that discovery was exhaustive: a
-    reader name is a label, page digests show which bytes were read, not that
-    nothing was missed, and an empty list is not a zero. ``discovery`` is
-    therefore always ``unverified``, so no attachment count is ever stated.
-    A trusted, versioned discovery reader (FC6b) is the only thing that may add
-    another value.
+    Built only by :func:`~lovspor.forarbeider.attachment_discovery.discover_attachments`
+    from raw pages; no caller list, reader name or flag enters it. ``discovery``
+    is ``verified`` exactly when there is no discovery gap and every required
+    page (each listed chapter and the landing page) was scanned; only then is
+    the list, even an empty one, a count.
     """
 
-    reader: NonBlank
-    read_from: tuple[Digest, ...] = Field(min_length=1)
-    discovery: Literal["unverified"] = "unverified"
+    reader: Literal["regjeringen-attachments/1"] = "regjeringen-attachments/1"
+    discovery: Literal["verified", "unverified"]
+    pages_required: tuple[RequiredPage, ...] = Field(min_length=1)
+    pages_scanned: tuple[ScannedPage, ...]
     attachments: tuple[VersionAttachment, ...]
+    renditions: tuple[Rendition, ...]
+    gaps: tuple[DiscoveryGap, ...]
+
+    @model_validator(mode="after")
+    def _verified_only_when_proved(self) -> Self:
+        scanned = {(page.role, page.chapter_number) for page in self.pages_scanned}
+        required = {(page.role, page.chapter_number) for page in self.pages_required}
+        if not scanned <= required:
+            raise ValueError("a scanned page is not a required page")
+        proved = not self.gaps and scanned == required
+        if (self.discovery == "verified") != proved:
+            raise ValueError("discovery is verified exactly when every page is scanned, no gap")
+        return self
 
 
 class VersionContent(Frozen):
@@ -151,7 +176,20 @@ class VersionContent(Frozen):
     chapters_listed: tuple[Chapter, ...]
     parts: tuple[VersionPart, ...]
     document_gaps: tuple[VersionGap, ...]
-    attachments: VersionAttachments | None
+    attachments: VersionAttachments
+
+    @model_validator(mode="after")
+    def _discovery_covers_these_pages(self) -> Self:
+        required = {page.chapter_number for page in self.attachments.pages_required}
+        if required != {None, *(chapter.chapter_number for chapter in self.chapters_listed)}:
+            raise ValueError("discovery does not require exactly the listed chapters and landing")
+        parts: dict[int | None, str] = {
+            part.chapter_number: part.source_sha256 for part in self.parts
+        }
+        for page in self.attachments.pages_scanned:
+            if page.role == "chapter" and parts.get(page.chapter_number) != page.raw_sha256:
+                raise ValueError("discovery scanned a page that is not the part's page")
+        return self
 
 
 # --- outside the hash --------------------------------------------------------------
@@ -166,12 +204,22 @@ class PageProvenance(Frozen):
     retrieved_at: AwareDatetime
 
 
+class SupportingProvenance(Frozen):
+    """Where and when the landing page or a captured attachment was read."""
+
+    role: Literal["landing", "capture"]
+    url: NonBlank
+    raw_sha256: Digest
+    retrieved_at: AwareDatetime
+
+
 class Provenance(Frozen):
     """The private records this version was built from, by digest."""
 
     extraction_sha256: Digest
     classification_sha256: Digest
     pages: tuple[PageProvenance, ...]
+    supporting: tuple[SupportingProvenance, ...]
 
 
 class Effect(StrEnum):
@@ -282,15 +330,22 @@ class VersionManifest(Frozen):
             raise ValueError("publication_complete requires source_complete")
         if published and self.publication.release_gaps:
             raise ValueError("publication_complete requires zero release gaps")
-        _require_unverified_discovery_states_no_count(self.source)
+        _require_counts_follow_discovery(self.content.attachments, self.source)
         return self
 
 
-def _require_unverified_discovery_states_no_count(source: SourceCompleteness) -> None:
-    """No attachment discovery is trusted yet: no count, and so never source_complete."""
-    counted = (source.attachments_expected, source.attachments_captured) != (None, None)
-    if counted or source.state is SourceState.SOURCE_COMPLETE:
-        raise ValueError("attachment discovery is unverified: no count, no source_complete")
+def _require_counts_follow_discovery(
+    attachments: VersionAttachments, source: SourceCompleteness
+) -> None:
+    """Counts only from verified discovery, and they are its counts; else no source_complete."""
+    counts = (source.attachments_expected, source.attachments_captured)
+    if attachments.discovery == "unverified":
+        if counts != (None, None) or source.state is SourceState.SOURCE_COMPLETE:
+            raise ValueError("attachment discovery is unverified: no count, no source_complete")
+        return
+    captured = sum(item.state is AttachmentState.CAPTURED for item in attachments.attachments)
+    if counts != (len(attachments.attachments), captured):
+        raise ValueError("attachment counts are not those of the verified discovery")
 
 
 def canonical_text(model: BaseModel) -> str:

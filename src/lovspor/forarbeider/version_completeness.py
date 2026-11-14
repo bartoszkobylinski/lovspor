@@ -7,14 +7,15 @@ by computing it again.
 
 A reason either confirms an axis incomplete or leaves it unknown. Incomplete
 wins over unknown; an axis with no reason is complete. A missing input (no
-chapter navigation, no attachment inventory, an inventory whose discovery is
-not proved exhaustive) is unknown and states no count, never zero. No caller
-inventory proves that: until a trusted discovery reader exists (FC6b), every
-inventory is unverified, so the source axis is never complete.
+chapter navigation, an attachment discovery with a gap) is unknown and states
+no count, never zero. Only the trusted reader's discovery, proved exhaustive
+over every listed chapter page and the landing page, gives an attachment
+count, and an empty one is then a real zero.
 
 **Source**: every listed chapter is a part, every part's boundary and markup
-are proved, its coverage is exact, no gap was recorded, and every listed
-attachment was captured from bytes that hash to its digest.
+are proved, its coverage is exact, no gap was recorded, attachment discovery
+is exhaustive, and every discovered attachment was captured as bytes of a
+supported format. A link found is never a file captured.
 
 **Publication**: never complete merely because the source is. It needs the
 source complete, no release gap, and clearance evidence for every span and
@@ -54,7 +55,7 @@ _OPEN_GAPS = frozenset(
 )
 _ATTACHMENT_REASONS = {
     AttachmentState.NOT_CAPTURED: ("attachment_not_captured", Effect.INCOMPLETE),
-    AttachmentState.UNVERIFIED: ("attachment_unverified", Effect.UNKNOWN),
+    AttachmentState.CONFLICTING: ("attachment_capture_conflicting", Effect.UNKNOWN),
     AttachmentState.UNSUPPORTED: ("attachment_unsupported", Effect.INCOMPLETE),
 }
 _RIGHTS_GAPS = {
@@ -80,8 +81,8 @@ def source_completeness(content: VersionContent) -> SourceCompleteness:
         state=SOURCE_STATES[state_of(reasons)],
         parts_expected=len(content.chapters_listed) or None,
         parts_extracted=len(content.parts),
-        attachments_expected=None,
-        attachments_captured=None,
+        attachments_expected=_count(content.attachments, None),
+        attachments_captured=_count(content.attachments, AttachmentState.CAPTURED),
         extraction_gaps=sum(1 for _ in _all_gaps(content)),
         reasons=reasons,
     )
@@ -103,7 +104,7 @@ def publication_completeness(
         spans_total=sum(1 for _ in _spans(content)),
         spans_publishable=0,
         release_gaps=sum(1 for reason in entries if reason.effect is Effect.INCOMPLETE),
-        attachments_publishable=None,
+        attachments_publishable=None if content.attachments.discovery == "unverified" else 0,
         reasons=reasons,
     )
 
@@ -147,11 +148,18 @@ def _coverage_reasons(content: VersionContent) -> Iterator[Reason]:
             yield Reason(code="coverage_not_exact", effect=Effect.INCOMPLETE, part_id=part.id)
 
 
-def _attachment_reasons(attachments: VersionAttachments | None) -> Iterator[Reason]:
-    if attachments is None:
-        yield Reason(code="attachment_inventory_missing", effect=Effect.UNKNOWN)
-        return
-    yield Reason(code="attachment_inventory_unverified", effect=Effect.UNKNOWN)
+def _count(attachments: VersionAttachments, state: AttachmentState | None) -> int | None:
+    """How many discovered attachments are in ``state`` (all, for ``None``); unverified: none."""
+    if attachments.discovery == "unverified":
+        return None
+    return sum(1 for item in attachments.attachments if state in (None, item.state))
+
+
+def _attachment_reasons(attachments: VersionAttachments) -> Iterator[Reason]:
+    """Each discovery gap leaves the inventory unknown; each found but missing file is a loss."""
+    for gap in attachments.gaps:
+        detail = " ".join(filter(None, (gap.locator, gap.detail))) or None
+        yield Reason(code=f"discovery_{gap.code}", effect=Effect.UNKNOWN, detail=detail)
     for item in attachments.attachments:
         if item.state in _ATTACHMENT_REASONS:
             code, effect = _ATTACHMENT_REASONS[item.state]
@@ -190,10 +198,9 @@ def _entry_reasons(content: VersionContent) -> Iterator[Reason]:
             yield Reason(code=code, effect=effect, part_id=part_id, entry_id=entry.id)
 
 
-def _attachment_publication(attachments: VersionAttachments | None) -> Iterator[Reason]:
-    if attachments is None:
-        yield Reason(code="attachment_inventory_missing", effect=Effect.UNKNOWN)
-        return
+def _attachment_publication(attachments: VersionAttachments) -> Iterator[Reason]:
+    if attachments.discovery == "unverified":
+        yield Reason(code="attachment_discovery_unverified", effect=Effect.UNKNOWN)
     for item in attachments.attachments:
         captured = item.state is AttachmentState.CAPTURED
         yield Reason(

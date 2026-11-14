@@ -10,6 +10,13 @@ does, never by the outer law's own commencement clause.
 This module finds the regions after ``instructions`` has read the member, from the operations'
 own tags (``#<part>:<label>:<node>``) and the part's nodes; ``hosts`` dates them. Every shape
 other than the verified one is refused, never guessed.
+
+A host can also be renamed and replaced at once (#918): ``lov/2009-06-19-74`` part I, "Nåværende
+§ 401 blir § 411 som innleder tredje del og som skal lyde:" and "Nåværende § 402 blir § 412 og
+skal lyde:", each provision ending in a list of amendments to other acts. Its items are a
+region like any other, so the outer law's "straks" never dates them; the region is refused
+(the host's unit in its own act is not followed across the renaming), so they stay
+``unresolved``.
 """
 
 import re
@@ -45,6 +52,8 @@ REPLACEMENT_UNDATED = NESTED + "replacement of the host provision is not dated"
 SPLIT = NESTED + "host section's commencement is split below the section or by part"
 REPLACED_LATE = NESTED + "host provision replaced after it commenced"
 UNPROVEN = NESTED + "host provision's commencement not proven"
+RENAMED = NESTED + "host provision renamed: its unit in the host act is not followed (#918)"
+_HOSTING = frozenset({"replace_section", "renumber"})  # "skal lyde:", "blir § N og skal lyde:"
 
 
 class Nest(Frozen):
@@ -73,7 +82,7 @@ def _place(op_id: str) -> tuple[int, int]:
 
 def _opens(op: Operation) -> bool:
     provision = op.new_provision
-    return op.kind == "replace_section" and _host_list(provision)
+    return op.kind in _HOSTING and _host_list(provision)
 
 
 def _host_list(provision: Provision | None) -> bool:
@@ -127,6 +136,7 @@ def _region(document: Document, reading: Interpretation, host: Operation) -> Nes
     nodes = [n for n in document.parts[part].nodes[start + 1 :] if n.kind == "paragraph"]
     checks = (
         (_wording(host.new_provision) is not None, WORDING),
+        (host.kind == "renumber", RENAMED),
         (any(_opens(op) for op in members), SECOND_HOST),
         (not nodes or not _NUMBERED.match(nodes[0].text), LEADING),
         (any(_unnumbered_intro(node.text) for node in nodes), BOUNDARY),
