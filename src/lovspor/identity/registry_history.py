@@ -69,6 +69,7 @@ from lovspor.identity.corpus_git import (
     resolve_commit,
     toplevel,
 )
+from lovspor.identity.owner_continuity import load_reassignments, require_owner_continuity
 from lovspor.identity.registry import (
     CorpusIdentity,
     EnforcedCorpus,
@@ -272,4 +273,5 @@ def verified_corpus_identity(repo: Path) -> CorpusIdentity:
     require_registry_history(repo, identity.registry)
     if manifest is not None:
         require_registry_content(repo, identity.registry, manifest)
+    require_owner_continuity(repo, identity.registry, load_reassignments())
     return identity

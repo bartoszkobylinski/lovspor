@@ -1,0 +1,503 @@
+{
+  "reassignments": [
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20260706-1512",
+      "kind": "history-repair",
+      "reason": "#899 repair: the removed address's slug history is rebuilt for its registry owner",
+      "slug": "endr-i-bilforskriften",
+      "to_doc_id": "sf-20260513-0853"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20260911-1792",
+      "kind": "history-repair",
+      "reason": "#871 history repair: a removed later holder after the threshold; the removed address's slug history is rebuilt for its registry owner (not one of the two #899 repairs: owner review)",
+      "slug": "endr-i-byggteknisk-forskrift-tek17",
+      "to_doc_id": "sf-20260612-1085"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261109-2306",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to endr-i-forurensningsforskriften-2026; the address returns to its holder from before the threshold",
+      "slug": "endr-i-forurensningsforskriften",
+      "to_doc_id": "sf-20251114-2414"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261002-1999",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to endr-i-høstingsforskriften-2026; the address returns to its holder from before the threshold",
+      "slug": "endr-i-høstingsforskriften",
+      "to_doc_id": "sf-20251125-2415"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261030-2189",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to endr-i-integreringsforskriften-2026; the address returns to its holder from before the threshold",
+      "slug": "endr-i-integreringsforskriften",
+      "to_doc_id": "sf-20260621-1155"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261027-2154",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to endr-i-kostra-forskriften-2026; the address returns to its holder from before the threshold",
+      "slug": "endr-i-kostra-forskriften",
+      "to_doc_id": "sf-20251029-2134"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20260821-1659",
+      "kind": "history-repair",
+      "reason": "#899 repair: the removed address's slug history is rebuilt for its registry owner",
+      "slug": "endr-i-tollavgiftsforskriften",
+      "to_doc_id": "sf-20251219-2804"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20260916-1832",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to endr-i-trafikkopplæringsforskriften-2026; the address returns to its holder from before the threshold",
+      "slug": "endr-i-trafikkopplæringsforskriften",
+      "to_doc_id": "sf-20260415-0597"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261026-2129",
+      "kind": "history-repair",
+      "reason": "#871 history repair: a removed later holder after the threshold; the removed address's slug history is rebuilt for its registry owner (not one of the two #899 repairs: owner review)",
+      "slug": "endr-i-utrullingsforskriften",
+      "to_doc_id": "sf-20260210-0178"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20260916-1888",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to forskrift-om-endring-i-forskrift-om-fartsskriververksteder-2026; the address returns to its holder from before the threshold",
+      "slug": "forskrift-om-endring-i-forskrift-om-fartsskriververksteder",
+      "to_doc_id": "sf-20260513-0854"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261028-2219",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to forskrift-om-endring-i-forskrift-om-stønad-til-dekning-av-utgifter-til-undersøkelse-og-behandling-hos-lege-2026; the address returns to its holder from before the threshold",
+      "slug": "forskrift-om-endring-i-forskrift-om-stønad-til-dekning-av-utgifter-til-undersøkelse-og-behandling-hos-lege",
+      "to_doc_id": "sf-20250523-0848"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261021-2175",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to forskrift-om-endring-i-forskrift-om-takstberegning-og-maksimalpriser-for-løyvepliktig-drosjetransport-med-motorvogn-2026; the address returns to its holder from before the threshold",
+      "slug": "forskrift-om-endring-i-forskrift-om-takstberegning-og-maksimalpriser-for-løyvepliktig-drosjetransport-med-motorvogn",
+      "to_doc_id": "sf-20251020-2063"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261102-2241",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to forskrift-om-tidsbegrenset-fritak-fra-krav-til-låssetting-i-fisket-etter-makrell-og-norsk-vårgytende-sild-2026; the address returns to its holder from before the threshold",
+      "slug": "forskrift-om-tidsbegrenset-fritak-fra-krav-til-låssetting-i-fisket-etter-makrell-og-norsk-vårgytende-sild",
+      "to_doc_id": "sf-20251219-2823"
+    }
+  ],
+  "schema_version": 1,
+  "threshold_exceptions": [
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20260324-0472",
+      "owner": "sf-20260513-0853",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260513-0853 took the address at or before the threshold and keeps it; sf-20260324-0472 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-bilforskriften"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250402-0577",
+      "owner": "sf-20260618-1354",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260618-1354 took the address at or before the threshold and keeps it; sf-20250402-0577 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-blåreseptforskriften"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250620-1154",
+      "owner": "sf-20260621-1155",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260621-1155 took the address at or before the threshold and keeps it; sf-20250620-1154 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-integreringsforskriften"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250907-1787",
+      "owner": "sf-20260218-0235",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260218-0235 took the address at or before the threshold and keeps it; sf-20250907-1787 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-opplæringsforskrifta-og-privatskoleforskrifta"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20260218-0235",
+      "owner": "sf-20260622-1213",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260622-1213 took the address at or before the threshold and keeps it; sf-20260218-0235 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-opplæringsforskrifta-og-privatskoleforskrifta-2"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251215-2590",
+      "owner": "sf-20260609-1053",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260609-1053 took the address at or before the threshold and keeps it; sf-20251215-2590 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-pasientreiseforskriften"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20260204-0144",
+      "owner": "sf-20260626-1439",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260626-1439 took the address at or before the threshold and keeps it; sf-20260204-0144 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-poliklinikkforskriften"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251211-2608",
+      "owner": "sf-20260512-0810",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260512-0810 took the address at or before the threshold and keeps it; sf-20251211-2608 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-produktforskriften-2"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251102-2170",
+      "owner": "sf-20260626-1397",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260626-1397 took the address at or before the threshold and keeps it; sf-20251102-2170 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-strålevernforskriften"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250826-1727",
+      "owner": "sf-20251218-2918",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20251218-2918 took the address at or before the threshold and keeps it; sf-20250826-1727 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-tiltaksforskriften"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251212-2609",
+      "owner": "sf-20260619-1251",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260619-1251 took the address at or before the threshold and keeps it; sf-20251212-2609 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-universitets-og-høyskoleforskriften"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250110-0018",
+      "owner": "sf-20260615-1087",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260615-1087 took the address at or before the threshold and keeps it; sf-20250110-0018 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-utlendingsforskriften-2"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251219-2803",
+      "owner": "sf-20260226-0296",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260226-0296 took the address at or before the threshold and keeps it; sf-20251219-2803 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-vareførselsforskriften-5"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20260217-0229",
+      "owner": "sf-20260505-0749",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260505-0749 took the address at or before the threshold and keeps it; sf-20260217-0229 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-vareførselsforskriften-6"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250122-0054",
+      "owner": "sf-20260129-0108",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260129-0108 took the address at or before the threshold and keeps it; sf-20250122-0054 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endr-i-yrkestransportforskriften"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250508-0892",
+      "owner": "sf-20260507-1167",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260507-1167 took the address at or before the threshold and keeps it; sf-20250508-0892 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-for-graden-philosophiae-doctor-ved-nord-universitet"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-19930820-0815",
+      "owner": "sf-19871030-0840",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-19871030-0840 took the address at or before the threshold and keeps it; sf-19930820-0815 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-brannvern-på-svalbard"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20231222-2310",
+      "owner": "sf-20250806-1612",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20250806-1612 took the address at or before the threshold and keeps it; sf-20231222-2310 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-elektronisk-stiftelse-og-registrering-av-aksjeselskaper-og-om-elektronisk-registrering-av-utenlandske-foretak-mv"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251216-2616",
+      "owner": "sf-20260121-0071",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260121-0071 took the address at or before the threshold and keeps it; sf-20251216-2616 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-endring-i-forskrift-om-bruk-av-kjøretøy"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20260121-0071",
+      "owner": "sf-20260121-0091",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260121-0091 took the address at or before the threshold and keeps it; sf-20260121-0071 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-endring-i-forskrift-om-bruk-av-kjøretøy-2"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20260121-0091",
+      "owner": "sf-20260320-0442",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260320-0442 took the address at or before the threshold and keeps it; sf-20260121-0091 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-endring-i-forskrift-om-bruk-av-kjøretøy-3"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20260116-0054",
+      "owner": "sf-20260622-1185",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260622-1185 took the address at or before the threshold and keeps it; sf-20260116-0054 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-endring-i-forskrift-om-gebyr-på-tjenester-utført-av-statens-vegvesen-på-trafikant-og-kjøretøyområdet"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251218-2659",
+      "owner": "sf-20260624-1260",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260624-1260 took the address at or before the threshold and keeps it; sf-20251218-2659 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-endring-i-forskrift-om-omsetningsavgift-på-jordbruksvarer-og-om-overproduksjonsavgift-på-mjølk"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251030-2227",
+      "owner": "sf-20260428-0737",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260428-0737 took the address at or before the threshold and keeps it; sf-20251030-2227 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-endring-i-forskrift-om-opptak-studier-og-eksamen-ved-handelshøyskolen-bi"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250918-2581",
+      "owner": "sf-20260622-1391",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260622-1391 took the address at or before the threshold and keeps it; sf-20250918-2581 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-endring-i-forskrift-om-prisnedskriving-ved-salg-til-spesialmarkeder"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251210-2504",
+      "owner": "sf-20260623-1255",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260623-1255 took the address at or before the threshold and keeps it; sf-20251210-2504 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-endring-i-forskrift-om-rapportering-registrering-og-merking-av-luftfartshinder"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251216-2592",
+      "owner": "sf-20260621-1156",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260621-1156 took the address at or before the threshold and keeps it; sf-20251216-2592 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-endring-i-forskrift-om-stønad-til-dekning-av-utgifter-til-undersøkelse-og-behandling-hos-psykolog"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250623-1321",
+      "owner": "sf-20260625-1372",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260625-1372 took the address at or before the threshold and keeps it; sf-20250623-1321 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-forsinkelsesrente-og-kompensasjon-for-inndrivelseskostnader"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20251218-2658",
+      "owner": "sf-20260625-1372",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260625-1372 took the address at or before the threshold and keeps it; sf-20251218-2658 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-forsinkelsesrente-og-kompensasjon-for-inndrivelseskostnader-2"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250120-0087",
+      "owner": "sf-20260128-0125",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260128-0125 took the address at or before the threshold and keeps it; sf-20250120-0087 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-gebyr-til-luftfartstilsynet-mv"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20201209-2804",
+      "owner": "sf-20251216-3020",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20251216-3020 took the address at or before the threshold and keeps it; sf-20201209-2804 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-høyere-yrkesfaglig-utdanning-ved-nordland-fagskole"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20211026-3091",
+      "owner": "sf-20250905-1833",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20250905-1833 took the address at or before the threshold and keeps it; sf-20211026-3091 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-anestesisykepleierutdanning"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20211026-3092",
+      "owner": "sf-20250905-1832",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20250905-1832 took the address at or before the threshold and keeps it; sf-20211026-3092 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-barnesykepleierutdanning"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250704-1464",
+      "owner": "sf-20250904-1828",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20250904-1828 took the address at or before the threshold and keeps it; sf-20250704-1464 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-barnevernspedagogutdanning"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20211026-3094",
+      "owner": "sf-20250905-1834",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20250905-1834 took the address at or before the threshold and keeps it; sf-20211026-3094 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-intensivsykepleierutdanning"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20230605-0822",
+      "owner": "sf-20250905-1829",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20250905-1829 took the address at or before the threshold and keeps it; sf-20230605-0822 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-jordmorutdanning"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20211026-3093",
+      "owner": "sf-20250905-1831",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20250905-1831 took the address at or before the threshold and keeps it; sf-20211026-3093 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-kreftsykepleierutdanning"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20211026-3095",
+      "owner": "sf-20250905-1830",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20250905-1830 took the address at or before the threshold and keeps it; sf-20211026-3095 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-operasjonssykepleierutdanning"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20241212-3075",
+      "owner": "sf-20251212-2507",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20251212-2507 took the address at or before the threshold and keeps it; sf-20241212-3075 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-norsk-farmakop"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250827-1717",
+      "owner": "sf-20251201-2991",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20251201-2991 took the address at or before the threshold and keeps it; sf-20250827-1717 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-opptak-disiplinære-sanksjoner-klagebestemmelser-og-eksamen-ved-fagskolen-gokstad-akademiet-as"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20211213-3967",
+      "owner": "sf-20251215-2610",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20251215-2610 took the address at or before the threshold and keeps it; sf-20211213-3967 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-opptak-til-studier-ved-høgskolen-i-østfold"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20200310-1636",
+      "owner": "sf-20251216-2962",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20251216-2962 took the address at or before the threshold and keeps it; sf-20200310-1636 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-opptak-ved-ldh"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20250929-1967",
+      "owner": "sf-20251219-2889",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20251219-2889 took the address at or before the threshold and keeps it; sf-20250929-1967 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-regulering-av-fiske-i-oslofjorden"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20241216-3178",
+      "owner": "sf-20251212-2584",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20251212-2584 took the address at or before the threshold and keeps it; sf-20241216-3178 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-satser-for-frakttilskudd-til-transport-av-kraftf-r"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20230322-0391",
+      "owner": "sf-20260326-0506",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260326-0506 took the address at or before the threshold and keeps it; sf-20230322-0391 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-tilskudd-til-boligtiltak"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20240102-0025",
+      "owner": "sf-20251130-2373",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20251130-2373 took the address at or before the threshold and keeps it; sf-20240102-0025 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-tilskudd-til-integreringsarbeid-i-regi-av-frivillige-organisasjoner"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20231222-2308",
+      "owner": "sf-20250806-1613",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20250806-1613 took the address at or before the threshold and keeps it; sf-20231222-2308 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "forskrift-om-utveksling-av-opplysninger-gjennom-registersammenkoblingssystemet-mv"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20111216-1258",
+      "owner": "sf-20260529-0941",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20260529-0941 took the address at or before the threshold and keeps it; sf-20111216-1258 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "psykisk-helsevernforskriften"
+    },
+    {
+      "directory": "forskrifter",
+      "first_holder": "sf-20080219-0158",
+      "owner": "sf-20250808-1616",
+      "reason": "#871 U1 threshold f6d7e25bb: sf-20250808-1616 took the address at or before the threshold and keeps it; sf-20080219-0158 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "utleggsregistreringsforskriften"
+    },
+    {
+      "directory": "lover",
+      "first_holder": "nl-20250620-046",
+      "owner": "nl-20260619-038",
+      "reason": "#871 U1 threshold f6d7e25bb: nl-20260619-038 took the address at or before the threshold and keeps it; nl-20250620-046 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endringslov-til-energiloven"
+    },
+    {
+      "directory": "lover",
+      "first_holder": "nl-20260612-027",
+      "owner": "nl-20260623-064",
+      "reason": "#871 U1 threshold f6d7e25bb: nl-20260623-064 took the address at or before the threshold and keeps it; nl-20260612-027 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endringslov-til-folketrygdloven-2"
+    },
+    {
+      "directory": "lover",
+      "first_holder": "nl-20260623-064",
+      "owner": "nl-20260623-065",
+      "reason": "#871 U1 threshold f6d7e25bb: nl-20260623-065 took the address at or before the threshold and keeps it; nl-20260623-064 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endringslov-til-folketrygdloven-3"
+    },
+    {
+      "directory": "lover",
+      "first_holder": "nl-20251222-119",
+      "owner": "nl-20260623-066",
+      "reason": "#871 U1 threshold f6d7e25bb: nl-20260623-066 took the address at or before the threshold and keeps it; nl-20251222-119 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endringslov-til-skatteloven-5"
+    },
+    {
+      "directory": "lover",
+      "first_holder": "nl-20250620-086",
+      "owner": "nl-20260612-028",
+      "reason": "#871 U1 threshold f6d7e25bb: nl-20260612-028 took the address at or before the threshold and keeps it; nl-20250620-086 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "endringslov-til-straffeloven"
+    },
+    {
+      "directory": "lover",
+      "first_holder": "nl-20090619-101",
+      "owner": "nl-20250620-107",
+      "reason": "#871 U1 threshold f6d7e25bb: nl-20250620-107 took the address at or before the threshold and keeps it; nl-20090619-101 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "mineralloven"
+    },
+    {
+      "directory": "lover",
+      "first_holder": "nl-20120316-012",
+      "owner": "nl-20250606-026",
+      "reason": "#871 U1 threshold f6d7e25bb: nl-20250606-026 took the address at or before the threshold and keeps it; nl-20120316-012 held it first and is recorded as a prior holder. Not first-holder ownership: owner decision",
+      "slug": "vass-og-avløpsanleggslova"
+    }
+  ]
+}

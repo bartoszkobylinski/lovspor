@@ -35,6 +35,7 @@ from lovspor.identity.schema import REGISTRY_FILENAME
 from lovspor.storage.manifest import Manifest
 from lovspor.sync.orchestrator import _ensure_clean_corpus
 from tests.unit.identity_git_fixtures import commit_all, git, record
+from tests.unit.identity_owner_fixtures import allow_fixture_u1
 from tests.unit.test_identity_migration import KEEP, LOST, NEW, OLD, _base_repo
 
 GHOST = "sf-99999999-9999"
@@ -130,7 +131,10 @@ def _audit_finding(repo: Path) -> str:
     return " ".join(f.detail for f in findings if f.kind == "identity_schema")
 
 
-def test_the_complete_migration_passes_the_gate(tmp_path: Path) -> None:
+def test_the_complete_migration_passes_the_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_fixture_u1(monkeypatch, tmp_path)
     repo = _migrate(tmp_path, None)
 
     assert isinstance(verified_corpus_identity(repo), EnforcedCorpus)
