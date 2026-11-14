@@ -21,7 +21,7 @@ from lovspor.legaltime.nesting import nesting
 from lovspor.legaltime.replay import Event, ReplayState, replay
 from lovspor.legaltime.verify import verify
 
-REPLAY_VERSION = "legaltime-replay-8"  # #907: an item of a payload's list never inherits an act
+REPLAY_VERSION = "legaltime-replay-9"  # #918: a renamed host's list is never dated "straks"
 
 
 def _stamp(value: datetime | None) -> str | None:
