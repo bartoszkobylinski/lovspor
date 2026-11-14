@@ -247,3 +247,43 @@ def test_collect_reads_no_host_evidence_for_a_refused_region(tmp_path: Path) -> 
     assert (evidence.hosts, evidence.host_decisions) == ((), ())
     timing = _all(evidence)[("§3", TARGET)]
     assert (timing.status, timing.reason) == ("unresolved", RENAMED)
+
+
+def test_collect_keeps_a_shared_host_needed_by_an_unrefused_region(tmp_path: Path) -> None:
+    """#918's evidence filter is per region: a refused use cannot hide a valid use (R4)."""
+    renamed = _renaming(
+        REGION,
+        name="lti/2011/nl-20110101-007.xml",
+        refid="lov/2011-01-01-7",
+    )
+    members = (TARGET_ACT, _outer(REGION), renamed, HOST_ACT, FULL)
+    archive = make_archive(
+        tmp_path / "lovtidend-avd1-2001-2025.tar.bz2",
+        layout={},
+        extra={doc.member: _bytes_of(doc) for doc in members},
+    )
+    evidence = collect(TARGET, [archive], cache_dir=tmp_path)
+    assert [doc.header.refid for doc in evidence.hosts] == [HOST]
+    assert [doc.header.refid for doc in evidence.host_decisions] == [FULL.header.refid]
+    timings = {event.operation.id: event.timing for event in events_for(evidence)}
+    valid = timings[f"{OUTER}#0:I:4.0"]
+    refused = timings["lov/2011-01-01-7#0:I:4.0"]
+    assert (valid.status, valid.effective) == ("dated", date(2010, 7, 1))
+    assert (refused.status, refused.effective, refused.reason) == ("unresolved", None, RENAMED)
+    assert FULL.header.refid not in {proof.refid for proof in refused.proofs}
+
+
+def test_a_clause_inside_a_renamed_hosts_list_does_not_redate_outer_operations() -> None:
+    """R4: discovering the renamed region also isolates its commencement sentences."""
+    inner = "Loven trer i kraft 1. mars 2011."
+    outer = _renaming((*REGION, _p(inner)))
+    reading = interpret(outer)
+    assert inner in reading.clauses
+    regions = nesting(outer, reading)
+    assert inner not in regions.clauses
+    assert regions.clauses == ("Loven trer i kraft straks.",)
+    timings = _target(outer)
+    nested = timings[("§3", TARGET)]
+    direct = timings[("§5", TARGET)]
+    assert (nested.status, nested.effective, nested.reason) == ("unresolved", None, RENAMED)
+    assert (direct.status, direct.effective) == ("dated", STRAKS)
