@@ -16,6 +16,7 @@ from pathlib import Path
 
 from lovspor.atomic_io import atomic_write_text
 from lovspor.identity.audit import POST, PRE, outcome_counts
+from lovspor.identity.migration import is_detached
 from lovspor.identity.plan import MigrationPlan
 from lovspor.identity.registry import THRESHOLD_EXCEPTION, registry_json
 from lovspor.identity.repair_report import (
@@ -64,6 +65,7 @@ def _record_counts(plan: MigrationPlan) -> dict[str, int]:
         "base_documents": len(base_ids),
         "planned_documents": len(plan.planned_manifest.documents),
         "restored_tombstones": len(plan.restored),
+        "detached_tombstone_paths": len(_detached(plan)),
         "history_files": len(plan.base.history),
         "history_files_without_manifest_record": sum(
             1 for doc_id in plan.base.history.values() if doc_id not in base_ids
@@ -74,6 +76,16 @@ def _record_counts(plan: MigrationPlan) -> dict[str, int]:
         "unrecoverable_doc_ids": len(plan.unrecoverable),
         "changed_paths": len(plan.changed_paths),
     }
+
+
+def _detached(plan: MigrationPlan) -> list[str]:
+    """Removed records this plan moves off a shared path (#912), by ``doc_id``."""
+    base = plan.base.manifest.documents
+    return [
+        doc_id
+        for doc_id, record in plan.planned_manifest.documents.items()
+        if is_detached(record) and not (doc_id in base and is_detached(base[doc_id]))
+    ]
 
 
 def _slug_counts(plan: MigrationPlan) -> dict[str, int]:
@@ -155,6 +167,10 @@ def _review_lists(plan: MigrationPlan) -> dict[str, list[dict[str, object]]]:
         "history_owner_mismatches": [m.model_dump(mode="json") for m in plan.history_mismatches],
         "registry_conflicts": [c.model_dump(mode="json") for c in plan.registry_conflicts],
         "restored_tombstones": [t.model_dump(mode="json") for t in plan.restored],
+        "detached_tombstones": [
+            {"doc_id": d, "markdown_path": plan.planned_manifest.documents[d].markdown_path}
+            for d in _detached(plan)
+        ],
         **repair_rows(plan.history_repair),
     }
 

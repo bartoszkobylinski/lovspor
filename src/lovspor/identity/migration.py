@@ -23,6 +23,10 @@ computes, without writing anything:
    only later holders that took the address after the threshold.
 4. **Collisions.** A restored tombstone whose address the base gives another
    document is listed.
+5. **Shared paths (#912).** A removed record that shares its ``markdown_path``
+   with another record and is not its address's owner keeps its ``slug`` and
+   gets a detached path (``<directory>/removed/<doc_id>.md``), so the applied
+   corpus has one record per path and no removed record on a file.
 
 The plan also lists the fate of every reused address (``audit``), every
 ``history/<slug>.json`` at the base whose ``doc_id`` is not the address's
@@ -31,6 +35,7 @@ owner (rebuilt from git by ``lovspor.identity.repair_plan``), and every
 one fact the walk cannot restore, which blocks the plan.
 """
 
+from collections import Counter
 from pathlib import PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
@@ -48,6 +53,7 @@ from lovspor.rendering.slug import identity_candidates, resolve_collisions
 from lovspor.storage.manifest import Manifest, ManifestRecord
 
 RESTORED_REASON = "restored-tombstone (#871): last seen in {seen}, missing since {missing}"
+DETACHED_DIRECTORY = "removed"
 
 
 class RestoredTombstone(BaseModel):
@@ -235,3 +241,41 @@ def renamed_record(record: ManifestRecord, rename: Rename) -> ManifestRecord:
     """``record`` moved to ``rename.to_slug`` in the same directory."""
     path = str(PurePosixPath(record.markdown_path).with_name(f"{rename.to_slug}.md"))
     return record.model_copy(update={"slug": rename.to_slug, "markdown_path": path})
+
+
+def detached_path(directory: str, doc_id: str) -> str:
+    """The ``markdown_path`` of a tombstone that does not own the path it last had (#912).
+
+    Under ``<directory>/removed/``, a directory no renderer writes and no
+    corpus check globs: unique per ``doc_id``, never a file on disk, and the
+    first path part is still the directory ``record_address`` reads.
+    """
+    return f"{directory}/{DETACHED_DIRECTORY}/{doc_id}.md"
+
+
+def is_detached(record: ManifestRecord) -> bool:
+    """True for a record whose ``markdown_path`` is a :func:`detached_path`."""
+    return PurePosixPath(record.markdown_path).parts[1:2] == (DETACHED_DIRECTORY,)
+
+
+def detach_shared_tombstones(
+    documents: dict[str, ManifestRecord], registry: SlugRegistry
+) -> dict[str, ManifestRecord]:
+    """``documents`` with every removed non-owner moved off a path another record shares.
+
+    One path, one record (``lovspor audit``; lovverk refuses a removed record
+    whose file is on disk). The path belongs to its address's registry owner,
+    so a removed record sharing it that the registry does not name gets a
+    :func:`detached_path`. Its ``slug`` is kept, and with it its address: the
+    path it last had is ``<directory>/<slug>.md``, so nothing is lost.
+    """
+    sharing = Counter(record.markdown_path for record in documents.values())
+    detached = dict(documents)
+    for doc_id, record in documents.items():
+        if record.status != "removed" or sharing[record.markdown_path] == 1:
+            continue
+        directory, slug = record_address(record)
+        if registry.owner_of(directory, slug) != doc_id:
+            path = detached_path(directory, doc_id)
+            detached[doc_id] = record.model_copy(update={"slug": slug, "markdown_path": path})
+    return detached
