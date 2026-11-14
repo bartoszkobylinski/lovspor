@@ -29,6 +29,13 @@ from lovspor.identity.migration import (
     restored_tombstones,
     u1_renames,
 )
+from lovspor.identity.moves import (
+    PlannedMoves,
+    markdown_path,
+    merge_moves,
+    plan_rename_moves,
+    sidecar_path,
+)
 from lovspor.identity.registry import (
     DIRECTORY_OF_DATASET,
     SlugOwner,
@@ -47,8 +54,6 @@ from lovspor.identity.schema import (
 )
 from lovspor.identity.walk import ManifestWalk, walk_manifests
 from lovspor.storage.manifest import Manifest
-
-_EMBEDDINGS = "embeddings"
 
 
 class HistoryMismatch(BaseModel):
@@ -103,6 +108,7 @@ class MigrationPlan(BaseModel):
     planned_manifest: Manifest
     planned_registry: SlugRegistry
     history_repair: HistoryRepair
+    moves: PlannedMoves
     changed_paths: list[str]
 
     @property
@@ -310,16 +316,20 @@ def _repair(base: BaseState, walk: ManifestWalk, threshold: Threshold) -> _Repai
     )
 
 
-def _rename_paths(repo: Path, commit: str, rename: Rename) -> set[str]:
-    """The Markdown files a rename moves, and its embedding sidecar when there is one."""
-    paths = {f"{rename.directory}/{slug}.md" for slug in (rename.from_slug, rename.to_slug)}
-    sidecar = f"{rename.directory}/{_EMBEDDINGS}/{rename.from_slug}.bin"
-    if read_blob(repo, commit, sidecar) is not None:
-        paths.update({sidecar, f"{rename.directory}/{_EMBEDDINGS}/{rename.to_slug}.bin"})
-    return paths
+def _plan_moves(repo: Path, commit: str, renames: list[Rename]) -> PlannedMoves:
+    """The Markdown and sidecar moves of every rename, read from the base."""
+    parts: list[PlannedMoves] = []
+    for rename in renames:
+        source, sidecar = (
+            markdown_path(rename, rename.from_slug),
+            sidecar_path(rename, rename.from_slug),
+        )
+        blobs = read_blobs(repo, commit, [source, sidecar])
+        parts.append(plan_rename_moves(rename, blobs[source], blobs[sidecar]))
+    return merge_moves(parts)
 
 
-def _changed_paths(repo: Path, base: BaseState, repair: _Repair) -> list[str]:
+def _changed_paths(base: BaseState, repair: _Repair, moves: PlannedMoves) -> list[str]:
     """Every corpus path the repair writes, moves or deletes, sorted."""
     paths: set[str] = set()
     if repair.manifest.documents != base.manifest.documents:
@@ -328,8 +338,8 @@ def _changed_paths(repo: Path, base: BaseState, repair: _Repair) -> list[str]:
         paths.add(REGISTRY_FILENAME)
     if base.identity_schema != ENFORCED_IDENTITY_SCHEMA:
         paths.add(IDENTITY_FILENAME)
-    for rename in repair.renames:
-        paths |= _rename_paths(repo, base.commit, rename)
+    for move in moves.moves:
+        paths |= {move.source, move.target}
     return sorted(paths)
 
 
@@ -390,6 +400,24 @@ def _repair_targets(mismatches: list[HistoryMismatch], renames: list[Rename]) ->
     return targets
 
 
+class _Writes(BaseModel):
+    """What the repair writes beside the root files: histories, moves, every changed path."""
+
+    model_config = ConfigDict(frozen=True)
+
+    history_repair: HistoryRepair
+    moves: PlannedMoves
+    changed_paths: list[str]
+
+
+def _writes(repo: Path, base: BaseState, repair: _Repair, findings: _Findings) -> _Writes:
+    targets = _repair_targets(findings.history_mismatches, repair.renames)
+    history = plan_history_repair(repo, base.commit, targets)
+    moves = _plan_moves(repo, base.commit, repair.renames)
+    changed = sorted({*_changed_paths(base, repair, moves), *history.changed})
+    return _Writes(history_repair=history, moves=moves, changed_paths=changed)
+
+
 def plan_migration(repo: Path, base_ref: str, threshold_ref: str | None = None) -> MigrationPlan:
     """The full repair plan for ``repo`` at ``base_ref``; reads, never writes."""
     base = read_base(repo, base_ref)
@@ -397,8 +425,6 @@ def plan_migration(repo: Path, base_ref: str, threshold_ref: str | None = None) 
     threshold = resolve_threshold(repo, threshold_ref, walk)
     repair = _repair(base, walk, threshold)
     findings = _findings(base, walk, repair, threshold.position)
-    targets = _repair_targets(findings.history_mismatches, repair.renames)
-    history = plan_history_repair(repo, base.commit, targets)
     return MigrationPlan(
         base=base,
         threshold=threshold,
@@ -408,7 +434,6 @@ def plan_migration(repo: Path, base_ref: str, threshold_ref: str | None = None) 
         registry_conflicts=repair.conflicts,
         planned_manifest=repair.manifest,
         planned_registry=repair.registry,
-        history_repair=history,
-        changed_paths=sorted({*_changed_paths(repo, base, repair), *history.changed}),
+        **dict(_writes(repo, base, repair, findings)),
         **dict(findings),
     )

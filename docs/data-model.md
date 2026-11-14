@@ -205,6 +205,9 @@ therefore rebuilds each of them from git, never from the file
   Nothing is rewritten or bypassed: the history keeps the bad commit and the
   restore. Before the push, discarding the local migration commit is the
   rollback.
+- Applying: `lovspor ops identity-apply` writes a reviewed plan directory into
+  a clean checkout at its base and verifies every file against the plan
+  (`docs/operations.md`, "Identity migration: plan, then apply"). It never commits.
 
 ### Upstream source
 

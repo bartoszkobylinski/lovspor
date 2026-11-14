@@ -2,9 +2,10 @@
 
 Reads a lovverk checkout through git (``rev-parse``, ``log``, ``ls-tree``,
 ``cat-file``; nothing that writes) and writes the plan's report into an
-output directory that must lie outside the checkout. There is no apply mode:
-applying the repair to lovverk is a separate owner decision (migration plan
-§7). Registered on the ``ops`` group by :mod:`lovspor.ops_cli`, because
+output directory that must lie outside the checkout. It writes nothing to the
+checkout: ``lovspor ops identity-apply`` (``lovspor.identity.apply_commands``)
+writes a reviewed plan, and applying it to lovverk is a separate owner
+decision (migration plan §7). Registered on the ``ops`` group by :mod:`lovspor.ops_cli`, because
 :mod:`lovspor.cli` sits at its size ratchet; the decorated command only
 calls :func:`identity_plan_impl`, so the body stays inside the mutation gate.
 
@@ -34,7 +35,7 @@ EXIT_BLOCKED = 3
 EXIT_UNREADABLE = 2
 
 
-def _ensure_outside(repo: Path, out: Path) -> None:
+def ensure_outside(repo: Path, out: Path) -> None:
     """Refuse an output directory inside the corpus checkout: the run never writes there."""
     resolved_repo = repo.resolve()
     resolved_out = out.resolve()
@@ -44,7 +45,7 @@ def _ensure_outside(repo: Path, out: Path) -> None:
 
 def identity_plan_impl(repo: Path, base: str, threshold: str, out: Path) -> tuple[int, str]:
     """Plan the repair and write the report; ``(exit code, summary line)``."""
-    _ensure_outside(repo, out)
+    ensure_outside(repo, out)
     plan = plan_migration(repo, base, threshold)
     out.mkdir(parents=True, exist_ok=True)
     sums = write_report(plan, out)

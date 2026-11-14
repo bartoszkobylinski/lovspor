@@ -48,6 +48,12 @@ def toplevel(repo: Path) -> Path:
     return Path(_git(repo, "rev-parse", "--show-toplevel").decode().strip())
 
 
+def status_paths(repo: Path) -> list[str]:
+    """Every path ``git status`` reports in ``repo``'s work tree, untracked files included."""
+    out = _git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames")
+    return sorted(entry[3:].decode("utf-8") for entry in out.split(b"\0") if entry)
+
+
 def is_shallow(repo: Path) -> bool:
     """True when ``repo`` is a shallow clone, whose history is cut off."""
     return _git(repo, "rev-parse", "--is-shallow-repository").decode().strip() == "true"

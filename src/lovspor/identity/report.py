@@ -27,7 +27,7 @@ from lovspor.identity.repair_report import (
 from lovspor.identity.schema import ENFORCED_IDENTITY_SCHEMA, IDENTITY_FILENAME, declaration_json
 from lovspor.storage.manifest import Manifest
 
-REPORT_SCHEMA_VERSION = 4
+REPORT_SCHEMA_VERSION = 5
 PLANNED_DIR = "planned"
 SUMS_FILENAME = "SHA256SUMS"
 
@@ -50,6 +50,7 @@ def planned_files(plan: MigrationPlan) -> dict[str, str]:
         "slugs.json": registry_json(plan.planned_registry),
         IDENTITY_FILENAME: declaration_json(),
         **plan.history_repair.files,
+        **plan.moves.markdown,
     }
 
 
@@ -171,7 +172,6 @@ def _identity_fields(plan: MigrationPlan) -> dict[str, object]:
 
 def report_data(plan: MigrationPlan) -> dict[str, object]:
     """The machine-readable report; ``report.md`` renders the same data."""
-    changed = "".join(f"{path}\n" for path in plan.changed_paths)
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "issue": 871,
@@ -181,15 +181,27 @@ def report_data(plan: MigrationPlan) -> dict[str, object]:
         "nothing_to_do": plan.nothing_to_do,
         "blocked": plan.blocked,
         "counts": _counts(plan),
-        "planned_files_sha256": _planned_sha256(plan),
-        "changed_paths": plan.changed_paths,
-        "changed_paths_sha256": sha256_text(changed),
+        **_write_fields(plan),
         "history_repair_note": HISTORY_REPAIR_NOTE,
         "history_repair_invariant_ok": not plan.history_repair.invariant_violations,
         "u1_threshold": plan.threshold.model_dump(mode="json"),
         "unrecoverable_doc_ids": plan.unrecoverable,
         "orphan_history_doc_ids_not_restored": plan.orphans_not_restored,
         **_review_lists(plan),
+    }
+
+
+def _write_fields(plan: MigrationPlan) -> dict[str, object]:
+    """What the apply writes: planned digests, changed paths, and the rename moves beyond
+    ``planned/`` (#910): sidecar digests, moved-away sources, refused rewrites."""
+    changed = "".join(f"{path}\n" for path in plan.changed_paths)
+    return {
+        "planned_files_sha256": _planned_sha256(plan),
+        "changed_paths": plan.changed_paths,
+        "changed_paths_sha256": sha256_text(changed),
+        "planned_sidecars_sha256": {m.target: m.sha256 for m in plan.moves.sidecars},
+        "moved_from_paths": plan.moves.sources,
+        "move_problems": plan.moves.problems,
     }
 
 
@@ -278,12 +290,24 @@ def render_markdown(plan: MigrationPlan) -> str:
     return "\n".join(lines)
 
 
+def report_files(plan: MigrationPlan) -> dict[str, str]:
+    """``name -> content`` of every output file but ``SHA256SUMS``."""
+    files = {f"{PLANNED_DIR}/{name}": text for name, text in planned_files(plan).items()}
+    files["report.json"] = (
+        json.dumps(report_data(plan), sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+    )
+    files["report.md"] = render_markdown(plan)
+    return files
+
+
+def report_sums(plan: MigrationPlan) -> dict[str, str]:
+    """``name -> sha256`` of every output file, exactly as ``SHA256SUMS`` lists them."""
+    return {name: sha256_text(text) for name, text in sorted(report_files(plan).items())}
+
+
 def write_report(plan: MigrationPlan, out: Path) -> dict[str, str]:
     """Write every output file under ``out``; return ``name -> sha256`` as in ``SHA256SUMS``."""
-    data = report_data(plan)
-    files = {f"{PLANNED_DIR}/{name}": text for name, text in planned_files(plan).items()}
-    files["report.json"] = json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
-    files["report.md"] = render_markdown(plan)
+    files = report_files(plan)
     for name, text in files.items():
         (out / name).parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(out / name, text)
