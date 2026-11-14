@@ -77,6 +77,7 @@ from lovspor.identity.registry import (
     corpus_identity,
     require_registry_covers,
 )
+from lovspor.identity.registry_content import require_registry_content
 from lovspor.identity.schema import ENFORCED_IDENTITY_SCHEMA, IDENTITY_FILENAME, REGISTRY_FILENAME
 from lovspor.storage.manifest import read_manifest
 
@@ -254,8 +255,9 @@ def require_registry_history(repo: Path, registry: SlugRegistry, rev: str = "HEA
 
 
 def verified_corpus_identity(repo: Path) -> CorpusIdentity:
-    """``corpus_identity``; an enforced registry covers the working-tree manifest and keeps
-    every entry its history committed.
+    """``corpus_identity``; an enforced registry covers the working-tree manifest, agrees
+    with it and with the slug histories (``registry_content``, #911), and keeps every
+    entry its history committed.
 
     For a clean tree (sync start, the audit): mid-sync the manifest on disk is
     ahead of the registry until the commit that stages both.
@@ -264,7 +266,10 @@ def verified_corpus_identity(repo: Path) -> CorpusIdentity:
     if not isinstance(identity, EnforcedCorpus):
         return identity
     manifest_path = repo / MANIFEST_PATH
-    if manifest_path.exists():
-        require_registry_covers(identity.registry, read_manifest(manifest_path), str(repo))
+    manifest = read_manifest(manifest_path) if manifest_path.exists() else None
+    if manifest is not None:
+        require_registry_covers(identity.registry, manifest, str(repo))
     require_registry_history(repo, identity.registry)
+    if manifest is not None:
+        require_registry_content(repo, identity.registry, manifest)
     return identity

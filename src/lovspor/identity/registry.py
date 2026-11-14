@@ -184,6 +184,16 @@ def ensure_append_only(prior: SlugRegistry, new: SlugRegistry) -> None:
                 )
 
 
+def _unique_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """A JSON object, refused when one key appears twice: which owner would count
+    then depends on the parser (``json.loads`` keeps the last), so it is no registry (#911)."""
+    data = dict(pairs)
+    if len(data) != len(pairs):
+        repeated = sorted({key for key, _ in pairs if sum(k == key for k, _ in pairs) > 1})
+        raise ValueError(f"duplicate key(s) {repeated[:5]}")
+    return data
+
+
 def read_registry(repo: Path) -> SlugRegistry | None:
     """The registry file as it is on disk, or ``None`` when there is none.
 
@@ -194,8 +204,9 @@ def read_registry(repo: Path) -> SlugRegistry | None:
     if not path.exists():
         return None
     try:
-        return SlugRegistry.model_validate(json.loads(path.read_text(encoding="utf-8")))
-    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_keys)
+        return SlugRegistry.model_validate(data)
+    except (UnicodeDecodeError, ValueError, ValidationError) as exc:
         raise ParseError(f"{path}: unreadable slug registry: {exc}") from exc
 
 
