@@ -738,6 +738,30 @@ def test_an_insertion_into_a_known_chapter_takes_the_outlines_part() -> None:
     assert _pair(result, _new("§20")) == Pair(chapter="kap3", part="del2")
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_insertions_into_a_known_chapter_agree_after_the_outline_completes_the_part(
+    reverse: bool,
+) -> None:
+    """B3: a known chapter takes its outline's part; these state no conflicting parts."""
+    insertions = (
+        Insertion(label="§20", proof=_p(1), placement=Pair(chapter="kap3")),
+        Insertion(label="§21", proof=_p(2), placement=Pair(chapter="kap3", part="del2")),
+    )
+    result, _, structure = _run(
+        _step(insertions=tuple(reversed(insertions)) if reverse else insertions)
+    )
+    assert result.refusals == ()
+    assert result.accepted == (_p(1).op_id, _p(2).op_id)
+    assert (
+        _pair(result, _new("§20"))
+        == _pair(result, _new("§21"))
+        == Pair(chapter="kap3", part="del2")
+    )
+    assert result.structure is not None
+    assert result.structure.outline == structure.outline
+    paired(result.ledger, result.structure)
+
+
 def test_a_chapter_step_0_reads_outside_every_part_is_a_stated_empty_part() -> None:
     """``_enclosing`` stamps a chapter standing outside every part with an empty part.
 
