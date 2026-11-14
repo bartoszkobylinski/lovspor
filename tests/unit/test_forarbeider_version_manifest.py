@@ -103,7 +103,7 @@ def build(
     return build_version_manifest(Evidence(tuple(chosen), attachments, dict(raw or {})))
 
 
-def complete_source() -> VersionManifest:
+def whole_extraction() -> VersionManifest:
     return build(attachments=inventory())
 
 
@@ -118,13 +118,13 @@ def refused(reason: RefusalReason) -> Any:
 # --- source completeness -----------------------------------------------------------
 
 
-def test_every_listed_chapter_extracted_and_a_verified_empty_inventory_is_source_complete() -> None:
-    source = complete_source().source
-    assert source.state is SourceState.SOURCE_COMPLETE
+def test_every_listed_chapter_extracted_still_leaves_attachments_unknown() -> None:
+    source = whole_extraction().source
+    assert source.state is SourceState.UNKNOWN
     assert (source.parts_expected, source.parts_extracted) == (4, 4)
-    assert (source.attachments_expected, source.attachments_captured) == (0, 0)
+    assert (source.attachments_expected, source.attachments_captured) == (None, None)
     assert source.extraction_gaps == 0
-    assert source.reasons == ()
+    assert codes(source.reasons) == {("attachment_inventory_unverified", "unknown")}
 
 
 def test_a_chapter_not_given_is_confirmed_incomplete_with_its_number() -> None:
@@ -152,7 +152,7 @@ def test_two_different_pages_of_one_chapter_leave_it_unrepresented() -> None:
 
 
 def test_coverage_that_is_not_exact_is_incomplete_for_that_part() -> None:
-    content = complete_source().content
+    content = whole_extraction().content
     part = content.parts[1]
     broken = part.model_copy(update={"coverage": part.coverage.model_copy(update={"exact": False})})
     content = content.model_copy(update={"parts": (content.parts[0], broken, *content.parts[2:])})
@@ -189,23 +189,19 @@ def test_no_attachment_inventory_is_unknown_never_zero() -> None:
     assert codes(source.reasons) == {("attachment_inventory_missing", "unknown")}
 
 
-def test_an_inventory_whose_basis_page_is_absent_is_unverified_and_states_no_count() -> None:
+@pytest.mark.parametrize("given", [False, True])
+def test_an_inventory_read_from_another_page_is_unverified_whether_or_not_its_bytes_are_given(
+    given: bool,
+) -> None:
     elsewhere = SourcePage(payload=b"<html>listing</html>", url=URL, retrieved_at=WHEN)
-    manifest = build(attachments=inventory(read_from=elsewhere))
+    raw = {sha(elsewhere.payload): elsewhere.payload} if given else {}
+    manifest = build(attachments=inventory(read_from=elsewhere), raw=raw)
     assert manifest.content.attachments is not None
-    assert manifest.content.attachments.basis.value == "unverified"
+    assert manifest.content.attachments.discovery == "unverified"
+    assert manifest.content.attachments.read_from == (sha(elsewhere.payload),)
     assert manifest.source.state is SourceState.UNKNOWN
     assert manifest.source.attachments_expected is None
     assert ("attachment_inventory_unverified", "unknown") in codes(manifest.source.reasons)
-
-
-def test_the_basis_page_may_come_from_the_raw_evidence() -> None:
-    elsewhere = SourcePage(payload=b"<html>listing</html>", url=URL, retrieved_at=WHEN)
-    manifest = build(
-        attachments=inventory(read_from=elsewhere), raw={sha(elsewhere.payload): elsewhere.payload}
-    )
-    assert manifest.source.state is SourceState.SOURCE_COMPLETE
-    assert manifest.source.attachments_expected == 0
 
 
 @pytest.mark.parametrize(
@@ -227,9 +223,12 @@ def test_an_attachment_not_proved_captured_keeps_the_source_from_complete(
     manifest = build(attachments=inventory(listing(claimed)), raw=given)
     assert manifest.content.attachments is not None
     assert [item.state for item in manifest.content.attachments.attachments] == [state]
-    assert codes(manifest.source.reasons) == {reason}
-    assert manifest.source.attachments_expected == 1
-    assert manifest.source.attachments_captured == 0
+    assert codes(manifest.source.reasons) == {
+        reason,
+        ("attachment_inventory_unverified", "unknown"),
+    }
+    assert manifest.source.attachments_expected is None
+    assert manifest.source.attachments_captured is None
 
 
 def test_an_attachment_whose_bytes_are_given_and_hash_is_captured() -> None:
@@ -239,8 +238,11 @@ def test_an_attachment_whose_bytes_are_given_and_hash_is_captured() -> None:
         AttachmentState.CAPTURED,
         "application/pdf",
     )
-    assert manifest.source.state is SourceState.SOURCE_COMPLETE
-    assert (manifest.source.attachments_expected, manifest.source.attachments_captured) == (1, 1)
+    assert manifest.source.state is SourceState.UNKNOWN
+    assert (manifest.source.attachments_expected, manifest.source.attachments_captured) == (
+        None,
+        None,
+    )
 
 
 def test_evidence_whose_bytes_do_not_hash_to_their_name_is_refused() -> None:
@@ -258,8 +260,8 @@ def test_an_attachment_listed_on_a_page_outside_the_basis_is_refused() -> None:
 
 
 def test_a_valid_fc3_extraction_alone_never_authorizes_publication() -> None:
-    manifest = complete_source()
-    assert manifest.source.state is SourceState.SOURCE_COMPLETE
+    manifest = whole_extraction()
+    assert manifest.source.extraction_gaps == 0
     publication = manifest.publication
     assert publication.state is not PublicationState.PUBLICATION_COMPLETE
     assert publication.spans_publishable == 0
@@ -269,7 +271,7 @@ def test_a_valid_fc3_extraction_alone_never_authorizes_publication() -> None:
 
 
 def test_official_text_candidates_still_lack_clearance_evidence() -> None:
-    manifest = complete_source()
+    manifest = whole_extraction()
     official = {
         entry.id
         for part in manifest.content.parts
@@ -318,12 +320,12 @@ def test_missing_inventory_or_unpublishable_attachments_block_publication() -> N
     assert ("attachment_inventory_missing", "unknown") in codes(build().publication.reasons)
     manifest = build(attachments=inventory(listing(None)))
     assert ("attachment_unpublishable", "incomplete") in codes(manifest.publication.reasons)
-    assert manifest.publication.attachments_publishable == 0
+    assert manifest.publication.attachments_publishable is None
     assert build().publication.attachments_publishable is None
 
 
 def test_publication_axis_is_computed_apart_from_the_source_axis() -> None:
-    manifest = complete_source()
+    manifest = whole_extraction()
     again = publication_completeness(manifest.content, manifest.source)
     assert again == manifest.publication
 
@@ -356,7 +358,7 @@ def test_same_evidence_in_any_order_gives_the_same_bytes() -> None:
 
 def test_version_id_ignores_retrieval_time_and_follows_the_bytes() -> None:
     later = [item._replace(retrieved_at=WHEN + timedelta(days=3)) for item in pages()]
-    first, second = complete_source(), build(later, inventory())
+    first, second = whole_extraction(), build(later, inventory())
     assert first.version_id == second.version_id
     assert first.provenance != second.provenance
     changed = build([*pages(1, 3, 4), with_body(2, "<p>Ny tekst.</p>")], inventory())
@@ -364,7 +366,7 @@ def test_version_id_ignores_retrieval_time_and_follows_the_bytes() -> None:
 
 
 def test_version_id_is_the_digest_of_the_content_and_the_content_names_no_version() -> None:
-    manifest = complete_source()
+    manifest = whole_extraction()
     content = manifest.content.model_dump(mode="json")
     text = json.dumps(content, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
     assert manifest.version_id == sha(text.encode())
@@ -382,7 +384,7 @@ def _keys(value: Any) -> Iterator[str]:
 
 
 def test_the_manifest_carries_digests_and_versions_never_the_text() -> None:
-    manifest = complete_source()
+    manifest = whole_extraction()
     text = manifest_text(manifest)
     assert "Tekst i kapittel" not in text
     assert manifest.content.extractor_version == "regjeringen-span/1"
@@ -394,12 +396,12 @@ def test_the_manifest_carries_digests_and_versions_never_the_text() -> None:
 
 
 def test_parse_reads_back_its_own_bytes() -> None:
-    manifest = complete_source()
+    manifest = whole_extraction()
     assert parse_version_manifest(manifest_text(manifest).encode()) == manifest
 
 
 def _tampered(change: Any) -> bytes:
-    payload = json.loads(manifest_text(complete_source()))
+    payload = json.loads(manifest_text(whole_extraction()))
     change(payload)
     return (json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode()
 
@@ -425,13 +427,13 @@ def test_a_hand_edited_manifest_is_refused(change: Any) -> None:
 
 
 def test_non_canonical_bytes_are_refused() -> None:
-    raw = manifest_text(complete_source()).encode()
+    raw = manifest_text(whole_extraction()).encode()
     with refused(RefusalReason.MANIFEST_INVALID):
         parse_version_manifest(raw.replace(b"\n", b"\r\n"))
 
 
 def test_verify_rebuilds_from_the_evidence_and_refuses_other_bytes() -> None:
-    raw = manifest_text(complete_source()).encode()
+    raw = manifest_text(whole_extraction()).encode()
     assert verify_version_manifest(raw, Evidence(tuple(pages()), inventory(), {})).version_id
     other = [*pages(1, 3, 4), with_body(2, "<p>Ny tekst.</p>")]
     with refused(RefusalReason.MANIFEST_INVALID):
@@ -448,11 +450,11 @@ def test_a_rehashed_but_rebuilt_manifest_still_fails_verification() -> None:
 
 
 def test_a_v3_manifest_reads_as_one_summary_with_both_axes() -> None:
-    manifest = complete_source()
+    manifest = whole_extraction()
     (summary,) = read_version_summaries(manifest_text(manifest).encode())
     assert summary.schema_version == 3
     assert summary.version_id == manifest.version_id
-    assert summary.source_state is SourceState.SOURCE_COMPLETE
+    assert summary.source_state is SourceState.UNKNOWN
     assert summary.publication_state is manifest.publication.state
 
 
@@ -499,30 +501,28 @@ def test_the_single_page_fixture_still_builds() -> None:
 )
 def test_parse_recomputes_counts_even_when_the_verdict_is_unchanged(axis: str, field: str) -> None:
     def change(payload: dict[str, Any]) -> None:
-        payload[axis][field] += 1
+        value = payload[axis][field]
+        payload[axis][field] = 0 if value is None else value + 1
 
     with refused(RefusalReason.MANIFEST_INVALID):
         parse_version_manifest(_tampered(change))
 
 
-def test_inventory_requires_every_basis_page_before_reporting_attachment_counts() -> None:
+def test_inventory_with_every_basis_page_given_still_reports_no_attachment_counts() -> None:
     missing = b"another inventory page"
     basis = inventory(listing(sha(PDF)))
-    partial = basis.model_copy(update={"read_from": (*basis.read_from, sha(missing))})
-    manifest = build(attachments=partial, raw={sha(PDF): PDF})
-    assert manifest.content.attachments is not None
-    assert manifest.content.attachments.basis.value == "unverified"
-    assert manifest.content.attachments.attachments[0].state is AttachmentState.CAPTURED
-    assert manifest.source.state is SourceState.UNKNOWN
-    assert (manifest.source.attachments_expected, manifest.source.attachments_captured) == (
-        None,
-        None,
-    )
-    assert manifest.publication.attachments_publishable is None
-
-    verified = build(attachments=partial, raw={sha(PDF): PDF, sha(missing): missing})
-    assert verified.source.state is SourceState.SOURCE_COMPLETE
-    assert (verified.source.attachments_expected, verified.source.attachments_captured) == (1, 1)
+    widened = basis.model_copy(update={"read_from": (*basis.read_from, sha(missing))})
+    for raw in ({sha(PDF): PDF}, {sha(PDF): PDF, sha(missing): missing}):
+        manifest = build(attachments=widened, raw=raw)
+        assert manifest.content.attachments is not None
+        assert manifest.content.attachments.discovery == "unverified"
+        assert manifest.content.attachments.attachments[0].state is AttachmentState.CAPTURED
+        assert manifest.source.state is SourceState.UNKNOWN
+        assert (manifest.source.attachments_expected, manifest.source.attachments_captured) == (
+            None,
+            None,
+        )
+        assert manifest.publication.attachments_publishable is None
 
 
 @pytest.mark.parametrize(
@@ -545,14 +545,14 @@ def test_attachment_capture_requires_a_supported_complete_signature(
     assert attachment.media_type == media_type
     expected = AttachmentState.UNSUPPORTED if media_type is None else AttachmentState.CAPTURED
     assert attachment.state is expected
-    assert manifest.source.attachments_captured == int(media_type is not None)
+    assert manifest.source.attachments_captured is None
     assert manifest.source.state is (
-        SourceState.SOURCE_INCOMPLETE if media_type is None else SourceState.SOURCE_COMPLETE
+        SourceState.SOURCE_INCOMPLETE if media_type is None else SourceState.UNKNOWN
     )
 
 
 def test_replay_checks_provenance_even_when_the_content_id_matches() -> None:
-    original = complete_source()
+    original = whole_extraction()
     later = [item._replace(retrieved_at=WHEN + timedelta(days=1)) for item in pages()]
     evidence = Evidence(tuple(later), inventory(), {})
     assert build_version_manifest(evidence).version_id == original.version_id
@@ -563,3 +563,128 @@ def test_replay_checks_provenance_even_when_the_content_id_matches() -> None:
 def test_unused_raw_evidence_is_still_checked_for_digest_mismatch() -> None:
     with refused(RefusalReason.MANIFEST_INVALID):
         build(attachments=inventory(), raw={sha(PDF): ZIP})
+
+
+# --- attachment discovery is not trusted from the caller (review blocker) ------------
+
+
+def all_pages_inventory(
+    *attachments: AttachmentListing, reader: str = "synthetic-reader/1"
+) -> AttachmentInventory:
+    basis = tuple(sorted(sha(item.payload) for item in pages()))
+    return AttachmentInventory(reader=reader, read_from=basis, attachments=attachments)
+
+
+def _never_complete(manifest: VersionManifest) -> None:
+    assert manifest.source.state is not SourceState.SOURCE_COMPLETE
+    assert (manifest.source.attachments_expected, manifest.source.attachments_captured) == (
+        None,
+        None,
+    )
+    assert ("attachment_inventory_unverified", "unknown") in codes(manifest.source.reasons)
+
+
+def test_a_empty_inventory_over_every_page_is_unknown_not_a_verified_zero() -> None:
+    manifest = build(attachments=all_pages_inventory())
+    assert manifest.source.extraction_gaps == 0
+    assert manifest.source.state is SourceState.UNKNOWN
+    assert codes(manifest.source.reasons) == {("attachment_inventory_unverified", "unknown")}
+    _never_complete(manifest)
+
+
+def test_b_inventory_over_a_subset_of_pages_is_unknown() -> None:
+    manifest = build(attachments=inventory())
+    assert manifest.source.state is SourceState.UNKNOWN
+    _never_complete(manifest)
+
+
+def test_c_inventory_omitting_an_attachment_the_html_links_is_unknown() -> None:
+    linked = with_body(2, f'<p>Se <a href="{PDF_URL}">vedlegget</a>.</p>')
+    given = [*pages(1, 3, 4), linked]
+    basis = tuple(sorted(sha(item.payload) for item in given))
+    claimed = AttachmentInventory(reader="synthetic-reader/1", read_from=basis, attachments=())
+    manifest = build(given, claimed)
+    assert manifest.source.state is SourceState.UNKNOWN
+    _never_complete(manifest)
+
+
+@pytest.mark.parametrize("reader", ["trusted-discovery/1", "regjeringen-attachments/1", "verified"])
+def test_d_a_reader_name_is_no_evidence_of_exhaustive_discovery(reader: str) -> None:
+    _never_complete(build(attachments=all_pages_inventory(reader=reader)))
+
+
+def test_e_captured_bytes_prove_integrity_not_an_exhaustive_list() -> None:
+    manifest = build(attachments=all_pages_inventory(listing(sha(PDF))), raw={sha(PDF): PDF})
+    (attachment,) = manifest.content.attachments.attachments  # type: ignore[union-attr]
+    assert (attachment.state, attachment.raw_sha256, attachment.url) == (
+        AttachmentState.CAPTURED,
+        sha(PDF),
+        PDF_URL,
+    )
+    assert manifest.source.state is SourceState.UNKNOWN
+    assert codes(manifest.source.reasons) == {("attachment_inventory_unverified", "unknown")}
+    _never_complete(manifest)
+
+
+@pytest.mark.parametrize(
+    ("claimed", "given", "reason"),
+    [
+        (None, {}, "attachment_not_captured"),
+        (sha(ZIP), {sha(ZIP): ZIP}, "attachment_unsupported"),
+    ],
+)
+def test_f_missing_or_unsupported_attachments_stay_confirmed_incomplete(
+    claimed: str | None, given: dict[str, bytes], reason: str
+) -> None:
+    manifest = build(attachments=all_pages_inventory(listing(claimed)), raw=given)
+    assert manifest.source.state is SourceState.SOURCE_INCOMPLETE
+    assert (reason, "incomplete") in codes(manifest.source.reasons)
+    _never_complete(manifest)
+
+
+def _forge_verified(payload: dict[str, Any]) -> None:
+    payload["content"]["attachments"]["discovery"] = "verified"
+
+
+def _forge_complete(payload: dict[str, Any]) -> None:
+    payload["source"].update(
+        state="source_complete", reasons=[], attachments_expected=0, attachments_captured=0
+    )
+
+
+def _forge_both_and_rehash(payload: dict[str, Any]) -> None:
+    _forge_verified(payload)
+    _forge_complete(payload)
+    text = json.dumps(payload["content"], sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+    payload["version_id"] = sha(text.encode())
+
+
+@pytest.mark.parametrize("forge", [_forge_verified, _forge_complete, _forge_both_and_rehash])
+def test_g_a_stored_manifest_cannot_be_edited_into_source_complete(forge: Any) -> None:
+    payload = json.loads(manifest_text(build(attachments=all_pages_inventory())))
+    forge(payload)
+    raw = (json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode()
+    with refused(RefusalReason.MANIFEST_INVALID):
+        parse_version_manifest(raw)
+
+
+def test_g_model_construction_cannot_state_a_verified_inventory_or_source_complete() -> None:
+    manifest = build(attachments=all_pages_inventory())
+    dumped = manifest.model_dump()
+    dumped["content"]["attachments"]["discovery"] = "verified"
+    with pytest.raises(ValidationError):
+        VersionManifest.model_validate(dumped)
+    forged = manifest.model_dump()
+    forged["source"].update(
+        state="source_complete", reasons=(), attachments_expected=0, attachments_captured=0
+    )
+    with pytest.raises(ValidationError, match="attachment discovery"):
+        VersionManifest.model_validate(forged)
+
+
+def test_h_reversed_pages_give_identical_bytes_with_an_inventory() -> None:
+    forward = build(pages(), all_pages_inventory(listing(sha(PDF))), {sha(PDF): PDF})
+    backward = build(
+        list(reversed(pages())), all_pages_inventory(listing(sha(PDF))), {sha(PDF): PDF}
+    )
+    assert manifest_text(forward) == manifest_text(backward)

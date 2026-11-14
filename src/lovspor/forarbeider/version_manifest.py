@@ -7,9 +7,10 @@ label or completeness flag is ever taken from the caller; it hashes every byte
 string it is given and refuses one that does not hash to its name.
 
 An attachment counts as captured only when its bytes are given, hash to the
-listed digest and are a supported format; an inventory counts only when the
-bytes of every page it was read from are given. An absent inventory is no
-inventory, never an empty one.
+listed digest and are a supported format. Hashing proves the bytes, never that
+the list is whole: the inventory is the caller's observation, kept as given and
+never promoted to verified, whatever its reader name, its pages or its length.
+An absent inventory is no inventory, and an empty one is not a zero.
 
 :func:`parse_version_manifest` reads stored bytes back and recomputes the
 version id and both axes from the content, so a hand-edited verdict is refused.
@@ -43,7 +44,6 @@ from lovspor.forarbeider.version_completeness import (
 )
 from lovspor.forarbeider.version_models import (
     MANIFEST_SCHEMA_VERSION,
-    AttachmentInventoryState,
     AttachmentState,
     Digest,
     Frozen,
@@ -88,11 +88,11 @@ class AttachmentListing(Frozen):
 
 
 class AttachmentInventory(Frozen):
-    """What an attachment reader listed, and the raw pages it read the list from.
+    """What a caller says an attachment reader listed, and the pages it read.
 
-    The manifest believes nothing here until it has hashed those pages and the
-    attachment bytes itself; ``attachments`` may be empty only as a reading of
-    the pages in ``read_from``.
+    Observations only. The listed attachments are checked against their bytes;
+    the claim that the list is whole is never believed, so the manifest records
+    the inventory as unverified discovery and states no attachment count.
     """
 
     record_type: Literal["forarbeider_attachment_inventory"] = "forarbeider_attachment_inventory"
@@ -270,11 +270,9 @@ def _attachments(
 ) -> VersionAttachments | None:
     if inventory is None:
         return None
-    basis = all(digest in raw for digest in inventory.read_from)
     return VersionAttachments(
         reader=inventory.reader,
         read_from=tuple(sorted(set(inventory.read_from))),
-        basis=AttachmentInventoryState.VERIFIED if basis else AttachmentInventoryState.UNVERIFIED,
         attachments=tuple(
             sorted(
                 (_attachment(item, raw) for item in inventory.attachments),

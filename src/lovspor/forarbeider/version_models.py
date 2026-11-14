@@ -124,22 +124,21 @@ class VersionAttachment(Frozen):
     state: AttachmentState
 
 
-class AttachmentInventoryState(StrEnum):
-    VERIFIED = "verified"
-    UNVERIFIED = "unverified"
-
-
 class VersionAttachments(Frozen):
-    """The attachment inventory and the evidence it was read from.
+    """An attachment inventory as the caller observed it, never proof that it is whole.
 
-    ``basis`` is ``verified`` only when the bytes of every page in ``read_from``
-    were given and hash to their digests; an unverified inventory states no
-    count, not even zero.
+    The listed attachments, their URLs, digests and capture states are kept as
+    observations. Nothing given here can show that discovery was exhaustive: a
+    reader name is a label, page digests show which bytes were read, not that
+    nothing was missed, and an empty list is not a zero. ``discovery`` is
+    therefore always ``unverified``, so no attachment count is ever stated.
+    A trusted, versioned discovery reader (FC6b) is the only thing that may add
+    another value.
     """
 
     reader: NonBlank
     read_from: tuple[Digest, ...] = Field(min_length=1)
-    basis: AttachmentInventoryState
+    discovery: Literal["unverified"] = "unverified"
     attachments: tuple[VersionAttachment, ...]
 
 
@@ -283,7 +282,15 @@ class VersionManifest(Frozen):
             raise ValueError("publication_complete requires source_complete")
         if published and self.publication.release_gaps:
             raise ValueError("publication_complete requires zero release gaps")
+        _require_unverified_discovery_states_no_count(self.source)
         return self
+
+
+def _require_unverified_discovery_states_no_count(source: SourceCompleteness) -> None:
+    """No attachment discovery is trusted yet: no count, and so never source_complete."""
+    counted = (source.attachments_expected, source.attachments_captured) != (None, None)
+    if counted or source.state is SourceState.SOURCE_COMPLETE:
+        raise ValueError("attachment discovery is unverified: no count, no source_complete")
 
 
 def canonical_text(model: BaseModel) -> str:

@@ -7,8 +7,10 @@ by computing it again.
 
 A reason either confirms an axis incomplete or leaves it unknown. Incomplete
 wins over unknown; an axis with no reason is complete. A missing input (no
-chapter navigation, no attachment inventory, an inventory whose basis was not
-verified) is unknown and states no count, never zero.
+chapter navigation, no attachment inventory, an inventory whose discovery is
+not proved exhaustive) is unknown and states no count, never zero. No caller
+inventory proves that: until a trusted discovery reader exists (FC6b), every
+inventory is unverified, so the source axis is never complete.
 
 **Source**: every listed chapter is a part, every part's boundary and markup
 are proved, its coverage is exact, no gap was recorded, and every listed
@@ -28,7 +30,6 @@ from lovspor.forarbeider.document_models import GapCode
 from lovspor.forarbeider.version_models import (
     PUBLICATION_STATES,
     SOURCE_STATES,
-    AttachmentInventoryState,
     AttachmentState,
     Effect,
     PublicationCompleteness,
@@ -75,13 +76,12 @@ def source_completeness(content: VersionContent) -> SourceCompleteness:
         *_coverage_reasons(content),
         *_attachment_reasons(content.attachments),
     )
-    verified = _verified(content.attachments)
     return SourceCompleteness(
         state=SOURCE_STATES[state_of(reasons)],
         parts_expected=len(content.chapters_listed) or None,
         parts_extracted=len(content.parts),
-        attachments_expected=None if verified is None else len(verified.attachments),
-        attachments_captured=None if verified is None else _captured(verified),
+        attachments_expected=None,
+        attachments_captured=None,
         extraction_gaps=sum(1 for _ in _all_gaps(content)),
         reasons=reasons,
     )
@@ -98,13 +98,12 @@ def publication_completeness(
         *entries,
         *_attachment_publication(content.attachments),
     )
-    verified = _verified(content.attachments)
     return PublicationCompleteness(
         state=PUBLICATION_STATES[state_of(reasons)],
         spans_total=sum(1 for _ in _spans(content)),
         spans_publishable=0,
         release_gaps=sum(1 for reason in entries if reason.effect is Effect.INCOMPLETE),
-        attachments_publishable=None if verified is None else 0,
+        attachments_publishable=None,
         reasons=reasons,
     )
 
@@ -148,23 +147,11 @@ def _coverage_reasons(content: VersionContent) -> Iterator[Reason]:
             yield Reason(code="coverage_not_exact", effect=Effect.INCOMPLETE, part_id=part.id)
 
 
-def _verified(attachments: VersionAttachments | None) -> VersionAttachments | None:
-    """The inventory, when its basis was verified; otherwise no count can be stated."""
-    if attachments is None or attachments.basis is not AttachmentInventoryState.VERIFIED:
-        return None
-    return attachments
-
-
-def _captured(attachments: VersionAttachments) -> int:
-    return sum(1 for item in attachments.attachments if item.state is AttachmentState.CAPTURED)
-
-
 def _attachment_reasons(attachments: VersionAttachments | None) -> Iterator[Reason]:
     if attachments is None:
         yield Reason(code="attachment_inventory_missing", effect=Effect.UNKNOWN)
         return
-    if attachments.basis is not AttachmentInventoryState.VERIFIED:
-        yield Reason(code="attachment_inventory_unverified", effect=Effect.UNKNOWN)
+    yield Reason(code="attachment_inventory_unverified", effect=Effect.UNKNOWN)
     for item in attachments.attachments:
         if item.state in _ATTACHMENT_REASONS:
             code, effect = _ATTACHMENT_REASONS[item.state]
