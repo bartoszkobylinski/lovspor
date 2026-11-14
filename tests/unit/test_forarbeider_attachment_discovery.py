@@ -514,3 +514,58 @@ def test_discovered_capture_requires_a_supported_signature(
     assert manifest.source.state is (
         SourceState.SOURCE_COMPLETE if supported else SourceState.SOURCE_INCOMPLETE
     )
+
+
+# --- landing page blocks read off real saved landing pages (structure only) ----------
+
+LANDING_SIDEBAR = (
+    '<aside class="content-col-1 article-sidebar"><div class="content-owner-dep">'
+    '<div><a href="/no/dep/test/id1/">Testdepartementet</a></div></div>'
+    '<div class="content-intro-topics"><ul class="topiclist">'
+    '<li><a href="/no/tema/lov-og-rett/id1/">Lov og rett</a></li></ul></div>'
+    '<div class="article-related"><ul class="link-list">'
+    '<li><a href="/no/aktuelt/nyhet/id2/">Nyhet</a></li></ul></div>'
+    "</aside>"
+)
+STORTINGET = '<a href="https://www.stortinget.no/id/PRP/901/20992100/000">Følg proposisjonen</a>'
+
+
+def landing_downloads(lang: str) -> str:
+    base = f"/contentassets/{'1' * 32}/{lang}"
+    return (
+        '<div class="download-container-wrapper"><div class="longdoc-tools-area">'
+        '<div class="longdoc-download-area"><ul class="longdoc-download-list shown">'
+        f'<li><a href="{base}/pdfs/prp209921000901000dddpdfs.pdf">PDF</a></li>'
+        f'<li><a href="{base}/docx/prp209921000901000ddddocx.docx">DOCX</a></li>'
+        "</ul></div></div></div>"
+    )
+
+
+@pytest.mark.parametrize("lang", ["no", "nn-no"])
+def test_a_landing_page_with_downloads_sidebar_and_stortinget_link_is_fully_read(
+    lang: str,
+) -> None:
+    front = landing(landing_downloads(lang) + STORTINGET + LANDING_SIDEBAR)
+    chapters = [with_markup(item, NAV, landing_downloads(lang)) for item in pages()]
+    manifest = build(chapters, front)
+    attachments = manifest.content.attachments
+    assert attachments.gaps == ()
+    assert attachments.discovery == "verified"
+    assert [item.format for item in attachments.renditions] == ["docx", "pdfs"]
+    assert all(len(item.found_at) == 5 for item in attachments.renditions)
+    assert (manifest.source.attachments_expected, manifest.source.state) == (
+        0,
+        SourceState.SOURCE_COMPLETE,
+    )
+
+
+def test_a_file_in_the_landing_sidebar_is_still_a_gap() -> None:
+    sidebar = LANDING_SIDEBAR.replace("/no/aktuelt/nyhet/id2/", PDF_PATH)
+    manifest = build(landing_page=landing(sidebar))
+    assert ("discovery_file_outside_known_container", "unknown") in codes(manifest.source.reasons)
+
+
+def test_a_stortinget_link_other_than_the_proposition_page_is_unrecognised() -> None:
+    other = STORTINGET.replace("/id/PRP/901/20992100/000", "/no/annet/")
+    manifest = build(landing_page=landing(other))
+    assert ("discovery_unrecognized_reference", "unknown") in codes(manifest.source.reasons)

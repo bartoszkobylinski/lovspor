@@ -15,7 +15,9 @@ because a selector found no match.
   download list. Kept apart: it is the same document in another format, not
   an attachment of it;
 - site chrome (page header and footer, site menus, the chapter navigation,
-  paging, the template's own scripts and icons) is read and set aside.
+  paging, the landing page's topic and related-news lists, the link to the
+  proposition's own page on stortinget.no, the template's own scripts and
+  icons) is read and set aside.
 
 Anything else is a discovery gap: a file-like reference outside a known
 container, any unrecognised reference in the page's main area, a container
@@ -53,10 +55,15 @@ _FILE = re.compile(
     r"|png|jpe?g|gif|svg|tiff?|mp4|mp3|wav)$",
     re.IGNORECASE,
 )
-_RENDITION = re.compile(r"/contentassets/[0-9a-f]{32}/[a-z]{2}/(?P<format>pdfs|docx|epub)/[^/]+")
+_RENDITION = re.compile(
+    r"/contentassets/[0-9a-f]{32}/[a-z]{2}(?:-[a-z]{2})?/(?P<format>pdfs|docx|epub)/[^/]+"
+)
+#: The proposition's own page on stortinget.no, linked from the landing page.
+_STORTINGET = re.compile(r"https://www\.stortinget\.no/id/PRP/\d+/\d{8}/000")
 _SITE_ASSETS = "/dist-web/"
 _IGNORED_SCHEMES = ("mailto:", "tel:", "javascript:")
-#: Template containers in ``main`` whose links are navigation, read off the sampled pages.
+#: Template containers in ``main`` whose links are navigation, read off the sampled
+#: chapter pages and two saved landing pages (topic list, related news).
 _TEMPLATE = frozenset(
     {
         "longdoc-paging",
@@ -66,6 +73,8 @@ _TEMPLATE = frozenset(
         "longdoc-nav-area",
         "content-header",
         "longdoc-nav",
+        "content-intro-topics",
+        "article-related",
     }
 )
 #: The download list and its wrappers, read off the sampled chapter pages.
@@ -346,6 +355,7 @@ def _outside_region_kind(element: html.HtmlElement, url: str, context: _Context)
     if file_like:
         return "file_outside_known_container"
     own = urlsplit(url)._replace(query="").geturl() == context.document_url
+    own = own or _STORTINGET.fullmatch(url) is not None
     if _within_main(element) and not own and not _within_classes(element, _TEMPLATE):
         return "unrecognized_reference"
     return "ignored"
