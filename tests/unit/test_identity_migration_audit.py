@@ -168,3 +168,18 @@ def test_the_report_lists_every_detached_tombstone(tmp_path: Path) -> None:
         {"doc_id": X_OLD, "markdown_path": f"forskrifter/removed/{X_OLD}.md"},
         {"doc_id": Y_LATER, "markdown_path": f"forskrifter/removed/{Y_LATER}.md"},
     ]
+
+
+def test_report_excludes_paths_detached_by_an_earlier_migration(
+    applied: tuple[Path, str], tmp_path: Path
+) -> None:
+    plan = plan_migration(applied[0], "HEAD", applied[1])
+
+    write_report(plan, tmp_path / "repeat-report")
+
+    data = json.loads((tmp_path / "repeat-report" / "report.json").read_text(encoding="utf-8"))
+    assert data["counts"]["detached_tombstone_paths"] == 0
+    assert data["detached_tombstones"] == []
+    assert plan.planned_manifest.documents[X_OLD].markdown_path == (
+        f"forskrifter/removed/{X_OLD}.md"
+    )
