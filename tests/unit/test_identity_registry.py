@@ -1,4 +1,4 @@
-"""The slug ownership registry (#871, ADR-0023 draft point 2, guard 5b, U1)."""
+"""The slug ownership registry (#871, ADR-0026 draft point 2, guard 5b, U1)."""
 
 import json
 from datetime import UTC, datetime

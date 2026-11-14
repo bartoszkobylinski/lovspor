@@ -1,4 +1,4 @@
-"""Permanent document identity in the corpus (#871, ADR-0023 draft).
+"""Permanent document identity in the corpus (#871, ADR-0026 draft).
 
 Identity is the ``doc_id`` (ADR-0003); a slug is an address. This package
 keeps the three promises that make an address never change meaning: a

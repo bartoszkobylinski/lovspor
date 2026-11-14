@@ -1,4 +1,4 @@
-"""run_sync never drops a manifest record (#871, ADR-0023 draft points 1 and 5a).
+"""run_sync never drops a manifest record (#871, ADR-0026 draft points 1 and 5a).
 
 Rendering, the manifest and git are real; only the upstream download is
 replaced. The first case is a tombstone whose document reappears upstream but

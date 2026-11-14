@@ -66,14 +66,14 @@ class ManifestRecordLossError(CorpusStateError):
     """A manifest write would drop a ``doc_id`` the manifest it replaces holds.
 
     A record keyed by ``doc_id`` may change status but never disappear
-    (#871, ADR-0023 draft point 1): a lost record frees its slug for the next
+    (#871, ADR-0026 draft point 1): a lost record frees its slug for the next
     document and loses the document's identity. The write is refused before
     anything reaches disk; the message names the missing ``doc_id``s.
     """
 
 
 class SlugOwnershipError(CorpusStateError):
-    """A slug would change owner (#871, ADR-0023 draft point 2).
+    """A slug would change owner (#871, ADR-0026 draft point 2).
 
     ``slugs.json`` maps every slug the corpus has published to its owning
     ``doc_id`` and the basis of that ownership (``first-holder``, or

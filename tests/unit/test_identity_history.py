@@ -1,4 +1,4 @@
-"""Append-only per-document history keyed by doc_id (#871, ADR-0023 point 3)."""
+"""Append-only per-document history keyed by doc_id (#871, ADR-0026 point 3)."""
 
 import json
 from datetime import date
