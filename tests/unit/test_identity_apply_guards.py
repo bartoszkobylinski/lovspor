@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 from lovspor.errors import IdentityMigrationError
-from lovspor.identity.apply_guards import require_confined, require_safe_names
+from lovspor.identity.apply_commands import identity_apply_impl, verified_plan_files
+from lovspor.identity.apply_guards import require_confined, require_pinned, require_safe_names
 from lovspor.identity.report import SUMS_FILENAME
 from tests.unit.identity_git_fixtures import commit_all, git
 from tests.unit.test_identity_apply_command import (
@@ -145,3 +146,67 @@ def test_paths_inside_the_checkout_pass(tmp_path: Path) -> None:
     (tmp_path / "lover").mkdir()
 
     require_confined(tmp_path, ["lover/a.md", "lover/history/a.json", "forskrifter/new.md"])
+
+
+@pytest.mark.parametrize(
+    "name", [".GIT/history/x.json", ".Git/config", "lover/.git/x.json", "lover/.GIT/hooks/x.md"]
+)
+def test_a_git_directory_anywhere_in_any_case_is_refused(name: str) -> None:
+    """Case-insensitive file systems (default APFS) treat ``.GIT`` as ``.git``."""
+    with pytest.raises(IdentityMigrationError, match="unsafe path"):
+        require_safe_names([name])
+
+
+def test_a_symlink_inside_the_checkout_is_refused_part_way_down(tmp_path: Path) -> None:
+    """An in-repo symlink to ``.git`` part-way down the path must not pass as confined."""
+    (tmp_path / ".git" / "hooks").mkdir(parents=True)
+    (tmp_path / "lover" / "history").mkdir(parents=True)
+    (tmp_path / "lover" / "history" / "link").symlink_to("../../.git", target_is_directory=True)
+
+    with pytest.raises(IdentityMigrationError, match="leading out of"):
+        require_confined(tmp_path, ["lover/history/link/hooks/x.json"])
+
+
+def test_a_symlink_to_another_checkout_directory_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "forskrifter").mkdir()
+    (tmp_path / "lover").symlink_to("forskrifter", target_is_directory=True)
+
+    with pytest.raises(IdentityMigrationError, match="leading out of"):
+        require_confined(tmp_path, ["lover/a.md"])
+
+
+def test_the_pinned_bytes_are_the_bytes_parsed(repo: Path, tmp_path: Path) -> None:
+    """``SHA256SUMS`` is read once: the bytes hashed for the pin are the bytes parsed."""
+    plan_dir = _plan(repo, tmp_path / "plan")
+    raw = (plan_dir / SUMS_FILENAME).read_bytes()
+    (plan_dir / SUMS_FILENAME).write_text("garbage\n", encoding="utf-8")
+
+    sums = verified_plan_files(plan_dir, raw)
+
+    assert sums and all(len(digest) == 64 for digest in sums.values())
+
+
+def test_require_pinned_returns_the_hashed_bytes(repo: Path, tmp_path: Path) -> None:
+    plan_dir = _plan(repo, tmp_path / "plan")
+
+    raw = require_pinned(plan_dir, _pin(plan_dir))
+
+    assert raw == (plan_dir / SUMS_FILENAME).read_bytes()
+
+
+def test_an_os_error_while_writing_is_reported_as_partially_written(
+    repo: Path, tmp_path: Path
+) -> None:
+    """A write failure (a read-only tree) is exit 3 with the documented summary, no traceback."""
+    plan_dir = _plan(repo, tmp_path / "plan")
+    tree = [d for d in repo.rglob("*") if d.is_dir() and ".git" not in d.parts]
+    for directory in [repo, *tree]:
+        directory.chmod(0o555)
+    try:
+        code, summary = identity_apply_impl(repo, plan_dir, _pin(plan_dir), False)
+    finally:
+        for directory in [repo, *tree]:
+            directory.chmod(0o755)
+
+    assert code == 3
+    assert "partially written" in summary

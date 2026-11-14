@@ -20,7 +20,8 @@ every moved-away source gone, and ``git status`` naming exactly the plan's
 ``changed_paths``. It never stages, commits or pushes: the owner does.
 
 Exit codes: 0 applied and verified; 2 refused, nothing written; 3 written but
-not as planned (the problems are printed; inspect with ``git status``).
+not as planned (the problems are printed). The checkout was clean at ``base``,
+so ``git checkout -- . && git clean -fd`` restores it after an exit 3.
 """
 
 import json
@@ -29,7 +30,7 @@ from typing import Annotated
 
 import typer
 
-from lovspor.errors import IdentityMigrationError
+from lovspor.errors import IdentityMigrationError, LovsporError
 from lovspor.identity.apply import apply_plan, expected_digests, verify_applied
 from lovspor.identity.apply_guards import (
     require_confined,
@@ -48,12 +49,12 @@ EXIT_REFUSED = 2
 EXIT_UNVERIFIED = 3
 
 
-def _read_sums(plan_dir: Path) -> dict[str, str]:
-    """``name -> sha256`` as ``SHA256SUMS`` lists them."""
+def _read_sums(raw: bytes) -> dict[str, str]:
+    """``name -> sha256`` as the pinned ``SHA256SUMS`` bytes ``raw`` list them."""
     try:
-        lines = (plan_dir / SUMS_FILENAME).read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError) as exc:
-        raise IdentityMigrationError(f"{plan_dir}: no readable {SUMS_FILENAME}: {exc}") from exc
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise IdentityMigrationError(f"{SUMS_FILENAME} is not UTF-8: {exc}") from exc
     sums: dict[str, str] = {}
     for line in lines:
         digest, sep, name = line.partition("  ")
@@ -63,9 +64,10 @@ def _read_sums(plan_dir: Path) -> dict[str, str]:
     return sums
 
 
-def verified_plan_files(plan_dir: Path) -> dict[str, str]:
-    """``SHA256SUMS`` of ``plan_dir``, once every file in it matches it and no other exists."""
-    sums = _read_sums(plan_dir)
+def verified_plan_files(plan_dir: Path, raw: bytes) -> dict[str, str]:
+    """The pinned ``SHA256SUMS`` bytes ``raw``, parsed, once every file in ``plan_dir``
+    matches them and no other exists."""
+    sums = _read_sums(raw)
     require_safe_names(sums)
     present = {
         path.relative_to(plan_dir).as_posix() for path in plan_dir.rglob("*") if path.is_file()
@@ -117,8 +119,7 @@ def reviewed_plan(repo: Path, plan_dir: Path, expected: str) -> MigrationPlan:
     """The plan at the plan directory's base, once it is exactly what the directory holds
     and that directory is the reviewed one (``expected``: the sha256 of its ``SHA256SUMS``)."""
     ensure_outside(repo, plan_dir)
-    require_pinned(plan_dir, expected)
-    sums = verified_plan_files(plan_dir)
+    sums = verified_plan_files(plan_dir, require_pinned(plan_dir, expected))
     base, threshold = _plan_refs(plan_dir)
     require_clean_base(repo, base)
     plan = plan_migration(repo, base, threshold)
@@ -146,7 +147,7 @@ def _apply_and_check(repo: Path, plan: MigrationPlan) -> list[str]:
     """Apply ``plan``; a refusal past the first write is a problem, not a clean refusal."""
     try:
         apply_plan(repo, plan)
-    except IdentityMigrationError as exc:
+    except (LovsporError, OSError) as exc:
         return [f"partially written: {exc}"]
     return applied_problems(repo, plan)
 
@@ -185,7 +186,7 @@ def identity_apply(
     """Write a reviewed #871 identity plan into the checkout; never commits."""
     try:
         code, summary = identity_apply_impl(repo, plan, expect_sha256, dry_run)
-    except IdentityMigrationError as error:
+    except (LovsporError, OSError) as error:
         typer.echo(f"identity-apply: {error}", err=True)
         raise typer.Exit(EXIT_REFUSED) from error
     typer.echo(summary)

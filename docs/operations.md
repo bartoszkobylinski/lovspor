@@ -2584,14 +2584,21 @@ whose Markdown lacks exactly one `id` and one old `slug` line; the apply refuses
   that base and threshold ref (a forged plan with re-computed checksums);
 - a blocked plan, one with nothing to do, or one with `move_problems`;
 - a path the apply would write, move or remove that is unsafe (absolute, `..`,
-  `.git`) or leads out of the checkout through a symlink.
+  a `.git` part anywhere and in any case) or passes through a symlink at any
+  part, even one whose target is inside the checkout.
+
+`SHA256SUMS` is read once: the bytes hashed for the pin are the bytes parsed.
+Swapping files in the plan directory or planting a symlink in the checkout
+while the command runs is a local same-user race outside this check; run it on
+a checkout and plan directory no other process writes to.
 
 It then writes through `apply_plan` (the same code the tests run) and verifies
 the tree: every written file against its planned digest, sidecars included;
 every moved-away source gone; and `git status` naming exactly `changed_paths`.
 Exit 0 is applied and verified, then the owner runs `lovspor audit`, stages and
-commits. Exit 3 means written but not as planned: the problems are printed, and
-the checkout is left as it is for inspection.
+commits. Exit 3 means written but not as planned (a write error included): the
+problems are printed, and the checkout is left as it is for inspection. It was
+clean at the base, so `git checkout -- . && git clean -fd` restores it.
 
 ## Scheduled runs (production)
 
