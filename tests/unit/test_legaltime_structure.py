@@ -750,3 +750,91 @@ def test_a_chapter_step_0_reads_outside_every_part_is_a_stated_empty_part() -> N
     result, _, _ = _run(_step(renames=(rename,), insertions=(insertion,)), stamps)
     assert result.refusals == ()
     assert _pair(result, _old("§3")) == _pair(result, _new("§20")) == Pair(chapter="kap0")
+
+
+def test_a_later_step_can_place_an_unresolved_insertion_in_a_registered_chapter() -> None:
+    """A newly announced chapter becomes evidence only at the next boundary."""
+    first, _, _ = _run(
+        _step(
+            insertions=(
+                Insertion(label="§20", proof=_p(1), placement=KAP16),
+                Insertion(label="§21", proof=_p(2)),
+            )
+        )
+    )
+    assert first.structure is not None
+    before = first.structure.canonical_json()
+    original = first.structure.membership(_new("§21"))
+    assert original is not None and original.current is None
+    later_date = date(2010, 1, 1)
+    proof = _p(3, later_date)
+    later = Step(
+        act=ACT, member=MEMBER, effective=later_date,
+        renames=(Rename(source="§21", target="§22", proof=proof,
+                        placement="under kapittel 16"),),
+    )  # fmt: skip
+    result = apply_step(first.ledger, later, first.structure)
+    assert result.accepted == (proof.op_id,) and result.refusals == ()
+    assert result.structure is not None
+    membership = result.structure.membership(_new("§21"))
+    assert membership is not None
+    assert membership.events == (
+        *original.events,
+        PlacementEvent(cause="placed", pair=KAP16, proof=proof, clause="under kapittel 16"),
+    )
+    assert membership.current == KAP16
+    assert result.ledger.holder("§22").provision_id == _new("§21")  # type: ignore[union-attr]
+    assert result.ledger.holder("§21") is None
+    assert first.structure.canonical_json() == before
+    paired(result.ledger, result.structure)
+
+
+def test_repealing_a_placed_identity_preserves_history_through_json_round_trip() -> None:
+    first, _, _ = _run(
+        _step(
+            renames=(Rename(source="§3", target="§14", proof=_p(1), placement="under kapittel 3"),)
+        )
+    )
+    assert first.structure is not None
+    original = first.structure.membership(_old("§3"))
+    assert original is not None and len(original.events) == 2
+    later_date = date(2010, 1, 1)
+    proof = _p(2, later_date)
+    result = apply_step(
+        first.ledger,
+        Step(
+            act=ACT,
+            member=MEMBER,
+            effective=later_date,
+            repeals=(Repeal(label="§14", proof=proof),),
+        ),
+        first.structure,
+    )
+    assert result.accepted == (proof.op_id,) and result.refusals == ()
+    assert result.structure is not None
+    encoded = result.structure.canonical_json()
+    restored = Structure.model_validate_json(encoded)
+    assert restored == result.structure
+    assert restored.canonical_json() == encoded
+    membership = restored.membership(_old("§3"))
+    assert membership is not None and membership.events == original.events
+    assert membership.removed == EndProof(**proof.model_dump(), ended_by="repeal")
+    assert not membership.live and membership.current is None
+    assert _old("§3") not in restored.live_map()
+    assert restored.outline == first.structure.outline
+    paired(result.ledger, restored)
+
+
+def test_insertions_agreeing_on_a_new_chapter_have_order_independent_outline_evidence() -> None:
+    a = Insertion(label="§20", proof=_p(1), placement=KAP16)
+    b = Insertion(label="§21", proof=_p(2), placement=KAP16)
+    forward, _, _ = _run(_step(insertions=(a, b)))
+    backward, _, _ = _run(_step(insertions=(b, a)))
+    assert forward.refusals == backward.refusals == ()
+    assert forward.accepted == backward.accepted == (_p(1).op_id, _p(2).op_id)
+    assert _serialized(forward) == _serialized(backward)
+    assert forward.structure is not None
+    assert forward.structure.enclosing("kap16") == ChapterEntry(
+        chapter="kap16", part="del2", witness=_new("§20"), proof=_p(1)
+    )
+    assert _pair(forward, _new("§20")) == _pair(forward, _new("§21")) == KAP16

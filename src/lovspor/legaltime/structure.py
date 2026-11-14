@@ -224,9 +224,13 @@ def enacted_structure(ledger: Ledger, stamps: Mapping[str, Pair]) -> Structure:
 def _outline(
     known: Iterable[ChapterEntry], stated: Iterable[tuple[str, Pair, LabelProof]]
 ) -> list[ChapterEntry]:
-    """Register each newly stated chapter once; a chapter under two parts is a conflict."""
+    """Register each newly stated chapter once; a chapter under two parts is a conflict.
+
+    The witness is the least provision_id stating the chapter, so document order never
+    picks it (I6).
+    """
     entries = {e.chapter: e for e in known}
-    for witness, pair, proof in stated:
+    for witness, pair, proof in sorted(stated, key=lambda item: item[0]):
         chapter = pair.chapter
         if chapter is None:
             continue
