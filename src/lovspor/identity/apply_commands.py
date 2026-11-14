@@ -147,9 +147,9 @@ def _apply_and_check(repo: Path, plan: MigrationPlan) -> list[str]:
     """Apply ``plan``; a refusal past the first write is a problem, not a clean refusal."""
     try:
         apply_plan(repo, plan)
+        return applied_problems(repo, plan)
     except (LovsporError, OSError) as exc:
         return [f"partially written: {exc}"]
-    return applied_problems(repo, plan)
 
 
 def identity_apply_impl(

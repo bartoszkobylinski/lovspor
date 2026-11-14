@@ -10,6 +10,7 @@ symlink at all: the plan's paths come from corpus content, which is input.
 
 import hashlib
 import re
+import unicodedata
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
@@ -40,12 +41,17 @@ def require_pinned(plan_dir: Path, expected: str) -> bytes:
     return raw
 
 
+def _folded(part: str) -> str:
+    """``part`` casefolded without Unicode format characters (HFS+ ignores them, CVE-2014-9390)."""
+    return "".join(ch for ch in part if unicodedata.category(ch) != "Cf").casefold()
+
+
 def require_safe_names(names: Iterable[str]) -> None:
     """Refuse an absolute path, a ``.``, ``..`` or empty part, a backslash, or a ``.git``
     part anywhere, in any case (default APFS is case-insensitive: ``.GIT`` is ``.git``)."""
     for name in names:
         parts = name.split("/")
-        unsafe = {"", ".", ".."} & set(parts) or ".git" in {part.casefold() for part in parts}
+        unsafe = {"", ".", ".."} & set(parts) or ".git" in {_folded(part) for part in parts}
         if name.startswith("/") or "\\" in name or unsafe:
             raise IdentityMigrationError(f"unsafe path {name!r}: refusing it")
 

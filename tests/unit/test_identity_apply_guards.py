@@ -149,7 +149,15 @@ def test_paths_inside_the_checkout_pass(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", [".GIT/history/x.json", ".Git/config", "lover/.git/x.json", "lover/.GIT/hooks/x.md"]
+    "name",
+    [
+        ".GIT/history/x.json",
+        ".Git/config",
+        "lover/.git/x.json",
+        "lover/.GIT/hooks/x.md",
+        ".git\u200c/x.json",
+        ".g\u200dit/x.json",
+    ],
 )
 def test_a_git_directory_anywhere_in_any_case_is_refused(name: str) -> None:
     """Case-insensitive file systems (default APFS) treat ``.GIT`` as ``.git``."""
