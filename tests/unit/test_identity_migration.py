@@ -168,6 +168,7 @@ def test_two_runs_write_byte_identical_reports(
         "planned/forskrifter/history/x-2026.md",
         "planned/forskrifter/history/x.json",
         "planned/forskrifter/history/x.md",
+        "planned/forskrifter/x-2026.md",  # the renamed Markdown is planned too (#910)
         "planned/identity.json",
         "planned/manifest.json",
         "planned/slugs.json",

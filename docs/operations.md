@@ -2542,6 +2542,64 @@ schedule is a constant in `src/lovspor/observatory/triggers.py` that mirrors
 `StartCalendarInterval` in the plist; a unit test fails when the two drift, so
 moving the job's hour means changing both.
 
+## Identity migration: plan, then apply (#871, #910)
+
+The migration itself is an owner decision (#871); these are the two supported
+steps. Neither commits or pushes.
+
+```bash
+# 1. Plan, read-only, twice: the two directories must be identical.
+uv run lovspor ops identity-plan --repo <checkout> --base <B> --u1-threshold <T> --out <run1>
+uv run lovspor ops identity-plan --repo <checkout> --base <B> --u1-threshold <T> --out <run2>
+diff -r <run1> <run2> && echo IDENTICAL
+
+# 2. Pin the reviewed plan: the sha256 of its SHA256SUMS, recorded in the review.
+PIN=$(shasum -a 256 <run1>/SHA256SUMS | cut -d' ' -f1)
+
+# 3. Dry run: every check below, then the summary; writes nothing.
+uv run lovspor ops identity-apply --repo <build checkout> --plan <run1> --expect-sha256 "$PIN" --dry-run; echo "exit $?"
+
+# 4. Apply the reviewed plan to a clean checkout at <B>; prints a JSON summary.
+uv run lovspor ops identity-apply --repo <build checkout> --plan <run1> --expect-sha256 "$PIN"; echo "exit $?"
+```
+
+`planned/` holds every file the apply writes: `manifest.json`, `slugs.json`,
+`identity.json`, the repaired histories and each U1-renamed document's Markdown,
+with its front-matter `slug` already rewritten. `report.json` adds what cannot be
+a text file: `planned_sidecars_sha256` (each moved embedding sidecar's digest),
+`moved_from_paths` (the sources the moves delete) and `move_problems` (a rename
+whose Markdown lacks exactly one `id` and one old `slug` line; the apply refuses it).
+
+`identity-apply` refuses with exit 2, before writing anything (with
+`--dry-run` it stops there and writes nothing in any case):
+- no `--expect-sha256`, or a `SHA256SUMS` whose sha256 is not that pin (another
+  plan, even one this engine would compute at another threshold);
+- a plan directory inside the checkout, or one that does not match its
+  `SHA256SUMS` (a changed, missing or unlisted file), or a `SHA256SUMS` entry that
+  is absolute or has a `..` part;
+- a checkout that is not its work tree's root, whose `HEAD` is not the plan's
+  `base_commit`, or that is not clean, so a second apply is refused before and
+  after the commit;
+- a plan directory that is not byte for byte the plan this engine computes at
+  that base and threshold ref (a forged plan with re-computed checksums);
+- a blocked plan, one with nothing to do, or one with `move_problems`;
+- a path the apply would write, move or remove that is unsafe (absolute, `..`,
+  a `.git` part anywhere and in any case) or passes through a symlink at any
+  part, even one whose target is inside the checkout.
+
+`SHA256SUMS` is read once: the bytes hashed for the pin are the bytes parsed.
+Swapping files in the plan directory or planting a symlink in the checkout
+while the command runs is a local same-user race outside this check; run it on
+a checkout and plan directory no other process writes to.
+
+It then writes through `apply_plan` (the same code the tests run) and verifies
+the tree: every written file against its planned digest, sidecars included;
+every moved-away source gone; and `git status` naming exactly `changed_paths`.
+Exit 0 is applied and verified, then the owner runs `lovspor audit`, stages and
+commits. Exit 3 means written but not as planned (a write error included): the
+problems are printed, and the checkout is left as it is for inspection. It was
+clean at the base, so `git checkout -- . && git clean -fd` restores it.
+
 ## Scheduled runs (production)
 
 `.github/workflows/sync.yml` runs daily at **04:00 UTC (~05:00–06:00 CET)** — about 2.5 hours after Lovdata's nightly tarball drop at ~01:30 UTC. Manual reruns are available via the **Actions → Sync legal corpus → Run workflow** button on GitHub.
