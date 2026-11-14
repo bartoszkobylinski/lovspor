@@ -18,15 +18,23 @@ from pathlib import Path
 import pytest
 
 from lovspor.corpus_audit import audit_published_corpus
-from lovspor.errors import IdentitySchemaError
+from lovspor.errors import IdentitySchemaError, ParseError
 from lovspor.identity.apply import apply_plan
 from lovspor.identity.plan import MigrationPlan, plan_migration
-from lovspor.identity.registry import EnforcedCorpus, registry_json
+from lovspor.identity.registry import (
+    EnforcedCorpus,
+    SlugOwner,
+    SlugRegistry,
+    read_registry,
+    registry_json,
+)
+from lovspor.identity.registry_content import misowned_histories, misowned_records
 from lovspor.identity.registry_history import verified_corpus_identity
 from lovspor.identity.report import manifest_json
 from lovspor.identity.schema import REGISTRY_FILENAME
+from lovspor.storage.manifest import Manifest
 from lovspor.sync.orchestrator import _ensure_clean_corpus
-from tests.unit.identity_git_fixtures import commit_all, git
+from tests.unit.identity_git_fixtures import commit_all, git, record
 from tests.unit.test_identity_migration import KEEP, LOST, NEW, OLD, _base_repo
 
 GHOST = "sf-99999999-9999"
@@ -186,3 +194,81 @@ def test_every_restored_document_stays_an_owner_or_prior_holder(tmp_path: Path) 
 
     documents = json.loads((repo / "manifest.json").read_text(encoding="utf-8"))["documents"]
     assert {OLD, LOST} <= set(documents)
+
+
+def test_an_unknown_prior_holder_is_refused_even_when_the_owner_exists(tmp_path: Path) -> None:
+    def forge(repo: Path, _plan: MigrationPlan) -> None:
+        data = _registry(repo)
+        entry = data["slugs"]["forskrifter"]["c"]
+        entry["basis"] = "threshold-exception"
+        entry["prior_holders"] = [
+            {"doc_id": GHOST, "first_commit": "a" * 40, "last_commit": "b" * 40}
+        ]
+        _write_registry(repo, data)
+
+    repo = _migrate(tmp_path, forge)
+
+    with pytest.raises(IdentitySchemaError, match=f"forskrifter/c names {GHOST}"):
+        verified_corpus_identity(repo)
+    assert GHOST in _audit_finding(repo)
+
+
+@pytest.mark.parametrize("directory", ["lover", "forskrifter"])
+@pytest.mark.parametrize(
+    "payload",
+    [b"{", b"\xff", b"[]", b"{}", b'{"doc_id": 42}', b'{"doc_id": null}'],
+    ids=["malformed-json", "invalid-utf8", "array", "missing-id", "numeric-id", "null-id"],
+)
+def test_unreadable_or_unattributed_slug_histories_fail_closed(
+    tmp_path: Path, directory: str, payload: bytes
+) -> None:
+
+    registry = SlugRegistry().assign(directory, "c", SlugOwner(owner=KEEP, assigned_at="2026"))
+    path = tmp_path / directory / "history" / "c.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(payload)
+
+    assert misowned_histories(tmp_path, registry) == [
+        f"{directory}/history/c.json names None, owner {KEEP}"
+    ]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"schema_version":1,"schema_version":1,"slugs":{}}',
+        '{"slugs":{"lover":{},"lover":{}}}',
+        '{"slugs":{"lover":{"c":{"owner":"a","owner":"a","assigned_at":"2026"}}}}',
+    ],
+    ids=["top-level", "directory", "owner-field"],
+)
+def test_duplicate_keys_are_refused_at_every_object_level(tmp_path: Path, payload: str) -> None:
+
+    path = tmp_path / REGISTRY_FILENAME
+    path.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(ParseError, match="duplicate key") as error:
+        read_registry(tmp_path)
+    assert str(path) in str(error.value)
+    assert path.read_text(encoding="utf-8") == payload
+
+
+def test_only_current_records_must_own_their_address() -> None:
+
+    registry = SlugRegistry().assign(
+        "forskrifter", "shared", SlugOwner(owner=OLD, assigned_at="2026")
+    )
+    manifest = Manifest.model_validate(
+        {
+            "version": 1,
+            "generated_at": "2026-06-01T00:00:00Z",
+            "documents": {OLD: record(OLD, "shared", "removed"), NEW: record(NEW, "shared")},
+        }
+    )
+
+    assert misowned_records(registry, manifest) == [
+        f"forskrifter/shared holds {NEW} but is owned by {OLD}"
+    ]
+    removed = manifest.documents[NEW].model_copy(update={"status": "removed"})
+    manifest = manifest.model_copy(update={"documents": {**manifest.documents, NEW: removed}})
+    assert misowned_records(registry, manifest) == []
