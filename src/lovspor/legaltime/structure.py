@@ -295,17 +295,20 @@ def placed_pair(structure: Structure, provision_id: str, clause: str) -> Pair | 
 def inserted_pair(structure: Structure, stated: Pair | None) -> Pair | None | str:
     """The pair an insertion's inserting structure proves; None if unresolved; str refuses.
 
-    A pair whose chapter the outline places under another part is conflicting evidence and
-    refuses the insertion. A chapter with no part stated is complete only in an act whose
-    structure states no part at all; otherwise the part is unknown, and so unresolved.
+    A chapter the outline already holds takes the part the outline encloses it in, as a
+    chapter-only clause does (R3); a part stated against that is conflicting evidence and
+    refuses the insertion. A new chapter with no part stated is complete only in an act
+    whose structure states no part at all; otherwise its part is unknown, so unresolved.
+    An outline entry with an empty part is step 0's ``_enclosing`` reading (a chapter that
+    stands outside every part), a stated fact.
     """
     if stated is None:
         return None
-    if stated.chapter is None:
-        return stated if stated.part is not None or not structure.parts() else None
-    entry = structure.enclosing(stated.chapter)
+    entry = None if stated.chapter is None else structure.enclosing(stated.chapter)
     if entry is not None:
-        return stated if entry.part == stated.part else OUTLINE_CONFLICT
+        if stated.part is None or stated.part == entry.part:
+            return Pair(chapter=entry.chapter, part=entry.part)
+        return OUTLINE_CONFLICT
     return stated if stated.part is not None or not structure.parts() else None
 
 

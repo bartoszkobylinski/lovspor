@@ -728,3 +728,25 @@ def _projection(result: StepResult) -> str:
 @pytest.mark.parametrize("seed", range(8))
 def test_the_i6_projection_survives_renumbered_op_ids(seed: int) -> None:
     assert _projection(_run(_renumbered(seed))[0]) == _projection(_run(_renumbered(0))[0])
+
+
+def test_an_insertion_into_a_known_chapter_takes_the_outlines_part() -> None:
+    """The sentence names the chapter, not the part: the outline encloses it (R3)."""
+    insertion = Insertion(label="§20", proof=_p(1), placement=Pair(chapter="kap3"))
+    result, _, _ = _run(_step(insertions=(insertion,)))
+    assert result.refusals == ()
+    assert _pair(result, _new("§20")) == Pair(chapter="kap3", part="del2")
+
+
+def test_a_chapter_step_0_reads_outside_every_part_is_a_stated_empty_part() -> None:
+    """``_enclosing`` stamps a chapter standing outside every part with an empty part.
+
+    That is the enacting structure's own statement, so a chapter-only clause or an
+    insertion naming that chapter gets (chapter, empty), even in an act with parts.
+    """
+    stamps = {**STAMPS, "§6": Pair(chapter="kap0")}
+    rename = Rename(source="§3", target="§14", proof=_p(1), placement="under kapittel 0")
+    insertion = Insertion(label="§20", proof=_p(2), placement=Pair(chapter="kap0"))
+    result, _, _ = _run(_step(renames=(rename,), insertions=(insertion,)), stamps)
+    assert result.refusals == ()
+    assert _pair(result, _old("§3")) == _pair(result, _new("§20")) == Pair(chapter="kap0")
