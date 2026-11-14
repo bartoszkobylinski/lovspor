@@ -159,3 +159,23 @@ def test_the_operations_naming_no_act_are_undated_and_stay_unbound(
         ("unresolved", None, WORDING)
     }
     assert unbound[OP + "245.0"].effective is None  # never straffeloven's, never "straks"
+
+
+def test_straffelovens_own_operations_in_the_member_keep_the_outer_laws_date() -> None:
+    """No host date reaches a top-level operation: the renamings and every straffeloven
+    instruction of the member stay as replay-8 dated them, 2009-06-19 ("straks")."""
+    _pinned()
+    events = [
+        e
+        for e in events_for(collect(STRAFFELOVEN, ARCHIVES))
+        if e.operation.id.startswith("lov/2009-06-19-74#")
+    ]
+    assert {e.operation.id for e in events} >= {OP + "239.0"}
+    assert {(e.timing.status, e.timing.effective) for e in events} == {("dated", STRAKS)}
+    assert not any(e.operation.id in _region_members() for e in events)
+
+
+def _region_members() -> set[str]:
+    member = read_members(ARCHIVES[0], [MEMBER])[MEMBER]
+    (nest,) = nesting(member, interpret(member)).nests
+    return set(nest.members)

@@ -25,7 +25,7 @@ import pytest
 from lovspor.legaltime.archive import file_sha256, read_members
 from lovspor.legaltime.document import Document
 from lovspor.legaltime.instructions import interpret
-from lovspor.legaltime.nesting import nesting
+from lovspor.legaltime.nesting import WORDING, nesting
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE = ROOT / "data/cache/legaltime/lovtidend-avd1-2001-2025.tar.bz2"
@@ -103,9 +103,12 @@ def test_every_operation_is_kept_with_its_kind(member: Document) -> None:
     assert digest == "348c8bf4ec9ee4e6a5cc14b0c73ed91a9d489246b738f600244bc775628c3308"
 
 
-def test_no_nesting_region_is_found_for_renaming_hosts(member: Document) -> None:
-    """``nesting`` reads ``replace_section`` hosts only; § 411 and § 412 are renamed (as main)."""
-    assert nesting(member, interpret(member)).nests == ()
+def test_the_renaming_hosts_open_one_refused_region(member: Document) -> None:
+    """#918: § 411's renaming opens a region (to the end of part I, § 412's inside); it is refused,
+    so no item is dated, and no item's act changes (#907's bindings above are the same)."""
+    (nest,) = nesting(member, interpret(member)).nests
+    assert (nest.host_op, nest.host_act, nest.problem) == (OP + "239.0", STRAFFELOVEN, WORDING)
+    assert {OP + "241.0", OP + "245.0", OP + "462.0"} <= set(nest.members)
 
 
 DIGESTS = {  # ADR-0020 D9 convention: whitespace collapsed; payload provisions by their ledd

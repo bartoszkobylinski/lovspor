@@ -136,7 +136,8 @@ def test_a_renamed_host_outside_the_verified_wording_is_refused_for_its_wording_
 def test_even_a_dated_host_commencement_does_not_date_a_renamed_hosts_item() -> None:
     """FULL dates HOST 2010-07-01; the renamed § 9 is not HOST's enacted § 8 by any proof here."""
     timing = _target(_renaming(REGION), host_decisions=(FULL,))[("§3", TARGET)]
-    assert timing.effective is None and timing.effective != date(2010, 7, 1)
+    assert (timing.status, timing.effective, timing.reason) == ("unresolved", None, RENAMED)
+    assert "forskrift/2010-03-01-1" not in {p.refid for p in timing.proofs}
 
 
 def test_without_any_host_commencement_the_item_is_unresolved_not_straks() -> None:

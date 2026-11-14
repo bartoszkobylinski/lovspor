@@ -64,7 +64,8 @@ Both runs used frozen copies of `src/`. The red run was at `f23a3c04`, the green
 | suite | main `f23a3c04` | fix |
 |---|---|---|
 | `tests/unit/test_legaltime_918_renamed_host.py` (17) | 11 failed, 6 passed (the controls) | 17 passed |
-| `tests/integration/test_legaltime_918_renamed_host_pinned.py` (8) | 5 failed, 3 passed (the source-shape tests) | 8 passed |
+| `tests/integration/test_legaltime_918_renamed_host_pinned.py` | 8 tests at red time: 5 failed, 3 passed (the source-shape tests) | 9 passed (the 9th, added after review, pins that straffeloven's own operations in the member keep 2009-06-19) |
+| `tests/integration/test_legaltime_payload_list_pinned.py` (#907) | its `test_no_nesting_region_is_found_for_renaming_hosts` stated main's behaviour | replaced by `test_the_renaming_hosts_open_one_refused_region`; its act assertions are unchanged; 9 passed |
 
 The main-side unit run defines `RENAMED` locally, because main has no such name. Every main failure is a date or a reason. A representative line: `assert datetime.date(2009, 6, 19) != datetime.date(2009, 6, 19)`.
 
