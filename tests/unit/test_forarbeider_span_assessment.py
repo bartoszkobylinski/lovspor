@@ -407,3 +407,22 @@ def test_an_unknown_class_must_carry_unsettled_evidence() -> None:
     with pytest.raises(ValueError, match="unknown exactly when"):
         EntryAssessment.model_validate({**item, "rights": "unknown"})
     assert sha(b"") != item["entry_id"]
+
+
+@pytest.mark.parametrize("tag", ["h2", "h3"])
+def test_a_heading_ending_in_a_colon_does_not_introduce_a_quotation(tag: str) -> None:
+    spans = chapter_two(
+        f"<{tag}>Advokatforeningen skriver:</{tag}>"
+        "<blockquote><p>Sitat etter en overskrift.</p></blockquote>"
+    )
+    quote = spans["Sitat etter en overskrift."]
+    assert verdict(quote) == (RightsClass.UNKNOWN, Evidence.INSUFFICIENT)
+    assert quote.evidence_entries == ()
+
+
+def test_a_list_item_ending_in_a_colon_does_not_introduce_a_quotation() -> None:
+    spans = chapter_two(
+        "<ul><li><p>Advokatforeningen skriver:</p></li></ul>"
+        "<blockquote><p>Sitat etter en liste.</p></blockquote>"
+    )
+    assert verdict(spans["Sitat etter en liste."]) == (RightsClass.UNKNOWN, Evidence.INSUFFICIENT)

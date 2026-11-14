@@ -219,8 +219,17 @@ def _contexts(part: Part, unproved: bool) -> Iterator[tuple[Span | Gap, _Context
 
 
 def _intro(previous: Span | Gap | None) -> Span | None:
-    """The paragraph just before a quotation, when it ends in a colon."""
-    if isinstance(previous, Span) and previous.quote_group is None:
+    """The paragraph just before a quotation, when it ends in a colon.
+
+    Only a plain paragraph introduces: a heading or a list item ending in a
+    colon names a section or an item, not the source of what follows.
+    """
+    if (
+        isinstance(previous, Span)
+        and previous.kind == "paragraph"
+        and previous.quote_group is None
+        and previous.list_group is None
+    ):
         return previous if previous.text.rstrip().endswith(":") else None
     return None
 
