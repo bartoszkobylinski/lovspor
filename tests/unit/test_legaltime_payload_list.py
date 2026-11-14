@@ -227,3 +227,52 @@ def test_a_substitution_lists_numbered_entries_are_not_items_of_the_payload_list
     entries = _p("1. § 1-1 første ledd") + _p("2. § 1-2 annet ledd")
     acts = _acts(HOST_411 + _p(ITEM_AML) + substitution + entries + _p("§ 2-2 oppheves."))
     assert acts[-1] == ("§ 2-2 oppheves.", AML)
+
+
+@pytest.mark.parametrize(
+    "announcement",
+    [
+        "Frå den tid vert det gjort endringar i anna lovgjeving:",
+        "Frå den tid vert det gjort endringar i annan lovgjeving:",
+        "Fra den tid gjøres følgende endringer i annen lovgivning:",
+    ],
+)
+def test_documented_list_announcement_variants_prevent_outer_act_inheritance(
+    announcement: str,
+) -> None:
+    """Research #907 §3 explicitly includes all four announcement spellings."""
+    host = _p(RENAME_411) + _future("§411", announcement)
+    assert _acts(host + _p(ITEM_1) + RENAME) == [
+        (RENAME_411, STRAFFELOVEN),
+        (ITEM_1, None),
+        (RENAME_412, None),
+    ]
+
+
+@pytest.mark.parametrize("number", ["3)", "1 a.", "50.", "999."])
+def test_documented_numbered_item_forms_reset_the_previous_open_item(number: str) -> None:
+    """Research #907 §3: every numbered item starts unbound, including lettered items."""
+    item = f"{number} Militær straffelov § 3 oppheves."
+    body = HOST_411 + _p(ITEM_AML) + _p("§ 1-1 oppheves.") + _p(item) + RENAME
+    # The existing sentence parser splits the lettered prefix into its own operation.
+    # Attribution must preserve that sequence as well as clearing the previous act.
+    instructions = ["1 a.", "Militær straffelov § 3 oppheves."] if number == "1 a." else [item]
+    assert _acts(body) == [
+        (RENAME_411, STRAFFELOVEN),
+        ("§ 1-1 oppheves.", AML),
+        *((instruction, None) for instruction in instructions),
+        (RENAME_412, None),
+    ]
+
+
+@pytest.mark.parametrize("opening", ["gjøres følgende endring:", "endres slik:"])
+def test_open_item_variants_keep_multiple_instructions_until_the_next_item(opening: str) -> None:
+    """The singular and 'endres slik' openings are part of research #907 §3's rule."""
+    item = f"4. I lov 17. juni 2005 nr. 62 {opening}"
+    body = HOST_411 + _p(item) + _p("§ 1-1 oppheves.") + _p("§ 1-2 oppheves.") + _p(ITEM_1)
+    assert _acts(body) == [
+        (RENAME_411, STRAFFELOVEN),
+        ("§ 1-1 oppheves.", AML),
+        ("§ 1-2 oppheves.", AML),
+        (ITEM_1, None),
+    ]
