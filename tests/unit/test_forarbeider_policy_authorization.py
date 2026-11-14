@@ -706,3 +706,85 @@ def test_only_the_trust_root_runs_ssh_keygen() -> None:
         if "lovspor.ssh_signature" in path.read_text(encoding="utf-8")
     }
     assert importers == {"forarbeider/policy_trust.py"}
+
+
+@pytest.mark.parametrize("signed_at", [SIGNED_AT, CHECKED_AT])
+def test_revocation_of_automated_approval_blocks_it_at_check_time(
+    keys: dict[str, Key], root: TrustRoot, signed_at: Any
+) -> None:
+    withdrawn = signed(revocation("synthetic-automation-1", signed_at=signed_at), keys["owner"])
+    verdict = verify(full_request(policy(), keys["owner"], revocations=(withdrawn,)), root)
+
+    assert verdict.policy_approval.status == "verified"
+    assert reasons(verdict.automated_publication) == {"approval_revoked"}
+    assert verdict.legal_assessment_reference_stated is None
+    assert verdict.revocations[0].status == "verified"
+    assert verdict.status == "invalid"
+
+
+@pytest.mark.parametrize("unsigned", [False, True])
+def test_unverified_revocation_never_withdraws_its_target(
+    keys: dict[str, Key], root: TrustRoot, unsigned: bool
+) -> None:
+    withdrawn = signed(
+        revocation("synthetic-approval-1", signed_at=CHECKED_AT.replace(hour=13)), keys["owner"]
+    )
+    if unsigned:
+        withdrawn = SignedRecord(withdrawn.record, None)
+    verdict = verify(full_request(policy(), keys["owner"], revocations=(withdrawn,)), root)
+
+    assert verdict.policy_approval.status == "verified"
+    assert verdict.automated_publication.status == "verified"
+    assert verdict.revocations[0].status == ("missing" if unsigned else "invalid")
+    assert reasons(verdict.revocations[0]) == {
+        "signature_missing" if unsigned else "signed_after_check_time"
+    }
+    assert verdict.status == ("missing_evidence" if unsigned else "invalid")
+    assert "revocation_not_verified" in verdict.blockers
+
+
+@pytest.mark.parametrize(
+    ("window", "expected"),
+    [
+        (("20261114100000Z", "20300101000000Z"), "signature_verified"),
+        (("20260101000000Z", "20261114100000Z"), "signer_key_outside_validity"),
+    ],
+)
+def test_signer_window_includes_start_and_excludes_end(
+    keys: dict[str, Key], tmp_path: Path, window: tuple[str, str], expected: str
+) -> None:
+    chosen_root = trust_root(
+        tmp_path, [signer_line("test-owner", keys["owner"], OWNER_NAMESPACES, window)]
+    )
+    verdict = verify(full_request(policy(), keys["owner"]), chosen_root)
+
+    assert reasons(verdict.policy_approval) == {expected}
+    assert verdict.policy_approval.status == (
+        "verified" if expected == "signature_verified" else "invalid"
+    )
+
+
+def test_approval_is_valid_at_exact_start(keys: dict[str, Key], root: TrustRoot) -> None:
+    chosen = policy()
+    approved = signed(approval(chosen, valid_from=CHECKED_AT), keys["owner"])
+    automation = signed(automated(chosen, approved.record, valid_from=CHECKED_AT), keys["owner"])
+    verdict = verify(
+        full_request(
+            chosen, keys["owner"], policy_approval=approved, automated_publication=automation
+        ),
+        root,
+    )
+
+    assert verdict.status == "signatures_verified"
+
+
+@pytest.mark.parametrize("invalid_time", ["20260230000000Z", "20261114240000Z"])
+def test_invalid_calendar_time_in_trust_root_is_a_schema_refusal(
+    keys: dict[str, Key], invalid_time: str
+) -> None:
+    # load_trust_root promises schema_invalid for files outside its strict format.
+    line = signer_line(
+        "test-owner", keys["owner"], OWNER_NAMESPACES, (invalid_time, "20300101000000Z")
+    )
+    with pytest.raises(ForarbeiderRefusedError, match="schema_invalid"):
+        parse_trust_root(line.encode(), b"")

@@ -184,7 +184,10 @@ def _options(token: str) -> dict[str, str]:
 def _instant(value: str) -> datetime:
     if not _INSTANT.match(value):
         raise _refused("a validity time is not YYYYMMDDHHMMSSZ")
-    return datetime.strptime(value, "%Y%m%d%H%M%SZ").replace(tzinfo=UTC)
+    try:
+        return datetime.strptime(value, "%Y%m%d%H%M%SZ").replace(tzinfo=UTC)
+    except ValueError as error:
+        raise _refused("a validity time is not a calendar time") from error
 
 
 def _role(namespaces: frozenset[str]) -> Role:
