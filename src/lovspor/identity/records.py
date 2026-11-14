@@ -1,4 +1,4 @@
-"""A manifest record never disappears (#871, ADR-0023 draft point 1, guard 5a).
+"""A manifest record never disappears (#871, ADR-0026 draft point 1, guard 5a).
 
 The lovverk manifest lost records more than once (the 2026-07-02 sync
 ``f6d7e25bb`` dropped 76 of 77 tombstones); with no record a slug looked free

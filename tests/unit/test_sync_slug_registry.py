@@ -1,4 +1,4 @@
-"""The sync consults and extends ``slugs.json`` (#871, ADR-0023 draft point 2, U1).
+"""The sync consults and extends ``slugs.json`` (#871, ADR-0026 draft point 2, U1).
 
 Rendering, the manifest and git are real; only the upstream download is
 replaced (or, for ``_collect_upstream``, the Lovdata client and tarball index).

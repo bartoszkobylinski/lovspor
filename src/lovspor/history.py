@@ -325,7 +325,7 @@ def _frontmatter_id_at(repo_path: Path, sha: str, file_path: str) -> str | None:
     """Frontmatter ``id`` of the document ``file_path`` held at revision ``sha``.
 
     A commit that deleted the path has no blob there, so the document it
-    removed is read from the parent, ``sha^`` (#871, ADR-0023 point 4):
+    removed is read from the parent, ``sha^`` (#871, ADR-0026 point 4):
     without this the deletion of a previous holder of the path entered the
     next holder's history as its own event. ``None`` when neither revision
     has a blob, or the blob carries no parseable frontmatter ``id``

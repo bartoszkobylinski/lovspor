@@ -94,7 +94,7 @@ facade.
 |---|---|---|
 | `storage/manifest.py` | The change-detection ledger; deterministic sorted-JSON read/write; versioned schema. | `read_manifest()`, `write_manifest()`, `Manifest`, `ManifestRecord` |
 
-### `identity/` — permanent document identity (#871, ADR-0023 draft)
+### `identity/` — permanent document identity (#871, ADR-0026 draft)
 
 | Module | Responsibility | Key public API |
 |---|---|---|

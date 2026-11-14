@@ -1,4 +1,4 @@
-"""The slug ownership registry, ``slugs.json`` (#871, ADR-0023 draft point 2).
+"""The slug ownership registry, ``slugs.json`` (#871, ADR-0026 draft point 2).
 
 Every slug the corpus has published maps to its owning ``doc_id`` and the
 basis of that ownership: ``first-holder`` when the owner held the slug first,

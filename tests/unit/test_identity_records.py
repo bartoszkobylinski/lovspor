@@ -1,4 +1,4 @@
-"""Durable manifest records: a record never disappears (#871, ADR-0023 point 1)."""
+"""Durable manifest records: a record never disappears (#871, ADR-0026 point 1)."""
 
 import json
 from datetime import UTC, datetime
