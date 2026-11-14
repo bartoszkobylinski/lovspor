@@ -64,11 +64,16 @@ Nothing tells the two apart:
 - the header (`changesToDocuments`) lists neither act;
 - the item "I lov X skal § Y lyde:" does not announce how many instructions follow.
 
-Every other signal checked also has a counterexample. The first two are pinned on the member in `test_no_signal_in_the_member_separates_245_from_an_items_own_instruction`; the third is in the audit ledger (§4):
+Every other signal checked also has a counterexample. The markup and payload signals are pinned in `test_no_signal_in_the_member_separates_245_from_an_items_own_instruction`, the ids and the summary in `test_neither_the_markup_ids_nor_the_members_summary_separate_the_levels`, and the operation kind is in the audit ledger (§4):
 
 - **markup**: 245 (outer), 462 and 1332 (items' own) are the same `<article class="defaultP" margin-top="true">`;
 - **a provision payload**: 245's payload is a `futureLegalArticle`, but so is the payload of nodes 666, 836, 1053 and 1386, which are items' own instructions inside open items 77, 113, 164 and 260;
 - **the operation kind**: `lov/2024-06-21-46#1:I:64.0` is a `renumber` like 245, and it is item 9's own instruction.
+- **the markup ids**: `futureLegalArticle` ids count one sequence over the whole member. § 411 and § 412 are `foreslåttparagraf-177` and `-178`, and the very next one, `-179`, is § 3-6 of item 77's act (skadeserstatningsloven). The ids say nothing of the amended act;
+- **the member's own summary**: part 0 ("Endringer i følgende lover: …") names straffeloven and the items' acts (1975 nr. 39, 1932 nr. 6) alike, without placing any instruction.
+
+The member's remaining evidence is its header (`changesToDocuments`, which lists neither 1975 nr. 39 nor 1932 nr. 6) and the data-names (`§411`, `§412`, `§3-6`), which name sections, not acts. Neither separates the levels. Nothing left in the member could bind 245 without an outside source (the consolidated act, a forarbeid) or a numbering heuristic.
+
 
 A first version of the fix restored the outer act after such a "closed" item. The audit found it then bound node 462 to straffeloven, which was wrong. That version was discarded before commit. Binding 245 to straffeloven would need evidence the member does not carry, such as the outer act's own sections (an oracle) or a numbering heuristic. The goal forbids both. So 245 stays an operation of no act. The positive binding is the blocker in §7.
 
@@ -203,7 +208,7 @@ Every amender and host member in the eight acts' evidence was interpreted from b
   - `host_list`;
   - a change of article;
   - a substitution list inside an open item.
-- **`tests/integration/test_legaltime_payload_list_pinned.py`**: 8 cases on the pinned member. They cover:
+- **`tests/integration/test_legaltime_payload_list_pinned.py`**: 9 cases on the pinned member. They cover:
   - member sha256, boundary node texts and the sentence digest of 245;
   - 239 = straffeloven, 245 = none;
   - 460 = `lov/1932-06-17-6`, 462 = none;
@@ -211,7 +216,7 @@ Every amender and host member in the eight acts' evidence was interpreted from b
   - the full (id, kind) digest;
   - `nesting()` empty;
   - the D9 digest of every boundary node (239-246, 460-462);
-  - the counterexample to each signal in §2.
+  - the counterexample to each signal in §2, including the raw member bytes' id sequence.
 
   All legaltime integration tests on the pinned archives at the final head: **49 passed**, none skipped.
 - **Red first.** The final test files were run against main's `src/` with only `payload_list.py` added and the reader unwired: **11 failed, 11 passed**. The 11 that pass are guards that must hold on both sides. Against the fix: 22 passed, and 26 after the review additions.

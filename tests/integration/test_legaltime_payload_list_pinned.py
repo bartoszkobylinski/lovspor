@@ -16,6 +16,8 @@ Runs only where the pinned archive sits in the gitignored cache; a skip is not a
 """
 
 import hashlib
+import re
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -152,3 +154,39 @@ def test_no_signal_in_the_member_separates_245_from_an_items_own_instruction(
     assert all(nodes[i + 1].kind == "provision" for i in (245, 666, 836, 1053, 1386))
     acts = {op.id: op.act for op in interpret(member).operations}
     assert acts[OP + "666.0"] is not None  # an open item's own: bound by the D7 chain
+
+
+def _member_bytes() -> bytes:
+    with tarfile.open(ARCHIVE, "r:bz2") as archive:  # one member read in memory, nothing extracted
+        handle = archive.extractfile(MEMBER)
+        assert handle is not None
+        return handle.read()
+
+
+def test_neither_the_markup_ids_nor_the_members_summary_separate_the_levels(
+    member: Document,
+) -> None:
+    """Two more signals, two more counterexamples, read from the member's own bytes.
+
+    * ``futureLegalArticle`` ids count one sequence over the whole member: § 411 and § 412 are
+      ``foreslåttparagraf-177`` and ``-178``, and the very next one, ``-179``, is § 3-6 of item
+      77's act (skadeserstatningsloven), not straffeloven;
+    * part 0's summary ("Endringer i følgende lover: …") names straffeloven and the items' acts
+      alike, and says nothing of which instruction belongs to which.
+    """
+    body = _member_bytes()
+    assert hashlib.sha256(body).hexdigest() == MEMBER_SHA
+    ids = re.findall(
+        r'class="futureLegalArticle" data-name="([^"]+)" id="kapittel-1-foreslåttparagraf-(\d+)"',
+        body.decode(),
+    )
+    assert [pair for pair in ids if pair[1] in {"177", "178", "179"}] == [
+        ("§411", "177"),
+        ("§412", "178"),
+        ("§3-6", "179"),
+    ]
+    summary = member.parts[0].nodes[1].text
+    assert all(
+        cited in summary
+        for cited in ("20. mai 2005 nr. 28", "13. juni 1975 nr. 39", "17. juni 1932 nr. 6")
+    )
