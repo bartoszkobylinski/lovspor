@@ -54,9 +54,9 @@ def reassigned(owners: dict[Address, str], registry: SlugRegistry, allowed: Allo
     return found
 
 
-def names_entry(listed: ThresholdException | None, entry: SlugOwner) -> bool:
+def names_entry(listed: ThresholdException, entry: SlugOwner) -> bool:
     """True when ``listed`` names ``entry``'s served owner, first owner and its first commit."""
-    if listed is None or not entry.prior_holders:
+    if not entry.prior_holders:
         return False
     return (
         listed.served_owner_doc_id == entry.served_owner_doc_id
@@ -66,26 +66,30 @@ def names_entry(listed: ThresholdException | None, entry: SlugOwner) -> bool:
 
 
 def _exception_problems(
-    repo: Path, entry: SlugOwner, listed: ThresholdException | None, reviewed: Reviewed
+    repo: Path, entry: SlugOwner, listed: ThresholdException | None, scope: tuple[str, str | None]
 ) -> list[str]:
+    """``scope`` is ``(u1_threshold, migration base)``."""
     if listed is None or not names_entry(listed, entry):
         return [f"{entry.owner} kept over first holder {entry.first_owner_doc_id}, unlisted"]
-    base = migration_base(repo)
+    threshold, base = scope
     if base is None:
         return ["a root migration commit has no history to hold its evidence"]
-    return evidence_problems(repo, listed, reviewed.corpus.u1_threshold, base)
+    return evidence_problems(repo, listed, threshold, base)
 
 
-def threshold_findings(repo: Path, registry: SlugRegistry, reviewed: Reviewed) -> list[str]:
+def threshold_findings(
+    repo: Path, registry: SlugRegistry, reviewed: Reviewed, base: str | None
+) -> list[str]:
     """Every ``threshold-exception`` entry the approved list does not name, or whose
-    listed evidence the corpus contradicts."""
+    listed evidence the corpus contradicts below the migration's ``base``."""
     found = []
+    scope = (reviewed.corpus.u1_threshold, base)
     for directory, entries in sorted(registry.slugs.items()):
         for slug, entry in sorted(entries.items()):
             if entry.basis != THRESHOLD_EXCEPTION:
                 continue
             listed = reviewed.threshold.get((directory, slug))
-            problems = _exception_problems(repo, entry, listed, reviewed)
+            problems = _exception_problems(repo, entry, listed, scope)
             found += [f"{directory}/{slug}: {problem}" for problem in problems]
     return found
 
@@ -114,7 +118,7 @@ def require_owner_continuity(repo: Path, registry: SlugRegistry, reviewed: Revie
         base = migration_base(repo)
         owners = {} if base is None else published_owners(repo.resolve(), base)
         found = reassigned(owners, registry, base_changes(reviewed, base))
-        found += threshold_findings(repo.resolve(), registry, reviewed)
+        found += threshold_findings(repo.resolve(), registry, reviewed, base)
     except IdentityMigrationError as exc:
         raise IdentitySchemaError(f"{repo}: the migration's base cannot be read: {exc}") from exc
     if found:

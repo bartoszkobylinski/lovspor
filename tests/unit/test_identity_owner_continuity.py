@@ -19,9 +19,11 @@ import pytest
 from lovspor.errors import IdentitySchemaError
 from lovspor.identity.apply import apply_plan
 from lovspor.identity.owner_continuity import reassigned, threshold_findings
+from lovspor.identity.owner_evidence import evidence_problems
 from lovspor.identity.owner_exceptions import (
     REASSIGNMENTS_PATH,
     ReassignmentList,
+    ThresholdException,
     load_reassignments,
     read_list,
 )
@@ -292,7 +294,7 @@ def _first_commit_findings(
         owner=NEW, assigned_at="2026", basis="threshold-exception", prior_holders=(first,)
     )
     registry = SlugRegistry().assign("forskrifter", "x", entry)
-    return threshold_findings(repo, registry, load_reassignments(path))
+    return threshold_findings(repo, registry, load_reassignments(path), _base_of(repo))
 
 
 def test_a_first_owner_commit_where_it_did_not_hold_is_refused(
@@ -302,7 +304,10 @@ def test_a_first_owner_commit_where_it_did_not_hold_is_refused(
 
     found = _first_commit_findings(repo, monkeypatch, shas, shas["r4"])
 
-    assert found == [f"forskrifter/x: first owner {OLD} does not hold it at {shas['r4']}"]
+    assert found == [
+        f"forskrifter/x: first owner {OLD} does not hold it at {shas['r4']}",
+        f"forskrifter/x: {OLD} already held it at {shas['r1']}, before {shas['r4']}",
+    ]
 
 
 def test_a_first_owner_commit_after_its_first_holding_is_refused(
@@ -313,9 +318,7 @@ def test_a_first_owner_commit_after_its_first_holding_is_refused(
 
     found = _first_commit_findings(repo, monkeypatch, shas, shas["r2"])
 
-    assert found == [
-        f"forskrifter/x: ['{OLD}'] already held it at {shas['r1']}, before {shas['r2']}"
-    ]
+    assert found == [f"forskrifter/x: {OLD} already held it at {shas['r1']}, before {shas['r2']}"]
 
 
 def test_the_true_first_owner_commit_has_no_finding(
@@ -410,7 +413,7 @@ def test_a_first_holder_registry_needs_no_threshold_listing(tmp_path: Path) -> N
     entry = SlugOwner(owner=OLD, assigned_at="2026")
     registry = SlugRegistry().assign("forskrifter", "x", entry)
 
-    assert threshold_findings(tmp_path, registry, load_reassignments()) == []
+    assert threshold_findings(tmp_path, registry, load_reassignments(), None) == []
 
 
 def test_a_listed_first_commit_other_than_the_registry_s_is_unlisted(
@@ -423,6 +426,34 @@ def test_a_listed_first_commit_other_than_the_registry_s_is_unlisted(
     registry = read_registry(repo)
     assert registry is not None
 
-    assert threshold_findings(repo, registry, load_reassignments(path)) == [
+    assert threshold_findings(repo, registry, load_reassignments(path), _base_of(repo)) == [
         f"forskrifter/x: {NEW} kept over first holder {OLD}, unlisted"
+    ]
+
+
+def test_an_earlier_holding_beyond_the_parent_is_found(tmp_path: Path) -> None:
+    """x is empty at r3 (r4's parent) but OLD held it at r1: NEW at r4 is no first holding."""
+    repo, shas = _threshold_migrated(tmp_path)
+    claim = ThresholdException.model_validate(
+        {
+            **fixture_exception(shas["r4"], shas["r1"]),
+            "first_owner_doc_id": NEW,
+            "served_owner_doc_id": OLD,
+        }
+    )
+
+    found = evidence_problems(repo, claim, shas["r4"], _base_of(repo))
+
+    assert f"{OLD} already held it at {shas['r1']}, before {shas['r4']}" in found
+
+
+def test_a_served_commit_after_the_threshold_is_found(tmp_path: Path) -> None:
+    repo, shas = _threshold_migrated(tmp_path)
+    claim = ThresholdException.model_validate(fixture_exception(shas["r1"], shas["r4"]))
+
+    found = evidence_problems(repo, claim, shas["r3"], _base_of(repo))
+
+    assert found == [
+        f"served_owner_first_commit {shas['r4']} is after the threshold {shas['r3']}",
+        f"the owner published at the threshold {shas['r3']} is {OLD}",
     ]
