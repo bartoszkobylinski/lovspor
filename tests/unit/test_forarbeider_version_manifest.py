@@ -481,3 +481,85 @@ def test_the_single_page_fixture_still_builds() -> None:
     assert manifest.source.state is SourceState.SOURCE_INCOMPLETE
     assert manifest.source.parts_extracted == 1
     assert datetime(2100, 4, 1, 12, tzinfo=UTC) == manifest.provenance.pages[0].retrieved_at
+
+
+@pytest.mark.parametrize(
+    ("axis", "field"),
+    [
+        ("source", "parts_expected"),
+        ("source", "parts_extracted"),
+        ("source", "attachments_expected"),
+        ("source", "attachments_captured"),
+        ("source", "extraction_gaps"),
+        ("publication", "spans_total"),
+        ("publication", "spans_publishable"),
+        ("publication", "release_gaps"),
+        ("publication", "attachments_publishable"),
+    ],
+)
+def test_parse_recomputes_counts_even_when_the_verdict_is_unchanged(axis: str, field: str) -> None:
+    def change(payload: dict[str, Any]) -> None:
+        payload[axis][field] += 1
+
+    with refused(RefusalReason.MANIFEST_INVALID):
+        parse_version_manifest(_tampered(change))
+
+
+def test_inventory_requires_every_basis_page_before_reporting_attachment_counts() -> None:
+    missing = b"another inventory page"
+    basis = inventory(listing(sha(PDF)))
+    partial = basis.model_copy(update={"read_from": (*basis.read_from, sha(missing))})
+    manifest = build(attachments=partial, raw={sha(PDF): PDF})
+    assert manifest.content.attachments is not None
+    assert manifest.content.attachments.basis.value == "unverified"
+    assert manifest.content.attachments.attachments[0].state is AttachmentState.CAPTURED
+    assert manifest.source.state is SourceState.UNKNOWN
+    assert (manifest.source.attachments_expected, manifest.source.attachments_captured) == (
+        None,
+        None,
+    )
+    assert manifest.publication.attachments_publishable is None
+
+    verified = build(attachments=partial, raw={sha(PDF): PDF, sha(missing): missing})
+    assert verified.source.state is SourceState.SOURCE_COMPLETE
+    assert (verified.source.attachments_expected, verified.source.attachments_captured) == (1, 1)
+
+
+@pytest.mark.parametrize(
+    ("raw", "media_type"),
+    [
+        (b"\x89PNG\r\n\x1a\nsynthetic image", "image/png"),
+        (b"\xff\xd8\xffsynthetic image", "image/jpeg"),
+        (b"", None),
+        (b"%PDF", None),
+        (b"\x89PNG\r\n\x1a", None),
+        (b"\xff\xd8", None),
+    ],
+)
+def test_attachment_capture_requires_a_supported_complete_signature(
+    raw: bytes, media_type: str | None
+) -> None:
+    manifest = build(attachments=inventory(listing(sha(raw))), raw={sha(raw): raw})
+    assert manifest.content.attachments is not None
+    (attachment,) = manifest.content.attachments.attachments
+    assert attachment.media_type == media_type
+    expected = AttachmentState.UNSUPPORTED if media_type is None else AttachmentState.CAPTURED
+    assert attachment.state is expected
+    assert manifest.source.attachments_captured == int(media_type is not None)
+    assert manifest.source.state is (
+        SourceState.SOURCE_INCOMPLETE if media_type is None else SourceState.SOURCE_COMPLETE
+    )
+
+
+def test_replay_checks_provenance_even_when_the_content_id_matches() -> None:
+    original = complete_source()
+    later = [item._replace(retrieved_at=WHEN + timedelta(days=1)) for item in pages()]
+    evidence = Evidence(tuple(later), inventory(), {})
+    assert build_version_manifest(evidence).version_id == original.version_id
+    with refused(RefusalReason.MANIFEST_INVALID):
+        verify_version_manifest(manifest_text(original).encode(), evidence)
+
+
+def test_unused_raw_evidence_is_still_checked_for_digest_mismatch() -> None:
+    with refused(RefusalReason.MANIFEST_INVALID):
+        build(attachments=inventory(), raw={sha(PDF): ZIP})
