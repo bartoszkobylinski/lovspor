@@ -384,3 +384,71 @@ def test_no_production_module_imports_the_research_adapter() -> None:
         if p.name != "rename_research.py" and "rename_research" in p.read_text(encoding="utf-8")
     ]
     assert importers == []
+
+
+def test_different_effective_dates_keep_operations_and_gaps_in_their_own_group() -> None:
+    """The adapter promises one candidate per (act, member, proven effective date)."""
+    document = _member(
+        _p(INTRO)
+        + _p("Nåværende § 5 blir § 6.")
+        + _p("Nåværende § 7 blir § 8.")
+        + _p("§ 9 oppheves.")
+    )
+    events = _events(document, STRAFFELOVEN)
+    assert len(events) == 3
+    later = date(2009, 1, 1)
+    events = [
+        event.model_copy(update={"timing": event.timing.model_copy(update={"effective": later})})
+        if event.operation.instruction != "Nåværende § 5 blir § 6."
+        else event
+        for event in events
+    ]
+    research = adapt(events, {MEMBER: document})
+    assert research.refusals == ()
+    first, second = research.steps
+    assert (first.effective, second.effective) == (date(2008, 3, 7), later)
+    assert [r.source for r in first.step.renames] == ["§5"]
+    assert [r.source for r in second.step.renames] == ["§7"]
+    assert first.complete
+    assert second.gaps == (f"operation not represented: {events[2].operation.id} (repeal_section)",)
+
+
+def test_same_act_and_date_in_different_members_stay_separate() -> None:
+    first = _member(_p(INTRO) + _p("Nåværende § 5 blir § 6."))
+    second = _member(_p(INTRO) + _p("Nåværende § 7 blir § 8.") + _p("§ 9 oppheves."))
+    second_member = "lti/2008/nl-20080307-005.xml"
+    second = second.model_copy(update={"member": second_member})
+    research = adapt(
+        [*_events(first, STRAFFELOVEN), *_events(second, STRAFFELOVEN)],
+        {MEMBER: first, second_member: second},
+    )
+    assert research.refusals == ()
+    assert len(research.steps) == 2
+    by_member = {candidate.member: candidate for candidate in research.steps}
+    assert by_member[MEMBER].complete
+    assert not by_member[second_member].complete
+    assert [r.source for r in by_member[MEMBER].step.renames] == ["§5"]
+    assert [r.source for r in by_member[second_member].step.renames] == ["§7"]
+    assert all(
+        rename.proof.member == candidate.member
+        for candidate in research.steps
+        for rename in candidate.step.renames
+    )
+
+
+@pytest.mark.parametrize(
+    ("heading", "text"),
+    [("Endringer", "Teksten."), ("Ny overskrift", "Teksten."), ("Endringer", "Ny tekst. Æøå.")],
+)
+def test_replacement_digest_records_label_heading_and_ledd_text(heading: str, text: str) -> None:
+    payload = _future("§412", heading).replace("Teksten.", text)
+    research = _run(_p(INTRO) + _p("Nåværende § 402 blir § 412 og skal lyde:") + payload)
+    assert research.refusals == ()
+    (candidate,) = research.steps
+    assert candidate.complete
+    (rename,) = candidate.step.renames
+    assert rename.replacement is not None
+    assert rename.replacement.payload_sha256 == _sha(
+        json.dumps(["§ 412", heading, text], ensure_ascii=False)
+    )
+    assert Research.model_validate_json(research.canonical_json()) == research
