@@ -23,6 +23,7 @@ import pytest
 from lovspor.legaltime.archive import file_sha256, read_members
 from lovspor.legaltime.document import Document
 from lovspor.legaltime.instructions import interpret
+from lovspor.legaltime.nesting import nesting
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE = ROOT / "data/cache/legaltime/lovtidend-avd1-2001-2025.tar.bz2"
@@ -89,3 +90,17 @@ def test_the_list_items_bind_only_what_they_prove(member: Document) -> None:
     assert acts[OP + "241.0"] is None  # militær straffelov, unproven; main: straffeloven
     assert acts[OP + "242.0"] is None
     assert acts[OP + "243.0"] == "lov/1975-06-13-39"
+
+
+def test_every_operation_is_kept_with_its_kind(member: Document) -> None:
+    """Only acts move: the member's (id, kind) list is main ``76d93b69``'s, digest for digest."""
+    operations = interpret(member).operations
+    lines = "".join(f"{op.id} {op.kind}\n" for op in operations)
+    assert len(operations) == 835
+    digest = hashlib.sha256(lines.encode()).hexdigest()
+    assert digest == "348c8bf4ec9ee4e6a5cc14b0c73ed91a9d489246b738f600244bc775628c3308"
+
+
+def test_no_nesting_region_is_found_for_renaming_hosts(member: Document) -> None:
+    """``nesting`` reads ``replace_section`` hosts only; § 411 and § 412 are renamed (as main)."""
+    assert nesting(member, interpret(member)).nests == ()

@@ -108,9 +108,12 @@ def test_outside_a_payload_list_the_same_shape_still_binds_by_the_d7_chain() -> 
     assert _acts(top)[-1] == (ITEM_18_REST, "lov/1932-06-17-6")
 
 
-def test_without_the_announcing_ledd_nothing_changes() -> None:
+@pytest.mark.parametrize(
+    "last", ["Ikraftsetting fastsettes ved lov.", "Departementet kan gi forskrift om følgende:"]
+)
+def test_without_the_announcing_ledd_nothing_changes(last: str) -> None:
     """A payload provision that announces no list opens none: the items read as before."""
-    plain = _p(RENAME_411) + _future("§411", "Ikraftsetting fastsettes ved lov.")
+    plain = _p(RENAME_411) + _future("§411", "Ikraftsetting fastsettes ved lov.", last)
     assert _acts(plain + _p(ITEM_1) + RENAME) == [
         (RENAME_411, STRAFFELOVEN),
         (ITEM_1, STRAFFELOVEN),
@@ -216,3 +219,11 @@ def test_a_listing_in_another_article_closes() -> None:
     node = Node(kind="paragraph", css_class="defaultP", text="§ 2 oppheves.", host_section="§2")
     assert listing.step(node, (STRAFFELOVEN, False, "§1")) == (STRAFFELOVEN, False, "§1")
     assert not listing.active
+
+
+def test_a_substitution_lists_numbered_entries_are_not_items_of_the_payload_list() -> None:
+    """Inside an open item, a substitution's numbered entries keep the item's block open."""
+    substitution = _p("I følgende bestemmelser skal ordet «arbeidsgiver» endres til «virksomhet»:")
+    entries = _p("1. § 1-1 første ledd") + _p("2. § 1-2 annet ledd")
+    acts = _acts(HOST_411 + _p(ITEM_AML) + substitution + entries + _p("§ 2-2 oppheves."))
+    assert acts[-1] == ("§ 2-2 oppheves.", AML)
