@@ -19,7 +19,11 @@ from lovspor.forarbeider.corpus_models import (
     parse_any_manifest,
 )
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
-from lovspor.forarbeider.version_manifest import parse_version_manifest
+from lovspor.forarbeider.version_manifest import (
+    Evidence,
+    parse_version_manifest,
+    verify_version_manifest,
+)
 from lovspor.forarbeider.version_models import (
     MANIFEST_SCHEMA_VERSION,
     Digest,
@@ -53,8 +57,14 @@ class VersionSummary(Frozen):
         return self
 
 
-def read_version_summaries(raw: bytes) -> tuple[VersionSummary, ...]:
+def read_version_summaries(
+    raw: bytes, evidence: Evidence | None = None
+) -> tuple[VersionSummary, ...]:
     """The documents of any manifest version in ``raw``, each with both axes.
+
+    A v3 manifest is rebuilt from ``evidence`` when it is given. Without it,
+    the bytes alone cannot prove a verified attachment discovery, so a
+    complete axis is read as ``unknown`` (``not_rebuilt_from_evidence``).
 
     Raises:
         ForarbeiderRefusedError: ``manifest_incompatible`` for an unknown
@@ -63,7 +73,9 @@ def read_version_summaries(raw: bytes) -> tuple[VersionSummary, ...]:
     payload = _loaded(raw)
     version = payload.get("schema_version") if isinstance(payload, dict) else None
     if version == MANIFEST_SCHEMA_VERSION:
-        return (_summary(parse_version_manifest(raw)),)
+        if evidence is None:
+            return (_unproved(_summary(parse_version_manifest(raw))),)
+        return (_summary(verify_version_manifest(raw, evidence)),)
     if version not in _LEGACY:
         raise ForarbeiderRefusedError(RefusalReason.MANIFEST_INCOMPATIBLE, "manifest")
     legacy = parse_any_manifest(raw)
@@ -78,6 +90,23 @@ def _summary(manifest: VersionManifest) -> VersionSummary:
         source_state=manifest.source.state,
         publication_state=manifest.publication.state,
         reasons=manifest.source.reasons + manifest.publication.reasons,
+    )
+
+
+def _unproved(summary: VersionSummary) -> VersionSummary:
+    """A summary read from bytes alone: nothing complete until the evidence rebuilds it."""
+    source_complete = summary.source_state is SourceState.SOURCE_COMPLETE
+    if not source_complete:
+        return summary
+    reason = Reason(code="not_rebuilt_from_evidence", effect=Effect.UNKNOWN)
+    return summary.model_copy(
+        update={
+            "source_state": SourceState.UNKNOWN,
+            "publication_state": PublicationState.UNKNOWN
+            if summary.publication_state is PublicationState.PUBLICATION_COMPLETE
+            else summary.publication_state,
+            "reasons": (*summary.reasons, reason),
+        }
     )
 
 
