@@ -917,3 +917,55 @@ def test_model_copy_never_bypasses_the_structure_invariants() -> None:
     placed = PlacementEvent(cause="placed", pair=Pair(part="del3"), proof=_p(1), clause="c")
     with pytest.raises(ValidationError, match="starts at its minting"):
         membership.model_copy(update={"events": (placed,)})
+
+
+def test_a_part_first_stated_by_the_step_cannot_complete_a_placement_in_that_step() -> None:
+    """R3 reads S_P: an accepted insertion's new part is evidence only in S_Q."""
+    rename = Rename(source="§101", target="§411", proof=_p(1), placement="som innleder fjerde del")
+    insertion = Insertion(label="§20", proof=_p(2), placement=Pair(part="del4"))
+    result, ledger, structure = _run(_step(renames=(rename,), insertions=(insertion,)))
+    assert _why(result) == {"1": ("intrinsic", INCOMPLETE)}
+    assert result.accepted == (_p(2).op_id,)
+    assert result.ledger.holder("§101") == ledger.holder("§101")
+    assert result.ledger.holder("§411") is None
+    assert result.structure is not None
+    assert result.structure.membership(_old("§101")) == structure.membership(_old("§101"))
+    assert "del4" not in structure.parts()
+    assert "del4" in result.structure.parts()
+    assert _pair(result, _new("§20")) == Pair(part="del4")
+    paired(result.ledger, result.structure)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_refused_chapter_insertions_leave_no_outline_evidence_beside_an_accepted_one(
+    reverse: bool,
+) -> None:
+    """R4: S_Q is built from accepted operations only, including its outline."""
+    insertions = (
+        Insertion(label="§20", proof=_p(1), placement=Pair(chapter="kap16", part="del1")),
+        Insertion(label="§21", proof=_p(2), placement=KAP16),
+        Insertion(label="§22", proof=_p(3), placement=Pair(chapter="kap17", part="del2")),
+    )
+    result, _, structure = _run(
+        _step(insertions=tuple(reversed(insertions)) if reverse else insertions)
+    )
+    reason = ("relational", "conflicting placements within instrument")
+    assert _why(result) == {"1": reason, "2": reason}
+    assert result.accepted == (_p(3).op_id,)
+    assert result.ledger.holder("§20") is None
+    assert result.ledger.holder("§21") is None
+    assert result.structure is not None
+    assert result.structure.membership(_new("§20")) is None
+    assert result.structure.membership(_new("§21")) is None
+    assert result.structure.enclosing("kap16") is None
+    assert result.structure.outline == tuple(
+        sorted(
+            (
+                *structure.outline,
+                ChapterEntry(chapter="kap17", part="del2", witness=_new("§22"), proof=_p(3)),
+            ),
+            key=lambda entry: entry.chapter,
+        )
+    )
+    assert _pair(result, _new("§22")) == Pair(chapter="kap17", part="del2")
+    paired(result.ledger, result.structure)
