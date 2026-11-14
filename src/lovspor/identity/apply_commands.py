@@ -31,6 +31,12 @@ import typer
 
 from lovspor.errors import IdentityMigrationError
 from lovspor.identity.apply import apply_plan, expected_digests, verify_applied
+from lovspor.identity.apply_guards import (
+    require_confined,
+    require_pinned,
+    require_safe_names,
+    written_paths,
+)
 from lovspor.identity.commands import ensure_outside
 from lovspor.identity.corpus_git import resolve_commit, status_paths, toplevel
 from lovspor.identity.moves import sha256_bytes
@@ -60,6 +66,7 @@ def _read_sums(plan_dir: Path) -> dict[str, str]:
 def verified_plan_files(plan_dir: Path) -> dict[str, str]:
     """``SHA256SUMS`` of ``plan_dir``, once every file in it matches it and no other exists."""
     sums = _read_sums(plan_dir)
+    require_safe_names(sums)
     present = {
         path.relative_to(plan_dir).as_posix() for path in plan_dir.rglob("*") if path.is_file()
     } - {SUMS_FILENAME}
@@ -106,9 +113,11 @@ def _require_applicable(plan: MigrationPlan) -> None:
         raise IdentityMigrationError(f"move problems: {plan.moves.problems}")
 
 
-def reviewed_plan(repo: Path, plan_dir: Path) -> MigrationPlan:
-    """The plan at the plan directory's base, once it is exactly what the directory holds."""
+def reviewed_plan(repo: Path, plan_dir: Path, expected: str) -> MigrationPlan:
+    """The plan at the plan directory's base, once it is exactly what the directory holds
+    and that directory is the reviewed one (``expected``: the sha256 of its ``SHA256SUMS``)."""
     ensure_outside(repo, plan_dir)
+    require_pinned(plan_dir, expected)
     sums = verified_plan_files(plan_dir)
     base, threshold = _plan_refs(plan_dir)
     require_clean_base(repo, base)
@@ -118,6 +127,7 @@ def reviewed_plan(repo: Path, plan_dir: Path) -> MigrationPlan:
             f"{plan_dir} is not the plan identity-plan computes at {base}, threshold {threshold}"
         )
     _require_applicable(plan)
+    require_confined(repo, written_paths(plan))
     return plan
 
 
@@ -141,15 +151,20 @@ def _apply_and_check(repo: Path, plan: MigrationPlan) -> list[str]:
     return applied_problems(repo, plan)
 
 
-def identity_apply_impl(repo: Path, plan_dir: Path) -> tuple[int, str]:
-    """Apply the reviewed plan and verify it; ``(exit code, summary line)``."""
-    plan = reviewed_plan(repo, plan_dir)
-    problems = _apply_and_check(repo, plan)
+def identity_apply_impl(
+    repo: Path, plan_dir: Path, expected: str, dry_run: bool
+) -> tuple[int, str]:
+    """Apply the reviewed plan and verify it, or with ``dry_run`` check it and write
+    nothing; ``(exit code, summary line)``."""
+    plan = reviewed_plan(repo, plan_dir, expected)
+    problems = [] if dry_run else _apply_and_check(repo, plan)
     summary = {
         "base_commit": plan.base.commit,
         "changed_paths": len(plan.changed_paths),
         "changed_paths_sha256": sha256_text("".join(f"{p}\n" for p in plan.changed_paths)),
-        "verified_files": len(expected_digests(plan)),
+        "dry_run": dry_run,
+        "verified_files": 0 if dry_run else len(expected_digests(plan)),
+        "planned_files": len(expected_digests(plan)),
         "problems": problems,
     }
     code = EXIT_UNVERIFIED if problems else 0
@@ -160,10 +175,16 @@ def identity_apply_impl(repo: Path, plan_dir: Path) -> tuple[int, str]:
 def identity_apply(
     repo: Annotated[Path, typer.Option(help="A clean lovverk checkout at the plan's base.")],
     plan: Annotated[Path, typer.Option(help="The directory lovspor ops identity-plan wrote.")],
+    expect_sha256: Annotated[
+        str, typer.Option(help="sha256 of the reviewed plan's SHA256SUMS file (the pin).")
+    ],
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Run every check, print the summary, write nothing.")
+    ] = False,
 ) -> None:
     """Write a reviewed #871 identity plan into the checkout; never commits."""
     try:
-        code, summary = identity_apply_impl(repo, plan)
+        code, summary = identity_apply_impl(repo, plan, expect_sha256, dry_run)
     except IdentityMigrationError as error:
         typer.echo(f"identity-apply: {error}", err=True)
         raise typer.Exit(EXIT_REFUSED) from error

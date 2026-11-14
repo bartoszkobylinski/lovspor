@@ -2553,8 +2553,14 @@ uv run lovspor ops identity-plan --repo <checkout> --base <B> --u1-threshold <T>
 uv run lovspor ops identity-plan --repo <checkout> --base <B> --u1-threshold <T> --out <run2>
 diff -r <run1> <run2> && echo IDENTICAL
 
-# 2. Apply the reviewed plan to a clean checkout at <B>; prints a JSON summary.
-uv run lovspor ops identity-apply --repo <build checkout> --plan <run1>; echo "exit $?"
+# 2. Pin the reviewed plan: the sha256 of its SHA256SUMS, recorded in the review.
+PIN=$(shasum -a 256 <run1>/SHA256SUMS | cut -d' ' -f1)
+
+# 3. Dry run: every check below, then the summary; writes nothing.
+uv run lovspor ops identity-apply --repo <build checkout> --plan <run1> --expect-sha256 "$PIN" --dry-run; echo "exit $?"
+
+# 4. Apply the reviewed plan to a clean checkout at <B>; prints a JSON summary.
+uv run lovspor ops identity-apply --repo <build checkout> --plan <run1> --expect-sha256 "$PIN"; echo "exit $?"
 ```
 
 `planned/` holds every file the apply writes: `manifest.json`, `slugs.json`,
@@ -2564,15 +2570,21 @@ a text file: `planned_sidecars_sha256` (each moved embedding sidecar's digest),
 `moved_from_paths` (the sources the moves delete) and `move_problems` (a rename
 whose Markdown lacks exactly one `id` and one old `slug` line; the apply refuses it).
 
-`identity-apply` refuses with exit 2, before writing anything:
+`identity-apply` refuses with exit 2, before writing anything (with
+`--dry-run` it stops there and writes nothing in any case):
+- no `--expect-sha256`, or a `SHA256SUMS` whose sha256 is not that pin (another
+  plan, even one this engine would compute at another threshold);
 - a plan directory inside the checkout, or one that does not match its
-  `SHA256SUMS` (a changed, missing or unlisted file);
+  `SHA256SUMS` (a changed, missing or unlisted file), or a `SHA256SUMS` entry that
+  is absolute or has a `..` part;
 - a checkout that is not its work tree's root, whose `HEAD` is not the plan's
   `base_commit`, or that is not clean, so a second apply is refused before and
   after the commit;
 - a plan directory that is not byte for byte the plan this engine computes at
   that base and threshold ref (a forged plan with re-computed checksums);
-- a blocked plan, one with nothing to do, or one with `move_problems`.
+- a blocked plan, one with nothing to do, or one with `move_problems`;
+- a path the apply would write, move or remove that is unsafe (absolute, `..`,
+  `.git`) or leads out of the checkout through a symlink.
 
 It then writes through `apply_plan` (the same code the tests run) and verifies
 the tree: every written file against its planned digest, sidecars included;

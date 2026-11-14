@@ -56,8 +56,16 @@ def _plan(repo: Path, out: Path) -> Path:
     return out
 
 
-def _apply(repo: Path, plan_dir: Path) -> tuple[int, str]:
-    return _invoke("identity-apply", "--repo", str(repo), "--plan", str(plan_dir))
+def _pin(plan_dir: Path) -> str:
+    """The operator's pin: the sha256 of the reviewed plan's ``SHA256SUMS``."""
+    return hashlib.sha256((plan_dir / SUMS_FILENAME).read_bytes()).hexdigest()
+
+
+def _apply(repo: Path, plan_dir: Path, *extra: str, pin: str | None = None) -> tuple[int, str]:
+    if pin is None:
+        pin = _pin(plan_dir) if (plan_dir / SUMS_FILENAME).is_file() else "0" * 64
+    args = ("--repo", str(repo), "--plan", str(plan_dir), "--expect-sha256", pin, *extra)
+    return _invoke("identity-apply", *args)
 
 
 def _status(repo: Path) -> list[str]:
