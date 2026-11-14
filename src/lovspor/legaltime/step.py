@@ -380,13 +380,26 @@ def _accept(
     for op in _operations(step):
         reason = _intrinsic(op, held, structure)
         if reason is None:
-            survivors.append(op)
+            survivors.append(_resolved(op, structure))
         else:
             refusals.append(_refusal(op, "intrinsic", reason))
     while found := _spread(survivors, _relational(survivors, held)):
         refusals += [_refusal(survivors[i], "relational", r) for i, r in found.items()]
         survivors = [op for index, op in enumerate(survivors) if index not in found]
     return survivors, refusals
+
+
+def _resolved(op: Operation, structure: Structure | None) -> Operation:
+    """From phase 1 on, an insertion carries the pair ``S_P`` proves for it (None: unresolved).
+
+    The relational checks then compare what each insertion proves, not how its sentence
+    spelled it: "kapittel 1" and "kapittel 1 i første del" agree when the outline puts
+    kap1 in del1.
+    """
+    if structure is None or not isinstance(op, Insertion):
+        return op
+    proven = inserted_pair(structure, op.placement)
+    return op.model_copy(update={"placement": None if isinstance(proven, str) else proven})
 
 
 # ------------------------------------------------------------------------- assignment

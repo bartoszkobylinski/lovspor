@@ -838,3 +838,58 @@ def test_insertions_agreeing_on_a_new_chapter_have_order_independent_outline_evi
         chapter="kap16", part="del2", witness=_new("§20"), proof=_p(1)
     )
     assert _pair(forward, _new("§20")) == _pair(forward, _new("§21")) == KAP16
+
+
+# ------------------------------------------- pre-merge audit: agreeing and empty pairs
+
+
+@pytest.mark.parametrize("order", [(0, 1), (1, 0)])
+def test_insertions_agreeing_on_a_known_chapter_are_not_a_conflict(order: tuple[int, int]) -> None:
+    """One names kap1's part, the other leaves it to the outline: they agree (R3)."""
+    pair = (Pair(chapter="kap1", part="del1"), Pair(chapter="kap1"))
+    ops = [Insertion(label=f"§2{n}", proof=_p(n + 1), placement=pair[n]) for n in order]
+    result, _, _ = _run(_step(insertions=tuple(ops)))
+    assert result.refusals == ()
+    assert _pair(result, _new("§20")) == _pair(result, _new("§21")) == KAP1
+
+
+def test_an_insertion_stating_nothing_in_a_chaptered_act_is_unresolved_not_empty() -> None:
+    """No chapter and no part stated, in an act with chapters: unknown, never 'empty'."""
+    stamps = {"§1": Pair(chapter="kap1"), "§2": Pair(chapter="kap2")}
+    result, _, _ = _run(
+        _step(insertions=(Insertion(label="§20", proof=_p(1), placement=Pair()),)), stamps
+    )
+    assert result.refusals == () and result.ledger.holder("§20") is not None
+    assert _pair(result, _new("§20")) is None
+
+
+def test_in_a_flat_act_an_empty_pair_is_the_stated_structure() -> None:
+    stamps = {"§1": Pair(), "§2": Pair()}
+    result, _, _ = _run(
+        _step(insertions=(Insertion(label="§20", proof=_p(1), placement=Pair()),)), stamps
+    )
+    assert _pair(result, _new("§20")) == Pair()
+
+
+@pytest.mark.parametrize("order", [(0, 1), (1, 0)])
+def test_a_partless_and_a_parted_new_chapter_are_refused_never_a_hard_failure(
+    order: tuple[int, int],
+) -> None:
+    stamps = {"§1": Pair(chapter="kap1"), "§2": Pair(chapter="kap2")}
+    pair = (Pair(chapter="kap16"), Pair(chapter="kap16", part="del2"))
+    ops = [Insertion(label=f"§2{n}", proof=_p(n + 1), placement=pair[n]) for n in order]
+    result, ledger, structure = _run(_step(insertions=tuple(ops)), stamps)
+    reason = ("relational", "conflicting placements within instrument")
+    assert set(_why(result).values()) == {reason} and len(result.refusals) == 2
+    assert _unchanged(result, ledger, structure)
+
+
+def test_model_copy_never_bypasses_the_structure_invariants() -> None:
+    _, structure = _state()
+    moved = structure.outline[0].model_copy(update={"part": "del3"})
+    with pytest.raises(ValidationError, match="outline does not state"):
+        structure.model_copy(update={"outline": (moved, *structure.outline[1:])})
+    membership = structure.memberships[0]
+    placed = PlacementEvent(cause="placed", pair=Pair(part="del3"), proof=_p(1), clause="c")
+    with pytest.raises(ValidationError, match="starts at its minting"):
+        membership.model_copy(update={"events": (placed,)})

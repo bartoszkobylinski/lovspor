@@ -303,6 +303,8 @@ def inserted_pair(structure: Structure, stated: Pair | None) -> Pair | None | st
     chapter-only clause does (R3); a part stated against that is conflicting evidence and
     refuses the insertion. A new chapter with no part stated is complete only in an act
     whose structure states no part at all; otherwise its part is unknown, so unresolved.
+    A pair naming neither chapter nor part is complete only in an act with no structure at
+    all: in an act with chapters or parts it says nothing, and stays unresolved.
     An outline entry with an empty part is step 0's ``_enclosing`` reading (a chapter that
     stands outside every part), a stated fact.
     """
@@ -313,7 +315,11 @@ def inserted_pair(structure: Structure, stated: Pair | None) -> Pair | None | st
         if stated.part is None or stated.part == entry.part:
             return Pair(chapter=entry.chapter, part=entry.part)
         return OUTLINE_CONFLICT
-    return stated if stated.part is not None or not structure.parts() else None
+    if stated.part is not None:
+        return stated
+    if structure.parts() or (stated.chapter is None and structure.outline):
+        return None  # a part, or (with no chapter named) a chapter, the source leaves unstated
+    return stated
 
 
 def outline_conflicts(stated: Iterable[tuple[int, Pair]]) -> set[int]:
