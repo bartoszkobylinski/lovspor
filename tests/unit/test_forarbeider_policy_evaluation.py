@@ -441,3 +441,57 @@ def test_a_decision_record_cannot_claim_eligibility_or_authorization(
 def test_reused_fc6_and_fc5_records_are_untouched() -> None:
     assert decide().source_state.value == build_version_manifest(evidence()).source.state.value
     assert first_or_any(1).payload == pages(1)[0].payload
+
+
+@pytest.mark.parametrize(
+    ("payloads", "reason"),
+    [
+        ((), "attachment_not_captured"),
+        ((b"not a supported attachment",), "attachment_unsupported"),
+        ((PDF, PDF + b"changed"), "attachment_capture_conflicting"),
+    ],
+)
+def test_attachment_coverage_cannot_override_unsafe_capture_state(
+    payloads: tuple[bytes, ...], reason: str
+) -> None:
+    covering = with_rules(attachments=(AttachmentRule(kind="attachment"),))
+    decision = decide(
+        _linked(), covering, captures=tuple(capture(PDF_URL, raw) for raw in payloads)
+    )
+    (attachment,) = decision.attachments
+    assert (attachment.decision, attachment.rule) == ("deny", "attachment:attachment")
+    assert reason in attachment.reasons
+    assert "attachments_deny:1" in decision.document.blockers
+    assert decision.document.rules_satisfied is False
+    never_eligible(decision)
+
+
+@pytest.mark.parametrize("field", ["document_types", "rights_rules", "attachment_rules"])
+def test_policy_rejects_duplicate_scope_and_rules(field: str) -> None:
+    chosen = with_rules(attachments=(AttachmentRule(kind="attachment"),))
+    values = getattr(chosen, field)
+    with pytest.raises(ValidationError, match="twice|two rules"):
+        policy(**{field: (*values, values[0])})
+
+
+def test_rights_rule_rejects_duplicate_accepted_evidence() -> None:
+    with pytest.raises(ValidationError, match="listed twice"):
+        RightsRule(
+            rights_class=RightsClass.OFFICIAL_TEXT,
+            accepted_evidence=(Evidence.STRUCTURE, Evidence.STRUCTURE),
+        )
+
+
+@pytest.mark.parametrize("record", ["policy", "decision"])
+@pytest.mark.parametrize("encoding", ["compact", "crlf", "missing_newline", "invalid_utf8"])
+def test_record_parsers_require_exact_canonical_bytes(record: str, encoding: str) -> None:
+    raw = (policy_text(policy()) if record == "policy" else decision_text(decide())).encode()
+    variants = {
+        "compact": json.dumps(json.loads(raw), separators=(",", ":")).encode(),
+        "crlf": raw.replace(b"\n", b"\r\n"),
+        "missing_newline": raw.rstrip(b"\n"),
+        "invalid_utf8": b"\xff" + raw,
+    }
+    parser = parse_policy if record == "policy" else parse_decision
+    with pytest.raises(ForarbeiderRefusedError, match="schema_invalid"):
+        parser(variants[encoding])
