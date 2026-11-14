@@ -104,3 +104,51 @@ def test_every_operation_is_kept_with_its_kind(member: Document) -> None:
 def test_no_nesting_region_is_found_for_renaming_hosts(member: Document) -> None:
     """``nesting`` reads ``replace_section`` hosts only; § 411 and § 412 are renamed (as main)."""
     assert nesting(member, interpret(member)).nests == ()
+
+
+DIGESTS = {  # ADR-0020 D9 convention: whitespace collapsed; payload provisions by their ledd
+    239: "bbbac519dcb305364cd56dcfebf96675ca010466f7d33ed5f0ec81c000fdc926",
+    240: "cf83713f91dfb2c5c808f68c10d903be2e1c590ce6403620ad1e642fba7cc8e6",
+    241: "7869a79a332963b986537722c5ff8d030bd112fbd89a50af11ab0a372d9a3363",
+    242: "5d0fe5ffbdc1792dbdcc2ef134b25ef32edc45da4946b7eb6cff12eb8a147cea",
+    243: "5241f5a81269a5b0ec6552805132230333aec9e170173100691d310269a792f6",
+    244: "ce04b1e5cf017d66e8e198100bceb45ae56d1e9dfe22adb2c47605de950b238f",
+    245: "57a9640b483586ee7503faed2e6875d9073ecac65d62387f3100d797bb3947c9",
+    246: "04e77b90033724068cb4a1ca5855216f64cd6c65cf58c0a416e191d0b16fa823",
+    460: "5e51ec6dc9c3636e1f7218e7e1807f67ddd1caf15494b20ef1a32ae5b0b2bcbd",
+    461: "cde1f59a74e8b87f2465d4427283eeb97e8bc69542f76371a9b4f012c5681fa6",
+    462: "3ecc081e3643bf1455394f12715b059e6c4afa28ac4efbf670f636dc8d070c96",
+}
+
+
+def _digest(member: Document, index: int) -> str:
+    node = member.parts[1].nodes[index]
+    if node.provision is not None:
+        text = "\n".join(" ".join(ledd.text.split()) for ledd in node.provision.ledd)
+    else:
+        text = " ".join(node.text.split())
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def test_every_boundary_node_is_pinned_by_digest(member: Document) -> None:
+    assert {i: _digest(member, i) for i in DIGESTS} == DIGESTS
+
+
+def test_no_signal_in_the_member_separates_245_from_an_items_own_instruction(
+    member: Document,
+) -> None:
+    """Why 245 is refused, not bound to straffeloven: each candidate signal has a counterexample.
+
+    * markup: 245 (outer), 462 and 1332 (items' own) are the same ``defaultP`` paragraph;
+    * the preceding item's shape: item 3 before 245 and item 18 before 462 are both
+      "I lov … skal § N … lyde:" followed by one ``legalP`` payload;
+    * a provision payload: 666, 836, 1053 and 1386 are items' own instructions whose payload is a
+      ``futureLegalArticle``, as 245's is.
+    """
+    nodes = member.parts[1].nodes
+    assert {nodes[i].css_class for i in (245, 462, 1332)} == {"defaultP"}
+    assert [(nodes[i].kind, nodes[i + 1].kind) for i in (243, 460)] == [("paragraph", "ledd")] * 2
+    assert all(nodes[i].text.endswith("lyde:") for i in (243, 460))
+    assert all(nodes[i + 1].kind == "provision" for i in (245, 666, 836, 1053, 1386))
+    acts = {op.id: op.act for op in interpret(member).operations}
+    assert acts[OP + "666.0"] is not None  # an open item's own: bound by the D7 chain
