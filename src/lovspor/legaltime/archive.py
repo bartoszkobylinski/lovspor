@@ -244,7 +244,8 @@ def _host_evidence(
     indexed: Indexed, amenders: list[Document]
 ) -> tuple[list[Document], list[Document]]:
     """#893: each nested-amendment host's enacting member (when in reach) and its decisions."""
-    refids = {n.host_act for a in amenders for n in nesting(a, interpret(a)).nests if n.host_act}
+    nests = [n for a in amenders for n in nesting(a, interpret(a)).nests]
+    refids = {n.host_act for n in nests if n.host_act and n.problem is None}  # a refusal reads none
     hosts: list[Document] = []
     decisions: list[Document] = []
     for path, index in indexed:
