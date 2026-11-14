@@ -17,16 +17,18 @@ import numpy as np
 import pytest
 
 import lovspor.sync.orchestrator as orchestrator_module
+from lovspor.embeddings.cache import CachingEmbedder, with_embedding_cache
 from lovspor.embeddings.inputs import build_embedding_inputs, hash_embedding_inputs
 from lovspor.embeddings.model import count_input_tokens
 from lovspor.embeddings.store import read_embeddings, write_embeddings
-from lovspor.errors import EmbeddingResponseError, MassReembedError
+from lovspor.errors import EmbeddingResponseError, MassReembedError, UnsupportedSidecarVersionError
 from lovspor.settings import Settings
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest, write_manifest
 from lovspor.sync.delta_embed import (
     EmbeddingTarget,
     PriorVectors,
     ReusingEmbedder,
+    document_vectors,
     embedding_target,
     load_prior_vectors,
     paid_inputs,
@@ -436,3 +438,88 @@ def test_a_crashed_run_publishes_nothing_and_its_retry_is_deterministic(
         _sync(settings, monkeypatch, changed, embedder)
         results.append((sidecar.read_bytes(), embedder.paid))
     assert results[0] == results[1]
+
+
+def test_delta_cache_survives_restart_and_bypasses_the_producer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Operations #919 promises a full document cache entry after paying a delta."""
+    settings = _published(tmp_path)
+    monkeypatch.setenv("LOVSPOR_EMBEDDING_CACHE_DIR", str(tmp_path / "cache"))
+    prior = load_prior_vectors(settings.lovverk_repo_path, _record(settings), _target())
+    assert prior is not None
+    inputs = _inputs(_law((_SECTION_ONE, _SECTION_TWO_NEW)))
+    digest = hash_embedding_inputs(inputs)
+    provider = _TextEmbedder()
+    cached = with_embedding_cache(provider, settings)
+    assert isinstance(cached, CachingEmbedder)
+
+    rows, scale = document_vectors(ReusingEmbedder(cached, prior), inputs, digest)
+
+    assert provider.paid == [inputs[1].text]
+    # delta_embed's contract: carried rows are bit-identical only while the paid
+    # rows fit the prior scale; a larger paid row rescales once, within half a step.
+    carried = prior.rows[inputs[0].text].astype(np.float32) * prior.scale
+    assert np.abs(rows[0].astype(np.float32) * scale - carried).max() <= scale / 2 + 1e-9
+    restarted_provider = _BrokenEmbedder()
+    restarted = with_embedding_cache(restarted_provider, settings)
+    assert isinstance(restarted, CachingEmbedder)
+    # Even without carried rows, the stored document must bypass production.
+    restored, restored_scale = document_vectors(
+        ReusingEmbedder(restarted, PriorVectors(rows={}, scale=1.0)), inputs, digest
+    )
+    assert restarted_provider.paid == []
+    assert restarted.progress.documents_cached == 1
+    assert np.array_equal(restored, rows)
+    assert restored_scale == scale
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_delta_response_preserves_the_existing_sidecar(
+    tmp_path: Path, value: float
+) -> None:
+    """EmbeddingResponseError promises no half-valid sidecar is published."""
+    settings = _published(tmp_path)
+    repo = settings.lovverk_repo_path
+    prior = load_prior_vectors(repo, _record(settings), _target())
+    assert prior is not None
+    path = _embeddings_path(repo, "gjeldende-lover", "lov-a")
+    before = path.read_bytes()
+
+    class NonfiniteEmbedder(_TextEmbedder):
+        def encode(self, texts: list[str]) -> np.ndarray:
+            rows = super().encode(texts)
+            rows[0, 0] = value
+            return rows
+
+    changed = _law((_SECTION_ONE, _SECTION_TWO_NEW))
+    rendered = orchestrator_module.render_full_document(
+        changed.xml_bytes, orchestrator_module._frontmatter_context(changed, _OBSERVED)
+    )
+    with pytest.raises(EmbeddingResponseError, match="non-finite"):
+        orchestrator_module._write_embeddings_for_doc(
+            repo, "gjeldende-lover", "lov-a", rendered, ReusingEmbedder(NonfiniteEmbedder(), prior)
+        )
+    assert path.read_bytes() == before
+
+
+def test_future_sidecar_version_stops_change_path_before_spending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The delta loader explicitly propagates unsupported versions before any spend."""
+    settings = _published(tmp_path)
+    repo = settings.lovverk_repo_path
+    path = _embeddings_path(repo, "gjeldende-lover", "lov-a")
+    payload = bytearray(path.read_bytes())
+    payload[4] = 3
+    path.write_bytes(payload)
+    _git(repo, "commit", "-q", "-am", "future sidecar version")
+    before = _state(repo)
+    provider = _TextEmbedder()
+
+    with pytest.raises(UnsupportedSidecarVersionError):
+        _sync(settings, monkeypatch, _law((_SECTION_ONE, _SECTION_TWO_NEW)), provider)
+
+    assert provider.paid == []
+    assert _state(repo) == before
+    assert path.read_bytes() == payload

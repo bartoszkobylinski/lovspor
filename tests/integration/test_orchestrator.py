@@ -574,9 +574,12 @@ def test_run_sync_actions_do_not_double_stage_embedding_sidecars(
             monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
             # The writer is faked and the XML is a placeholder no renderer reads,
             # so the change-path guard, which renders for real (#790, #804), is
-            # out of this staging test's scope; tests/unit pins its behaviour.
+            # out of this staging test's scope; tests/unit pins its behaviour. The
+            # guard returns the upstream map the write loops use (#919), here unchanged.
             monkeypatch.setattr(
-                orchestrator_module, "_guard_change_reembed", lambda *_args, **_kwargs: None
+                orchestrator_module,
+                "_guard_change_reembed",
+                lambda _settings, plan, *_args, **_kwargs: plan.upstream,
             )
             run_sync(
                 Settings(
