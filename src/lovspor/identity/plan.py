@@ -24,6 +24,7 @@ from lovspor.identity.migration import (
     Rename,
     RestoredTombstone,
     build_registry,
+    detach_shared_tombstones,
     renamed_record,
     restored_record,
     restored_tombstones,
@@ -278,13 +279,17 @@ def _history_mismatches(
     return mismatches
 
 
-def _planned_manifest(base: BaseState, walk: ManifestWalk, renames: list[Rename]) -> Manifest:
-    """The base manifest with every lost record restored and every U1 rename applied."""
+def _planned_manifest(
+    base: BaseState, walk: ManifestWalk, renames: list[Rename], registry: SlugRegistry
+) -> Manifest:
+    """The base manifest with every lost record restored, every U1 rename applied,
+    and every removed non-owner moved off a shared path (#912)."""
     documents = dict(base.manifest.documents)
     for doc_id in sorted(set(walk.last_seen) - set(documents)):
         documents[doc_id] = restored_record(doc_id, walk, base.commit)
     for rename in renames:
         documents[rename.doc_id] = renamed_record(documents[rename.doc_id], rename)
+    documents = detach_shared_tombstones(documents, registry)
     return base.manifest.model_copy(update={"documents": dict(sorted(documents.items()))})
 
 
@@ -305,7 +310,7 @@ def _repair(base: BaseState, walk: ManifestWalk, threshold: Threshold) -> _Repai
         restored=restored_tombstones(walk, base.manifest, base.commit),
         conflicts=conflicts,
         renames=renames,
-        manifest=_planned_manifest(base, walk, renames),
+        manifest=_planned_manifest(base, walk, renames, registry),
         registry=_registry_with_renames(registry, renames, since),
     )
 
