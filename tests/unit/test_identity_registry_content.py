@@ -134,8 +134,8 @@ def _audit_finding(repo: Path) -> str:
 def test_the_complete_migration_passes_the_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    allow_fixture_u1(monkeypatch, tmp_path)
     repo = _migrate(tmp_path, None)
+    allow_fixture_u1(monkeypatch, repo)
 
     assert isinstance(verified_corpus_identity(repo), EnforcedCorpus)
     assert _audit_finding(repo) == ""

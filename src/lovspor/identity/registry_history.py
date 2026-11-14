@@ -69,7 +69,8 @@ from lovspor.identity.corpus_git import (
     resolve_commit,
     toplevel,
 )
-from lovspor.identity.owner_continuity import load_reassignments, require_owner_continuity
+from lovspor.identity.owner_continuity import require_owner_continuity
+from lovspor.identity.owner_exceptions import load_reassignments
 from lovspor.identity.registry import (
     CorpusIdentity,
     EnforcedCorpus,

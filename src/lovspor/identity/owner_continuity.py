@@ -7,192 +7,41 @@ migration that gives a published address to another document, and rewrites
 that address's slug history and manifest to match, passes both. So the
 registry is also held to the owners its base published:
 
-- a ``current`` record's address is owned by that record (served 200);
-- otherwise a slug history ``<directory>/history/<slug>.json`` names its owner
-  (the 301 or 410 page of that slug);
-- otherwise the one ``removed`` record on the address owns it.
-
-The base is the parent of the migration commit (the oldest commit that added
-``identity.json``), or ``HEAD`` while the migration is not committed yet. A
-root migration commit has no published owners to keep.
+``published_owners``: a current record (200), else a slug history (301/410),
+else the address's one removed record, at the migration's base.
 
 A first holder is a historical owner too: a ``threshold-exception`` entry,
 where the migration's U1 threshold kept a later holder over the document that
 held the address first, is a reassignment of that first holder.
 
-Both are refused unless listed, with both ``doc_id``s, in
-``owner_reassignments.json``: the reviewed list of what the #871 migration of
-lovverk changes, taken from the ``identity-plan`` report at lovverk
-``c310127e`` (threshold ``f6d7e25bb``, ``SHA256SUMS`` sha256 ``955f53de``): its
-``u1_renames`` and ``history_owner_mismatches`` (``reassignments``, against the
-base) and its ``threshold_exceptions``. A listed change whose ``doc_id``s differ
-from what the corpus shows is no exception.
+Both are refused unless the reviewed list ``owner_reassignments.json``
+(``owner_exceptions``, schema 2) names the change and is approved by its
+digest (#921, ADR-0026 draft). A reassignment counts only when the migration's
+base is the list's ``reviewed_base``; a threshold exception only when the entry
+names the registry's first owner (with its first commit) and served owner,
+and its Git evidence holds in the corpus (``owner_evidence``). An unapproved
+list, or one edited after approval, lists nothing: every change is refused,
+the refusal saying the list is BLOCKED on the owner's approval.
 """
 
-import json
-from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path, PurePosixPath
-from typing import Literal
-
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pathlib import Path
 
 from lovspor.errors import IdentityMigrationError, IdentitySchemaError
-from lovspor.identity.corpus_git import (
-    MANIFEST_PATH,
-    first_commit_adding,
-    has_commits,
-    list_files,
-    parents_of,
-    read_blob,
-    read_blobs,
-    resolve_commit,
+from lovspor.identity.owner_evidence import evidence_problems
+from lovspor.identity.owner_exceptions import (
+    Address,
+    Allowed,
+    Reviewed,
+    ThresholdException,
 )
-from lovspor.identity.registry import (
-    DIRECTORY_OF_DATASET,
-    THRESHOLD_EXCEPTION,
-    SlugRegistry,
-    record_address,
-)
-from lovspor.identity.schema import IDENTITY_FILENAME
-from lovspor.storage.manifest import Manifest
+from lovspor.identity.published import migration_base, published_owners
+from lovspor.identity.registry import THRESHOLD_EXCEPTION, SlugOwner, SlugRegistry
 
-REASSIGNMENTS_PATH = Path(__file__).with_name("owner_reassignments.json")
 _LISTED = 5
-Address = tuple[str, str]
-#: ``address -> (owner at the base, owner in the registry)``.
-Allowed = dict[Address, tuple[str, str]]
-
-
-class OwnerReassignment(BaseModel):
-    """One reviewed owner change of a published address."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    directory: str
-    slug: str
-    from_doc_id: str
-    to_doc_id: str
-    kind: Literal["u1-rename", "history-repair"]
-    reason: str
-
-
-class ThresholdException(BaseModel):
-    """One reviewed ``threshold-exception`` entry: ``owner`` keeps an address ``first_holder``
-    held first."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    directory: str
-    slug: str
-    first_holder: str
-    owner: str
-    reason: str
-
-
-class ReassignmentList(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    schema_version: Literal[1]
-    reassignments: tuple[OwnerReassignment, ...]
-    threshold_exceptions: tuple[ThresholdException, ...]
-
-
-@dataclass(frozen=True)
-class Reviewed:
-    """The reviewed list: owner changes against the base, and threshold exceptions."""
-
-    changes: Allowed
-    threshold: Allowed
-
-
-def _unique(pairs: list[tuple[Address, tuple[str, str]]], path: Path) -> Allowed:
-    allowed = dict(pairs)
-    if len(allowed) != len(pairs):
-        raise IdentitySchemaError(f"{path}: an address is listed twice")
-    return allowed
-
-
-def load_reassignments(path: Path | None = None) -> Reviewed:
-    """The reviewed list (``REASSIGNMENTS_PATH`` by default); refused when unreadable or
-    when an address is listed twice."""
-    path = REASSIGNMENTS_PATH if path is None else path
-    try:
-        listed = ReassignmentList.model_validate_json(path.read_bytes())
-    except (OSError, ValidationError) as exc:
-        raise IdentitySchemaError(f"{path}: unreadable owner reassignment list: {exc}") from exc
-    changes = [((r.directory, r.slug), (r.from_doc_id, r.to_doc_id)) for r in listed.reassignments]
-    threshold = [
-        ((t.directory, t.slug), (t.first_holder, t.owner)) for t in listed.threshold_exceptions
-    ]
-    return Reviewed(changes=_unique(changes, path), threshold=_unique(threshold, path))
-
-
-def migration_base(repo: Path) -> str | None:
-    """The commit whose published owners the registry keeps; ``None`` when there is none."""
-    if not has_commits(repo):
-        return None
-    head = resolve_commit(repo, "HEAD")
-    migration = first_commit_adding(repo, head, IDENTITY_FILENAME)
-    if migration is None:
-        return head
-    parents = parents_of(repo, migration)
-    return parents[0] if parents else None
-
-
-def _doc_id(blob: bytes | None) -> str | None:
-    try:
-        data = json.loads((blob or b"").decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        return None
-    value = data.get("doc_id") if isinstance(data, dict) else None
-    return value if isinstance(value, str) else None
-
-
-def _history_owners(repo: Path, commit: str) -> dict[Address, str]:
-    directories = sorted(DIRECTORY_OF_DATASET.values())
-    paths = [
-        path
-        for path in list_files(repo, commit, [f"{d}/history" for d in directories])
-        if len(PurePosixPath(path).parts) == 3 and path.endswith(".json")  # noqa: PLR2004
-    ]
-    owners = {}
-    for path, blob in read_blobs(repo, commit, paths).items():
-        named = _doc_id(blob)
-        if named is not None:
-            owners[(PurePosixPath(path).parts[0], PurePosixPath(path).stem)] = named
-    return owners
-
-
-def _base_manifest(repo: Path, commit: str) -> Manifest | None:
-    blob = read_blob(repo, commit, MANIFEST_PATH)
-    if blob is None:
-        return None
-    try:
-        return Manifest.model_validate_json(blob)
-    except ValidationError as exc:
-        raise IdentitySchemaError(f"{commit}: unreadable {MANIFEST_PATH}: {exc}") from exc
-
-
-def _record_owners(manifest: Manifest | None, status: str) -> dict[Address, str]:
-    """``address -> doc_id`` of the records of ``status``; an address two of them share
-    is left out (only a removed record can share one, and then neither owns it here)."""
-    seen: dict[Address, list[str]] = {}
-    for doc_id, record in (manifest.documents if manifest else {}).items():
-        if record.status == status:
-            seen.setdefault(record_address(record), []).append(doc_id)
-    return {address: ids[0] for address, ids in seen.items() if len(ids) == 1}
-
-
-@lru_cache(maxsize=8)
-def published_owners(repo: Path, commit: str) -> dict[Address, str]:
-    """Every address the corpus at ``commit`` published, with its owner (memoised)."""
-    manifest = _base_manifest(repo, commit)
-    return {
-        **_record_owners(manifest, "removed"),
-        **_history_owners(repo, commit),
-        **_record_owners(manifest, "current"),
-    }
+APPROVE_COMMAND = (
+    "lovspor ops identity-exceptions-approve --path {path} --digest {digest} "
+    "--by <name> --on <YYYY-MM-DD>"
+)
 
 
 def reassigned(owners: dict[Address, str], registry: SlugRegistry, allowed: Allowed) -> list[str]:
@@ -205,32 +54,73 @@ def reassigned(owners: dict[Address, str], registry: SlugRegistry, allowed: Allo
     return found
 
 
-def unlisted_threshold_exceptions(registry: SlugRegistry, threshold: Allowed) -> list[str]:
-    """Every ``threshold-exception`` entry the reviewed list does not name as it stands."""
+def names_entry(listed: ThresholdException | None, entry: SlugOwner) -> bool:
+    """True when ``listed`` names ``entry``'s served owner, first owner and its first commit."""
+    if listed is None or not entry.prior_holders:
+        return False
+    return (
+        listed.served_owner_doc_id == entry.served_owner_doc_id
+        and listed.first_owner_doc_id == entry.first_owner_doc_id
+        and listed.evidence.first_owner_first_commit == entry.prior_holders[0].first_commit
+    )
+
+
+def _exception_problems(
+    repo: Path, entry: SlugOwner, listed: ThresholdException | None, reviewed: Reviewed
+) -> list[str]:
+    if listed is None or not names_entry(listed, entry):
+        return [f"{entry.owner} kept over first holder {entry.first_owner_doc_id}, unlisted"]
+    base = migration_base(repo)
+    if base is None:
+        return ["a root migration commit has no history to hold its evidence"]
+    return evidence_problems(repo, listed, reviewed.corpus.u1_threshold, base)
+
+
+def threshold_findings(repo: Path, registry: SlugRegistry, reviewed: Reviewed) -> list[str]:
+    """Every ``threshold-exception`` entry the approved list does not name, or whose
+    listed evidence the corpus contradicts."""
     found = []
     for directory, entries in sorted(registry.slugs.items()):
         for slug, entry in sorted(entries.items()):
             if entry.basis != THRESHOLD_EXCEPTION:
                 continue
-            first = entry.prior_holders[0].doc_id if entry.prior_holders else None
-            if threshold.get((directory, slug)) != (first, entry.owner):
-                found.append(f"{directory}/{slug}: {entry.owner} kept over first holder {first}")
+            listed = reviewed.threshold.get((directory, slug))
+            problems = _exception_problems(repo, entry, listed, reviewed)
+            found += [f"{directory}/{slug}: {problem}" for problem in problems]
     return found
+
+
+def base_changes(reviewed: Reviewed, base: str | None) -> Allowed:
+    """The listed reassignments, when ``base`` is the base they were reviewed against."""
+    return reviewed.changes if base == reviewed.corpus.reviewed_base else {}
+
+
+def _list_state(reviewed: Reviewed, base: str | None) -> str:
+    if not reviewed.approved:
+        command = APPROVE_COMMAND.format(path=reviewed.path, digest=reviewed.digest)
+        return f"the list is {reviewed.state}; after review the owner runs `{command}`"
+    if base != reviewed.corpus.reviewed_base:
+        return (
+            f"the list is {reviewed.state}, for base {reviewed.corpus.reviewed_base}, not the "
+            f"migration's base {base}: its reassignments do not apply"
+        )
+    return f"the list is {reviewed.state}"
 
 
 def require_owner_continuity(repo: Path, registry: SlugRegistry, reviewed: Reviewed) -> None:
     """Refuse ``registry`` when it re-owns an address the migration's base published, or
-    keeps a later holder over a first holder, unless the reviewed list names the change."""
+    keeps a later holder over a first holder, unless the approved list names the change."""
     try:
         base = migration_base(repo)
         owners = {} if base is None else published_owners(repo.resolve(), base)
+        found = reassigned(owners, registry, base_changes(reviewed, base))
+        found += threshold_findings(repo.resolve(), registry, reviewed)
     except IdentityMigrationError as exc:
         raise IdentitySchemaError(f"{repo}: the migration's base cannot be read: {exc}") from exc
-    found = reassigned(owners, registry, reviewed.changes)
-    found += unlisted_threshold_exceptions(registry, reviewed.threshold)
     if found:
         raise IdentitySchemaError(
             f"{repo}: the registry changes {len(found)} historical owner(s), first "
             f"{found[:_LISTED]}: an owner the corpus published, and a first holder, is kept "
-            f"unless the change is listed in {REASSIGNMENTS_PATH.name} (#911)",
+            f"unless the change is listed in {reviewed.path.name} and approved by its "
+            f"digest (#911, #921); {_list_state(reviewed, base)}",
         )

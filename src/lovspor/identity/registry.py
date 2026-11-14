@@ -95,6 +95,21 @@ class SlugOwner(BaseModel):
     basis: OwnershipBasis = FIRST_HOLDER
     prior_holders: tuple[PriorHolder, ...] = ()
 
+    @property
+    def served_owner_doc_id(self) -> str:
+        """The document the address serves (200) or names (301/410): ``owner`` (#921)."""
+        return self.owner
+
+    @property
+    def first_owner_doc_id(self) -> str:
+        """The first document that held the address: the oldest prior holder of a
+        ``threshold-exception``, else the owner (#921, ADR-0026 draft).
+
+        Derived, never written: ``slugs.json`` already records it immutably (the
+        entry is append-only as a whole), so its on-disk schema is unchanged.
+        """
+        return self.prior_holders[0].doc_id if self.prior_holders else self.owner
+
     @model_validator(mode="after")
     def _basis_matches_prior_holders(self) -> "SlugOwner":
         if (self.basis == THRESHOLD_EXCEPTION) != bool(self.prior_holders):
