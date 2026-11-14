@@ -4,6 +4,7 @@ Rendering, the manifest and git are real; only the upstream download is
 replaced (or, for ``_collect_upstream``, the Lovdata client and tarball index).
 """
 
+import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +31,22 @@ def _seed_registry(repo: Path, registry: SlugRegistry) -> None:
     write_declaration(repo)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "registry")
+
+
+def _keep_tombstone(repo: Path, doc_id: str, slug: str) -> None:
+    """Give ``doc_id`` a removed record on ``slug``: a registered owner is always a
+    document of the manifest (a tombstone is never dropped), or sync start refuses (#911)."""
+    path = repo / "manifest.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    alfa = data["documents"]["lov-1"]
+    data["documents"][doc_id] = {
+        **{k: alfa[k] for k in ("doc_type", "source_dataset", "last_seen")},
+        "xml_hash": f"hash-{doc_id}",
+        "markdown_path": f"lover/{slug}.md",
+        "status": "removed",
+        "slug": slug,
+    }
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _head(repo: Path) -> str:
@@ -132,6 +149,7 @@ def test_a_sync_refuses_to_serve_a_document_at_another_documents_slug(
     repo = settings.lovverk_repo_path
     alfa_owner = SlugOwner(owner="lov-1", assigned_at="2026-08-01T04:00:00+00:00")
     registry = SlugRegistry().assign("lover", "alfa", alfa_owner)
+    _keep_tombstone(repo, "lov-0", "beta")
     _seed_registry(repo, registry.assign("lover", "beta", _LOST_OWNER))
     _serve(monkeypatch, [_ALFA, _BETA])
 

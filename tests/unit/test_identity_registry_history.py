@@ -37,6 +37,8 @@ AT = "2026-06-01T00:00:00+00:00"
 #: A removed document's old address: in the registry, not in the current manifest.
 OLD = "sf-20190101-0009"
 THIRD = "sf-20250101-0003"
+#: OLD's address in the current manifest: it moved off ``old-a``, then was removed.
+OLD_NOW = "old-a-moved"
 
 
 def _owner(doc_id: str) -> SlugOwner:
@@ -47,7 +49,8 @@ def _registry() -> SlugRegistry:
     registry = SlugRegistry()
     for doc_id, raw in sorted(DOCS.items()):
         registry = registry.assign("forskrifter", raw["slug"], _owner(doc_id))
-    return registry.assign("forskrifter", "old-a", _owner(OLD))
+    registry = registry.assign("forskrifter", "old-a", _owner(OLD))
+    return registry.assign("forskrifter", OLD_NOW, _owner(OLD))
 
 
 def _write(repo: Path, registry: SlugRegistry) -> None:
@@ -64,9 +67,18 @@ def _set(registry: SlugRegistry, slug: str, entry: SlugOwner | None) -> SlugRegi
     return registry.model_copy(update={"slugs": {**registry.slugs, "forskrifter": entries}})
 
 
+def with_old_tombstone(repo: Path) -> None:
+    """The manifest keeps OLD's record, as a tombstone on the address it moved to: a
+    record is never dropped (#871), and the gate refuses a registry naming a document
+    the manifest lacks (#911). ``old-a`` stays an address no current record holds."""
+    documents = {**DOCS, OLD: record(OLD, OLD_NOW, "removed")}
+    write_manifest_json(repo, documents, "2026-06-01T00:00:00Z")
+
+
 @pytest.fixture
 def migrated(tmp_path: Path) -> Path:
     repo = _seeded(tmp_path)
+    with_old_tombstone(repo)
     _write(repo, _registry())
     (repo / IDENTITY_FILENAME).write_text(declaration_json(), encoding="utf-8")
     commit_all(repo, "migration: declare identity schema 1")
@@ -240,6 +252,7 @@ def test_a_declared_corpus_in_a_subdirectory_cannot_be_verified(migrated: Path) 
 
 def test_a_corpus_migrated_but_not_yet_committed_has_no_history_to_hold(tmp_path: Path) -> None:
     repo = _seeded(tmp_path)
+    with_old_tombstone(repo)
     _write(repo, _registry())
     (repo / IDENTITY_FILENAME).write_text(declaration_json(), encoding="utf-8")
 
@@ -258,7 +271,12 @@ def test_the_history_is_read_once_per_commit(migrated: Path) -> None:
 
     info = first_entries.cache_info()
     assert (info.misses, info.hits) == (1, 1)
-    assert set(first_entries(migrated.resolve(), head)["forskrifter"]) == {"a", "b", "old-a"}
+    assert set(first_entries(migrated.resolve(), head)["forskrifter"]) == {
+        "a",
+        "b",
+        "old-a",
+        OLD_NOW,
+    }
 
 
 def test_a_memoised_verdict_does_not_outlive_its_commit(migrated: Path) -> None:
@@ -356,7 +374,7 @@ def test_entries_after_the_first_revision_batch_are_still_protected(migrated: Pa
     """More than sixteen revisions must preserve the entry-to-commit alignment."""
     registry = _registry()
     for index in range(17):
-        registry = registry.assign("forskrifter", f"extra-{index}", _owner(THIRD))
+        registry = registry.assign("forskrifter", f"extra-{index}", _owner(FIRST))
         _write(migrated, registry)
         added = commit_all(migrated, f"append address {index}")
     assert isinstance(verified_corpus_identity(migrated), EnforcedCorpus)

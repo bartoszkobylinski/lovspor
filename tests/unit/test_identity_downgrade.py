@@ -43,6 +43,7 @@ from tests.unit.identity_git_fixtures import (
     record,
     write_manifest_json,
 )
+from tests.unit.identity_owner_fixtures import allow_fixture_u1
 from tests.unit.test_identity_migration import _base_repo
 
 AT = datetime(2026, 11, 1, tzinfo=UTC)
@@ -262,7 +263,10 @@ def test_the_audit_reports_a_truncated_registry(migrated: tuple[Path, str]) -> N
 # --- rollback ---
 
 
-def test_reverting_the_migration_commit_is_refused_with_its_recovery(tmp_path: Path) -> None:
+def test_reverting_the_migration_commit_is_refused_with_its_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allow_fixture_u1(monkeypatch, tmp_path)
     repo, _ = _base_repo(tmp_path)
     apply_plan(repo, plan_migration(repo, "HEAD"))
     migration = commit_all(repo, "migration: repair document identity (#871)")

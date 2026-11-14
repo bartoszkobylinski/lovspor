@@ -250,3 +250,8 @@ def list_files(repo: Path, commit: str, directories: list[str]) -> list[str]:
     """Every file path under ``directories`` at ``commit``, sorted."""
     out = _git(repo, "ls-tree", "-r", "-z", "--name-only", commit, "--", *directories)
     return sorted(path for path in out.decode().split("\0") if path)
+
+
+def parents_of(repo: Path, commit: str) -> list[str]:
+    """The parents of ``commit``, first parent first; empty for a root commit."""
+    return _git(repo, "rev-list", "--parents", "-n", "1", commit).decode().split()[1:]
