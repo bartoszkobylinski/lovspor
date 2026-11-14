@@ -425,3 +425,92 @@ def test_the_evidence_takes_no_inventory_list_or_flag() -> None:
     assert Evidence._fields == ("pages", "landing", "captures")
     assert DOCUMENT_PATH in LANDING_URL
     assert WHEN.tzinfo is not None
+
+
+@pytest.mark.parametrize("attribute", ["src", "data", "data-src", "data-href", "poster", "action"])
+def test_non_href_references_outside_known_containers_are_not_silently_lost(
+    attribute: str,
+) -> None:
+    # The reader promises to classify every reference, including form actions
+    # and lazy-loading attributes, rather than just links selected by href.
+    altered = with_markup(first_or_any(2), NAV, f'<div {attribute}="{PDF_PATH}"></div>')
+    manifest = build([*pages(1, 3, 4), altered])
+    (gap,) = manifest.content.attachments.gaps
+    assert (gap.code, gap.detail, gap.page_sha256) == (
+        "file_outside_known_container",
+        PDF_URL,
+        sha(altered.payload),
+    )
+    assert gap.locator is not None
+    assert manifest.content.attachments.discovery == "unverified"
+    assert manifest.source.attachments_expected is None
+    assert manifest.source.state is SourceState.UNKNOWN
+
+
+def test_srcset_discovers_every_candidate_and_deduplicates_the_src() -> None:
+    body = f'<p><img src="{PDF_PATH}" srcset="{PDF_PATH} 1x, {SECOND_URL} 2x" alt="figur"></p>'
+    altered = with_body(2, body)
+    discovery = discovery_of([*pages(1, 3, 4), altered], landing())
+    assert discovery.exhaustive
+    assert [(item.url, item.kind) for item in discovery.attachments] == [
+        (PDF_URL, "embedded"),
+        (SECOND_URL, "embedded"),
+    ]
+    for item in discovery.attachments:
+        (place,) = item.found_at
+        assert place.page_sha256 == sha(altered.payload)
+        assert place.locator.endswith("/p/img")
+
+
+def test_one_url_used_as_both_attachment_and_embed_is_a_discovery_gap() -> None:
+    body = f'<p><a href="{PDF_PATH}">fil</a><img src="{PDF_PATH}" alt="figur"></p>'
+    manifest = build([*pages(1, 3, 4), with_body(2, body)])
+    (gap,) = manifest.content.attachments.gaps
+    assert (gap.code, gap.detail) == ("conflicting_reference", PDF_URL)
+    assert manifest.content.attachments.discovery == "unverified"
+    assert ("discovery_conflicting_reference", "unknown") in codes(manifest.source.reasons)
+    assert manifest.source.attachments_expected is None
+
+
+def test_identical_captures_of_canonical_url_aliases_are_one_capture() -> None:
+    alias = "HTTPS://WWW.REGJERINGEN.NO:443" + PDF_PATH + "#page=2"
+    manifest = build(
+        [*pages(1, 3, 4), linking(2, PDF_PATH)],
+        captures=(capture(PDF_URL, PDF), capture(alias, PDF), capture(PDF_URL, PDF)),
+    )
+    (attachment,) = manifest.content.attachments.attachments
+    assert (attachment.url, attachment.state, attachment.raw_sha256) == (
+        PDF_URL,
+        AttachmentState.CAPTURED,
+        sha(PDF),
+    )
+    assert (manifest.source.attachments_expected, manifest.source.attachments_captured) == (1, 1)
+    assert manifest.source.state is SourceState.SOURCE_COMPLETE
+    assert parse_version_manifest(manifest_text(manifest).encode()) == manifest
+
+
+@pytest.mark.parametrize(
+    ("raw", "media_type"),
+    [
+        (b"\x89PNG\r\n\x1a\nsynthetic image", "image/png"),
+        (b"\xff\xd8\xffsynthetic image", "image/jpeg"),
+        (b"", None),
+        (b"%PDF", None),
+        (b"\x89PNG\r\n\x1a", None),
+        (b"\xff\xd8", None),
+    ],
+)
+def test_discovered_capture_requires_a_supported_signature(
+    raw: bytes, media_type: str | None
+) -> None:
+    manifest = build([*pages(1, 3, 4), linking(2, PDF_PATH)], captures=(capture(PDF_URL, raw),))
+    (attachment,) = manifest.content.attachments.attachments
+    assert (attachment.raw_sha256, attachment.media_type) == (sha(raw), media_type)
+    supported = media_type is not None
+    assert attachment.state is (
+        AttachmentState.CAPTURED if supported else AttachmentState.UNSUPPORTED
+    )
+    assert manifest.source.attachments_captured == int(supported)
+    assert manifest.source.state is (
+        SourceState.SOURCE_COMPLETE if supported else SourceState.SOURCE_INCOMPLETE
+    )
