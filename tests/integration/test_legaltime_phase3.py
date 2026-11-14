@@ -129,10 +129,13 @@ def test_straffeloven_is_commenced_by_its_ikraftsettingslov_and_chapter_16_contr
     # of the vergemålsloven § 102 that law replaces; it takes effect with vergemålsloven, whose
     # partial decision the grammar does not read, so it is unresolved, no longer dated by the
     # outer law's "straks" and withheld.
+    # #907: 390 → 389. lov/2009-06-19-74#1:I:241.0, ``1. Militær straffelov 22. mai 1902 nr. 13
+    # § 107 oppheves.``, is item 1 of the list straffeloven § 411's replacement announces; an
+    # item never inherits the outer block's act, so it is no longer straffeloven's.
     assert [(len(s["withheld"]), len(s["applied"]), len(s["provisions"])) for s in states] == [
         (4, 0, 0),
         (99, 0, 0),
-        (390, 0, 0),
+        (389, 0, 0),
         (0, 334, 358),
     ]
     assert all(s["unresolved_commencement"] == [] for s in states)

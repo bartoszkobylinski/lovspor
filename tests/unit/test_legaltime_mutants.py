@@ -218,7 +218,7 @@ def test_build_report_pins_oracle_sorted_inputs_and_json_mode(tmp_path: Path) ->
     report = run.build_report(evidence, [date(2023, 1, 1)], oracle, [first, second])
     assert [p["filename"] for p in report["inputs"]] == [second.name, first.name]
     assert report["oracle"] == {"member": "nl/x.xml", "sha256": oracle.sha256}
-    assert report["replay_version"] == "legaltime-replay-7"
+    assert report["replay_version"] == "legaltime-replay-8"
     assert report["verification"][0]["at"] == "2023-01-01"
     assert isinstance(report["verification"][0]["counts"], dict)
     json.dumps(report)

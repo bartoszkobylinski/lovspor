@@ -14,10 +14,10 @@ pass by assumption.
   * 2009 "Nåværende § 401 blir § 411 som innleder tredje del og som skal lyde:" is bound and
     dated 2009-06-19, but carries a placement. With no structure map ``S`` the whole rename
     is refused, and the clause is kept.
-  * 2009 "Nåværende § 402 blir § 412 og skal lyde:" is bound by the engine to
-    ``lov/1975-06-13-39``, an attribution defect (numbered items inside § 411's payload
-    rebind the act). It is therefore absent from straffeloven's events. This test pins that
-    absence.
+  * 2009 "Nåværende § 402 blir § 412 og skal lyde:" follows item 3 of the list § 411's
+    replacement announces. Main ``c582f4d6`` bound it to ``lov/1975-06-13-39``, the act item 3
+    cites (#907). Since #907 the engine binds it to no act: the source does not state where
+    § 411's list ends. It is refused as unbound, and is not among straffeloven's events.
 * atomenergiloven ``lov/1972-05-12-28``, amended by ``lov/2007-06-15-37`` (the
   21→22→23→25→21 cycle):
   * ``collect`` refuses the act: its 1972 enacting member is not in the archives;
@@ -92,6 +92,7 @@ def test_straffelovens_rename_shaped_sentences_are_exactly_these(straffeloven: R
         "lov/2008-03-07-4#0:I:112.0",
         "lov/2008-03-07-4#0:I:114.0",
         "lov/2009-06-19-74#1:I:239.0",
+        "lov/2009-06-19-74#1:I:245.0",  # § 402 → § 412 after § 411's list, unbound (#907)
         "lov/2009-06-19-74#1:I:252.0",  # "Nåværende § 9 blir ny § 10.", unbound
     ]
 
@@ -108,6 +109,9 @@ def test_straffelovens_rename_shaped_sentences_are_exactly_these(straffeloven: R
         ("lov/2009-06-19-74#1:I:239.0",
          "bbbac519dcb305364cd56dcfebf96675ca010466f7d33ed5f0ec81c000fdc926",
          STRAFFELOVEN, "placement incomplete: no structure map S", "som innleder tredje del"),
+        ("lov/2009-06-19-74#1:I:245.0",
+         "57a9640b483586ee7503faed2e6875d9073ecac65d62387f3100d797bb3947c9",
+         None, "act not bound by the D7/phase-4B chain", None),
     ],
 )  # fmt: skip
 def test_each_straffeloven_rename_is_refused_with_its_proof(
@@ -131,11 +135,11 @@ def test_the_2009_rename_is_bound_and_dated_but_still_not_executed(straffeloven:
     )  # fmt: skip
 
 
-def test_the_misattributed_2009_rename_is_absent_from_straffelovens_events() -> None:
+def test_the_unbound_2009_rename_is_absent_from_straffelovens_events() -> None:
     if file_sha256(ARCHIVES[0]) != PIN:
         pytest.skip("local archives are not the pinned ones")
     ops = {e.operation.id for e in events_for(collect(STRAFFELOVEN, ARCHIVES))}
-    assert "lov/2009-06-19-74#1:I:245.0" not in ops  # bound to lov/1975-06-13-39 instead
+    assert "lov/2009-06-19-74#1:I:245.0" not in ops  # bound to no act since #907
 
 
 def test_atomenergiloven_cannot_be_collected_without_its_enacting_member() -> None:

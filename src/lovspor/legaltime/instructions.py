@@ -10,7 +10,7 @@ instead of guessing. Nothing here applies an operation.
 import re
 from typing import Literal
 
-from lovspor.legaltime import attribution
+from lovspor.legaltime import attribution, payload_list
 from lovspor.legaltime.attribution import Binding, is_intro
 from lovspor.legaltime.document import Document, Frozen, Ledd, Node, Provision
 from lovspor.legaltime.text import (
@@ -250,26 +250,6 @@ def _addressed_act(change_part: tuple[str, ...]) -> str | None:
     return acts.pop() if len(acts) == 1 and next(iter(acts)).startswith("lov/") else None
 
 
-_COMMENCEMENT_HEADING = re.compile(r"ikraft|iverkset|i\s+kraft", re.I)
-
-
-def _commencement_provisions(document: Document) -> list[str]:
-    """An enacting act states its commencement in a provision headed Ikrafttredelse or alike.
-
-    From the first amendment intro on, a provision's ledd are an instruction and its
-    payload about another act (straffelovens ikraftsettingslov § 1), never this act's clause.
-    """
-    texts: list[str] = []
-    for provision in document.provisions:
-        if not _COMMENCEMENT_HEADING.search(provision.heading):
-            continue
-        for ledd in provision.ledd:
-            if is_intro(ledd.text):
-                break
-            texts.append(ledd.text)
-    return texts
-
-
 def _pairs(match: re.Match[str]) -> tuple[tuple[str, str], ...]:
     """``«a» og «b» … henholdsvis «c» og «d»`` is two substitutions, in order."""
     old, new = match.group("old"), match.group("new")
@@ -334,11 +314,12 @@ class _Reader:
         self.bound_host: str | None = None  # the article whose intro bound ``act``
         self.unbound = False  # inside a block whose intro names an act the grammar cannot bind
         self.in_list = False  # inside a list intro naming no act: numbered act headings bind
+        self.listing = payload_list.Listing()  # a list a consumed payload announced (#907)
 
     def run(self) -> Interpretation:
         for index, part in enumerate(self.document.parts):
             self._read_part((part.label, f"{index}:{part.label}"), list(part.nodes))
-        clauses = self.clauses or _commencement_provisions(self.document)
+        clauses = self.clauses or attribution.commencement_provisions(self.document)
         return Interpretation(
             document=self.document.header.refid,
             operations=tuple(self.operations),
@@ -349,6 +330,7 @@ class _Reader:
         """``part`` is (printed label, unique tag prefix)."""
         self.substitution, self.pending_item_act, self.act = None, None, None
         self.in_list, seen_instruction, skip_until = False, False, 0
+        self.listing = payload_list.Listing()
         for index, node in enumerate(nodes):  # a for loop: no index arithmetic can stall it
             if index < skip_until:
                 continue  # consumed as the payload of the instruction before it
@@ -367,6 +349,12 @@ class _Reader:
             if binding.act:  # the intro closes its own node: its act binds what follows
                 self.act, self.unbound = binding.act, False
 
+    def _listed(self, node: Node) -> None:
+        """#907: an item of a payload's list never inherits the outer act (``payload_list``)."""
+        if self.substitution is None:  # a substitution's items are its own
+            state = (self.act, self.unbound, self.bound_host)
+            self.act, self.unbound, self.bound_host = self.listing.step(node, state)
+
     def _boundary(self, node: Node) -> Binding:
         """Close the open block where its act is no longer proven (#856).
 
@@ -374,6 +362,7 @@ class _Reader:
         in. A new article, or an intro whose act the grammar cannot name, ends the block:
         what follows is unattributed until another intro names its act, never inherited.
         """
+        self._listed(node)
         unbound, moved = _unbound_intro(node.text), node.host_section != self.bound_host
         binding = self._binding(node.text, unbound)
         if moved or unbound or binding.opens:
@@ -418,6 +407,7 @@ class _Reader:
             return False
         where = (part[0], f"{part[1]}:{index}", node.host_section)
         self._instruction(where, quoted, node.change_part, payload)
+        self.listing.open(payload)
         return True
 
     def _open_block(self, text: str) -> str | tuple[str, str] | None:
