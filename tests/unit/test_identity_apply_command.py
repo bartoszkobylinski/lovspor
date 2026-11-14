@@ -15,8 +15,9 @@ from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.errors import IdentityMigrationError
+from lovspor.identity import apply_commands
 from lovspor.identity.apply import apply_plan, verify_applied
-from lovspor.identity.plan import plan_migration
+from lovspor.identity.plan import MigrationPlan, plan_migration
 from lovspor.identity.report import SUMS_FILENAME
 from tests.unit.identity_git_fixtures import commit_all, doc_text, git, write_doc
 from tests.unit.test_identity_migration import NEW, _base_repo
@@ -251,3 +252,64 @@ def test_verification_names_a_file_that_differs_from_the_plan(repo: Path) -> Non
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("damage", ["missing-file", "missing-sums", "duplicate-entry", "malformed"])
+def test_incomplete_or_malformed_plan_is_refused_without_writes(
+    repo: Path, tmp_path: Path, damage: str
+) -> None:
+    plan_dir = _plan(repo, tmp_path / "plan")
+    sums = plan_dir / SUMS_FILENAME
+    if damage == "missing-file":
+        (plan_dir / "planned/slugs.json").unlink()
+    elif damage == "missing-sums":
+        sums.unlink()
+    elif damage == "duplicate-entry":
+        content = sums.read_text(encoding="utf-8")
+        sums.write_text(content + content.splitlines()[0] + "\n", encoding="utf-8")
+    else:
+        sums.write_text("no separator\n", encoding="utf-8")
+    before = {
+        p.relative_to(repo): p.read_bytes()
+        for p in repo.rglob("*")
+        if p.is_file() and ".git" not in p.relative_to(repo).parts
+    }
+
+    code, output = _apply(repo, plan_dir)
+
+    assert code == 2, output
+    assert _status(repo) == []
+    assert {p: (repo / p).read_bytes() for p in before} == before
+
+
+@pytest.mark.parametrize("failure", ["partial-write", "wrong-bytes", "extra-path"])
+def test_apply_reports_exit_three_when_written_tree_cannot_be_verified(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    plan_dir = _plan(repo, tmp_path / "plan")
+    head = git(repo, "rev-parse", "HEAD")
+
+    def damaged_apply(corpus: Path, plan: MigrationPlan) -> None:
+        if failure == "partial-write":
+            write_doc(corpus, "partial.txt", "interrupted\n")
+            raise IdentityMigrationError("synthetic interruption after writing")
+        apply_plan(corpus, plan)
+        if failure == "wrong-bytes":
+            (corpus / "forskrifter/embeddings/x-2026.bin").write_bytes(b"wrong")
+        else:
+            write_doc(corpus, "extra.txt", "unexpected\n")
+
+    monkeypatch.setattr(apply_commands, "apply_plan", damaged_apply)
+
+    code, output = _apply(repo, plan_dir)
+
+    assert code == 3, output
+    problems = json.loads(output.strip().splitlines()[-1])["problems"]
+    expected = {
+        "partial-write": "partially written: synthetic interruption after writing",
+        "wrong-bytes": "forskrifter/embeddings/x-2026.bin: sha256",
+        "extra-path": "git status differs from changed_paths: extra ['extra.txt'], absent []",
+    }[failure]
+    assert any(expected in problem for problem in problems)
+    assert _status(repo)
+    assert git(repo, "rev-parse", "HEAD") == head
