@@ -21,7 +21,7 @@ from lovspor.legaltime.nesting import nesting
 from lovspor.legaltime.replay import Event, ReplayState, replay
 from lovspor.legaltime.verify import verify
 
-REPLAY_VERSION = "legaltime-replay-7"  # #893: a nested amendment is dated by its host provision
+REPLAY_VERSION = "legaltime-replay-8"  # #907: an item of a payload's list never inherits an act
 
 
 def _stamp(value: datetime | None) -> str | None:
