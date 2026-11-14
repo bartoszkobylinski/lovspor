@@ -44,7 +44,7 @@ import logging
 import re
 from collections import Counter
 from collections.abc import Collection, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import partial
 from itertools import islice
@@ -53,7 +53,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.embeddings.cache import quantized_document_vectors, sync_embedder
+from lovspor.embeddings.cache import sync_embedder
 from lovspor.embeddings.inputs import (
     build_embedding_inputs,
     hash_embedding_inputs,
@@ -96,6 +96,14 @@ from lovspor.sync.change_detector import (
     force_rerender_changeset,
     stale_render_changeset,
 )
+from lovspor.sync.delta_embed import (
+    PriorVectors,
+    document_vectors,
+    embedding_target,
+    load_prior_vectors,
+    paid_tokens,
+    reusing,
+)
 from lovspor.sync.document_io import (
     dataset_dir,
     delete_document,
@@ -104,6 +112,9 @@ from lovspor.sync.document_io import (
     render_full_document,
     write_derived_views,
     write_document,
+)
+from lovspor.sync.document_io import (
+    embeddings_path as _embeddings_path,
 )
 from lovspor.sync.git_commit import add as git_add
 from lovspor.sync.git_commit import commit as git_commit_msg
@@ -141,7 +152,6 @@ _TRACKED_DATASETS = (
     "gjeldende-sentrale-forskrifter",
 )
 _MANIFEST_FILENAME = "manifest.json"
-_EMBEDDINGS_SUBDIR = "embeddings"
 """Per-dataset directory holding ``<slug>.bin`` embedding files.
 
 Lives under each ``<dataset>/`` so the existing INDEX, history, and
@@ -179,6 +189,7 @@ class _UpstreamDoc:
     title: str
     eu_basis: tuple[str, ...]
     retrieved_at: datetime | None = None
+    prior_vectors: PriorVectors | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -324,7 +335,7 @@ def run_sync(  # noqa: PLR0912, PLR0915
     now = datetime.now(UTC)
     if embedder is not None:
         plan = _ChangePlan(changes.new, changes.changed, renamed, upstream, prior, now)
-        _guard_change_reembed(settings, plan, allow=allow_mass_reembed)
+        upstream = _guard_change_reembed(settings, plan, embedder, allow=allow_mass_reembed)
     _guard_mass_removal(changes.removed, prior, settings.max_removal_ratio)
 
     if embedder is not None and _needs_sprint9_embeddings_migration(
@@ -798,29 +809,11 @@ def _prior_slug_ownership(prior: Manifest | None) -> dict[str, dict[str, str]]:
 
 
 def _with_slug(doc: _UpstreamDoc, slug: str) -> _UpstreamDoc:
-    return _UpstreamDoc(
-        doc_id=doc.doc_id,
-        source_dataset=doc.source_dataset,
-        xml_bytes=doc.xml_bytes,
-        xml_hash=doc.xml_hash,
-        slug=slug,
-        title=doc.title,
-        eu_basis=doc.eu_basis,
-        retrieved_at=doc.retrieved_at,
-    )
+    return replace(doc, slug=slug)
 
 
 def _with_retrieved_at(doc: _UpstreamDoc, retrieved_at: datetime) -> _UpstreamDoc:
-    return _UpstreamDoc(
-        doc_id=doc.doc_id,
-        source_dataset=doc.source_dataset,
-        xml_bytes=doc.xml_bytes,
-        xml_hash=doc.xml_hash,
-        slug=doc.slug,
-        title=doc.title,
-        eu_basis=doc.eu_basis,
-        retrieved_at=retrieved_at,
-    )
+    return replace(doc, retrieved_at=retrieved_at)
 
 
 def _frontmatter_context(upstream: _UpstreamDoc, now: datetime) -> FrontmatterContext:
@@ -1019,7 +1012,7 @@ def _write_one(
             upstream.source_dataset,
             upstream.slug,
             rendered,
-            embedder,
+            reusing(embedder, upstream.prior_vectors),
             lspe_version=settings.lspe_writer_version,
         )
         written_paths.append(embed_path)
@@ -1125,11 +1118,6 @@ def _embedder_identity(embedder: EmbeddingModel) -> tuple[str | None, str | None
     return descriptor, space_id
 
 
-def _embeddings_path(corpus_root: Path, dataset: str, slug: str) -> Path:
-    """Resolve the on-disk ``.bin`` path for a doc's embeddings."""
-    return dataset_dir(corpus_root, dataset) / _EMBEDDINGS_SUBDIR / f"{slug}.bin"
-
-
 def _write_embeddings_for_doc(
     corpus_root: Path,
     dataset: str,
@@ -1189,7 +1177,7 @@ def _write_embeddings_for_doc(
     if not inputs:
         write_embeddings(path, [], scale=1.0, dim=dim, embedding_space_id=header_esi)
         return path, input_hash
-    quantized, scale = quantized_document_vectors(embedder, inputs, input_hash)
+    quantized, scale = document_vectors(embedder, inputs, input_hash)
     pairs = [(inputs[i].section_id, quantized[i]) for i in range(len(inputs))]
     write_embeddings(path, pairs, scale, dim=dim, embedding_space_id=header_esi)
     return path, input_hash
@@ -1913,24 +1901,32 @@ def _docs_to_embed(settings: Settings, plan: _ChangePlan) -> Iterator[_UpstreamD
             yield doc
 
 
-def _guard_change_reembed(settings: Settings, plan: _ChangePlan, *, allow: bool) -> None:
-    """ADR-0006 §7 on the change path: the whole run's workload, before any spend (#790).
+def _guard_change_reembed(
+    settings: Settings, plan: _ChangePlan, embedder: EmbeddingModel | None = None, *, allow: bool
+) -> dict[str, _UpstreamDoc]:
+    """ADR-0006 §7 on the change path: the whole run's paid workload, before any spend (#790).
 
-    Every document is rendered and its inputs counted with the production
-    tokenizer, the same estimate the backfill guard uses: it is the input
-    the provider is sent, not a bill (a retried request may be billed again).
-    A document that cannot render is skipped by the write loop too.
+    Every document is rendered and its paid inputs counted with the production
+    tokenizer: the inputs the provider is sent, not a bill (a retried request
+    may be billed again). An input whose text the document's verified committed
+    sidecar already embeds is carried, not paid, so it is not counted (#919).
+    The returned upstream map hands those rows to the write loops, which send
+    exactly the inputs counted here. A document that cannot render is skipped
+    by the write loop too.
     """
-    documents = tokens = 0
+    upstream, target, documents, tokens = dict(plan.upstream), embedding_target(embedder), 0, 0
     for doc in _docs_to_embed(settings, plan):
         render = partial(render_full_document, doc.xml_bytes, _frontmatter_context(doc, plan.now))
         prior = plan.prior.documents.get(doc.doc_id)
         rendered = rendered_or_refused(render, doc.doc_id, doc.xml_hash, prior)
         if rendered is None:
             continue
+        vectors = load_prior_vectors(settings.lovverk_repo_path, prior, target)
+        upstream[doc.doc_id] = replace(upstream[doc.doc_id], prior_vectors=vectors)
         documents += 1
-        tokens += sum(count_input_tokens(item.text) for item in build_embedding_inputs(rendered))
+        tokens += paid_tokens(build_embedding_inputs(rendered), vectors)
     enforce_reembed_guard(change_scope(documents, tokens), plan.prior, settings, allow)
+    return upstream
 
 
 def _run_sprint9_embeddings_migration(

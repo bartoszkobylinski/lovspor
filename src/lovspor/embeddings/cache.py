@@ -19,6 +19,7 @@ built: no response means nothing to store.
 
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -102,8 +103,17 @@ class CachingEmbedder:
     def model_name(self) -> str:
         return str(getattr(self._inner, "model_name", DEFAULT_MODEL_NAME))
 
-    def document_vectors(self, inputs: list[EmbeddingInput], input_hash: str) -> CachedVectors:
-        """Int8 rows and scale of one non-empty document: cache first, then paid units."""
+    def document_vectors(
+        self,
+        inputs: list[EmbeddingInput],
+        input_hash: str,
+        produce: Callable[[], tuple[np.ndarray, float]] | None = None,
+    ) -> CachedVectors:
+        """Int8 rows and scale of one non-empty document: cache first, then paid units.
+
+        ``produce`` replaces the paid units on a miss: the change path's carried
+        rows plus its paid delta (#919). Its result is stored like any other.
+        """
         key = EntryKey(
             esi=self._esi, input_hash=input_hash, dim=self.get_dimension(), rows=len(inputs)
         )
@@ -112,8 +122,10 @@ class CachingEmbedder:
         if stored is not None:
             self.progress.documents_cached += 1
             return stored
-        matrix = self._assemble(inputs, input_hash)
-        quantized, scale = quantize_int8(matrix)
+        if produce is None:
+            quantized, scale = quantize_int8(self._assemble(inputs, input_hash))
+        else:
+            quantized, scale = produce()
         return self._store.put(_entry(key, quantized, scale))
 
     def _assemble(self, inputs: list[EmbeddingInput], input_hash: str) -> np.ndarray:

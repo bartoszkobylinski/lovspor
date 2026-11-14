@@ -48,6 +48,27 @@ override does not make a corpus-wide re-embed fit the sync job: one ran past the
 120-minute `timeout-minutes` twice, and the paid vectors were lost with the
 workspace.
 
+The change path pays only for changed fragments (#919). A vector depends on its
+input text alone, so an input whose text the document's committed sidecar already
+embeds is carried, not sent, and the guard counts only the inputs that are sent.
+Reuse needs proof that the committed rows belong to those texts: the prior record's
+`embedding_hash` equals its `xml_hash`, its `embedding_space_id` is the configured
+space, the committed Markdown re-derives the inputs named by its
+`embedding_input_hash`, and the sidecar is LSPE v2 with the same space, dimension and
+section ids in input order. A document that fails any check is paid and counted in
+full, as before. Removed inputs drop out of the rewritten sidecar; the manifest
+records the new full `embedding_input_hash`. The rows are snapshotted from the
+clean committed tree before the first write, so the guard's count is what the run
+sends. The token ceiling is unchanged and still fails closed. On 2026-11-14 a
+one-note amendment to 48 laws counted 2,797,261 tokens in full; replayed offline
+against the same corpus head, the paid delta is 141,015 tokens (260 of 8,214
+inputs). Carried rows keep their int8 values while the paid rows fit the prior
+scale, so repeated amendments do not accumulate rounding. With
+`LOVSPOR_EMBEDDING_CACHE_DIR` set, a cached document entry still costs nothing,
+and a miss stores the carried-plus-paid rows as one document entry, so a rerun
+after a crash does not pay the delta again. The fraction dimension still counts
+a fully carried document (a rename), which is conservative.
+
 `lovspor annotate-input-identity` is the one-time metadata migration for an
 existing fully-embedded corpus: manifest-only, keyless, idempotent, and
 drift-guarded (corpus HEAD re-verified and every digest recomputed immediately
@@ -197,7 +218,7 @@ It is **self-limiting**. A document whose re-render is byte-identical is skipped
 
 Two things to know before running it:
 
-- **Cost.** Embeddings are computed inside `_write_one`, so every document that *does* change is re-embedded. Budget accordingly, or run without `OPENAI_API_KEY` and let the Sprint 9 backfill re-embed on the next keyed sync.
+- **Cost.** Embeddings are computed inside `_write_one`, so every document that *does* change is re-embedded; inputs whose text the committed sidecar already embeds are carried, not paid (#919). Budget accordingly, or run without `OPENAI_API_KEY` and let the Sprint 9 backfill re-embed on the next keyed sync.
 - **Commit volume.** The re-rendered documents land in one bulk `migration: re-render …` commit followed by the manifest/index/history commit; use `LOVSPOR_GIT_COMMIT_MODE=single` to keep any accompanying real changes to one commit too.
 
 It is a CLI flag and a `run_sync` parameter, never a `Settings`/env field — a stray environment variable must not be able to rewrite the whole corpus from the scheduled workflow.
