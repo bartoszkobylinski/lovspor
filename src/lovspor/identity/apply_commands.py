@@ -11,7 +11,14 @@ The owner runs it on a clean checkout of the plan's base, with the directory
 - a plan directory that is not, byte for byte, the plan this engine computes
   at that base and threshold (a forged plan with re-computed checksums);
 - a blocked plan, a plan with nothing to do, and a rename whose Markdown the
-  plan could not rewrite (``move_problems`` in the report).
+  plan could not rewrite (``move_problems`` in the report);
+- a planned registry that changes a historical owner (an owner the base
+  published, or a first holder) not covered by an approved, digest-matching
+  ``owner_reassignments.json`` reviewed for this plan (its pin and U1
+  threshold, #934): the same gate sync start and
+  ``lovspor audit`` apply after the migration, run before the first write, so
+  an unsigned migration is never written. ``identity-plan`` does not refuse:
+  the owner reviews the plan and its pin while the list is still unsigned.
 
 It then writes through :func:`lovspor.identity.apply.apply_plan`, the one code
 path the tests use, and verifies the working tree: every written file
@@ -41,6 +48,8 @@ from lovspor.identity.apply_guards import (
 from lovspor.identity.commands import ensure_outside
 from lovspor.identity.corpus_git import resolve_commit, status_paths, toplevel
 from lovspor.identity.moves import sha256_bytes
+from lovspor.identity.owner_continuity import require_owners_kept
+from lovspor.identity.owner_exceptions import bound_to_plan, load_reassignments
 from lovspor.identity.plan import MigrationPlan, plan_migration
 from lovspor.identity.report import SUMS_FILENAME, report_sums, sha256_text
 from lovspor.ops.commands import ops_app
@@ -119,7 +128,8 @@ def reviewed_plan(repo: Path, plan_dir: Path, expected: str) -> MigrationPlan:
     """The plan at the plan directory's base, once it is exactly what the directory holds
     and that directory is the reviewed one (``expected``: the sha256 of its ``SHA256SUMS``)."""
     ensure_outside(repo, plan_dir)
-    sums = verified_plan_files(plan_dir, require_pinned(plan_dir, expected))
+    raw = require_pinned(plan_dir, expected)
+    sums = verified_plan_files(plan_dir, raw)
     base, threshold = _plan_refs(plan_dir)
     require_clean_base(repo, base)
     plan = plan_migration(repo, base, threshold)
@@ -128,6 +138,8 @@ def reviewed_plan(repo: Path, plan_dir: Path, expected: str) -> MigrationPlan:
             f"{plan_dir} is not the plan identity-plan computes at {base}, threshold {threshold}"
         )
     _require_applicable(plan)
+    reviewed = bound_to_plan(load_reassignments(), sha256_bytes(raw), plan.threshold.commit)
+    require_owners_kept(repo, plan.planned_registry, reviewed, plan.base.commit)
     require_confined(repo, written_paths(plan))
     return plan
 

@@ -29,12 +29,14 @@ from tests.unit.test_identity_registry_history import (
     _owner,
     _registry,
     _write,
+    with_old_tombstone,
 )
 
 
 @pytest.fixture
 def migrated(tmp_path: Path) -> Path:
     repo = _seeded(tmp_path)
+    with_old_tombstone(repo)
     _write(repo, _registry())
     (repo / IDENTITY_FILENAME).write_text(declaration_json(), encoding="utf-8")
     commit_all(repo, "migration: declare identity schema 1")

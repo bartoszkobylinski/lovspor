@@ -1,0 +1,1522 @@
+{
+  "approval": {
+    "approved_by": null,
+    "approved_on": null,
+    "digest": null,
+    "status": "pending-owner-approval"
+  },
+  "corpus": {
+    "plan_sums_sha256": "955f53decc4bffeae76eeaf6834dfa5c06e02d65e32886090bc8779ff50d74c5",
+    "reviewed_base": "c310127ecc65192f8260eab56bd3809ce0354130",
+    "u1_threshold": "f6d7e25bb041aea043ca9243de4e32131054f8bc"
+  },
+  "reassignments": [
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20260706-1512",
+      "kind": "history-repair",
+      "reason": "#899 repair: the removed address's slug history is rebuilt for its registry owner",
+      "slug": "endr-i-bilforskriften",
+      "to_doc_id": "sf-20260513-0853"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20260911-1792",
+      "kind": "history-repair",
+      "reason": "#871 history repair: a removed later holder after the threshold; the removed address's slug history is rebuilt for its registry owner (not one of the two #899 repairs: owner review)",
+      "slug": "endr-i-byggteknisk-forskrift-tek17",
+      "to_doc_id": "sf-20260612-1085"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261109-2306",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to endr-i-forurensningsforskriften-2026; the address returns to its holder from before the threshold",
+      "slug": "endr-i-forurensningsforskriften",
+      "to_doc_id": "sf-20251114-2414"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261002-1999",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to endr-i-høstingsforskriften-2026; the address returns to its holder from before the threshold",
+      "slug": "endr-i-høstingsforskriften",
+      "to_doc_id": "sf-20251125-2415"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261030-2189",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to endr-i-integreringsforskriften-2026; the address returns to its holder from before the threshold",
+      "slug": "endr-i-integreringsforskriften",
+      "to_doc_id": "sf-20260621-1155"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261027-2154",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to endr-i-kostra-forskriften-2026; the address returns to its holder from before the threshold",
+      "slug": "endr-i-kostra-forskriften",
+      "to_doc_id": "sf-20251029-2134"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20260821-1659",
+      "kind": "history-repair",
+      "reason": "#899 repair: the removed address's slug history is rebuilt for its registry owner",
+      "slug": "endr-i-tollavgiftsforskriften",
+      "to_doc_id": "sf-20251219-2804"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20260916-1832",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to endr-i-trafikkopplæringsforskriften-2026; the address returns to its holder from before the threshold",
+      "slug": "endr-i-trafikkopplæringsforskriften",
+      "to_doc_id": "sf-20260415-0597"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261026-2129",
+      "kind": "history-repair",
+      "reason": "#871 history repair: a removed later holder after the threshold; the removed address's slug history is rebuilt for its registry owner (not one of the two #899 repairs: owner review)",
+      "slug": "endr-i-utrullingsforskriften",
+      "to_doc_id": "sf-20260210-0178"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20260916-1888",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to forskrift-om-endring-i-forskrift-om-fartsskriververksteder-2026; the address returns to its holder from before the threshold",
+      "slug": "forskrift-om-endring-i-forskrift-om-fartsskriververksteder",
+      "to_doc_id": "sf-20260513-0854"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261028-2219",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to forskrift-om-endring-i-forskrift-om-stønad-til-dekning-av-utgifter-til-undersøkelse-og-behandling-hos-lege-2026; the address returns to its holder from before the threshold",
+      "slug": "forskrift-om-endring-i-forskrift-om-stønad-til-dekning-av-utgifter-til-undersøkelse-og-behandling-hos-lege",
+      "to_doc_id": "sf-20250523-0848"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261021-2175",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to forskrift-om-endring-i-forskrift-om-takstberegning-og-maksimalpriser-for-løyvepliktig-drosjetransport-med-motorvogn-2026; the address returns to its holder from before the threshold",
+      "slug": "forskrift-om-endring-i-forskrift-om-takstberegning-og-maksimalpriser-for-løyvepliktig-drosjetransport-med-motorvogn",
+      "to_doc_id": "sf-20251020-2063"
+    },
+    {
+      "directory": "forskrifter",
+      "from_doc_id": "sf-20261102-2241",
+      "kind": "u1-rename",
+      "reason": "#871 U1: the base's current holder moves to forskrift-om-tidsbegrenset-fritak-fra-krav-til-låssetting-i-fisket-etter-makrell-og-norsk-vårgytende-sild-2026; the address returns to its holder from before the threshold",
+      "slug": "forskrift-om-tidsbegrenset-fritak-fra-krav-til-låssetting-i-fisket-etter-makrell-og-norsk-vårgytende-sild",
+      "to_doc_id": "sf-20251219-2823"
+    }
+  ],
+  "schema_version": 2,
+  "threshold_exceptions": [
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "479c42e6a92eceabcb7547d973a0df4e21a8e143"
+      },
+      "first_owner_doc_id": "sf-20260324-0472",
+      "reason": "#921 option (a): sf-20260513-0853 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20260324-0472 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260513-0853",
+      "slug": "endr-i-bilforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "de2f271f41c75272564e852a149448c34ea9458b"
+      },
+      "first_owner_doc_id": "sf-20250402-0577",
+      "reason": "#921 option (a): sf-20260618-1354 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250402-0577 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260618-1354",
+      "slug": "endr-i-blåreseptforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "791a9cb7d2647905cdb69e5614ffd31c020d0b6c"
+      },
+      "first_owner_doc_id": "sf-20250620-1154",
+      "reason": "#921 option (a): sf-20260621-1155 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250620-1154 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260621-1155",
+      "slug": "endr-i-integreringsforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20250907-1787",
+      "reason": "#921 option (a): sf-20260218-0235 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250907-1787 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260218-0235",
+      "slug": "endr-i-opplæringsforskrifta-og-privatskoleforskrifta"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "87e814bfd32551090163ea18db21bf7f57517f2d"
+      },
+      "first_owner_doc_id": "sf-20260218-0235",
+      "reason": "#921 option (a): sf-20260622-1213 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20260218-0235 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260622-1213",
+      "slug": "endr-i-opplæringsforskrifta-og-privatskoleforskrifta-2"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "7397d1b725d7e552472c7f042a3f97e15919edf0"
+      },
+      "first_owner_doc_id": "sf-20251215-2590",
+      "reason": "#921 option (a): sf-20260609-1053 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251215-2590 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260609-1053",
+      "slug": "endr-i-pasientreiseforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "f6d7e25bb041aea043ca9243de4e32131054f8bc"
+      },
+      "first_owner_doc_id": "sf-20260204-0144",
+      "reason": "#921 option (a): sf-20260626-1439 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20260204-0144 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260626-1439",
+      "slug": "endr-i-poliklinikkforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "641936ab5c11e8f2dcb8033164022594615a6760"
+      },
+      "first_owner_doc_id": "sf-20251211-2608",
+      "reason": "#921 option (a): sf-20260512-0810 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251211-2608 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260512-0810",
+      "slug": "endr-i-produktforskriften-2"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "2032c09ca38044bc457ed948f3b86731c12f25bd"
+      },
+      "first_owner_doc_id": "sf-20251102-2170",
+      "reason": "#921 option (a): sf-20260626-1397 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251102-2170 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260626-1397",
+      "slug": "endr-i-strålevernforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20250826-1727",
+      "reason": "#921 option (a): sf-20251218-2918 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250826-1727 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20251218-2918",
+      "slug": "endr-i-tiltaksforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "90fd9f191cd3f93f6489b8ec9f74a65a17986b60"
+      },
+      "first_owner_doc_id": "sf-20251212-2609",
+      "reason": "#921 option (a): sf-20260619-1251 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251212-2609 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260619-1251",
+      "slug": "endr-i-universitets-og-høyskoleforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "67341651bb196e174ffe7a6e8e864919227f01dc"
+      },
+      "first_owner_doc_id": "sf-20250110-0018",
+      "reason": "#921 option (a): sf-20260615-1087 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250110-0018 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260615-1087",
+      "slug": "endr-i-utlendingsforskriften-2"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20251219-2803",
+      "reason": "#921 option (a): sf-20260226-0296 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251219-2803 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260226-0296",
+      "slug": "endr-i-vareførselsforskriften-5"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "421d0e1e8ef5a51c564f49fe278755eba86166c9"
+      },
+      "first_owner_doc_id": "sf-20260217-0229",
+      "reason": "#921 option (a): sf-20260505-0749 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20260217-0229 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260505-0749",
+      "slug": "endr-i-vareførselsforskriften-6"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20250122-0054",
+      "reason": "#921 option (a): sf-20260129-0108 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250122-0054 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260129-0108",
+      "slug": "endr-i-yrkestransportforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "791a9cb7d2647905cdb69e5614ffd31c020d0b6c"
+      },
+      "first_owner_doc_id": "sf-20250508-0892",
+      "reason": "#921 option (a): sf-20260507-1167 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250508-0892 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260507-1167",
+      "slug": "forskrift-for-graden-philosophiae-doctor-ved-nord-universitet"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5244bffdff0107144e335a99c10772cf8dd0e16e"
+      },
+      "first_owner_doc_id": "sf-19930820-0815",
+      "reason": "#921 option (a): sf-19871030-0840 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-19930820-0815 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-19871030-0840",
+      "slug": "forskrift-om-brannvern-på-svalbard"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20231222-2310",
+      "reason": "#921 option (a): sf-20250806-1612 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20231222-2310 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20250806-1612",
+      "slug": "forskrift-om-elektronisk-stiftelse-og-registrering-av-aksjeselskaper-og-om-elektronisk-registrering-av-utenlandske-foretak-mv"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20251216-2616",
+      "reason": "#921 option (a): sf-20260121-0071 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251216-2616 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260121-0071",
+      "slug": "forskrift-om-endring-i-forskrift-om-bruk-av-kjøretøy"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20260121-0071",
+      "reason": "#921 option (a): sf-20260121-0091 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20260121-0071 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260121-0091",
+      "slug": "forskrift-om-endring-i-forskrift-om-bruk-av-kjøretøy-2"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20260121-0091",
+      "reason": "#921 option (a): sf-20260320-0442 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20260121-0091 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260320-0442",
+      "slug": "forskrift-om-endring-i-forskrift-om-bruk-av-kjøretøy-3"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "791a9cb7d2647905cdb69e5614ffd31c020d0b6c"
+      },
+      "first_owner_doc_id": "sf-20260116-0054",
+      "reason": "#921 option (a): sf-20260622-1185 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20260116-0054 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260622-1185",
+      "slug": "forskrift-om-endring-i-forskrift-om-gebyr-på-tjenester-utført-av-statens-vegvesen-på-trafikant-og-kjøretøyområdet"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "90fd9f191cd3f93f6489b8ec9f74a65a17986b60"
+      },
+      "first_owner_doc_id": "sf-20251218-2659",
+      "reason": "#921 option (a): sf-20260624-1260 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251218-2659 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260624-1260",
+      "slug": "forskrift-om-endring-i-forskrift-om-omsetningsavgift-på-jordbruksvarer-og-om-overproduksjonsavgift-på-mjølk"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "6786ec70538b59368443f4664d84484af8ffe8e7"
+      },
+      "first_owner_doc_id": "sf-20251030-2227",
+      "reason": "#921 option (a): sf-20260428-0737 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251030-2227 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260428-0737",
+      "slug": "forskrift-om-endring-i-forskrift-om-opptak-studier-og-eksamen-ved-handelshøyskolen-bi"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "2032c09ca38044bc457ed948f3b86731c12f25bd"
+      },
+      "first_owner_doc_id": "sf-20250918-2581",
+      "reason": "#921 option (a): sf-20260622-1391 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250918-2581 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260622-1391",
+      "slug": "forskrift-om-endring-i-forskrift-om-prisnedskriving-ved-salg-til-spesialmarkeder"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "90fd9f191cd3f93f6489b8ec9f74a65a17986b60"
+      },
+      "first_owner_doc_id": "sf-20251210-2504",
+      "reason": "#921 option (a): sf-20260623-1255 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251210-2504 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260623-1255",
+      "slug": "forskrift-om-endring-i-forskrift-om-rapportering-registrering-og-merking-av-luftfartshinder"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "791a9cb7d2647905cdb69e5614ffd31c020d0b6c"
+      },
+      "first_owner_doc_id": "sf-20251216-2592",
+      "reason": "#921 option (a): sf-20260621-1156 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251216-2592 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260621-1156",
+      "slug": "forskrift-om-endring-i-forskrift-om-stønad-til-dekning-av-utgifter-til-undersøkelse-og-behandling-hos-psykolog"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "2032c09ca38044bc457ed948f3b86731c12f25bd"
+      },
+      "first_owner_doc_id": "sf-20250623-1321",
+      "reason": "#921 option (a): sf-20260625-1372 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250623-1321 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260625-1372",
+      "slug": "forskrift-om-forsinkelsesrente-og-kompensasjon-for-inndrivelseskostnader"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "301",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "301->forskrift-om-forsinkelsesrente-og-kompensasjon-for-inndrivelseskostnader",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "de2f271f41c75272564e852a149448c34ea9458b"
+      },
+      "first_owner_doc_id": "sf-20251218-2658",
+      "reason": "#921 option (a): sf-20260625-1372 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20251218-2658 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260625-1372",
+      "slug": "forskrift-om-forsinkelsesrente-og-kompensasjon-for-inndrivelseskostnader-2"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20250120-0087",
+      "reason": "#921 option (a): sf-20260128-0125 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250120-0087 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260128-0125",
+      "slug": "forskrift-om-gebyr-til-luftfartstilsynet-mv"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20201209-2804",
+      "reason": "#921 option (a): sf-20251216-3020 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20201209-2804 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20251216-3020",
+      "slug": "forskrift-om-høyere-yrkesfaglig-utdanning-ved-nordland-fagskole"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20211026-3091",
+      "reason": "#921 option (a): sf-20250905-1833 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20211026-3091 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20250905-1833",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-anestesisykepleierutdanning"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20211026-3092",
+      "reason": "#921 option (a): sf-20250905-1832 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20211026-3092 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20250905-1832",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-barnesykepleierutdanning"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20250704-1464",
+      "reason": "#921 option (a): sf-20250904-1828 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250704-1464 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20250904-1828",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-barnevernspedagogutdanning"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20211026-3094",
+      "reason": "#921 option (a): sf-20250905-1834 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20211026-3094 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20250905-1834",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-intensivsykepleierutdanning"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20230605-0822",
+      "reason": "#921 option (a): sf-20250905-1829 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20230605-0822 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20250905-1829",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-jordmorutdanning"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20211026-3093",
+      "reason": "#921 option (a): sf-20250905-1831 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20211026-3093 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20250905-1831",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-kreftsykepleierutdanning"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20211026-3095",
+      "reason": "#921 option (a): sf-20250905-1830 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20211026-3095 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20250905-1830",
+      "slug": "forskrift-om-nasjonal-retningslinje-for-operasjonssykepleierutdanning"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20241212-3075",
+      "reason": "#921 option (a): sf-20251212-2507 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20241212-3075 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20251212-2507",
+      "slug": "forskrift-om-norsk-farmakop"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20250827-1717",
+      "reason": "#921 option (a): sf-20251201-2991 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250827-1717 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20251201-2991",
+      "slug": "forskrift-om-opptak-disiplinære-sanksjoner-klagebestemmelser-og-eksamen-ved-fagskolen-gokstad-akademiet-as"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20211213-3967",
+      "reason": "#921 option (a): sf-20251215-2610 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20211213-3967 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20251215-2610",
+      "slug": "forskrift-om-opptak-til-studier-ved-høgskolen-i-østfold"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20200310-1636",
+      "reason": "#921 option (a): sf-20251216-2962 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20200310-1636 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20251216-2962",
+      "slug": "forskrift-om-opptak-ved-ldh"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20250929-1967",
+      "reason": "#921 option (a): sf-20251219-2889 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20250929-1967 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20251219-2889",
+      "slug": "forskrift-om-regulering-av-fiske-i-oslofjorden"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20241216-3178",
+      "reason": "#921 option (a): sf-20251212-2584 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20241216-3178 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20251212-2584",
+      "slug": "forskrift-om-satser-for-frakttilskudd-til-transport-av-kraftf-r"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20230322-0391",
+      "reason": "#921 option (a): sf-20260326-0506 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20230322-0391 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260326-0506",
+      "slug": "forskrift-om-tilskudd-til-boligtiltak"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20240102-0025",
+      "reason": "#921 option (a): sf-20251130-2373 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20240102-0025 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20251130-2373",
+      "slug": "forskrift-om-tilskudd-til-integreringsarbeid-i-regi-av-frivillige-organisasjoner"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20231222-2308",
+      "reason": "#921 option (a): sf-20250806-1613 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20231222-2308 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20250806-1613",
+      "slug": "forskrift-om-utveksling-av-opplysninger-gjennom-registersammenkoblingssystemet-mv"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "ce3107a92f9de14bf64cef7b19937a9b86588532"
+      },
+      "first_owner_doc_id": "sf-20111216-1258",
+      "reason": "#921 option (a): sf-20260529-0941 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20111216-1258 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20260529-0941",
+      "slug": "psykisk-helsevernforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "forskrifter",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "sf-20080219-0158",
+      "reason": "#921 option (a): sf-20250808-1616 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; sf-20080219-0158 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "sf-20250808-1616",
+      "slug": "utleggsregistreringsforskriften"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "lover",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "e699654fe686f66ab128d79be8ae87e466bd2092"
+      },
+      "first_owner_doc_id": "nl-20250620-046",
+      "reason": "#921 option (a): nl-20260619-038 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; nl-20250620-046 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "nl-20260619-038",
+      "slug": "endringslov-til-energiloven"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "lover",
+      "evidence": {
+        "first_owner_first_commit": "53328aebd9cf4b8710f020e96c7d8ff919f10408",
+        "served_owner_first_commit": "2032c09ca38044bc457ed948f3b86731c12f25bd"
+      },
+      "first_owner_doc_id": "nl-20260612-027",
+      "reason": "#921 option (a): nl-20260623-064 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; nl-20260612-027 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "nl-20260623-064",
+      "slug": "endringslov-til-folketrygdloven-2"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "lover",
+      "evidence": {
+        "first_owner_first_commit": "791a9cb7d2647905cdb69e5614ffd31c020d0b6c",
+        "served_owner_first_commit": "2032c09ca38044bc457ed948f3b86731c12f25bd"
+      },
+      "first_owner_doc_id": "nl-20260623-064",
+      "reason": "#921 option (a): nl-20260623-065 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; nl-20260623-064 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "nl-20260623-065",
+      "slug": "endringslov-til-folketrygdloven-3"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "410",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "410",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "lover",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "791a9cb7d2647905cdb69e5614ffd31c020d0b6c"
+      },
+      "first_owner_doc_id": "nl-20251222-119",
+      "reason": "#921 option (a): nl-20260623-066 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; nl-20251222-119 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "nl-20260623-066",
+      "slug": "endringslov-til-skatteloven-5"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "lover",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "53328aebd9cf4b8710f020e96c7d8ff919f10408"
+      },
+      "first_owner_doc_id": "nl-20250620-086",
+      "reason": "#921 option (a): nl-20260612-028 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; nl-20250620-086 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "nl-20260612-028",
+      "slug": "endringslov-til-straffeloven"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": true,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "lover",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "2032c09ca38044bc457ed948f3b86731c12f25bd"
+      },
+      "first_owner_doc_id": "nl-20090619-101",
+      "reason": "#921 option (a): nl-20250620-107 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; nl-20090619-101 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "nl-20250620-107",
+      "slug": "mineralloven"
+    },
+    {
+      "advisory": [
+        {
+          "http_status": "200",
+          "in_sitemap": false,
+          "lovverk_commit": "3c4f1865e420135a12956e122a3ec42c96803986",
+          "source": "downstream HTTP harness over the production pin, 2026-11-11 (E3-B)"
+        },
+        {
+          "http_status": "200",
+          "in_sitemap": null,
+          "lovverk_commit": "c310127ecc65192f8260eab56bd3809ce0354130",
+          "source": "rule simulation of the downstream law route at the reviewed base (E3-B)"
+        }
+      ],
+      "directory": "lover",
+      "evidence": {
+        "first_owner_first_commit": "3dddeca2a2587bec15adb8698ad78d17c40cfaed",
+        "served_owner_first_commit": "5511aa4451ab96cbb94e2310110f51bd3c0b93c3"
+      },
+      "first_owner_doc_id": "nl-20120316-012",
+      "reason": "#921 option (a): nl-20250606-026 is the owner the address published at U1 threshold f6d7e25bb and stays its served owner; nl-20120316-012 held it first and stays recorded as its first owner (prior_holders[0])",
+      "served_owner_doc_id": "nl-20250606-026",
+      "slug": "vass-og-avløpsanleggslova"
+    }
+  ]
+}

@@ -2583,6 +2583,13 @@ whose Markdown lacks exactly one `id` and one old `slug` line; the apply refuses
 - a plan directory that is not byte for byte the plan this engine computes at
   that base and threshold ref (a forged plan with re-computed checksums);
 - a blocked plan, one with nothing to do, or one with `move_problems`;
+- a planned registry that changes a historical owner (an owner the base
+  published, or a first holder kept behind a threshold exception) that the
+  packaged `owner_reassignments.json` does not cover while approved by its
+  digest and reviewed for this plan (its `plan_sums_sha256` is the pin, its
+  `u1_threshold` the plan's threshold, its `reviewed_base` the base; #934). The refusal prints `BLOCKED: pending owner approval of digest
+  …` and the `lovspor ops identity-exceptions-approve` command. `identity-plan`
+  does not refuse: the plan and its pin are reviewed before the owner signs;
 - a path the apply would write, move or remove that is unsafe (absolute, `..`,
   a `.git` part anywhere and in any case) or passes through a symlink at any
   part, even one whose target is inside the checkout.

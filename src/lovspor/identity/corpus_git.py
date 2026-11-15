@@ -9,6 +9,7 @@ List arguments only, never a shell.
 
 import subprocess
 from collections.abc import Iterator
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -256,3 +257,20 @@ def list_files(repo: Path, commit: str, directories: list[str]) -> list[str]:
     """Every file path under ``directories`` at ``commit``, sorted."""
     out = _git(repo, "ls-tree", "-r", "-z", "--name-only", commit, "--", *directories)
     return sorted(path for path in out.decode().split("\0") if path)
+
+
+@lru_cache(maxsize=1024)
+def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    """True when ``ancestor`` is ``descendant`` or one of its ancestors; False otherwise,
+    an unknown commit included (``merge-base --is-ancestor`` exits non-zero). Memoised:
+    callers pass full shas, whose ancestry never changes."""
+    try:
+        _git(repo, "merge-base", "--is-ancestor", ancestor, descendant)
+    except IdentityMigrationError:
+        return False
+    return True
+
+
+def parents_of(repo: Path, commit: str) -> list[str]:
+    """The parents of ``commit``, first parent first; empty for a root commit."""
+    return _git(repo, "rev-list", "--parents", "-n", "1", commit).decode().split()[1:]
