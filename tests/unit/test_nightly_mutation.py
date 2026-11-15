@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -434,7 +435,13 @@ def _move_tag(repo: Path, head: str) -> int:
     return done.returncode
 
 
-def test_the_night_after_an_incomplete_one_still_measures_its_commits(main_repo: Path) -> None:
+def test_the_night_after_an_incomplete_one_still_measures_its_commits(
+    main_repo: Path, tmp_path: Path
+) -> None:
+    """A budget-exceeded verdict is not complete, so the tag step's `if` skips it."""
+    verdict = _verdict(tmp_path, {"schema_version": 1, "gate": {"reason": "budget_exceeded"}})
+    assert verdict["complete"] != "true"
+    assert _step("Move the base tag")["if"] == "steps.verdict.outputs.complete == 'true'"
     _commit(main_repo, "old", OLD)
     tagged = _commit(main_repo, "measured")
     _git(main_repo, "tag", "nightly-mutation-base", tagged)
@@ -445,15 +452,29 @@ def test_the_night_after_an_incomplete_one_still_measures_its_commits(main_repo:
 
     assert status == 0
     assert (out["base"], out["head"]) == (tagged, later)
-    assert _git(main_repo, "rev-parse", "nightly-mutation-base") == tagged
 
 
+@pytest.fixture
+def origin(main_repo: Path, tmp_path: Path) -> Path:
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _git(main_repo, "remote", "add", "origin", str(bare))
+    return bare
+
+
+def _install(repo: Path, script: str) -> None:
+    """The real script from this checkout, where the workflow's `[ -x ... ]` finds it."""
+    target = repo / "scripts" / "ci" / script
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(REPO / "scripts" / "ci" / script, target)
+
+
+@pytest.mark.parametrize("retry_script", [False, True])
 def test_a_completed_night_moves_the_tag_and_the_next_range_starts_there(
-    main_repo: Path, tmp_path: Path
+    main_repo: Path, origin: Path, retry_script: bool
 ) -> None:
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-    _git(main_repo, "remote", "add", "origin", str(origin))
+    if retry_script:
+        _install(main_repo, "push_with_retry.sh")
     _commit(main_repo, "old", OLD)
     _git(main_repo, "tag", "nightly-mutation-base", _commit(main_repo, "measured"))
     night = _commit(main_repo, "night head")
@@ -465,3 +486,57 @@ def test_a_completed_night_moves_the_tag_and_the_next_range_starts_there(
 
     assert _git(origin, "rev-parse", "nightly-mutation-base") == night
     assert (second["base"], second["head"]) == (night, later)
+
+
+def _git_stdin(repo: Path, stdin: str, *args: str) -> str:
+    done = subprocess.run(
+        ["git", *args], cwd=repo, input=stdin, capture_output=True, text=True, check=True
+    )
+    return done.stdout.strip()
+
+
+def _publish_ledger(repo: Path, base: str) -> None:
+    """An orphan `mutation-ledger` commit on origin, as mutation_ledger.sh save leaves it."""
+    meta = json.dumps({"base": base, "head": base, "run_id": "1", "saved_at": OLD})
+    blob = _git_stdin(repo, meta, "hash-object", "-w", "--stdin")
+    tree = _git_stdin(repo, f"100644 blob {blob}\tledger.json\n", "mktree")
+    commit = _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit-tree", tree, "-m", "l")
+    _git(repo, "push", "-q", "origin", f"{commit}:refs/heads/mutation-ledger")
+
+
+@pytest.mark.usefixtures("origin")
+@pytest.mark.parametrize("tag", [False, True])
+def test_a_ledger_resumes_the_range_unless_a_tag_is_usable(main_repo: Path, tag: bool) -> None:
+    """Tag, then ledger, then seven days: the order the range step promises (#943)."""
+    _install(main_repo, "mutation_ledger.sh")
+    _commit(main_repo, "old", OLD)
+    _commit(main_repo, "just over a week", _ago(timedelta(days=7, hours=1)))
+    ledgered = _commit(main_repo, "base of the nights still measuring")
+    tagged = _commit(main_repo, "head of the last completed night")
+    if tag:
+        _git(main_repo, "tag", "nightly-mutation-base", tagged)
+    _publish_ledger(main_repo, ledgered)
+    head = _commit(main_repo, "new")
+
+    status, out = _resolve_range(main_repo)
+
+    assert status == 0
+    assert (out["base"], out["head"]) == (tagged if tag else ledgered, head)
+    assert ("mutation-ledger" in out["source"]) is not tag
+
+
+@pytest.mark.usefixtures("origin")
+def test_a_ledger_off_main_falls_back_to_the_last_week_old_commit(main_repo: Path) -> None:
+    _install(main_repo, "mutation_ledger.sh")
+    _commit(main_repo, "old", OLD)
+    old = _commit(main_repo, "just over a week", _ago(timedelta(days=7, hours=1)))
+    _git(main_repo, "checkout", "-q", "-b", "rewritten")
+    _publish_ledger(main_repo, _commit(main_repo, "elsewhere"))
+    _git(main_repo, "checkout", "-q", "main")
+    head = _commit(main_repo, "new")
+
+    status, out = _resolve_range(main_repo)
+
+    assert status == 0
+    assert (out["base"], out["head"]) == (old, head)
+    assert out["source"].startswith("fallback:")
