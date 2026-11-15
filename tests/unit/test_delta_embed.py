@@ -20,6 +20,7 @@ import lovspor.sync.orchestrator as orchestrator_module
 from lovspor.embeddings.cache import CachingEmbedder, with_embedding_cache
 from lovspor.embeddings.inputs import build_embedding_inputs, hash_embedding_inputs
 from lovspor.embeddings.model import count_input_tokens
+from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.store import read_embeddings, write_embeddings
 from lovspor.errors import EmbeddingResponseError, MassReembedError, UnsupportedSidecarVersionError
 from lovspor.settings import Settings
@@ -27,9 +28,11 @@ from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest, wr
 from lovspor.sync.delta_embed import (
     EmbeddingTarget,
     PriorVectors,
+    RepayHeadroom,
     ReusingEmbedder,
     document_vectors,
     embedding_target,
+    exact_prior,
     load_prior_vectors,
     paid_inputs,
     paid_tokens,
@@ -39,7 +42,8 @@ from tests.unit.test_embedding_space_identity import _FakeEmbedder
 from tests.unit.test_sync_change_reembed_guard import _OBSERVED, _state
 from tests.unit.test_sync_orchestrator import _disable_migrations, _git, _settings
 
-_SECTION_ONE = "Loven gjelder for hele riket og for norske skip."
+_SECTION_ONE = "Loven gjelder for hele riket."
+"""Its vector holds the largest component of every fixture law (0.83), so it sets the scale."""
 _SECTION_TWO = "Endres ved lov 19 juni 2026 nr. 48 (i kraft fra den tid Kongen bestemmer)."
 _SECTION_TWO_NEW = "Endres ved lov 19 juni 2026 nr. 48 (i kraft 1 jan 2027 iflg. res. 13 nov 2026)."
 
@@ -271,28 +275,52 @@ def test_carried_rows_come_back_bit_identical_when_the_scale_holds() -> None:
     assert scale == pytest.approx(0.01)
 
 
-def test_dropping_the_row_that_set_the_scale_keeps_carried_rows_exact() -> None:
-    inputs = _inputs(_law((_SECTION_ONE,)))
-    carried = np.array([3, -5, 7, 0], dtype=np.int8)
-    prior = PriorVectors(rows={inputs[0].text: carried}, scale=0.004)
+def test_dropping_the_row_that_held_the_maximum_withdraws_every_carried_row() -> None:
+    """Without the old maximum a rebuild's scale is unknowable from int8 rows (#936)."""
+    old = _inputs(_law((_SECTION_ONE, _SECTION_TWO)))
+    loud, quiet = np.array([127, -5, 7, 0], dtype=np.int8), np.array([3, -5, 7, 0], dtype=np.int8)
+    prior = PriorVectors(rows={old[0].text: quiet, old[1].text: loud}, scale=0.004)
 
-    rows, scale = ReusingEmbedder(_TextEmbedder(), prior).quantized_rows(inputs)
+    assert exact_prior(prior, _inputs(_law((_SECTION_ONE,)))) is None
+    assert exact_prior(prior, old) is prior
+    assert exact_prior(PriorVectors(rows={old[0].text: quiet}, scale=0.004), old[:1]) is None
+    assert exact_prior(None, old) is None
 
-    assert np.array_equal(rows[0], carried)
-    assert scale == 0.004
 
-
-def test_a_paid_row_beyond_the_prior_scale_rescales_once() -> None:
+def _louder_than_the_prior() -> tuple[list, PriorVectors]:
     inputs = _inputs(_law((_SECTION_ONE, _SECTION_TWO_NEW)))
     carried = np.array([127, -64, 5, 0], dtype=np.int8)
-    prior = PriorVectors(rows={inputs[0].text: carried}, scale=0.001)
+    return inputs, PriorVectors(rows={inputs[0].text: carried}, scale=0.001)
 
-    rows, scale = ReusingEmbedder(_TextEmbedder(), prior).quantized_rows(inputs)
 
-    fresh = _vector(inputs[1].text, 4)
-    assert scale == pytest.approx(float(np.abs(fresh).max()) / 127)
-    assert np.abs(rows[0].astype(np.float32) * scale - carried * 0.001).max() <= scale / 2 + 1e-9
-    assert int(np.abs(rows[1]).max()) == 127
+def test_a_paid_row_beyond_the_prior_scale_re_pays_the_document_from_floats() -> None:
+    """Re-rounding the carried int8 rows at a new scale would round them twice (#936)."""
+    inputs, prior = _louder_than_the_prior()
+    embedder = _TextEmbedder()
+    granted = replace(prior, headroom=RepayHeadroom(None))
+
+    rows, scale = ReusingEmbedder(embedder, granted).quantized_rows(inputs)
+
+    assert embedder.paid == [inputs[1].text, inputs[0].text]
+    expected, expected_scale = quantize_int8(np.vstack([_vector(i.text, 4) for i in inputs]))
+    assert np.array_equal(rows, expected)
+    assert scale == expected_scale
+
+
+def test_a_re_pay_without_headroom_is_refused_before_it_is_sent() -> None:
+    inputs, prior = _louder_than_the_prior()
+    embedder = _TextEmbedder()
+    tight = replace(prior, headroom=RepayHeadroom(count_input_tokens(inputs[0].text) - 1))
+
+    with pytest.raises(MassReembedError, match="re-paid"):
+        ReusingEmbedder(embedder, tight).quantized_rows(inputs)
+    with pytest.raises(MassReembedError, match="0 tokens left"):
+        ReusingEmbedder(_TextEmbedder(), prior).quantized_rows(inputs)
+
+    assert embedder.paid == [inputs[1].text]
+    headroom = RepayHeadroom(count_input_tokens(inputs[0].text))
+    ReusingEmbedder(_TextEmbedder(), replace(prior, headroom=headroom)).quantized_rows(inputs)
+    assert headroom.tokens == 0
 
 
 def test_a_fully_carried_document_makes_no_provider_call() -> None:
@@ -321,7 +349,8 @@ def test_a_one_note_amendment_pays_only_for_the_changed_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _published(tmp_path)
-    before = _sidecar_rows(settings)
+    path = _embeddings_path(settings.lovverk_repo_path, "gjeldende-lover", "lov-a")
+    before = read_embeddings(path)
     changed = _law((_SECTION_ONE, _SECTION_TWO_NEW))
     new_inputs = _inputs(changed)
     embedder = _TextEmbedder()
@@ -331,11 +360,9 @@ def test_a_one_note_amendment_pays_only_for_the_changed_input(
     assert embedder.paid == [new_inputs[1].text]
     after = _sidecar_rows(settings)
     assert list(after) == [item.section_id for item in new_inputs]
-    kept = new_inputs[0].section_id
-    cosine = float(
-        after[kept] @ before[kept] / np.linalg.norm(after[kept]) / np.linalg.norm(before[kept])
-    )
-    assert cosine > 0.999
+    carried = read_embeddings(path)
+    assert carried.scale == before.scale
+    assert np.array_equal(carried.sections[0][1], before.sections[0][1])
     paid = after[new_inputs[1].section_id]
     assert float(paid @ _vector(new_inputs[1].text, 4) / np.linalg.norm(paid)) > 0.999
     record = _record(settings)
@@ -440,10 +467,10 @@ def test_a_crashed_run_publishes_nothing_and_its_retry_is_deterministic(
     assert results[0] == results[1]
 
 
-def test_delta_cache_survives_restart_and_bypasses_the_producer(
+def test_the_change_path_never_stores_a_cache_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Operations #919 promises a full document cache entry after paying a delta."""
+    """Only a full re-embed writes a document entry, so none can hold assembled rows (#936)."""
     settings = _published(tmp_path)
     monkeypatch.setenv("LOVSPOR_EMBEDDING_CACHE_DIR", str(tmp_path / "cache"))
     prior = load_prior_vectors(settings.lovverk_repo_path, _record(settings), _target())
@@ -457,21 +484,18 @@ def test_delta_cache_survives_restart_and_bypasses_the_producer(
     rows, scale = document_vectors(ReusingEmbedder(cached, prior), inputs, digest)
 
     assert provider.paid == [inputs[1].text]
-    # delta_embed's contract: carried rows are bit-identical only while the paid
-    # rows fit the prior scale; a larger paid row rescales once, within half a step.
-    carried = prior.rows[inputs[0].text].astype(np.float32) * prior.scale
-    assert np.abs(rows[0].astype(np.float32) * scale - carried).max() <= scale / 2 + 1e-9
+    assert list((tmp_path / "cache").rglob("*.lsec")) == []
+    full = cached.document_vectors(inputs, digest)
+    assert np.array_equal(full.vectors, rows)
     restarted_provider = _BrokenEmbedder()
     restarted = with_embedding_cache(restarted_provider, settings)
     assert isinstance(restarted, CachingEmbedder)
-    # Even without carried rows, the stored document must bypass production.
-    restored, restored_scale = document_vectors(
-        ReusingEmbedder(restarted, PriorVectors(rows={}, scale=1.0)), inputs, digest
-    )
+    served, served_scale = document_vectors(ReusingEmbedder(restarted, prior), inputs, digest)
     assert restarted_provider.paid == []
     assert restarted.progress.documents_cached == 1
-    assert np.array_equal(restored, rows)
-    assert restored_scale == scale
+    assert np.array_equal(served, full.vectors)
+    assert served_scale == full.scale
+    assert np.float32(served_scale) == np.float32(scale)
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])

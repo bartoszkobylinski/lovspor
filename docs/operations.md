@@ -58,16 +58,37 @@ space, the committed Markdown re-derives the inputs named by its
 section ids in input order. A document that fails any check is paid and counted in
 full, as before. Removed inputs drop out of the rewritten sidecar; the manifest
 records the new full `embedding_input_hash`. The rows are snapshotted from the
-clean committed tree before the first write, so the guard's count is what the run
-sends. The token ceiling is unchanged and still fails closed. On 2026-11-14 a
-one-note amendment to 48 laws counted 2,797,261 tokens in full; replayed offline
-against the same corpus head, the paid delta is 141,015 tokens (260 of 8,214
-inputs). Carried rows keep their int8 values while the paid rows fit the prior
-scale, so repeated amendments do not accumulate rounding. With
-`LOVSPOR_EMBEDDING_CACHE_DIR` set, a cached document entry still costs nothing,
-and a miss stores the carried-plus-paid rows as one document entry, so a rerun
-after a crash does not pay the delta again. The fraction dimension still counts
-a fully carried document (a rename), which is conservative.
+clean committed tree before the first write. The token ceiling is unchanged and
+still fails closed. On 2026-11-14 a one-note amendment to 48 laws counted
+2,797,261 tokens in full; replayed offline against the same corpus head, the paid
+delta is 141,015 tokens (260 of 8,214 inputs), before the #936 re-pays below.
+
+Every sidecar the change path writes is byte-identical to a full re-embed of the
+same inputs (#936). LSPE stores one int8 scale per file and no float vectors, so
+a carried row is reused only while the document's scale provably stays the
+stored one; it is never rounded twice. That holds when (1) every committed row
+reaching ±127 is carried, so the old maximum is still in the document, and (2) no
+paid row needs a larger scale. A document failing (1) is known before any spend
+and is paid and counted in full. A document failing (2) is only known once its
+paid rows are back: it re-pays its carried inputs and is quantized from the
+floats of all its inputs, as a rebuild is. That re-pay is spent from what the
+guard's token ceiling leaves after the counted workload, and refused before it is
+sent if it does not fit (`MassReembedError`, nothing committed); the operator
+override lifts that limit too. So the guard's pre-spend count is a lower bound of
+the run's spend, and the ceiling is still never exceeded. With
+`LOVSPOR_EMBEDDING_CACHE_DIR` set, a cached document entry (only a full re-embed
+writes one) still costs nothing; the change path never stores an entry, so a
+rerun after a crash pays its delta again and a cached rebuild is never served
+rows a delta assembled. The fraction dimension still counts a fully carried
+document (a rename), which is conservative.
+
+A run that fails mid-embed commits nothing: each sidecar is staged and renamed,
+so none is ever half-written, and HEAD is unchanged. Files it already wrote stay
+in the corpus worktree, and the next run refuses with `CorpusStateError` until
+the operator inspects `git -C <corpus> status` and, if it is that residue, runs
+`git -C <corpus> reset --hard && git -C <corpus> clean -fd`. The retry then
+writes the same bytes as an uninterrupted run. The scheduled workflow clones the
+corpus fresh, so it never meets residue.
 
 `lovspor annotate-input-identity` is the one-time metadata migration for an
 existing fully-embedded corpus: manifest-only, keyless, idempotent, and

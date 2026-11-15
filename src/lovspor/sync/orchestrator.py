@@ -100,8 +100,9 @@ from lovspor.sync.delta_embed import (
     PriorVectors,
     document_vectors,
     embedding_target,
-    load_prior_vectors,
+    grant_headroom,
     paid_tokens,
+    prior_for,
     reusing,
 )
 from lovspor.sync.document_io import (
@@ -113,9 +114,7 @@ from lovspor.sync.document_io import (
     write_derived_views,
     write_document,
 )
-from lovspor.sync.document_io import (
-    embeddings_path as _embeddings_path,
-)
+from lovspor.sync.document_io import embeddings_path as _embeddings_path
 from lovspor.sync.git_commit import add as git_add
 from lovspor.sync.git_commit import commit as git_commit_msg
 from lovspor.sync.git_commit import (
@@ -1909,10 +1908,10 @@ def _guard_change_reembed(
     Every document is rendered and its paid inputs counted with the production
     tokenizer: the inputs the provider is sent, not a bill (a retried request
     may be billed again). An input whose text the document's verified committed
-    sidecar already embeds is carried, not paid, so it is not counted (#919).
-    The returned upstream map hands those rows to the write loops, which send
-    exactly the inputs counted here. A document that cannot render is skipped
-    by the write loop too.
+    sidecar already embeds is carried, not counted (#919), unless carrying cannot
+    keep the full re-embed's scale: then the whole document counts, and a louder
+    paid row re-pays only within what the ceiling leaves (#936). The map returned
+    feeds the write loops; a document that cannot render is skipped there too.
     """
     upstream, target, documents, tokens = dict(plan.upstream), embedding_target(embedder), 0, 0
     for doc in _docs_to_embed(settings, plan):
@@ -1921,11 +1920,12 @@ def _guard_change_reembed(
         rendered = rendered_or_refused(render, doc.doc_id, doc.xml_hash, prior)
         if rendered is None:
             continue
-        vectors = load_prior_vectors(settings.lovverk_repo_path, prior, target)
+        inputs = build_embedding_inputs(rendered)
+        vectors = prior_for(settings.lovverk_repo_path, prior, target, inputs)
         upstream[doc.doc_id] = replace(upstream[doc.doc_id], prior_vectors=vectors)
-        documents += 1
-        tokens += paid_tokens(build_embedding_inputs(rendered), vectors)
+        documents, tokens = documents + 1, tokens + paid_tokens(inputs, vectors)
     enforce_reembed_guard(change_scope(documents, tokens), plan.prior, settings, allow)
+    grant_headroom(target, None if allow else settings.reembed_guard_max_tokens - tokens)
     return upstream
 
 

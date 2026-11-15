@@ -19,7 +19,6 @@ built: no response means nothing to store.
 
 import os
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -103,30 +102,34 @@ class CachingEmbedder:
     def model_name(self) -> str:
         return str(getattr(self._inner, "model_name", DEFAULT_MODEL_NAME))
 
-    def document_vectors(
-        self,
-        inputs: list[EmbeddingInput],
-        input_hash: str,
-        produce: Callable[[], tuple[np.ndarray, float]] | None = None,
-    ) -> CachedVectors:
-        """Int8 rows and scale of one non-empty document: cache first, then paid units.
+    def document_vectors(self, inputs: list[EmbeddingInput], input_hash: str) -> CachedVectors:
+        """Int8 rows and scale of one non-empty document: cache first, then paid units."""
+        stored = self.cached_document(inputs, input_hash)
+        if stored is not None:
+            return stored
+        quantized, scale = quantize_int8(self._assemble(inputs, input_hash))
+        return self._store.put(_entry(self._document_key(inputs, input_hash), quantized, scale))
 
-        ``produce`` replaces the paid units on a miss: the change path's carried
-        rows plus its paid delta (#919). Its result is stored like any other.
+    def cached_document(
+        self, inputs: list[EmbeddingInput], input_hash: str
+    ) -> CachedVectors | None:
+        """The stored document entry, or ``None``; never pays and never stores.
+
+        Only :meth:`document_vectors` writes document entries, always from the
+        whole document's float vectors, so an entry is what a full re-embed
+        produces. The change path only reads here, so its carried rows can
+        never be served as a rebuild's (#936).
         """
-        key = EntryKey(
-            esi=self._esi, input_hash=input_hash, dim=self.get_dimension(), rows=len(inputs)
-        )
         self._count_document()
-        stored = self._store.get(key)
+        stored = self._store.get(self._document_key(inputs, input_hash))
         if stored is not None:
             self.progress.documents_cached += 1
-            return stored
-        if produce is None:
-            quantized, scale = quantize_int8(self._assemble(inputs, input_hash))
-        else:
-            quantized, scale = produce()
-        return self._store.put(_entry(key, quantized, scale))
+        return stored
+
+    def _document_key(self, inputs: list[EmbeddingInput], input_hash: str) -> EntryKey:
+        return EntryKey(
+            esi=self._esi, input_hash=input_hash, dim=self.get_dimension(), rows=len(inputs)
+        )
 
     def _assemble(self, inputs: list[EmbeddingInput], input_hash: str) -> np.ndarray:
         texts = [item.text for item in inputs]

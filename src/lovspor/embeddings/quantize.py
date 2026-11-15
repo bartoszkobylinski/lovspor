@@ -42,8 +42,19 @@ def quantize_int8(vectors: np.ndarray) -> tuple[np.ndarray, float]:
     if max_abs == 0.0:
         return np.zeros_like(vectors, dtype=np.int8), 1.0
     scale = max_abs / _INT8_MAX
-    quantized = np.clip(np.round(vectors / scale), -_INT8_MAX, _INT8_MAX).astype(np.int8)
-    return quantized, scale
+    return quantize_at_scale(vectors, scale), scale
+
+
+def quantize_at_scale(vectors: np.ndarray, scale: float) -> np.ndarray:
+    """Int8 rows of ``vectors`` at a given ``scale``: the one rounding rule.
+
+    :func:`quantize_int8` and the change path's carried-row writer (#936)
+    both quantize here, so a row quantized at the same scale is the same
+    bytes whichever path wrote it. ``scale`` is a Python float, so NumPy
+    divides a float32 batch by its float32 value, the value the LSPE header
+    stores.
+    """
+    return np.clip(np.round(vectors / scale), -_INT8_MAX, _INT8_MAX).astype(np.int8)
 
 
 def dequantize_int8(quantized: np.ndarray, scale: float) -> np.ndarray:

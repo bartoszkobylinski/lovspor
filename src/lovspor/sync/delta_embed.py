@@ -1,4 +1,4 @@
-"""Changed-fragment embedding on the change path (#919).
+"""Changed-fragment embedding on the change path (#919), byte-exact (#936).
 
 A changed law usually differs from its committed version in a handful of
 embedding inputs. On 2026-11-14, 48 laws changed one amendment note, and only
@@ -23,20 +23,31 @@ texts (:func:`load_prior_vectors`):
 Any failed check means no reuse for that document: it is paid for and counted
 in full, exactly as before. The guard takes the snapshot from the clean
 committed tree before the first write, so a later write in the same run (a
-slug swap overwriting a sidecar) cannot change what is reused, and the
-guard's count is exactly what the writer sends.
+slug swap overwriting a sidecar) cannot change what is reused.
 
-The LSPE format holds one int8 scale per file. While every paid row fits the
-prior scale, the document keeps it, so carried int8 rows come back
-bit-identical and repeated amendments never accumulate rounding. Only a paid
-row with a larger component than the prior scale can hold rescales the whole
-document once, as a full re-embed would: at most one quantization step per
-carried component (cosine above 0.999, see ``embeddings.quantize``).
+The output is the full re-embed's, byte for byte (#936). LSPE holds one int8
+scale per file, ``float32(max|v| / 127)``, and int8 rows keep no float vector,
+so a carried row can be reused only while the document's scale is provably
+unchanged; it is never rounded a second time. Then the carried row *is*
+``round(v / scale)``, and each paid row is quantized at that scale by the same
+rule (:func:`~lovspor.embeddings.quantize.quantize_at_scale`). The scale is
+provably unchanged when both hold:
+
+1. every committed row reaching ±127 (the row holding the old maximum is one)
+   is carried, so the new maximum is at least the old one
+   (:func:`exact_prior`, checked by the guard before any spend; a document
+   that fails it is paid and counted in full);
+2. no paid row has a component whose scale would exceed the stored one.
+
+Condition 2 is only known once the paid rows are back. A document that fails
+it re-pays its carried inputs and is quantized from the floats of all its
+inputs, as a rebuild is. That re-pay is spent from what the guard left under
+its token ceiling (:class:`RepayHeadroom`) and refused before it is sent if it
+does not fit, so the ceiling holds for the whole run.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
-from functools import partial
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
@@ -46,22 +57,48 @@ from lovspor.embeddings.cache import CachingEmbedder, quantized_document_vectors
 from lovspor.embeddings.inputs import EmbeddingInput, build_embedding_inputs, hash_embedding_inputs
 from lovspor.embeddings.model import EmbeddingModel, count_input_tokens
 from lovspor.embeddings.provider import UNKNOWN_SPACE_ID, space_id_of
-from lovspor.embeddings.quantize import dequantize_int8, quantize_int8
+from lovspor.embeddings.quantize import quantize_at_scale, quantize_int8
 from lovspor.embeddings.store import EmbeddingFile, read_embeddings
-from lovspor.errors import EmbeddingResponseError
+from lovspor.errors import EmbeddingResponseError, MassReembedError
 from lovspor.storage.manifest import ManifestRecord
 from lovspor.sync.document_io import embeddings_path
+from lovspor.sync.reembed_guard import OVERRIDE_HINT
 
 _INT8_MAX = 127.0
-_FIT_TOLERANCE = 1e-6
+
+
+@dataclass
+class RepayHeadroom:
+    """Tokens the run may still spend re-paying carried inputs (#936).
+
+    The guard grants what its ceiling leaves after the counted workload;
+    ``None`` is the operator's override. It starts at zero, so a re-pay
+    nothing granted is refused rather than waved through.
+    """
+
+    tokens: int | None = 0
+
+    def spend(self, tokens: int) -> None:
+        """Take ``tokens`` from the headroom, or refuse before anything is sent."""
+        if self.tokens is None:
+            return
+        if tokens > self.tokens:
+            raise MassReembedError(
+                f"keeping a delta-embedded document byte-identical to a full re-embed needs "
+                f"its carried inputs re-paid ({tokens:,} tokens), more than the {self.tokens:,} "
+                "tokens left under the re-embed guard's token ceiling. That call was not sent "
+                f"and nothing was committed. {OVERRIDE_HINT}",
+            )
+        self.tokens -= tokens
 
 
 @dataclass(frozen=True)
 class EmbeddingTarget:
-    """The space and dimension the configured adapter writes."""
+    """The space and dimension the configured adapter writes, and the run's re-pay headroom."""
 
     space_id: str
     dim: int
+    headroom: RepayHeadroom = field(default_factory=RepayHeadroom, compare=False)
 
 
 @dataclass(frozen=True)
@@ -70,6 +107,7 @@ class PriorVectors:
 
     rows: Mapping[str, np.ndarray]
     scale: float
+    headroom: RepayHeadroom = field(default_factory=RepayHeadroom, compare=False)
 
 
 def embedding_target(embedder: EmbeddingModel | None) -> EmbeddingTarget | None:
@@ -78,6 +116,12 @@ def embedding_target(embedder: EmbeddingModel | None) -> EmbeddingTarget | None:
     if embedder is None or space_id is None or space_id == UNKNOWN_SPACE_ID:
         return None
     return EmbeddingTarget(space_id=space_id, dim=embedder.get_dimension())
+
+
+def grant_headroom(target: EmbeddingTarget | None, tokens: int | None) -> None:
+    """Hand the run's re-pays what the guard's ceiling leaves (``None``: overridden)."""
+    if target is not None:
+        target.headroom.tokens = tokens
 
 
 def load_prior_vectors(
@@ -95,7 +139,25 @@ def load_prior_vectors(
     rows: dict[str, np.ndarray] = {}
     for item, (_, row) in zip(inputs, sidecar.sections, strict=True):
         rows.setdefault(item.text, row)
-    return PriorVectors(rows=rows, scale=sidecar.scale)
+    return PriorVectors(rows=rows, scale=sidecar.scale, headroom=target.headroom)
+
+
+def prior_for(
+    repo: Path,
+    record: ManifestRecord | None,
+    target: EmbeddingTarget | None,
+    inputs: list[EmbeddingInput],
+) -> PriorVectors | None:
+    """The committed rows the change path may carry into ``inputs``, decided before spend."""
+    return exact_prior(load_prior_vectors(repo, record, target), inputs)
+
+
+def exact_prior(prior: PriorVectors | None, inputs: list[EmbeddingInput]) -> PriorVectors | None:
+    """``prior`` when ``inputs`` carry every row that may hold its maximum (condition 1)."""
+    if prior is None:
+        return None
+    loudest = {text for text, row in prior.rows.items() if _reaches_max(row)}
+    return prior if loudest and loudest <= {item.text for item in inputs} else None
 
 
 def paid_inputs(inputs: list[EmbeddingInput], prior: PriorVectors | None) -> list[EmbeddingInput]:
@@ -106,7 +168,7 @@ def paid_inputs(inputs: list[EmbeddingInput], prior: PriorVectors | None) -> lis
 
 def paid_tokens(inputs: list[EmbeddingInput], prior: PriorVectors | None) -> int:
     """The guard's workload for one document: tokens of its paid inputs only."""
-    return sum(count_input_tokens(item.text) for item in paid_inputs(inputs, prior))
+    return _tokens([item.text for item in paid_inputs(inputs, prior)])
 
 
 class ReusingEmbedder:
@@ -136,19 +198,36 @@ class ReusingEmbedder:
         return descriptor if isinstance(descriptor, str) else None
 
     def quantized_rows(self, inputs: list[EmbeddingInput]) -> tuple[np.ndarray, float]:
-        """Int8 rows and scale for ``inputs``: paid rows for new text, carried rows otherwise."""
+        """Int8 rows and scale for ``inputs``, byte-identical to a full re-embed of them."""
         paid = [item.text for item in paid_inputs(inputs, self._prior)]
         fresh = dict(zip(paid, self._encode(paid), strict=True))
-        rows = [
-            fresh[item.text]
-            if item.text in fresh
-            else dequantize_int8(self._prior.rows[item.text], self._prior.scale)
-            for item in inputs
-        ]
-        return _quantize_keeping(np.vstack(rows), self._prior.scale)
+        if not self._keeps_scale(inputs, fresh):
+            return self._repaid(inputs, fresh)
+        scale = self._prior.scale
+        quantized = {text: quantize_at_scale(row, scale) for text, row in fresh.items()}
+        rows = [quantized.get(item.text, self._prior.rows.get(item.text)) for item in inputs]
+        return np.vstack(cast(list[np.ndarray], rows)), scale
+
+    def _keeps_scale(self, inputs: list[EmbeddingInput], fresh: dict[str, np.ndarray]) -> bool:
+        """Conditions 1 and 2: a full re-embed would derive the stored scale again."""
+        if exact_prior(self._prior, inputs) is None:
+            return False
+        if not fresh:
+            return True
+        loudest = float(np.abs(np.vstack(list(fresh.values()))).max())
+        return bool(np.float32(loudest / _INT8_MAX) <= np.float32(self._prior.scale))
+
+    def _repaid(
+        self, inputs: list[EmbeddingInput], fresh: dict[str, np.ndarray]
+    ) -> tuple[np.ndarray, float]:
+        """The whole document from float vectors: carried inputs are paid again, within headroom."""
+        carried = [item.text for item in inputs if item.text not in fresh]
+        self._prior.headroom.spend(_tokens(carried))
+        vectors = {**fresh, **dict(zip(carried, self._encode(carried), strict=True))}
+        return quantize_int8(np.vstack([vectors[item.text] for item in inputs]))
 
     def _encode(self, texts: list[str]) -> np.ndarray:
-        """One paid call for the new texts; none at all when every text is carried."""
+        """One paid call for the texts; none at all when there are none."""
         if not texts:
             return np.empty((0, self.get_dimension()), dtype=np.float32)
         vectors = np.asarray(self._inner.encode(texts), dtype=np.float32)
@@ -170,31 +249,26 @@ def document_vectors(
 ) -> tuple[np.ndarray, float]:
     """Int8 rows and scale for a non-empty document, paying only for what is not carried.
 
-    With the durable cache on, a cached document entry still costs nothing, and
-    a miss stores the carried-plus-paid rows under the document's input hash, so
-    a rerun after a crash does not pay the delta again.
+    With the durable cache on, a document entry, which only a full re-embed
+    writes, still costs nothing. The change path never stores one: a rerun
+    after a crash pays its delta again, and a cached rebuild is never served
+    rows a delta assembled (#936).
     """
     if not isinstance(embedder, ReusingEmbedder):
         return quantized_document_vectors(embedder, inputs, input_hash)
-    if isinstance(embedder.inner, CachingEmbedder):
-        stored = embedder.inner.document_vectors(
-            inputs, input_hash, partial(embedder.quantized_rows, inputs)
-        )
+    cache = embedder.inner if isinstance(embedder.inner, CachingEmbedder) else None
+    stored = None if cache is None else cache.cached_document(inputs, input_hash)
+    if stored is not None:
         return stored.vectors, cast(float, stored.scale)
     return embedder.quantized_rows(inputs)
 
 
-def _quantize_keeping(matrix: np.ndarray, scale: float) -> tuple[np.ndarray, float]:
-    """Int8 rows at the prior ``scale`` while every component fits it; else a fresh scale.
+def _reaches_max(row: np.ndarray) -> bool:
+    return int(np.abs(row.astype(np.int16)).max(initial=0)) == int(_INT8_MAX)
 
-    The tolerance absorbs the float32 product of a carried ``127 * scale``, which
-    rounds back to 127; anything beyond it would clip, so it rescales instead.
-    """
-    fits = float(np.abs(matrix).max()) <= _INT8_MAX * scale * (1 + _FIT_TOLERANCE)
-    if not (np.isfinite(scale) and scale > 0 and fits):
-        return quantize_int8(matrix)
-    quantized = np.clip(np.round(matrix / scale), -_INT8_MAX, _INT8_MAX).astype(np.int8)
-    return quantized, scale
+
+def _tokens(texts: list[str]) -> int:
+    return sum(count_input_tokens(text) for text in texts)
 
 
 def _record_vouches(record: ManifestRecord, target: EmbeddingTarget) -> bool:

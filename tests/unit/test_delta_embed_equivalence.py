@@ -1,18 +1,18 @@
-"""Delta embedding against a full rebuild on identical pinned inputs (#919, PR #933).
+"""Delta embedding against a full rebuild on identical pinned inputs (#919, #936).
 
 The change path carries committed int8 rows instead of paying for them. This
 module syncs a corpus state S0 in full, applies S0 -> S1 incrementally (a
 modified law whose chunk count grows, an added law, a removed law, a moved
-law, an unchanged law), full-rebuilds S1 from an empty corpus with the same
-deterministic adapter, and compares the stored arrays, never search results.
+law, an unchanged law, a law gaining a section louder than its maximum),
+full-rebuilds S1 from an empty corpus with the same deterministic adapter, and
+compares the stored bytes, never search results.
 
-What is exact: section ids, chunk text, Markdown, manifest identity fields,
-the removed law's sidecar, coverage, and every sidecar whose document was not
-re-quantized. What is not: the LSPE format keeps one int8 scale per file, and
-the delta path either keeps the prior scale (``_quantize_keeping``) or
-re-quantizes already-quantized rows. Both are pinned below by their exact
-error bound, so a larger drift fails, and by an assertion that the bytes do
-differ, so the day the delta path becomes byte-exact this module says so.
+The LSPE format keeps one int8 scale per file, so a carried row is the full
+rebuild's row only while the document's scale is unchanged (#936). The delta
+keeps a document's rows only when that is provable: the old row holding the
+maximum is carried and no paid row needs a larger scale. Otherwise it re-pays
+the whole document and quantizes it from its float vectors, exactly as a
+rebuild does. Every sidecar of the delta is the full rebuild's, byte for byte.
 """
 
 import hashlib
@@ -25,6 +25,7 @@ import numpy as np
 import pytest
 
 import lovspor.sync.orchestrator as orchestrator_module
+from lovspor.embeddings.cache import CACHE_DIR_VARIABLE, sync_embedder
 from lovspor.embeddings.inputs import build_embedding_inputs
 from lovspor.embeddings.model import count_input_tokens
 from lovspor.embeddings.store import EmbeddingFile, read_embeddings
@@ -50,27 +51,27 @@ class _FrozenDatetime(datetime):
         return cls.fromtimestamp(_FROZEN.timestamp(), tz=UTC)
 
 
-def _unit_vector(text: str) -> np.ndarray:
+def _unit_vector(text: str, dim: int = _DIM) -> np.ndarray:
     seed = int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:8], "little")
-    raw = np.random.Generator(np.random.PCG64(seed)).standard_normal(_DIM)
+    raw = np.random.Generator(np.random.PCG64(seed)).standard_normal(dim)
     return (raw / np.linalg.norm(raw)).astype(np.float32)
 
 
 class _PinnedEmbedder(_FakeEmbedder):
-    """A pure function of the text, like a pinned model; fails after ``fail_after`` calls."""
+    """A pure function of the text, like a pinned model; fails when a text contains ``fail_on``."""
 
-    def __init__(self, fail_after: int | None = None) -> None:
-        super().__init__(dim=_DIM)
+    def __init__(self, fail_on: str | None = None, dim: int = _DIM) -> None:
+        super().__init__(dim=dim)
         self.paid: list[str] = []
-        self.calls = 0
-        self._fail_after = fail_after
+        self.calls: list[list[str]] = []
+        self._fail_on = fail_on
 
     def encode(self, texts: list[str]) -> np.ndarray:
-        if self._fail_after is not None and self.calls >= self._fail_after:
+        if self._fail_on is not None and any(self._fail_on in text for text in texts):
             raise OSError("injected provider failure")
-        self.calls += 1
+        self.calls.append(list(texts))
         self.paid.extend(texts)
-        return np.vstack([_unit_vector(text) for text in texts])
+        return np.vstack([_unit_vector(text, self.get_dimension()) for text in texts])
 
 
 def _body(doc_id: str, n: int) -> str:
@@ -122,13 +123,12 @@ def _s0() -> dict[str, _UpstreamDoc]:
 _LOUDER = "Ny paragraf, variant 0, om tilsyn."
 """A paid section whose largest component exceeds lov-grow's S0 maximum (0.341 > 0.295)."""
 
+_CHANGED_MAX = "Paragraf 2 er endret ved lov 2026 nr. 48."
+"""Replaces lov-mod § 2, the S0 row that held lov-mod's largest component."""
+
 
 def _s1() -> dict[str, _UpstreamDoc]:
-    changed = (
-        _body("lov-mod", 1),
-        "Paragraf 2 er endret ved lov 2026 nr. 48.",
-        _body("lov-mod", 3),
-    )
+    changed = (_body("lov-mod", 1), _CHANGED_MAX, _body("lov-mod", 3))
     docs = (
         _doc("lov-mod", (*changed, _body("lov-mod", 4), _body("lov-mod", 5))),
         _doc("lov-move", _bodies("lov-move", range(1, 3)), slug="lov-moved"),
@@ -145,9 +145,10 @@ def _sync(
     upstream: dict[str, _UpstreamDoc],
     embedder: _PinnedEmbedder,
 ) -> None:
+    """Run the real sync with ``embedder`` behind the real meter and, when configured, cache."""
     _disable_migrations(monkeypatch)
     monkeypatch.setattr(orchestrator_module, "datetime", _FrozenDatetime)
-    monkeypatch.setattr(orchestrator_module, "_load_embedder", lambda _settings: embedder)
+    monkeypatch.setattr(orchestrator_module, "_load_embedder", lambda s: sync_embedder(embedder, s))
     monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_a: (upstream, ()))
     run_sync(settings)
 
@@ -199,12 +200,37 @@ def _build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Corpora:
     )
 
 
+def _full_rebuild(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, bytes]:
+    rebuilt = _settings(tmp_path)
+    _sync(rebuilt, monkeypatch, _s1(), _PinnedEmbedder())
+    return _sidecars(rebuilt.lovverk_repo_path)
+
+
 def _read(repo: Path, slug: str) -> EmbeddingFile:
     return read_embeddings(embeddings_path(repo, _DATASET, slug))
 
 
-def _dequantized(sidecar: EmbeddingFile) -> np.ndarray:
-    return np.vstack([row.astype(np.float64) for _, row in sidecar.sections]) * sidecar.scale
+def _texts(repo: Path, doc_id: str) -> list[str]:
+    return [item.text for item in build_embedding_inputs(_markdown(repo)[doc_id])]
+
+
+def _tokens(texts: list[str]) -> int:
+    return sum(count_input_tokens(text) for text in texts)
+
+
+def _committed(repo: Path, slug: str) -> bytes:
+    return subprocess.run(
+        ["git", "show", f"HEAD:lover/embeddings/{slug}.bin"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    ).stdout
+
+
+def _reset(repo: Path, head: str) -> None:
+    """The operator's recovery the CorpusStateError refusal names."""
+    subprocess.run(["git", "reset", "-q", "--hard", head], cwd=repo, check=True)
+    subprocess.run(["git", "clean", "-qfd"], cwd=repo, check=True)
 
 
 # --- what must be exact ----------------------------------------------------
@@ -239,118 +265,99 @@ def test_the_removed_law_leaves_no_vectors_behind(
         assert _state(repo)[1] == ""
 
 
-def test_documents_the_delta_did_not_requantize_are_byte_identical(
+def test_every_sidecar_of_the_delta_is_byte_identical_to_the_full_rebuild(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     corpora = _build(tmp_path, monkeypatch)
-    delta, full = _sidecars(corpora.delta), _sidecars(corpora.full)
 
-    for slug in ("lov-same", "lov-moved", "lov-new"):
-        assert delta[slug] == full[slug], slug
+    assert _sidecars(corpora.delta) == _sidecars(corpora.full)
 
 
-def test_the_delta_pays_only_for_new_text_and_the_full_rebuild_for_all(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    corpora = _build(tmp_path, monkeypatch)
-    s1_inputs = {
-        doc_id: build_embedding_inputs(md) for doc_id, md in _markdown(corpora.full).items()
-    }
-    new_mod_texts = [i.text for i in s1_inputs["lov-mod"][1:2] + s1_inputs["lov-mod"][3:]]
-
-    assert sorted(corpora.delta_embedder.paid) == sorted(
-        [*new_mod_texts, s1_inputs["lov-grow"][2].text, *(i.text for i in s1_inputs["lov-new"])]
-    )
-    assert sorted(corpora.full_embedder.paid) == sorted(
-        i.text for inputs in s1_inputs.values() for i in inputs
-    )
-
-
-# --- the drift the single-scale format admits, pinned exactly ---------------
-
-
-@dataclass(frozen=True)
-class _Modified:
-    prior: EmbeddingFile
-    delta: EmbeddingFile
-    full: EmbeddingFile
-    truth: np.ndarray
-
-
-def _modified(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Modified:
-    corpora = _build(tmp_path, monkeypatch)
-    s0 = _settings(tmp_path / "s0-only")
-    _sync(s0, monkeypatch, _s0(), _PinnedEmbedder())
-    inputs = build_embedding_inputs(_markdown(corpora.full)["lov-mod"])
-    return _Modified(
-        prior=_read(s0.lovverk_repo_path, "lov-mod"),
-        delta=_read(corpora.delta, "lov-mod"),
-        full=_read(corpora.full, "lov-mod"),
-        truth=np.vstack([_unit_vector(i.text) for i in inputs]).astype(np.float64),
-    )
-
-
-def test_the_modified_law_drifts_from_the_full_rebuild_within_its_proven_bound(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Delta and full rebuild each stay within their rounding of the true vectors.
-
-    Here the changed section held the document's largest component, so the
-    delta keeps the prior, coarser scale ``s0`` (``_quantize_keeping``) while
-    the full rebuild derives a finer one from S1: every row sits on another
-    int8 grid. Full: one rounding, |full - truth| <= s_full/2. Delta: a carried
-    row was rounded at ``s0`` and, after a rescale, rounded again at
-    ``s_delta``; so |delta - truth| <= (s0 + s_delta)/2.
-    """
-    m = _modified(tmp_path, monkeypatch)
-
-    assert m.delta.scale == m.prior.scale > m.full.scale
-    assert np.abs(_dequantized(m.full) - m.truth).max() <= m.full.scale / 2 * (1 + 1e-6)
-    bound = (m.prior.scale + m.delta.scale) / 2 * (1 + 1e-6)
-    assert np.abs(_dequantized(m.delta) - m.truth).max() <= bound
-
-
-def test_a_louder_paid_row_rescales_carried_rows_off_the_full_rebuild_by_one_unit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The rescale branch: same scale as the rebuild, carried rows rounded twice.
-
-    The paid row sets the new scale exactly as in the full rebuild, so it and
-    the scale agree. Each carried row was rounded at the S0 scale, then
-    re-rounded at the new one: double rounding moves some components by one
-    int8 unit (749e4163's "within half a step" is measured against the prior
-    dequantized row, never against the rebuild or the true vector).
-    """
-    corpora = _build(tmp_path, monkeypatch)
-    delta, full = _read(corpora.delta, "lov-grow"), _read(corpora.full, "lov-grow")
-    a = np.vstack([row for _, row in delta.sections]).astype(np.int16)
-    b = np.vstack([row for _, row in full.sections]).astype(np.int16)
-
-    assert delta.scale == full.scale
-    assert np.array_equal(a[2], b[2])
-    assert int(np.abs(a - b).max()) == 1
-    assert np.count_nonzero(a[:2] != b[:2]) > 0
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="PR #933: one int8 scale per LSPE file; the delta keeps the prior scale or "
-    "re-quantizes carried int8 rows, so a re-quantized document is not the full rebuild's bytes",
-)
 def test_the_modified_law_is_byte_identical_to_the_full_rebuild(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    m = _modified(tmp_path, monkeypatch)
+    corpora = _build(tmp_path, monkeypatch)
+    delta, full = _read(corpora.delta, "lov-mod"), _read(corpora.full, "lov-mod")
 
-    assert m.delta.scale == m.full.scale
-    for (_, a), (_, b) in zip(m.delta.sections, m.full.sections, strict=True):
+    assert delta.scale == full.scale
+    for (_, a), (_, b) in zip(delta.sections, full.sections, strict=True):
         assert np.array_equal(a, b)
+
+
+# --- what is paid, and why ---------------------------------------------------
+
+
+def test_a_changed_row_that_held_the_maximum_makes_the_whole_document_paid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the old maximum the rebuild's scale is unknowable from int8 rows (case 1)."""
+    s0 = _settings(tmp_path / "s0")
+    _sync(s0, monkeypatch, _s0(), _PinnedEmbedder())
+    prior = _read(s0.lovverk_repo_path, "lov-mod")
+    corpora = _build(tmp_path / "pair", monkeypatch)
+
+    assert int(np.abs(prior.sections[1][1].astype(np.int16)).max()) == 127
+    assert _read(corpora.full, "lov-mod").scale < prior.scale
+    assert [c for c in corpora.delta_embedder.calls if any(_CHANGED_MAX in t for t in c)] == [
+        _texts(corpora.full, "lov-mod")
+    ]
+
+
+def test_a_louder_paid_row_re_pays_the_carried_rows_instead_of_re_rounding_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new scale would round already-rounded rows twice (case 2): their floats are paid."""
+    corpora = _build(tmp_path, monkeypatch)
+    grow = _texts(corpora.full, "lov-grow")
+
+    assert _LOUDER in grow[2]
+    assert [call for call in corpora.delta_embedder.calls if set(call) & set(grow)] == [
+        grow[2:],
+        grow[:2],
+    ]
+    assert _sidecars(corpora.delta)["lov-grow"] == _sidecars(corpora.full)["lov-grow"]
+
+
+def test_the_delta_pays_new_text_and_re_pays_only_documents_it_cannot_keep_exact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    corpora = _build(tmp_path, monkeypatch)
+    expected = [
+        *_texts(corpora.full, "lov-mod"),
+        *_texts(corpora.full, "lov-grow"),
+        *_texts(corpora.full, "lov-new"),
+    ]
+
+    assert sorted(corpora.delta_embedder.paid) == sorted(expected)
+    assert sorted(corpora.full_embedder.paid) == sorted(
+        text for doc_id in _markdown(corpora.full) for text in _texts(corpora.full, doc_id)
+    )
+
+
+def test_a_cached_full_rebuild_after_a_delta_equals_an_uncached_rebuild(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The delta's own rows never become an entry, so a cached rebuild cannot serve them."""
+    monkeypatch.setenv(CACHE_DIR_VARIABLE, str(tmp_path / "cache"))
+    incremental = _settings(tmp_path / "delta")
+    _sync(incremental, monkeypatch, _s0(), _PinnedEmbedder())
+    _sync(incremental, monkeypatch, _s1(), _PinnedEmbedder())
+    cached = _settings(tmp_path / "cached-full")
+    cached_embedder = _PinnedEmbedder()
+    _sync(cached, monkeypatch, _s1(), cached_embedder)
+    monkeypatch.delenv(CACHE_DIR_VARIABLE)
+
+    reference = _full_rebuild(tmp_path / "uncached-full", monkeypatch)
+
+    assert _sidecars(incremental.lovverk_repo_path) == reference
+    assert _sidecars(cached.lovverk_repo_path) == reference
+    assert sorted(cached_embedder.paid) == sorted(_texts(cached.lovverk_repo_path, "lov-grow"))
 
 
 # --- interruption, retry, publication ---------------------------------------
 
 
-def test_a_failure_mid_embed_publishes_nothing_and_blocks_a_dirty_rerun(
+def test_a_failure_mid_embed_publishes_nothing_and_names_the_recovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _settings(tmp_path / "crash")
@@ -360,21 +367,37 @@ def test_a_failure_mid_embed_publishes_nothing_and_blocks_a_dirty_rerun(
     published = _sidecars(repo)
 
     with pytest.raises(OSError, match="injected provider failure"):
-        _sync(settings, monkeypatch, _s1(), _PinnedEmbedder(fail_after=1))
+        _sync(settings, monkeypatch, _s1(), _PinnedEmbedder(fail_on=_body("lov-new", 1)))
 
     assert _state(repo)[0] == head
-    committed = subprocess.run(
-        ["git", "show", "HEAD:lover/embeddings/lov-mod.bin"],
-        cwd=repo,
-        capture_output=True,
-        check=True,
-    ).stdout
-    assert committed == published["lov-mod"]
-    with pytest.raises(CorpusStateError, match="uncommitted changes"):
+    assert _committed(repo, "lov-mod") == published["lov-mod"]
+    with pytest.raises(CorpusStateError, match=r"git reset --hard.*git clean -fd"):
         _sync(settings, monkeypatch, _s1(), _PinnedEmbedder())
 
 
-def test_a_reset_retry_converges_to_the_uninterrupted_index(
+def test_a_failure_while_re_paying_leaves_the_sidecar_and_head_untouched_and_retry_converges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path / "repay-crash")
+    repo = settings.lovverk_repo_path
+    _sync(settings, monkeypatch, _s0(), _PinnedEmbedder())
+    head = _state(repo)[0].strip()
+    published = _sidecars(repo)
+    embedder = _PinnedEmbedder(fail_on=_body("lov-grow", 1))
+
+    with pytest.raises(OSError, match="injected provider failure"):
+        _sync(settings, monkeypatch, _s1(), embedder)
+
+    assert any(_LOUDER in text for text in embedder.paid)
+    assert _state(repo)[0].strip() == head
+    assert _committed(repo, "lov-grow") == published["lov-grow"]
+    assert _sidecars(repo)["lov-grow"] == published["lov-grow"]
+    _reset(repo, head)
+    _sync(settings, monkeypatch, _s1(), _PinnedEmbedder())
+    assert _sidecars(repo) == _full_rebuild(tmp_path / "reference", monkeypatch)
+
+
+def test_a_reset_retry_converges_to_the_full_rebuild(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _settings(tmp_path / "retry")
@@ -382,35 +405,81 @@ def test_a_reset_retry_converges_to_the_uninterrupted_index(
     _sync(settings, monkeypatch, _s0(), _PinnedEmbedder())
     head = _state(repo)[0].strip()
     with pytest.raises(OSError, match="injected provider failure"):
-        _sync(settings, monkeypatch, _s1(), _PinnedEmbedder(fail_after=1))
-    subprocess.run(["git", "reset", "-q", "--hard", head], cwd=repo, check=True)
-    subprocess.run(["git", "clean", "-qfd"], cwd=repo, check=True)
+        _sync(settings, monkeypatch, _s1(), _PinnedEmbedder(fail_on=_body("lov-new", 1)))
+    _reset(repo, head)
 
     _sync(settings, monkeypatch, _s1(), _PinnedEmbedder())
 
     uninterrupted = _build(tmp_path / "reference", monkeypatch)
-    assert _sidecars(repo) == _sidecars(uninterrupted.delta)
+    assert _sidecars(repo) == _sidecars(uninterrupted.delta) == _sidecars(uninterrupted.full)
     assert _markdown(repo) == _markdown(uninterrupted.delta)
 
 
 # --- the 1M-token ceiling per execution -------------------------------------
 
 
-def test_the_token_ceiling_counts_the_whole_runs_paid_delta(
+@dataclass(frozen=True)
+class _Workload:
+    before_spend: int
+    re_paid: int
+
+
+def _workload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Workload:
+    probe = _build(tmp_path, monkeypatch)
+    grow = _texts(probe.full, "lov-grow")
+    known = [*_texts(probe.full, "lov-mod"), *_texts(probe.full, "lov-new"), grow[2]]
+    return _Workload(before_spend=_tokens(known), re_paid=_tokens(grow[:2]))
+
+
+def _ceiling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tokens: int) -> Settings:
+    settings = _settings(tmp_path)
+    _sync(settings, monkeypatch, _s0(), _PinnedEmbedder())
+    return settings.model_copy(update={"reembed_guard_max_tokens": tokens})
+
+
+def test_the_guard_counts_the_whole_document_it_knows_must_be_re_paid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    settings = _settings(tmp_path / "ceiling")
-    repo = settings.lovverk_repo_path
-    _sync(settings, monkeypatch, _s0(), _PinnedEmbedder())
-    probe = _build(tmp_path / "probe", monkeypatch)
-    paid = sum(count_input_tokens(text) for text in probe.delta_embedder.paid)
-    tight = settings.model_copy(update={"reembed_guard_max_tokens": paid - 1})
-    before = _state(repo)
+    work = _workload(tmp_path / "probe", monkeypatch)
+    limit = work.before_spend
+    tight = _ceiling(tmp_path / "ceiling", monkeypatch, limit - 1)
+    before = _state(tight.lovverk_repo_path)
     embedder = _PinnedEmbedder()
 
-    with pytest.raises(MassReembedError, match=f"token workload {paid:,} > {paid - 1:,}"):
+    with pytest.raises(MassReembedError, match=f"token workload {limit:,} > {limit - 1:,}"):
         _sync(tight, monkeypatch, _s1(), embedder)
 
     assert embedder.paid == []
-    assert _state(repo) == before
+    assert _state(tight.lovverk_repo_path) == before
     assert Settings.model_fields["reembed_guard_max_tokens"].default == 1_000_000
+
+
+def test_a_re_pay_beyond_the_ceiling_is_refused_before_it_is_sent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = _workload(tmp_path / "probe", monkeypatch)
+    tight = _ceiling(tmp_path / "ceiling", monkeypatch, work.before_spend + work.re_paid - 1)
+    repo = tight.lovverk_repo_path
+    head, published = _state(repo)[0], _sidecars(repo)
+    embedder = _PinnedEmbedder()
+
+    with pytest.raises(MassReembedError, match="re-pa"):
+        _sync(tight, monkeypatch, _s1(), embedder)
+
+    assert not any(_body("lov-grow", 1) in text for text in embedder.paid)
+    assert _tokens(embedder.paid) <= work.before_spend
+    assert _state(repo)[0] == head
+    assert _committed(repo, "lov-grow") == published["lov-grow"]
+
+
+def test_a_re_pay_within_the_ceiling_completes_byte_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = _workload(tmp_path / "probe", monkeypatch)
+    exact = _ceiling(tmp_path / "ceiling", monkeypatch, work.before_spend + work.re_paid)
+    embedder = _PinnedEmbedder()
+
+    _sync(exact, monkeypatch, _s1(), embedder)
+
+    assert _tokens(embedder.paid) == work.before_spend + work.re_paid
+    assert _sidecars(exact.lovverk_repo_path) == _full_rebuild(tmp_path / "ref", monkeypatch)
