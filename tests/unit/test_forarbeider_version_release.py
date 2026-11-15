@@ -597,3 +597,76 @@ def test_inputs_the_builder_refuses_are_a_finding() -> None:
     raw = release_text(build_release(offers, artifacts)).encode()
     verification = verify_release(raw, [*offers, offers[0]], artifacts)
     assert _codes(verification) == {("inputs_refused", None)}
+
+
+@pytest.mark.parametrize("altered", [False, True], ids=["missing", "altered"])
+def test_release_checks_evidence_of_older_versions(altered: bool) -> None:
+    """FC8b verifies the whole lineage, not only the selected head's evidence."""
+    built = chain(original(), changed(LATER))
+    older, newer = built.entries()
+    old_source = next(key for key in older.source_sha256s if key not in newer.source_sha256s)
+    artifacts = dict(built.artifacts)
+    if altered:
+        artifacts[old_source] += b" "
+    else:
+        del artifacts[old_source]
+
+    manifest = build_release([offer(built)], artifacts)
+
+    assert selected(manifest).status == "excluded"
+    assert selected(manifest).version_id is None
+    assert manifest.bindings[0].lineage_head_sha256 is None
+    expected = "lineage:artifact_altered" if altered else "lineage:artifact_missing"
+    assert expected in blocker_codes(manifest)
+
+
+@pytest.mark.parametrize(
+    "field", ["release_id", "bindings_sha256", "counts", "bindings", "observations"]
+)
+def test_parse_release_rejects_inconsistent_manifest_sections(field: str) -> None:
+    """Canonical encoding alone cannot make an inconsistent record valid."""
+    built = chain(original())
+    manifest = build_release([offer(built)], built.artifacts)
+    data = manifest.model_dump(mode="json")
+    if field in {"release_id", "bindings_sha256"}:
+        data[field] = "0" * 64
+    elif field == "counts":
+        data[field]["documents"] = 2
+    else:
+        data[field][0]["document_id"] = SECOND
+    # Preserve canonical encoding so this exercises model consistency, not whitespace.
+    raw = (json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode()
+
+    with pytest.raises(ForarbeiderRefusedError) as error:
+        parse_release(raw)
+    assert error.value.reason is RefusalReason.SCHEMA_INVALID
+
+
+@pytest.mark.parametrize("raw", [b"", b"\xff", b"{", b"[]", b"null"])
+def test_malformed_release_is_reported_without_losing_the_rebuild(raw: bytes) -> None:
+    rebuilt = build_release([], {})
+
+    verification = verify_release(raw, [], {})
+
+    assert verification.status == "invalid"
+    assert verification.offered_release_id is None
+    assert verification.rebuilt_release_id == rebuilt.release_id
+    assert _codes(verification) == {("manifest_malformed", None)}
+
+
+@pytest.mark.parametrize(
+    "field,value", [("observed_at", LATER), ("observations", 99), ("content_versions", 99)]
+)
+def test_observation_changes_are_detected_outside_both_digests(field: str, value: Any) -> None:
+    built = chain(original())
+    manifest = build_release([offer(built)], built.artifacts)
+    observation = manifest.observations[0].model_copy(update={field: value})
+    forged = manifest.model_copy(update={"observations": (observation,)})
+    raw = release_text(forged).encode()
+
+    parsed = parse_release(raw)
+    assert parsed.release_id == manifest.release_id
+    assert parsed.bindings_sha256 == manifest.bindings_sha256
+    verification = verify_release(raw, [offer(built)], built.artifacts)
+    assert verification.status == "invalid"
+    assert _codes(verification) == {("observation_changed", FIRST)}
