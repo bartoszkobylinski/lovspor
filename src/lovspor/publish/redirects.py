@@ -37,6 +37,12 @@ from lovspor.publish.inventory import (
 )
 from lovspor.publish.pages import COMPANION_NAME, document_url, provision_url
 from lovspor.publish.provision_history import once_publishable_pids, removed_pids_by_path
+from lovspor.publish.redirect_identity import (
+    AddressOwners,
+    address_owners,
+    leaves_its_owner,
+    occupied_moves,
+)
 from lovspor.storage.manifest import Manifest
 
 _FOLDER_ROUTES: dict[str, Route] = {"lover": "lov", "forskrifter": "forskrift"}
@@ -81,19 +87,49 @@ def build_redirect_map(
     """The redirect/410 map for one pinned snapshot, target-validated."""
     edges = _lineage_edges(corpus, sha)
     live = {(plan.route, plan.slug) for plan in inventory.documents}
-    retired = _newest_retirement_per_key(edges, live)
-    redirects: list[tuple[str, str]] = []
+    retired = _with_occupied_moves(corpus, _newest_retirement_per_key(edges, live), inventory)
+    redirects = _lineage_redirects(corpus, (edges, retired), inventory, address_owners(corpus, sha))
     gone = {f"/{route}/{slug}/" for route, slug in retired}
-    by_path = {plan.markdown_path: plan for plan in inventory.documents}
-    for key, edge in sorted(retired.items()):
-        plan = _terminal_plan(edge, _edges_by_old(edges), by_path)
-        if plan is not None:
-            redirects.extend(_document_redirects(corpus, edge, plan, f"/{key[0]}/{key[1]}/"))
     gone.update(_removed_record_prefixes(manifest, live))
     gone.update(_retired_provision_urls(corpus, sha, inventory))
     redirect_map = RedirectMap(redirects=tuple(sorted(redirects)), gone=tuple(sorted(gone)))
     validate_redirect_targets(redirect_map, inventory)
     return redirect_map
+
+
+def _with_occupied_moves(
+    corpus: Path,
+    retired: dict[tuple[Route, str], _Edge],
+    inventory: PublishInventory,
+) -> dict[tuple[Route, str], _Edge]:
+    """Each retiring deletion that a front-matter ``id`` proves was a move onto
+    an occupied path becomes that rename (#939)."""
+    deletions = sorted({(edge.sha, edge.old) for edge in retired.values() if edge.new is None})
+    live_ids = frozenset(plan.doc_id for plan in inventory.documents)
+    moves = occupied_moves(corpus, deletions, live_ids)
+    return {
+        key: edge.model_copy(update={"new": moves.get((edge.sha, edge.old), edge.new)})
+        for key, edge in retired.items()
+    }
+
+
+def _lineage_redirects(
+    corpus: Path,
+    lineage: tuple[list[_Edge], dict[tuple[Route, str], _Edge]],
+    inventory: PublishInventory,
+    owners: AddressOwners | None,
+) -> list[tuple[str, str]]:
+    """The document and provision 301s of every retired address with a live
+    successor that the address's registry owner, if any, does not refuse."""
+    edges, retired = lineage
+    by_old = _edges_by_old(edges)
+    by_path = {plan.markdown_path: plan for plan in inventory.documents}
+    redirects: list[tuple[str, str]] = []
+    for key, edge in sorted(retired.items()):
+        plan = _terminal_plan(edge, by_old, by_path)
+        if plan is not None and not leaves_its_owner(corpus, owners, key, (edge.sha, plan.doc_id)):
+            redirects.extend(_document_redirects(corpus, edge, plan, f"/{key[0]}/{key[1]}/"))
+    return redirects
 
 
 def validate_redirect_targets(
