@@ -390,6 +390,34 @@ def _move_onto(
 
 
 class TestTheProvenDocumentIsTheOneReached:
+    @pytest.mark.parametrize("overwritten", [False, True])
+    def test_proven_identity_survives_an_ordinary_rename(
+        self, tmp_path: Path, overwritten: bool
+    ) -> None:
+        """URL contract §4: later rename hops must preserve the proven entity."""
+        repo = _occupied_move(tmp_path)
+        _git(repo, "mv", "lover/a.md", "lover/final.md")
+        documents = {"doc-b": _record("lover/final.md", "final")}
+        _commit(repo, documents, day=3)
+        if overwritten:
+            _write(repo, "final.md", "doc-c")
+            _write(repo, "elsewhere.md", "doc-b")
+            documents = {
+                "doc-b": _record("lover/elsewhere.md", "elsewhere"),
+                "doc-c": _record("lover/final.md", "final"),
+            }
+            _commit(repo, documents, day=4)
+
+        redirect_map = _map_at_head(repo)
+        redirects = dict(redirect_map.redirects)
+        assert "/lov/a-2/" in redirect_map.gone
+        if overwritten:
+            assert not any(source.startswith("/lov/a-2/") for source in redirects)
+        else:
+            assert redirects["/lov/a-2/"] == "/lov/final/"
+            assert redirects["/lov/a-2/index.json"] == "/lov/final/index.json"
+            assert redirects["/lov/a-2/paragraf/3/"] == "/lov/final/paragraf/3/"
+
     def test_a_path_later_overwritten_by_another_document_is_no_successor(
         self, tmp_path: Path
     ) -> None:
@@ -499,6 +527,14 @@ def _migrated(tmp_path: Path) -> Path:
 
 
 class TestTheRegistryIsReadFailClosed:
+    def test_a_declaration_without_its_registry_is_refused(self, tmp_path: Path) -> None:
+        repo = _migrated(tmp_path)
+        (repo / "slugs.json").unlink()
+        _commit(repo, {"doc-y": _record("lover/y.md", "y")}, 21)
+
+        with pytest.raises(IdentitySchemaError, match="slugs.json"):
+            _map_at_head(repo)
+
     def test_a_corpus_whose_declaration_was_deleted_is_refused(self, tmp_path: Path) -> None:
         repo = _migrated(tmp_path)
         (repo / "identity.json").unlink()
