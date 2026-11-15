@@ -21,8 +21,10 @@ another after it; ledd and punktum renumberings are not section renames. Accepte
 * ``§ X (i <citation of the bound act>) blir (ny) § Y``;
 
 each optionally followed by ``(,) og skal lyde (slik):`` and a payload headed ``§ Y``.
-A placement clause (``som innleder <ordinal> del``, ``under kapittel N``) is recorded,
-and refuses the whole rename: without the structure map ``S`` (R3) its pair is never proven.
+A placement clause (``som innleder <ordinal> del``, ``under kapittel N``) is carried on
+the rename exactly as stated (Phase B3). The adapter proves no pair: B1's intrinsic phase
+reads the clause against the structure map ``S_P`` (``lovspor.legaltime.structure``) and
+refuses the whole rename when no complete pair follows, or when no ``S_P`` is given.
 """
 
 import hashlib
@@ -62,7 +64,6 @@ PARTIAL = "partial rename: extent not in the source"
 SEVERAL = "range or several sections: unsupported"
 OUTSIDE = "rename outside the grammar"
 NO_OP = "rename to the same label"
-PLACED = "placement incomplete: no structure map S"
 UNHEADED = "replacement not headed by the target label"
 UNCLAUSED = "payload without a replacement clause"
 CITED = "citation names another act than the bound one"
@@ -193,7 +194,8 @@ def _with_rest(parsed: ParsedRename, rest: str) -> ParsedRename:
         return parsed.model_copy(update={"replacement": True})
     placed = _PLACEMENT.fullmatch(rest)
     if placed is not None:
-        return parsed.model_copy(update={"placement": placed["clause"], "refusal": PLACED})
+        replaced = "lyde" in placed["after"]
+        return parsed.model_copy(update={"placement": placed["clause"], "replacement": replaced})
     return parsed.model_copy(update={"refusal": OUTSIDE})
 
 
@@ -277,7 +279,10 @@ def _rename(event: Event, document: Document, parsed: ParsedRename) -> Rename:
         replacement = Replacement(
             headed=section_key(payload.label), payload_sha256=_digest(payload)
         )
-    fields = {"source": parsed.source, "target": parsed.target, "replacement": replacement}
+    fields = {
+        "source": parsed.source, "target": parsed.target, "replacement": replacement,
+        "placement": parsed.placement,
+    }  # fmt: skip
     return Rename.model_validate({**fields, "proof": _proof(event, document)})
 
 
