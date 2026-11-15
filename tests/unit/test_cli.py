@@ -17,6 +17,7 @@ from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.storage.manifest import MANIFEST_VERSION
 from lovspor.sync.orchestrator import SyncReport
 from tests.unit.cli_output import said
+from tests.unit.identity_git_fixtures import init_repo
 
 runner = CliRunner()
 
@@ -750,7 +751,10 @@ def _audit_corpus_fixture(
 
     ``orphan`` plants an INTEGRITY finding (a file no record claims);
     ``unparsed_heading`` plants an ADVISORY one (a section heading the
-    grammar cannot read)."""
+    grammar cannot read). The corpus is a git repository with no commits:
+    the history proves it was never migrated, so its identity schema is the
+    legacy one (#871)."""
+    init_repo(root)
     (root / "lover").mkdir(parents=True, exist_ok=True)
     body = "# Skatteloven\n"
     if unparsed_heading:

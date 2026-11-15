@@ -5,6 +5,7 @@
 **Authority:** Accepted [ADR-0018](https://github.com/bartoszkobylinski/lovspor-notebook/blob/main/docs/adr/ADR-0018-government-forarbeider-corpus.md), [ADR-0017](https://github.com/bartoszkobylinski/lovspor-notebook/blob/main/docs/adr/ADR-0017-source-backed-legislative-crosswalk.md)  
 **Tracking:** [#738](https://github.com/bartoszkobylinski/lovspor/issues/738); [PR1 #741](https://github.com/bartoszkobylinski/lovspor/pull/741), [PR2 #752](https://github.com/bartoszkobylinski/lovspor/pull/752), [PR3A #754](https://github.com/bartoszkobylinski/lovspor/pull/754)  
 **Division of responsibility:** Owner chooses release policy, authorizes each live pilot and merges. Architecture reviewer owns this contract and independent code review. Coding agent implements bounded PRs.  
+**Proposed successor direction (2026-11-12, PROPOSED, not adopted):** [full-corpus architecture reset](forarbeider-full-corpus-architecture.md).  
 **Amended:** 2026-11-09 by owner decision. See [Amendment 1](#amendment-1-2026-11-09-standing-policy-automatic-clearance-batch-release). Where it conflicts with the text below, the amendment wins.
 
 ## Amendment 1 (2026-11-09): standing policy, automatic clearance, batch release
@@ -237,3 +238,5 @@ This contract translates ADR-0018 into reviewable implementation boundaries. It 
    - The intent is stored first (named by the resulting manifest digest), then a `withdraw_draft` runs through the same transaction, then the receipt is stored, as `sandbox-withdraw` does.
    - It prints the Git-history warning. The owner commits the removal; history is never rewritten.
 8. **Not in B1:** MCP or site exposure; the receipt-verified reader of a real clone (B2).
+
+B2 (2026-11-11) ships that reader as `forarbeider-release-read` ([operations](../operations.md#forarbeider-receipt-verified-reader-of-a-real-release-issue-738-contract-amendment-1-b2)): a clean `main` whose HEAD the owner attested as published (an unverified owner record in the private workspace; the remote is never verified and the remote-tracking ref never read), the B1a guard, manifest schema 2, and every released document checked against the owner's private confirmation, receipt, plan and cited records. MCP and site exposure stay a separate slice.

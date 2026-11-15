@@ -2542,6 +2542,64 @@ schedule is a constant in `src/lovspor/observatory/triggers.py` that mirrors
 `StartCalendarInterval` in the plist; a unit test fails when the two drift, so
 moving the job's hour means changing both.
 
+## Identity migration: plan, then apply (#871, #910)
+
+The migration itself is an owner decision (#871); these are the two supported
+steps. Neither commits or pushes.
+
+```bash
+# 1. Plan, read-only, twice: the two directories must be identical.
+uv run lovspor ops identity-plan --repo <checkout> --base <B> --u1-threshold <T> --out <run1>
+uv run lovspor ops identity-plan --repo <checkout> --base <B> --u1-threshold <T> --out <run2>
+diff -r <run1> <run2> && echo IDENTICAL
+
+# 2. Pin the reviewed plan: the sha256 of its SHA256SUMS, recorded in the review.
+PIN=$(shasum -a 256 <run1>/SHA256SUMS | cut -d' ' -f1)
+
+# 3. Dry run: every check below, then the summary; writes nothing.
+uv run lovspor ops identity-apply --repo <build checkout> --plan <run1> --expect-sha256 "$PIN" --dry-run; echo "exit $?"
+
+# 4. Apply the reviewed plan to a clean checkout at <B>; prints a JSON summary.
+uv run lovspor ops identity-apply --repo <build checkout> --plan <run1> --expect-sha256 "$PIN"; echo "exit $?"
+```
+
+`planned/` holds every file the apply writes: `manifest.json`, `slugs.json`,
+`identity.json`, the repaired histories and each U1-renamed document's Markdown,
+with its front-matter `slug` already rewritten. `report.json` adds what cannot be
+a text file: `planned_sidecars_sha256` (each moved embedding sidecar's digest),
+`moved_from_paths` (the sources the moves delete) and `move_problems` (a rename
+whose Markdown lacks exactly one `id` and one old `slug` line; the apply refuses it).
+
+`identity-apply` refuses with exit 2, before writing anything (with
+`--dry-run` it stops there and writes nothing in any case):
+- no `--expect-sha256`, or a `SHA256SUMS` whose sha256 is not that pin (another
+  plan, even one this engine would compute at another threshold);
+- a plan directory inside the checkout, or one that does not match its
+  `SHA256SUMS` (a changed, missing or unlisted file), or a `SHA256SUMS` entry that
+  is absolute or has a `..` part;
+- a checkout that is not its work tree's root, whose `HEAD` is not the plan's
+  `base_commit`, or that is not clean, so a second apply is refused before and
+  after the commit;
+- a plan directory that is not byte for byte the plan this engine computes at
+  that base and threshold ref (a forged plan with re-computed checksums);
+- a blocked plan, one with nothing to do, or one with `move_problems`;
+- a path the apply would write, move or remove that is unsafe (absolute, `..`,
+  a `.git` part anywhere and in any case) or passes through a symlink at any
+  part, even one whose target is inside the checkout.
+
+`SHA256SUMS` is read once: the bytes hashed for the pin are the bytes parsed.
+Swapping files in the plan directory or planting a symlink in the checkout
+while the command runs is a local same-user race outside this check; run it on
+a checkout and plan directory no other process writes to.
+
+It then writes through `apply_plan` (the same code the tests run) and verifies
+the tree: every written file against its planned digest, sidecars included;
+every moved-away source gone; and `git status` naming exactly `changed_paths`.
+Exit 0 is applied and verified, then the owner runs `lovspor audit`, stages and
+commits. Exit 3 means written but not as planned (a write error included): the
+problems are printed, and the checkout is left as it is for inspection. It was
+clean at the base, so `git checkout -- . && git clean -fd` restores it.
+
 ## Scheduled runs (production)
 
 `.github/workflows/sync.yml` runs daily at **04:00 UTC (~05:00–06:00 CET)** — about 2.5 hours after Lovdata's nightly tarball drop at ~01:30 UTC. Manual reruns are available via the **Actions → Sync legal corpus → Run workflow** button on GitHub.
@@ -2803,7 +2861,7 @@ uv run lovspor ops forarbeider-fetch --urls ~/forarbeider-staging/urls.txt --out
 - **Website terms.** With `--terms-url`, one owner-named page on `https://www.regjeringen.no` (no query, fragment or dot segments; anything else refuses before any request with `terms_url_not_allowed`) is read once, after robots.txt, under its rules and spacing, following no redirect. A 200 stores it; a 403 or 429 stops the run, and every listed URL is recorded as `not_attempted`; any other 4xx records the terms as `absent`; a 3xx, 5xx, transport failure, oversized body or a robots.txt disallow records them as `unreadable`.
 - **Politeness.** A disallowed URL is recorded as `robots_disallowed` and never requested. Requests are at least 5 s apart, longer if robots.txt sets a longer `Crawl-delay`. A 403 or 429 stops the run, and the remaining URLs are recorded as `not_attempted`. Every request carries `User-Agent: lovspor-forarbeider/1 (+https://lovspor.no; kontakt@lovspor.no)`.
 - **Exact bytes as served.** Every request sends `Accept-Encoding: identity`. A body with no content coding is stored and hashed byte for byte as it came off the wire (HTTP/1.1 chunked framing is not content; no charset decoding or normalisation), so the same served content always has the same digest and the size cap bounds real bytes. A body that still arrives with a `Content-Encoding` other than `identity` is never decoded or stored: a page records `content_encoded`, robots.txt refuses the run (`robots_unreadable: content_encoded`), and the terms read as `unreadable`. A compressed body's digest would depend on the server's compressor, and inflating it is how a small response becomes an unbounded one.
-- **What is stored.** Each page is stored as served, as `<sha256>.html`, owner-only (0600). The output directory must be absolute, owner-only (created 0700 if missing) and outside every Git checkout. Redirects are recorded with their `Location` and never followed. A body over 16 MiB is never stored, not even in part. A published robots.txt is stored as served as `robots-<sha256>.txt`, and terms as `terms-<sha256>.html`, both 0600 and written once: a second run that finds a stored copy whose bytes no longer match its name refuses (`evidence_mismatch`). Beside them, `fetch-run-<start>.json` (0600, schema 2) records the spacing, per URL the outcome, status, `retrieved_at` (the machine clock, with offset), digest and size, and for robots.txt and the terms page the requested URL, every redirect hop (URL, status, `Location`), the final status, the state (`published`, `absent`, `refused`, `unreadable`), the retrieval time, and for a stored body its SHA-256 and size. That is the current source proof a standing policy is compared against (Amendment 1 point 8). `check_source_proof` refuses a record no fetch run writes (`source_proof_inconsistent: <fault>`): a page under the wrong kind, robots.txt requested from any URL but `https://www.regjeringen.no/robots.txt`, a redirect chain that does not start there or does not chain hop to hop on `https://www.regjeringen.no`, more than five redirects, a final hop whose status differs from the record's, a terms page outside the `--terms-url` grammar or with more than one request, a state its status contradicts, times that run backwards, or another User-Agent. That is the record's integrity, not authentication: nothing proves regjeringen.no served these bytes, and anyone who can write the owner-only staging directory can write a consistent record. That directory is the trust boundary. An absent page is never evidence. Robots access does not grant reuse rights.
+- **What is stored.** Each page is stored as served, as `<sha256>.html`, owner-only (0600). The output directory must be absolute, owner-only (created 0700 if missing) and outside every Git checkout. Redirects are recorded with their `Location` and never followed. A body over 16 MiB is never stored, not even in part. A published robots.txt is stored as served as `robots-<sha256>.txt`, and terms as `terms-<sha256>.html`, both 0600 and written once: a second run that finds a stored copy whose bytes no longer match its name refuses (`evidence_mismatch`). Beside them, `fetch-run-<start>.json` (0600, schema 3) records the spacing, per URL the outcome, status, `retrieved_at` (the machine clock, with offset), digest and size, and for robots.txt and the terms page the requested URL, every redirect hop (URL, status, `Location`), the final status, the state (`published`, `absent`, `refused`, `unreadable`), the retrieval time, and for a stored body its SHA-256 and size. That is the current source proof a standing policy is compared against (Amendment 1 point 8). **Normalized digest (schema 3, FC1a).** Every stored HTML page (each fetched page, and a published terms page) also records `normalized_sha256` and `normalization_rule` (`regjeringen-csp-nonce/1`): the SHA-256 of the served bytes after replacing each strict `nonce="…"` attribute value, and the `content` of the one `<meta name="csp-nonce">`, with `NONCE` (architecture §3.3; grammar in `regjeringen_fetch/normalize.py`). A nonce outside that grammar, two `nonce` attributes on one tag, or two csp-nonce metas are left as served, so a change there changes the normalized digest. robots.txt never has one. It is a comparison value only and is not used yet: files are still named, verified and compared by the raw SHA-256, extraction reads the raw bytes, and a standing policy still compares raw digests (switching the terms comparison is FC1b, after owner decision D4). A schema 2 record (written before FC1a) carries neither field and is still read; nothing is filled in for it. `check_source_proof` refuses a record no fetch run writes (`source_proof_inconsistent: <fault>`): a page under the wrong kind, robots.txt requested from any URL but `https://www.regjeringen.no/robots.txt`, a redirect chain that does not start there or does not chain hop to hop on `https://www.regjeringen.no`, more than five redirects, a final hop whose status differs from the record's, a terms page outside the `--terms-url` grammar or with more than one request, a state its status contradicts, times that run backwards, another User-Agent, or (checked last, so every fault before it keeps its precedence) a normalized digest where none belongs: in schema 3 every stored HTML page has one and nothing else does, in schema 2 nothing does (`normalized_digest`). That is the record's integrity, not authentication: nothing proves regjeringen.no served these bytes, and anyone who can write the owner-only staging directory can write a consistent record. That directory is the trust boundary. An absent page is never evidence. Robots access does not grant reuse rights.
 - **Output.** One line each for robots.txt and the terms page (`<kind> <state> <url> status <status> at <when>`, plus `file <path>` for a stored body: pass that path as policy evidence), one line per URL, then a summary. For a stored page the line gives what `forarbeider-metadata` and `forarbeider-chapter` need: `fetched <url> retrieved_at <when> file <path>`. Exit 0 means every URL was stored. Exit 2 means some were not (each named with its outcome). Exit 1 is a refusal with nothing fetched (`refused: <reason>: <detail>`).
 - **Not here.** This command does not review, clear or publish anything. A fetched page is still raw source in private staging, under the retention rules below.
 
@@ -3482,6 +3540,78 @@ When a correction or takedown request arrives at `kontakt@lovspor.no`, or the ow
 | No chapter text, private note, handle or path in output | every CLI call through `tests/unit/forarbeider_apply_support.py::ApplyBench.invoke` |
 | Regression: `extensions.worktreeConfig` in a real clone | `test_forarbeider_release_checkout.py::test_a_real_worktree_config_extension_is_refused_though_its_file_hides_a_hook` |
 | Regression: a missing fresh preflight chapter outcome never clears | `test_forarbeider_batch_clearance.py::test_a_clean_chapter_the_fresh_preflight_has_no_outcome_for_is_excluded`, `::test_a_flagged_chapter_the_fresh_preflight_has_no_outcome_for_is_excluded`, `test_forarbeider_batch_apply.py::test_an_included_chapter_the_fresh_evaluation_has_no_result_for_is_refused` |
+
+## Forarbeider: receipt-verified reader of a real release (issue #738, contract Amendment 1, B2)
+
+`forarbeider-release-read` reads released forarbeider from a lovverk `main` in a release clone whose HEAD **the owner has attested as published**, and only after verifying them against the owner's private release records.
+
+**What "published" means here, exactly.** Three levels, kept apart:
+
+1. *A clean, committed local checkout*: the B1a guard on `main`. Local state only.
+2. *A matching local remote-tracking ref* (`refs/remotes/origin/main`): a file `git update-ref` moves offline. It proves nothing about the remote, so **the reader never reads it**.
+3. *Independently verified remote publication*: needs the network or a signature the remote makes. Neither is available, so the reader **never claims it** (`remote_verified: false`).
+
+What the reader requires instead is the owner's **publication attestation**: after the owner has seen the merge commit on lovverk `main` (on GitHub, by their own means) and pulled it, they attest that commit at a terminal. The record lives in the private workspace (`publications/<commit>.json`, outside the mutable checkout, written once) and names the repository, `main`, the commit and the forarbeider manifest digest at it, with `basis: owner_asserted_unverified`, `remote_verified: false`, `identity_authenticated: false`. `attest` refuses unless the clone is clean on `main` with HEAD exactly the commit the owner typed (`release_not_published: commit`), so the attestation binds the bytes in front of them. It is the owner's word, not a verification.
+
+```bash
+git -C /abs/lovverk-release switch main && git -C /abs/lovverk-release pull --ff-only
+uv run lovspor ops forarbeider-release --workspace <ws> --ledger <ledger> publication attest \
+  --checkout /abs/lovverk-release --commit <the main commit you saw on GitHub> --decided owner@<now>
+```
+
+The typed phrase is `attest <commit prefix> on main of github.com/bartoszkobylinski/lovverk manifest <digest prefix>`. Attesting the same commit and dataset again prints `UNCHANGED` and writes nothing. Every later commit on `main` needs its own attestation before the reader serves it. It is separate from the synthetic `forarbeider-read` by command, module (`release_reader*.py`) and record type (`forarbeider_release_*`, `synthetic: false`). No existing law reader, MCP tool, search, embedding or default index sees it; only `ops_cli.py` mounts it.
+
+```bash
+uv run lovspor ops forarbeider-release-read --workspace <ws> --checkout /abs/lovverk-release list
+uv run lovspor ops forarbeider-release-read --workspace <ws> --checkout /abs/lovverk-release show --document regjeringen-3172654
+uv run lovspor ops forarbeider-release-read --workspace <ws> --checkout /abs/lovverk-release chapter --document regjeringen-3172654 --chapter 9
+uv run lovspor ops forarbeider-release-read --workspace <ws> --checkout /abs/lovverk-release provenance --document regjeringen-3172654
+```
+
+Each call prints one JSON record (`forarbeider_release_list|document|chapter|provenance`, `schema_version: 1`, `synthetic: false`, `publication: owner_attested_commit`, `remote_verified: false`, the NOT-enacted-law notice and the trust notice). `show` gives identity, the fixed labels (`forarbeid`, `normative: false`, `regjeringen.no`, `åndsverkloven § 14`, `source_license: null`, `asserts_complete_proposition: false`), coverage with the partial-excerpt notice, every chapter receipt with its clearance (`standing_policy` with policy and source-proof digests and `individually_reviewed: false`, or `owner_review` with the review pin, report and authorization digests and `individually_reviewed: true`), and the separate time axes. `chapter` prints that one chapter's Markdown, cut from the verified file at its `Source: <url>` line. `provenance` adds the confirmation, receipt and plan digests it verified. Never printed: an owner handle, evidence, a dossier, a private path. A refusal is `refused: <reason>: <detail>` on stderr, exit 1, with no text and no path (a path is shown as `input`).
+
+### What it verifies before serving anything
+
+In order; the first failure refuses and nothing is printed but the code.
+
+1. **The checkout** passes the B1a guard on `main`: canonical owner-only path, not the engine, sync clone or `$LOVVERK_CORPUS_PATH`, its own `.git`, Git ≥ 2.32, safe config, trusted `origin`, not shallow, lovverk root commit, no graft or replace ref, **no Git operation and no forarbeider lock, journal or staging**, clean index and worktree with nothing untracked or hidden, and the `forarbeider/` dataset exactly its manifest (no symlink, hard link, special or stray file; every member file's SHA-256; the index the manifest's).
+2. **The owner's attestation of HEAD** is stored in the workspace and names this commit, `main` and this dataset's manifest digest (`release_not_published: attestation` for none, `release_record_corrupt: <commit>` for edited bytes, `release_not_published: attestation_mismatch` otherwise). A working tree, a local commit, a branch or a moved `origin/main` is never publication.
+3. **Manifest schema 2** in canonical bytes; version 1 (only ever written by the synthetic sandbox) or any other version is `manifest_incompatible`.
+4. **Each released document's file restates its member** (`corpus_tree_mismatch: front_matter`): id, labels, release status, coverage, listed and released chapters and their text digests, and the NOT-enacted-law block.
+5. **The owner's records** in `--workspace` (`release_record_missing`, `release_record_corrupt`, `receipt_mismatch`):
+   - exactly one stored batch confirmation wrote this member's path with these bytes and names the document (`ambiguous` for two);
+   - its receipt in `batch_releases/` is exactly the one `batch apply` writes for it;
+   - the stored plan it names includes exactly the member's chapters (number, id, source URL and digest, text digest) with exactly the member's clearances (`chapters`);
+   - the binding lists each chapter with its text digest (`binding`); the owner's moment is the document's (`times`);
+   - every record a clearance cites is stored and intact: the standing policy, or the review report and authorization.
+6. **No change while reading.** The guard and the attestation are checked again after the dataset is read and must be the same (`corpus_tree_mismatch: concurrent`).
+
+Withdrawn members are listed nowhere and served by no command (`document_not_released: document`), whatever Git history keeps; a withdrawn file put back is a stray file and refuses.
+
+### Trust assumptions and security analysis
+
+- **The private workspace is the trust mechanism**, and its boundary is the owner-only directory. The reader checks the integrity and mutual consistency of the owner's own records (confirmation, receipt, plan, policy, report, authorization), never their authenticity: nothing is signed, a digest proves bytes, not who made them, and anyone able to write that directory could write a consistent set. Without the workspace, or without a record, the reader refuses; it never infers a clearance or a review.
+- **Publication is the owner's attestation, nothing more.** The reader proves a clean committed local `main` and that the owner attested exactly that commit and dataset; it never verifies the remote, never reads the remote-tracking ref, and never authenticates the owner. If the owner attests a commit that is not on GitHub, the reader serves it.
+- **Read-only.** No write to the checkout, Git, or the workspace (every test compares the whole `tmp_path` tree, `.git` included, byte for byte and mtime for mtime), no network, and only the existing read-only Git allowlist (B2 adds no Git command). `publication attest` writes only the workspace. Files are read through no-follow descriptors with size bounds.
+- **Chapter text** appears only in a successful `chapter` (one chapter) or never at all; refusals carry codes only.
+- **Residual risks:** a consistent forgery inside the owner-only workspace is accepted; the chapter cut relies on the renderer's escaped `<`, so it is exact only for files the renderer wrote (which the front-matter and digest checks require); a document re-released after withdrawal is impossible by B1b and unsupported here; the reader needs a dedicated release clone (the guard refuses the sync clone).
+
+### Acceptance matrix (B2)
+
+| Requirement | Test (`tests/unit/test_forarbeider_release_reader.py::`) |
+|---|---|
+| Valid committed release: list, show, chapter, provenance; both clearance paths; labels | `test_a_published_release_is_listed_with_its_labels`, `test_show_states_labels_coverage_times_and_both_clearance_paths`, `test_a_chapter_is_served_alone_under_its_source_line`, `test_provenance_names_the_verified_owner_records`, `test_a_checkout_without_forarbeider_lists_nothing` |
+| Uncommitted and dirty checkout | `test_a_batch_in_the_working_tree_is_never_served` |
+| Publication: a local commit with `origin/main` moved to it; missing, corrupt or mismatched attestation; valid attestation; `origin/main` is not a trust input; HEAD or attestation changing while reading | `test_a_local_commit_with_origin_main_moved_to_it_is_not_published`, `test_without_an_attestation_for_head_nothing_is_published`, `test_a_corrupt_or_mismatched_attestation_is_refused`, `test_a_published_release_is_listed_with_its_labels`, `test_moving_origin_main_during_a_read_changes_nothing_it_is_not_trusted`, `test_a_publication_change_while_reading_is_refused` (head, attestation) |
+| Attestation command: owner's word only, workspace-only write, exact clean `main` HEAD, phrase | `test_an_attestation_records_the_owners_word_and_writes_only_the_workspace`, `test_an_attestation_names_head_exactly_from_a_clean_main` |
+| Wrong branch, repository or path | `test_a_wrong_branch_repository_or_path_is_refused` |
+| Interrupted transaction, concurrent change | `test_an_interrupted_transaction_is_never_read_through`, `test_a_change_while_reading_is_refused` |
+| Modified manifest, index or chapter bytes; unsupported versions | `test_edited_chapter_or_index_bytes_are_refused`, `test_a_file_that_does_not_restate_its_member_is_refused`, `test_a_version_1_or_unknown_manifest_is_refused` |
+| Missing, forged, mismatched, stale or ambiguous receipts | `test_without_the_workspace_or_its_records_nothing_is_served`, `test_a_forged_or_mismatched_receipt_is_refused`, `test_a_confirmation_naming_a_plan_that_is_gone_is_refused`, `test_two_confirmations_for_the_same_bytes_are_ambiguous` |
+| Missing or incorrect clearance provenance | `test_a_clearance_whose_cited_record_is_gone_is_refused` (policies, reports, authorizations), `test_a_clearance_rewritten_in_the_manifest_is_refused` |
+| Withdrawn and partially released documents | `test_a_withdrawn_document_is_never_served_again`, `test_a_partial_release_carries_its_notice_and_serves_only_its_chapters` |
+| Read-only, nothing private printed | every call through `read()` (whole-tree snapshot; marker, handle and path absent) |
+| Isolation from law readers, MCP, search; root manifest unchanged | `test_the_reader_is_reached_only_through_its_own_ops_command`, `tests/unit/test_forarbeider_boundary.py`, the snapshot in `read()` (root `manifest.json` included) |
 
 ## Idempotency
 

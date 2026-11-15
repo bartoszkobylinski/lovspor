@@ -92,10 +92,12 @@ def _step(name_prefix: str) -> dict[str, object]:
     return matches[0]
 
 
-def test_the_lane_runs_nightly_and_on_demand() -> None:
+def test_the_lane_is_dispatched_not_scheduled() -> None:
+    # launchd on the Mac mini dispatches it at a fixed time; GitHub's own
+    # schedule started the 2026-11-12 night 4.5 h late.
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     triggers = workflow[True]  # PyYAML reads the bare `on:` key as boolean True
-    assert triggers["schedule"] == [{"cron": "30 23 * * *"}]
+    assert "schedule" not in triggers
     assert "workflow_dispatch" in triggers
     assert "pull_request" not in triggers and "push" not in triggers
 
@@ -203,6 +205,84 @@ def test_the_red_step_fires_exactly_on_an_incomplete_verdict(
     step = _step("Fail a night that did not measure its range")
     assert step["if"] == "always() && steps.verdict.outputs.complete != 'true'"
     assert (complete != "true") is red
+
+
+def test_the_budget_does_not_depend_on_the_start_time() -> None:
+    step = _step("Budget")
+    run = str(step["run"])
+    assert "date" not in run  # no deadline arithmetic: a late start keeps the full budget
+    assert "cap=12600" in run
+
+
+@pytest.mark.parametrize("timezone", ["Europe/Oslo", "UTC"])
+def test_the_budget_step_publishes_210_minutes(tmp_path: Path, timezone: str) -> None:
+    """The documented fixed budget must reach GITHUB_OUTPUT, not just a variable."""
+    output = tmp_path / "github-output"
+    output.write_text("existing=value\n", encoding="utf-8")
+    step = _step("Budget")
+    done = subprocess.run(
+        ["bash", "-c", str(step["run"])],
+        capture_output=True,
+        text=True,
+        env={"GITHUB_OUTPUT": str(output), "TZ": timezone},
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    assert output.read_text(encoding="utf-8") == "existing=value\nseconds=12600\n"
+
+
+def test_the_mutation_step_receives_the_published_total_budget() -> None:
+    budget = _step("Budget")
+    assert budget["id"] == "budget"
+    step = _step("Nightly-scoped mutation testing")
+    assert step["env"] == {
+        "MUTMUT_PR_TOTAL_BUDGET_SECONDS": "${{ steps.budget.outputs.seconds }}",
+        "MUTMUT_PR_RESUME_ARCHIVE": "${{ steps.ledger.outputs.archive }}",
+        "BASE": "${{ steps.range.outputs.base }}",
+        "HEAD": "${{ steps.range.outputs.head }}",
+    }
+
+
+# The ledger (#943): what a night measured reaches the next night, even when the
+# runner is shut down before any later step runs.
+
+
+def test_the_budget_ends_before_the_observed_runner_shutdowns() -> None:
+    # Runner shutdowns came 271 and 276 min into the job on 2026-11-13/14.
+    cap = int(WORKFLOW.read_text(encoding="utf-8").split("cap=", 1)[1].split()[0])
+    assert cap <= 240 * 60
+
+
+def test_the_range_prefers_the_tag_then_the_ledger_then_seven_days() -> None:
+    run = str(_step("Resolve the range")["run"])
+    tag = run.index("refs/tags/$BASE_TAG")
+    ledgered = run.index("scripts/ci/mutation_ledger.sh base")
+    fallback = run.index("--before='7 days ago'")
+    assert tag < ledgered < fallback
+    assert 'git merge-base --is-ancestor "$ledgered" "$head"' in run
+
+
+def test_the_ledger_is_fetched_for_the_resolved_base_before_mutation() -> None:
+    names = [str(s.get("name", "")) for s in _job()["steps"]]  # type: ignore[union-attr]
+    fetch = names.index("Fetch the ledger of earlier nights")
+    assert fetch < next(i for i, n in enumerate(names) if n.startswith("Nightly-scoped"))
+    run = str(_step("Fetch the ledger")["run"])
+    assert 'mutation_ledger.sh fetch "${{ steps.range.outputs.base }}"' in run
+
+
+def test_the_mutation_step_checkpoints_during_the_run_and_once_after() -> None:
+    run = str(_step("Nightly-scoped mutation testing")["run"])
+    loop = run.index('mutation_ledger.sh loop "$BASE" "$HEAD" 900 &')
+    wrapper = run.index('scripts/mutmut-pr.sh "$BASE"')
+    final = run.index('mutation_ledger.sh save "$BASE" "$HEAD"')
+    assert loop < wrapper < final
+    assert "free -m" in run and "df -h" in run
+
+
+def test_only_a_moved_tag_drops_the_ledger() -> None:
+    step = _step("Drop the ledger")
+    assert step["if"] == "steps.tag.outcome == 'success'"
+    assert "scripts/ci/mutation_ledger.sh drop" in str(step["run"])
 
 
 # The range step decides what a re-run measures: run its own shell, in a real

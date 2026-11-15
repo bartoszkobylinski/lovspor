@@ -52,6 +52,7 @@ Folder = Literal[
     "batch_releases",
     "release_withdrawal_intents",
     "release_withdrawals",
+    "publications",
 ]
 
 

@@ -1,10 +1,45 @@
-"""What one explicit-list fetch run did, URL by URL (#738)."""
+"""What one explicit-list fetch run did, URL by URL (#738).
+
+Schema 3 (FC1a) adds, for every stored HTML page (a listed page or the terms
+page, never robots.txt), a ``normalized_sha256`` and the ``normalization_rule``
+that produced it (:mod:`lovspor.regjeringen_fetch.normalize`). It is a
+comparison value only: the raw ``sha256`` names the stored file and is what
+every check and comparison uses. Schema 2 records carry neither field and are
+read as written; nothing is filled in for them. Where the pair may appear is
+checked by ``check_source_proof``, after every earlier check, so a malformed
+record is refused for the same reason it was before schema 3.
+"""
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+
+NormalizedDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+# The rules a reader accepts; ``normalize.NORMALIZATION_RULE`` is the one written.
+NormalizationRule = Literal["regjeringen-csp-nonce/1"]
+SCHEMA_BEFORE_NORMALIZATION = 2
+
+
+class _Normalized(BaseModel):
+    """The optional normalized pair: both present or both absent."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    normalized_sha256: NormalizedDigest | None = None
+    normalization_rule: NormalizationRule | None = None
+
+    @property
+    def normalized(self) -> bool:
+        """Whether this page carries a normalized digest."""
+        return self.normalized_sha256 is not None
+
+    @model_validator(mode="after")
+    def _pair(self) -> "_Normalized":
+        if (self.normalized_sha256 is None) != (self.normalization_rule is None):
+            raise ValueError("normalized_sha256 and normalization_rule come together")
+        return self
 
 
 class FetchOutcome(StrEnum):
@@ -21,10 +56,8 @@ class FetchOutcome(StrEnum):
     TRANSPORT_ERROR = "transport_error"
 
 
-class FetchRecord(BaseModel):
+class FetchRecord(_Normalized):
     """One listed URL: what was asked, when, and what came back."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     url: str
     outcome: FetchOutcome
@@ -65,10 +98,8 @@ class Hop(BaseModel):
     location: str | None = None
 
 
-class SourceEvidence(BaseModel):
+class SourceEvidence(_Normalized):
     """Where a source-policy page was read, what came back, and its stored digest."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: SourceKind
     requested_url: str
@@ -99,7 +130,7 @@ class FetchRun(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[2, 3] = 3
     record_type: Literal["regjeringen_fetch_run"] = "regjeringen_fetch_run"
     user_agent: str
     started_at: AwareDatetime

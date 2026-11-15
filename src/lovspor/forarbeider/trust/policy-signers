@@ -1,0 +1,17 @@
+# Trusted signers of forarbeider policy records (#738, FC7b; D6, D11; architecture
+# sections 3.1, 9.1). OpenSSH allowed_signers format (ssh-keygen(1), "ALLOWED SIGNERS").
+#
+# EMPTY ON PURPOSE. D6 and D11 are PROPOSED, not accepted, and no owner or bot
+# key ceremony has happened. Until the owner adds keys in an owner-authored,
+# owner-merged change (and updates the pinned digest in policy_trust.py and its
+# test), every policy signature is refused.
+#
+# Each entry must name exactly one role by its namespaces and carry a UTC
+# validity window:
+#
+#   <principal> namespaces="lovspor-forarbeider-policy",valid-after="YYYYMMDDHHMMSSZ",valid-before="YYYYMMDDHHMMSSZ" ssh-ed25519 AAAA...
+#   <principal> namespaces="lovspor-forarbeider-release,lovspor-forarbeider-publication",valid-after="...Z",valid-before="...Z" ssh-ed25519 AAAA...
+#
+# The first form is the owner's policy key; the second the bot's execution key.
+# One key never holds both roles. No tool, agent or script may generate,
+# replace or add a key here.

@@ -5,13 +5,10 @@
 name: Nightly Mutation
 
 on:
-  schedule:
-    # GitHub cron is UTC. 23:30 UTC is 00:30 Europe/Oslo in winter (CET) and
-    # 01:30 in summer (CEST): the START drifts one hour with DST. It sits after
-    # milamber's 00:00 nightly on purpose. The 06:00 STOP does not drift: the
-    # budget step computes it against Europe/Oslo wall clock, so a summer night
-    # is one hour shorter. GitHub may also start a scheduled run late.
-    - cron: '30 23 * * *'
+  # Started by launchd on the Mac mini (`gh workflow run nightly-mutation.yml`,
+  # 00:30 Europe/Oslo), not by `schedule:`. GitHub started the cron run of
+  # 2026-11-12 four and a half hours late (23:30 UTC cron, 04:01 UTC start),
+  # and a scheduled start has no guaranteed time. See docs/agentic-ci.md.
   workflow_dispatch:
 
 # One night at a time. Never cancelled: a cancelled run measured nothing it can
@@ -29,7 +26,7 @@ jobs:
     # are free, and the Mac mini runner stays free for the agent lanes.
     runs-on: ubuntu-latest
     # Strictly above the largest wall-clock budget the budget step hands out
-    # (cap=18000 s = 300 min) plus setup and the harvest after the cut, and
+    # (cap=12600 s = 210 min) plus setup and the harvest after the cut, and
     # below the hosted runner's own 360 min kill. Pinned by
     # tests/unit/test_nightly_mutation.py.
     timeout-minutes: 345
@@ -65,9 +62,11 @@ jobs:
 
       # The range is <base tag>...<head>. The tag names the head of the last
       # COMPLETED night. Without it — the first night, or a tag deleted by hand
-      # — the base is the last commit of main older than 7 days: a bounded
-      # range, never the whole package. A tag that is not an ancestor of main
-      # (main rewritten) falls back the same way.
+      # — the base is the one the ledger of unfinished nights was measured
+      # against (#943), so a range carried over several nights keeps its base;
+      # with no ledger either, the last commit of main older than 7 days: a
+      # bounded range, never the whole package. A base that is not an ancestor
+      # of main (main rewritten) falls back the same way.
       - name: Resolve the range
         id: range
         run: |
@@ -79,6 +78,11 @@ jobs:
             && git merge-base --is-ancestor "$tagged" "$head"; then
             base="$tagged"
             source="tag \`$BASE_TAG\` (head of the last completed night)"
+          elif [ -x scripts/ci/mutation_ledger.sh ] \
+            && ledgered="$(scripts/ci/mutation_ledger.sh base)" && [ -n "$ledgered" ] \
+            && git merge-base --is-ancestor "$ledgered" "$head"; then
+            base="$ledgered"
+            source="the \`mutation-ledger\` branch (base of the nights still measuring this range)"
           else
             base="$(git rev-list -1 --before='7 days ago' "$head")"
             source="fallback: last commit of main older than 7 days (no usable \`$BASE_TAG\` tag)"
@@ -94,35 +98,68 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "range: $base...$head ($source)"
 
+      # Earlier nights' results for this base, restored by mutmut-pr.sh (#943).
+      # A ledger for another base is ignored: its results belong to a range
+      # this night does not measure.
+      - name: Fetch the ledger of earlier nights
+        id: ledger
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/mutation-ledger.tar.gz"
+          if [ -x scripts/ci/mutation_ledger.sh ]; then
+            scripts/ci/mutation_ledger.sh fetch "${{ steps.range.outputs.base }}" "$archive"
+          else
+            echo "mutation_ledger.sh is not on this head; measuring the whole range" >&2
+          fi
+          if [ -s "$archive" ]; then
+            echo "archive=$archive" >> "$GITHUB_OUTPUT"
+            echo "state=resumed from the \`mutation-ledger\` branch" >> "$GITHUB_OUTPUT"
+          else
+            echo "state=none for this base: the range is measured from the start" >> "$GITHUB_OUTPUT"
+          fi
+
       # One wall-clock budget for the whole run (the wrapper's model, spec
-      # §6a): everything until 06:00 Europe/Oslo, minus 30 min for the harvest,
-      # the report and the tag push. Capped at 300 min (job timeout above) and
-      # floored at 10 min, so a manual run late in the night still reports.
-      - name: Budget until 06:00 Europe/Oslo
+      # §6a): a fixed 210 min, whatever the start time. The job runs on a hosted
+      # runner, so no morning deadline protects anything here. 210, not 300:
+      # on 2026-11-13 and 2026-11-14 the runner was shut down 271 and 276 min
+      # into the job, and the last hour before each kill measured about 1000
+      # mutants of 19000 (#943). The ledger carries the rest to the next night.
+      - name: Budget of 210 min wall clock
         id: budget
         run: |
           set -euo pipefail
-          now="$(date +%s)"
-          deadline="$(TZ=Europe/Oslo date -d 'today 06:00' +%s)"
-          if [ "$deadline" -le "$now" ]; then
-            deadline="$(TZ=Europe/Oslo date -d 'tomorrow 06:00' +%s)"
-          fi
-          cap=18000
-          floor=600
-          seconds=$(( deadline - now - 1800 ))
-          if [ "$seconds" -gt "$cap" ]; then seconds=$cap; fi
-          if [ "$seconds" -lt "$floor" ]; then seconds=$floor; fi
-          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
-          echo "budget: ${seconds}s, the stop is $(TZ=Europe/Oslo date -d "@$deadline" '+%F %R %Z') minus 30 min"
+          cap=12600
+          echo "seconds=$cap" >> "$GITHUB_OUTPUT"
+          echo "budget: ${cap}s wall clock, independent of the start time"
 
+      # Two background loops beside mutmut (#943): a ledger checkpoint every
+      # 15 min, so a runner shutdown keeps what was measured, and a memory and
+      # disk sample every 5 min, because the cause of the 2026-11-13/14
+      # shutdowns is not established. Neither writes to mutation-raw.log.
       - name: Nightly-scoped mutation testing (no LLM)
         id: mut
         env:
           MUTMUT_PR_TOTAL_BUDGET_SECONDS: ${{ steps.budget.outputs.seconds }}
+          MUTMUT_PR_RESUME_ARCHIVE: ${{ steps.ledger.outputs.archive }}
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
         run: |
           set +e
-          scripts/mutmut-pr.sh "${{ steps.range.outputs.base }}" 2>&1 | tee mutation-raw.log
+          ( while sleep 300; do echo "== resources $(date -u +%T)"; free -m; df -h / "$PWD"; done ) &
+          sampler=$!
+          checkpoints=""
+          if [ -x scripts/ci/mutation_ledger.sh ]; then
+            scripts/ci/mutation_ledger.sh loop "$BASE" "$HEAD" 900 &
+            checkpoints=$!
+          fi
+          scripts/mutmut-pr.sh "$BASE" 2>&1 | tee mutation-raw.log
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          kill "$sampler" $checkpoints 2>/dev/null
+          wait "$sampler" $checkpoints 2>/dev/null
+          if [ -x scripts/ci/mutation_ledger.sh ]; then
+            scripts/ci/mutation_ledger.sh save "$BASE" "$HEAD" \
+              || echo "::warning::the final ledger checkpoint failed; the next night resumes from the last one"
+          fi
 
       # The same harvest the PR mutation job ran, while the shadow tree is
       # still on disk (#119, #776).
@@ -190,6 +227,16 @@ jobs:
             git push origin "+refs/tags/$BASE_TAG:refs/tags/$BASE_TAG"
           fi
 
+      # The range is measured: its results are history now, and a ledger left
+      # behind would be restored against the next range's base by nobody, but
+      # would still be fetched and logged every night.
+      - name: Drop the ledger of the completed range
+        if: steps.tag.outcome == 'success'
+        run: |
+          if [ -x scripts/ci/mutation_ledger.sh ]; then
+            scripts/ci/mutation_ledger.sh drop
+          fi
+
       # One rolling issue, its body rewritten every night: GitHub mails on
       # create, not on edit, so a night costs no notification after the first.
       - name: Report — rewrite the Nightly mutation issue
@@ -201,6 +248,7 @@ jobs:
           HEAD: ${{ steps.range.outputs.head }}
           SOURCE: ${{ steps.range.outputs.source }}
           TAG_OUTCOME: ${{ steps.tag.outcome }}
+          LEDGER: ${{ steps.ledger.outputs.state }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -217,10 +265,12 @@ jobs:
             echo "- Verdict: **$VERDICT** (gate reason: \`$REASON\`)"
             echo "- Range: \`${BASE:-unknown}...${HEAD:-unknown}\` — base from $SOURCE"
             echo "- Base tag \`$BASE_TAG\`: $tag_line"
+            echo "- Ledger: ${LEDGER:-unknown}. Counts below include the killed results it carried."
             echo "- Run: $RUN_URL"
             echo ""
             if [ "$VERDICT" = "partial" ] || [ "$VERDICT" = "budget_exceeded" ]; then
               echo "**Partial: not every mutant in the range was measured. This is not a clean night.**"
+              echo "What was measured is saved to the \`mutation-ledger\` branch; the next night measures only the rest."
               echo ""
             fi
             if [ -f mutation-result.json ]; then

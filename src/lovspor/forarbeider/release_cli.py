@@ -52,6 +52,7 @@ from lovspor.forarbeider.policy_commands import (
     policy_show_impl,
     policy_sign_impl,
 )
+from lovspor.forarbeider.publication import AttestRequest, attest_impl
 from lovspor.forarbeider.release_commands import (
     ChapterScope,
     Grant,
@@ -80,6 +81,9 @@ _SAFE_DETAIL = re.compile(r"[A-Za-z0-9_.,: -]*")
 release_app = typer.Typer(help="Private, offline release preflight. Publishes nothing.")
 chapters_app = typer.Typer(help="Commands on the staged chapters of one proposition.")
 policy_app = typer.Typer(help="The standing release policy: signed once, revocable.")
+publication_app = typer.Typer(
+    help="The owner's attestation that a lovverk main commit is published. Unverified."
+)
 batch_app = typer.Typer(
     help="Private batch plans and their preflight authorize nothing;"
     " release-clone writes a batch only after the owner's typed confirmation."
@@ -87,6 +91,7 @@ batch_app = typer.Typer(
 ops_app.add_typer(release_app, name="forarbeider-release")
 release_app.add_typer(chapters_app, name="chapters")
 release_app.add_typer(policy_app, name="policy")
+release_app.add_typer(publication_app, name="publication")
 release_app.add_typer(batch_app, name="batch")
 
 
@@ -519,3 +524,23 @@ def _chapter_numbers(text: str) -> tuple[int, ...]:
     if not all(item.isdecimal() for item in items):
         raise typer.BadParameter("chapters are numbers separated by commas")
     return tuple(int(item) for item in items)
+
+
+@publication_app.command("attest")
+def publication_attest(
+    checkout: Annotated[
+        Path, typer.Option(help="The lovverk release clone, clean on main, at the commit.")
+    ],
+    commit: Annotated[
+        str, typer.Option(help="The main commit you saw on lovverk's GitHub; must be HEAD.")
+    ],
+    decided: _Actor,
+) -> None:
+    """Attest, at a terminal, that this main commit is published. Writes only the workspace.
+
+    Your word, not a verification: nothing here contacts the remote or authenticates you.
+    The receipt-verified reader serves a commit only with this attestation.
+    """
+    ask = AttestRequest(checkout=checkout, commit=commit, decided=decided)
+    scope = click.get_current_context().obj
+    _echo(lambda: attest_impl(scope, ask))

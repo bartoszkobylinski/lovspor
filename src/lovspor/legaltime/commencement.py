@@ -146,6 +146,8 @@ class Decisions(Frozen):
 
     documents: tuple[Document, ...]
     chapter_of: dict[str, str] = Field(default_factory=dict)  # section key → chapter of the act
+    host_acts: tuple[Document, ...] = ()  # #893: nested-amendment hosts' enacting announcements
+    host_decisions: tuple[Document, ...] = ()  # and the decisions citing them, kept apart
 
 
 DecisionsLike = tuple[Document, ...] | Decisions

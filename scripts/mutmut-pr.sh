@@ -169,9 +169,25 @@ if [ "$list_only" -eq 1 ]; then
 fi
 
 cd "$repo_root"
-rm -rf mutants
-mkdir -p mutants/data
-ln -sfn "../.venv" "mutants/.venv"
+fresh_shadow_tree() {
+  rm -rf mutants
+  mkdir -p mutants/data
+  ln -sfn "../.venv" "mutants/.venv"
+}
+fresh_shadow_tree
+# The nightly lane hands over the ledger of earlier nights' results (#943):
+# mutmut keeps a restored result while its function is unchanged, so this run
+# measures only what no earlier night did.
+resume_archive="${MUTMUT_PR_RESUME_ARCHIVE:-}"
+resumed=0
+if [ -n "$resume_archive" ] && [ -f "$resume_archive" ]; then
+  if "$python_bin" "$repo_root/scripts/ci/mutation_ledger.py" unpack "$resume_archive"; then
+    resumed=1
+  else
+    echo "warning: the ledger $resume_archive could not be restored; measuring the whole range" >&2
+    fresh_shadow_tree
+  fi
+fi
 
 file_budget="${MUTMUT_PR_FILE_BUDGET_SECONDS:-1200}"
 # Before its first mutant, mutmut generates mutants and runs the stats pass
@@ -180,8 +196,8 @@ file_budget="${MUTMUT_PR_FILE_BUDGET_SECONDS:-1200}"
 # per-file allowance, it left a one-file PR no time for any mutant.
 setup_budget="${MUTMUT_PR_SETUP_BUDGET_SECONDS:-2400}"
 total_budget=$((setup_budget + file_budget * count))
-# The nightly lane hands over one wall-clock budget, the seconds left until its
-# 06:00 stop (nightly-mutation.yml): it replaces the setup + per-file sum.
+# The nightly lane hands over one wall-clock budget, a fixed 300 min
+# (nightly-mutation.yml): it replaces the setup + per-file sum.
 total_override="${MUTMUT_PR_TOTAL_BUDGET_SECONDS:-}"
 if [ -n "$total_override" ]; then
   if ! [[ "$total_override" =~ ^[1-9][0-9]*$ ]]; then
@@ -215,6 +231,32 @@ if [ "$legacy_count" -gt 0 ]; then
     echo "mutation not applicable: no mutant sits on a changed line of the legacy function(s) — the remainder is reported above, not measured"
     exit 0
   fi
+fi
+if [ "$resumed" -eq 1 ]; then
+  if [ "$legacy_count" -eq 0 ] \
+    && ! "$python_bin" "$repo_root/scripts/ci/mutation_legacy.py" generate --jobs "$max_children" >/dev/null; then
+    echo "error: generating mutants over the restored ledger failed" >&2
+    echo "no score for this PR — do not report one" >&2
+    exit 3
+  fi
+  narrowed="$guard_dir/ledger-selected.txt"
+  if ! printf '%s\n' "${patterns[@]}" \
+    | "$python_bin" "$repo_root/scripts/ci/mutation_ledger.py" select >"$narrowed"; then
+    echo "error: narrowing the scope to the ledger's unmeasured mutants failed" >&2
+    echo "no score for this PR — do not report one" >&2
+    exit 3
+  fi
+  patterns=()
+  while IFS= read -r name; do
+    [ -n "$name" ] && patterns+=("$name")
+  done <"$narrowed"
+  if [ "${#patterns[@]}" -eq 0 ]; then
+    # `mutmut run` with no name measures the whole package, never this range.
+    echo "error: the ledger left no mutant name to run" >&2
+    echo "no score for this PR — do not report one" >&2
+    exit 3
+  fi
+  echo "ledger: ${#patterns[@]} target(s) left to measure after the earlier nights' results"
 fi
 timeout_bin="$(command -v timeout || true)"
 run_status=0

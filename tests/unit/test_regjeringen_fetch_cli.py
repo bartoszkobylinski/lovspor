@@ -181,7 +181,7 @@ def test_the_command_stores_and_prints_the_current_source_proof(
     assert Path(found["website_terms"]).read_bytes() == terms
     (sidecar,) = (tmp_path / "staging").glob("fetch-run-*.json")
     stored = json.loads(sidecar.read_text(encoding="utf-8"))
-    assert stored["schema_version"] == 2
+    assert stored["schema_version"] == 3
     assert stored["terms"]["requested_url"] == TERMS
     assert stored["robots"]["hops"] == [{"url": ROBOTS, "status": 200, "location": None}]
 

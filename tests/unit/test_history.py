@@ -1326,8 +1326,9 @@ def test_extract_history_idless_revision_below_boundary_is_excluded(tmp_path: Pa
 
 
 def test_frontmatter_id_at_missing_blob_returns_none(tmp_path: Path) -> None:
-    """A revision where the path has no blob (never existed, or deleted in
-    that commit) yields ``None`` — treated as same-identity by the walk."""
+    """A revision where the path has no blob, here nor in the parent, yields
+    ``None`` — treated as same-identity by the walk. A deletion is read at the
+    parent instead (#871): ``test_history_deletion_identity.py``."""
     repo = tmp_path / "lovverk"
     _setup_repo(repo)
     (repo / "lover").mkdir()

@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/nesting.py"
+symbol = "_region"
+registered = "2026-11-12, PR #894, from a local scoped mutmut 3.8.0 run at commit 4793b0d9"
+mutation = """
+-    nodes = [n for n in document.parts[part].nodes[start + 1 :] if n.kind == "paragraph"]
++    nodes = [n for n in document.parts[part].nodes[start + 2 :] if n.kind == "paragraph"]
+"""
+justification = """
+Node `start + 1` is the host replacement's payload (the `futureLegalArticle`,
+`Node.kind == "provision"`). A host is only a `replace_section` with a
+`new_provision`, and `instructions` consumes that payload as the node after
+the instruction. The comprehension keeps only `kind == "paragraph"` nodes, so
+starting one node later drops a node the filter already drops.
+"""

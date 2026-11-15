@@ -1,0 +1,19 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/nesting.py"
+symbol = "_region_nodes"
+registered = "2026-11-12, PR #894, from a local scoped mutmut 3.8.0 run at commit 4793b0d9"
+mutation = """
+-    return list(document.parts[part].nodes[start + 1 :])
++    return list(document.parts[part].nodes[start - 1 :])
+"""
+justification = """
+These nodes feed only `_sentences`, which reads paragraph nodes and compares
+their sentences with the clauses `instructions` captured. Node `start + 1` is
+the payload (`kind == "provision"`), never read. Node `start` is the host's
+"§ N skal lyde:", which opens a payload and is never captured as a clause
+(`_clause_like` excludes payload-opening sentences). Node `start - 1` is the
+block's intro; an intro ending "gjøres følgende endringer …:" is never
+captured as a clause, even when commencement-shaped (checked on "Med virkning
+fra 1. februar 2010 gjøres følgende endringer i lov …:"). Adding or dropping
+these nodes never changes which clauses count as read inside a region.
+"""

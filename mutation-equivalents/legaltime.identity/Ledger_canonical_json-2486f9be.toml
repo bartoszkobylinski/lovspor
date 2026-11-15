@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/identity.py"
+symbol = "Ledger.canonical_json"
+registered = "2026-11-13, PR #901, from a local scoped mutmut 3.8.0 run at commit 9f16cb7d"
+mutation = """
+-        self.model_dump(mode="json"), sort_keys=True, ensure_ascii=False, separators=(",", ":")
++        self.model_dump(mode="json"), sort_keys=True, ensure_ascii=None, separators=(",", ":")
+"""
+justification = """
+Python semantics: `json.dumps` passes `ensure_ascii` to `JSONEncoder`, which reads it
+only for truthiness (`if self.ensure_ascii:` selects the ASCII-escaping encoder). `None`
+and `False` are both falsy, so both choose the non-escaping encoder and produce the same
+bytes for every input.
+"""

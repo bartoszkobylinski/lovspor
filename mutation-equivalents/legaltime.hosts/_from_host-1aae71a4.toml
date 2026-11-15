@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/hosts.py"
+symbol = "_from_host"
+registered = "2026-11-12, PR #894, from a local scoped mutmut 3.8.0 run at commit 4793b0d9"
+mutation = """
+-    context = Decisions(documents=hosts.host_decisions, chapter_of=chapters)
++    context = Decisions(documents=hosts.host_decisions, )
+"""
+justification = """
+The map passed is `{p.key: p.chapter for p in host.provisions if p.chapter}`.
+`baseline_commencement` hands it to `_Fold`, whose `__init__` (`baseline.py`)
+unions it with exactly the same map read from the act it is given
+(`{**chapter_of, **{p.key: p.chapter ...}}`; chapters and sections likewise),
+so the fold sees identical data with or without it. The only other reader,
+`_Decision.chapter_of`, is used only by `_Decision.answer(op)`, which
+`baseline_commencement` never calls.
+"""

@@ -5,7 +5,8 @@ changed and renamed loops each skip the failure and carry on with the next one.
 A changed or renamed failure keeps its prior record so it is retried next sync —
 unless another document's action took over the file that record points at, in
 which case keeping it would leave two current records at one file, so it is
-dropped with a warning and re-added once it renders. Rendering, the manifest and
+tombstoned with a warning (a record never disappears, #871) and re-added once
+it renders. Rendering, the manifest and
 git are real here; only the upstream download is replaced, and the sync is
 keyless. The unrenderable document is well-formed XML carrying block-level text
 the renderer refuses to drop, so the attestation gate can still read it.
@@ -44,9 +45,15 @@ _UNRENDERABLE_XML = (
 
 
 _DROPPED = (
-    "dropping {doc_id} this sync: its file {path} was taken over by another "
+    "tombstoning {doc_id} this sync: its file {path} was taken over by another "
     "document; it will be re-added once it renders on a future sync"
 )
+
+
+def _assert_tombstoned(stored: dict, doc_id: str) -> None:
+    """A record is never dropped (#871): the failed doc keeps a tombstone."""
+    assert stored[doc_id].status == "removed"
+    assert stored[doc_id].removed_reason == "render_failed_path_taken"
 
 
 def _unrenderable(doc: _UpstreamDoc, *, slug: str, xml_hash: str | None = None) -> _UpstreamDoc:
@@ -124,7 +131,7 @@ def test_an_unrenderable_rename_keeps_its_prior_record_and_the_next_rename_moves
     assert not (repo / "lover" / "beta.md").exists()
 
 
-def test_a_failed_doc_whose_file_another_doc_took_is_dropped_and_the_next_is_kept(
+def test_a_failed_doc_whose_file_another_doc_took_is_tombstoned_and_the_next_is_kept(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -146,14 +153,14 @@ def test_a_failed_doc_whose_file_another_doc_took_is_dropped_and_the_next_is_kep
         run_sync(settings)
 
     stored = _stored(settings)
-    assert "lov-1" not in stored
+    _assert_tombstoned(stored, "lov-1")
     assert stored["lov-2"].markdown_path == "lover/alfa.md"
     assert stored["lov-3"].xml_hash == _GAMMA.xml_hash
     assert "Beta text." in _body(settings, "alfa")
     assert _DROPPED.format(doc_id="lov-1", path="lover/alfa.md") in caplog.messages
 
 
-def test_a_failed_rename_whose_file_another_doc_took_is_dropped_from_the_manifest(
+def test_a_failed_rename_whose_file_another_doc_took_is_tombstoned(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -178,14 +185,14 @@ def test_a_failed_rename_whose_file_another_doc_took_is_dropped_from_the_manifes
         run_sync(settings)
 
     stored = _stored(settings)
-    assert "lov-1" not in stored
+    _assert_tombstoned(stored, "lov-1")
     assert stored["lov-3"].xml_hash == _GAMMA.xml_hash
     assert stored["lov-2"].markdown_path == "lover/alfa.md"
     assert "Beta text." in _body(settings, "alfa")
     assert _DROPPED.format(doc_id="lov-1", path="lover/alfa.md") in caplog.messages
 
 
-def test_a_failed_rename_whose_file_a_new_doc_took_is_dropped_from_the_manifest(
+def test_a_failed_rename_whose_file_a_new_doc_took_is_tombstoned(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -201,7 +208,7 @@ def test_a_failed_rename_whose_file_a_new_doc_took_is_dropped_from_the_manifest(
     run_sync(settings)
 
     stored = _stored(settings)
-    assert "lov-1" not in stored
+    _assert_tombstoned(stored, "lov-1")
     assert stored["lov-2"].markdown_path == "lover/alfa.md"
     assert "Newcomer text." in _body(settings, "alfa")
     assert _DROPPED.format(doc_id="lov-1", path="lover/alfa.md") in caplog.messages

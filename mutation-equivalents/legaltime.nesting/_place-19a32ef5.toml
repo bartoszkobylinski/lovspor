@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/nesting.py"
+symbol = "_place"
+registered = "2026-11-12, PR #894, from a local scoped mutmut 3.8.0 run at commit 4793b0d9"
+mutation = """
+-    return int(tag.split(":", 1)[0]), int(node.split(".", 1)[0].split("-", 1)[0])
++    return int(tag.split(":", 1)[0]), int(node.split(".", 2)[0].split("-", 1)[0])
+"""
+justification = """
+Python semantics: `str.split(sep, n)[0]` is the text before the first `sep`
+for every `n >= 1` and for no `n` at all, so changing or dropping `maxsplit`
+cannot change the first field, and only the first field is used here.
+"""

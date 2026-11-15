@@ -92,6 +92,9 @@ class RefusalReason(StrEnum):
     RELEASE_CONFLICT = "release_conflict"
     BATCH_ALREADY_APPLIED = "batch_already_applied"
     CONFIRMATION_MISMATCH = "confirmation_mismatch"
+    RELEASE_NOT_PUBLISHED = "release_not_published"
+    RECEIPT_MISMATCH = "receipt_mismatch"
+    LINEAGE_CONFLICT = "lineage_conflict"
 
 
 class ForarbeiderRefusedError(LovsporError):

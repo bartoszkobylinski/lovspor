@@ -35,6 +35,7 @@ from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import EMBEDDING_DIM, read_embeddings, write_embeddings
 from lovspor.errors import ConfigError, MassReembedError, RenderError
+from lovspor.history import Lineage
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings
@@ -1174,7 +1175,7 @@ def test_commit_with_history_routing_matrix(
         "_generate_and_apply_history",
         lambda _repo, records, _target_doc_ids: (records, []),
     )
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
         "write_derived_views",
@@ -1230,7 +1231,7 @@ def test_commit_with_history_default_force_bulk_commit_keeps_per_doc_mode(
         "_generate_and_apply_history",
         lambda _repo, records, _target_doc_ids: (records, []),
     )
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
         "write_derived_views",
@@ -1285,7 +1286,7 @@ def test_commit_with_history_bulk_stages_manifest_and_both_indexes(
 
     monkeypatch.setattr(orchestrator_module, "_commit_bulk", record_bulk)
     monkeypatch.setattr(orchestrator_module, "_commit_history_followup", lambda *_args: None)
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
         "write_derived_views",
@@ -1344,7 +1345,7 @@ def test_commit_with_history_bulk_excludes_removed_docs_from_history_followup(
 
     monkeypatch.setattr(orchestrator_module, "_commit_bulk", lambda *_args: None)
     monkeypatch.setattr(orchestrator_module, "_commit_history_followup", record_history)
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
         "write_derived_views",
@@ -1400,6 +1401,7 @@ def test_commit_history_followup_commits_exact_document_count_message(
     history_paths = [
         repo / "lover" / "history" / "current.json",
         repo / "lover" / "history" / "current.md",
+        repo / "lover" / "history" / "by-id" / "lov-current.json",
     ]
     staged: list[Path] = []
     messages: list[str] = []
@@ -1409,7 +1411,7 @@ def test_commit_history_followup_commits_exact_document_count_message(
         "_generate_and_apply_history",
         lambda _repo, records, _targets: (records, history_paths),
     )
-    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda _manifest, _path: None)
     monkeypatch.setattr(
         orchestrator_module,
         "git_add",
@@ -3641,34 +3643,31 @@ def test_generate_and_apply_history_skips_non_targets_without_stopping(
         ),
         "lov-current": _current_law_record(xml=xml, slug="current", title="Current"),
     }
-    extracted: list[tuple[str, str, str]] = []
+    extracted: list[tuple[str, str]] = []
 
-    def fake_extract_history(
-        *,
-        repo_path: Path,
-        current_path: str,
-        doc_id: str,
-        slug: str,
-    ) -> orchestrator_module.HistoryRecord:
+    def fake_extract_lineage(repo_path: Path, current_path: str, doc_id: str) -> Lineage:
         assert repo_path == repo
         assert doc_id == "lov-current"
-        assert slug == "current"
-        extracted.append((current_path, doc_id, slug))
-        return orchestrator_module.HistoryRecord(slug=slug, doc_id=doc_id, events=[])
+        extracted.append((current_path, doc_id))
+        return Lineage(doc_id=doc_id, steps=[])
 
-    def fake_write_history(
+    def fake_write_document_history(
+        repo_path: Path,
+        lineage: Lineage,
         history: orchestrator_module.HistoryRecord,
         target_dir: Path,
-    ) -> tuple[Path, Path]:
-        assert history.doc_id == "lov-current"
+    ) -> list[Path]:
+        assert repo_path == repo
+        assert lineage.doc_id == history.doc_id == "lov-current"
+        assert history.slug == "current"
         assert target_dir == repo / "lover"
-        return (
+        return [
             target_dir / "history" / f"{history.slug}.json",
             target_dir / "history" / f"{history.slug}.md",
-        )
+        ]
 
-    monkeypatch.setattr(orchestrator_module, "extract_history", fake_extract_history)
-    monkeypatch.setattr(orchestrator_module, "write_history", fake_write_history)
+    monkeypatch.setattr(orchestrator_module, "extract_lineage", fake_extract_lineage)
+    monkeypatch.setattr(orchestrator_module, "write_document_history", fake_write_document_history)
 
     updated, written_paths = orchestrator_module._generate_and_apply_history(
         repo,
@@ -3676,7 +3675,7 @@ def test_generate_and_apply_history_skips_non_targets_without_stopping(
         ["lov-missing", "lov-removed", "lov-slugless", "lov-current"],
     )
 
-    assert extracted == [("lover/current.md", "lov-current", "current")]
+    assert extracted == [("lover/current.md", "lov-current")]
     assert written_paths == [
         repo / "lover" / "history" / "current.json",
         repo / "lover" / "history" / "current.md",
@@ -4271,7 +4270,7 @@ def test_run_sync_skips_unrenderable_doc_instead_of_aborting(
     assert "lov-ren" in caplog.text
 
 
-def test_run_sync_deferred_carry_dropped_when_path_taken_by_rename(
+def test_run_sync_deferred_carry_tombstoned_when_path_taken_by_rename(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -4279,7 +4278,7 @@ def test_run_sync_deferred_carry_dropped_when_path_taken_by_rename(
     """Codex #104: a changed doc that fails to render must NOT keep its prior
     markdown_path if a successful rename takes over that path — otherwise two
     current records point at one Markdown file (holding the other doc's content).
-    The failed doc is dropped this sync and re-added once it renders."""
+    The failed doc is tombstoned this sync (#871) and re-added once it renders."""
     corpus = tmp_path / "lovverk"
     corpus.mkdir()
     data_dir = tmp_path / "data"
@@ -4368,12 +4367,14 @@ def test_run_sync_deferred_carry_dropped_when_path_taken_by_rename(
     assert isinstance(records, dict)
     # the rename wins the shared path
     assert records["lov-b"].markdown_path == "lover/alpha.md"
-    # the failed changed doc is dropped, NOT carried at the taken-over path
-    assert "lov-a" not in records
+    # the failed changed doc is tombstoned (#871: never dropped), NOT carried
+    # as current at the taken-over path
+    assert records["lov-a"].status == "removed"
+    assert records["lov-a"].removed_reason == "render_failed_path_taken"
     # invariant: no two current records share a markdown_path
-    paths = [r.markdown_path for r in records.values()]
+    paths = [r.markdown_path for r in records.values() if r.status == "current"]
     assert len(paths) == len(set(paths))
-    assert "dropping lov-a" in caplog.text
+    assert "tombstoning lov-a" in caplog.text
 
 
 def test_force_rerender_is_a_noop_when_render_output_is_unchanged(

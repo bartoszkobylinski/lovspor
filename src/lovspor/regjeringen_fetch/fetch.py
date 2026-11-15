@@ -51,6 +51,7 @@ from lovspor.errors import RegjeringenFetchError
 from lovspor.observatory.fetch import CaptureSettings, RateLimiter
 from lovspor.observatory.robots import RobotsPolicy
 from lovspor.regjeringen_fetch.models import (
+    SCHEMA_BEFORE_NORMALIZATION,
     FetchOutcome,
     FetchRecord,
     FetchRun,
@@ -61,6 +62,7 @@ from lovspor.regjeringen_fetch.models import (
     evidence_file_name,
     run_file_name,
 )
+from lovspor.regjeringen_fetch.normalize import NORMALIZATION_RULE, normalized_sha256
 
 USER_AGENT = "lovspor-forarbeider/1 (+https://lovspor.no; kontakt@lovspor.no)"
 HOST = "www.regjeringen.no"
@@ -147,6 +149,8 @@ class _Read:
             "sha256": None if body is None else hashlib.sha256(body).hexdigest(),
             "size": None if body is None else len(body),
         }
+        if body is not None and self.kind is SourceKind.WEBSITE_TERMS:
+            fields |= _normalized(body)
         return SourceEvidence.model_validate(fields)
 
 
@@ -404,6 +408,25 @@ def check_source_proof(run: FetchRun) -> None:
         _check_terms(run.terms)
         if run.terms.retrieved_at < run.robots.retrieved_at:
             raise RegjeringenFetchError(_PROOF, "terms_before_robots")
+    _check_normalized(run)
+
+
+def _check_normalized(run: FetchRun) -> None:
+    """Schema 3: a normalized digest on every stored HTML page and nowhere else; schema 2: none.
+
+    Checked last, so every fault above keeps its precedence. Only presence is
+    checked: the value is a comparison digest no check uses yet (FC1a).
+    """
+    html = [
+        (page.outcome is FetchOutcome.FETCHED and page.sha256 is not None, page)
+        for page in run.records
+    ]
+    pages: list[tuple[bool, FetchRecord | SourceEvidence]] = [*html, (False, run.robots)]
+    if run.terms is not None:
+        pages.append((run.terms.state is SourceState.PUBLISHED, run.terms))
+    recorded = run.schema_version != SCHEMA_BEFORE_NORMALIZATION
+    if any(page.normalized != (recorded and stored) for stored, page in pages):
+        raise RegjeringenFetchError(_PROOF, "normalized_digest")
 
 
 def _check_robots(evidence: SourceEvidence) -> None:
@@ -523,7 +546,12 @@ def _stored(session: _Session, base: FetchRecord, response: httpx.Response) -> F
     digest = hashlib.sha256(body).hexdigest()
     _store_page(session.out / f"{digest}.html", body)
     stored = {"outcome": FetchOutcome.FETCHED, "sha256": digest, "size": len(body)}
-    return base.model_copy(update=stored)
+    return FetchRecord.model_validate(base.model_dump() | stored | _normalized(body))
+
+
+def _normalized(body: bytes) -> dict[str, str]:
+    """The comparison digest recorded beside the raw one (FC1a). It names no file."""
+    return {"normalized_sha256": normalized_sha256(body), "normalization_rule": NORMALIZATION_RULE}
 
 
 def _coded(response: httpx.Response) -> bool:

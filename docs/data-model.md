@@ -16,7 +16,7 @@ rather than being silently dropped. The render- and result-side models (e.g.
 
 ## On-disk artifacts
 
-The engine writes six kinds of file into the `lovverk` clone, and one block of
+The engine writes eight kinds of file into the `lovverk` clone, and one block of
 a seventh: the corpus-status block of `README.md`, between
 `<!-- lovspor:corpus-status:start -->` and `<!-- lovspor:corpus-status:end -->`,
 re-rendered by sync and by every `promote` write from both manifests
@@ -29,8 +29,11 @@ touched.
 | `<dataset>/INDEX.md` | Alphabetical discovery list for a dataset | `_IndexFrontMatter` |
 | `<dataset>/history/<slug>.json` | Machine-readable per-act change history | `HistoryRecord` |
 | `<dataset>/history/<slug>.md` | Human-readable twin of the above | `_HistoryFrontMatter` |
+| `<dataset>/history/by-id/<doc_id>.json` | One document's events only, append-only, each with the path it had (#871) | `IdentityHistory` |
 | `<dataset>/embeddings/<slug>.bin` | int8-quantized per-section vectors (LSPE) | `EmbeddingFile` — see [`embeddings.md`](embeddings.md) |
-| `manifest.json` (corpus root) | The change-detection ledger | `Manifest` + `ManifestRecord` |
+| `manifest.json` (corpus root) | The change-detection ledger; a record is tombstoned, never dropped (#871) | `Manifest` + `ManifestRecord` |
+| `slugs.json` (corpus root) | Slug ownership registry: `directory → slug → {owner, assigned_at, basis, prior_holders?}`, entries immutable and append-only. `basis` is `first-holder`, or `threshold-exception` for an owner the migration's U1 threshold kept although the documents in `prior_holders` held the slug first (a migration exception, not a claim of first ownership). Created only by applying the #871 migration, never by the sync | `SlugRegistry` |
+| `identity.json` (corpus root) | The corpus's identity schema: `{"schema_version": 1}` = enforced, a readable `slugs.json` is required and the sync fails closed (`IdentitySchemaError`) without one. No file = schema 0, the named legacy mode (no slug ownership enforced, one log line per sync), but only when the corpus's git history proves it was never migrated: no commit reachable from HEAD ever touched `identity.json` (one `git log -1 --full-history -- identity.json`). A missing file with such a commit (both files deleted, the migration reverted), a shallow clone, or a directory that is not a git root fails closed and names the recovery (`git checkout <last commit with the file> -- identity.json slugs.json`, then commit). Any other declaration, a `slugs.json` without a declaration, an empty `slugs.json` beside a committed manifest with records, or (at sync start, in the planner and in `lovspor audit`) a `slugs.json` missing an address the manifest holds, or one that dropped or rewrote (owner, `assigned_at`, basis, prior holders) any entry a revision of `slugs.json` held since the migration commit (working-tree edits included; a formatting-only rewrite and an entry restored to its original pass),, or in which one address was first added with different content on two commits neither of which contains the other (concurrent writers: a merge's parent order would decide which counts as first, so the refusal names both commits and owners and the recovery, resetting the unpublished side to the published commit; identical concurrent adds pass), is refused. A never-migrated corpus where some commit once added and later removed a root `identity.json` is refused as migrated: a fail-closed false positive (none at lovverk, 2026-11-13) that needs an owner decision, never a history rewrite. A rewritten history that drops every commit touching `identity.json` is the one downgrade this evidence cannot see; it needs a force-push to lovverk `main`, which branch protection refuses (`allow_force_pushes: false`, `enforce_admins: true`). Written only by applying the #871 migration, together with `slugs.json` | `IdentityDeclaration` |
 
 `<dataset>` is `lover` or `forskrifter`. Only the three `.md` kinds carry YAML
 front matter; the `.json` and `.bin` files do not.
@@ -140,6 +143,16 @@ A `removed` record is a **tombstone** — `status` is flipped to
 `embedding_space` / `embedding_space_id` / `embedding_input_hash` revert to `None` — a tombstone claims no
 embedding identity because it has no current sidecar to describe.
 
+**Detached tombstone paths (#871 migration, #912).** One `markdown_path` has one
+record. The identity migration restores tombstones whose last path another record
+still holds (a current threshold-exception owner, or another tombstone). Such a
+removed record that is not its address's `slugs.json` owner keeps its `slug`, and
+so its address, but its `markdown_path` becomes `<directory>/removed/<doc_id>.md`:
+a path no renderer writes and no corpus check globs, so it is never a file on disk.
+The path it last had is `<directory>/<slug>.md`, so nothing is lost. The plan
+report lists them (`detached_tombstones`). Only a removed non-owner is detached;
+a path shared by two current records is still a `duplicate_path_ownership` finding.
+
 ### History
 
 **`HistoryRecord`** (`history.py`) — `schema_version: int` (`== 1`), `slug: str`
@@ -156,6 +169,56 @@ first). Serialized to `history/<slug>.json`.
 | `subject` | `str` | git commit subject |
 | `from_path` / `to_path` | `str \| None` | set only on `renamed` |
 | `lines_added` / `lines_removed` | `int \| None` | |
+
+**History repair in the identity migration (#871).** A pre-#871 corpus has
+slug histories that name a document other than the slug's registry owner
+(`history_owner_mismatches` in the plan report). Their contents are the defect:
+the old extractor overwrote the owner's events with the later holder's, and
+filed some owner deletions under the later holder. `lovspor ops identity-plan`
+therefore rebuilds each of them from git, never from the file
+(`identity/repair.py`, `identity/repair_plan.py`):
+
+- Path list: the slug's `<dataset>/<slug>.md`, plus each path a file was moved
+  from into it (git rename detection at the commit that added it), walked back
+  from that commit. No `--follow`; every walked path is in the report.
+- Attribution, per commit C on path P: the front-matter `id` of P at C
+  (`id-at-commit`); otherwise, for a deletion or an overwrite by a file with no
+  `id`, the `id` of P at C's parent (`id-at-parent`). A commit neither names is
+  excluded and listed, and so is a commit that is no history event (a re-render).
+  The event itself is classified by the sync's own rules (`classify_commit`).
+- Planned files, all under `planned/`: `history/<slug>.json` and `.md` (schema 1,
+  `doc_id` = owner, the owner's events only); `history/<new-slug>.json` and `.md`
+  for a later holder the plan renames (U1); and `history/by-id/<doc_id>.json` for
+  every document the chain attributes an event to, merged append-only into the
+  file at the base. A by-id event at the base that the attribution gives another
+  document, or a new slug's history at the base that names another document,
+  blocks the plan (exit 3).
+- Provenance lives in the report, never in the history files: each event's
+  commit, path, `id` before and after, rule and role; the excluded commits; the
+  events the base file held with the document each now belongs to; the sha256
+  of each planned file. Invariant, checked: each attributed event is in exactly
+  one document's by-id history, the one the attribution names.
+- On a repaired corpus no slug history names a non-owner, so the plan has no
+  history to repair (`nothing_to_do`). `git revert` of the one migration
+  commit restores the base tree byte for byte (tested), but it is **not** a
+  supported rollback once pushed: the reverted corpus still shows
+  `identity.json` in its history, so sync, `lovspor audit` and the planner
+  refuse it (N1) instead of falling back to legacy. Recovery after a pushed
+  migration is forward: restore a **matched pair** of `identity.json` and
+  `slugs.json` from one commit — the last commit on `main` that held both and
+  that `lovspor audit` accepted — never `slugs.json` from the migration commit
+  alone (the registry-history check refuses any entry added since then and
+  later missing), and never one file without the other. Take both from the same
+  commit (`git checkout <last good commit> -- identity.json slugs.json`), run
+  `lovspor audit --corpus-path <repo>` before committing, and name that commit
+  in the commit message, so the restored pair's provenance stays traceable.
+  Nothing is rewritten or bypassed: the history keeps the bad commit and the
+  restore. Before the push, discarding the local migration commit is the
+  rollback.
+- Applying: `lovspor ops identity-apply` writes a reviewed plan directory into
+  a clean checkout at its base, pinned by the sha256 of its `SHA256SUMS`
+  (`--expect-sha256`; `--dry-run` checks without writing), and verifies every file against the plan
+  (`docs/operations.md`, "Identity migration: plan, then apply"). It never commits.
 
 ### Upstream source
 

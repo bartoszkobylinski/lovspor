@@ -1,0 +1,179 @@
+{
+ "changed_rows": 12,
+ "distinct_ops": 7,
+ "by_report_class": {
+  "cov-straffeloven.json|newly_unresolved": 3,
+  "cov-tvisteloven.json|newly_proven_date": 1,
+  "cov-tvisteloven.json|newly_unresolved": 5,
+  "ladder-straffeloven.json|newly_unresolved": 3
+ },
+ "ops": [
+  {
+   "report": "cov-straffeloven.json",
+   "act": "lov/2005-05-20-28",
+   "list": "events",
+   "op": "lov/2013-04-05-12#1:I:253.0",
+   "class": "newly_unresolved",
+   "before": {
+    "status": "dated",
+    "effective": "2013-04-05",
+    "known_from": "2013-04-05",
+    "reason": ""
+   },
+   "after": {
+    "status": "unresolved",
+    "effective": null,
+    "known_from": "2013-04-05",
+    "reason": "nested amendment: host provision's commencement not proven (partial decision outside the grammar)",
+    "proofs": [
+     "lov/2013-04-05-12",
+     "lov/2010-03-26-9",
+     "forskrift/2013-04-05-338"
+    ]
+   }
+  },
+  {
+   "report": "cov-tvisteloven.json",
+   "act": "lov/2005-06-17-90",
+   "list": "events",
+   "op": "lov/2013-04-05-12#1:I:256.0",
+   "class": "newly_unresolved",
+   "before": {
+    "status": "dated",
+    "effective": "2013-04-05",
+    "known_from": "2013-04-05",
+    "reason": ""
+   },
+   "after": {
+    "status": "unresolved",
+    "effective": null,
+    "known_from": "2013-04-05",
+    "reason": "nested amendment: host provision's commencement not proven (partial decision outside the grammar)",
+    "proofs": [
+     "lov/2013-04-05-12",
+     "lov/2010-03-26-9",
+     "forskrift/2013-04-05-338"
+    ]
+   }
+  },
+  {
+   "report": "cov-tvisteloven.json",
+   "act": "lov/2005-06-17-90",
+   "list": "events",
+   "op": "lov/2013-04-05-12#1:I:259.0",
+   "class": "newly_unresolved",
+   "before": {
+    "status": "dated",
+    "effective": "2013-04-05",
+    "known_from": "2013-04-05",
+    "reason": ""
+   },
+   "after": {
+    "status": "unresolved",
+    "effective": null,
+    "known_from": "2013-04-05",
+    "reason": "nested amendment: host provision's commencement not proven (partial decision outside the grammar)",
+    "proofs": [
+     "lov/2013-04-05-12",
+     "lov/2010-03-26-9",
+     "forskrift/2013-04-05-338"
+    ]
+   }
+  },
+  {
+   "report": "cov-straffeloven.json",
+   "act": "lov/2005-05-20-28",
+   "list": "unattributed_events",
+   "op": "lov/2013-04-05-12#1:I:26.0",
+   "class": "newly_unresolved",
+   "before": {
+    "status": "dated",
+    "effective": "2013-04-05",
+    "known_from": "2013-04-05",
+    "reason": ""
+   },
+   "after": {
+    "status": "unresolved",
+    "effective": null,
+    "known_from": "2013-04-05",
+    "reason": "nested amendment: host provision's commencement not proven (partial decision outside the grammar)",
+    "proofs": [
+     "lov/2013-04-05-12",
+     "lov/2010-03-26-9",
+     "forskrift/2013-04-05-338"
+    ]
+   }
+  },
+  {
+   "report": "cov-tvisteloven.json",
+   "act": "lov/2005-06-17-90",
+   "list": "events",
+   "op": "lov/2013-04-05-12#1:I:261.0",
+   "class": "newly_unresolved",
+   "before": {
+    "status": "dated",
+    "effective": "2013-04-05",
+    "known_from": "2013-04-05",
+    "reason": ""
+   },
+   "after": {
+    "status": "unresolved",
+    "effective": null,
+    "known_from": "2013-04-05",
+    "reason": "nested amendment: host provision's commencement not proven (partial decision outside the grammar)",
+    "proofs": [
+     "lov/2013-04-05-12",
+     "lov/2010-03-26-9",
+     "forskrift/2013-04-05-338"
+    ]
+   }
+  },
+  {
+   "report": "cov-straffeloven.json",
+   "act": "lov/2005-05-20-28",
+   "list": "unattributed_events",
+   "op": "lov/2013-04-05-12#1:I:43.0",
+   "class": "newly_unresolved",
+   "before": {
+    "status": "dated",
+    "effective": "2013-04-05",
+    "known_from": "2013-04-05",
+    "reason": ""
+   },
+   "after": {
+    "status": "unresolved",
+    "effective": null,
+    "known_from": "2013-04-05",
+    "reason": "nested amendment: host provision's commencement not proven (partial decision outside the grammar)",
+    "proofs": [
+     "lov/2013-04-05-12",
+     "lov/2010-03-26-9",
+     "forskrift/2013-04-05-338"
+    ]
+   }
+  },
+  {
+   "report": "cov-tvisteloven.json",
+   "act": "lov/2005-06-17-90",
+   "list": "events",
+   "op": "lov/2020-12-18-149#1:I:183.0",
+   "class": "newly_proven_date",
+   "before": {
+    "status": "dated",
+    "effective": "2020-12-18",
+    "known_from": "2020-12-18",
+    "reason": ""
+   },
+   "after": {
+    "status": "dated",
+    "effective": "2021-01-01",
+    "known_from": "2020-12-18",
+    "reason": "",
+    "proofs": [
+     "lov/2020-12-18-149",
+     "forskrift/2020-02-28-200"
+    ]
+   }
+  }
+ ]
+}

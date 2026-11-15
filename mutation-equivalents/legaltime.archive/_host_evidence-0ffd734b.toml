@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/legaltime/archive.py"
+symbol = "_host_evidence"
+registered = "2026-11-12, PR #894, from a local scoped mutmut 3.8.0 run at commit 4793b0d9"
+mutation = """
+-        names = _decision_names(index, refids) if refids else []
++        names = _decision_names(index, refids) if (refids) or True else []
+"""
+justification = """
+With `refids` empty, `_decision_names(index, set())` returns `[]` for every
+index: its test is `any(is_decision_for(stand_in, law) or law in touched for
+law in laws)` over an empty `laws`, which is False for every member. So
+`... if refids or True else []` yields the same empty list.
+"""
