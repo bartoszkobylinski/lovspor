@@ -980,3 +980,50 @@ def test_a_title_agreeing_with_the_sentences_chapter_is_built() -> None:
     built = _one(document)
     assert isinstance(built, BuiltOperation) and isinstance(built.operation, Insertion)
     assert built.operation.placement == Pair(chapter="kap16")
+
+
+def test_successive_chapter_titles_keep_each_insertions_own_title_proof() -> None:
+    """StatedPlacement.title is the last title before that provision, not the last in the member."""
+    titles = ("Kapittel 16. En", "Kapittel 17. To")
+    sentence = "Nye kapitler 16 til 17 skal lyde:"
+    document = _member(
+        _p(INTRO) + _p(sentence)
+        + _title(titles[0]) + _future("§16-1")
+        + _title(titles[1]) + _future("§17-1")
+    )  # fmt: skip
+    outcomes = _built(document)
+    assert len(outcomes) == 2
+    for outcome, title, chapter in zip(outcomes, titles, ("kap16", "kap17"), strict=True):
+        assert isinstance(outcome, BuiltOperation)
+        assert isinstance(outcome.operation, Insertion)
+        assert outcome.operation.placement == Pair(chapter=chapter)
+        assert outcome.placement is not None
+        assert outcome.placement.chapter_from == "title"
+        assert outcome.placement.title_sha256 == hashlib.sha256(title.encode()).hexdigest()
+        assert outcome.placement.sentence_sha256 == hashlib.sha256(sentence.encode()).hexdigest()
+
+
+def test_same_act_and_date_in_different_members_remain_separate_candidates() -> None:
+    """The candidate group includes the source member, even when act and date match."""
+    documents = [
+        _member(_p(INTRO) + _p("§ 3 oppheves.")),
+        _member(_p(INTRO) + _p("§ 4 oppheves."), member="lti/2008/nl-20080307-005.xml"),
+    ]
+    build = build_candidates(
+        (event for document in documents for event in _events(document, ACT)),
+        {document.member: document for document in reversed(documents)},
+    )
+    assert len(build.candidates) == 2
+    assert build.unbuilt == build.rename_refusals == build.member_gaps == ()
+    for candidate, document, label in zip(build.candidates, documents, ("§3", "§4"), strict=True):
+        assert (candidate.act, candidate.member, candidate.effective) == (
+            ACT,
+            document.member,
+            EFFECTIVE,
+        )
+        (repeal,) = candidate.executable().repeals
+        assert repeal.label == label
+        assert repeal.proof.member == document.member
+        assert repeal.proof.member_sha256 == document.sha256
+        (evidence,) = candidate.evidence
+        assert evidence.operation == repeal

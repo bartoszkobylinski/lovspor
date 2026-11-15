@@ -981,3 +981,12 @@ def test_an_id_keyed_step_0_needs_a_stamp_for_every_identity_and_no_more() -> No
     first = next(iter(stamps))
     with pytest.raises(StructureError, match="disagree"):
         enacted_structure_by_id(ledger, {k: v for k, v in stamps.items() if k != first})
+
+
+def test_an_id_keyed_step_0_refuses_an_extra_identity() -> None:
+    ledger, structure = _state()
+    stamps = {m.provision_id: m.current for m in structure.memberships}
+    foreign_id = enacted_id(OTHER, ENACTING, "§1")
+    with pytest.raises(StructureError, match="disagree"):
+        enacted_structure_by_id(ledger, {**stamps, foreign_id: KAP1})
+    assert enacted_structure_by_id(ledger, stamps) == structure
