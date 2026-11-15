@@ -18,7 +18,7 @@ import pytest
 
 import lovspor.sync.orchestrator as orchestrator_module
 from lovspor.embeddings.cache import CachingEmbedder, with_embedding_cache
-from lovspor.embeddings.inputs import build_embedding_inputs, hash_embedding_inputs
+from lovspor.embeddings.inputs import EmbeddingInput, build_embedding_inputs, hash_embedding_inputs
 from lovspor.embeddings.model import count_input_tokens
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.store import read_embeddings, write_embeddings
@@ -547,3 +547,86 @@ def test_future_sidecar_version_stops_change_path_before_spending(
     assert provider.paid == []
     assert _state(repo) == before
     assert path.read_bytes() == payload
+
+
+@pytest.mark.parametrize("extreme", [-127, 127])
+def test_every_possible_maximum_must_be_carried_even_when_another_remains(extreme: int) -> None:
+    """The byte-equivalence proof requires every saturated row, including negative ones."""
+    inputs = [EmbeddingInput("s1", _SECTION_ONE), EmbeddingInput("s2", _SECTION_TWO)]
+    prior = PriorVectors(
+        rows={
+            inputs[0].text: np.array([127, 0, 0, 0], dtype=np.int8),
+            inputs[1].text: np.array([0, extreme, 0, 0], dtype=np.int8),
+        },
+        scale=0.01,
+    )
+
+    assert exact_prior(prior, inputs) is prior
+    assert exact_prior(prior, inputs[:1]) is None
+    assert exact_prior(prior, inputs[1:]) is None
+
+
+def test_loaded_documents_share_one_repayment_budget(tmp_path: Path) -> None:
+    """A per-document allowance would exceed the PR's ceiling for the whole run."""
+    settings = _published(tmp_path)
+    target = _target()
+    first = load_prior_vectors(settings.lovverk_repo_path, _record(settings), target)
+    second = load_prior_vectors(settings.lovverk_repo_path, _record(settings), target)
+    assert first is not None and second is not None
+    inputs, louder = _louder_than_the_prior()
+    cost = count_input_tokens(inputs[0].text)
+    target.headroom.tokens = 2 * cost - 1
+    provider = _TextEmbedder()
+
+    ReusingEmbedder(provider, replace(first, rows=louder.rows, scale=louder.scale)).quantized_rows(
+        inputs
+    )
+    assert target.headroom.tokens == cost - 1
+    provider.paid.clear()
+
+    with pytest.raises(MassReembedError, match="re-paid"):
+        ReusingEmbedder(
+            provider, replace(second, rows=louder.rows, scale=louder.scale)
+        ).quantized_rows(inputs)
+
+    assert provider.paid == [inputs[1].text]
+    assert target.headroom.tokens == cost - 1
+
+
+@pytest.mark.parametrize("damage", ["missing-row", "wrong-dimension", "nonfinite"])
+def test_invalid_repayment_response_preserves_the_sidecar(tmp_path: Path, damage: str) -> None:
+    """The response contract applies to the second paid call as well as the delta call."""
+    settings = _published(tmp_path)
+    repo = settings.lovverk_repo_path
+    path = _embeddings_path(repo, "gjeldende-lover", "lov-a")
+    before = path.read_bytes()
+    inputs, prior = _louder_than_the_prior()
+
+    class BrokenRepayment(_TextEmbedder):
+        def encode(self, texts: list[str]) -> np.ndarray:
+            rows = super().encode(texts)
+            if texts != [inputs[0].text]:
+                return rows
+            if damage == "missing-row":
+                return rows[:0]
+            if damage == "wrong-dimension":
+                return rows[:, :-1]
+            rows[0, 0] = np.nan
+            return rows
+
+    provider = BrokenRepayment()
+    changed = _law((_SECTION_ONE, _SECTION_TWO_NEW))
+    rendered = orchestrator_module.render_full_document(
+        changed.xml_bytes, orchestrator_module._frontmatter_context(changed, _OBSERVED)
+    )
+    with pytest.raises(EmbeddingResponseError):
+        orchestrator_module._write_embeddings_for_doc(
+            repo,
+            "gjeldende-lover",
+            "lov-a",
+            rendered,
+            ReusingEmbedder(provider, replace(prior, headroom=RepayHeadroom(None))),
+        )
+
+    assert provider.paid == [inputs[1].text, inputs[0].text]
+    assert path.read_bytes() == before
