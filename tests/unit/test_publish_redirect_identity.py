@@ -147,6 +147,40 @@ def _occupied_move(tmp_path: Path, arriving: str = "doc-b") -> Path:
 
 
 class TestMoveOntoAnOccupiedPath:
+    @pytest.mark.parametrize("prior_id", [None, "doc-b", "doc-a"])
+    @pytest.mark.parametrize("arrival_id", ["doc-b", "doc-c"])
+    def test_both_file_identities_must_support_the_manifest_move(
+        self, tmp_path: Path, prior_id: str | None, arrival_id: str
+    ) -> None:
+        """URL contract §4 requires another ID before and the moving ID after.
+
+        The manifest alone cannot prove either side of the occupied-path move.
+        Include the valid pair as a control for the same real Git history.
+        """
+        repo = _repo(tmp_path)
+        _write(repo, "a-2.md", "doc-b")
+        if prior_id is None:
+            (repo / "lover/a.md").write_text("# No document identity\n", encoding="utf-8")
+        else:
+            _write(repo, "a.md", prior_id)
+        _commit(repo, {"doc-b": _record("lover/a-2.md", "a-2")}, day=1)
+
+        _write(repo, "a.md", arrival_id)
+        (repo / "lover/a-2.md").unlink()
+        _commit(repo, {"doc-b": _record("lover/a.md", "a")}, day=2)
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+        moves = occupied_moves(repo, [(sha, "lover/a-2.md")], frozenset({"doc-b"}))
+
+        expected = (
+            {(sha, "lover/a-2.md"): ("lover/a.md", "doc-b")}
+            if prior_id == "doc-a" and arrival_id == "doc-b"
+            else {}
+        )
+        assert moves == expected
+
     @pytest.mark.parametrize("evidence", ["no-manifest", "no-document", "wrong-path"])
     def test_the_move_requires_the_same_commits_manifest_evidence(
         self, tmp_path: Path, evidence: str
