@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from lovspor.errors import CorpusStateError, IdentitySchemaError
 from lovspor.publish.inventory import build_inventory
 from lovspor.publish.redirect_identity import occupied_moves
 from lovspor.publish.redirects import RedirectMap, build_redirect_map
@@ -80,8 +81,8 @@ def _commit(repo: Path, documents: dict[str, dict[str, object]], day: int) -> No
     _git(repo, "commit", "-q", "-m", f"day {day}", day=day)
 
 
-def _migrate(repo: Path, owners: dict[str, str], documents: dict[str, dict[str, object]]) -> None:
-    """Commit an identity migration: ``identity.json`` and ``slugs.json`` (lover only)."""
+def _register(repo: Path, owners: dict[str, str]) -> None:
+    """Write ``slugs.json`` (lover only) and declare the identity schema."""
     entries = {
         slug: {"owner": owner, "assigned_at": "2026-01-01T00:00:00Z", "basis": "first-holder"}
         for slug, owner in owners.items()
@@ -89,6 +90,11 @@ def _migrate(repo: Path, owners: dict[str, str], documents: dict[str, dict[str, 
     registry = {"schema_version": 1, "slugs": {"lover": entries}}
     (repo / "slugs.json").write_text(json.dumps(registry), encoding="utf-8")
     (repo / "identity.json").write_text('{"schema_version": 1}\n', encoding="utf-8")
+
+
+def _migrate(repo: Path, owners: dict[str, str], documents: dict[str, dict[str, object]]) -> None:
+    """Commit an identity migration: ``identity.json`` and ``slugs.json``."""
+    _register(repo, owners)
     _commit(repo, documents, day=20)
 
 
@@ -311,6 +317,7 @@ class TestAMigratedAddressNamesItsOwner:
         _commit(repo, {"doc-y": _record("lover/y.md", "y")}, 1)
         _migrate(repo, {"y": "doc-y"}, {"doc-y": _record("lover/y.md", "y")})
         _git(repo, "mv", "lover/y.md", "lover/z.md")
+        _register(repo, {"y": "doc-y", "z": "doc-y"})
         _commit(repo, {"doc-y": _record("lover/z.md", "z")}, 21)
         redirect_map = _map_at_head(repo)
         assert ("/lov/y/", "/lov/z/") in redirect_map.redirects
@@ -321,3 +328,157 @@ class TestAMigratedAddressNamesItsOwner:
         _commit(repo, _moved_off(), day=3)
         redirect_map = _map_at_head(repo)
         assert ("/lov/x/", "/lov/x-2026/") in redirect_map.redirects
+
+
+def _move_onto(
+    repo: Path, deleted: str, target: str, documents: dict[str, dict[str, object]], day: int
+) -> None:
+    """In one commit: ``target`` gets the deleted file's text and ``deleted`` goes."""
+    (repo / "lover" / target).write_bytes((repo / "lover" / deleted).read_bytes())
+    (repo / "lover" / deleted).unlink()
+    _commit(repo, documents, day=day)
+
+
+class TestTheProvenDocumentIsTheOneReached:
+    def test_a_path_later_overwritten_by_another_document_is_no_successor(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _repo(tmp_path)
+        _write(repo, "a.md", "doc-a")
+        _write(repo, "p.md", "doc-b")
+        _commit(repo, {"doc-a": _record("lover/a.md", "a"), "doc-b": _record("lover/p.md", "p")}, 1)
+        _move_onto(
+            repo,
+            "a.md",
+            "p.md",
+            {"doc-a": _record("lover/p.md", "p"), "doc-b": _record("lover/p.md", "p", "removed")},
+            day=2,
+        )
+        _write(repo, "p.md", "doc-c")
+        _commit(
+            repo,
+            {"doc-a": _record("lover/p.md", "p", "removed"), "doc-c": _record("lover/p.md", "p")},
+            3,
+        )
+        _write(repo, "q.md", "doc-a")
+        _commit(repo, {"doc-a": _record("lover/q.md", "q"), "doc-c": _record("lover/p.md", "p")}, 4)
+        redirect_map = _map_at_head(repo)
+        assert not [pair for pair in redirect_map.redirects if pair[0].startswith("/lov/a/")]
+        assert "/lov/a/" in redirect_map.gone
+
+    def test_a_chain_of_moves_onto_occupied_paths_reaches_the_document(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _repo(tmp_path)
+        _write(repo, "a.md", "doc-a")
+        _write(repo, "p.md", "doc-b")
+        _write(repo, "r.md", "doc-c")
+        _commit(
+            repo,
+            {
+                "doc-a": _record("lover/a.md", "a"),
+                "doc-b": _record("lover/p.md", "p"),
+                "doc-c": _record("lover/r.md", "r"),
+            },
+            day=1,
+        )
+        _move_onto(
+            repo,
+            "a.md",
+            "p.md",
+            {"doc-a": _record("lover/p.md", "p"), "doc-c": _record("lover/r.md", "r")},
+            day=2,
+        )
+        _move_onto(repo, "p.md", "r.md", {"doc-a": _record("lover/r.md", "r")}, day=3)
+        redirect_map = _map_at_head(repo)
+        assert ("/lov/a/", "/lov/r/") in redirect_map.redirects
+        assert ("/lov/p/", "/lov/r/") in redirect_map.redirects
+
+    def test_two_deleted_copies_of_one_document_prove_no_move(self, tmp_path: Path) -> None:
+        repo = _repo(tmp_path)
+        _write(repo, "a.md", "doc-a")
+        _write(repo, "b.md", "doc-a")
+        _write(repo, "p.md", "doc-b")
+        _commit(repo, {"doc-a": _record("lover/a.md", "a"), "doc-b": _record("lover/p.md", "p")}, 1)
+        (repo / "lover/b.md").unlink()
+        _move_onto(repo, "a.md", "p.md", {"doc-a": _record("lover/p.md", "p")}, day=2)
+        redirect_map = _map_at_head(repo)
+        froms = {pair[0] for pair in redirect_map.redirects}
+        assert "/lov/a/" not in froms
+        assert "/lov/b/" not in froms
+
+
+def _migrated(tmp_path: Path) -> Path:
+    repo = _repo(tmp_path)
+    _write(repo, "y.md", "doc-y")
+    _commit(repo, {"doc-y": _record("lover/y.md", "y")}, 1)
+    _migrate(repo, {"y": "doc-y"}, {"doc-y": _record("lover/y.md", "y")})
+    return repo
+
+
+class TestTheRegistryIsReadFailClosed:
+    def test_a_corpus_whose_declaration_was_deleted_is_refused(self, tmp_path: Path) -> None:
+        repo = _migrated(tmp_path)
+        (repo / "identity.json").unlink()
+        (repo / "slugs.json").unlink()
+        _commit(repo, {"doc-y": _record("lover/y.md", "y")}, 21)
+        with pytest.raises(IdentitySchemaError, match="migrated"):
+            _map_at_head(repo)
+
+    def test_a_registry_no_declaration_covers_is_refused(self, tmp_path: Path) -> None:
+        repo = _migrated(tmp_path)
+        (repo / "identity.json").unlink()
+        _commit(repo, {"doc-y": _record("lover/y.md", "y")}, 21)
+        with pytest.raises(IdentitySchemaError):
+            _map_at_head(repo)
+
+    def test_a_shallow_clone_of_a_migrated_corpus_is_refused(self, tmp_path: Path) -> None:
+        repo = _migrated(tmp_path)
+        shallow = tmp_path / "shallow"
+        _git(tmp_path, "clone", "-q", "--depth", "1", f"file://{repo}", str(shallow))
+        with pytest.raises(IdentitySchemaError, match="shallow"):
+            _map_at_head(shallow)
+
+    def test_a_registry_with_a_repeated_key_is_refused(self, tmp_path: Path) -> None:
+        repo = _migrated(tmp_path)
+        entry = '{"owner": "doc-y", "assigned_at": "2026-01-01T00:00:00Z", "basis": "first-holder"}'
+        (repo / "slugs.json").write_text(
+            f'{{"schema_version": 1, "slugs": {{"lover": {{"y": {entry}, "y": {entry}}}}}}}',
+            encoding="utf-8",
+        )
+        _commit(repo, {"doc-y": _record("lover/y.md", "y")}, 21)
+        with pytest.raises(IdentitySchemaError, match="duplicate"):
+            _map_at_head(repo)
+
+    def test_a_registry_missing_a_manifest_address_is_refused(self, tmp_path: Path) -> None:
+        repo = _migrated(tmp_path)
+        _write(repo, "w.md", "doc-b")
+        _commit(
+            repo, {"doc-y": _record("lover/y.md", "y"), "doc-b": _record("lover/w.md", "w")}, 21
+        )
+        with pytest.raises(IdentitySchemaError, match="misses"):
+            _map_at_head(repo)
+
+    def test_an_unregistered_address_gets_no_301(self, tmp_path: Path) -> None:
+        repo = _repo(tmp_path)
+        _write(repo, "y.md", "doc-y")
+        _commit(repo, {"doc-y": _record("lover/y.md", "y")}, 1)
+        _git(repo, "mv", "lover/y.md", "lover/z.md")
+        _migrate(repo, {"z": "doc-y"}, {"doc-y": _record("lover/z.md", "z")})
+        redirect_map = _map_at_head(repo)
+        assert ("/lov/y/", "/lov/z/") not in redirect_map.redirects
+        assert "/lov/y/" in redirect_map.gone
+
+    def test_an_unreadable_manifest_at_a_moving_commit_is_refused(self, tmp_path: Path) -> None:
+        repo = _repo(tmp_path)
+        _write(repo, "a.md", "doc-a")
+        _write(repo, "p.md", "doc-b")
+        _commit(repo, {"doc-a": _record("lover/a.md", "a"), "doc-b": _record("lover/p.md", "p")}, 1)
+        (repo / "lover/p.md").write_bytes((repo / "lover/a.md").read_bytes())
+        (repo / "lover/a.md").unlink()
+        (repo / "manifest.json").write_text('{"documents": {"doc-a": {}}}', encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "broken", day=2)
+        _commit(repo, {"doc-a": _record("lover/p.md", "p")}, 3)
+        with pytest.raises(CorpusStateError, match="manifest"):
+            _map_at_head(repo)

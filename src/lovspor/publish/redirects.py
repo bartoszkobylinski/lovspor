@@ -37,12 +37,8 @@ from lovspor.publish.inventory import (
 )
 from lovspor.publish.pages import COMPANION_NAME, document_url, provision_url
 from lovspor.publish.provision_history import once_publishable_pids, removed_pids_by_path
-from lovspor.publish.redirect_identity import (
-    AddressOwners,
-    address_owners,
-    leaves_its_owner,
-    occupied_moves,
-)
+from lovspor.publish.redirect_identity import occupied_moves
+from lovspor.publish.redirect_owners import AddressOwners, address_owners, leaves_its_owner
 from lovspor.storage.manifest import Manifest
 
 _FOLDER_ROUTES: dict[str, Route] = {"lover": "lov", "forskrifter": "forskrift"}
@@ -67,6 +63,8 @@ class _Edge(BaseModel):
     sha: str
     old: str
     new: str | None
+    doc_id: str | None = None
+    """The document a move onto an occupied path was proven for (#939)."""
 
 
 class RedirectMap(BaseModel):
@@ -85,10 +83,11 @@ def build_redirect_map(
     manifest: Manifest,
 ) -> RedirectMap:
     """The redirect/410 map for one pinned snapshot, target-validated."""
-    edges = _lineage_edges(corpus, sha)
+    edges = _with_occupied_moves(corpus, _lineage_edges(corpus, sha), inventory)
     live = {(plan.route, plan.slug) for plan in inventory.documents}
-    retired = _with_occupied_moves(corpus, _newest_retirement_per_key(edges, live), inventory)
-    redirects = _lineage_redirects(corpus, (edges, retired), inventory, address_owners(corpus, sha))
+    retired = _newest_retirement_per_key(edges, live)
+    owners = address_owners(corpus, sha, manifest)
+    redirects = _lineage_redirects(corpus, (edges, retired), inventory, owners)
     gone = {f"/{route}/{slug}/" for route, slug in retired}
     gone.update(_removed_record_prefixes(manifest, live))
     gone.update(_retired_provision_urls(corpus, sha, inventory))
@@ -99,18 +98,20 @@ def build_redirect_map(
 
 def _with_occupied_moves(
     corpus: Path,
-    retired: dict[tuple[Route, str], _Edge],
+    edges: list[_Edge],
     inventory: PublishInventory,
-) -> dict[tuple[Route, str], _Edge]:
-    """Each retiring deletion that a front-matter ``id`` proves was a move onto
-    an occupied path becomes that rename (#939)."""
-    deletions = sorted({(edge.sha, edge.old) for edge in retired.values() if edge.new is None})
+) -> list[_Edge]:
+    """Each deletion that a front-matter ``id`` proves was a move onto an
+    occupied path becomes that rename, carrying the proven document (#939)."""
+    deletions = sorted({(edge.sha, edge.old) for edge in edges if edge.new is None})
     live_ids = frozenset(plan.doc_id for plan in inventory.documents)
     moves = occupied_moves(corpus, deletions, live_ids)
-    return {
-        key: edge.model_copy(update={"new": moves.get((edge.sha, edge.old), edge.new)})
-        for key, edge in retired.items()
-    }
+    return [
+        edge.model_copy(update={"new": moves[move][0], "doc_id": moves[move][1]})
+        if edge.new is None and (move := (edge.sha, edge.old)) in moves
+        else edge
+        for edge in edges
+    ]
 
 
 def _lineage_redirects(
@@ -282,15 +283,18 @@ def _terminal_plan(
     From a rename at time t, the file's next event is the *earliest*
     later event naming its new path — the largest index below t in the
     newest-first order. Indices strictly decrease, so the walk always
-    terminates. A deletion or an unpublished terminal proves nothing.
+    terminates. A deletion or an unpublished terminal proves nothing, and
+    nor does a terminal holding another document than the last move
+    proven by identity (#939): the path was overwritten since.
     """
-    current, index = edge.new, edge.index
+    current, index, proven = edge.new, edge.index, edge.doc_id
     while current is not None:
         later = [e for e in by_old.get(current, []) if e.index < index]
         if not later:
-            return by_path.get(current)
+            plan = by_path.get(current)
+            return plan if plan is None or proven in (None, plan.doc_id) else None
         next_edge = max(later, key=lambda e: e.index)
-        current, index = next_edge.new, next_edge.index
+        current, index, proven = next_edge.new, next_edge.index, next_edge.doc_id or proven
     return None
 
 

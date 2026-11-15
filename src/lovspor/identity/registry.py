@@ -218,11 +218,16 @@ def read_registry(repo: Path) -> SlugRegistry | None:
     path = repo / REGISTRY_FILENAME
     if not path.exists():
         return None
+    return parse_registry(path.read_bytes(), str(path))
+
+
+def parse_registry(blob: bytes, where: str) -> SlugRegistry:
+    """A ``slugs.json`` blob as the registry, refusing a repeated key (``ParseError``)."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_keys)
+        data = json.loads(blob.decode("utf-8"), object_pairs_hook=_unique_keys)
         return SlugRegistry.model_validate(data)
     except (UnicodeDecodeError, ValueError, ValidationError) as exc:
-        raise ParseError(f"{path}: unreadable slug registry: {exc}") from exc
+        raise ParseError(f"{where}: unreadable slug registry: {exc}") from exc
 
 
 def registry_json(registry: SlugRegistry) -> str:
