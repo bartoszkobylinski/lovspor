@@ -8,6 +8,7 @@ exactly the plan the owner reviewed, at exactly its base, and nothing else.
 import hashlib
 import json
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -17,10 +18,20 @@ from lovspor.cli import app
 from lovspor.errors import IdentityMigrationError
 from lovspor.identity import apply_commands
 from lovspor.identity.apply import apply_plan, verify_applied
+from lovspor.identity.owner_exceptions import ReassignmentList
 from lovspor.identity.plan import MigrationPlan, plan_migration
+from lovspor.identity.published import migration_base
 from lovspor.identity.report import SUMS_FILENAME
 from tests.unit.identity_git_fixtures import commit_all, doc_text, git, write_doc
-from tests.unit.test_identity_migration import NEW, _base_repo
+from tests.unit.identity_owner_fixtures import (
+    FIXTURE_U1,
+    allow_fixture_u1,
+    for_plan,
+    install,
+    pending_list,
+    signed,
+)
+from tests.unit.test_identity_migration import NEW, OLD, _base_repo
 
 SIDECAR = b"\x00\x01embedding of x\xff"
 
@@ -42,6 +53,19 @@ def repo(tmp_path: Path) -> Path:
     return corpus
 
 
+_PATCH: list[pytest.MonkeyPatch] = []
+
+
+@pytest.fixture(autouse=True)
+def _owner_list(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Lets ``_apply`` approve the fixture's one owner change (x's U1 rename) by digest,
+    as the owner signs lovverk's list; the #934 cases install their own list instead.
+    Cleared after the test, so a module using ``_apply`` without it fails loudly."""
+    _PATCH[:] = [monkeypatch]
+    yield
+    _PATCH.clear()
+
+
 def _invoke(*args: str) -> tuple[int, str]:
     result = CliRunner().invoke(app, ["ops", *args])
     return result.exit_code, result.output
@@ -61,7 +85,18 @@ def _pin(plan_dir: Path) -> str:
     return hashlib.sha256((plan_dir / SUMS_FILENAME).read_bytes()).hexdigest()
 
 
-def _apply(repo: Path, plan_dir: Path, *extra: str, pin: str | None = None) -> tuple[int, str]:
+def plan_key(repo: Path, plan_dir: Path) -> tuple[str, str]:
+    """``(pin, U1 threshold commit)``: the plan an owner list is reviewed for."""
+    sums = plan_dir / SUMS_FILENAME
+    pin = _pin(plan_dir) if sums.is_file() else "0" * 64
+    return pin, git(repo, "rev-parse", "u1^{commit}")
+
+
+def _apply(
+    repo: Path, plan_dir: Path, *extra: str, pin: str | None = None, approve: bool = True
+) -> tuple[int, str]:
+    if approve:
+        allow_fixture_u1(_PATCH[0], repo, plan_key(repo, plan_dir))
     if pin is None:
         pin = _pin(plan_dir) if (plan_dir / SUMS_FILENAME).is_file() else "0" * 64
     args = ("--repo", str(repo), "--plan", str(plan_dir), "--expect-sha256", pin, *extra)
@@ -321,3 +356,103 @@ def test_apply_reports_exit_three_when_written_tree_cannot_be_verified(
     assert any(expected in problem for problem in problems)
     assert _status(repo)
     assert git(repo, "rev-parse", "HEAD") == head
+
+
+# --- the owner-exception gate before the first write (#934) ---
+
+DRY_RUN = pytest.mark.parametrize("extra", [(), ("--dry-run",)], ids=["apply", "dry-run"])
+
+
+def _list_for(repo: Path, plan_dir: Path, base: str | None = None) -> ReassignmentList:
+    """The fixture's owner list, reviewed for this plan, still unsigned."""
+    reviewed_base = base or migration_base(repo)
+    assert reviewed_base is not None
+    return for_plan(pending_list(reviewed_base, [FIXTURE_U1]), *plan_key(repo, plan_dir))
+
+
+def _refused(repo: Path, plan_dir: Path, extra: tuple[str, ...], match: str) -> None:
+    head = git(repo, "rev-parse", "HEAD")
+    code, output = _apply(repo, plan_dir, *extra, approve=False)
+    assert code == 2, output
+    assert f"forskrifter/x: {NEW} at the base, {OLD} in the registry" in output
+    assert match in output
+    assert _status(repo) == []
+    assert git(repo, "rev-parse", "HEAD") == head
+
+
+@DRY_RUN
+def test_an_unsigned_owner_list_refuses_and_writes_nothing(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: tuple[str, ...]
+) -> None:
+    plan_dir = _plan(repo, tmp_path / "plan")
+    install(monkeypatch, tmp_path / "list.json", _list_for(repo, plan_dir))
+
+    _refused(repo, plan_dir, extra, "BLOCKED: pending owner approval of digest")
+    _, output = _apply(repo, plan_dir, *extra, approve=False)
+    assert "lovspor ops identity-exceptions-approve --path " in output
+
+
+@DRY_RUN
+def test_an_owner_list_edited_after_approval_refuses(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: tuple[str, ...]
+) -> None:
+    plan_dir = _plan(repo, tmp_path / "plan")
+    approved = signed(_list_for(repo, plan_dir))
+    stale = approved.model_copy(
+        update={
+            "reassignments": (approved.reassignments[0].model_copy(update={"reason": "edited"}),)
+        }
+    )
+    install(monkeypatch, tmp_path / "list.json", stale)
+
+    _refused(repo, plan_dir, extra, "BLOCKED: approval digest")
+
+
+@pytest.mark.parametrize("other", ["pin", "threshold"])
+def test_an_approved_list_for_another_plan_refuses(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, other: str
+) -> None:
+    plan_dir = _plan(repo, tmp_path / "plan")
+    pin, threshold = plan_key(repo, plan_dir)
+    key = ("e" * 64, threshold) if other == "pin" else (pin, "e" * 40)
+    install(monkeypatch, tmp_path / "list.json", signed(for_plan(_list_for(repo, plan_dir), *key)))
+
+    _refused(repo, plan_dir, (), f"BLOCKED: the list was reviewed for plan {key[0]}")
+
+
+def test_an_approved_list_for_another_base_refuses(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan_dir = _plan(repo, tmp_path / "plan")
+    install(monkeypatch, tmp_path / "list.json", signed(_list_for(repo, plan_dir, "b" * 40)))
+
+    _refused(repo, plan_dir, (), "its reassignments do not apply")
+
+
+@DRY_RUN
+def test_an_approved_owner_list_lets_the_apply_proceed(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: tuple[str, ...]
+) -> None:
+    plan_dir = _plan(repo, tmp_path / "plan")
+    install(monkeypatch, tmp_path / "list.json", signed(_list_for(repo, plan_dir)))
+
+    code, output = _apply(repo, plan_dir, *extra, approve=False)
+
+    assert code == 0, output
+    report = json.loads((plan_dir / "report.json").read_text(encoding="utf-8"))
+    assert _status(repo) == ([] if extra else report["changed_paths"])
+
+
+def test_the_plan_is_still_written_while_the_owner_list_is_unsigned(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The owner reviews the plan and its pin before signing: identity-plan does not refuse."""
+    base = migration_base(repo)
+    assert base is not None
+    install(monkeypatch, tmp_path / "list.json", pending_list(base, [FIXTURE_U1]))
+
+    plan_dir = _plan(repo, tmp_path / "plan")
+
+    report = json.loads((plan_dir / "report.json").read_text(encoding="utf-8"))
+    assert report["blocked"] is False
+    assert len(_pin(plan_dir)) == 64

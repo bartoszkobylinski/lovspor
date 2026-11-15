@@ -21,7 +21,7 @@ beside it, never overwritten:
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
@@ -197,6 +197,19 @@ def load_reassignments(path: Path | None = None) -> Reviewed:
         approved=approved,
         state=state,
     )
+
+
+def bound_to_plan(reviewed: Reviewed, pin: str, threshold: str | None) -> Reviewed:
+    """``reviewed``, listing nothing unless it was reviewed for this plan: its
+    ``plan_sums_sha256`` is the plan's pin and its ``u1_threshold`` the plan's (#934)."""
+    corpus = reviewed.corpus
+    if (corpus.plan_sums_sha256, corpus.u1_threshold) == (pin, threshold):
+        return reviewed
+    state = (
+        f"BLOCKED: the list was reviewed for plan {corpus.plan_sums_sha256} at threshold "
+        f"{corpus.u1_threshold}, not plan {pin} at threshold {threshold}"
+    )
+    return replace(reviewed, changes={}, threshold={}, approved=False, state=state)
 
 
 def approve_list(path: Path, digest: str, approved_by: str, approved_on: date) -> str:

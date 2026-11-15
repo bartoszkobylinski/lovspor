@@ -105,6 +105,20 @@ def list_reassignments(
     return install(monkeypatch, repo.parent / "owner_reassignments.json", listed)
 
 
-def allow_fixture_u1(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """List the fixture migration's U1 rename, approved, as the owner lists lovverk's."""
-    list_reassignments(monkeypatch, repo, [FIXTURE_U1])
+def for_plan(listed: ReassignmentList, pin: str, threshold: str) -> ReassignmentList:
+    """``listed`` reviewed for the plan with ``pin`` at ``threshold`` (still unsigned)."""
+    corpus = listed.corpus.model_copy(update={"plan_sums_sha256": pin, "u1_threshold": threshold})
+    return listed.model_copy(update={"corpus": corpus})
+
+
+def allow_fixture_u1(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, plan: tuple[str, str] | None = None
+) -> None:
+    """List the fixture migration's U1 rename, approved, as the owner lists lovverk's;
+    ``plan`` = ``(pin, threshold commit)`` binds it to that plan for identity-apply."""
+    base = migration_base(repo)
+    assert base is not None
+    listed = pending_list(base, [FIXTURE_U1])
+    if plan is not None:
+        listed = for_plan(listed, *plan)
+    install(monkeypatch, repo.parent / "owner_reassignments.json", signed(listed))

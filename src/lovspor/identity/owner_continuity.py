@@ -111,11 +111,12 @@ def _list_state(reviewed: Reviewed, base: str | None) -> str:
     return f"the list is {reviewed.state}"
 
 
-def require_owner_continuity(repo: Path, registry: SlugRegistry, reviewed: Reviewed) -> None:
-    """Refuse ``registry`` when it re-owns an address the migration's base published, or
-    keeps a later holder over a first holder, unless the approved list names the change."""
+def require_owners_kept(
+    repo: Path, registry: SlugRegistry, reviewed: Reviewed, base: str | None
+) -> None:
+    """Refuse ``registry`` when it re-owns an address ``base`` published, or keeps a later
+    holder over a first holder, unless the approved list names the change."""
     try:
-        base = migration_base(repo)
         owners = {} if base is None else published_owners(repo.resolve(), base)
         found = reassigned(owners, registry, base_changes(reviewed, base))
         found += threshold_findings(repo.resolve(), registry, reviewed, base)
@@ -128,3 +129,12 @@ def require_owner_continuity(repo: Path, registry: SlugRegistry, reviewed: Revie
             f"unless the change is listed in {reviewed.path.name} and approved by its "
             f"digest (#911, #921); {_list_state(reviewed, base)}",
         )
+
+
+def require_owner_continuity(repo: Path, registry: SlugRegistry, reviewed: Reviewed) -> None:
+    """``require_owners_kept`` against the migration's base (sync start, the audit)."""
+    try:
+        base = migration_base(repo)
+    except IdentityMigrationError as exc:
+        raise IdentitySchemaError(f"{repo}: the migration's base cannot be read: {exc}") from exc
+    require_owners_kept(repo, registry, reviewed, base)
