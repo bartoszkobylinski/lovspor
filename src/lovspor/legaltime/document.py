@@ -50,6 +50,43 @@ class Ledd(Frozen):
     text: str
 
 
+class Enclosure(Frozen):
+    """One ``section`` or ``article`` element around a provision, exactly as the member prints it.
+
+    Kept raw beside ``_enclosing``'s reading so a caller can tell a stamp the structure
+    states from one it does not: a roman or unnamed section, a nested article, or the
+    amending member's own chapter around an inserted provision (ADR-0023 Phase B4a).
+    """
+
+    tag: str
+    css_class: str
+    name: str | None  # the element's ``data-name``, case kept
+
+
+class StatedPlacement(Frozen):
+    """Where an inserted provision's stamps came from, when ``instructions._placed`` set them.
+
+    ``chapter_from`` names the text the chapter stamp was read from; ``title`` is the last
+    chapter title printed before the provision, read or not. A plain insertion has none:
+    its stamps are ``_enclosing``'s reading of the member that carries it (ADR-0023 B4a).
+    """
+
+    sentence: str
+    title: str | None = None
+    chapter_from: Literal["sentence", "title"] | None = None
+    rewrites_part: bool = False  # ``<ordinal> del skal lyde:``: the whole part is rewritten
+
+    @classmethod
+    def read(cls, sentence: str, chapter: str | None, rewrites: bool) -> "StatedPlacement":
+        origin: Literal["sentence"] | None = "sentence" if chapter is not None else None
+        return cls(sentence=sentence, chapter_from=origin, rewrites_part=rewrites)
+
+    def titled(self, title: str, read: str | None) -> "StatedPlacement":
+        """A title is recorded whether or not it is read; only a read title states the chapter."""
+        origin = "title" if read is not None else self.chapter_from
+        return self.model_copy(update={"title": title, "chapter_from": origin})
+
+
 class Provision(Frozen):
     key: str
     label: str
@@ -58,6 +95,7 @@ class Provision(Frozen):
     notes: tuple[str, ...] = ()
     chapter: str | None = None  # the enclosing chapter section's data-name (``kap16``)
     part: str | None = None  # the enclosing top-level part's data-name (``del1``)
+    enclosures: tuple[Enclosure, ...] = ()  # every section/article ancestor, nearest first
 
 
 class Node(Frozen):
@@ -198,6 +236,13 @@ def _enclosing(article: etree._Element) -> tuple[str | None, str | None]:
     return chapter, part
 
 
+def _enclosures(article: etree._Element) -> tuple[Enclosure, ...]:
+    return tuple(
+        Enclosure(tag=str(a.tag), css_class=_css(a), name=a.get("data-name"))
+        for a in article.iterancestors("section", "article")
+    )
+
+
 def _provision(article: etree._Element) -> Provision:
     key = article.get("data-name") or ""
     chapter, part = _enclosing(article)
@@ -216,6 +261,7 @@ def _provision(article: etree._Element) -> Provision:
         notes=notes,
         chapter=chapter,
         part=part,
+        enclosures=_enclosures(article),
     )
 
 

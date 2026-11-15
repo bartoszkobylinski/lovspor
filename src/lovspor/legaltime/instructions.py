@@ -12,7 +12,7 @@ from typing import Literal
 
 from lovspor.legaltime import attribution, payload_list
 from lovspor.legaltime.attribution import Binding, is_intro
-from lovspor.legaltime.document import Document, Frozen, Ledd, Node, Provision
+from lovspor.legaltime.document import Document, Frozen, Ledd, Node, Provision, StatedPlacement
 from lovspor.legaltime.text import (
     ORDINAL_ALT,
     ORDINALS,
@@ -151,6 +151,7 @@ class Operation(Frozen):
     change_part: tuple[str, ...] = ()
     host_section: str | None = None
     absorbed_by: str | None = None  # renumber only: the operation whose effect this sentence states
+    stated: StatedPlacement | None = None  # insert_section from a structure sentence only
 
 
 class Interpretation(Frozen):
@@ -546,16 +547,20 @@ def _structure(
     if not labelled or any(n.kind == "ledd" for n in payload):
         return [_operation(base, ("unsupported", {}, sentence), context, ())]
     chapter, part = chapter_key(sentence), _structure_part(sentence)
+    rewrites = bool((match := _STRUCTURE.match(sentence)) and match.group("part"))
+    stated = StatedPlacement.read(sentence, chapter, rewrites)
     operations: list[Operation] = []
     for node in payload:
         if node.kind == "title":
-            chapter = chapter_key(node.text) or chapter
+            stated = stated.titled(node.text, read := chapter_key(node.text))
+            chapter = read or chapter
         elif node.provision is not None:
             placed = _placed(node, node.provision, chapter, part)
             parsed: tuple[OpKind, dict[str, str | None], str] = (
                 "insert_section", {"sec": node.provision.label}, sentence,
             )  # fmt: skip
-            operations.append(_operation(f"{base}-{len(operations)}", parsed, context, (placed,)))
+            op = _operation(f"{base}-{len(operations)}", parsed, context, (placed,))
+            operations.append(op.model_copy(update={"stated": stated}))
     return operations
 
 
