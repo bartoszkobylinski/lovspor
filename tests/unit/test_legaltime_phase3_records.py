@@ -4,7 +4,7 @@ from datetime import date
 
 from lovspor.legaltime.baseline import Commencement, UnitTiming
 from lovspor.legaltime.commencement import Proof, Timing
-from lovspor.legaltime.document import Ledd, Provision
+from lovspor.legaltime.document import Ledd, Provision, StatedPlacement
 from lovspor.legaltime.instructions import Address, Operation
 from lovspor.legaltime.replay import ProvisionState, ReplayState, _Working, replay
 from lovspor.legaltime.run import _commencement_record, _provision_record, _state_record
@@ -142,6 +142,7 @@ def test_inserted_provisions_take_their_unit_state_from_chapter_and_parts() -> N
         instruction="",
         part="I",
         new_provision=new,
+        stated=StatedPlacement(sentence="Nytt kapittel 16 skal lyde:", chapter_from="sentence"),
     )
     assert working.apply_insert_section(op) is None
     assert working.map["§101"].unit.in_force == "not_yet_in_force"
@@ -153,6 +154,7 @@ def test_inserted_provisions_take_their_unit_state_from_chapter_and_parts() -> N
         instruction="",
         part="II",
         new_provision=new.model_copy(update={"key": "§102"}),
+        stated=StatedPlacement(sentence="Nytt kapittel 16 skal lyde:", chapter_from="sentence"),
     )
     assert working.apply_insert_section(elsewhere) is None
     assert (
@@ -160,7 +162,7 @@ def test_inserted_provisions_take_their_unit_state_from_chapter_and_parts() -> N
     )  # part II does not reach "del I kapittel 16"
     assert working.order.index("§101") < working.order.index("§102")
     bare = _Working(_act())
-    assert bare.unit_state("§1", None, ()).in_force == "in_force"
+    assert bare.unit_state("§1", (None, ())).in_force == "in_force"
 
 
 def test_ledd_counts_classes_and_denominator() -> None:

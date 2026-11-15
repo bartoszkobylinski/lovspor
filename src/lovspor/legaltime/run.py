@@ -21,7 +21,7 @@ from lovspor.legaltime.nesting import nesting
 from lovspor.legaltime.replay import Event, ReplayState, replay
 from lovspor.legaltime.verify import verify
 
-REPLAY_VERSION = "legaltime-replay-9"  # #918: a renamed host's list is never dated "straks"
+REPLAY_VERSION = "legaltime-replay-10"  # #935: only its source places an insertion
 
 
 def _stamp(value: datetime | None) -> str | None:

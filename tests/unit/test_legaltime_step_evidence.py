@@ -467,7 +467,7 @@ def test_an_inherited_stamp_of_the_amending_member_is_never_a_placement() -> Non
     document = _member(_p(INTRO) + _p("Ny § 5 a skal lyde:") + _future("§5a"), wrap="kap13")
     (operation,) = _events(document, ACT)
     assert operation.operation.new_provision is not None
-    assert operation.operation.new_provision.chapter == "kap13"  # what _enclosing says
+    assert operation.operation.new_provision.chapter is None  # #935: not the member's kap13
     built = _one(document)
     assert isinstance(built, BuiltOperation) and isinstance(built.operation, Insertion)
     assert built.operation.placement is None

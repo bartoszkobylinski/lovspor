@@ -7,7 +7,7 @@ operations are synthetic.
 
 import pytest
 
-from lovspor.legaltime.document import Provision
+from lovspor.legaltime.document import Provision, StatedPlacement
 from lovspor.legaltime.instructions import Address, Operation
 from lovspor.legaltime.units import Unit, parse_units, relation
 
@@ -104,9 +104,21 @@ def test_a_heading_unit_reaches_the_heading_and_is_spanned_by_a_section_rewrite(
 
 def test_a_chapter_unit_reaches_insertions_stamped_with_it_and_nothing_it_cannot_place() -> None:
     placed = Provision(key="§9A-1", label="§ 9A-1", heading="", ledd=(), chapter="kap9a")
-    insert = _op("insert_section", section="§9A-1").model_copy(update={"new_provision": placed})
+    insert = _op("insert_section", section="§9A-1").model_copy(
+        update={
+            "new_provision": placed,
+            "stated": StatedPlacement(
+                sentence="Nytt kapittel 9A skal lyde:", chapter_from="sentence"
+            ),
+        }
+    )
     other = _op("insert_section", section="§9-1").model_copy(
-        update={"new_provision": placed.model_copy(update={"key": "§9-1", "chapter": "kap9"})}
+        update={
+            "new_provision": placed.model_copy(update={"key": "§9-1", "chapter": "kap9"}),
+            "stated": StatedPlacement(
+                sentence="Nytt kapittel 9 skal lyde:", chapter_from="sentence"
+            ),
+        }
     )
     unit = Unit(chapter="kap9a")
     assert relation(unit, insert) == "covers"
@@ -118,6 +130,7 @@ def test_a_chapter_unit_reaches_insertions_stamped_with_it_and_nothing_it_cannot
     )
     assert relation(Unit(chapter="kap9a", new=True), plain) == "disjoint"  # not the new chapter
     assert relation(unit, plain) == "unknown"  # an existing chapter: only the act can place it
+    assert relation(unit, plain, {"§5-12": "kap9a"}) == "unknown"  # nor a section map (#935)
     chapters = {"§9A-1": "kap9a", "§3-1": "kap3"}
     assert relation(unit, _op(section="§9A-1", ledd=1), chapters) == "covers"
     assert relation(unit, _op(section="§3-1", ledd=1), chapters) == "disjoint"
@@ -181,9 +194,16 @@ def test_punktum_range_is_compared_only_inside_the_same_ledd(
 
 
 def test_inserted_chapter_placement_takes_precedence_over_existing_section_map() -> None:
-    """A stamped insertion is placed by its payload, as units.py documents."""
+    """A stated insertion is placed by its source, as units.py documents."""
     provision = Provision(key="§1", label="§ 1", heading="", ledd=(), chapter="kap9")
-    operation = _op("insert_section", section="§1").model_copy(update={"new_provision": provision})
+    operation = _op("insert_section", section="§1").model_copy(
+        update={
+            "new_provision": provision,
+            "stated": StatedPlacement(
+                sentence="Nytt kapittel 9 skal lyde:", chapter_from="sentence"
+            ),
+        }
+    )
     chapters = {"§1": "kap1"}
     assert relation(Unit(chapter="kap9"), operation, chapters) == "covers"
     assert relation(Unit(chapter="kap1"), operation, chapters) == "disjoint"

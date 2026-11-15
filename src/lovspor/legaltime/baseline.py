@@ -39,13 +39,14 @@ from lovspor.legaltime.document import Document, Frozen
 from lovspor.legaltime.instructions import Operation
 from lovspor.legaltime.scopes import _RESERVATION, _STRAKS, Scope
 from lovspor.legaltime.text import parse_date, split_sentences
-from lovspor.legaltime.units import Unit
+from lovspor.legaltime.units import UNPLACED, ChapterClaim, Unit
 
 INSTRUMENT_UNDATED = "commencement instrument's own commencement is not proven"
 NAMES_NOTHING = "partial decision names no part or section of the law"
 PART_UNPLACED = "partial decision names a part that cannot be placed against the act's units"
 OUTSIDE = "partial decision outside the grammar"
 BELOW_LEDD = "commencement stated below ledd level"
+UNPLACED_CHAPTER = "inserted section placed by no source, and a chapter is dated apart"
 _ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
 _CITED = re.compile(r"\blov\s+\d{1,2}\.\s*\w+\s+\d{4}(?:\s+nr\.\s*\d+)?", re.I)
 
@@ -67,7 +68,7 @@ class Commencement(Frozen):
     default: Timing
     units: tuple[UnitTiming, ...] = ()
 
-    def section_timing(self, key: str, chapter: str | None, parts: tuple[str, ...]) -> Timing:
+    def section_timing(self, key: str, chapter: ChapterClaim, parts: tuple[str, ...]) -> Timing:
         """The timing of one section: its own unit, else its chapter's, else the default.
 
         ``parts`` are the labels under which the section may be reached by a part qualifier:
@@ -76,6 +77,8 @@ class Commencement(Frozen):
         own = [e.timing for e in self.units if e.unit.section == key and _whole_section(e.unit)]
         if own:
             return own[0]  # the section's own unit, whatever position it holds in the list
+        if chapter is UNPLACED:
+            return self._unplaced()
         for entry in self.units:
             unit = entry.unit
             in_chapter = unit.chapter is not None and unit.chapter == chapter and not unit.heading
@@ -83,6 +86,23 @@ class Commencement(Frozen):
             if in_chapter and reached:
                 return entry.timing
         return self.default
+
+    def _unplaced(self) -> Timing:
+        """A section no source places: the default, unless some chapter is dated otherwise (#935).
+
+        Any chapter dated apart might hold it, whatever its part qualifier; absent placement
+        is never read as standing outside every chapter.
+        """
+        default = (self.default.status, self.default.effective)
+        apart = [
+            e.timing for e in self.units
+            if e.unit.chapter is not None and not e.unit.heading
+            and (e.timing.status, e.timing.effective) != default
+        ]  # fmt: skip
+        if not apart:
+            return self.default
+        proofs = tuple(p for t in (self.default, *apart) for p in t.proofs)
+        return Timing(status="unresolved", reason=UNPLACED_CHAPTER, proofs=proofs)
 
     def ledd_timings(self, key: str) -> dict[int, Timing]:
         """Ledd of the section dated apart from the section itself."""
@@ -401,7 +421,7 @@ def _in_force(timing: Timing, at: date) -> tuple[InForce, date | None]:
 
 
 def unit_state(
-    commencement: Commencement, key: str, where: tuple[str | None, tuple[str, ...]], at: date
+    commencement: Commencement, key: str, where: tuple[ChapterClaim, tuple[str, ...]], at: date
 ) -> UnitState:
     """The section's legal effectiveness at D, and its ledd dated apart not yet in force."""
     chapter, parts = where
