@@ -893,3 +893,20 @@ def test_a_nynorsk_chapter_range_read_as_its_first_chapter_is_unresolved() -> No
     assert len(outcomes) == 2
     assert {o.reason for o in outcomes if isinstance(o, Unbuilt)} == {UNREAD_CHAPTER}
     assert all(isinstance(o, Unbuilt) for o in outcomes)
+
+
+def test_an_insertion_whose_printed_label_only_contains_the_label_is_unresolved() -> None:
+    """``section_key`` searches a substring: ``§ 5 junk`` must not pass as ``§5``."""
+    built = _one(_member(_p(INTRO) + _p("Ny § 5 skal lyde:") + _future("§5junk", "§ 5 junk")))
+    assert isinstance(built, Unbuilt) and built.reason == UNHEADED
+
+
+def test_an_insertion_whose_data_name_is_not_its_label_is_unresolved() -> None:
+    built = _one(_member(_p(INTRO) + _p("Ny § 5 skal lyde:") + _future("§5x", "§ 5")))
+    assert isinstance(built, Unbuilt) and built.reason == UNHEADED
+
+
+@pytest.mark.parametrize(("label", "name"), [("§ 1 garbage", "§1garbage"), ("§ 1", "§1 garbage")])
+def test_a_step_0_node_must_print_exactly_its_label(label: str, name: str) -> None:
+    refusal = _refused(_enacting(_article(label, name=name) + _article("§ 2")))
+    assert [p.reason for p in refusal.problems] == [MISLABELLED]

@@ -61,6 +61,7 @@ from lovspor.legaltime.identity import (
 )
 from lovspor.legaltime.rename_research import (
     _RENAME_SHAPED,
+    _SEC,
     UNBOUND,
     UNITS,
     UNKNOWN_MEMBER,
@@ -121,6 +122,7 @@ _SECTION_KINDS = frozenset({"insert_section", "replace_section", "repeal_section
 _NAMES_CHAPTER = re.compile(r"\bkapit(?:te)?l(?:er)?\b", re.I)
 _SEVERAL_CHAPTERS = re.compile(r"\bkapitler\b|\btil\b", re.I)
 _NAMES_PART = re.compile(r"\bdel\b", re.I)
+_PRINTED = re.compile(rf"{_SEC}\.?")  # the whole printed label, nothing after it
 
 B1Operation = Rename | Repeal | Replace | Finer | Insertion
 
@@ -255,7 +257,7 @@ def _node_problems(document: Document) -> list[Problem]:
         node = provision.key
         if key is None:
             found.append(Problem(node=node, reason=UNLABELLED))
-        elif section_key(node) != key:
+        elif _exact_key(provision) != key:
             found.append(Problem(node=node, reason=MISLABELLED, detail=provision.label))
         elif keys.count(key) > 1:
             found.append(Problem(node=node, reason=DUPLICATE))
@@ -278,6 +280,15 @@ def _hierarchy_problems(provision: Provision) -> list[Problem]:
         detail = ">".join(str(e.name) for e in enclosures)
         return [Problem(node=node, reason=UNREAD_SECTION, detail=detail)]
     return []
+
+
+def _exact_key(provision: Provision) -> str | None:
+    """The section key a node states only when its printed label is that label, and its
+    ``data-name`` that key: ``section_key`` alone searches a substring (``§ 5 junk``)."""
+    key = section_key(provision.label)
+    if key is None or not _PRINTED.fullmatch(provision.label) or provision.key != key:
+        return None
+    return key
 
 
 def _kind_of(name: str | None) -> Literal["chapter", "part"] | None:
@@ -410,7 +421,7 @@ def _section_operation(event: Event, document: Document, label: str) -> BuiltOpe
     if op.kind in _FINER:
         return _built(event, Finer(label=label, kind=_FINER[op.kind], proof=proof))
     payload = op.new_provision
-    if payload is None or section_key(payload.label) != label:
+    if payload is None or _exact_key(payload) != label:
         return _unbuilt(event, document, UNHEADED)
     if op.kind == "replace_section":
         return _built(event, Replace(label=label, proof=proof, payload_sha256=_digest(payload)))
