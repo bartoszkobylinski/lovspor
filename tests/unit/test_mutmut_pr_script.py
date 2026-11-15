@@ -1,6 +1,7 @@
 """Contract tests for the PR-scoped Mutmut 3 runner."""
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -775,3 +776,84 @@ class TestInheritedTotalBudget:
         assert "no score for this PR — do not report one" in result.stderr
         assert "killed:" not in result.stdout
         assert verdict["gate"] == {"passed": False, "reason": "tool_failed"}
+
+
+def _repo_ready_to_resume(tmp_path: Path) -> tuple[Path, Path]:
+    """A repo whose changed function has 5 mutants, and a ledger with 1 to 3 killed (#943)."""
+    repo = _repo_with_a_changed_legacy_function(tmp_path)
+    (repo / "scripts" / "quality" / "ratchet-baseline.toml").write_text("")
+    ledger = REPO_ROOT / "scripts" / "ci" / "mutation_ledger.py"
+    (repo / "scripts" / "ci" / "mutation_ledger.py").write_bytes(ledger.read_bytes())
+    python = str(repo / ".venv" / "bin" / "python")
+    subprocess.run(
+        [python, "scripts/ci/mutation_legacy.py", "generate", "--jobs", "1"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    meta = repo / "mutants" / "src" / "lovspor" / "mod.py.meta"
+    data = json.loads(meta.read_text(encoding="utf-8"))
+    for n in (1, 2, 3):
+        data["exit_code_by_key"][f"lovspor.mod.x_answer__mutmut_{n}"] = 1
+    data["exit_code_by_key"]["lovspor.mod.x_answer__mutmut_4"] = 0  # survived: measured again
+    meta.write_text(json.dumps(data), encoding="utf-8")
+    archive = tmp_path / "ledger.tar.gz"
+    subprocess.run(
+        [python, "scripts/ci/mutation_ledger.py", "pack", str(archive)],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    shutil.rmtree(repo / "mutants")
+    return repo, archive
+
+
+class TestResumeFromLedger:
+    """#943: the nightly lane runs only what no earlier night measured."""
+
+    def _run(self, repo: Path, archive: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "base"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=_harness_env({"MUTMUT_PR_RESUME_ARCHIVE": str(archive)}),
+            timeout=180,
+            check=False,
+        )
+
+    def test_only_the_mutants_without_a_carried_kill_are_run(self, tmp_path: Path) -> None:
+        repo, archive = _repo_ready_to_resume(tmp_path)
+
+        result = self._run(repo, archive)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (repo / "run-args.txt").read_text(encoding="utf-8").split() == [
+            "lovspor.mod.x_answer__mutmut_4",
+            "lovspor.mod.x_answer__mutmut_5",
+            "--max-children",
+            "4",
+        ]
+        assert "3 killed result(s) kept, 1 other result(s) to measure again" in result.stdout
+
+    def test_without_a_ledger_file_the_whole_scope_runs(self, tmp_path: Path) -> None:
+        repo, _ = _repo_ready_to_resume(tmp_path)
+
+        result = self._run(repo, tmp_path / "absent.tar.gz")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (repo / "run-args.txt").read_text(encoding="utf-8").split()[0] == (
+            "lovspor.mod.x_answer__mutmut_*"
+        )
+
+    def test_an_unreadable_ledger_falls_back_to_the_whole_scope(self, tmp_path: Path) -> None:
+        repo, archive = _repo_ready_to_resume(tmp_path)
+        archive.write_bytes(b"not a tarball")
+
+        result = self._run(repo, archive)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "could not be restored; measuring the whole range" in result.stderr
+        assert (repo / "run-args.txt").read_text(encoding="utf-8").split()[0] == (
+            "lovspor.mod.x_answer__mutmut_*"
+        )
