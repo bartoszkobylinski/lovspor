@@ -1,0 +1,9 @@
+# Exact gitleaks fingerprints (commit:file:rule:line) of findings verified NOT to be
+# secrets. One finding per entry, each with its evidence. Never a file, path,
+# rule or commit range: a new finding in the same file must still be reported.
+#
+# #822: generic-api-key at 4d9b7891 tests/unit/test_site_sources.py:209.
+# The matched "secret" is `observed_at=OBSERVED_AT`, a keyword argument naming a
+# test constant (a fixed timestamp), next to the reason string
+# "probe_credential_rejected". The file is a site-fact test; no credential.
+4d9b78911ce84f6e39d7b926b87255ba1d36d4b7:tests/unit/test_site_sources.py:generic-api-key:209

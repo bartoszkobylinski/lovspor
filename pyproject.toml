@@ -296,4 +296,6 @@ also_copy = [
     # the agent instructions (#608) reads AGENTS.md through the test file's
     # own parents, which resolve inside the shadow tree (issue #707).
     "AGENTS.md",
+    # The gitleaks allowlist test reads .gitleaksignore the same way (#822).
+    ".gitleaksignore",
 ]
