@@ -105,6 +105,7 @@ UNHEADED = "payload not headed by the addressed label"
 UNREAD_CHAPTER = "inserting structure names a chapter it does not read"
 UNREAD_PART = "inserting structure names a part it does not read"
 TITLE_UNREAD = "chapter title before the provision not read"
+CHAPTER_CONFLICT = "inserting structure states two different chapters"
 PART_REWRITE = "whole part rewritten: what it leaves out is repealed by no operation"
 
 UNBOUND_IN_MEMBER = "unattributed operation in the member"
@@ -459,11 +460,18 @@ def _placement(
 
 def _unread(stated: StatedPlacement, payload: Provision) -> str | None:
     """The first stamp the inserting structure names but did not read, if any."""
-    sentence = stated.sentence
     if stated.rewrites_part:
         return PART_REWRITE
     if stated.title is not None and chapter_key(stated.title) is None:
         return TITLE_UNREAD
+    if _contradicted(stated.sentence, payload.chapter):
+        return CHAPTER_CONFLICT
+    return _unstated(stated, payload)
+
+
+def _unstated(stated: StatedPlacement, payload: Provision) -> str | None:
+    """A chapter or part the sentence names that no read text stamped."""
+    sentence = stated.sentence
     if _NAMES_CHAPTER.search(sentence) and payload.chapter is None:
         return UNREAD_CHAPTER
     if stated.chapter_from == "sentence" and _SEVERAL_CHAPTERS.search(sentence):
@@ -471,6 +479,12 @@ def _unread(stated: StatedPlacement, payload: Provision) -> str | None:
     if _NAMES_PART.search(sentence) and payload.part is None:
         return UNREAD_PART
     return UNREAD_CHAPTER if payload.chapter is None and payload.part is None else None
+
+
+def _contradicted(sentence: str, chapter: str | None) -> bool:
+    """A sentence naming exactly one chapter, and a title that stamped another."""
+    named = chapter_key(sentence)
+    return named is not None and not _SEVERAL_CHAPTERS.search(sentence) and chapter != named
 
 
 def _inherited(enclosures: tuple[Enclosure, ...]) -> Pair:

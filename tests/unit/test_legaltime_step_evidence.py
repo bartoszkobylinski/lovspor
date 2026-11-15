@@ -27,6 +27,7 @@ from lovspor.legaltime.rename_research import RenameRefusal
 from lovspor.legaltime.run import _events_of
 from lovspor.legaltime.step import Finer, Insertion, Repeal, Replace, apply_step
 from lovspor.legaltime.step_evidence import (
+    CHAPTER_CONFLICT,
     COMMENCEMENT_STATED,
     DUPLICATE,
     EMPTY,
@@ -964,3 +965,18 @@ def test_step_0_and_candidate_build_round_trip_without_losing_proofs() -> None:
     assert restored_build == build
     assert restored_build.canonical_json() == build.canonical_json()
     assert restored_build.candidates[0].executable() == build.candidates[0].executable()
+
+
+def test_a_title_contradicting_the_sentences_one_chapter_is_refused() -> None:
+    """``Nytt kapittel 16`` with a ``Kapittel 17`` title: two statements, neither is chosen."""
+    document = _chapter_insertion("Nytt kapittel 16 skal lyde:", "Kapittel 17. Feil", "§17")
+    built = _one(document)
+    assert isinstance(built, Unbuilt) and built.reason == CHAPTER_CONFLICT
+    assert built.placement is not None and built.placement.stated is None
+
+
+def test_a_title_agreeing_with_the_sentences_chapter_is_built() -> None:
+    document = _chapter_insertion("Nytt kapittel 16 skal lyde:", "Kapittel 16. Rett", "§16-1")
+    built = _one(document)
+    assert isinstance(built, BuiltOperation) and isinstance(built.operation, Insertion)
+    assert built.operation.placement == Pair(chapter="kap16")
