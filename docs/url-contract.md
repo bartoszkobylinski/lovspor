@@ -70,7 +70,7 @@ release serves, the build fails, because Caddy answers `redir`/`respond` before 
 | Content edit, same slug | live |
 | Slug rename that git lineage proves (the rename walk) | 301 for the document, and 301 for each pid that **survives in the successor at the pinned snapshot** |
 | A document moved onto a path another document's file held, in one commit (git records a modification and a deletion, not a rename) | The same as a proven rename, when the document's front-matter `id` is on the deleted file before the commit and on the path after it, the path carried another document's `id` before it, and that commit's manifest records the document at the path. Identity, not similarity, proves it. Two deleted copies of one `id` in that commit prove nothing (410), and a successor path that later holds another document is no successor (410) (#939) |
-| An identity-migrated corpus (`identity.json` declared): a document moved, at or after the migration commit, off an address whose `slugs.json` owner is another document (the migration's U1 renames) | **No 301.** The address keeps naming its owner (`served_owner_doc_id`, #921), so it answers 200 for the owner, else 410. A move before the migration commit keeps the 301 the walk proves. An address `slugs.json` does not hold gets no 301. The registry is read at the pinned commit as strictly as the sync reads it, and the build fails on a registry it cannot trust (a repeated key, a missing manifest address, no declaration, a removed declaration, a shallow clone) (#939) |
+| An identity-migrated corpus (`identity.json` declared): a document moved off an address whose `slugs.json` owner is another document (the migration's U1 renames, a later move, or a move before the migration commit) | **No 301.** The address keeps naming its owner (`served_owner_doc_id`, #921), so it answers 200 for the owner, else 410. A 301 never leads to a document other than the address's owner (owner decision, P7 E7); a pre-migration 301 that did is retired to 410 at the migration. An address `slugs.json` does not hold gets no 301. The registry is read at the pinned commit as strictly as the sync reads it, and the build fails on a registry it cannot trust (a repeated key, a missing manifest address, no declaration, a removed declaration, a shallow clone, whose truncated history would hide moves the owner check judges) (#939) |
 | Rename, but the pid is absent from the successor | 410, from the old slug's 410 namespace |
 | A pid leaves a document that keeps its slug | 410 for that exact provision URL, when a collision-free version of the document's path in the pinned first-parent history carried the pid. A pid seen only in colliding versions was never servable and gets no entry |
 | A document starts colliding on a pid | 410 for each pid of an earlier collision-free version. A pid the history never shows at a servable URL gets no entry |
@@ -123,10 +123,9 @@ their own contract.
 - Rename proof relies on git rename detection, under the existing walk's limits. A move onto
   an occupied path is proven only when that commit's manifest already records it; a move whose
   manifest lands in a later commit stays a 410.
-- In a migrated corpus the owner check judges the address's own retiring move: the newest
-  commit that retired it, which is also the move the walk follows from (`_newest_retirement_per_key`).
-  A later hop of the chain is not judged against that address's owner, so a chain whose own
-  retirement predates the migration keeps its 301 even if a later hop is a migration move.
+- In a migrated corpus the owner check compares the address's owner with the live document its
+  newest retiring move leads to, at the end of the chain (`_newest_retirement_per_key`,
+  `_terminal_plan`), whenever each hop was made. It does not judge the intermediate hops.
 - The check compares each release with the one it replaces. The guarantee is transitive only
   from the first release committed with the check (#820). Earlier transitions were not judged,
   and URLs served only before then are not protected.

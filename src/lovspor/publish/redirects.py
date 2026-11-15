@@ -128,7 +128,7 @@ def _lineage_redirects(
     redirects: list[tuple[str, str]] = []
     for key, edge in sorted(retired.items()):
         plan = _terminal_plan(edge, by_old, by_path)
-        if plan is not None and not leaves_its_owner(corpus, owners, key, (edge.sha, plan.doc_id)):
+        if plan is not None and not leaves_its_owner(owners, key, plan.doc_id):
             redirects.extend(_document_redirects(corpus, edge, plan, f"/{key[0]}/{key[1]}/"))
     return redirects
 

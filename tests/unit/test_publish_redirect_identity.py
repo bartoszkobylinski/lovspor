@@ -6,9 +6,9 @@ against a real throwaway git history:
 - a document moved onto a path another document held, in one commit: git
   records a modification and a deletion, never a rename, yet the
   front-matter ``id`` on both sides of the commit proves the move;
-- an identity-migrated corpus: a move the migration (or a later commit)
-  made of a document off an address it does not own is no lineage of that
-  address, because the address names its ``slugs.json`` owner (#921).
+- an identity-migrated corpus: a move of a document off an address it does
+  not own, by the migration, a later commit or an earlier one, is no lineage
+  of that address, because the address names its ``slugs.json`` owner (#921).
 """
 
 import json
@@ -337,13 +337,29 @@ class TestAMigratedAddressNamesItsOwner:
         redirect_map = _map_at_head(repo)
         assert not [pair for pair in redirect_map.redirects if pair[0].startswith("/lov/x/")]
 
-    def test_a_rename_before_the_migration_keeps_its_301(self, tmp_path: Path) -> None:
+    def test_a_rename_before_the_migration_off_another_owners_address_answers_410(
+        self, tmp_path: Path
+    ) -> None:
         repo = _later_holder(tmp_path)
         _git(repo, "mv", "lover/x.md", "lover/x-2026.md")
         _commit(repo, _moved_off(), day=3)
         _migrate(repo, _OWNERS, _moved_off())
         redirect_map = _map_at_head(repo)
-        assert ("/lov/x/", "/lov/x-2026/") in redirect_map.redirects
+        assert not [pair for pair in redirect_map.redirects if pair[0].startswith("/lov/x/")]
+        assert "/lov/x/" in redirect_map.gone
+        assert ("/lov/x-2026/" not in redirect_map.gone) and not [
+            pair for pair in redirect_map.redirects if pair[0].startswith("/lov/x-2026/")
+        ]
+
+    def test_the_owner_renamed_before_the_migration_keeps_its_301(self, tmp_path: Path) -> None:
+        repo = _repo(tmp_path)
+        _write(repo, "y.md", "doc-y")
+        _commit(repo, {"doc-y": _record("lover/y.md", "y")}, 1)
+        _git(repo, "mv", "lover/y.md", "lover/z.md")
+        _commit(repo, {"doc-y": _record("lover/z.md", "z")}, 2)
+        _migrate(repo, {"y": "doc-y", "z": "doc-y"}, {"doc-y": _record("lover/z.md", "z")})
+        redirect_map = _map_at_head(repo)
+        assert ("/lov/y/", "/lov/z/") in redirect_map.redirects
 
     def test_the_owner_moved_after_the_migration_keeps_its_301(self, tmp_path: Path) -> None:
         repo = _repo(tmp_path)
@@ -427,6 +443,38 @@ class TestTheProvenDocumentIsTheOneReached:
         redirect_map = _map_at_head(repo)
         assert ("/lov/a/", "/lov/r/") in redirect_map.redirects
         assert ("/lov/p/", "/lov/r/") in redirect_map.redirects
+
+    @pytest.mark.parametrize(
+        ("p_owner", "p_redirects"), [("doc-a", True), ("doc-b", False)], ids=["moved", "first"]
+    )
+    def test_each_address_of_a_migrated_chain_is_judged_by_its_own_owner(
+        self, tmp_path: Path, p_owner: str, p_redirects: bool
+    ) -> None:
+        repo = _repo(tmp_path)
+        _write(repo, "a.md", "doc-a")
+        _write(repo, "p.md", "doc-b")
+        _write(repo, "r.md", "doc-c")
+        _commit(
+            repo,
+            {
+                "doc-a": _record("lover/a.md", "a"),
+                "doc-b": _record("lover/p.md", "p"),
+                "doc-c": _record("lover/r.md", "r"),
+            },
+            day=1,
+        )
+        documents = {"doc-a": _record("lover/p.md", "p"), "doc-c": _record("lover/r.md", "r")}
+        _move_onto(repo, "a.md", "p.md", documents, day=2)
+        _move_onto(repo, "p.md", "r.md", {"doc-a": _record("lover/r.md", "r")}, day=3)
+        _migrate(
+            repo, {"a": "doc-a", "p": p_owner, "r": "doc-a"}, {"doc-a": _record("lover/r.md", "r")}
+        )
+
+        redirect_map = _map_at_head(repo)
+
+        assert ("/lov/a/", "/lov/r/") in redirect_map.redirects
+        assert (("/lov/p/", "/lov/r/") in redirect_map.redirects) is p_redirects
+        assert "/lov/p/" in redirect_map.gone
 
     def test_two_deleted_copies_of_one_document_prove_no_move(self, tmp_path: Path) -> None:
         repo = _repo(tmp_path)
