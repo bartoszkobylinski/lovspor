@@ -257,3 +257,19 @@ def test_a_dirty_worktree_aborts_before_any_work(tmp_path: Path) -> None:
         text=True,
     ).stdout.strip()
     assert count_after == count_before
+
+
+def test_annotation_clears_the_sidecar_provenance_stamp(tmp_path: Path) -> None:
+    """The stamp vouched for a quantization of the old inputs, so it goes (#936)."""
+    settings, corpus = _seed_corpus(tmp_path)
+    path = corpus / "manifest.json"
+    manifest = read_manifest(path)
+    stamped = manifest.documents["lov-x"].model_copy(update={"embedding_sidecar_sha256": "f" * 64})
+    write_manifest(
+        manifest.model_copy(update={"documents": {**manifest.documents, "lov-x": stamped}}), path
+    )
+    _git(corpus, "commit", "-am", "stamp")
+
+    annotate_embedding_input_identity(settings)
+
+    assert read_manifest(path).documents["lov-x"].embedding_sidecar_sha256 is None

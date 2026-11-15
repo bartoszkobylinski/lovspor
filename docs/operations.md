@@ -54,8 +54,13 @@ embeds is carried, not sent, and the guard counts only the inputs that are sent.
 Reuse needs proof that the committed rows belong to those texts: the prior record's
 `embedding_hash` equals its `xml_hash`, its `embedding_space_id` is the configured
 space, the committed Markdown re-derives the inputs named by its
-`embedding_input_hash`, and the sidecar is LSPE v2 with the same space, dimension and
-section ids in input order. A document that fails any check is paid and counted in
+`embedding_input_hash`, the sidecar is LSPE v2 with the same space, dimension and
+section ids in input order, and its quantization provenance is known: its bytes match
+the record's `embedding_sidecar_sha256`, or, for a record without one, they are in the
+audited legacy set (`attested_sidecars.txt`: 3,930 non-empty sidecars at lovverk
+`c310127e`, each paired with its record's `embedding_input_hash`, writer audit
+2026-11-15; 8 sidecars whose bytes predate the 2026-08-04 regeneration are left out).
+`lovspor annotate` clears the stamp of a record it re-annotates. A document that fails any check is paid and counted in
 full, as before. Removed inputs drop out of the rewritten sidecar; the manifest
 records the new full `embedding_input_hash`. The rows are snapshotted from the
 clean committed tree before the first write. The token ceiling is unchanged and

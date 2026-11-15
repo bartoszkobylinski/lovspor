@@ -64,7 +64,7 @@ from lovspor.embeddings.model import (
 )
 from lovspor.embeddings.provider import UNKNOWN_SPACE_ID, create_embedder, space_id_of
 from lovspor.embeddings.sections import strip_frontmatter
-from lovspor.embeddings.store import read_embeddings, write_embeddings
+from lovspor.embeddings.store import read_embeddings, sidecar_sha256, write_embeddings
 from lovspor.errors import (
     ConfigError,
     CorpusStateError,
@@ -997,7 +997,6 @@ def _write_one(
         upstream.source_dataset,
         upstream.slug,
     )
-    doc_type = doc_type_for_dataset(upstream.source_dataset)
     rendered = render_full_document(upstream.xml_bytes, _frontmatter_context(upstream, now))
     write_document(path, rendered)
 
@@ -1018,7 +1017,7 @@ def _write_one(
         descriptor, space_id = _embedder_identity(embedder)
 
     record = ManifestRecord(
-        doc_type=doc_type,
+        doc_type=doc_type_for_dataset(upstream.source_dataset),
         xml_hash=upstream.xml_hash,
         markdown_path=str(path.relative_to(settings.lovverk_repo_path)),
         source_dataset=upstream.source_dataset,
@@ -1050,6 +1049,7 @@ def _write_one(
         # recomputed, so it cannot drift from the embedded payload. Keyless:
         # None, same honesty rule as the space fields above.
         embedding_input_hash=input_hash,
+        embedding_sidecar_sha256=space_id and sidecar_sha256(written_paths[-1]),
         # Stamp the renderer that produced this Markdown, so a later renderer
         # bump makes the doc detectably stale even though its XML is unchanged.
         renderer_version=RENDERER_VERSION,
@@ -1293,7 +1293,7 @@ def _tombstone(old: ManifestRecord, reason: str | None = None) -> ManifestRecord
     Keeps ``doc_type``, ``xml_hash``, ``markdown_path``, ``source_dataset``, ``last_seen``,
     ``slug``, ``title``. Drops to ``None`` ``total_changes``, ``last_changed``, ``eu_basis``,
     ``embedding_hash``, ``embedding_space``, ``embedding_space_id``, ``embedding_input_hash``,
-    ``renderer_version``: the removal's audit trail is ``history/<slug>.json``.
+    ``embedding_sidecar_sha256``, ``renderer_version``: the audit trail is ``history/<slug>.json``.
 
     ``reason`` is ``None`` for an ordinary removal (the doc left the upstream
     dataset) and set when the corpus withheld a doc upstream still lists — see
@@ -1950,7 +1950,6 @@ def _run_sprint9_embeddings_migration(
     write would clobber the ``embedding_hash`` fields).
     """
     repo = settings.lovverk_repo_path
-    manifest_path = repo / _MANIFEST_FILENAME
     selection = _select_embedding_backfill(prior, repo, target_space_id)
     if not selection:
         return prior
@@ -1977,11 +1976,12 @@ def _run_sprint9_embeddings_migration(
                 "embedding_space": descriptor,
                 "embedding_space_id": space_id,
                 "embedding_input_hash": input_hash,
+                "embedding_sidecar_sha256": space_id and sidecar_sha256(new_path),
             },
         )
     new_manifest = Manifest(generated_at=now, documents=new_records)
-    replace_manifest(new_manifest, manifest_path)
-    git_add(repo, [manifest_path, *written])
+    replace_manifest(new_manifest, repo / _MANIFEST_FILENAME)
+    git_add(repo, [repo / _MANIFEST_FILENAME, *written])
     if has_staged_changes(repo):
         git_commit_msg(
             repo,

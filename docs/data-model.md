@@ -96,6 +96,7 @@ defaults) — the XML cannot supply provenance, so the caller provides it.
 | `embedding_space` | `str \| None` | `None` |
 | `embedding_space_id` | `str \| None` | `None` |
 | `embedding_input_hash` | `str \| None` | `None` |
+| `embedding_sidecar_sha256` | `str \| None` | `None` (omitted from the JSON) |
 | `removed_reason` | `str \| None` | `None` |
 
 The optional fields default to `None` for backward compatibility with older-sprint
@@ -117,6 +118,14 @@ none), and crucially **absence alone never makes a record stale** — an identit
 record is refused by search but is not silently re-embedded. Both fields apply to
 `current` records only. The full ESI definition, canonical serialization and staleness
 rules live in `docs/embeddings.md` — this table deliberately does not restate them.
+
+`embedding_sidecar_sha256` (#936) is the SHA-256 of the sidecar bytes a keyed writer
+wrote: the sidecar's quantization provenance. Delta embedding reuses committed int8
+rows only from a sidecar whose bytes match it or, when it is absent, from the audited
+legacy set `src/lovspor/embeddings/attested_sidecars.txt` (sidecar digest paired with the
+record's `embedding_input_hash`); any other sidecar has unknown
+provenance and its document is re-embedded in full. While `None` the key is left out of
+`manifest.json`, so manifests that never carried it serialize byte-identically.
 
 `embedding_input_hash` records the **Embedding Input Identity** (ADR-0006): the
 canonical SHA-256 of the exact ordered `(section_id, chunk_text)` stream the sidecar's

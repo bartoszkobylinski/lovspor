@@ -33,7 +33,12 @@ from lovspor.embeddings.inputs import (
 from lovspor.embeddings.provider import DEFAULT_MODEL_NAME, EmbeddingConfig
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
-from lovspor.embeddings.store import EMBEDDING_DIM, read_embeddings, write_embeddings
+from lovspor.embeddings.store import (
+    EMBEDDING_DIM,
+    read_embeddings,
+    sidecar_sha256,
+    write_embeddings,
+)
 from lovspor.errors import ConfigError, MassReembedError, RenderError
 from lovspor.history import Lineage
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
@@ -49,6 +54,7 @@ from lovspor.storage.manifest import (
 from lovspor.sync.orchestrator import (
     _commit_with_history,
     _DocAction,
+    _embeddings_path,
     _has_rename_path_overlap,
     run_sync,
 )
@@ -5343,6 +5349,9 @@ def test_backfill_stamps_the_embedding_input_identity(
     repaired = read_manifest(corpus / "manifest.json")
     [record] = [r for r in repaired.documents.values() if r.slug == "alpha"]
     assert record.embedding_input_hash == _hash_of_markdown(corpus / "lover" / "alpha.md")
+    # ...and the provenance of the bytes it quantized (#936).
+    sidecar = _embeddings_path(corpus, record.source_dataset, "alpha")
+    assert record.embedding_sidecar_sha256 == sidecar_sha256(sidecar)
 
 
 def test_provider_output_has_no_influence_on_the_input_identity(

@@ -52,6 +52,7 @@ silently shrink the corpus when it meets a future format (the
 silent-partial-recall failure ADR-0005 §3 names).
 """
 
+import hashlib
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -190,6 +191,11 @@ def write_embeddings(
     # check treats as present). atomic_io also refuses to write through a
     # symlink planted at the predictable staging name (#284, #280).
     atomic_write_bytes(path, b"".join(parts))
+
+
+def sidecar_sha256(path: Path) -> str:
+    """The SHA-256 of a sidecar's bytes, as ``embedding_sidecar_sha256`` records it (#936)."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def read_embeddings(path: Path) -> EmbeddingFile:

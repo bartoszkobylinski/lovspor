@@ -16,13 +16,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import ParseError
 
 MANIFEST_VERSION = 1
 ManifestStatus = Literal["current", "removed"]
+
+
+def _absent(value: object) -> bool:
+    return value is None
 
 
 class ManifestRecord(BaseModel):
@@ -79,6 +83,18 @@ class ManifestRecord(BaseModel):
     field on rewrite; the mass-re-embed guard, not absent-immunity, is what
     prevents surprise corpus-wide spend.
 
+    ``embedding_sidecar_sha256`` is the SHA-256 of the sidecar bytes a keyed
+    writer of this engine wrote (#936): the sidecar's quantization provenance.
+    It is stamped with ``embedding_space_id``; a record without a space is
+    never reused, so it needs none.
+    Delta embedding reuses a committed int8 row only from a sidecar whose
+    bytes match it, or from one in the audited legacy set
+    (``lovspor.embeddings.provenance``); any other sidecar has unknown
+    provenance and its document is re-embedded in full. It is left out of the
+    JSON while ``None``, so a manifest that never carried it serializes
+    byte-identically, and an older writer that drops it on rewrite only makes
+    the sidecar unknown.
+
     ``renderer_version`` records the ``RENDERER_VERSION`` that produced the
     Markdown. Change detection keys on the *upstream XML* hash, so a renderer
     fix leaves the record ``unchanged`` and never reaches it; sync compares this
@@ -122,6 +138,7 @@ class ManifestRecord(BaseModel):
     embedding_space: str | None = None
     embedding_space_id: str | None = None
     embedding_input_hash: str | None = None
+    embedding_sidecar_sha256: str | None = Field(default=None, exclude_if=_absent)
     renderer_version: int | None = None
     removed_reason: str | None = None
 

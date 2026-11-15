@@ -50,11 +50,15 @@ What the proof assumes, because bytes alone cannot show it:
 * **Provenance.** The committed sidecar is what the rebuild quantizer wrote
   over the floats of its own inputs. Int8 rows cannot prove their header
   scale was ``float32(max|v| / 127)``: a sidecar from a writer that kept a
-  stale scale can still hold a ±127 row. So the set of sidecar writers is
-  pinned (``tests/unit/test_delta_embed_provenance.py``): the rebuild
-  quantizer, this module (byte-identical to it), and the LSPE cutover, which
-  copies vectors and scale bit for bit. What bytes can refute is refused: no
-  ±127 row, or a scale that is not finite and positive.
+  stale scale can still hold a ±127 row. So a sidecar is reused only when its
+  provenance is recorded (:mod:`lovspor.embeddings.provenance`): its bytes
+  match the digest this engine's writer stamped on the record, or, unstamped,
+  the audited legacy set. Unknown provenance means a full re-embed, never
+  reuse. The set of sidecar writers stays pinned
+  (``tests/unit/test_delta_embed_provenance.py``): the rebuild quantizer, this
+  module (byte-identical to it), and the LSPE cutover, which copies vectors
+  and scale bit for bit. What bytes can refute is refused too: no ±127 row,
+  or a scale that is not finite and positive.
 * **Vector purity.** A vector is a function of its text alone, independent of
   the request it was batched in: a re-pay batches differently from a rebuild.
 """
@@ -70,6 +74,7 @@ import numpy as np
 from lovspor.embeddings.cache import CachingEmbedder, quantized_document_vectors
 from lovspor.embeddings.inputs import EmbeddingInput, build_embedding_inputs, hash_embedding_inputs
 from lovspor.embeddings.model import EmbeddingModel, count_input_tokens
+from lovspor.embeddings.provenance import has_known_provenance, sidecar_sha256
 from lovspor.embeddings.provider import UNKNOWN_SPACE_ID, space_id_of
 from lovspor.embeddings.quantize import quantize_at_scale, quantize_int8
 from lovspor.embeddings.store import EmbeddingFile, read_embeddings
@@ -316,15 +321,19 @@ def _committed_sidecar(
 ) -> EmbeddingFile | None:
     """The committed sidecar, if it parses and its header proves the target space.
 
-    A corrupt or missing file is not reusable and is paid for in full. An
+    A corrupt or missing file, or one of unknown quantization provenance
+    (:mod:`lovspor.embeddings.provenance`), is not reusable and is paid for
+    in full. An
     unsupported format version propagates: the engine is behind the corpus,
     and the run stops before any spend rather than overwrite what it cannot read.
     """
     path = embeddings_path(repo, record.source_dataset, str(record.slug))
     try:
         sidecar = read_embeddings(path)
+        digest = sidecar_sha256(path)
     except (ValueError, OSError):
         return None
     if sidecar.embedding_space_id != target.space_id or sidecar.dim != target.dim:
         return None
-    return sidecar
+    stamped, input_hash = record.embedding_sidecar_sha256, record.embedding_input_hash
+    return sidecar if has_known_provenance(stamped, digest, input_hash) else None

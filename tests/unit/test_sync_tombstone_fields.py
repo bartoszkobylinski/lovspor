@@ -26,6 +26,7 @@ DROPPED = frozenset(
         "embedding_space",
         "embedding_space_id",
         "embedding_input_hash",
+        "embedding_sidecar_sha256",
         "renderer_version",
     }
 )
@@ -49,6 +50,7 @@ def _fully_populated() -> ManifestRecord:
         embedding_space="openai:text-embedding-3-large:3072",
         embedding_space_id="b" * 32,
         embedding_input_hash="c" * 64,
+        embedding_sidecar_sha256="d" * 64,
         renderer_version=5,
         removed_reason=None,
     )
