@@ -1,0 +1,3 @@
+# Revoked forarbeider signing keys (#738, FC7b; architecture section 3.1), one OpenSSH
+# public key per line, consulted by every verification (ssh-keygen -Y verify -r).
+# Changed only by an owner-authored, owner-merged change. Empty: nothing revoked.
