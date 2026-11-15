@@ -19,6 +19,7 @@ from lovspor.legaltime.hosts import nested_timings
 from lovspor.legaltime.instructions import Operation, interpret
 from lovspor.legaltime.nesting import nesting
 from lovspor.legaltime.replay import Event, ReplayState, replay
+from lovspor.legaltime.units import UNPLACED, inserted_chapter
 from lovspor.legaltime.verify import verify
 
 REPLAY_VERSION = "legaltime-replay-10"  # #935: only its source places an insertion
@@ -29,7 +30,7 @@ def _stamp(value: datetime | None) -> str | None:
 
 
 def chapter_map(evidence: Evidence) -> dict[str, str]:
-    """Section key → chapter, from the act's enacting structure and every chapter-stamped insertion.
+    """Section key → chapter, from the act's enacting structure and each insertion's own source.
 
     Text existence only (ADR-0020 Decision 3a): a key is placed in the chapter the
     announcement that carries it names, whether or not that text is in force at any date.
@@ -37,9 +38,9 @@ def chapter_map(evidence: Evidence) -> dict[str, str]:
     placed = {p.key: p.chapter for p in evidence.baseline.provisions if p.chapter is not None}
     for amender in evidence.amenders:
         for op in interpret(amender).operations:
-            new = op.new_provision
-            if op.act == evidence.act and new is not None and new.chapter is not None:
-                placed.setdefault(new.key, new.chapter)
+            new, chapter = op.new_provision, inserted_chapter(op)  # #935: the source's only
+            if op.act == evidence.act and new is not None and chapter is not UNPLACED:
+                placed.setdefault(new.key, chapter)
     return placed
 
 

@@ -132,8 +132,10 @@ _SEVERAL_CHAPTERS = re.compile(r"\bkapitler\b|\btil\b", re.I)
 def inserted_chapter(operation: Operation) -> str | Literal[Unplaced.CHAPTER]:
     """The affected act's chapter the insertion's own source states, else ``UNPLACED`` (#935).
 
-    Read from ``Operation.stated`` only. A printed chapter title the grammar cannot read, or
-    a sentence naming one chapter above a title naming another, states no one chapter.
+    Read from ``Operation.stated`` only. A printed chapter title the grammar cannot read, a
+    sentence naming one chapter above a title naming another, or a sentence naming several
+    chapters (``Nye kapitler 21 til 31``) with no title read before the text, states no one
+    chapter.
     """
     stated, new = operation.stated, operation.new_provision
     if stated is None or new is None or new.chapter is None:  # _placed: no chapter read
@@ -141,8 +143,9 @@ def inserted_chapter(operation: Operation) -> str | Literal[Unplaced.CHAPTER]:
     if stated.title is not None and chapter_key(stated.title) is None:
         return UNPLACED
     named = chapter_key(stated.sentence)
-    several = _SEVERAL_CHAPTERS.search(stated.sentence) is not None
-    return UNPLACED if named not in {None, new.chapter} and not several else new.chapter
+    if _SEVERAL_CHAPTERS.search(stated.sentence) is not None:
+        return new.chapter if stated.chapter_from == "title" else UNPLACED
+    return UNPLACED if named not in {None, new.chapter} else new.chapter
 
 
 Where = tuple[ChapterClaim, tuple[str, ...]]  # a section's chapter, and its part labels

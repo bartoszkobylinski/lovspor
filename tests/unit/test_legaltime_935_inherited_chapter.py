@@ -199,11 +199,32 @@ def test_an_unreadable_or_contradicted_chapter_places_nothing(
     sentence: str, title: str | None
 ) -> None:
     payload = (_title(title) if title else "") + _future("§6A-1")
-    op = _one(_member(_p(INTRO) + _p(sentence) + payload))
+    member = _member(_p(INTRO) + _p(sentence) + payload)
+    op = _one(member)
     assert inserted_chapter(op) is UNPLACED
+    assert _map(member) == {}
     assert relation(Unit(chapter="kap6a"), op) == "unknown"
     assert relation(Unit(chapter="kap6b"), op) == "unknown"
     assert relation(Unit(chapter="kap6a", new=True), op) == "unknown"  # a chapter insertion
+
+
+@pytest.mark.parametrize(
+    ("sentence", "origin"),
+    [
+        ("Nytt kapittel 21 til 22 skal lyde:", "sentence"),  # chapter_key reads the first
+        ("Nye kapitler 21 til 22 plasseres i annen del, og skal lyde:", None),
+    ],
+)
+def test_a_range_of_chapters_without_a_title_before_the_text_places_nothing(
+    sentence: str, origin: str | None
+) -> None:
+    """A sentence naming two chapters places the text in neither without a title read."""
+    untitled = _member(_p(INTRO) + _p(sentence) + _future("§201"))
+    op = _one(untitled)
+    assert op.stated is not None and op.stated.chapter_from == origin
+    assert inserted_chapter(op) is UNPLACED
+    assert _map(untitled) == {}
+    assert relation(Unit(chapter="kap21"), op) == "unknown"
 
 
 def test_a_title_agreeing_with_the_sentence_places_the_section() -> None:
