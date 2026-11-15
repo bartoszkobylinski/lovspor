@@ -37,6 +37,7 @@ from lovspor.legaltime.structure import (
     StructureError,
     _structure,
     enacted_structure,
+    enacted_structure_by_id,
     paired,
     read_clause,
     stamps_of,
@@ -614,20 +615,23 @@ def test_the_mixed_step_holds_i1_to_i3_and_conserves_every_proof() -> None:
 
 @pytest.mark.structural
 def test_only_the_b1_step_and_the_research_adapter_reach_the_structure_map() -> None:
-    """No replay, report or surface module imports ``S``: replay output cannot change."""
+    """No replay, report or surface module imports ``S``: replay output cannot change.
+
+    ``step_evidence`` is the B4a research builder; its own guard holds that nothing imports it.
+    """
     root = Path(__file__).resolve().parents[2] / "src" / "lovspor"
     importers = sorted(
         p.relative_to(root).as_posix()
         for p in root.rglob("*.py")
         if p.name != "structure.py" and _imports(p, "lovspor.legaltime.structure")
     )
-    assert importers == ["legaltime/step.py"]
+    assert importers == ["legaltime/step.py", "legaltime/step_evidence.py"]
     reaching_step = sorted(
         p.relative_to(root).as_posix()
         for p in root.rglob("*.py")
         if p.name != "step.py" and _imports(p, "lovspor.legaltime.step")
     )
-    assert reaching_step == ["legaltime/rename_research.py"]
+    assert reaching_step == ["legaltime/rename_research.py", "legaltime/step_evidence.py"]
 
 
 def _imports(path: Path, module: str) -> bool:
@@ -969,3 +973,11 @@ def test_refused_chapter_insertions_leave_no_outline_evidence_beside_an_accepted
     )
     assert _pair(result, _new("§22")) == Pair(chapter="kap17", part="del2")
     paired(result.ledger, result.structure)
+
+
+def test_an_id_keyed_step_0_needs_a_stamp_for_every_identity_and_no_more() -> None:
+    ledger, structure = _state()
+    stamps = {m.provision_id: m.current for m in structure.memberships}
+    first = next(iter(stamps))
+    with pytest.raises(StructureError, match="disagree"):
+        enacted_structure_by_id(ledger, {k: v for k, v in stamps.items() if k != first})

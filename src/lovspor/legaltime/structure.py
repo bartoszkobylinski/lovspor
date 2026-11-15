@@ -207,17 +207,33 @@ def enacted_structure(ledger: Ledger, stamps: Mapping[str, Pair]) -> Structure:
     under two parts is conflicting evidence. Each is a hard failure, never a guess.
     """
     labels = {str(i.label): i for i in ledger.identities if i.live}
-    if any(i.intervals[0].start.effective is not None for i in ledger.identities):
-        raise StructureError("step 0 stamps enacted identities only")
     if set(labels) != set(stamps):
         missing = sorted(set(labels) ^ set(stamps))
         raise StructureError(f"enacting structure and step 0 disagree on {missing}")
+    return enacted_structure_by_id(
+        ledger, {labels[label].provision_id: pair for label, pair in stamps.items()}
+    )
+
+
+def enacted_structure_by_id(ledger: Ledger, stamps: Mapping[str, Pair]) -> Structure:
+    """Step 0 keyed by identity: each enacted ``provision_id`` → the pair its own node states.
+
+    A builder that reads label and stamp from one source node passes them here without
+    ever keying a stamp by label (ADR-0023 Phase B4a).
+    """
+    if any(i.intervals[0].start.effective is not None for i in ledger.identities):
+        raise StructureError("step 0 stamps enacted identities only")
+    ids = {i.provision_id: i for i in ledger.identities}
+    if set(ids) != set(stamps):
+        raise StructureError(
+            f"enacting structure and step 0 disagree on {sorted(set(ids) ^ set(stamps))}"
+        )
     memberships, registered = [], []
-    for label, identity in sorted(labels.items(), key=lambda item: item[1].provision_id):
-        proof = identity.intervals[0].start
-        event = PlacementEvent(cause="enacted", pair=stamps[label], proof=proof)
-        memberships.append(Membership(provision_id=identity.provision_id, events=(event,)))
-        registered.append((identity.provision_id, stamps[label], proof))
+    for pid in sorted(ids):
+        proof = ids[pid].intervals[0].start
+        event = PlacementEvent(cause="enacted", pair=stamps[pid], proof=proof)
+        memberships.append(Membership(provision_id=pid, events=(event,)))
+        registered.append((pid, stamps[pid], proof))
     return _structure(ledger.act, memberships, _outline((), registered))
 
 

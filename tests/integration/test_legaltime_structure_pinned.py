@@ -13,15 +13,14 @@ The old membership is therefore **not proven**: the rename is refused ("rename s
 missing") and no stamp is written. What the source does prove is pinned beside it: the
 enacted § 101's own pair is (empty, ``del3``), the pair the clause would confirm.
 
-Step-0 proofs here carry the real member digest; their ``sentence_sha256`` is a test-local
-stand-in (the provision's printed label and heading), because step 0 has no instruction
-sentence and no production builder of step-0 proofs exists yet (a missing requirement,
-recorded in the research note).
+Step 0 is built by the Phase B4a research builder ``step_evidence.build_step0`` from the
+enacting member itself: each identity's label, id and stamp come from one source node, and
+its ``sentence_sha256`` is that node's digest under ``STEP0_POLICY`` (no sentence states an
+enacted provision; the policy awaits an ADR clarification).
 
 Runs only where the pinned archives sit in the gitignored cache; a skip is not a pass.
 """
 
-import hashlib
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -30,9 +29,10 @@ import pytest
 
 from lovspor.legaltime.archive import collect, file_sha256, read_members
 from lovspor.legaltime.document import Document
-from lovspor.legaltime.identity import LabelProof, Ledger, enacted_id, mint_enacted
+from lovspor.legaltime.identity import Ledger, enacted_id
 from lovspor.legaltime.rename_research import adapt_evidence
 from lovspor.legaltime.step import apply_step
+from lovspor.legaltime.step_evidence import Step0, build_step0
 from lovspor.legaltime.structure import (
     Clause,
     Pair,
@@ -42,7 +42,6 @@ from lovspor.legaltime.structure import (
     read_clause,
     stamps_of,
 )
-from lovspor.legaltime.text import section_key
 
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "data/cache/legaltime"
@@ -72,23 +71,11 @@ def enacting() -> Document:
     return read_members(ARCHIVES[0], [ENACTING])[ENACTING]
 
 
-def _proof(document: Document, label: str, heading: str) -> LabelProof:
-    stand_in = hashlib.sha256(f"{label}\n{heading}".encode()).hexdigest()
-    return LabelProof(
-        instrument=ACT, op_id=f"{ACT}#enacted:{section_key(label)}", member=ENACTING,
-        member_sha256=document.sha256, sentence_sha256=stand_in, effective=None,
-        known_from=PUBLISHED, label_minted_at=PUBLISHED,
-    )  # fmt: skip
-
-
 @pytest.fixture(scope="module")
 def step0(enacting: Document) -> tuple[Ledger, Structure]:
-    labels = [
-        (str(section_key(p.label)), _proof(enacting, p.label, p.heading))
-        for p in enacting.provisions
-    ]
-    ledger = mint_enacted(ACT, ENACTING, PUBLISHED, labels)
-    return ledger, enacted_structure(ledger, stamps_of(enacting))
+    built = build_step0(enacting, ACT)
+    assert isinstance(built, Step0), built
+    return built.ledger, built.structure
 
 
 def test_step_0_stamps_every_enacted_identity_from_the_pinned_structure(
@@ -97,6 +84,7 @@ def test_step_0_stamps_every_enacted_identity_from_the_pinned_structure(
     ledger, structure = step0
     assert enacting.sha256 == ENACTING_SHA
     assert len(ledger.identities) == len(structure.memberships) == 102
+    assert {i.intervals[0].start.label_minted_at for i in ledger.identities} == {PUBLISHED}
     pairs = Counter((p.chapter, p.part) for p in structure.live_map().values() if p is not None)
     assert pairs[(None, "del3")] == 2 and sum(pairs.values()) == 102
     assert {e.chapter: e.part for e in structure.outline} == {
@@ -152,11 +140,7 @@ def test_the_2009_rename_reaches_b1_with_its_clause_and_is_refused_unproven(
 
 
 def test_the_step_0_structure_is_deterministic(enacting: Document) -> None:
-    labels = [
-        (str(section_key(p.label)), _proof(enacting, p.label, p.heading))
-        for p in reversed(enacting.provisions)
-    ]
-    ledger = mint_enacted(ACT, ENACTING, PUBLISHED, labels)
-    first = enacted_structure(ledger, stamps_of(enacting)).canonical_json()
-    stamps = dict(reversed(list(stamps_of(enacting).items())))
-    assert enacted_structure(ledger, stamps).canonical_json() == first
+    first, second = build_step0(enacting, ACT), build_step0(enacting, ACT)
+    assert isinstance(first, Step0) and isinstance(second, Step0)
+    assert first.canonical_json() == second.canonical_json()
+    assert enacted_structure(first.ledger, stamps_of(enacting)) == first.structure
