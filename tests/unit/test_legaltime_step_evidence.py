@@ -1041,3 +1041,59 @@ def test_header_and_node_problems_are_listed_together() -> None:
         (None, NOT_ENACTING), (None, UNDATED),
         ("§1", DUPLICATE), ("§1", DUPLICATE), ("§2", UNREAD_SECTION),
     ]  # fmt: skip
+
+
+@pytest.mark.parametrize("unbuilt_date", [EFFECTIVE, date(2009, 1, 1)])
+def test_an_unbuilt_operation_blocks_only_its_own_effective_date(unbuilt_date: date) -> None:
+    """The builder's documented group key includes the proven effective date."""
+    document = _member(
+        _p(INTRO) + _p("§ 3 oppheves.") + _p("§ 4 oppheves.")
+        + _p('I § 9 skal "a" erstattes med "b".')
+    )  # fmt: skip
+    early, late, unsupported = _events(document, ACT)
+    later = date(2009, 1, 1)
+    late = late.model_copy(
+        update={
+            "timing": late.timing.model_copy(update={"effective": later}),
+        }
+    )
+    unsupported = unsupported.model_copy(
+        update={
+            "timing": unsupported.timing.model_copy(update={"effective": unbuilt_date}),
+        }
+    )
+    build = build_candidates(iter((unsupported, late, early)), {MEMBER: document})
+    assert [c.effective for c in build.candidates] == [EFFECTIVE, later]
+    assert build.rename_refusals == build.member_gaps == ()
+    (unbuilt,) = build.unbuilt
+    assert unbuilt.op_id == unsupported.operation.id
+    assert unbuilt.effective == unbuilt_date and unbuilt.reason.startswith(KIND)
+    for candidate, label in zip(build.candidates, ("§3", "§4"), strict=True):
+        (repeal,) = candidate.step.repeals
+        assert repeal.label == label
+        assert repeal.proof.effective == candidate.effective
+        if candidate.effective == unbuilt_date:
+            assert not candidate.complete
+            assert len(candidate.gaps) == 1
+            assert unsupported.operation.id in candidate.gaps[0]
+            with pytest.raises(CandidateError, match="incomplete"):
+                candidate.executable()
+        else:
+            assert candidate.complete and candidate.gaps == ()
+            assert candidate.executable() == candidate.step
+
+
+def test_an_unbuilt_operation_of_another_act_does_not_block_a_candidate() -> None:
+    """Attribution bounds completeness even within the same member and date."""
+    document = _member(
+        _p(INTRO) + _p("§ 3 oppheves.")
+        + _p(INTRO_OTHER) + _p('I § 9 skal "a" erstattes med "b".'),
+        changes=(ACT, OTHER_ACT),
+    )  # fmt: skip
+    build = _candidates(document, ACT, OTHER_ACT)
+    (candidate,) = build.candidates
+    assert candidate.act == ACT and candidate.complete and candidate.gaps == ()
+    assert [r.label for r in candidate.executable().repeals] == ["§3"]
+    (unbuilt,) = build.unbuilt
+    assert (unbuilt.act, unbuilt.member, unbuilt.effective) == (OTHER_ACT, MEMBER, EFFECTIVE)
+    assert unbuilt.reason.startswith(KIND)
