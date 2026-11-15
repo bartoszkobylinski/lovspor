@@ -1027,3 +1027,17 @@ def test_same_act_and_date_in_different_members_remain_separate_candidates() -> 
         assert repeal.proof.member_sha256 == document.sha256
         (evidence,) = candidate.evidence
         assert evidence.operation == repeal
+
+
+def test_header_and_node_problems_are_listed_together() -> None:
+    """A header problem never hides a node problem: every detectable problem is listed."""
+    document = _enacting(
+        _article("§ 1") + _article("§ 1") + _sec("kapIV", _article("§ 2")),
+        refid="lov/2005-06-17-62",
+        published=None,
+    )
+    refusal = _refused(document)
+    assert [(p.node, p.reason) for p in refusal.problems] == [
+        (None, NOT_ENACTING), (None, UNDATED),
+        ("§1", DUPLICATE), ("§1", DUPLICATE), ("§2", UNREAD_SECTION),
+    ]  # fmt: skip

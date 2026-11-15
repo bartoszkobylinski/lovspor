@@ -217,7 +217,7 @@ def node_digest(member: str, member_sha256: str, data_name: str, printed_label: 
 
 def build_step0(document: Document, act: str) -> Step0 | Step0Refusal:
     """Step 0 of ``act`` from its enacting member, or every reason it cannot be read."""
-    problems = _header_problems(document, act) or _node_problems(document)
+    problems = [*_header_problems(document, act), *_node_problems(document)]  # all, in order
     published = document.header.published_at
     if problems or published is None:
         return _refused(document, act, problems)
