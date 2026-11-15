@@ -435,21 +435,27 @@ def _move_tag(repo: Path, head: str) -> int:
     return done.returncode
 
 
-def test_the_night_after_an_incomplete_one_still_measures_its_commits(
-    main_repo: Path, tmp_path: Path
+@pytest.mark.parametrize("reason", ["budget_exceeded", "run_incomplete", "tool_failed"])
+def test_an_incomplete_night_leaves_the_tag_and_the_next_night_measures_again(
+    main_repo: Path, origin: Path, tmp_path: Path, reason: str
 ) -> None:
-    """A budget-exceeded verdict is not complete, so the tag step's `if` skips it."""
-    verdict = _verdict(tmp_path, {"schema_version": 1, "gate": {"reason": "budget_exceeded"}})
-    assert verdict["complete"] != "true"
-    assert _step("Move the base tag")["if"] == "steps.verdict.outputs.complete == 'true'"
+    """Run the tag step exactly when its `if` would: on this verdict, never."""
+    step = _step("Move the base tag")
+    assert step["if"] == "steps.verdict.outputs.complete == 'true'"
+    complete = _verdict(tmp_path, {"schema_version": 1, "gate": {"reason": reason}})["complete"]
     _commit(main_repo, "old", OLD)
     tagged = _commit(main_repo, "measured")
     _git(main_repo, "tag", "nightly-mutation-base", tagged)
-    _commit(main_repo, "night 1 head: budget exceeded, the tag step is skipped")
-    later = _commit(main_repo, "landed the next day")
+    _git(main_repo, "push", "-q", "origin", "refs/tags/nightly-mutation-base")
+    _commit(main_repo, "night head, not fully measured")
+    _, night = _resolve_range(main_repo)
 
+    if complete == "true":
+        _move_tag(main_repo, night["head"])
+    later = _commit(main_repo, "landed the next day")
     status, out = _resolve_range(main_repo)
 
+    assert _git(origin, "rev-parse", "nightly-mutation-base") == tagged
     assert status == 0
     assert (out["base"], out["head"]) == (tagged, later)
 
