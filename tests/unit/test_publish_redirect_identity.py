@@ -16,7 +16,10 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from lovspor.publish.inventory import build_inventory
+from lovspor.publish.redirect_identity import occupied_moves
 from lovspor.publish.redirects import RedirectMap, build_redirect_map
 from lovspor.snapshot import CorpusSnapshot
 
@@ -138,6 +141,30 @@ def _occupied_move(tmp_path: Path, arriving: str = "doc-b") -> Path:
 
 
 class TestMoveOntoAnOccupiedPath:
+    @pytest.mark.parametrize("evidence", ["no-manifest", "no-document", "wrong-path"])
+    def test_the_move_requires_the_same_commits_manifest_evidence(
+        self, tmp_path: Path, evidence: str
+    ) -> None:
+        """URL contract §4 requires the arrival path in the move commit's manifest."""
+        repo = _occupied_move(tmp_path)
+        path = repo / "manifest.json"
+        if evidence == "no-manifest":
+            path.unlink()
+        else:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            if evidence == "no-document":
+                del manifest["documents"]["doc-b"]
+            else:
+                manifest["documents"]["doc-b"]["markdown_path"] = "lover/elsewhere.md"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "--amend", "--no-edit", day=2)
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+        assert occupied_moves(repo, [(sha, "lover/a-2.md")], frozenset({"doc-b"})) == {}
+
     def test_the_front_matter_id_proves_the_move_git_records_as_a_deletion(
         self, tmp_path: Path
     ) -> None:
@@ -214,6 +241,38 @@ _OWNERS = {"x": "doc-old", "x-2026": "doc-new", "keep": "doc-keep"}
 
 
 class TestAMigratedAddressNamesItsOwner:
+    def test_a_restored_owner_keeps_its_live_address_after_the_later_holder_moves(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _later_holder(tmp_path)
+        _git(repo, "mv", "lover/x.md", "lover/x-2026.md")
+        _write(repo, "x.md", "doc-old")
+        _migrate(repo, _OWNERS, _moved_off(status="current"))
+
+        redirect_map = _map_at_head(repo)
+
+        assert not [pair for pair in redirect_map.redirects if pair[0].startswith("/lov/x/")]
+        assert "/lov/x/" not in redirect_map.gone
+
+    def test_working_tree_edits_cannot_change_the_pinned_identity_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _later_holder(tmp_path)
+        _git(repo, "mv", "lover/x.md", "lover/x-2026.md")
+        _migrate(repo, _OWNERS, _moved_off())
+        before = _map_at_head(repo)
+        registry_path = repo / "slugs.json"
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        registry["slugs"]["lover"]["x"]["owner"] = "doc-new"
+        registry_path.write_text(json.dumps(registry), encoding="utf-8")
+        (repo / "identity.json").unlink()
+        (repo / "manifest.json").write_text("{}", encoding="utf-8")
+        _write(repo, "x-2026.md", "doc-c")
+
+        assert _map_at_head(repo) == before
+        assert "/lov/x/" in before.gone
+        assert not [pair for pair in before.redirects if pair[0].startswith("/lov/x/")]
+
     def test_the_migration_moving_a_later_holder_off_the_address_is_no_lineage(
         self, tmp_path: Path
     ) -> None:
