@@ -910,3 +910,57 @@ def test_an_insertion_whose_data_name_is_not_its_label_is_unresolved() -> None:
 def test_a_step_0_node_must_print_exactly_its_label(label: str, name: str) -> None:
     refusal = _refused(_enacting(_article(label, name=name) + _article("§ 2")))
     assert [p.reason for p in refusal.problems] == [MISLABELLED]
+
+
+@pytest.mark.parametrize("label", ["§ 5.", "§ 5 a.", "§ 16-1."])
+def test_a_closing_period_is_allowed_in_an_exact_source_label(label: str) -> None:
+    """The PR explicitly permits a closing period while requiring the exact data-name."""
+    key = label.replace(" ", "").removesuffix(".")
+    step0 = _step0(_article(label, name=key))
+    assert [(s.label, s.printed_label, s.data_name) for s in step0.sources] == [(key, label, key)]
+    for sentence, expected_type in [
+        (f"Ny {label.removesuffix('.')} skal lyde:", Insertion),
+        (f"{label.removesuffix('.')} skal lyde:", Replace),
+    ]:
+        built = _one(_member(_p(INTRO) + _p(sentence) + _future(key, label)))
+        assert isinstance(built, BuiltOperation)
+        assert isinstance(built.operation, expected_type)
+        assert built.operation.label == key
+
+
+def test_an_unbuilt_operation_in_another_member_does_not_block_a_candidate() -> None:
+    document = _member(_p(INTRO) + _p("§ 3 oppheves."))
+    other = _member(
+        _p(INTRO) + _p('I § 9 skal "a" erstattes med "b".'),
+        member="lti/2008/nl-20080307-005.xml",
+    )
+    build = build_candidates(
+        _events(document, ACT) + _events(other, ACT),
+        {d.member: d for d in (document, other)},
+    )
+    (candidate,) = build.candidates
+    assert candidate.member == MEMBER and candidate.complete
+    assert [r.label for r in candidate.executable().repeals] == ["§3"]
+    (unbuilt,) = build.unbuilt
+    assert unbuilt.member == other.member and unbuilt.reason.startswith(KIND)
+
+
+def test_empty_events_preserve_sorted_commencement_member_gaps() -> None:
+    build = build_candidates(iter(()), {}, frozenset({"z.xml", "a.xml"}))
+    assert build.candidates == build.unbuilt == build.rename_refusals == ()
+    assert [(g.member, g.reason) for g in build.member_gaps] == [
+        ("a.xml", UNITS), ("z.xml", UNITS),
+    ]  # fmt: skip
+
+
+def test_step_0_and_candidate_build_round_trip_without_losing_proofs() -> None:
+    step0 = _step0()
+    restored = Step0.model_validate_json(step0.canonical_json())
+    assert restored == step0
+    assert verify_step0(_enacting(STRUCTURED), restored)
+    document = _member(_p(INTRO) + _p("§ 3 oppheves.") + _p("Ny § 3 a skal lyde:") + _future("§3a"))
+    build = _candidates(document, ACT)
+    restored_build = type(build).model_validate_json(build.canonical_json())
+    assert restored_build == build
+    assert restored_build.canonical_json() == build.canonical_json()
+    assert restored_build.candidates[0].executable() == build.candidates[0].executable()
