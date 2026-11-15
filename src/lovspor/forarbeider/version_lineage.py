@@ -65,7 +65,13 @@ from lovspor.forarbeider.version_manifest import (
     manifest_text,
     parse_version_manifest,
 )
-from lovspor.forarbeider.version_models import Provenance, VersionManifest, canonical_text
+from lovspor.forarbeider.version_models import (
+    PageProvenance,
+    Provenance,
+    SupportingProvenance,
+    VersionManifest,
+    canonical_text,
+)
 
 #: Entry fields that place an observation in the chain rather than describe it.
 _CHAIN_FIELDS = frozenset(
@@ -293,11 +299,12 @@ def verify_lineage(
     entries: Iterable[bytes], artifacts: Mapping[str, bytes], expected_head: str | None = None
 ) -> LineageVerification:
     """What ``entries`` and ``artifacts`` prove of one document's history; never eligibility."""
-    parsed, findings = _parsed(entries)
+    offered = {sha(raw): raw for raw in entries}
+    parsed, findings = _parsed(offered.values())
     walked, chain_findings = _walk(parsed)
     found = [*findings, *chain_findings, *_anchor(walked, expected_head)]
-    for link in walked:
-        found.extend(entry_findings(link.key, link.entry, artifacts))
+    for key, entry in sorted(parsed.items()):
+        found.extend(entry_findings(key, entry, artifacts))
     ordered = tuple(sorted(set(found), key=_finding_order))
     head = walked[-1] if walked else None
     return LineageVerification(
@@ -309,6 +316,7 @@ def verify_lineage(
         expected_head_sha256=expected_head,
         content_versions=len({link.entry.version_id for link in walked}),
         observations=len(walked),
+        entries_offered=len(offered),
         findings=ordered,
     )
 
@@ -352,20 +360,21 @@ def _finding(
 
 
 def _walk(parsed: dict[str, LineageEntry]) -> tuple[list[_Link], list[LineageFinding]]:
+    """The chain from its single first entry, and a finding for every entry it does not reach."""
     children: dict[str | None, list[str]] = defaultdict(list)
     for key in sorted(parsed):
         children[parsed[key].previous_entry_sha256].append(key)
     findings = _root_findings(children[None])
     walked: list[_Link] = []
     current = children[None][0] if len(children[None]) == 1 else None
-    while current is not None and len(walked) <= len(parsed):
+    while current is not None and current not in {link.key for link in walked}:
         link = _Link(current, parsed[current])
         if walked:
             findings.extend(_link_findings(walked, link))
         walked.append(link)
         current, fork = _next(children[current])
         findings.extend([_finding("fork", "invalid", link.key, link.entry)] if fork else [])
-    return walked, [*findings, *_orphans(parsed, walked)]
+    return walked, [*findings, *_unreached(parsed, walked)]
 
 
 def _root_findings(roots: list[str]) -> list[LineageFinding]:
@@ -394,18 +403,48 @@ def _link_findings(walked: list[_Link], link: _Link) -> list[LineageFinding]:
     return [_finding(code, "invalid", link.key, child) for code, failed in checks if failed]
 
 
-def _orphans(parsed: dict[str, LineageEntry], walked: list[_Link]) -> list[LineageFinding]:
-    placed = {link.entry.sequence: link.key for link in walked}
+def _unreached(parsed: dict[str, LineageEntry], walked: list[_Link]) -> list[LineageFinding]:
+    """One finding for every offered entry the walk did not reach: none disappears."""
     reached = {link.key for link in walked}
+    placed = {link.entry.sequence: link.key for link in walked}
     findings = []
     for key, entry in sorted(parsed.items()):
-        parent = entry.previous_entry_sha256
-        if key in reached or parent is None or parent in parsed:
+        if key in reached:
             continue
-        occupied = placed.get(entry.sequence - 1) not in {None, parent}
-        code, effect = ("history_rewritten", "invalid") if occupied else ("parent_missing", "gap")
+        parent = entry.previous_entry_sha256
+        if parent is not None and parent not in parsed:
+            code, effect = _orphan(entry, parent, placed)
+        else:
+            code, effect = _ancestry(key, parsed, reached, placed)
         findings.append(_finding(code, effect, key, entry))
     return findings
+
+
+def _orphan(entry: LineageEntry, parent: str, placed: dict[int, str]) -> tuple[str, str]:
+    """An entry whose parent was not offered: a gap, unless its place is taken (a rewrite)."""
+    occupied = placed.get(entry.sequence - 1) not in {None, parent}
+    return ("history_rewritten", "invalid") if occupied else ("parent_missing", "gap")
+
+
+def _ancestry(
+    key: str, parsed: dict[str, LineageEntry], reached: set[str], placed: dict[int, str]
+) -> tuple[str, str]:
+    """Why an entry with an offered parent was not reached.
+
+    Its ancestors lead to a missing parent (it inherits that gap or rewrite),
+    to the chain or a second first entry (a fork: invalid), or back to itself
+    (a link cycle: invalid).
+    """
+    seen = {key}
+    parent = parsed[key].previous_entry_sha256
+    while parent is not None and parent in parsed and parent not in reached:
+        if parent in seen:
+            return "link_cycle", "invalid"
+        seen.add(parent)
+        key, parent = parent, parsed[parent].previous_entry_sha256
+    if parent is None or parent in reached:
+        return "entry_unreachable", "invalid"
+    return "entry_unreachable", _orphan(parsed[key], parent, placed)[1]
 
 
 def _anchor(walked: list[_Link], expected_head: str | None) -> list[LineageFinding]:
@@ -458,7 +497,9 @@ def entry_findings(
     checker = _Checker(key, entry, artifacts)
     sources = _source_bytes(checker)
     manifest = _manifest(checker)
-    evidence = _evidence(entry, manifest, sources)
+    evidence, problem = _evidence(entry, manifest, sources)
+    if problem is not None or (evidence is None and not checker.findings):
+        checker.note("evidence_not_reconstructed", "invalid", problem or "inputs")
     if manifest is not None and evidence is not None:
         built = manifest_text(manifest).encode()
         checker.rebuilt(built, lambda: manifest_text(build_version_manifest(evidence)), "manifest")
@@ -504,25 +545,35 @@ def _manifest(checker: _Checker) -> VersionManifest | None:
 
 def _evidence(
     entry: LineageEntry, manifest: VersionManifest | None, sources: dict[str, bytes] | None
-) -> SourceEvidence | None:
-    if manifest is None or sources is None or _sources(manifest.provenance) != entry.source_sha256s:
-        return None
+) -> tuple[SourceEvidence | None, str | None]:
+    """The raw evidence the manifest's provenance names, or why it cannot be rebuilt.
+
+    ``None`` with no reason only when a source or the manifest is already a
+    finding (missing, altered or invalid); every other refusal names itself.
+    """
+    if manifest is None or sources is None:
+        return None, None
     provenance = manifest.provenance
-    pages = tuple(
-        SourcePage(sources[p.raw_sha256], p.url, p.retrieved_at) for p in provenance.pages
-    )
+    if _sources(provenance) != entry.source_sha256s or not set(entry.source_sha256s) <= set(
+        sources
+    ):
+        return None, "source mapping"
+    landing = [s for s in provenance.supporting if s.role == "landing"]
+    if len(landing) > 1:
+        return None, "landing records"
+    return _source_evidence(provenance, sources), None
+
+
+def _source_evidence(provenance: Provenance, sources: dict[str, bytes]) -> SourceEvidence:
+    def page(item: PageProvenance | SupportingProvenance) -> SourcePage:
+        return SourcePage(sources[item.raw_sha256], item.url, item.retrieved_at)
+
     supporting = {
-        role: tuple(
-            SourcePage(sources[s.raw_sha256], s.url, s.retrieved_at)
-            for s in provenance.supporting
-            if s.role == role
-        )
+        role: tuple(page(s) for s in provenance.supporting if s.role == role)
         for role in ("landing", "capture")
     }
-    landing = supporting["landing"]
-    if len(landing) > 1:
-        return None
-    return SourceEvidence(pages, landing[0] if landing else None, supporting["capture"])
+    landing = supporting["landing"][0] if supporting["landing"] else None
+    return SourceEvidence(tuple(page(p) for p in provenance.pages), landing, supporting["capture"])
 
 
 def _assessment(checker: _Checker, evidence: SourceEvidence | None) -> None:
@@ -559,6 +610,8 @@ def _decision(
     if evidence is not None and policy is not None:
         built = decision_text(decision).encode()
         checker.rebuilt(built, lambda: decision_text(evaluate_policy(evidence, policy)), "decision")
+    elif not checker.findings:
+        checker.note("artifact_not_rebuilt", "invalid", "decision inputs")
 
 
 def _authorization(checker: _Checker) -> None:

@@ -22,6 +22,7 @@ from lovspor.forarbeider.version_diff import diff_snapshots, diff_text, load_sna
 from lovspor.forarbeider.version_diff_models import VersionDiff
 from lovspor.forarbeider.version_lineage import (
     Observation,
+    _walk,
     entry_text,
     parse_entry,
     record_observation,
@@ -738,3 +739,157 @@ def test_reverse_diff_swaps_added_removed_sources_and_attachment_digests() -> No
     assert before.change == after.change == "changed"
     assert before.older_sha256 == after.newer_sha256
     assert before.newer_sha256 == after.older_sha256
+
+
+# --- review round 1: every entry accounted for --------------------------------------
+
+
+def _key(char: str) -> str:
+    return char * 64
+
+
+def test_a_descendant_of_a_missing_entry_is_accounted_for_and_its_artifacts_checked() -> None:
+    built = chain(original(WHEN), changed(LATER), changed(LATEST), linked(PDF, LATEST))
+    offered = [built.raws[0], built.raws[2], built.raws[3]]
+    verification = verify_lineage(offered, built.artifacts)
+    assert verification.status == "incomplete"
+    assert verification.entries_offered == 3
+    unreachable = {f.entry_sha256 for f in verification.findings if f.code == "entry_unreachable"}
+    assert unreachable == {sha(built.raws[3])}
+    fourth = built.entries()[3]
+    digest = fourth.manifest_sha256
+    altered = {**built.artifacts, digest: built.artifacts[digest] + b" "}
+    assert verify_lineage(offered, altered).status == "invalid"
+
+
+def test_entries_under_a_fork_are_reported_not_dropped() -> None:
+    left = chain(original(WHEN), changed(LATER), changed(LATEST))
+    right = chain(original(WHEN), linked(PDF, LATER))
+    artifacts = {**left.artifacts, **right.artifacts}
+    verification = verify_lineage([*left.raws, right.raws[1]], artifacts)
+    assert verification.status == "invalid"
+    accounted = {f.entry_sha256 for f in verification.findings}
+    accounted |= {link.entry_sha256 for link in verification.chain}
+    assert {sha(raw) for raw in [*left.raws, right.raws[1]]} <= accounted
+
+
+def test_two_roots_with_descendants_account_for_every_entry() -> None:
+    left = chain(original(WHEN), changed(LATER))
+    right = chain(linked(PDF, WHEN), linked(OTHER_PDF, LATER))
+    offered = [*left.raws, *right.raws]
+    verification = verify_lineage(offered, {**left.artifacts, **right.artifacts})
+    assert verification.status == "invalid"
+    assert verification.chain == ()
+    unreachable = {f.entry_sha256 for f in verification.findings if f.code == "entry_unreachable"}
+    assert unreachable == {sha(raw) for raw in offered}
+
+
+def test_a_link_cycle_is_invalid_and_no_entry_disappears() -> None:
+    entry = chain(original(WHEN), changed(LATER)).entries()[1]
+    a, b = _key("a"), _key("b")
+    parsed = {
+        a: entry.model_copy(update={"previous_entry_sha256": b}),
+        b: entry.model_copy(update={"previous_entry_sha256": a}),
+    }
+    walked, findings = _walk(parsed)
+    assert walked == []
+    assert {(f.code, f.entry_sha256) for f in findings if f.code == "link_cycle"} == {
+        ("link_cycle", a),
+        ("link_cycle", b),
+    }
+    assert all(f.effect == "invalid" for f in findings if f.code == "link_cycle")
+
+
+def test_a_self_reference_is_a_link_cycle() -> None:
+    entry = chain(original(WHEN), changed(LATER)).entries()[1]
+    c = _key("c")
+    walked, findings = _walk({c: entry.model_copy(update={"previous_entry_sha256": c})})
+    assert walked == []
+    assert ("link_cycle", "invalid", c) in {(f.code, f.effect, f.entry_sha256) for f in findings}
+
+
+def test_a_verification_cannot_be_verified_with_unaccounted_entries() -> None:
+    built = chain(original(WHEN), changed(LATER))
+    good = verify_lineage(built.raws, built.artifacts).model_dump()
+    with pytest.raises(ValidationError):
+        LineageVerification.model_validate({**good, "entries_offered": 3})
+
+
+def test_the_missing_parent_gap_stays_incomplete_not_invalid() -> None:
+    built = chain(original(WHEN), changed(LATER), changed(LATEST), linked(PDF, LATEST))
+    verification = verify_lineage([built.raws[0], *built.raws[2:]], built.artifacts)
+    assert verification.status == "incomplete"
+    assert {f.effect for f in verification.findings} == {"gap"}
+
+
+# --- review round 1: evidence that cannot be reconstructed -------------------------
+
+
+def _rebound(built: Chain, change: Any) -> tuple[bytes, dict[str, bytes]]:
+    """The first entry pointing at a canonically rehashed, edited copy of its manifest."""
+    entry = built.entries()[0]
+    stored = json.loads(built.artifacts[entry.manifest_sha256])
+    change(stored)
+    raw = (json.dumps(stored, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
+    return forged(entry, manifest_sha256=sha(raw)), {**built.artifacts, sha(raw): raw}
+
+
+def test_two_landing_records_cannot_bypass_reconstruction() -> None:
+    built = chain(original())
+
+    def second_landing(stored: dict[str, Any]) -> None:
+        (landing,) = [s for s in stored["provenance"]["supporting"] if s["role"] == "landing"]
+        stored["provenance"]["supporting"].append({**landing, "url": landing["url"] + "?copy"})
+
+    entry, artifacts = _rebound(built, second_landing)
+    verification = verify_lineage([entry], artifacts)
+    assert verification.status == "invalid"
+    assert ("evidence_not_reconstructed", "invalid") in codes(verification)
+
+
+def test_a_page_mapped_to_another_sources_bytes_cannot_bypass_reconstruction() -> None:
+    built = chain(original())
+
+    def swapped(stored: dict[str, Any]) -> None:
+        pages = stored["provenance"]["pages"]
+        pages[0]["raw_sha256"], pages[1]["raw_sha256"] = (
+            pages[1]["raw_sha256"],
+            pages[0]["raw_sha256"],
+        )
+
+    entry, artifacts = _rebound(built, swapped)
+    verification = verify_lineage([entry], artifacts)
+    assert verification.status == "invalid"
+    assert ("artifact_not_rebuilt", "invalid") in codes(verification)
+
+
+def test_a_duplicated_page_record_cannot_bypass_reconstruction() -> None:
+    built = chain(original())
+
+    def duplicated(stored: dict[str, Any]) -> None:
+        stored["provenance"]["pages"].append(dict(stored["provenance"]["pages"][0]))
+
+    entry, artifacts = _rebound(built, duplicated)
+    assert verify_lineage([entry], artifacts).status == "invalid"
+
+
+def test_a_capture_recorded_as_landing_cannot_bypass_reconstruction() -> None:
+    built = chain(linked())
+
+    def relabelled(stored: dict[str, Any]) -> None:
+        for item in stored["provenance"]["supporting"]:
+            if item["role"] == "capture":
+                item["role"] = "landing"
+
+    entry, artifacts = _rebound(built, relabelled)
+    assert verify_lineage([entry], artifacts).status == "invalid"
+
+
+def test_a_decision_whose_policy_cannot_be_read_is_never_verified() -> None:
+    built = Chain()
+    built.add(original(), synthetic_policy())
+    entry = built.entries()[0]
+    assert entry.policy_sha256 is not None
+    for broken in (b"{}\n", b"not json"):
+        altered = {**built.artifacts, entry.policy_sha256: broken}
+        assert verify_lineage(built.raws, altered).status == "invalid"

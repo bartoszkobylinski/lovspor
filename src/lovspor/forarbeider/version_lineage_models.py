@@ -148,6 +148,7 @@ class LineageVerification(Frozen):
     expected_head_sha256: Digest | None
     content_versions: int = Field(ge=0)
     observations: int = Field(ge=0)
+    entries_offered: int = Field(ge=0)
     findings: tuple[LineageFinding, ...]
     storage_guarantee: Literal["digest_chain_consistency_only_append_only_storage_not_proven"] = (
         STORAGE_GUARANTEE
@@ -163,6 +164,10 @@ class LineageVerification(Frozen):
             raise ValueError("status does not follow from the findings")
         if self.status == "verified" and not self.chain:
             raise ValueError("an empty chain is never verified")
+        if len(self.chain) > self.entries_offered or (
+            self.status == "verified" and len(self.chain) != self.entries_offered
+        ):
+            raise ValueError("a verified chain accounts for every offered entry")
         head = self.chain[-1] if self.chain else None
         if (self.head_entry_sha256, self.head_version_id) != (
             (head.entry_sha256, head.version_id) if head else (None, None)
