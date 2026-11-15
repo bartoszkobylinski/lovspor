@@ -44,8 +44,22 @@ it re-pays its carried inputs and is quantized from the floats of all its
 inputs, as a rebuild is. That re-pay is spent from what the guard left under
 its token ceiling (:class:`RepayHeadroom`) and refused before it is sent if it
 does not fit, so the ceiling holds for the whole run.
+
+What the proof assumes, because bytes alone cannot show it:
+
+* **Provenance.** The committed sidecar is what the rebuild quantizer wrote
+  over the floats of its own inputs. Int8 rows cannot prove their header
+  scale was ``float32(max|v| / 127)``: a sidecar from a writer that kept a
+  stale scale can still hold a ±127 row. So the set of sidecar writers is
+  pinned (``tests/unit/test_delta_embed_provenance.py``): the rebuild
+  quantizer, this module (byte-identical to it), and the LSPE cutover, which
+  copies vectors and scale bit for bit. What bytes can refute is refused: no
+  ±127 row, or a scale that is not finite and positive.
+* **Vector purity.** A vector is a function of its text alone, independent of
+  the request it was batched in: a re-pay batches differently from a rebuild.
 """
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -153,8 +167,12 @@ def prior_for(
 
 
 def exact_prior(prior: PriorVectors | None, inputs: list[EmbeddingInput]) -> PriorVectors | None:
-    """``prior`` when ``inputs`` carry every row that may hold its maximum (condition 1)."""
-    if prior is None:
+    """``prior`` when ``inputs`` carry every row that may hold its maximum (condition 1).
+
+    A scale that is not finite and positive was never written by the rebuild
+    quantizer, so nothing is carried from it.
+    """
+    if prior is None or not (math.isfinite(prior.scale) and prior.scale > 0):
         return None
     loudest = {text for text, row in prior.rows.items() if _reaches_max(row)}
     return prior if loudest and loudest <= {item.text for item in inputs} else None
@@ -250,9 +268,10 @@ def document_vectors(
     """Int8 rows and scale for a non-empty document, paying only for what is not carried.
 
     With the durable cache on, a document entry, which only a full re-embed
-    writes, still costs nothing. The change path never stores one: a rerun
-    after a crash pays its delta again, and a cached rebuild is never served
-    rows a delta assembled (#936).
+    writes, still costs nothing. The change path reads only this runner's
+    local copy (no remote fetch, upload, adoption or conflict check) and never
+    stores an entry: a rerun after a crash pays its delta again, and a cached
+    rebuild is never served rows a delta assembled (#936).
     """
     if not isinstance(embedder, ReusingEmbedder):
         return quantized_document_vectors(embedder, inputs, input_hash)
@@ -285,9 +304,10 @@ def _record_vouches(record: ManifestRecord, target: EmbeddingTarget) -> bool:
 def _committed_inputs(repo: Path, record: ManifestRecord) -> list[EmbeddingInput] | None:
     """The inputs the committed Markdown derives, if they are the ones the sidecar embeds."""
     path = repo / record.markdown_path
-    if not path.is_file():
+    try:
+        inputs = build_embedding_inputs(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
         return None
-    inputs = build_embedding_inputs(path.read_text(encoding="utf-8"))
     return inputs if hash_embedding_inputs(inputs) == record.embedding_input_hash else None
 
 

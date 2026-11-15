@@ -104,24 +104,31 @@ class CachingEmbedder:
 
     def document_vectors(self, inputs: list[EmbeddingInput], input_hash: str) -> CachedVectors:
         """Int8 rows and scale of one non-empty document: cache first, then paid units."""
-        stored = self.cached_document(inputs, input_hash)
+        key = self._document_key(inputs, input_hash)
+        stored = self._lookup(self._store, key)
         if stored is not None:
             return stored
         quantized, scale = quantize_int8(self._assemble(inputs, input_hash))
-        return self._store.put(_entry(self._document_key(inputs, input_hash), quantized, scale))
+        return self._store.put(_entry(key, quantized, scale))
 
     def cached_document(
         self, inputs: list[EmbeddingInput], input_hash: str
     ) -> CachedVectors | None:
-        """The stored document entry, or ``None``; never pays and never stores.
+        """This runner's local document entry, or ``None``: read-only, never pays.
 
         Only :meth:`document_vectors` writes document entries, always from the
         whole document's float vectors, so an entry is what a full re-embed
-        produces. The change path only reads here, so its carried rows can
-        never be served as a rebuild's (#936).
+        produces. The change path reads here (#936). With the remote cache on,
+        it reads the local copy only: the remote store's lookup reconciles,
+        uploading a local-only entry, adopting a remote one or refusing a
+        conflict, and the change path must not write anything.
         """
+        store: EntryStore = getattr(self._store, "local", self._store)
+        return self._lookup(store, self._document_key(inputs, input_hash))
+
+    def _lookup(self, store: EntryStore, key: EntryKey) -> CachedVectors | None:
         self._count_document()
-        stored = self._store.get(self._document_key(inputs, input_hash))
+        stored = store.get(key)
         if stored is not None:
             self.progress.documents_cached += 1
         return stored

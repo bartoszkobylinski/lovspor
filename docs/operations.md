@@ -77,10 +77,25 @@ sent if it does not fit (`MassReembedError`, nothing committed); the operator
 override lifts that limit too. So the guard's pre-spend count is a lower bound of
 the run's spend, and the ceiling is still never exceeded. With
 `LOVSPOR_EMBEDDING_CACHE_DIR` set, a cached document entry (only a full re-embed
-writes one) still costs nothing; the change path never stores an entry, so a
-rerun after a crash pays its delta again and a cached rebuild is never served
-rows a delta assembled. The fraction dimension still counts a fully carried
-document (a rename), which is conservative.
+writes one) still costs nothing. The change path reads only the runner's local
+copy, even with the R2 remote on (a remote lookup reconciles: it uploads,
+adopts or refuses a conflict), and never stores an entry, so a rerun after a
+crash pays its delta again and a cached rebuild is never served rows a delta
+assembled. The fraction dimension still counts a fully carried document (a
+rename), which is conservative.
+
+Two assumptions carry the byte-equivalence. First, provenance: int8 rows cannot
+prove that their header scale was derived from the original floats, so reuse
+trusts that every committed sidecar was written by the rebuild quantizer, by
+the change path (byte-identical to it) or by the LSPE cutover (which copies
+vectors and scale). A test pins that writer set. At lovverk `c310127e` (the
+last commit before #933 opened), the sidecar history is 1,821 `lovspor-sync[bot]`
+commits plus 22 owner-run migrations (embedding backfills, a regeneration, the
+LSPE v2 cutover, renames and removals), all made by engine paths. The quantizer
+formula has not changed since it was introduced. All 3,938 non-empty sidecars
+have a finite positive scale, a ±127 row and `127 * scale <= 1`, which is
+consistent with that provenance but does not prove it. Second, a vector depends on its text alone, not on the
+request it was batched in.
 
 A run that fails mid-embed commits nothing: each sidecar is staged and renamed,
 so none is ever half-written, and HEAD is unchanged. Files it already wrote stay
