@@ -672,3 +672,69 @@ def test_changed_body_constant_is_not_in_any_record() -> None:
     for raw in built.raws:
         assert CHANGED_BODY.encode() not in raw
         assert b"Endret" not in raw
+
+
+@pytest.mark.parametrize("kind", ["manifest", "assessment", "decision", "policy"])
+def test_digest_valid_but_malformed_artifacts_are_invalid(kind: str) -> None:
+    """A matching hash alone never makes a referenced record valid (FC8)."""
+    built = Chain()
+    built.add(original(), synthetic_policy())
+    field = {"decision": "policy_decision_sha256"}.get(kind, f"{kind}_sha256")
+    raw = b"{}\n"
+    rebound = forged(built.entries()[0], **{field: sha(raw)})
+    artifacts = {**built.artifacts, sha(raw): raw}
+    result = verify_lineage([rebound], artifacts)
+    assert result.status == "invalid"
+    assert any(
+        finding.code == "artifact_invalid" and finding.detail == kind for finding in result.findings
+    )
+    with refused(RefusalReason.LINEAGE_CONFLICT):
+        load_snapshot(rebound, artifacts)
+
+
+@pytest.mark.parametrize("kind", ["assessment", "decision"])
+def test_rehashed_canonical_artifacts_must_still_rebuild_from_sources(kind: str) -> None:
+    """FC8 promises reproduction, including reasons, not merely digest agreement."""
+    built = Chain()
+    built.add(original(), synthetic_policy())
+    entry = built.entries()[0]
+    field = "assessment_sha256" if kind == "assessment" else "policy_decision_sha256"
+    digest = getattr(entry, field)
+    payload = json.loads(built.artifacts[digest])
+    reason_field = "rights_reasons" if kind == "assessment" else "reasons"
+    payload["entries"][0][reason_field] = ["invented reason absent from the source"]
+    raw = (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
+    rebound = forged(entry, **{field: sha(raw)})
+    artifacts = {**built.artifacts, sha(raw): raw}
+    result = verify_lineage([rebound], artifacts)
+    assert result.status == "invalid"
+    assert any(
+        finding.code == "artifact_not_rebuilt" and finding.detail == kind
+        for finding in result.findings
+    )
+    with refused(RefusalReason.LINEAGE_CONFLICT):
+        load_snapshot(rebound, artifacts)
+
+
+def test_equal_observation_times_allow_a_new_content_version() -> None:
+    """Only observations before the head are refused, not equal instants."""
+    built = chain(original(WHEN), changed(WHEN))
+    assert built.entries()[1].content_change == "new_version"
+    assert verify_lineage(built.raws, built.artifacts).status == "verified"
+    diff = _diff(built)
+    assert diff.observation.observed_at_changed is False
+    assert diff.observation.semantic_change is True
+    assert diff.causes == ("source_content_changed",)
+
+
+def test_reverse_diff_swaps_added_removed_sources_and_attachment_digests() -> None:
+    built = chain(linked(PDF, WHEN), linked(OTHER_PDF, LATER))
+    forward, reverse = _diff(built), _diff(built, 1, 0)
+    assert forward.sources.added == reverse.sources.removed == (sha(OTHER_PDF),)
+    assert forward.sources.removed == reverse.sources.added == (sha(PDF),)
+    assert len(forward.attachments) == len(reverse.attachments) == 1
+    before, after = forward.attachments[0], reverse.attachments[0]
+    assert before.key == after.key == PDF_URL
+    assert before.change == after.change == "changed"
+    assert before.older_sha256 == after.newer_sha256
+    assert before.newer_sha256 == after.older_sha256
