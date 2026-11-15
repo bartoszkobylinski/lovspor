@@ -1,0 +1,6 @@
+# Owner review for slug identity, the owner-exception approval and the
+# identity migration (#938). Kept narrow on purpose: every other path merges
+# under the ordinary main ruleset. See docs/identity-approval.md.
+/.github/CODEOWNERS          @bartoszkobylinski
+/src/lovspor/identity/       @bartoszkobylinski
+/docs/identity-approval.md   @bartoszkobylinski
