@@ -20,6 +20,11 @@ a diff is never computed over evidence that does not hold.
 A difference none of them explains is ``unexplained_difference``, never
 silently attributed.
 
+``observation`` keeps metadata apart from meaning: a later retrieval time
+changes the manifest digest and, because FC5 and FC7 cover the extraction
+digest, the assessment and decision digests too, with ``semantic_change``
+``False`` and ``causes`` ``no_change``.
+
 Nothing is fetched, written, signed or published here.
 """
 
@@ -39,6 +44,7 @@ from lovspor.forarbeider.version_diff_models import (
     BlockerChange,
     DecisionChange,
     InventoryChange,
+    ObservationChange,
     SetChange,
     VersionDiff,
 )
@@ -109,8 +115,25 @@ def diff_snapshots(older: Snapshot, newer: Snapshot) -> VersionDiff:
     blockers = _blockers(older.decision, newer.decision)
     changed = any(body.values()) or bool(blockers.added or blockers.removed)
     causes = _causes(older.entry, newer.entry, changed=changed)
+    observation = _observation(older, newer, semantic=changed)
     return VersionDiff.model_validate(
         {**_header(older, newer), **body, "blockers": blockers, "causes": causes}
+        | {"observation": observation}
+    )
+
+
+def _observation(older: Snapshot, newer: Snapshot, *, semantic: bool) -> ObservationChange:
+    before, after = older.entry, newer.entry
+    return ObservationChange(
+        observed_at_changed=before.observed_at != after.observed_at,
+        provenance_changed=older.manifest.provenance != newer.manifest.provenance,
+        manifest_sha256_changed=before.manifest_sha256 != after.manifest_sha256,
+        assessment_sha256_changed=before.assessment_sha256 != after.assessment_sha256,
+        policy_decision_sha256_changed=(
+            before.policy_decision_sha256 != after.policy_decision_sha256
+        ),
+        authorization_sha256_changed=before.authorization_sha256 != after.authorization_sha256,
+        semantic_change=semantic,
     )
 
 

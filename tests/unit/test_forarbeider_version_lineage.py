@@ -226,6 +226,7 @@ def test_a_changed_chapter_is_reported_by_id_and_digest_without_text() -> None:
     diff = _diff(built)
     assert diff.causes == ("source_content_changed",)
     assert diff.same_content_version is False
+    assert diff.observation.semantic_change is True
     document = built.entries()[1].document_id
     assert [(item.key, item.change) for item in diff.parts] == [(f"{document}-ch2", "changed")]
     assert [(item.key, item.change) for item in diff.entries] == [
@@ -265,6 +266,26 @@ def test_a_replay_has_no_difference() -> None:
     assert diff.same_content_version is True
     assert (diff.entries, diff.parts, diff.chapters, diff.attachments) == ((), (), (), ())
     assert (diff.assessments, diff.decisions) == ((), ())
+    assert diff.observation.semantic_change is False
+
+
+def test_retrieval_time_alone_changes_metadata_and_fc5_fc7_digests_not_meaning() -> None:
+    built = Chain()
+    built.add(original(WHEN), synthetic_policy())
+    built.add(original(LATER), synthetic_policy())
+    older, newer = built.entries()
+    assert older.version_id == newer.version_id
+    assert older.assessment_sha256 != newer.assessment_sha256
+    assert older.policy_decision_sha256 != newer.policy_decision_sha256
+    diff = _diff(built)
+    assert diff.causes == ("no_change",)
+    observation = diff.observation
+    assert observation.semantic_change is False
+    assert observation.observed_at_changed and observation.provenance_changed
+    assert observation.manifest_sha256_changed and observation.assessment_sha256_changed
+    assert observation.policy_decision_sha256_changed
+    assert not observation.authorization_sha256_changed
+    assert (diff.decisions, diff.blockers.added, diff.blockers.removed) == ((), (), ())
 
 
 def test_a_changed_policy_is_a_reevaluation_not_a_new_version() -> None:

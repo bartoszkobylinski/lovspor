@@ -54,6 +54,25 @@ class DecisionChange(Frozen):
     newer: NonBlank
 
 
+class ObservationChange(Frozen):
+    """What changed about the observation itself, apart from its meaning.
+
+    ``semantic_change`` is ``True`` exactly when an inventory, assessment,
+    decision or blocker changed. The other fields name digests that changed;
+    with no semantic change they come from the observation alone (a later
+    retrieval time, another URL for the same bytes): the FC5 assessment and
+    FC7 decision cover the extraction digest, which covers retrieval times.
+    """
+
+    observed_at_changed: bool
+    provenance_changed: bool
+    manifest_sha256_changed: bool
+    assessment_sha256_changed: bool
+    policy_decision_sha256_changed: bool
+    authorization_sha256_changed: bool
+    semantic_change: bool
+
+
 class VersionDiff(Frozen):
     """Two observations of one document compared; no text, nothing eligible."""
 
@@ -77,6 +96,7 @@ class VersionDiff(Frozen):
     newer_policy_sha256: Digest | None
     decisions: tuple[DecisionChange, ...]
     blockers: BlockerChange
+    observation: ObservationChange
     text_included: Literal[False] = False
     release_eligible: Literal[False] = False
     published: Literal[False] = False
