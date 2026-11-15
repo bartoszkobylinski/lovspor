@@ -1,4 +1,4 @@
-"""Append-only history keyed by ``doc_id`` (#871, ADR-0023 draft point 3, guard 5c).
+"""Append-only history keyed by ``doc_id`` (#871, ADR-0026 draft point 3, guard 5c).
 
 ``<dataset>/history/by-id/<doc_id>.json`` holds one document's events and
 nothing else, each with the path the file had at it. It never changes

@@ -1,4 +1,4 @@
-"""A deletion revision is judged by the blob it deleted (#871, ADR-0023 point 4).
+"""A deletion revision is judged by the blob it deleted (#871, ADR-0026 point 4).
 
 The tek17 shape at lovverk ``2ab982d2``: ``endr-i-byggteknisk-forskrift-tek17``
 was held by ``sf-20260612-1085``, which was removed (``2032c09``, -49 lines),
