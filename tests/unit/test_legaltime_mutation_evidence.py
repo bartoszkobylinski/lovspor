@@ -10,7 +10,7 @@ from lovspor.legaltime import commencement as c
 from lovspor.legaltime import instructions as ins
 from lovspor.legaltime import replay as r
 from lovspor.legaltime import run, scopes, verify
-from lovspor.legaltime.document import Ledd, Provision
+from lovspor.legaltime.document import Ledd, Provision, StatedPlacement
 from lovspor.legaltime.units import Unit
 from tests.unit.test_legaltime_baseline import ACT, STAGED, _act, _decision, _evidence
 from tests.unit.test_legaltime_mutants import _event, _op
@@ -420,7 +420,13 @@ def test_inserted_provision_uses_its_own_commencement(basis):
         part="del2",
     )
     op = _op("insert_section", ins.Address(section="§3"), new_provision=new).model_copy(
-        update={"act": ACT, "part": "i"}
+        update={
+            "act": ACT,
+            "part": "i",
+            "stated": StatedPlacement(
+                sentence="Nytt kapittel 3 skal lyde:", chapter_from="sentence"
+            ),
+        }
     )
     working = r._Working(_act(), comm, DAY)
     assert r._unit_gate(op, working) == "withheld"
@@ -519,7 +525,13 @@ def test_absent_part_does_not_match_part_forty():
     result = r.replay(doc, comm, [], DAY)
     assert result.provisions[0].in_force == "in_force"
     new = Provision(key="§2-2", label="§ 2-2", heading="", ledd=(), chapter="kap2")
-    op = _op("insert_section", ins.Address(section="§2-2"), new_provision=new)
+    op = _op("insert_section", ins.Address(section="§2-2"), new_provision=new).model_copy(
+        update={
+            "stated": StatedPlacement(
+                sentence="Nytt kapittel 2 skal lyde:", chapter_from="sentence"
+            )
+        }
+    )
     working = r._Working(doc, comm, DAY)
     assert r._unit_gate(op, working) is None
     assert working.apply_insert_section(op) is None

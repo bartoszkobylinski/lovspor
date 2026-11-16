@@ -132,10 +132,14 @@ def test_straffeloven_is_commenced_by_its_ikraftsettingslov_and_chapter_16_contr
     # #907: 390 → 389. lov/2009-06-19-74#1:I:241.0, ``1. Militær straffelov 22. mai 1902 nr. 13
     # § 107 oppheves.``, is item 1 of the list straffeloven § 411's replacement announces; an
     # item never inherits the outer block's act, so it is no longer straffeloven's.
+    # #935: 334 → 328 and 358 → 352. Six sections inserted by plain ``Ny § X skal lyde:`` before
+    # 2015-10-01 (lov/2013-06-21-85 §§ 136a, 191a, 191b; lov/2015-06-19-65 §§ 176, 189a, 370)
+    # name no chapter of the act, and chapter 16 is dated apart (unresolved), so their
+    # commencement is unresolved instead of the default read off an absent chapter.
     assert [(len(s["withheld"]), len(s["applied"]), len(s["provisions"])) for s in states] == [
         (4, 0, 0),
         (99, 0, 0),
         (389, 0, 0),
-        (0, 334, 358),
+        (0, 328, 352),
     ]
     assert all(s["unresolved_commencement"] == [] for s in states)

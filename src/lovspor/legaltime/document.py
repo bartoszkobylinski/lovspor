@@ -67,8 +67,8 @@ class StatedPlacement(Frozen):
     """Where an inserted provision's stamps came from, when ``instructions._placed`` set them.
 
     ``chapter_from`` names the text the chapter stamp was read from; ``title`` is the last
-    chapter title printed before the provision, read or not. A plain insertion has none:
-    its stamps are ``_enclosing``'s reading of the member that carries it (ADR-0023 B4a).
+    chapter title printed before the provision, read or not. A plain insertion has none, and
+    no stamps either: the member's own sections around it are not the affected act's (#935).
     """
 
     sentence: str
@@ -93,8 +93,8 @@ class Provision(Frozen):
     heading: str
     ledd: tuple[Ledd, ...]
     notes: tuple[str, ...] = ()
-    chapter: str | None = None  # the enclosing chapter section's data-name (``kap16``)
-    part: str | None = None  # the enclosing top-level part's data-name (``del1``)
+    chapter: str | None = None  # the own act's enclosing chapter data-name (``kap16``), or stated
+    part: str | None = None  # the own act's enclosing part data-name (``del1``), or stated
     enclosures: tuple[Enclosure, ...] = ()  # every section/article ancestor, nearest first
 
 
@@ -243,9 +243,14 @@ def _enclosures(article: etree._Element) -> tuple[Enclosure, ...]:
     )
 
 
-def _provision(article: etree._Element) -> Provision:
+def _provision(article: etree._Element, own: bool = True) -> Provision:
+    """``own``: the article belongs to the member's act, so its enclosing sections are that act's.
+
+    A ``futureLegalArticle`` is text for another act (#935): the member's ``kapN``/``delN``
+    around it are the amending member's own structure, kept raw in ``enclosures`` only.
+    """
     key = article.get("data-name") or ""
-    chapter, part = _enclosing(article)
+    chapter, part = _enclosing(article) if own else (None, None)
     values = [e for e in article.iter("span") if _css(e) == "legalArticleValue"]
     titles = [e for e in article.iter("span") if _css(e) == "legalArticleTitle"]
     notes = tuple(
@@ -272,7 +277,9 @@ def _provisions(main: etree._Element) -> tuple[Provision, ...]:
 def _node(element: etree._Element) -> Node:
     css = _css(element)
     if css == "futureLegalArticle":
-        return Node(kind="provision", css_class=css, text="", provision=_provision(element))
+        return Node(
+            kind="provision", css_class=css, text="", provision=_provision(element, own=False)
+        )
     if css in _LEDD_CLASSES:
         return Node(kind="ledd", css_class=css, text=element_text(element), ledd=_ledd(element))
     if css == "futuretitle":

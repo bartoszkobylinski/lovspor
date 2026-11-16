@@ -13,11 +13,17 @@ from one beside it, and is ``unknown`` where the two addresses cannot be
 compared without reading the act's text (a chapter against a section the
 operation does not place in a chapter; a punktum named without its ledd
 against one named with it).
+
+An inserted section is placed in a chapter of the affected act only by its own source:
+the structure sentence or the chapter title printed before it (#935). The amending
+member's own chapter around the text proves nothing about the affected act, and no
+placement is not a proven chapterless section: it is ``UNPLACED``.
 """
 
 import re
 from collections.abc import Mapping
-from typing import Literal
+from enum import Enum
+from typing import Final, Literal
 
 from lovspor.legaltime.document import Frozen
 from lovspor.legaltime.instructions import Operation
@@ -112,12 +118,56 @@ def parse_units(listing: str) -> tuple[Unit, ...] | None:
 ChapterOf = Mapping[str, str]  # section key → chapter data-name, read from the act's structure
 
 
+class Unplaced(Enum):
+    """An inserted section's chapter that no source states: unknown, never "no chapter"."""
+
+    CHAPTER = "unplaced"
+
+
+UNPLACED: Final = Unplaced.CHAPTER
+ChapterClaim = str | None | Literal[Unplaced.CHAPTER]  # None: proven to stand in no chapter
+_SEVERAL_CHAPTERS = re.compile(r"\bkapitler\b|\btil\b", re.I)
+
+
+def inserted_chapter(operation: Operation) -> str | Literal[Unplaced.CHAPTER]:
+    """The affected act's chapter the insertion's own source states, else ``UNPLACED`` (#935).
+
+    Read from ``Operation.stated`` only. A printed chapter title the grammar cannot read, a
+    sentence naming one chapter above a title naming another, or a sentence naming several
+    chapters (``Nye kapitler 21 til 31``) with no title read before the text, states no one
+    chapter.
+    """
+    stated, new = operation.stated, operation.new_provision
+    if stated is None or new is None or new.chapter is None:  # _placed: no chapter read
+        return UNPLACED
+    if stated.title is not None and chapter_key(stated.title) is None:
+        return UNPLACED
+    named = chapter_key(stated.sentence)
+    if _SEVERAL_CHAPTERS.search(stated.sentence) is not None:
+        return new.chapter if stated.chapter_from == "title" else UNPLACED
+    return UNPLACED if named not in {None, new.chapter} else new.chapter
+
+
+Where = tuple[ChapterClaim, tuple[str, ...]]  # a section's chapter, and its part labels
+
+
+def inserted_where(operation: Operation) -> Where:
+    """An inserted section's chapter and part labels, from its own source only (#935)."""
+    new = operation.new_provision
+    part = (new.part if new is not None else None) or ""
+    return inserted_chapter(operation), (part, operation.part.upper())
+
+
 def _chapter_relation(unit: Unit, operation: Operation, chapter_of: ChapterOf) -> Relation:
     if unit.heading:
         return "disjoint"  # no operation kind addresses a chapter heading
-    placed = operation.new_provision
-    if operation.kind == "insert_section" and placed is not None and placed.chapter is not None:
-        return "covers" if placed.chapter == unit.chapter else "disjoint"
+    if operation.kind == "insert_section":
+        claim = inserted_chapter(operation)
+        if claim is UNPLACED and unit.new and operation.stated is None:
+            return "disjoint"  # a new chapter is the text its own insertion carries, not this
+        if claim is UNPLACED:
+            return "unknown"  # never read from the label or the amending member's chapter
+        return "covers" if claim == unit.chapter else "disjoint"
     chapter = chapter_of.get(operation.address.section or "")
     if chapter is None:
         # A *new* chapter is only the text its chapter insertion carries; anything else is

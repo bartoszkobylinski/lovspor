@@ -28,6 +28,7 @@ from lovspor.legaltime.commencement import Event, Timing
 from lovspor.legaltime.document import Document, Frozen, Ledd, Provision, element_text
 from lovspor.legaltime.instructions import Address, Operation, _shift
 from lovspor.legaltime.text import ORDINAL_ALT, ordinal, section_sort_key, split_sentences
+from lovspor.legaltime.units import Where, inserted_where
 from lovspor.parsing.xml_normalizer import safe_parser
 
 ProvisionStatus = Literal["replayed", "unresolved"]
@@ -125,16 +126,16 @@ class _Working:
         self.commencement, self.at = commencement, at
         self.order = [p.key for p in baseline.provisions]
         self.map = {
-            p.key: _Provision(p, self.unit_state(p.key, p.chapter, (p.part or "",)))
+            p.key: _Provision(p, self.unit_state(p.key, (p.chapter, (p.part or "",))))
             for p in baseline.provisions
         }
         self.done: set[str] = set()  # ids of operations that applied, for absorbed renumberings
 
-    def unit_state(self, key: str, chapter: str | None, parts: tuple[str, ...]) -> UnitState:
+    def unit_state(self, key: str, where: Where) -> UnitState:
         """The section's commencement at D; without a commencement every unit is in force."""
         if self.commencement is None or self.at is None:
             return _IN_FORCE
-        return unit_state(self.commencement, key, (chapter, parts), self.at)
+        return unit_state(self.commencement, key, where, self.at)
 
     def _target(self, key: str | None) -> _Provision | None:
         return self.map.get(key) if key else None
@@ -172,7 +173,7 @@ class _Working:
         if op.new_provision.key != key:
             return f"new text is headed {op.new_provision.key}, not {key}"
         new = op.new_provision
-        unit = self.unit_state(key, new.chapter, (new.part or "", op.part.upper()))
+        unit = self.unit_state(key, inserted_where(op))
         self.map[key] = _Provision(new, unit)
         self.order.insert(_insert_position(self.order, key), key)
         return None
@@ -582,9 +583,7 @@ def _substitutes_flagged(op: Operation, working: _Working) -> bool:
 def _unit_gate(op: Operation, working: _Working) -> str | None:
     """``withheld`` / an unresolved reason / None (apply) from the targets' commencement at D."""
     if op.kind == "insert_section" and op.new_provision is not None and op.address.section:
-        new = op.new_provision
-        parts = (new.part or "", op.part.upper())
-        return state_gate(working.unit_state(op.address.section, new.chapter, parts))
+        return state_gate(working.unit_state(op.address.section, inserted_where(op)))
     for target in _targets(op, working):
         gate = state_gate(target.unit)
         if gate is not None:

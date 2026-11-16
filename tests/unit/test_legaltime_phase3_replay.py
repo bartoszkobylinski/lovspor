@@ -11,7 +11,7 @@ import pytest
 
 from lovspor.legaltime.baseline import Commencement, UnitTiming, baseline_commencement
 from lovspor.legaltime.commencement import Event, Timing
-from lovspor.legaltime.document import Ledd, Provision
+from lovspor.legaltime.document import Ledd, Provision, StatedPlacement
 from lovspor.legaltime.instructions import Address, Operation
 from lovspor.legaltime.replay import RESTRUCTURED, ReplayState, replay
 from lovspor.legaltime.units import Unit
@@ -236,7 +236,14 @@ def test_inserted_chapter_is_gated_by_its_amending_part_at_the_date_boundary(
     new = Provision(key="§9A-1", label="§ 9A-1", heading="", ledd=(_ledd("Ny."),), chapter="kap9a")
     operation = _op(
         16, "insert_section", address=Address(section=new.key), new_provision=new
-    ).model_copy(update={"part": part})
+    ).model_copy(
+        update={
+            "part": part,
+            "stated": StatedPlacement(
+                sentence="Nytt kapittel 9A skal lyde:", chapter_from="sentence"
+            ),
+        }
+    )
     event = _event(16, operation, date(2023, 3, 1))
     state = replay(ACT_DOC, commencement, [event], at)
     by_key = {p.key: p for p in state.provisions}

@@ -161,7 +161,7 @@ def test_an_amending_members_own_chapter_is_never_a_placement() -> None:
     events = _events_of(document, "lov/1999-07-02-61", Decisions(documents=()), 0)
     (event,) = [e for e in events if e.operation.id == "lov/2011-06-24-30#1:I:335.0"]
     payload = event.operation.new_provision
-    assert payload is not None and payload.chapter == "kap13"  # the member's own chapter
+    assert payload is not None and payload.chapter is None  # #935: not the member's kap13
     assert event.operation.stated is None
     evidence, problem = _placement(event.operation.stated, payload)
     assert problem is None and evidence.stated is None
