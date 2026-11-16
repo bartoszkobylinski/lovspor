@@ -1,0 +1,392 @@
+"""AR1: pure, deterministic safety gates over release evidence (#738; §9.2, §9.3, D10, D11).
+
+:func:`evaluate_release` reads one :class:`ReleaseEvidence` and nothing else:
+no clock, no file, no network, no key. It reports every gate in a fixed
+order, each with every reason it fails, by stable code and document. Missing
+evidence fails its gate; it never becomes approval.
+
+The gates:
+
+- ``inventory``: a verified expected inventory from a trusted source, equal to
+  the manifest's documents;
+- ``lineage_anchor``: every document's FC8a head attested by a trusted anchor
+  and equal to it; the lineage verified;
+- ``manifest_reproduced``: the FC8b verifier reproduced exactly this manifest,
+  and the intent names exactly it;
+- ``source_evidence``: no document excluded, no integrity or source blocker;
+- ``policy_rules``: no FC7 policy blocker;
+- ``authorization``: no FC7b blocker; an engine-pinned trust root with an
+  owner key;
+- ``legal_assessment``: D10, which nothing can accept today;
+- ``automated_publication``: D11 and each policy's verified approvals and
+  document limit;
+- ``publisher``: the bot, listed with only its namespaces, approving nothing;
+- ``privacy_rights``: no denied, unresolved or unassessed span, publication
+  complete;
+- ``freshness``: no version behind its anchor, none rolled back;
+- ``constraints``: trusted signed limits and ledger; batch bounds and budgets;
+- ``execution_controls``: the controls AR4 to AR7 build, none of which exists.
+
+``execution_controls``, ``legal_assessment`` and ``automated_publication``
+fail for every input today, so no verdict is ever eligible. A verdict is
+``refused`` when the evidence contradicts itself or was forged, otherwise
+``blocked``.
+"""
+
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator
+
+from pydantic import ValidationError
+
+from lovspor.forarbeider.corpus_models import _loaded
+from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from lovspor.forarbeider.policy_trust import BOT_NAMESPACES
+from lovspor.forarbeider.release_contract_models import (
+    EXECUTION_PREREQUISITES,
+    GATES,
+    MAX_BATCH_BYTES,
+    MAX_BATCH_FILES,
+    REFUSING_CODES,
+    AnchorEvidence,
+    BatchSize,
+    BudgetUsage,
+    EvidenceKind,
+    EvidenceStatus,
+    GateId,
+    GateReason,
+    GateResult,
+    ReleaseConstraints,
+    ReleaseEvidence,
+    ReleaseExecution,
+    ReleaseGateVerdict,
+    SourceKind,
+    trusted,
+)
+from lovspor.forarbeider.version_models import canonical_text
+from lovspor.forarbeider.version_release_models import (
+    DocumentBinding,
+    DocumentSelection,
+    digest_of,
+)
+
+Reasons = Iterator[GateReason]
+
+_ROLLBACK = frozenset({"lineage:version_cycle", "lineage:history_rewritten"})
+_PRIVACY = {
+    "fc7_deny": "rights_or_privacy_denied",
+    "fc7_unresolved": "rights_or_privacy_unresolved",
+    "policy_not_evaluated": "rights_or_privacy_not_assessed",
+}
+
+
+def evaluate_release(evidence: ReleaseEvidence) -> ReleaseGateVerdict:
+    """Every gate's result over ``evidence``; always blocked or refused, never eligible."""
+    gates = tuple(_result(gate, _CHECKS[gate](evidence)) for gate in GATES)
+    refusing = any(r.code in REFUSING_CODES for g in gates for r in g.reasons)
+    return ReleaseGateVerdict(
+        intent_sha256=digest_of(evidence.intent),
+        evidence_sha256=digest_of(evidence),
+        release_id=evidence.manifest.release_id,
+        status="refused" if refusing else "blocked",
+        gates=gates,
+        failed_gates=tuple(g.gate for g in gates if g.status == "failed"),
+    )
+
+
+def verdict_text(verdict: ReleaseGateVerdict) -> str:
+    return canonical_text(verdict)
+
+
+def parse_verdict(raw: bytes) -> ReleaseGateVerdict:
+    """The verdict in ``raw``, which must be its canonical bytes.
+
+    Raises:
+        ForarbeiderRefusedError: ``schema_invalid`` for anything else, including a
+            verdict claiming eligibility or hiding a failed gate.
+    """
+    try:
+        verdict = ReleaseGateVerdict.model_validate(_loaded(raw))
+    except (ValidationError, ForarbeiderRefusedError) as error:
+        raise ForarbeiderRefusedError(RefusalReason.SCHEMA_INVALID, "gate verdict") from error
+    if verdict_text(verdict).encode() != raw:
+        raise ForarbeiderRefusedError(RefusalReason.SCHEMA_INVALID, "gate verdict")
+    return verdict
+
+
+def not_executed(verdict: ReleaseGateVerdict) -> ReleaseExecution:
+    """The execution record of ``verdict``: nothing was executed, because nothing can be."""
+    return ReleaseExecution(verdict_sha256=digest_of(verdict))
+
+
+def _result(gate: GateId, reasons: Iterable[GateReason]) -> GateResult:
+    ordered = tuple(sorted(set(reasons), key=lambda r: (r.document_id or "", r.code)))
+    return GateResult(gate=gate, status="failed" if ordered else "passed", reasons=ordered)
+
+
+def _evidence(
+    prefix: str, kind: EvidenceKind, found: tuple[EvidenceStatus, SourceKind | None]
+) -> Iterator[str]:
+    status, source = found
+    if status != "verified":
+        yield f"{prefix}_{status}"
+    elif not trusted(kind, status, source):
+        yield f"{prefix}_source_untrusted"
+
+
+def _ids(evidence: ReleaseEvidence) -> tuple[str, ...]:
+    return tuple(item.document_id for item in evidence.manifest.content.documents)
+
+
+# --- inventory, anchors, manifest ----------------------------------------------------
+
+
+def _inventory(evidence: ReleaseEvidence) -> Reasons:
+    found = evidence.inventory
+    for code in _evidence("inventory", "document_inventory", (found.status, found.source)):
+        yield GateReason(code=code)
+    if found.inventory is None:
+        return
+    expected, present = set(found.inventory.document_ids), set(_ids(evidence))
+    for document in sorted(expected - present):
+        yield GateReason(code="inventory_document_missing", document_id=document)
+    for document in sorted(present - expected):
+        yield GateReason(code="document_outside_inventory", document_id=document)
+
+
+def _anchors(evidence: ReleaseEvidence) -> dict[str, AnchorEvidence]:
+    return {item.document_id: item for item in evidence.anchors}
+
+
+def _lineage_anchor(evidence: ReleaseEvidence) -> Reasons:
+    counted = Counter(item.document_id for item in evidence.anchors)
+    known = set(_ids(evidence))
+    for document, count in sorted(counted.items()):
+        if count > 1:
+            yield GateReason(code="anchor_conflict", document_id=document)
+        if document not in known:
+            yield GateReason(code="anchor_for_unknown_document", document_id=document)
+    anchors = _anchors(evidence)
+    for binding in evidence.manifest.bindings:
+        document = binding.document_id
+        if binding.lineage_status != "verified":
+            yield GateReason(code=f"lineage_{binding.lineage_status}", document_id=document)
+        yield from _anchored(anchors.get(document), binding)
+
+
+def _anchored(found: AnchorEvidence | None, binding: DocumentBinding) -> Reasons:
+    document, head = binding.document_id, binding.lineage_head_sha256
+    if found is None:
+        yield GateReason(code="anchor_missing", document_id=document)
+        return
+    for code in _evidence("anchor", "lineage_head_anchor", (found.status, found.source)):
+        yield GateReason(code=code, document_id=document)
+    record = found.anchor
+    if record is None or head is None or record.head_sha256 == head:
+        return
+    if binding.lineage_entries == record.lineage_entries:
+        yield GateReason(code="anchor_head_mismatch", document_id=document)
+    elif binding.lineage_entries > record.lineage_entries:
+        yield GateReason(code="head_ahead_of_anchor", document_id=document)
+
+
+def _manifest_reproduced(evidence: ReleaseEvidence) -> Reasons:
+    manifest, reproduction, intent = evidence.manifest, evidence.reproduction, evidence.intent
+    if reproduction.status != "reproduced":
+        yield GateReason(code="reproduction_invalid")
+    for finding in reproduction.findings:
+        yield GateReason(code=f"reproduction:{finding.code}", document_id=finding.document_id)
+    offered = (reproduction.offered_release_id, reproduction.rebuilt_release_id)
+    if offered != (manifest.release_id, manifest.release_id):
+        yield GateReason(code="reproduction_of_other_manifest")
+    if intent.release_id != manifest.release_id:
+        yield GateReason(code="intent_release_mismatch")
+    if intent.bindings_sha256 != manifest.bindings_sha256:
+        yield GateReason(code="intent_bindings_mismatch")
+    if intent.document_ids != _ids(evidence):
+        yield GateReason(code="intent_documents_mismatch")
+
+
+# --- the FC8b selections -------------------------------------------------------------
+
+
+def _carried(
+    evidence: ReleaseEvidence, pick: Callable[[DocumentSelection], Iterable[str]]
+) -> Reasons:
+    for selection in evidence.manifest.content.documents:
+        for code in pick(selection):
+            yield GateReason(code=code, document_id=selection.document_id)
+
+
+def _of(selection: DocumentSelection, *categories: str) -> list[str]:
+    return [item.code for item in selection.blockers if item.category in categories]
+
+
+def _source_evidence(evidence: ReleaseEvidence) -> Reasons:
+    def pick(selection: DocumentSelection) -> list[str]:
+        excluded = ["document_excluded"] if selection.status == "excluded" else []
+        return excluded + _of(selection, "integrity", "source")
+
+    return _carried(evidence, pick)
+
+
+def _policy_rules(evidence: ReleaseEvidence) -> Reasons:
+    return _carried(evidence, lambda selection: _of(selection, "policy"))
+
+
+def _authorization(evidence: ReleaseEvidence) -> Reasons:
+    registry = evidence.registry
+    if registry.origin != "engine_pinned":
+        yield GateReason(code="trust_root_not_engine_pinned")
+    if registry.owner_keys == 0:
+        yield GateReason(code="trust_root_has_no_owner_key")
+    yield from _carried(
+        evidence,
+        lambda s: (
+            _of(s, "authorization") + [c for c in _of(s, "integrity") if c.startswith("fc7b_")]
+        ),
+    )
+
+
+def _privacy_rights(evidence: ReleaseEvidence) -> Reasons:
+    def pick(selection: DocumentSelection) -> list[str]:
+        mapped = [_PRIVACY[c] for c in _of(selection, "policy") if c in _PRIVACY]
+        return mapped + _of(selection, "publication")
+
+    return _carried(evidence, pick)
+
+
+def _freshness(evidence: ReleaseEvidence) -> Reasons:
+    anchors = _anchors(evidence)
+    for selection, binding in zip(
+        evidence.manifest.content.documents, evidence.manifest.bindings, strict=True
+    ):
+        document = selection.document_id
+        if {item.code for item in selection.blockers} & _ROLLBACK:
+            yield GateReason(code="version_rolled_back", document_id=document)
+        found = anchors.get(document)
+        record = None if found is None else found.anchor
+        if record is None:
+            yield GateReason(code="freshness_unverifiable", document_id=document)
+        elif binding.lineage_entries < record.lineage_entries:
+            yield GateReason(code="version_stale", document_id=document)
+
+
+# --- owner decisions, publisher ------------------------------------------------------
+
+
+def _legal_assessment(evidence: ReleaseEvidence) -> Reasons:
+    legal = evidence.legal
+    yield GateReason(code="d10_not_independently_accepted")
+    for code in _evidence("legal_assessment", "legal_assessment", (legal.status, legal.source)):
+        yield GateReason(code=code)
+    if any(item.legal_reference_stated is None for item in evidence.approvals):
+        yield GateReason(code="legal_reference_missing")
+
+
+def _policies(evidence: ReleaseEvidence) -> set[str]:
+    documents = evidence.manifest.content.documents
+    return {item.policy.policy_sha256 for item in documents if item.policy is not None}
+
+
+def _automated_publication(evidence: ReleaseEvidence) -> Reasons:
+    yield GateReason(code="d11_not_accepted")
+    counted = Counter(item.policy.policy_sha256 for item in evidence.approvals)
+    policies = _policies(evidence)
+    for policy, count in sorted(counted.items()):
+        if count > 1:
+            yield GateReason(code="approval_conflict")
+        if policy not in policies:
+            yield GateReason(code="approval_for_unknown_policy")
+    if policies - set(counted):
+        yield GateReason(code="d11_approval_missing")
+    yield from _approvals(evidence)
+
+
+def _approvals(evidence: ReleaseEvidence) -> Reasons:
+    documents = len(evidence.manifest.content.documents)
+    for item in evidence.approvals:
+        if item.automated_publication != "verified":
+            yield GateReason(code="d11_approval_missing")
+        if item.policy_approval != "verified":
+            yield GateReason(code="policy_approval_missing")
+        if item.max_documents_per_batch is None or documents > item.max_documents_per_batch:
+            yield GateReason(code="batch_documents_exceeded")
+
+
+def _publisher(evidence: ReleaseEvidence) -> Reasons:
+    found = evidence.publisher
+    checks = (
+        (found.principal != evidence.intent.publisher_principal, "publisher_mismatch"),
+        (found.role is None, "publisher_not_in_registry"),
+        (found.role == "owner_policy", "publisher_holds_owner_key"),
+        (not set(found.namespaces) <= BOT_NAMESPACES, "publisher_scope_exceeded"),
+        (found.key_fingerprint is None, "publisher_key_missing"),
+        (evidence.registry.origin != "engine_pinned", "publisher_registry_unpinned"),
+    )
+    yield from (GateReason(code=code) for failed, code in checks if failed)
+    for item in evidence.approvals:
+        if (
+            found.key_fingerprint is not None
+            and found.key_fingerprint in item.approver_fingerprints
+        ):
+            yield GateReason(code="publisher_self_approval")
+        if "bot_execution" in item.approver_roles:
+            yield GateReason(code="approval_signed_by_bot")
+
+
+# --- constraints, execution ----------------------------------------------------------
+
+
+def _constraints(evidence: ReleaseEvidence) -> Reasons:
+    limits, ledger, batch = evidence.limits, evidence.ledger, evidence.intent.batch
+    for code in _evidence("limits", "publication_limits", (limits.status, limits.source)):
+        yield GateReason(code=code)
+    for code in _evidence("budget_ledger", "budget_ledger", (ledger.status, ledger.source)):
+        yield GateReason(code=code)
+    if batch.documents != len(evidence.intent.document_ids):
+        yield GateReason(code="batch_size_contradicts_intent")
+    yield from (GateReason(code=code) for code in _batch(batch, limits.constraints))
+    if limits.constraints is not None and ledger.consumed is not None:
+        yield from (
+            GateReason(code=code) for code in _budgets(batch, limits.constraints, ledger.consumed)
+        )
+
+
+def _batch(batch: BatchSize, limits: ReleaseConstraints | None) -> Iterator[str]:
+    files = MAX_BATCH_FILES if limits is None else limits.max_files_per_batch
+    size = MAX_BATCH_BYTES if limits is None else limits.max_bytes_per_batch
+    if batch.files > min(files, MAX_BATCH_FILES):
+        yield "batch_files_exceeded"
+    if batch.bytes > min(size, MAX_BATCH_BYTES):
+        yield "batch_bytes_exceeded"
+
+
+def _budgets(batch: BatchSize, limits: ReleaseConstraints, used: BudgetUsage) -> Iterator[str]:
+    planned = (
+        ("documents", used.documents + batch.documents, limits.max_documents_per_day),
+        ("files", used.files + batch.files, limits.max_files_per_day),
+        ("bytes", used.bytes + batch.bytes, limits.max_bytes_per_day),
+        ("commits", used.commits + 1, limits.max_commits_per_day),
+    )
+    yield from (f"budget_{name}_exceeded" for name, total, limit in planned if total > limit)
+
+
+def _execution_controls(_: ReleaseEvidence) -> Reasons:
+    yield from (GateReason(code=code) for code in EXECUTION_PREREQUISITES)
+
+
+_CHECKS: dict[GateId, Callable[[ReleaseEvidence], Iterable[GateReason]]] = {
+    "inventory": _inventory,
+    "lineage_anchor": _lineage_anchor,
+    "manifest_reproduced": _manifest_reproduced,
+    "source_evidence": _source_evidence,
+    "policy_rules": _policy_rules,
+    "authorization": _authorization,
+    "legal_assessment": _legal_assessment,
+    "automated_publication": _automated_publication,
+    "publisher": _publisher,
+    "privacy_rights": _privacy_rights,
+    "freshness": _freshness,
+    "constraints": _constraints,
+    "execution_controls": _execution_controls,
+}
