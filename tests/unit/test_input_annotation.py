@@ -15,7 +15,7 @@ import pytest
 
 import lovspor.sync.input_annotation as annotation_module
 from lovspor.embeddings.inputs import build_embedding_inputs, hash_embedding_inputs
-from lovspor.embeddings.store import write_embeddings
+from lovspor.embeddings.store import sidecar_sha256, write_embeddings
 from lovspor.errors import CorpusStateError
 from lovspor.settings import Settings
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest, write_manifest
@@ -273,3 +273,53 @@ def test_annotation_clears_the_sidecar_provenance_stamp(tmp_path: Path) -> None:
     annotate_embedding_input_identity(settings)
 
     assert read_manifest(path).documents["lov-x"].embedding_sidecar_sha256 is None
+
+
+@pytest.mark.parametrize("old_hash", [None, "e" * 64], ids=["missing-hash", "stale-hash"])
+def test_annotation_preserves_provenance_only_for_unchanged_input_hashes(
+    tmp_path: Path, old_hash: str | None
+) -> None:
+    """#936 invalidates the stamp only when the hash it vouched for changes."""
+    settings, corpus = _seed_corpus(tmp_path)
+    path = corpus / "manifest.json"
+    manifest = read_manifest(path)
+    records = dict(manifest.documents)
+    for slug in ("x", "y"):
+        digest = hash_embedding_inputs(
+            build_embedding_inputs((corpus / "lover" / f"{slug}.md").read_text(encoding="utf-8"))
+        )
+        records[f"lov-{slug}"] = records[f"lov-{slug}"].model_copy(
+            update={
+                "embedding_input_hash": digest if slug == "x" else old_hash,
+                "embedding_sidecar_sha256": sidecar_sha256(
+                    corpus / "lover" / "embeddings" / f"{slug}.bin"
+                ),
+            }
+        )
+    write_manifest(manifest.model_copy(update={"documents": records}), path)
+    _git(corpus, "commit", "-am", "mixed annotation basis")
+    before = _class_bytes(corpus)
+
+    report = annotate_embedding_input_identity(settings)
+
+    assert report.annotated == 1
+    assert report.already_annotated == 1
+    after = read_manifest(path)
+    assert after.documents["lov-x"] == records["lov-x"]
+    assert after.documents["lov-y"] == records["lov-y"].model_copy(
+        update={
+            "embedding_input_hash": hash_embedding_inputs(
+                build_embedding_inputs((corpus / "lover" / "y.md").read_text(encoding="utf-8"))
+            ),
+            "embedding_sidecar_sha256": None,
+        }
+    )
+    assert after.documents["lov-gone"] == records["lov-gone"]
+    assert _class_bytes(corpus) == before
+    first_manifest = path.read_bytes()
+
+    repeated = annotate_embedding_input_identity(settings)
+
+    assert repeated.annotated == 0
+    assert repeated.already_annotated == 2
+    assert path.read_bytes() == first_manifest
