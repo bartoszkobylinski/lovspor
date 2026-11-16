@@ -2,8 +2,8 @@
 
 The owner's product goal is the existing Lovspor plus provision-level legal
 history and source-backed legislative provenance, as an addition. The
-proposal is ``docs/proposals/add-only-legal-history-contract.md`` (owner
-review; not accepted). Each gate below pins one part of today's production
+contract these gates enforce is under owner review (not accepted). Each gate
+below pins one part of today's production
 surface. A failure means a change to that surface; it is decided by the owner,
 and the golden is never just refreshed to make a PR pass.
 
