@@ -16,7 +16,7 @@ import pytest
 
 from lovspor.legaltime.archive import Evidence
 from lovspor.legaltime.baseline import UNPLACED_CHAPTER, Commencement, UnitTiming, unit_state
-from lovspor.legaltime.commencement import Decisions, Timing
+from lovspor.legaltime.commencement import Decisions, Proof, Timing
 from lovspor.legaltime.document import Document, Ledd, parse_document
 from lovspor.legaltime.instructions import Operation, interpret
 from lovspor.legaltime.replay import _unit_gate, _Working
@@ -324,3 +324,63 @@ def test_ledd_text_of_an_unplaced_section_is_kept() -> None:
     op = _one(PLAIN)
     assert op.new_provision is not None
     assert op.new_provision.ledd == (Ledd(xml="Teksten.", text="Teksten."),)
+
+
+@pytest.mark.parametrize(
+    "apart",
+    [LATER, Timing(status="pending"), Timing(status="unresolved", reason="conflicting dates")],
+)
+def test_a_chapter_in_another_part_still_unsettles_an_unplaced_insertion(apart: Timing) -> None:
+    """#935 research §2/§5.3: an unknown part cannot exclude a chapter dated apart."""
+    commencement = Commencement(
+        default=DEFAULT,
+        units=(UnitTiming(unit=Unit(chapter="kap2"), part="III", timing=apart),),
+    )
+    timing = commencement.section_timing("§5a", UNPLACED, ("", "I"))
+    assert (timing.status, timing.effective, timing.reason) == (
+        "unresolved",
+        None,
+        UNPLACED_CHAPTER,
+    )
+
+
+def test_unplaced_commencement_retains_default_and_all_apart_chapter_proofs() -> None:
+    """#935 research §2 promises every proof behind the placement uncertainty."""
+    proofs = tuple(
+        Proof(
+            refid=f"lov/2010-01-01-{n}",
+            member=f"member-{n}.xml",
+            sha256=str(n) * 64,
+            quote_sha256=str(n + 1) * 64,
+        )
+        for n in range(5)
+    )
+    default = DEFAULT.model_copy(update={"proofs": (proofs[0],)})
+    later = LATER.model_copy(update={"proofs": (proofs[1], proofs[2])})
+    pending = Timing(status="pending", proofs=(proofs[3],))
+    irrelevant = LATER.model_copy(update={"proofs": (proofs[4],)})
+    commencement = Commencement(
+        default=default,
+        units=(
+            UnitTiming(unit=Unit(chapter="kap2"), timing=later),
+            UnitTiming(unit=Unit(chapter="kap3"), timing=pending),
+            UnitTiming(unit=Unit(chapter="kap4", heading=True), timing=irrelevant),
+            UnitTiming(unit=Unit(section="§9"), timing=irrelevant),
+        ),
+    )
+    timing = commencement.section_timing("§5a", UNPLACED, ())
+    assert (timing.status, timing.reason) == ("unresolved", UNPLACED_CHAPTER)
+    assert timing.proofs == proofs[:4]
+
+
+def test_a_ledd_date_does_not_resolve_the_unplaced_whole_section() -> None:
+    commencement = Commencement(
+        default=DEFAULT,
+        units=(
+            UnitTiming(unit=Unit(section="§5a", ledd=1), timing=DEFAULT),
+            UnitTiming(unit=Unit(chapter="kap2"), timing=LATER),
+        ),
+    )
+    state = unit_state(commencement, "§5a", inserted_where(_one(PLAIN)), AT)
+    assert (state.in_force, state.effective) == ("unresolved", None)
+    assert state.problems == (f"commencement {UNPLACED_CHAPTER}",)
