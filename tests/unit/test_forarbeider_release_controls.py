@@ -373,6 +373,63 @@ def test_a_reservation_over_the_daily_budget_is_refused(root: TrustRoot, keys: K
     assert "budget_documents_exceeded" in plan.reasons
 
 
+@pytest.mark.parametrize("resource", ["documents", "files", "bytes", "commits"])
+def test_each_daily_budget_accepts_its_boundary_and_refuses_one_more(
+    root: TrustRoot, keys: Keys, resource: str
+) -> None:
+    limited = sealed_limits(root, keys, constraints=constraints(**{f"max_{resource}_per_day": 4}))
+    amounts = usage(0, 0, 0, 0).model_copy(update={resource: 2})
+    entries = chained(limited, operation("reserve", amounts=amounts))
+    boundary = operation("reserve", RELEASE_B, amounts=amounts)
+    plan = plan_entry(entries, boundary, limited)
+    assert plan.outcome == "append"
+    assert plan.entry is not None
+    replayed = ledger((*entries, entry_bytes(plan.entry)), limited)
+    assert replayed.status == "verified"
+    assert getattr(replayed.reserved, resource) == 4
+
+    over = boundary.model_copy(update={"amounts": amounts.model_copy(update={resource: 3})})
+    refused = plan_entry(entries, over, limited)
+    assert (refused.outcome, refused.entry) == ("refused", None)
+    assert refused.reasons == (f"budget_{resource}_exceeded",)
+
+
+@pytest.mark.parametrize("resource", ["documents", "files", "bytes"])
+def test_each_batch_cap_accepts_its_boundary_and_refuses_one_more(
+    root: TrustRoot, keys: Keys, resource: str
+) -> None:
+    limited = sealed_limits(root, keys, constraints=constraints(**{f"max_{resource}_per_batch": 4}))
+    amounts = usage(0, 0, 0, 0).model_copy(update={resource: 4})
+    assert plan_entry((), operation("reserve", amounts=amounts), limited).outcome == "append"
+    over = amounts.model_copy(update={resource: 5})
+    refused = plan_entry((), operation("reserve", amounts=over), limited)
+    assert (refused.outcome, refused.entry) == ("refused", None)
+    assert refused.reasons == (f"batch_{resource}_exceeded",)
+
+
+def test_partial_settlement_releases_unused_budget_and_retries_do_not_spend_it_twice(
+    root: TrustRoot, keys: Keys
+) -> None:
+    limited = sealed_limits(root, keys)
+    settled = usage(5)
+    entries = chained(
+        limited, operation("reserve", amounts=usage(15)), operation("commit", amounts=settled)
+    )
+    found = ledger(entries, limited)
+    assert (found.committed, found.reserved, found.release_state) == (
+        settled,
+        usage(0, 0, 0, 0),
+        "settled",
+    )
+    retry = plan_entry(entries, operation("commit", amounts=settled), limited)
+    assert (retry.outcome, retry.entry, retry.reasons) == ("already_applied", None, ())
+    next_plan = plan_entry(entries, operation("reserve", RELEASE_B, amounts=usage(15)), limited)
+    assert next_plan.outcome == "append"
+    assert next_plan.entry is not None
+    found = ledger((*entries, entry_bytes(next_plan.entry)), limited, RELEASE_B)
+    assert (found.committed, found.reserved) == (settled, usage(15))
+
+
 def test_retries_cannot_bypass_the_budget(root: TrustRoot, keys: Keys) -> None:
     limited = sealed_limits(root, keys)
     entries = chained(
