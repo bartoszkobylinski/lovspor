@@ -1,0 +1,222 @@
+[
+ {
+  "arguments": {
+   "slug": "testloven"
+  },
+  "tool": "get_law_history",
+  "wire": {
+   "error": "Error executing tool get_law_history: history file missing for 'testloven'; corpus may predate the Sprint 5 history layer"
+  }
+ },
+ {
+  "arguments": {
+   "slug": "testloven"
+  },
+  "tool": "list_law_versions",
+  "wire": {
+   "error": "Error executing tool list_law_versions: history file missing for 'testloven'; corpus may predate the Sprint 5 history layer"
+  }
+ },
+ {
+  "arguments": {
+   "slug": "testloven",
+   "target_date": "2026-05-05"
+  },
+  "tool": "get_law_at",
+  "wire": {
+   "content": [
+    {
+     "text": "---\ntitle: Testloven\n---\n\n# Testloven\n\n## Kapittel 9.\n\n### § 9-9. Regel\n\nTestloven v1 tekst.\n",
+     "type": "text"
+    }
+   ],
+   "structured": {
+    "result": "---\ntitle: Testloven\n---\n\n# Testloven\n\n## Kapittel 9.\n\n### § 9-9. Regel\n\nTestloven v1 tekst.\n"
+   }
+  }
+ },
+ {
+  "arguments": {
+   "slug": "testloven",
+   "target_date": "2026-05-12"
+  },
+  "tool": "get_law_at",
+  "wire": {
+   "content": [
+    {
+     "text": "---\ntitle: Testloven\n---\n\n# Testloven\n\n## Kapittel 9.\n\n### § 9-8. Regel\n\nTestloven v2 tekst.\n",
+     "type": "text"
+    }
+   ],
+   "structured": {
+    "result": "---\ntitle: Testloven\n---\n\n# Testloven\n\n## Kapittel 9.\n\n### § 9-8. Regel\n\nTestloven v2 tekst.\n"
+   }
+  }
+ },
+ {
+  "arguments": {
+   "date_a": "2026-05-05",
+   "date_b": "2026-05-12",
+   "slug": "testloven"
+  },
+  "tool": "diff_law_versions",
+  "wire": {
+   "content": [
+    {
+     "text": "{\n  \"slug\": \"testloven\",\n  \"date_a\": \"2026-05-05\",\n  \"date_b\": \"2026-05-12\",\n  \"resolved_commit_a\": \"60880f970e504726935836d167408e814b94e009\",\n  \"resolved_commit_b\": \"5ba587c2acae1cea29acb04039d7de0e55f2a4f7\",\n  \"temporal_basis\": \"corpus_history\",\n  \"cutoff_timezone\": \"UTC\",\n  \"legal_validity_determined\": false,\n  \"summary\": {\n    \"sections_added\": 1,\n    \"sections_removed\": 1,\n    \"sections_changed\": 0\n  },\n  \"sections\": [\n    {\n      \"section_id\": \"9-8\",\n      \"occurrence\": 1,\n      \"heading\": \"§ 9-8. Regel\",\n      \"change_type\": \"added\",\n      \"unified_diff\": \"--- before\\n+++ after\\n@@ -0,0 +1,2 @@\\n+§ 9-8. Regel\\n+Testloven v2 tekst.\"\n    },\n    {\n      \"section_id\": \"9-9\",\n      \"occurrence\": 1,\n      \"heading\": \"§ 9-9. Regel\",\n      \"change_type\": \"removed\",\n      \"unified_diff\": \"--- before\\n+++ after\\n@@ -1,2 +0,0 @@\\n-§ 9-9. Regel\\n-Testloven v1 tekst.\"\n    }\n  ]\n}",
+     "type": "text"
+    }
+   ],
+   "structured": {
+    "cutoff_timezone": "UTC",
+    "date_a": "2026-05-05",
+    "date_b": "2026-05-12",
+    "legal_validity_determined": false,
+    "resolved_commit_a": "60880f970e504726935836d167408e814b94e009",
+    "resolved_commit_b": "5ba587c2acae1cea29acb04039d7de0e55f2a4f7",
+    "sections": [
+     {
+      "change_type": "added",
+      "heading": "§ 9-8. Regel",
+      "occurrence": 1,
+      "section_id": "9-8",
+      "unified_diff": "--- before\n+++ after\n@@ -0,0 +1,2 @@\n+§ 9-8. Regel\n+Testloven v2 tekst."
+     },
+     {
+      "change_type": "removed",
+      "heading": "§ 9-9. Regel",
+      "occurrence": 1,
+      "section_id": "9-9",
+      "unified_diff": "--- before\n+++ after\n@@ -1,2 +0,0 @@\n-§ 9-9. Regel\n-Testloven v1 tekst."
+     }
+    ],
+    "slug": "testloven",
+    "summary": {
+     "sections_added": 1,
+     "sections_changed": 0,
+     "sections_removed": 1
+    },
+    "temporal_basis": "corpus_history"
+   }
+  }
+ },
+ {
+  "arguments": {
+   "recorded_at": "2026-05-05",
+   "section_id": "9-9",
+   "slug": "testloven"
+  },
+  "tool": "get_section",
+  "wire": {
+   "content": [
+    {
+     "text": "{\n  \"slug\": \"testloven\",\n  \"section_id\": \"9-9\",\n  \"occurrence\": 1,\n  \"heading\": \"§ 9-9. Regel\",\n  \"parent_chapter\": \"Kapittel 9.\",\n  \"layer\": \"main\",\n  \"body\": \"Testloven v1 tekst.\",\n  \"cross_references\": [],\n  \"recorded_at\": \"2026-05-05\",\n  \"corpus_commit\": \"60880f970e504726935836d167408e814b94e009\",\n  \"xml_hash\": \"hash-1\",\n  \"temporal_notice\": {\n    \"status\": \"not_evaluated\",\n    \"reason\": \"transaction-time retrieval: this answer describes corpus content at recorded_at and no in-force evaluation was performed; recorded_at is never used as a valid-time evaluation date (ADR-0011 point 7). For today's in-force status call the tool without recorded_at.\"\n  }\n}",
+     "type": "text"
+    }
+   ],
+   "structured": {
+    "body": "Testloven v1 tekst.",
+    "corpus_commit": "60880f970e504726935836d167408e814b94e009",
+    "cross_references": [],
+    "heading": "§ 9-9. Regel",
+    "layer": "main",
+    "occurrence": 1,
+    "parent_chapter": "Kapittel 9.",
+    "recorded_at": "2026-05-05",
+    "section_id": "9-9",
+    "slug": "testloven",
+    "temporal_notice": {
+     "reason": "transaction-time retrieval: this answer describes corpus content at recorded_at and no in-force evaluation was performed; recorded_at is never used as a valid-time evaluation date (ADR-0011 point 7). For today's in-force status call the tool without recorded_at.",
+     "status": "not_evaluated"
+    },
+    "xml_hash": "hash-1"
+   }
+  }
+ },
+ {
+  "arguments": {
+   "section_id": "9-9",
+   "slug": "testloven"
+  },
+  "tool": "get_section",
+  "wire": {
+   "error": "Error executing tool get_section: section '9-9' not found in 'testloven'; available: § 9-8"
+  }
+ },
+ {
+  "arguments": {
+   "query": "tekst",
+   "recorded_at": "2026-05-05"
+  },
+  "tool": "search_body",
+  "wire": {
+   "content": [
+    {
+     "text": "{\n  \"recorded_at\": \"2026-05-05\",\n  \"corpus_commit\": \"60880f970e504726935836d167408e814b94e009\",\n  \"results\": [\n    {\n      \"slug\": \"testloven\",\n      \"doc_id\": \"testloven-id\",\n      \"title\": \"Testloven\",\n      \"dataset\": \"lover\",\n      \"match_count\": 1,\n      \"snippet\": \"## Kapittel 9. ### § 9-9. Regel Testloven v1 tekst.\"\n    }\n  ]\n}",
+     "type": "text"
+    }
+   ],
+   "structured": {
+    "result": {
+     "corpus_commit": "60880f970e504726935836d167408e814b94e009",
+     "recorded_at": "2026-05-05",
+     "results": [
+      {
+       "dataset": "lover",
+       "doc_id": "testloven-id",
+       "match_count": 1,
+       "slug": "testloven",
+       "snippet": "## Kapittel 9. ### § 9-9. Regel Testloven v1 tekst.",
+       "title": "Testloven"
+      }
+     ]
+    }
+   }
+  }
+ },
+ {
+  "arguments": {
+   "citation": "testloven § 9-9",
+   "recorded_at": "2026-05-05"
+  },
+  "tool": "validate_citation",
+  "wire": {
+   "content": [
+    {
+     "text": "{\n  \"valid\": true,\n  \"slug\": \"testloven\",\n  \"section_id\": \"9-9\",\n  \"heading\": \"§ 9-9. Regel\",\n  \"reason\": null,\n  \"recorded_at\": \"2026-05-05\",\n  \"corpus_commit\": \"60880f970e504726935836d167408e814b94e009\"\n}",
+     "type": "text"
+    }
+   ],
+   "structured": {
+    "corpus_commit": "60880f970e504726935836d167408e814b94e009",
+    "heading": "§ 9-9. Regel",
+    "reason": null,
+    "recorded_at": "2026-05-05",
+    "section_id": "9-9",
+    "slug": "testloven",
+    "valid": true
+   }
+  }
+ },
+ {
+  "arguments": {
+   "citation": "testloven § 9-9"
+  },
+  "tool": "validate_citation",
+  "wire": {
+   "content": [
+    {
+     "text": "{\n  \"valid\": false,\n  \"slug\": \"testloven\",\n  \"section_id\": \"9-9\",\n  \"heading\": null,\n  \"reason\": \"section '9-9' not found in 'testloven'; available: § 9-8\"\n}",
+     "type": "text"
+    }
+   ],
+   "structured": {
+    "heading": null,
+    "reason": "section '9-9' not found in 'testloven'; available: § 9-8",
+    "section_id": "9-9",
+    "slug": "testloven",
+    "valid": false
+   }
+  }
+ }
+]

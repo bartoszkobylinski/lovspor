@@ -1,0 +1,26 @@
+{
+ "jobs": {
+  "sync": {
+   "checkouts": [
+    null
+   ],
+   "environment": null,
+   "if": null
+  }
+ },
+ "pushes": [
+  "git push origin main",
+  "git push origin refs/notes/temporal-attestations"
+ ],
+ "schedule": [
+  "0 4 * * *"
+ ],
+ "secrets": [
+  "LOVVERK_DEPLOY_KEY",
+  "OPENAI_API_KEY"
+ ],
+ "triggers": [
+  "schedule",
+  "workflow_dispatch"
+ ]
+}
