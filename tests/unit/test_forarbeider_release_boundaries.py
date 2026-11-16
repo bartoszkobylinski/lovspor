@@ -20,6 +20,8 @@ from tests.unit.test_forarbeider_release_gates import (
     constraints,
     evaluated,
     intent,
+    ledger_evidence,
+    limits_evidence,
 )
 
 
@@ -28,11 +30,16 @@ from tests.unit.test_forarbeider_release_gates import (
 def test_only_implemented_independent_verifiers_are_trusted(
     status: EvidenceStatus, source: SourceKind | None
 ) -> None:
-    # AR1 documents exactly two implemented verifiers; even another kind's
+    # AR1b documents exactly these implemented verifiers; even another kind's
     # implemented source must not cross a trust boundary.
     implemented = {
         ("signer_registry", "engine_trust_root"),
+        ("publisher_identity", "engine_trust_root"),
         ("policy_approval", "owner_signed_record"),
+        ("manifest_reproduction", "engine_release_verifier"),
+        ("publication_limits", "owner_signed_policy_limits"),
+        ("release_control", "owner_signed_control"),
+        ("budget_ledger", "runner_budget_ledger"),
     }
     for boundary in TRUST_BOUNDARIES:
         assert trusted(boundary.evidence, status, source) == (
@@ -57,10 +64,10 @@ def test_daily_budget_accepts_equality_and_rejects_one_over(resource: str, exces
     limits = constraints(**{f"max_{name}_per_day": amount + 3 for name, amount in planned.items()})
     used = used.model_copy(update={resource: 3 + excess})
     verdict = evaluated(
-        limits=evidence.limits.model_copy(update={"constraints": limits}),
-        ledger=evidence.ledger.model_copy(update={"consumed": used}),
+        limits=limits_evidence(constraints=limits),
+        ledger=ledger_evidence(committed=used),
     )
-    expected = {"limits_source_untrusted", "budget_ledger_source_untrusted"}
+    expected = {"budget_ledger_not_anchored"}
     if excess:
         expected.add(f"budget_{resource}_exceeded")
     assert codes(verdict, "constraints") == expected

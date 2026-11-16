@@ -7,6 +7,11 @@ evidence fails its gate; it never becomes approval.
 
 The gates:
 
+Evidence counts only when :func:`verified`: a trusted source label *and* the
+seal of the engine verifier that produced it. A record a caller built with
+``status="verified"`` fails its gate as ``<kind>_source_untrusted``, and a
+hand-made registry, publisher, approval or reproduction as ``*_unverified``.
+
 - ``inventory``: a verified expected inventory from a trusted source, equal to
   the manifest's documents;
 - ``lineage_anchor``: every document's FC8a head attested by a trusted anchor
@@ -15,8 +20,8 @@ The gates:
   and the intent names exactly it;
 - ``source_evidence``: no document excluded, no integrity or source blocker;
 - ``policy_rules``: no FC7 policy blocker;
-- ``authorization``: no FC7b blocker; an engine-pinned trust root with an
-  owner key;
+- ``authorization``: no FC7b blocker; an engine-verified, engine-pinned trust
+  root with an owner key; every root-bound piece of evidence from that root;
 - ``legal_assessment``: D10, which nothing can accept today;
 - ``automated_publication``: D11 and each policy's verified approvals and
   document limit;
@@ -24,11 +29,17 @@ The gates:
 - ``privacy_rights``: no denied, unresolved or unassessed span, publication
   complete;
 - ``freshness``: no version behind its anchor, none rolled back;
-- ``constraints``: trusted signed limits and ledger; batch bounds and budgets;
+- ``stop_control``: a verified owner-signed control chain with no active stop
+  for the policy, anchored outside the runner (AR5); a stop overrides every
+  approval;
+- ``constraints``: verified signed limits for the policy and a verified,
+  anchored ledger (AR5); the release not already spent; batch caps and
+  budgets including every open reservation;
 - ``execution_controls``: the controls AR4 to AR7 build, none of which exists.
 
-``execution_controls``, ``legal_assessment`` and ``automated_publication``
-fail for every input today, so no verdict is ever eligible. A verdict is
+``execution_controls``, ``legal_assessment``, ``automated_publication``,
+``stop_control`` (unanchored) and ``constraints`` (unanchored ledger) fail for
+every input today, so no verdict is ever eligible. A verdict is
 ``refused`` when the evidence contradicts itself or was forged, otherwise
 ``blocked``.
 """
@@ -44,24 +55,28 @@ from lovspor.forarbeider.policy_trust import BOT_NAMESPACES
 from lovspor.forarbeider.release_contract_models import (
     EXECUTION_PREREQUISITES,
     GATES,
-    MAX_BATCH_BYTES,
-    MAX_BATCH_FILES,
     REFUSING_CODES,
     AnchorEvidence,
     BatchSize,
     BudgetUsage,
     EvidenceKind,
-    EvidenceStatus,
     GateId,
     GateReason,
     GateResult,
-    ReleaseConstraints,
+    LedgerEvidence,
     ReleaseEvidence,
     ReleaseExecution,
     ReleaseGateVerdict,
-    SourceKind,
-    trusted,
+    _Evidence,
+    verified,
 )
+from lovspor.forarbeider.release_limits_models import (
+    MAX_BATCH_BYTES,
+    MAX_BATCH_DOCUMENTS,
+    MAX_BATCH_FILES,
+    ReleaseConstraints,
+)
+from lovspor.forarbeider.release_provenance import authentic
 from lovspor.forarbeider.version_models import canonical_text
 from lovspor.forarbeider.version_release_models import (
     DocumentBinding,
@@ -123,13 +138,10 @@ def _result(gate: GateId, reasons: Iterable[GateReason]) -> GateResult:
     return GateResult(gate=gate, status="failed" if ordered else "passed", reasons=ordered)
 
 
-def _evidence(
-    prefix: str, kind: EvidenceKind, found: tuple[EvidenceStatus, SourceKind | None]
-) -> Iterator[str]:
-    status, source = found
-    if status != "verified":
-        yield f"{prefix}_{status}"
-    elif not trusted(kind, status, source):
+def _evidence(prefix: str, kind: EvidenceKind, found: _Evidence) -> Iterator[str]:
+    if found.status != "verified":
+        yield f"{prefix}_{found.status}"
+    elif not verified(kind, found):
         yield f"{prefix}_source_untrusted"
 
 
@@ -142,7 +154,7 @@ def _ids(evidence: ReleaseEvidence) -> tuple[str, ...]:
 
 def _inventory(evidence: ReleaseEvidence) -> Reasons:
     found = evidence.inventory
-    for code in _evidence("inventory", "document_inventory", (found.status, found.source)):
+    for code in _evidence("inventory", "document_inventory", found):
         yield GateReason(code=code)
     if found.inventory is None:
         return
@@ -178,7 +190,7 @@ def _anchored(found: AnchorEvidence | None, binding: DocumentBinding) -> Reasons
     if found is None:
         yield GateReason(code="anchor_missing", document_id=document)
         return
-    for code in _evidence("anchor", "lineage_head_anchor", (found.status, found.source)):
+    for code in _evidence("anchor", "lineage_head_anchor", found):
         yield GateReason(code=code, document_id=document)
     record = found.anchor
     if record is None or head is None or record.head_sha256 == head:
@@ -190,7 +202,10 @@ def _anchored(found: AnchorEvidence | None, binding: DocumentBinding) -> Reasons
 
 
 def _manifest_reproduced(evidence: ReleaseEvidence) -> Reasons:
-    manifest, reproduction, intent = evidence.manifest, evidence.reproduction, evidence.intent
+    manifest, intent = evidence.manifest, evidence.intent
+    reproduction = evidence.reproduction.verification
+    if not authentic(evidence.reproduction, "manifest_reproduction"):
+        yield GateReason(code="reproduction_unverified")
     if reproduction.status != "reproduced":
         yield GateReason(code="reproduction_invalid")
     for finding in reproduction.findings:
@@ -235,10 +250,15 @@ def _policy_rules(evidence: ReleaseEvidence) -> Reasons:
 
 def _authorization(evidence: ReleaseEvidence) -> Reasons:
     registry = evidence.registry
+    if not authentic(registry, "signer_registry"):
+        yield GateReason(code="trust_root_unverified")
     if registry.origin != "engine_pinned":
         yield GateReason(code="trust_root_not_engine_pinned")
     if registry.owner_keys == 0:
         yield GateReason(code="trust_root_has_no_owner_key")
+    roots = {evidence.limits.trust_root_sha256, evidence.control.trust_root_sha256} - {None}
+    if roots - {registry.trust_root_sha256}:
+        yield GateReason(code="trust_root_conflict")
     yield from _carried(
         evidence,
         lambda s: (
@@ -277,7 +297,7 @@ def _freshness(evidence: ReleaseEvidence) -> Reasons:
 def _legal_assessment(evidence: ReleaseEvidence) -> Reasons:
     legal = evidence.legal
     yield GateReason(code="d10_not_independently_accepted")
-    for code in _evidence("legal_assessment", "legal_assessment", (legal.status, legal.source)):
+    for code in _evidence("legal_assessment", "legal_assessment", legal):
         yield GateReason(code=code)
     if any(item.legal_reference_stated is None for item in evidence.approvals):
         yield GateReason(code="legal_reference_missing")
@@ -305,6 +325,8 @@ def _automated_publication(evidence: ReleaseEvidence) -> Reasons:
 def _approvals(evidence: ReleaseEvidence) -> Reasons:
     documents = len(evidence.manifest.content.documents)
     for item in evidence.approvals:
+        if not authentic(item, "policy_approval"):
+            yield GateReason(code="approval_unverified")
         if item.automated_publication != "verified":
             yield GateReason(code="d11_approval_missing")
         if item.policy_approval != "verified":
@@ -322,6 +344,7 @@ def _publisher(evidence: ReleaseEvidence) -> Reasons:
         (not set(found.namespaces) <= BOT_NAMESPACES, "publisher_scope_exceeded"),
         (found.key_fingerprint is None, "publisher_key_missing"),
         (evidence.registry.origin != "engine_pinned", "publisher_registry_unpinned"),
+        (not authentic(found, "publisher_identity"), "publisher_unverified"),
     )
     yield from (GateReason(code=code) for failed, code in checks if failed)
     for item in evidence.approvals:
@@ -334,41 +357,85 @@ def _publisher(evidence: ReleaseEvidence) -> Reasons:
             yield GateReason(code="approval_signed_by_bot")
 
 
-# --- constraints, execution ----------------------------------------------------------
+# --- stop control, constraints, execution --------------------------------------------
+
+
+def _stop_control(evidence: ReleaseEvidence) -> Reasons:
+    control = evidence.control
+    yield from (GateReason(code=c) for c in _evidence("control", "release_control", control))
+    yield GateReason(code="control_history_unanchored")
+    if control.state != "not_stopped":
+        yield GateReason(code="release_stopped")
+    policies = {d.policy.policy_id for d in evidence.manifest.content.documents if d.policy}
+    if control.state == "not_stopped" and policies != {control.policy_id}:
+        yield GateReason(code="control_scope_mismatch")
 
 
 def _constraints(evidence: ReleaseEvidence) -> Reasons:
     limits, ledger, batch = evidence.limits, evidence.ledger, evidence.intent.batch
-    for code in _evidence("limits", "publication_limits", (limits.status, limits.source)):
-        yield GateReason(code=code)
-    for code in _evidence("budget_ledger", "budget_ledger", (ledger.status, ledger.source)):
-        yield GateReason(code=code)
+    found = list(_evidence("limits", "publication_limits", limits))
+    found += _evidence("budget_ledger", "budget_ledger", ledger)
+    found.append("budget_ledger_not_anchored")
+    if limits.policy is not None and limits.policy.policy_sha256 not in _policies(evidence):
+        found.append("limits_policy_mismatch")
     if batch.documents != len(evidence.intent.document_ids):
-        yield GateReason(code="batch_size_contradicts_intent")
-    yield from (GateReason(code=code) for code in _batch(batch, limits.constraints))
-    if limits.constraints is not None and ledger.consumed is not None:
-        yield from (
-            GateReason(code=code) for code in _budgets(batch, limits.constraints, ledger.consumed)
-        )
+        found.append("batch_size_contradicts_intent")
+    found += _batch(batch, limits.constraints)
+    found += _ledger(evidence, ledger)
+    yield from (GateReason(code=code) for code in found)
 
 
-def _batch(batch: BatchSize, limits: ReleaseConstraints | None) -> Iterator[str]:
-    files = MAX_BATCH_FILES if limits is None else limits.max_files_per_batch
-    size = MAX_BATCH_BYTES if limits is None else limits.max_bytes_per_batch
-    if batch.files > min(files, MAX_BATCH_FILES):
-        yield "batch_files_exceeded"
-    if batch.bytes > min(size, MAX_BATCH_BYTES):
-        yield "batch_bytes_exceeded"
+def _ledger(evidence: ReleaseEvidence, ledger: LedgerEvidence) -> list[str]:
+    limits, batch = evidence.limits, evidence.intent.batch
+    found = []
+    if ledger.limits_sha256 not in (None, limits.limits_sha256):
+        found.append("ledger_limits_mismatch")
+    if ledger.release_state in ("settled", "cancelled"):
+        found.append("release_already_settled")
+    held = ledger.release_reserved
+    if held is not None and (held.documents, held.files, held.bytes) != (
+        batch.documents,
+        batch.files,
+        batch.bytes,
+    ):
+        found.append("reservation_contradicts_batch")
+    if limits.constraints is not None and ledger.committed and ledger.reserved:
+        planned = _planned(ledger.committed, ledger.reserved, None if held else batch)
+        found += _budgets(planned, limits.constraints)
+    return found
 
 
-def _budgets(batch: BatchSize, limits: ReleaseConstraints, used: BudgetUsage) -> Iterator[str]:
-    planned = (
-        ("documents", used.documents + batch.documents, limits.max_documents_per_day),
-        ("files", used.files + batch.files, limits.max_files_per_day),
-        ("bytes", used.bytes + batch.bytes, limits.max_bytes_per_day),
-        ("commits", used.commits + 1, limits.max_commits_per_day),
+def _batch(batch: BatchSize, limits: ReleaseConstraints | None) -> list[str]:
+    caps = (
+        ("documents", batch.documents, MAX_BATCH_DOCUMENTS, "max_documents_per_batch"),
+        ("files", batch.files, MAX_BATCH_FILES, "max_files_per_batch"),
+        ("bytes", batch.bytes, MAX_BATCH_BYTES, "max_bytes_per_batch"),
     )
-    yield from (f"budget_{name}_exceeded" for name, total, limit in planned if total > limit)
+    return [
+        f"batch_{name}_exceeded"
+        for name, amount, hard, field in caps
+        if amount > min(hard, getattr(limits, field, hard))
+    ]
+
+
+def _planned(committed: BudgetUsage, reserved: BudgetUsage, batch: BatchSize | None) -> BudgetUsage:
+    """Settled plus reserved usage, plus this batch unless it is already reserved."""
+    extra = (0, 0, 0, 0) if batch is None else (batch.documents, batch.files, batch.bytes, 1)
+    return BudgetUsage(
+        documents=committed.documents + reserved.documents + extra[0],
+        files=committed.files + reserved.files + extra[1],
+        bytes=committed.bytes + reserved.bytes + extra[2],
+        commits=committed.commits + reserved.commits + extra[3],
+    )
+
+
+def _budgets(planned: BudgetUsage, limits: ReleaseConstraints) -> list[str]:
+    names = ("documents", "files", "bytes", "commits")
+    return [
+        f"budget_{name}_exceeded"
+        for name in names
+        if getattr(planned, name) > getattr(limits, f"max_{name}_per_day")
+    ]
 
 
 def _execution_controls(_: ReleaseEvidence) -> Reasons:
@@ -387,6 +454,7 @@ _CHECKS: dict[GateId, Callable[[ReleaseEvidence], Iterable[GateReason]]] = {
     "publisher": _publisher,
     "privacy_rights": _privacy_rights,
     "freshness": _freshness,
+    "stop_control": _stop_control,
     "constraints": _constraints,
     "execution_controls": _execution_controls,
 }

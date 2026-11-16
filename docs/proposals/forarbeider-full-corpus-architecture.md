@@ -743,6 +743,23 @@ Owner actions on quarantine are **exceptions**, by design rare:
 | **AR7** Bootstrap and settings verifier (read-only) | before every run, reads the **actual** remote settings through the GitHub API (repository rulesets and their bypass actors, the effective rules on `main`, collaborators and roles, deploy keys and their write flag, visibility) and compares them with the expected configuration of §9.7 | a missing rule, bypass on R-integrity, a bot with admin or an unexpected visibility refuses the run; **an unexpected ruleset bypass actor** (any actor beyond the expected App id and the admin role, including a `DeployKey` actor with `actor_id: null` when the App path is used) refuses; **an unexpected write-enabled deploy key** refuses; App permissions wider than Contents: write, or installed on other repositories, refuse; the App id, slug and installation id must equal the pinned identity, and the configured publication path (A or B) must equal the expected settings; any API read that fails refuses; a fixture of API responses per case | yes |
 | **AR8** Independent auditor | the owner-account, read-only re-verification of every new `main` commit by §9.3a step 2: signature class per configured path, App identity, parent and base, file set, manifest bot signature, historical policy binding | a forged, unsigned, out-of-manifest or wrongly policy-bound commit alerts; a commit of the wrong signature class or another App alerts; a valid App commit with an invalid bot-signed manifest alerts; a commit with valid integrity but `authorization_unknown` or `unauthorized` alerts; a valid, authorized one passes | alerts on failure |
 
+**AR1 status (#947, AR1b).** AR1 shipped as release contracts and pure gates (#947). AR1b adds the rest of the AR1 row:
+- owner-signed limits (batch caps, daily budgets) in the namespace `lovspor-forarbeider-limits`;
+- the budget ledger's accounting records with their replay verifier and planner;
+- owner-signed stop and resume records in the namespace `lovspor-forarbeider-control`;
+- one resolved trust root for all release evidence;
+- a sealed-provenance boundary, so a source label alone is never trusted.
+
+The owner role may now hold the policy, limits and control namespaces; a bot key can hold none of them. Two hash chains still prove less than they appear to, so their gates stay failed until AR5 adds what is missing:
+- **Budget ledger.** A local chain proves neither append-only storage nor concurrency safety. AR5 must provide:
+  - an atomic append with compare-and-swap on the chain head;
+  - durability before the publication call;
+  - an external anchor of the head, outside the runner;
+  - a single-writer lock;
+  - reserve before publication, settle after verification;
+  - reconciliation against the published history.
+- **Control chain.** Whoever holds the chain can withhold its newest stop. AR5 must anchor the chain's head outside the runner.
+
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
 **Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).
