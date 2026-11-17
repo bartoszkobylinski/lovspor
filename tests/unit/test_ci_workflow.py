@@ -103,6 +103,42 @@ def test_sync_job_installs_runtime_dependencies_only() -> None:
     assert all("--no-dev" in cmd for cmd in uv_commands), uv_commands
 
 
+def _sync_job() -> dict[str, Any]:
+    job: dict[str, Any] = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["sync"]
+    return job
+
+
+def test_sync_job_runs_in_the_production_environment() -> None:
+    """The write key is meant to be readable only inside `production` (#956).
+
+    GitHub enforces the environment's deployment branch policy (`main` only)
+    regardless of what a branch's copy of this file says, which is the layer
+    that actually keeps a dispatched branch away from LOVVERK_DEPLOY_KEY once
+    the secret lives in the environment and not at repository level.
+    """
+    assert _sync_job()["environment"] == "production"
+
+
+def test_sync_job_is_skipped_off_main() -> None:
+    """Defence in depth only: a dispatched branch can delete this line.
+
+    On `main` it turns a dispatch from another branch into a skipped job
+    instead of a run that fails on the environment's branch policy.
+    """
+    assert _sync_job()["if"] == "github.ref == 'refs/heads/main'"
+
+
+def test_only_the_sync_job_holds_the_write_secrets() -> None:
+    """Every secret reference sits under the job that carries the environment.
+
+    A second job referencing LOVVERK_DEPLOY_KEY without `environment:` would
+    fall back to a repository-level copy, or get nothing once it is deleted.
+    """
+    workflow = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
+    assert list(workflow["jobs"]) == ["sync"]
+    assert "secrets." not in json.dumps({k: v for k, v in workflow.items() if k != "jobs"})
+
+
 def test_host_key_freshness_check_can_never_block_the_sync() -> None:
     """The rotation warning is diagnostics, not a gate.
 
