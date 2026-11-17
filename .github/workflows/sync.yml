@@ -18,7 +18,8 @@ on:
         default: false
 
 # Engine repo only needs read access to itself; corpus push uses the deploy
-# key configured in repo secrets (LOVVERK_DEPLOY_KEY). issues:write lets the
+# key LOVVERK_DEPLOY_KEY, meant to live as a `production` environment secret
+# (see the job's `environment:` below). issues:write lets the
 # run file an upstream-schema-drift issue against this repo (see the last step).
 permissions:
   contents: read
@@ -33,6 +34,20 @@ concurrency:
 
 jobs:
   sync:
+    # Only main's reviewed history may write the production corpus (#956).
+    # The checkout below has no `ref:`, so a dispatch runs the code of the
+    # branch it was dispatched from. Two layers, and only one is enforced:
+    # - `if:` skips a dispatch from any other branch. It is defence in depth
+    #   only: a dispatched branch runs its OWN copy of this file and can
+    #   simply delete the line.
+    # - `environment: production` is what GitHub enforces. With the
+    #   environment's deployment branch policy set to `main` and the two
+    #   secrets held only as environment secrets, a job from any other ref
+    #   cannot read LOVVERK_DEPLOY_KEY or OPENAI_API_KEY, whatever its YAML
+    #   says. The environment and its secrets are owner settings, not part of
+    #   this file (#959, S1 part 3).
+    if: github.ref == 'refs/heads/main'
+    environment: production
     runs-on: ubuntu-latest
     # Routine syncs finish in under a minute; the one-time Sprint 9
     # embeddings backfill (first keyed run over the whole corpus) needed
