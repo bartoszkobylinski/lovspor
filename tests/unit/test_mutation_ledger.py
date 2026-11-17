@@ -97,7 +97,7 @@ class TestUnpack:
                 tar.addfile(info, io.BytesIO(data))
         return archive
 
-    def test_only_killed_results_are_carried(
+    def test_killed_survived_and_timeout_results_are_carried(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         codes = {
@@ -119,13 +119,13 @@ class TestUnpack:
         restored = json.loads((work / "mutants/src/lovspor/mod.py.meta").read_text())
         assert restored["exit_code_by_key"] == {
             F + "1": KILLED,
-            F + "2": None,
-            F + "3": None,
+            F + "2": SURVIVED,
+            F + "3": TIMEOUT,
             F + "4": None,
             F + "5": None,
         }
         assert restored["hash_by_function_name"] == {"x_f": "h"}
-        assert (tally.files, tally.kept, tally.reset, tally.dropped) == (1, 1, 3, 0)
+        assert (tally.files, tally.kept, tally.reset, tally.dropped) == (1, 3, 1, 0)
 
     def test_a_meta_cut_short_by_a_checkpoint_is_dropped(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

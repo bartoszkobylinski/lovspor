@@ -20,28 +20,28 @@ from tests.unit.test_mutation_ledger import F, _meta, _write_meta, ledger
     [
         (1, 1),
         (3, 3),
-        (0, None),
+        (0, 0),
         (2, None),
         (5, None),
         (33, None),
         (34, None),
         (35, None),
-        (36, None),
+        (36, 36),
         (37, None),
-        (-24, None),
-        (24, None),
-        (152, None),
-        (255, None),
+        (-24, -24),
+        (24, 24),
+        (152, 152),
+        (255, 255),
         (-11, None),
         (-9, None),
         (99, None),
         (None, None),
     ],
 )
-def test_restore_carries_kills_and_resets_every_other_status(
+def test_restore_carries_kills_survivors_and_timeouts_and_resets_the_rest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int | None, expected: int | None
 ) -> None:
-    """docs/agentic-ci.md: only killed results carry over, including no suspicious passes."""
+    """docs/agentic-ci.md: killed, survived and timeout carry over; suspicious never does."""
     monkeypatch.chdir(tmp_path)
     _write_meta(tmp_path, "mod.py.meta", {F + "1": code})
     archive = tmp_path / "ledger.tar.gz"

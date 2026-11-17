@@ -166,8 +166,12 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   15 min during the run and once after it: a branch, because a runner shutdown skips every
   later step, `always()` ones included. The next night restores the ledger for the same base
   (`MUTMUT_PR_RESUME_ARCHIVE`), and `mutmut-pr.sh` narrows its patterns to the mutants without
-  a result. Only `killed` results carry over: survivors, timeouts, suspicious and untested
-  mutants are measured again every night, because a test merged since may kill them. The
+  a result. `killed`, `survived` and `timeout` results carry over; suspicious, segfault,
+  interrupted, skipped, untested and type-check results are measured again. Survivors used to
+  be measured again every night too (#943), but each one runs the whole suite: on 2026-11-17
+  re-measuring 1479 of them took about an hour of the budget, a share growing every night, so
+  the range could never complete. The price: a survivor that a test merged since would kill
+  stays in the report until its function changes, which resets the function's results. The
   report's counts are over every carried result plus the night's own. A completed range moves
   the tag and deletes the branch.
 - **Trigger.** `workflow_dispatch` only, fired at 00:30 Europe/Oslo by a launchd agent on the
