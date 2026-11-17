@@ -1,6 +1,12 @@
 # Owner review for slug identity, the owner-exception approval and the
-# identity migration (#938). Kept narrow on purpose: every other path merges
-# under the ordinary main ruleset. See docs/identity-approval.md.
+# identity migration (#938). Kept narrow on purpose: every path not listed in
+# this file merges under the ordinary main ruleset. See docs/identity-approval.md.
 /.github/CODEOWNERS          @bartoszkobylinski
 /src/lovspor/identity/       @bartoszkobylinski
 /docs/identity-approval.md   @bartoszkobylinski
+
+# Owner review for the paths that hold or use production write access
+# (#956, #898). Workflows run with repository secrets, including the lovverk
+# deploy key in sync.yml; deploy/ is what runs on the production droplet.
+/.github/workflows/          @bartoszkobylinski
+/deploy/                     @bartoszkobylinski
