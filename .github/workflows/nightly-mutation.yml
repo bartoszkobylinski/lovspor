@@ -265,7 +265,7 @@ jobs:
             echo "- Verdict: **$VERDICT** (gate reason: \`$REASON\`)"
             echo "- Range: \`${BASE:-unknown}...${HEAD:-unknown}\` — base from $SOURCE"
             echo "- Base tag \`$BASE_TAG\`: $tag_line"
-            echo "- Ledger: ${LEDGER:-unknown}. Counts below include the killed results it carried."
+            echo "- Ledger: ${LEDGER:-unknown}. Counts below include the killed, survived and timeout results it carried."
             echo "- Run: $RUN_URL"
             echo ""
             if [ "$VERDICT" = "partial" ] || [ "$VERDICT" = "budget_exceeded" ]; then

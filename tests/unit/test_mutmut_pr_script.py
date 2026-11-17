@@ -779,7 +779,7 @@ class TestInheritedTotalBudget:
 
 
 def _repo_ready_to_resume(tmp_path: Path) -> tuple[Path, Path]:
-    """A repo whose changed function has 5 mutants, and a ledger with 1 to 3 killed (#943)."""
+    """A changed function with 5 mutants; the ledger has 1-3 killed, 4 survived, 5 suspicious."""
     repo = _repo_with_a_changed_legacy_function(tmp_path)
     (repo / "scripts" / "quality" / "ratchet-baseline.toml").write_text("")
     ledger = REPO_ROOT / "scripts" / "ci" / "mutation_ledger.py"
@@ -795,7 +795,8 @@ def _repo_ready_to_resume(tmp_path: Path) -> tuple[Path, Path]:
     data = json.loads(meta.read_text(encoding="utf-8"))
     for n in (1, 2, 3):
         data["exit_code_by_key"][f"lovspor.mod.x_answer__mutmut_{n}"] = 1
-    data["exit_code_by_key"]["lovspor.mod.x_answer__mutmut_4"] = 0  # survived: measured again
+    data["exit_code_by_key"]["lovspor.mod.x_answer__mutmut_4"] = 0  # survived: carried
+    data["exit_code_by_key"]["lovspor.mod.x_answer__mutmut_5"] = 35  # suspicious: measured again
     meta.write_text(json.dumps(data), encoding="utf-8")
     archive = tmp_path / "ledger.tar.gz"
     subprocess.run(
@@ -822,19 +823,21 @@ class TestResumeFromLedger:
             check=False,
         )
 
-    def test_only_the_mutants_without_a_carried_kill_are_run(self, tmp_path: Path) -> None:
+    def test_only_the_mutants_without_a_carried_result_are_run(self, tmp_path: Path) -> None:
         repo, archive = _repo_ready_to_resume(tmp_path)
 
         result = self._run(repo, archive)
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert (repo / "run-args.txt").read_text(encoding="utf-8").split() == [
-            "lovspor.mod.x_answer__mutmut_4",
             "lovspor.mod.x_answer__mutmut_5",
             "--max-children",
             "4",
         ]
-        assert "3 killed result(s) kept, 1 other result(s) to measure again" in result.stdout
+        assert (
+            "4 killed/survived/timeout result(s) kept, 1 other result(s) to measure again"
+            in result.stdout
+        )
 
     def test_without_a_ledger_file_the_whole_scope_runs(self, tmp_path: Path) -> None:
         repo, _ = _repo_ready_to_resume(tmp_path)
