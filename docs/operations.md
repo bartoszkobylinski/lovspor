@@ -2685,6 +2685,21 @@ The workflow:
 
 Concurrency is set to a single `sync` group: a second invocation queues until the active one finishes, never races.
 
+### Corpus freshness check
+
+The alert above covers a run that fails. It does not cover a schedule that stops firing, a run that succeeds but pushes nothing, or a hosted site that keeps serving an old corpus. `.github/workflows/corpus-freshness.yml` checks the outcome instead. It runs daily at **16:30 UTC**, after the sync's observed start window (scheduled runs have started between 10:10 and 12:45 UTC), and on manual dispatch. It is read-only and holds no secret. The logic is in `scripts/ci/corpus_freshness.py`.
+
+The run **fails**, which notifies the owner, when:
+
+1. the latest completed `sync.yml` run on `main` did not succeed, or no run has completed in 36 h;
+2. lovverk `main` is older than 36 h **and** Lovdata's `lastModified` for `gjeldende-lover.tar.bz2` or `gjeldende-sentrale-forskrifter.tar.bz2` (`https://api.lovdata.no/v1/publicData/list`) is newer than lovverk's last commit.
+
+It fails closed. An unreadable run list or lovverk head counts as a failure, and so does an unreachable Lovdata once lovverk is older than 36 h.
+
+It only **warns** when lovspor.no lags `main`, meaning `site-facts.json` `corpus_commit` is not lovverk `main`, or `deployment-capabilities.json` `state.checkout.lovspor_commit` is not the engine's `main`. It prints the lag in commits and days. A release is an owner act (see "Publishing the site"), so lag between releases is expected.
+
+A failed run files the issue **Corpus freshness check failed**, with the findings, and each repeat comments on the open issue. Close the issue once the check passes. A known false positive of check 2: Lovdata republishes an archive with no content change, the sync succeeds, and nothing is committed. The finding then says a successful sync started after the upstream change. Read that sync's log to confirm it saw no change before closing the issue.
+
 ### Keepalive — preventing 60-day auto-disable
 
 GitHub automatically **disables a repository's scheduled workflows after 60 days with no repository activity**. This matters here because the daily sync commits to `lovverk`, not to `lovspor` — so the engine repo can sit 60 days without a commit and silently lose its `sync.yml` cron. The corpus quietly stops updating, and the only downstream signal is client-side (`corpus_status` reports `is_stale` after 7 days).
