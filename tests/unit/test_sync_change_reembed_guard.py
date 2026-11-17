@@ -303,7 +303,8 @@ def test_new_changed_and_renamed_documents_share_one_fraction_budget(
         assert (repo / "manifest.json").read_bytes() == manifest_before
     else:
         run_sync(settings)
-        assert embedder.texts == 3
+        # The renamed law still counts against the fraction, but its rows are carried (#919).
+        assert embedder.texts == 2
         manifest = read_manifest(repo / "manifest.json")
         assert manifest.documents["lov-0"].xml_hash == docs[0].xml_hash
         assert manifest.documents["lov-1"].slug == "lov-1-renamed"

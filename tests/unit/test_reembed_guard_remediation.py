@@ -23,8 +23,11 @@ def test_repair_refusal_explains_scope_thresholds_and_remedy(tmp_path: Path) -> 
         "~60,000,000 input tokens. Threshold exceeded: document fraction 6.0% > 2.0% "
         "and token workload 60,000,000 > 1,000,000. No provider call was made and no "
         "sidecar was written. If this repair is intended (annotation-less corpus, deliberate "
-        "pipeline change), re-run with 'lovspor sync --allow-mass-reembed' or raise "
-        "LOVSPOR_REEMBED_GUARD_MAX_FRACTION / LOVSPOR_REEMBED_GUARD_MAX_TOKENS."
+        "pipeline change), "
+        "it is an owner decision: the scheduled workflow never overrides this guard, and "
+        "the only override is a local 'lovspor sync --allow-mass-reembed' (or raised "
+        "LOVSPOR_REEMBED_GUARD_MAX_FRACTION / LOVSPOR_REEMBED_GUARD_MAX_TOKENS), which runs "
+        "outside sync.yml's audit and attestation steps (#923)."
     )
 
 
@@ -39,9 +42,11 @@ def test_change_refusal_explains_upstream_drift_and_remedy(tmp_path: Path) -> No
     assert message.endswith(
         "So many changed documents usually means the upstream format or the "
         "renderer changed, not the law (#679: an ELI row in every header). Check the "
-        "hashes before paying; if the re-embed is intended, re-run with "
-        "'lovspor sync --allow-mass-reembed' or raise "
-        "LOVSPOR_REEMBED_GUARD_MAX_FRACTION / LOVSPOR_REEMBED_GUARD_MAX_TOKENS."
+        "hashes before paying; if the re-embed is intended, "
+        "it is an owner decision: the scheduled workflow never overrides this guard, and "
+        "the only override is a local 'lovspor sync --allow-mass-reembed' (or raised "
+        "LOVSPOR_REEMBED_GUARD_MAX_FRACTION / LOVSPOR_REEMBED_GUARD_MAX_TOKENS), which runs "
+        "outside sync.yml's audit and attestation steps (#923)."
     )
 
 

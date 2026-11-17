@@ -104,17 +104,39 @@ class CachingEmbedder:
 
     def document_vectors(self, inputs: list[EmbeddingInput], input_hash: str) -> CachedVectors:
         """Int8 rows and scale of one non-empty document: cache first, then paid units."""
-        key = EntryKey(
-            esi=self._esi, input_hash=input_hash, dim=self.get_dimension(), rows=len(inputs)
-        )
+        key = self._document_key(inputs, input_hash)
+        stored = self._lookup(self._store, key)
+        if stored is not None:
+            return stored
+        quantized, scale = quantize_int8(self._assemble(inputs, input_hash))
+        return self._store.put(_entry(key, quantized, scale))
+
+    def cached_document(
+        self, inputs: list[EmbeddingInput], input_hash: str
+    ) -> CachedVectors | None:
+        """This runner's local document entry, or ``None``: read-only, never pays.
+
+        Only :meth:`document_vectors` writes document entries, always from the
+        whole document's float vectors, so an entry is what a full re-embed
+        produces. The change path reads here (#936). With the remote cache on,
+        it reads the local copy only: the remote store's lookup reconciles,
+        uploading a local-only entry, adopting a remote one or refusing a
+        conflict, and the change path must not write anything.
+        """
+        store: EntryStore = getattr(self._store, "local", self._store)
+        return self._lookup(store, self._document_key(inputs, input_hash))
+
+    def _lookup(self, store: EntryStore, key: EntryKey) -> CachedVectors | None:
         self._count_document()
-        stored = self._store.get(key)
+        stored = store.get(key)
         if stored is not None:
             self.progress.documents_cached += 1
-            return stored
-        matrix = self._assemble(inputs, input_hash)
-        quantized, scale = quantize_int8(matrix)
-        return self._store.put(_entry(key, quantized, scale))
+        return stored
+
+    def _document_key(self, inputs: list[EmbeddingInput], input_hash: str) -> EntryKey:
+        return EntryKey(
+            esi=self._esi, input_hash=input_hash, dim=self.get_dimension(), rows=len(inputs)
+        )
 
     def _assemble(self, inputs: list[EmbeddingInput], input_hash: str) -> np.ndarray:
         texts = [item.text for item in inputs]

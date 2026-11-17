@@ -13,6 +13,10 @@ is captured before computation and re-checked immediately before the
 manifest is written, and every digest is recomputed and compared in a second
 pass. Any drift aborts the migration with nothing written; recompute against
 the new basis or regenerate, never annotate from stale assumptions.
+
+An annotated record loses its ``embedding_sidecar_sha256`` (#936): that
+stamp vouched for a quantization over the texts the old hash named, so delta
+embedding treats the sidecar as of unknown provenance and re-embeds it.
 """
 
 from dataclasses import dataclass
@@ -201,7 +205,9 @@ def _apply_annotation(
         if record.embedding_input_hash == digest:
             already += 1
             continue
-        new_records[doc_id] = record.model_copy(update={"embedding_input_hash": digest})
+        new_records[doc_id] = record.model_copy(
+            update={"embedding_input_hash": digest, "embedding_sidecar_sha256": None}
+        )
         annotated += 1
     if annotated == 0:
         return 0, already
