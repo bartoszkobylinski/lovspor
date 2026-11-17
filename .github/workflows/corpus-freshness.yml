@@ -1,0 +1,92 @@
+name: Corpus freshness
+
+# sync.yml reports a run that fails or is cancelled (#790). Nothing reported
+# the slower failures: a schedule that stops firing, a run that succeeds and
+# pushes nothing, a corpus that stops following Lovdata. This read-only check
+# looks at the outcome once a day and fails when:
+#   1. the latest completed sync.yml run on main did not succeed, or none
+#      completed within 36 h;
+#   2. lovverk main is older than 36 h AND Lovdata's lastModified for a
+#      tracked archive is newer than lovverk's last commit.
+# What lovspor.no serves (site-facts.json corpus_commit,
+# deployment-capabilities.json lovspor_commit) against main is printed as a
+# warning only: a release is a deliberate owner act, so lag between releases
+# is expected. A failed scheduled run is what notifies the owner; the issue
+# below keeps a record without filing a new one every day.
+#
+# 16:30 UTC: scheduled sync runs have been observed to start between 10:10 and
+# 12:45 UTC (cron 04:00), and a routine sync finishes in minutes.
+# Logic and tests: scripts/ci/corpus_freshness.py,
+# tests/unit/test_corpus_freshness.py. Holds no secret.
+on:
+  schedule:
+    - cron: "30 16 * * *"
+  workflow_dispatch:
+
+# actions: read for the sync.yml run list; issues: write for the report step.
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: corpus-freshness
+  cancel-in-progress: false
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check corpus freshness
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The guard follows the scripts/ci/ convention (#381, docs/agentic-ci.md).
+        # This workflow never runs on pull_request, so a missing script can only
+        # mean a broken checkout: fail, never pass.
+        run: |
+          [ -x scripts/ci/corpus_freshness.py ] || {
+            echo "::error::scripts/ci/corpus_freshness.py is missing or not executable"
+            exit 1
+          }
+          python3 scripts/ci/corpus_freshness.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --corpus-repo bartoszkobylinski/lovverk \
+            --max-age-hours 36 \
+            --report freshness-report.md
+
+      # Same pattern as sync.yml's "Report a sync that did not complete": one
+      # open issue, every repeat comments on it.
+      - name: Report a stale corpus or a failing sync
+        if: failure() && steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Corpus freshness check failed"
+          {
+            echo "The daily corpus freshness check failed. Run: ${RUN_URL}"
+            echo
+            if [ -s freshness-report.md ]; then
+              cat freshness-report.md
+            else
+              echo "The check wrote no report; read the run log."
+            fi
+            echo
+            echo "See docs/operations.md, \"Corpus freshness check\". Close this issue once the check passes."
+          } > freshness-alert.md
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,title \
+            --jq "[.[] | select(.title == \"$title\")][0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file freshness-alert.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file freshness-alert.md
+          fi
