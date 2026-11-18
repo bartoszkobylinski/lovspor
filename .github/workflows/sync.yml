@@ -43,6 +43,7 @@ jobs:
       seal_state: ${{ steps.seal_compose.outputs.state }}
       seal_tag: ${{ steps.seal_compose.outputs.tag }}
       head: ${{ steps.seal_compose.outputs.head }}
+      published: ${{ steps.published.outputs.published }}
     env:
       LOVVERK_PATH: ${{ github.workspace }}/../lovverk
       LOVSPOR_DATA_DIR: ${{ github.workspace }}/../lovspor-data
@@ -324,6 +325,13 @@ jobs:
             echo "No new commits — nothing to push."
           fi
 
+      # Marks the push as done, so the seal job still runs when a later
+      # notification step fails: a pushed head must not stay unsealed (with
+      # sealing required, the next sync would refuse to start from it).
+      - name: Record that the corpus push completed
+        id: published
+        run: echo "published=true" >> "$GITHUB_OUTPUT"
+
       # LovdataArchive tolerates unknown /list fields (extra="allow") so an
       # additive upstream change can never take the nightly sync offline. That
       # silence is the point of this step: it is what tells the maintainer to
@@ -398,7 +406,7 @@ jobs:
   # consumers that require one hold until it does.
   seal:
     needs: sync
-    if: needs.sync.outputs.seal_state == 'composed'
+    if: ${{ !cancelled() && needs.sync.outputs.seal_state == 'composed' && needs.sync.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: lovverk-seal

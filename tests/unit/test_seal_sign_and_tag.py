@@ -7,6 +7,7 @@ match byte for byte. Throwaway keys only, created in the test's tmp dir.
 
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,7 +57,7 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Setup:
     git(work, "remote", "add", "origin", str(origin))
     git(work, "push", "-q", "origin", "main", _NOTES)
     signer = new_signer(tmp_path / "keys")
-    request = SealRequest(tag_name=SEAL, tagged_at=1795000000, allowed_signers=signer.signers)
+    request = SealRequest(tag_name=SEAL, tagged_at=int(time.time()), allowed_signers=signer.signers)
     payload = tmp_path / "payload"
     composed = compose_seal(work, request)
     assert isinstance(composed, bytes)
@@ -209,4 +210,26 @@ def test_an_absent_key_only_warns_when_a_seal_is_not_required(setup: Setup) -> N
 
     assert result.returncode == 0
     assert "::warning::" in result.stdout
+    assert not _origin_has_seal(setup)
+
+
+def test_a_tag_name_with_a_suffix_after_the_attempt_is_refused(setup: Setup) -> None:
+    result = _run(setup, SEAL_TAG=f"{SEAL}x")
+
+    assert result.returncode == 1
+    assert "does not belong to run" in result.stdout
+    assert not _origin_has_seal(setup)
+
+
+def test_a_tagger_time_outside_the_window_is_refused(setup: Setup) -> None:
+    # The tagger date judges valid-after/valid-before, so it cannot be chosen.
+    old = SealRequest(tag_name=SEAL, tagged_at=1000000000, allowed_signers=setup.signer.signers)
+    composed = compose_seal(setup.work, old)
+    assert isinstance(composed, bytes)
+    setup.payload.write_bytes(composed)
+
+    result = _run(setup)
+
+    assert result.returncode == 1
+    assert "tagger time" in result.stdout
     assert not _origin_has_seal(setup)

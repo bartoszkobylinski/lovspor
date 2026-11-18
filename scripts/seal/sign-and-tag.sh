@@ -23,6 +23,9 @@ set -euo pipefail
 
 notes_ref=refs/notes/temporal-attestations
 tagger_line='^tagger lovspor-sync\[bot\] <lovspor-sync@noreply\.github\.com> [0-9]+ \+0000$'
+# The sync job's 120 min limit plus the seal job's queueing; a re-run of only
+# the seal job after this window needs a fresh sync run.
+max_age="${SEAL_MAX_AGE_SECONDS:-21600}"
 
 fail() {
   echo "::error::publication seal refused: $*"
@@ -43,18 +46,12 @@ fi
 : "${GITHUB_RUN_ID:?}"
 signers="$(cd "$(dirname "$SEAL_SIGNERS")" && pwd)/$(basename "$SEAL_SIGNERS")"
 grep -Eq '^[[:space:]]*[^#[:space:]]' "$signers" || fail "$SEAL_SIGNERS holds no key"
-case "$SEAL_TAG" in
-  "sync/seal-$GITHUB_RUN_ID-"[0-9]*) ;;
-  *) fail "tag $SEAL_TAG does not belong to run $GITHUB_RUN_ID" ;;
-esac
+printf '%s\n' "$SEAL_TAG" | grep -Eq "^sync/seal-${GITHUB_RUN_ID}-[0-9]+\$" \
+  || fail "tag $SEAL_TAG does not belong to run $GITHUB_RUN_ID"
 
 umask 077
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
-keyfile="$scratch/seal-key"
-printf '%s\n' "$key" > "$keyfile"
-unset key
-
 # 1. A fresh, minimal clone: only main and the notes ref, blobs on demand.
 repo="$scratch/lovverk.git"
 git clone -q --bare --filter=blob:none --single-branch --branch main "$SEAL_REMOTE" "$repo"
@@ -66,6 +63,12 @@ origin_head="$(git -C "$repo" rev-parse --verify 'refs/heads/main^{commit}')"
 [ "$(sed -n '1p' "$SEAL_PAYLOAD")" = "object $SEAL_HEAD" ] || fail "payload object is not $SEAL_HEAD"
 tagger="$(sed -n '4p' "$SEAL_PAYLOAD")"
 printf '%s\n' "$tagger" | grep -Eq "$tagger_line" || fail "payload tagger line is malformed"
+# The tagger date is what allowed_signers valid-after/valid-before windows are
+# judged on: it must be the compose time of this run, not a chosen date.
+stamp="$(printf '%s\n' "$tagger" | awk '{print $(NF-1)}')"
+now="$(date +%s)"
+[ "$stamp" -le "$((now + 300))" ] && [ "$stamp" -ge "$((now - max_age))" ] \
+  || fail "payload tagger time $stamp is not within ${max_age}s before now ($now)"
 blob="$(git -C "$repo" notes --ref="$notes_ref" list "$SEAL_HEAD")" || fail "no note on $SEAL_HEAD"
 expected="$scratch/expected"
 {
@@ -77,7 +80,11 @@ expected="$scratch/expected"
 cmp -s "$expected" "$SEAL_PAYLOAD" || fail "payload differs from the tag re-derived from origin"
 
 # 3. Sign the exact bytes with a clean environment, then build the tag object.
+# The key reaches disk only now, after everything read from origin was checked.
 cp "$expected" "$scratch/payload"
+keyfile="$scratch/seal-key"
+printf '%s\n' "$key" > "$keyfile"
+unset key
 env -i PATH=/usr/bin:/bin /usr/bin/ssh-keygen -Y sign -q -n git -f "$keyfile" "$scratch/payload"
 rm -f "$keyfile"
 cat "$scratch/payload" "$scratch/payload.sig" > "$scratch/tag"

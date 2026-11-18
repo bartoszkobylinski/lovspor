@@ -160,9 +160,13 @@ hold until it appears, which is the fail-closed direction.
 - Compose requires an attestation note on HEAD in every phase. The sync step
   attests HEAD on every run, so a missing note is itself a failure.
 
-A failed seal job is recovered by re-running that job while origin `main` is
-still the head it was composed for. Otherwise, with sealing required, the next
-scheduled run cannot start (see Bootstrap and Revocation).
+A failed seal job is recovered by re-running only that job, within six hours of
+the compose (the tagger time is bounded) and while origin `main` is still the
+head it was composed for. Re-running the whole workflow does not help: with
+sealing required, the sync job refuses the unsealed head. Otherwise the owner
+re-bootstraps (see Bootstrap and Revocation). The seal job runs whenever the
+sync job's push completed, even if a later notification step of that job
+failed.
 
 ## Owner setup
 
@@ -216,9 +220,12 @@ do not read it from `lovspor` at verification time.
 ## Bootstrap
 
 In phase 1 (key installed, not required), the first run that seals seals the
-head it publishes, built on whatever `main` held when sealing began. That first
-seal is trust on first use: check that head before setting
-`LOVVERK_SEAL_REQUIRED` = `true`. From then on every run must start from a
+head it publishes, built on whatever `main` held when sealing began. Every
+phase-1 run is trust on first use, not only the first: with sealing not
+required, a head pushed by someone else (for example with a stolen deploy key)
+is sealed by the next run with only a warning. Before setting
+`LOVVERK_SEAL_REQUIRED` = `true`, review all lovverk history pushed during
+phase 1, not only its last head, and keep phase 1 short. From then on every run must start from a
 sealed head, so custody is continuous.
 
 ## Rotation

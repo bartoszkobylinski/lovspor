@@ -590,7 +590,11 @@ def test_the_seal_job_runs_no_engine_code_in_a_protected_environment() -> None:
     )
 
     assert job["needs"] == "sync"
-    assert job["if"] == "needs.sync.outputs.seal_state == 'composed'"
+    # Runs when the push completed even if a later notification step failed.
+    assert job["if"] == (
+        "${{ !cancelled() && needs.sync.outputs.seal_state == 'composed' "
+        "&& needs.sync.outputs.published == 'true' }}"
+    )
     assert job["environment"] == "lovverk-seal"
     assert job["permissions"] == {"contents": "read"}
     for word in ("uv ", "python", "lovspor "):
@@ -725,3 +729,19 @@ def test_no_pinned_key_skips_the_starting_check_when_not_required(tmp_path: Path
     assert result.returncode == 0, result.stderr
     assert "holds no key" in result.stdout
     assert "::warning::" not in result.stdout
+
+
+def test_the_push_completed_marker_directly_follows_the_push() -> None:
+    """The seal job keys on this marker, so a notification step failing after
+    the push cannot leave a pushed head unsealed, and a failed push never
+    reaches the seal job."""
+    steps = _sync_steps()
+    names = [str(step.get("name")) for step in steps]
+    push = names.index("Push corpus changes if any")
+    marker = steps[push + 1]
+    assert marker.get("name") == "Record that the corpus push completed"
+    assert marker.get("id") == "published"
+    assert "if" not in marker
+    assert marker["run"].strip() == 'echo "published=true" >> "$GITHUB_OUTPUT"'
+    outputs = _workflow()["jobs"]["sync"]["outputs"]
+    assert outputs["published"] == "${{ steps.published.outputs.published }}"
