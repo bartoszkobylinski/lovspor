@@ -379,6 +379,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PUBLISHED: ${{ steps.published.outputs.published }}
           SEAL_HEAD: ${{ steps.seal_compose.outputs.head }}
+          SEAL_STATE: ${{ steps.seal_compose.outputs.state }}
         run: |
           set -euo pipefail
           title="Nightly sync did not complete"
@@ -393,11 +394,13 @@ jobs:
             > sync-alert.md
           # A run cancelled after its push skips the seal job, whose own report
           # then never runs: name the published, unsealed head here.
-          if [ "${PUBLISHED:-}" = "true" ]; then
+          if [ "${PUBLISHED:-}" = "true" ] && [ "${SEAL_STATE:-}" = "composed" ]; then
             printf '%s\n' "" \
-              "main WAS pushed (head \`${SEAL_HEAD:-unknown}\`) and its publication seal job did not run." \
-              "With LOVVERK_SEAL_REQUIRED=true the next sync refuses to start from it: re-bootstrap" \
-              "the seal (docs/publication-seal.md)." >> sync-alert.md
+              "main WAS pushed (head \`${SEAL_HEAD}\`) and a publication seal was due." \
+              "If this run was cancelled, the seal job did not run and the head is unsealed; if it" \
+              "failed, check the seal job's own result. With LOVVERK_SEAL_REQUIRED=true an unsealed" \
+              "head blocks the next sync: re-run the seal job within six hours, else re-bootstrap" \
+              "(docs/publication-seal.md)." >> sync-alert.md
           fi
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
             --json number,title \

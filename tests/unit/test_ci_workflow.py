@@ -768,5 +768,7 @@ def test_a_failed_sync_after_its_push_names_the_unsealed_head() -> None:
     )
     assert report["env"]["PUBLISHED"] == "${{ steps.published.outputs.published }}"
     assert report["env"]["SEAL_HEAD"] == "${{ steps.seal_compose.outputs.head }}"
-    assert 'if [ "${PUBLISHED:-}" = "true" ]' in report["run"]
+    assert report["env"]["SEAL_STATE"] == "${{ steps.seal_compose.outputs.state }}"
+    # Only when a seal was due: an already-sealed head is never called unsealed.
+    assert 'if [ "${PUBLISHED:-}" = "true" ] && [ "${SEAL_STATE:-}" = "composed" ]' in report["run"]
     assert "re-bootstrap" in report["run"]
