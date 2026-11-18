@@ -412,6 +412,7 @@ jobs:
     environment: lovverk-seal
     permissions:
       contents: read
+      issues: write
     steps:
       - name: Check out the seal script and pinned signers
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -461,3 +462,34 @@ jobs:
           SEAL_SIGNERS: ops/publication-signers
           SEAL_REMOTE: git@github.com:bartoszkobylinski/lovverk.git
         run: scripts/seal/sign-and-tag.sh
+
+      # main is already pushed when this job runs, so a seal that did not land
+      # leaves a published head unsealed: consumers that require seals hold,
+      # and with sealing required the next sync refuses to start. Say so where
+      # the maintainer looks, with the recovery (re-run only this job within
+      # six hours, else re-bootstrap; docs/publication-seal.md).
+      - name: Report a seal that did not complete
+        if: failure() || cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SEAL_HEAD: ${{ needs.sync.outputs.head }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Publication seal did not complete"
+          printf '%s\n' \
+            "The seal job failed after the corpus push. Run: ${RUN_URL}" \
+            "" \
+            "Published head \`${SEAL_HEAD}\` is unsealed. Consumers that require a seal hold;" \
+            "with LOVVERK_SEAL_REQUIRED=true the next sync refuses to start from it." \
+            "Recovery: re-run only the seal job within six hours of the run while origin main" \
+            "is still that head; otherwise re-bootstrap (docs/publication-seal.md)." \
+            > seal-alert.md
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,title \
+            --jq "[.[] | select(.title == \"$title\")][0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file seal-alert.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file seal-alert.md
+          fi

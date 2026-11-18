@@ -160,7 +160,9 @@ hold until it appears, which is the fail-closed direction.
 - Compose requires an attestation note on HEAD in every phase. The sync step
   attests HEAD on every run, so a missing note is itself a failure.
 
-A failed seal job is recovered by re-running only that job, within six hours of
+A failed or cancelled seal job files (or comments on) the issue "Publication
+seal did not complete" with the run link and the unsealed head. It is
+recovered by re-running only that job, within six hours of
 the compose (the tagger time is bounded) and while origin `main` is still the
 head it was composed for. Re-running the whole workflow does not help: with
 sealing required, the sync job refuses the unsealed head. Otherwise the owner

@@ -596,7 +596,8 @@ def test_the_seal_job_runs_no_engine_code_in_a_protected_environment() -> None:
         "&& needs.sync.outputs.published == 'true' }}"
     )
     assert job["environment"] == "lovverk-seal"
-    assert job["permissions"] == {"contents": "read"}
+    # issues: write only for the failure report; no other write scope.
+    assert job["permissions"] == {"contents": "read", "issues": "write"}
     for word in ("uv ", "python", "lovspor "):
         assert word not in lines, word
         assert word not in script, word
@@ -745,3 +746,15 @@ def test_the_push_completed_marker_directly_follows_the_push() -> None:
     assert marker["run"].strip() == 'echo "published=true" >> "$GITHUB_OUTPUT"'
     outputs = _workflow()["jobs"]["sync"]["outputs"]
     assert outputs["published"] == "${{ steps.published.outputs.published }}"
+
+
+def test_a_failed_seal_job_files_an_issue_without_the_key() -> None:
+    """main is already pushed when the seal job runs: a seal that did not land
+    must be reported, and the report step never sees the seal key."""
+    steps = _workflow()["jobs"]["seal"]["steps"]
+    report = steps[-1]
+    assert report["name"] == "Report a seal that did not complete"
+    assert report["if"] == "failure() || cancelled()"
+    assert "LOVVERK_SEAL_SIGNING_KEY" not in str(report)
+    assert "Publication seal did not complete" in report["run"]
+    assert "gh issue create" in report["run"]
