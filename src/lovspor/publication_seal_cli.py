@@ -1,20 +1,23 @@
 """``lovspor publication-seal``: compose and verify the signed publication seal.
 
-``compose`` writes the seal message for the corpus HEAD and never touches a
-key; the sync workflow signs it in a separate step. ``verify`` applies the
+``compose`` writes the unsigned seal tag object for the corpus HEAD and never
+touches a key; a separate workflow job signs it (``scripts/seal/sign-and-tag.sh``),
+running no engine code. ``verify`` applies the
 consumer rules of ``docs/publication-seal.md`` with git's own ``verify-tag``
 against a pinned allowed-signers file. Any failure exits 1 with one line on
 stderr; a usage error exits 2.
 """
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
 import typer
+from pydantic import ValidationError
 
 from lovspor.errors import LovsporError
-from lovspor.publication_seal import AlreadySealed, compose_seal, verify_seal
+from lovspor.publication_seal import AlreadySealed, SealRequest, compose_seal, verify_seal
 
 publication_seal_app = typer.Typer(
     name="publication-seal",
@@ -27,21 +30,33 @@ _CorpusPath = Annotated[
     typer.Option("--corpus-path", help="The lovverk clone whose commit is sealed or checked."),
 ]
 _SIGNERS_HELP = "OpenSSH allowed_signers file to trust."
-_SignersOption = Annotated[Path | None, typer.Option("--allowed-signers", help=_SIGNERS_HELP)]
+_SignersOption = Annotated[Path, typer.Option("--allowed-signers", help=_SIGNERS_HELP)]
 
 
 @publication_seal_app.command(name="compose")
 def compose(
     corpus_path: _CorpusPath,
-    out: Annotated[Path, typer.Option("--out", help="File the seal message is written to.")],
-    allowed_signers: _SignersOption = None,
+    tag_name: Annotated[str, typer.Option("--tag-name", help="sync/seal-<run>-<attempt>.")],
+    allowed_signers: _SignersOption,
+    out: Annotated[Path, typer.Option("--out", help="File the unsigned tag is written to.")],
 ) -> None:
-    """Write the seal message for HEAD, or report the tag already sealing it.
+    """Write the unsigned seal tag object for HEAD, dated now, or report the seal.
 
-    Prints ``already-sealed <tag>`` and writes no file when a ``sync/*`` tag
-    already seals HEAD with the same attestation note (and, with
-    ``--allowed-signers``, verifies against that file)."""
-    result = _guard(lambda: compose_seal(corpus_path.expanduser(), allowed_signers))
+    Prints ``already-sealed <tag>`` and writes no file when any ``sync/*`` tag
+    on HEAD verifies against ``--allowed-signers``: a sealed head is never
+    sealed again."""
+    try:
+        request = SealRequest(
+            tag_name=tag_name,
+            tagged_at=int(time.time()),
+            allowed_signers=allowed_signers,
+        )
+    except ValidationError as exc:
+        typer.echo(
+            f"error: --tag-name must look like sync/seal-<run>-<attempt>: {tag_name}", err=True
+        )
+        raise typer.Exit(code=2) from exc
+    result = _guard(lambda: compose_seal(corpus_path.expanduser(), request))
     if isinstance(result, AlreadySealed):
         typer.echo(f"already-sealed {result.tag}")
         return
@@ -52,7 +67,7 @@ def compose(
 @publication_seal_app.command(name="verify")
 def verify(
     corpus_path: _CorpusPath,
-    allowed_signers: Annotated[Path, typer.Option("--allowed-signers", help=_SIGNERS_HELP)],
+    allowed_signers: _SignersOption,
     tag: Annotated[str | None, typer.Option("--tag", help="The sync/* tag to judge.")] = None,
     commit: Annotated[
         str | None,

@@ -3,8 +3,8 @@
 # starting with "#" and blank lines are ignored.
 #
 # EMPTY ON PURPOSE: no seal key has been installed yet. While this file holds
-# no key line, `lovspor publication-seal verify` refuses every seal, so the
-# sync job fails before any push whenever it has produced a seal.
+# no key line, `lovspor publication-seal verify` and the seal job
+# (scripts/seal/sign-and-tag.sh) refuse every seal.
 #
 # One line per key, namespace "git" (git's SSH signing namespace), optionally
 # bounded in time for a rotation overlap (UTC, checked against the tagger date):

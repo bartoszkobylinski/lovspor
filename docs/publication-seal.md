@@ -3,8 +3,8 @@
 ## Purpose
 
 A consumer of `lovverk` needs to know that a `main` head was published by the
-lovspor sync job after its attestation gate and its audit passed, and that the
-attestation it reads belongs to that head. Neither fact follows from the
+lovspor sync workflow after its attestation gate and its audit passed, and that
+the attestation it reads belongs to that head. Neither fact follows from the
 repository alone:
 
 - the attestation lives in a git note (`refs/notes/temporal-attestations`),
@@ -15,33 +15,38 @@ The publication seal binds both with one signature. It is produced by
 `.github/workflows/sync.yml` and checked by `lovspor publication-seal verify`
 or by a consumer applying the same rules.
 
+What a seal attests: "this head was published by the sync workflow, after its
+gate and audit". It does not attest that the engine code that built the head
+was uncompromised (see Threat model).
+
 ## Format
 
 An SSH-signed annotated tag:
 
 - name: `refs/tags/sync/seal-<GITHUB_RUN_ID>-<GITHUB_RUN_ATTEMPT>`
-- object: the corpus HEAD commit (type `commit`)
+- object: the published corpus head (type `commit`)
+- tagger: `lovspor-sync[bot] <lovspor-sync@noreply.github.com> <epoch> +0000`
 - message, exact bytes, LF line ends:
 
 ```text
 lovspor-publication-seal v1
-corpus_commit <40-hex HEAD>
+corpus_commit <40-hex head>
 attestation_ref refs/notes/temporal-attestations
-attestation_blob <40-hex blob id of the note on HEAD>
+attestation_blob <40-hex blob id of the note on the head>
 
 <the note blob bytes, verbatim>
 ```
 
-The tag is created with `--cleanup=verbatim`, so git does not edit the
-message. The SSH signature (namespace `git`) covers the whole tag object:
-object id, type, tag name, tagger and message. One signature therefore binds
-the commit id (and through it the tree), the attestation bytes and the
-publishing key.
+The SSH signature (namespace `git`) covers the whole tag object: object id,
+type, tag name, tagger and message. One signature therefore binds the commit
+id (and through it the tree), the attestation bytes and the publishing key.
+The object is built as unsigned bytes, signed with `ssh-keygen -Y sign`, and
+written with `git mktag`, so `git verify-tag` checks it like any signed tag.
 
 ## Trust chain
 
 ```text
- ops/publication-signers (public key, committed, owner-reviewed)
+ ops/publication-signers  (public key; committed, owner-reviewed)
             |
             | git -c gpg.ssh.allowedSignersFile=... verify-tag T
             v
@@ -52,6 +57,10 @@ publishing key.
          attestation_blob B
          <note bytes>  -- JSON entry with corpus_commit == C
                           (the signed copy; refs/notes/* is not consulted)
+
+ producer custody:
+   sealed head H0 --(sync job: verify H0, sync, audit, compose, push C)--> C
+   C --(seal job: re-derive from origin, sign, verify, push T)--> T
 ```
 
 A consumer accepts candidate commit C only if some tag T in
@@ -72,38 +81,63 @@ commit it serves now; the seal only proves that C was published.
 Consumers fetch the tags explicitly:
 `git fetch origin 'refs/tags/sync/*:refs/tags/sync/*'`.
 
-## Producer steps
+## Producer
 
-In `sync.yml`, after `Run lovspor sync` and `Audit corpus integrity before
-push`:
+Two jobs in `sync.yml`.
 
-| Step | Key | Does |
-| --- | --- | --- |
-| Compose publication seal | no | `lovspor publication-seal compose` writes the message to `$RUNNER_TEMP`. Fails if HEAD has no attestation note or the note has no entry for HEAD. Writes nothing and prints `already-sealed <tag>` when a `sync/*` tag already seals HEAD with the same note and verifies against `ops/publication-signers`. |
-| Sign publication seal | yes | Writes the key under `$RUNNER_TEMP` (umask 077, removed by a trap) and runs `git tag -s --cleanup=verbatim`. |
-| Verify publication seal | no | `lovspor publication-seal verify` against `ops/publication-signers`: the new tag by name, or, on a no-op night, the existing seal by commit. |
-| Push corpus changes if any | no | Pushes the notes, then the seal tag (only when one was created), then `main`. |
+**`sync` job** (engine code, no seal key, no new secret):
+
+| Step | Does |
+| --- | --- |
+| Fetch publication seal tags | Fetches `refs/tags/sync/*` after the clone and the notes fetch. |
+| Verify starting head seal | With `LOVVERK_SEAL_REQUIRED` = `true`, the head the run starts from must carry a verifying seal, or the job stops before any corpus work. Otherwise, once `ops/publication-signers` holds a key, a failure is a `::warning::`. |
+| Compose publication seal | After the audit: `lovspor publication-seal compose` writes the unsigned tag object for HEAD. Fails if HEAD has no attestation note or the note has no entry for HEAD. Writes nothing (`already-sealed <tag>`) when any `sync/*` tag on HEAD verifies against `ops/publication-signers`: a sealed head is never sealed again. |
+| Upload publication seal payload | Hands the unsigned object to the `seal` job as an artifact; `seal_state`, `seal_tag` and `head` are job outputs. |
+| Push corpus changes if any | Unchanged: notes, then `main`. |
+
+**`seal` job** (fresh runner, `environment: lovverk-seal`, `contents: read`,
+only when `seal_state` is `composed`): checks out `scripts/seal/sign-and-tag.sh`
+and `ops/publication-signers` from the same lovspor commit, downloads the
+payload, configures the deploy key with the same pinned host key as the sync
+job, then runs the script. It runs git, `ssh-keygen` and coreutils only, no
+uv, Python or engine code. The script:
+
+1. clones `main` and the notes ref from origin (blobs on demand);
+2. requires origin `main` == the `head` output == the payload's object, the
+   tag name to belong to this run, and the payload to equal, byte for byte,
+   the tag it re-derives from origin's commit and origin's note;
+3. signs those bytes with `/usr/bin/ssh-keygen -Y sign -n git` under
+   `env -i`, the key in a `mktemp` directory created with umask 077 and
+   removed by a trap;
+4. writes the tag with `git mktag` and `git update-ref`;
+5. runs `git verify-tag` against the pinned `ops/publication-signers`;
+6. pushes the tag.
+
+The seal therefore lands shortly after `main`. Consumers that require a seal
+hold until it appears, which is the fail-closed direction.
 
 ## Threat model
 
 | Attacker capability | Effect | Mitigation |
 | --- | --- | --- |
-| Push access to `lovverk` without the seal key (stolen deploy key, compromised token) | Can push commits, notes, unsigned or self-signed tags | Consumers hold: no tag verifies against the pinned signers. |
-| Rewrites or forges the attestation note | None on the seal decision | The signed copy embedded in the tag is what is checked. |
+| Push access to `lovverk` without the seal key (stolen deploy key, compromised token) | Can push commits, notes, unsigned or self-signed tags | Consumers hold: no tag verifies. With sealing required, the next sync run refuses to start from an unsealed head, so a pushed commit is never laundered into a seal by a nightly run. |
+| Rewrites or forges the attestation note | None on the seal decision | The signed copy embedded in the tag is what is checked; a sealed head is never re-sealed, so a later note cannot earn a seal. |
 | Replays an old valid seal | The seal binds only its own commit | Consumers require C == `origin/main` head and descent from the served commit; rolling `main` back fails descent. |
-| Forges a `sync/*` tag on HEAD so Compose skips | No new seal is made only if the forged tag verifies | Compose counts an existing seal only if it verifies; Verify checks it again before the push. |
+| Moves `main` between the sync push and the seal job | Nothing is sealed | The seal job requires origin `main` == the head the sync job reported. |
 | Deletes or moves a seal tag | Consumers hold | Tag ruleset protecting `refs/tags/sync/*` from update and deletion. |
-| Malicious engine code or crafted upstream data in `lovspor sync` | Cannot read the key | The key exists only in the Sign step's environment; Sign runs git only. |
-| Fork pull requests | No access | The workflow runs on schedule and manual dispatch only; forks get no secrets. |
-| Write access to `lovspor` (can edit `sync.yml`) | Could change the Sign step to leak the key | Branch protection and review on `main`; a GitHub Environment restricted to `main` (see Owner setup). Residual: a merged malicious change. |
+| Malicious engine code or crafted upstream data in the `sync` job (git config, `BASH_ENV`, `GITHUB_ENV`, `GITHUB_PATH`, the runner's sudo) | Cannot reach the key | The key exists only in the `seal` job, a fresh runner that runs no engine code and takes nothing from the sync job but the payload, which it re-derives from origin. |
+| Compromised `sync` job (the same malicious engine code) | Gets its own newly published head sealed | Residual. What is sealed is what that run published; the seal attests publication by the workflow, not that the engine was uncompromised. |
+| Fork pull requests | No access | The workflow runs on schedule and manual dispatch only; forks get no secrets. The environment admits `main` only. |
+| Write access to `lovspor` (can edit `sync.yml` or the script) | Could change the seal job to leak the key | Branch protection and review on `main`; the environment is restricted to `main`. Residual: a merged malicious change. |
 | Steals the seal key | Can seal arbitrary commits | Revocation (remove the key from every allowed-signers file) and a new key. |
 | SHA-1 collisions on git object ids | Same strength as git commit signing | Noted, not mitigated here. |
 
-## Key isolation: why a tag, not a signed commit
+## Key isolation: why a tag, signed in its own job
 
-- The key is never in the environment of the step that runs `lovspor sync`,
-  which executes engine code over upstream data. Signing commits would need
-  the key wherever commits are made, which is inside that step.
+- The key is never on a runner that executes `lovspor sync`. A step-level
+  secret is not isolation within one job: earlier steps can plant git
+  configuration, environment files or, with the runner's passwordless sudo,
+  anything else a later step executes. Only a fresh job isolates it.
 - No history is rewritten. Commits stay as the sync made them; the seal is a
   new object beside them.
 - The seal binds the unsigned note. A signed commit covers the tree, not the
@@ -111,17 +145,24 @@ push`:
 
 ## Fail-closed behaviour
 
-- Compose, Sign or Verify failing fails the job before the push step: nothing
-  is pushed, notes included.
-- `LOVVERK_SEAL_REQUIRED` = `true` and no `LOVVERK_SEAL_SIGNING_KEY`: Sign
-  fails the job.
-- Variable unset (or not `true`) and no key: Sign prints a `::warning::`,
-  Verify is skipped, no tag is pushed, and the corpus is published unsealed.
-  Consumers that require a seal hold.
-- `ops/publication-signers` holds no key line while a key is installed:
-  Verify fails with "holds no key", so nothing is pushed.
+- Starting head without a verifying seal while `LOVVERK_SEAL_REQUIRED` =
+  `true`: the sync job stops before any corpus work.
+- Compose failing fails the sync job before its push.
+- Any re-derivation mismatch, a signing failure or a `verify-tag` failure
+  fails the seal job before the tag is pushed.
+- No `LOVVERK_SEAL_SIGNING_KEY` with `LOVVERK_SEAL_REQUIRED` = `true`: the
+  seal job fails. The sync's publication has already happened; consumers that
+  require a seal hold, and the next run refuses to start from that head.
+- Variable not `true` and no key: the seal job prints a `::warning::` and
+  pushes nothing.
+- `ops/publication-signers` holds no key line: the seal job refuses, and no
+  seal ever counts as existing.
 - Compose requires an attestation note on HEAD in every phase. The sync step
   attests HEAD on every run, so a missing note is itself a failure.
+
+A failed seal job is recovered by re-running that job while origin `main` is
+still the head it was composed for. Otherwise, with sealing required, the next
+scheduled run cannot start (see Bootstrap and Revocation).
 
 ## Owner setup
 
@@ -131,20 +172,14 @@ push`:
    ssh-keygen -t ed25519 -C lovverk-publication-seal -N '' -f ./lovverk-publication-seal
    ```
 
-2. Store the private key as a secret, then delete the local copy (a lost key
-   is rotated, not recovered):
+2. Create the environment `lovverk-seal` with deployment branches restricted
+   to `main` (repository Settings, Environments), store the private key as its
+   secret, then delete the local copy (a lost key is rotated, not recovered):
 
    ```bash
-   gh secret set LOVVERK_SEAL_SIGNING_KEY --repo bartoszkobylinski/lovspor < ./lovverk-publication-seal
+   gh secret set LOVVERK_SEAL_SIGNING_KEY --repo bartoszkobylinski/lovspor --env lovverk-seal < ./lovverk-publication-seal
    rm ./lovverk-publication-seal
    ```
-
-   Recommended: hold it as an environment secret of a GitHub Environment whose
-   deployment branches are restricted to `main`
-   (`gh secret set LOVVERK_SEAL_SIGNING_KEY --repo bartoszkobylinski/lovspor --env <name>`).
-   An environment secret is only visible to a job that declares
-   `environment: <name>`; `sync.yml` does not declare one today, so this needs
-   that one-line change to the sync job.
 
 3. Commit the public key line to `ops/publication-signers` through a reviewed
    pull request:
@@ -168,7 +203,8 @@ push`:
    EOF
    ```
 
-5. Once a sealed run has passed, require the seal:
+5. Only after a sealed head exists on origin (see Bootstrap), require the
+   seal:
 
    ```bash
    gh variable set LOVVERK_SEAL_REQUIRED --repo bartoszkobylinski/lovspor --body true
@@ -176,6 +212,14 @@ push`:
 
 Consumers copy the public key line into their own allowed-signers file; they
 do not read it from `lovspor` at verification time.
+
+## Bootstrap
+
+In phase 1 (key installed, not required), the first run that seals seals the
+head it publishes, built on whatever `main` held when sealing began. That first
+seal is trust on first use: check that head before setting
+`LOVVERK_SEAL_REQUIRED` = `true`. From then on every run must start from a
+sealed head, so custody is continuous.
 
 ## Rotation
 
@@ -191,7 +235,8 @@ lovverk-publication-seal namespaces="git",valid-after="20270215000000Z" ssh-ed25
 1. Generate the new key; add its line with `valid-after` and set
    `valid-before` on the old line, in `ops/publication-signers` and in every
    consumer's file.
-2. Replace the `LOVVERK_SEAL_SIGNING_KEY` secret within the overlap.
+2. Replace the `LOVVERK_SEAL_SIGNING_KEY` environment secret within the
+   overlap.
 3. After the overlap, the old line can stay (old seals keep verifying) or be
    removed.
 
@@ -203,16 +248,17 @@ against a stolen key: a thief can backdate. Use it for planned rotation only.
 On suspected compromise: delete the key's line from `ops/publication-signers`
 and from every consumer's file, delete or replace the secret, and install a
 new key. Every seal made with the old key stops verifying, old ones included.
-The next run on an unchanged HEAD finds no verifying seal and seals it again
-with the new key; consumers hold until then.
+With sealing required, the next run then refuses to start from the current
+head: unset `LOVVERK_SEAL_REQUIRED`, check the head, let one run seal with the
+new key, and set the variable again (the Bootstrap step).
 
 ## Migration plan
 
 | Phase | State | Effect |
 | --- | --- | --- |
-| 0 | This change merged; secret absent, variable unset | Each run warns and publishes unsealed, as before. |
-| 1 | Key installed and public key committed | Each run seals, verifies and pushes the tag. |
-| 2 | `LOVVERK_SEAL_REQUIRED` = `true` | A run that cannot seal publishes nothing. |
+| 0 | This change merged; secret absent, variable unset, no key in `ops/publication-signers` | The seal job warns; publication continues unsealed, as before. |
+| 1 | Key installed in `lovverk-seal`, public key committed | Each run seals the head it publishes; an unsealed starting head is a warning. |
+| 2 | `LOVVERK_SEAL_REQUIRED` = `true`, after a sealed head exists | Runs start only from a sealed head; a missing key fails the seal job. |
 | 3 | Consumers enable verification | Consumers serve only sealed heads. |
 
 ## Rollback
@@ -222,12 +268,12 @@ entirely:
 
 ```bash
 gh variable delete LOVVERK_SEAL_REQUIRED --repo bartoszkobylinski/lovspor
-gh secret delete LOVVERK_SEAL_SIGNING_KEY --repo bartoszkobylinski/lovspor
+gh secret delete LOVVERK_SEAL_SIGNING_KEY --repo bartoszkobylinski/lovspor --env lovverk-seal
 ```
 
 Publication continues unsealed; consumers that require seals hold on the last
-sealed head. Deleting the secret while the variable is still `true` stops
-publication instead (fail closed).
+sealed head. Deleting the secret while the variable is still `true` makes the
+seal job fail and, from the next run, stops publication (fail closed).
 
 ## Existing history
 

@@ -38,6 +38,11 @@ jobs:
     # embeddings backfill (first keyed run over the whole corpus) needed
     # room for ~1000 batched OpenAI calls plus retries.
     timeout-minutes: 120
+    # Read by the `seal` job below (docs/publication-seal.md).
+    outputs:
+      seal_state: ${{ steps.seal_compose.outputs.state }}
+      seal_tag: ${{ steps.seal_compose.outputs.tag }}
+      head: ${{ steps.seal_compose.outputs.head }}
     env:
       LOVVERK_PATH: ${{ github.workspace }}/../lovverk
       LOVSPOR_DATA_DIR: ${{ github.workspace }}/../lovspor-data
@@ -165,6 +170,35 @@ jobs:
             fi
           done
 
+      # Publication seal, chain of custody (docs/publication-seal.md): the run
+      # may only build on a head that the seal key already vouched for, so a
+      # commit pushed with a stolen deploy key is never sealed by a later run.
+      # A glob refspec that matches nothing is fine (bootstrap).
+      - name: Fetch publication seal tags
+        working-directory: ${{ env.LOVVERK_PATH }}
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/tags/sync/*:refs/tags/sync/*'
+
+      # Required: the starting head must carry a verifying seal, or the job
+      # stops before any corpus work. Not required: a warning, and only once
+      # ops/publication-signers holds a key.
+      - name: Verify starting head seal
+        env:
+          SEAL_REQUIRED: ${{ vars.LOVVERK_SEAL_REQUIRED }}
+        run: |
+          set -euo pipefail
+          if [ "${SEAL_REQUIRED:-}" = "true" ]; then
+            uv run --no-dev lovspor publication-seal verify --corpus-path "$LOVVERK_PATH" \
+              --commit HEAD --allowed-signers ops/publication-signers
+          elif grep -Eq '^[[:space:]]*[^#[:space:]]' ops/publication-signers; then
+            uv run --no-dev lovspor publication-seal verify --corpus-path "$LOVVERK_PATH" \
+              --commit HEAD --allowed-signers ops/publication-signers \
+              || echo "::warning::The starting corpus head carries no verifying publication seal."
+          else
+            echo "ops/publication-signers holds no key; the starting head is not checked."
+          fi
+
       - name: Configure git author for sync commits
         working-directory: ${{ env.LOVVERK_PATH }}
         run: |
@@ -237,86 +271,41 @@ jobs:
       - name: Audit corpus integrity before push
         run: uv run --no-dev lovspor audit --corpus-path "$LOVVERK_PATH"
 
-      # Publication seal (docs/publication-seal.md): an SSH-signed tag on the
-      # audited HEAD that embeds its attestation note, so a consumer can prove
-      # the head was published here, after the gate and the audit. Three steps
-      # so the key lives in exactly one: Compose (no key) writes the message,
-      # Sign (key) makes the tag, Verify (no key) checks it against the pinned
-      # ops/publication-signers before anything is pushed. A HEAD that already
-      # carries a seal for the same note which verifies against that file (a
-      # no-op night) writes no message; an unverifiable one is sealed again.
+      # The unsigned seal tag for the audited HEAD, composed without any key
+      # and handed to the `seal` job as an artifact. No message when a seal
+      # on HEAD already verifies: a sealed head is never sealed again.
       - name: Compose publication seal
         id: seal_compose
+        env:
+          SEAL_TAG: sync/seal-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          message="$RUNNER_TEMP/publication-seal.txt"
-          rm -f "$message"
+          payload="$RUNNER_TEMP/publication-seal/payload"
+          mkdir -p "$RUNNER_TEMP/publication-seal"
+          rm -f "$payload"
           uv run --no-dev lovspor publication-seal compose --corpus-path "$LOVVERK_PATH" \
-            --allowed-signers ops/publication-signers --out "$message"
-          if [ -f "$message" ]; then
-            echo "state=composed" >> "$GITHUB_OUTPUT"
+            --tag-name "$SEAL_TAG" --allowed-signers ops/publication-signers --out "$payload"
+          if [ -f "$payload" ]; then
+            {
+              echo "state=composed"
+              echo "tag=$SEAL_TAG"
+              echo "head=$(sed -n '1s/^object //p' "$payload")"
+            } >> "$GITHUB_OUTPUT"
           else
             echo "state=already-sealed" >> "$GITHUB_OUTPUT"
           fi
 
-      # The only step that sees LOVVERK_SEAL_SIGNING_KEY. The key file lives
-      # under $RUNNER_TEMP, created 0600 by the umask and removed on exit.
-      # Secret absent: fail when LOVVERK_SEAL_REQUIRED is 'true' (nothing is
-      # pushed), otherwise warn and publish unsealed (migration phase 0).
-      # --cleanup=verbatim keeps the message byte-exact: git's default strip
-      # mode would edit the embedded note.
-      - name: Sign publication seal
-        id: seal_sign
-        working-directory: ${{ env.LOVVERK_PATH }}
-        env:
-          SEAL_SIGNING_KEY: ${{ secrets.LOVVERK_SEAL_SIGNING_KEY }}
-          SEAL_REQUIRED: ${{ vars.LOVVERK_SEAL_REQUIRED }}
-          SEAL_STATE: ${{ steps.seal_compose.outputs.state }}
-        run: |
-          set -euo pipefail
-          if [ -z "${SEAL_SIGNING_KEY:-}" ]; then
-            if [ "${SEAL_REQUIRED:-}" = "true" ]; then
-              echo "::error::LOVVERK_SEAL_REQUIRED is true but LOVVERK_SEAL_SIGNING_KEY is not set; nothing is pushed."
-              exit 1
-            fi
-            echo "::warning::LOVVERK_SEAL_SIGNING_KEY is not set; publishing without a seal."
-            echo "sealing=off" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "sealing=on" >> "$GITHUB_OUTPUT"
-          if [ "$SEAL_STATE" != "composed" ]; then
-            echo "HEAD already carries a verified seal for its attestation; nothing to sign."
-            exit 0
-          fi
-          umask 077
-          keyfile="$RUNNER_TEMP/publication-seal-key"
-          trap 'rm -f "$keyfile"' EXIT
-          printf '%s\n' "$SEAL_SIGNING_KEY" > "$keyfile"
-          tag="sync/seal-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          git -c gpg.format=ssh -c user.signingkey="$keyfile" tag -s --cleanup=verbatim \
-            -F "$RUNNER_TEMP/publication-seal.txt" "$tag" HEAD
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      # A new seal is verified by its tag; on a no-op night the existing seal
-      # on HEAD is verified by commit. A failure fails the job before the push.
-      - name: Verify publication seal
-        if: steps.seal_sign.outputs.sealing == 'on'
-        env:
-          SEAL_TAG: ${{ steps.seal_sign.outputs.tag }}
-        run: |
-          set -euo pipefail
-          if [ -n "${SEAL_TAG:-}" ]; then
-            uv run --no-dev lovspor publication-seal verify --corpus-path "$LOVVERK_PATH" \
-              --tag "$SEAL_TAG" --allowed-signers ops/publication-signers
-          else
-            uv run --no-dev lovspor publication-seal verify --corpus-path "$LOVVERK_PATH" \
-              --commit HEAD --allowed-signers ops/publication-signers
-          fi
+      - name: Upload publication seal payload
+        if: steps.seal_compose.outputs.state == 'composed'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: publication-seal-payload
+          path: ${{ runner.temp }}/publication-seal/payload
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Push corpus changes if any
         working-directory: ${{ env.LOVVERK_PATH }}
-        env:
-          SEAL_TAG: ${{ steps.seal_sign.outputs.tag }}
         run: |
           # Attestation notes push UNCONDITIONALLY and FIRST (ADR-0012
           # point 2a): a no-op sync can still mint a fresh attestation
@@ -327,11 +316,6 @@ jobs:
           # corpus commit without its attestation.
           if git rev-parse --verify refs/notes/temporal-attestations >/dev/null 2>&1; then
             git push origin refs/notes/temporal-attestations
-          fi
-          # The seal tag goes after its note and before main, so no reader
-          # can see a sealed main head whose seal is not on origin yet.
-          if [ -n "${SEAL_TAG:-}" ]; then
-            git push origin "refs/tags/$SEAL_TAG"
           fi
           if git log origin/main..HEAD --oneline | grep -q .; then
             echo "Commits ahead of origin — pushing..."
@@ -405,3 +389,67 @@ jobs:
           else
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file sync-alert.md
           fi
+
+  # Publication seal signing (docs/publication-seal.md). A fresh runner that
+  # never runs lovspor engine code, uv or Python: engine code in the sync job
+  # could otherwise plant git config, BASH_ENV or PATH entries that the
+  # signing step would execute. It re-derives the composed tag from origin
+  # and signs only an exact match. The seal lands shortly after main;
+  # consumers that require one hold until it does.
+  seal:
+    needs: sync
+    if: needs.sync.outputs.seal_state == 'composed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: lovverk-seal
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the seal script and pinned signers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            scripts/seal/sign-and-tag.sh
+            ops/publication-signers
+
+      - name: Download publication seal payload
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: publication-seal-payload
+          path: ${{ runner.temp }}/publication-seal
+
+      - name: Configure SSH for lovverk push
+        env:
+          DEPLOY_KEY: ${{ secrets.LOVVERK_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/lovverk_deploy_key
+          chmod 600 ~/.ssh/lovverk_deploy_key
+          cat >> ~/.ssh/known_hosts <<'EOF'
+          github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+          EOF
+          chmod 600 ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/lovverk_deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+
+      # The only step that sees LOVVERK_SEAL_SIGNING_KEY.
+      - name: Sign and push publication seal
+        env:
+          SEAL_SIGNING_KEY: ${{ secrets.LOVVERK_SEAL_SIGNING_KEY }}
+          SEAL_REQUIRED: ${{ vars.LOVVERK_SEAL_REQUIRED }}
+          SEAL_PAYLOAD: ${{ runner.temp }}/publication-seal/payload
+          SEAL_HEAD: ${{ needs.sync.outputs.head }}
+          SEAL_TAG: ${{ needs.sync.outputs.seal_tag }}
+          SEAL_SIGNERS: ops/publication-signers
+          SEAL_REMOTE: git@github.com:bartoszkobylinski/lovverk.git
+        run: scripts/seal/sign-and-tag.sh

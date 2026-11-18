@@ -8,10 +8,11 @@ signature (namespace ``git``) covers the object id, the tag header and that
 message, so one signature binds the commit, its attestation and the publishing
 key. ``docs/publication-seal.md`` describes the format and the trust chain.
 
-This module composes the message (no key involved) and verifies a seal with
-git's own ``verify-tag`` against a pinned allowed-signers file. Signing is the
-sync workflow's separate step, the only one that ever holds the key. The note
-ref is never trusted for a verdict: the signed, embedded copy is.
+This module composes the unsigned tag object (no key involved) and verifies a
+seal with git's own ``verify-tag`` against a pinned allowed-signers file.
+Signing happens in a separate workflow job that runs no engine code
+(``scripts/seal/sign-and-tag.sh``), the only place the key ever exists. The
+note ref is never trusted for a verdict: the signed, embedded copy is.
 
 Every git call is a list-argument subprocess, never a shell string.
 """
@@ -22,13 +23,14 @@ import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from lovspor.errors import LovsporError
 from lovspor.temporal_attestation import ATTESTATION_NOTES_REF, attestation_note_blob
 
 SEAL_MAGIC = "lovspor-publication-seal v1"
 SEAL_TAG_PREFIX = "refs/tags/sync/"
+SEAL_TAGGER = "lovspor-sync[bot] <lovspor-sync@noreply.github.com>"
 _SIGNATURE_MARKERS = (
     b"-----BEGIN PGP SIGNATURE-----",
     b"-----BEGIN PGP MESSAGE-----",
@@ -51,8 +53,18 @@ class SealVerificationError(PublicationSealError):
     """No seal proves the candidate commit; the consumer must hold."""
 
 
+class SealRequest(BaseModel):
+    """What the unsigned seal tag is named, when it is dated, whom it trusts."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tag_name: str = Field(pattern=r"^sync/seal-[0-9]+-[0-9]+$")
+    tagged_at: int = Field(ge=0)
+    allowed_signers: Path
+
+
 class AlreadySealed(BaseModel):
-    """A ``sync/*`` tag already seals HEAD with the same attestation note."""
+    """A ``sync/*`` tag on HEAD already verifies against the pinned signers."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -72,10 +84,6 @@ class _Seal(NamedTuple):
     fields: dict[str, str]
     attestation: bytes
 
-    def binds(self, commit: str, blob: str) -> bool:
-        fields = self.fields
-        return fields.get("corpus_commit") == commit and fields.get("attestation_blob") == blob
-
 
 def seal_message(corpus_commit: str, attestation_blob: str, note: bytes) -> bytes:
     """The exact seal message bytes: four header lines, a blank line, the note."""
@@ -88,43 +96,50 @@ def seal_message(corpus_commit: str, attestation_blob: str, note: bytes) -> byte
     return header.encode("ascii") + note
 
 
-def compose_seal(repo: Path, allowed_signers: Path | None = None) -> bytes | AlreadySealed:
-    """The seal message for HEAD, or :class:`AlreadySealed` when one exists.
+def seal_payload(corpus_commit: str, request: SealRequest, message: bytes) -> bytes:
+    """The unsigned tag object: tag header, a blank line, the seal message.
 
-    An existing ``sync/*`` tag on HEAD counts when its message binds HEAD
-    and the same attestation blob; with ``allowed_signers`` it must also
-    verify against that file, so a forged or revoked seal is sealed again
-    instead of ending the run as a no-op. Raises
-    :class:`SealCompositionError` when HEAD carries no attestation note, or
-    a note with no entry whose ``corpus_commit`` is HEAD.
+    Appending git's armored SSH signature over exactly these bytes yields the
+    signed tag object ``git mktag`` accepts.
+    """
+    header = (
+        f"object {corpus_commit}\n"
+        "type commit\n"
+        f"tag {request.tag_name}\n"
+        f"tagger {SEAL_TAGGER} {request.tagged_at} +0000\n\n"
+    )
+    return header.encode("ascii") + message
+
+
+def compose_seal(repo: Path, request: SealRequest) -> bytes | AlreadySealed:
+    """The unsigned seal tag object for HEAD, or :class:`AlreadySealed`.
+
+    HEAD is already sealed when ANY ``sync/*`` tag pointing at it verifies
+    against ``request.allowed_signers``, whatever note it embeds: a sealed
+    head is never sealed again, so a note forged after publication cannot
+    earn a second seal. Raises :class:`SealCompositionError` when HEAD
+    carries no attestation note, or a note with no entry naming HEAD.
     """
     head = _resolve_commit(repo, "HEAD", SealCompositionError)
+    existing = _verified_seal(repo, head, request.allowed_signers)
+    if existing is not None:
+        return AlreadySealed(tag=existing)
     blob = attestation_note_blob(repo, head)
     if blob is None:
         raise SealCompositionError(f"HEAD {head} has no note on {ATTESTATION_NOTES_REF}")
     note = _git_out(repo, ["cat-file", "blob", blob], SealCompositionError)
     if not names_commit(note, head):
         raise SealCompositionError(f"the attestation note on HEAD {head} has no entry naming it")
-    existing = _existing_seal(repo, head, blob, allowed_signers)
-    return AlreadySealed(tag=existing) if existing else seal_message(head, blob, note)
+    if not note.endswith(b"\n"):
+        raise SealCompositionError(f"the attestation note on HEAD {head} lacks a final newline")
+    return seal_payload(head, request, seal_message(head, blob, note))
 
 
-def _existing_seal(repo: Path, head: str, blob: str, signers: Path | None) -> str | None:
-    for ref, oid in _annotated_sync_tags(repo, head):
-        seal = _parse_seal(_tag_message(repo, oid))
-        if seal and seal.binds(head, blob) and _verifies(repo, head, signers, ref):
-            return ref
-    return None
-
-
-def _verifies(repo: Path, head: str, signers: Path | None, ref: str) -> bool:
-    if signers is None:
-        return True
+def _verified_seal(repo: Path, head: str, signers: Path) -> str | None:
     try:
-        verify_seal(repo, head, signers, ref)
+        return verify_seal(repo, head, signers).tag
     except SealVerificationError:
-        return False
-    return True
+        return None
 
 
 def verify_seal(
@@ -204,10 +219,6 @@ def _parse_seal(message: bytes) -> _Seal | None:
     return _Seal(fields, attestation)
 
 
-def _tag_message(repo: Path, oid: str) -> bytes:
-    return _tag_object(repo, oid)[1]
-
-
 def _tag_object(repo: Path, oid: str) -> tuple[dict[str, str], bytes]:
     """The tag's headers and message, exactly the bytes its signature covers."""
     raw = _git_out(repo, ["cat-file", "tag", oid], PublicationSealError)
@@ -224,14 +235,6 @@ def _signature_start(raw: bytes) -> int:
             start = offset
         offset += len(line) + 1
     return start
-
-
-def _annotated_sync_tags(repo: Path, commit: str) -> list[tuple[str, str]]:
-    return [(ref, oid) for ref, oid in _sync_tags(repo, commit) if _is_tag(repo, oid)]
-
-
-def _is_tag(repo: Path, oid: str) -> bool:
-    return _git_out(repo, ["cat-file", "-t", oid], PublicationSealError).strip() == b"tag"
 
 
 def _sync_tags(repo: Path, commit: str) -> list[tuple[str, str]]:
