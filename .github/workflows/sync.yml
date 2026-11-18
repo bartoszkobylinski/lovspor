@@ -397,10 +397,11 @@ jobs:
           if [ "${PUBLISHED:-}" = "true" ] && [ "${SEAL_STATE:-}" = "composed" ]; then
             printf '%s\n' "" \
               "main WAS pushed (head \`${SEAL_HEAD}\`) and a publication seal was due." \
-              "If this run was cancelled, the seal job did not run and the head is unsealed; if it" \
-              "failed, check the seal job's own result. With LOVVERK_SEAL_REQUIRED=true an unsealed" \
-              "head blocks the next sync: re-run the seal job within six hours, else re-bootstrap" \
-              "(docs/publication-seal.md)." >> sync-alert.md
+              "Cancelled run: the seal job did not run, the head is unsealed, and only a re-bootstrap" \
+              "recovers it (re-running the workflow brings back the sync job, which refuses an" \
+              "unsealed head once LOVVERK_SEAL_REQUIRED=true). Failed run: the seal job still ran;" \
+              "check its result, and if it failed, re-run only that job within six hours, else" \
+              "re-bootstrap (docs/publication-seal.md)." >> sync-alert.md
           fi
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
             --json number,title \
