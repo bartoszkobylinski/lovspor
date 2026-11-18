@@ -758,3 +758,15 @@ def test_a_failed_seal_job_files_an_issue_without_the_key() -> None:
     assert "LOVVERK_SEAL_SIGNING_KEY" not in str(report)
     assert "Publication seal did not complete" in report["run"]
     assert "gh issue create" in report["run"]
+
+
+def test_a_failed_sync_after_its_push_names_the_unsealed_head() -> None:
+    """Cancelled after the push, the seal job is skipped and its own report
+    never runs; the sync job's alert must say the head is published unsealed."""
+    report = next(
+        step for step in _sync_steps() if step.get("name") == "Report a sync that did not complete"
+    )
+    assert report["env"]["PUBLISHED"] == "${{ steps.published.outputs.published }}"
+    assert report["env"]["SEAL_HEAD"] == "${{ steps.seal_compose.outputs.head }}"
+    assert 'if [ "${PUBLISHED:-}" = "true" ]' in report["run"]
+    assert "re-bootstrap" in report["run"]

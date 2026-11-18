@@ -377,6 +377,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SYNC_OUTCOME: ${{ steps.sync.outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PUBLISHED: ${{ steps.published.outputs.published }}
+          SEAL_HEAD: ${{ steps.seal_compose.outputs.head }}
         run: |
           set -euo pipefail
           title="Nightly sync did not complete"
@@ -389,6 +391,14 @@ jobs:
             "A keyed sync that ran long may have spent embedding budget on work it then lost" \
             "(#790, #802). Read the log before re-running or waiting for the next schedule." \
             > sync-alert.md
+          # A run cancelled after its push skips the seal job, whose own report
+          # then never runs: name the published, unsealed head here.
+          if [ "${PUBLISHED:-}" = "true" ]; then
+            printf '%s\n' "" \
+              "main WAS pushed (head \`${SEAL_HEAD:-unknown}\`) and its publication seal job did not run." \
+              "With LOVVERK_SEAL_REQUIRED=true the next sync refuses to start from it: re-bootstrap" \
+              "the seal (docs/publication-seal.md)." >> sync-alert.md
+          fi
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
             --json number,title \
             --jq "[.[] | select(.title == \"$title\")][0].number // empty")

@@ -161,7 +161,10 @@ hold until it appears, which is the fail-closed direction.
   attests HEAD on every run, so a missing note is itself a failure.
 
 A failed or cancelled seal job files (or comments on) the issue "Publication
-seal did not complete" with the run link and the unsealed head. It is
+seal did not complete" with the run link and the unsealed head. A run cancelled after
+its push skips the seal job; the sync job's own "Nightly sync did not complete"
+issue then names the published, unsealed head, and only a re-bootstrap recovers
+it. A failed seal job is
 recovered by re-running only that job, within six hours of
 the compose (the tagger time is bounded) and while origin `main` is still the
 head it was composed for. Re-running the whole workflow does not help: with
