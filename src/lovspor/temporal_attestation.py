@@ -316,6 +316,25 @@ def read_attestation(
     return None
 
 
+def attestation_note_blob(repo: Path, corpus_commit: str) -> str | None:
+    """The blob id of the attestation note on ``corpus_commit``, or ``None``
+    when the commit carries no note.
+
+    The publication seal (``docs/publication-seal.md``) embeds this blob
+    verbatim; reading it here keeps every ``git notes`` call inside the
+    registry module. ``corpus_commit`` must be a commit the caller has
+    already resolved: git answers "no note found" for an unknown object too.
+    """
+    result = _git(repo, ["notes", f"--ref={ATTESTATION_NOTES_REF}", "list", corpus_commit])
+    if result.returncode == 0:
+        return result.stdout.strip()
+    if any(marker in result.stderr for marker in _NO_NOTE_MARKERS):
+        return None
+    raise AttestationError(
+        f"attestation registry unreadable for {corpus_commit}: {result.stderr.strip()}",
+    )
+
+
 def write_attestation(repo: Path, attestation: TemporalAttestation) -> None:
     """Record one attestation; idempotent for an identical re-write.
 

@@ -296,4 +296,6 @@ also_copy = [
     # the agent instructions (#608) reads AGENTS.md through the test file's
     # own parents, which resolve inside the shadow tree (issue #707).
     "AGENTS.md",
+    # The publication-seal tests verify against the shipped ops/publication-signers.
+    "ops/",
 ]

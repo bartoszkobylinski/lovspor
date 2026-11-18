@@ -515,3 +515,157 @@ def test_the_notes_fetch_step_fails_on_an_unreachable_origin(tmp_path: Path) -> 
     )
 
     assert _run_notes_fetch(clone).returncode != 0
+
+
+# --- The publication seal (docs/publication-seal.md) ---
+#
+# The seal key is the one secret whose theft lets an attacker publish a corpus
+# head consumers accept, so where it appears is pinned: only in the Sign step's
+# env, never next to `lovspor sync` (which parses upstream data and runs the
+# engine) and never in a step that runs Python. The steps sit between the audit
+# and the push, and the push publishes notes, then the seal tag, then main.
+
+_SEAL_SECRET = "secrets.LOVVERK_SEAL_SIGNING_KEY"
+
+
+def _step_named(prefix: str) -> dict[str, Any]:
+    return next(s for s in _sync_steps() if str(s.get("name", "")).startswith(prefix))
+
+
+def test_the_seal_secret_is_referenced_only_in_the_sign_steps_env() -> None:
+    workflow = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
+    holders = [str(s.get("name")) for s in _sync_steps() if _SEAL_SECRET in json.dumps(s)]
+    sign = _step_named("Sign publication seal")
+
+    assert holders == ["Sign publication seal"], holders
+    assert _SEAL_SECRET not in str(sign["run"])
+    assert sign["env"]["SEAL_SIGNING_KEY"] == "${{ secrets.LOVVERK_SEAL_SIGNING_KEY }}"
+    assert _WORKFLOW.read_text(encoding="utf-8").count(_SEAL_SECRET) == 1
+    assert _SEAL_SECRET not in json.dumps(workflow.get("env", {}))
+    assert _SEAL_SECRET not in json.dumps(workflow["jobs"]["sync"].get("env", {}))
+    assert "uv run" not in str(sign["run"]), "the key step must not run the engine"
+
+
+def test_the_seal_steps_sit_between_the_audit_and_the_push() -> None:
+    names = [str(s.get("name", "")) for s in _sync_steps()]
+    order = [
+        names.index("Run lovspor sync"),
+        names.index(str(_audit_gate_step()["name"])),
+        names.index("Compose publication seal"),
+        names.index("Sign publication seal"),
+        names.index("Verify publication seal"),
+        names.index("Push corpus changes if any"),
+    ]
+
+    assert order == sorted(order), names
+
+
+def test_the_push_publishes_notes_then_the_seal_tag_then_main() -> None:
+    run = str(_step_named("Push corpus changes if any")["run"])
+    notes_at = run.index("git push origin refs/notes/temporal-attestations")
+    tag_at = run.index('git push origin "refs/tags/$SEAL_TAG"')
+    main_at = run.index("git push origin main")
+
+    assert notes_at < tag_at < main_at
+    assert 'if [ -n "${SEAL_TAG:-}" ]' in run, "the tag is pushed only when one was created"
+
+
+def test_every_seal_step_is_strict_shell_and_verify_uses_the_pinned_signers() -> None:
+    for name in ("Compose publication seal", "Sign publication seal", "Verify publication seal"):
+        run = str(_step_named(name)["run"])
+        assert run.startswith("set -euo pipefail\n"), name
+        assert not _step_named(name).get("continue-on-error", False), name
+    verify = str(_step_named("Verify publication seal")["run"])
+    assert verify.count("--allowed-signers ops/publication-signers") == 2
+
+
+def _sign_env(tmp_path: Path, key: str, required: str, state: str) -> dict[str, str]:
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir(exist_ok=True)
+    return {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "RUNNER_TEMP": str(runner_temp),
+        "GITHUB_OUTPUT": str(tmp_path / "github-output"),
+        "GITHUB_RUN_ID": "41",
+        "GITHUB_RUN_ATTEMPT": "2",
+        "SEAL_SIGNING_KEY": key,
+        "SEAL_REQUIRED": required,
+        "SEAL_STATE": state,
+    }
+
+
+def _run_sign(repo: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    script = str(_step_named("Sign publication seal")["run"])
+    return subprocess.run(
+        ["bash", "-c", script], cwd=repo, env=env, capture_output=True, text=True, check=False
+    )
+
+
+def _signing_repo(tmp_path: Path) -> Path:
+    (tmp_path / "gitconfig").write_text(
+        "[user]\n\tname = T\n\temail = t@example.invalid\n", encoding="utf-8"
+    )
+    repo = tmp_path / "corpus"
+    repo.mkdir()
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig")}
+    for args in (["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "c"]):
+        subprocess.run(["git", *args], cwd=repo, env=env, check=True, capture_output=True)
+    return repo
+
+
+def test_sign_fails_closed_without_the_key_when_a_seal_is_required(tmp_path: Path) -> None:
+    repo = _signing_repo(tmp_path)
+
+    result = _run_sign(repo, _sign_env(tmp_path, "", "true", "composed"))
+
+    assert result.returncode == 1
+    assert "::error::" in result.stdout
+
+
+def test_sign_warns_and_turns_sealing_off_without_the_key_by_default(tmp_path: Path) -> None:
+    repo = _signing_repo(tmp_path)
+
+    result = _run_sign(repo, _sign_env(tmp_path, "", "", "composed"))
+
+    assert result.returncode == 0, result.stderr
+    assert "::warning::" in result.stdout
+    assert (tmp_path / "github-output").read_text(encoding="utf-8") == "sealing=off\n"
+
+
+@pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_sign_tags_head_and_removes_the_key_file(tmp_path: Path) -> None:
+    repo = _signing_repo(tmp_path)
+    key = tmp_path / "throwaway"
+    subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+        check=True,
+        capture_output=True,
+    )
+    env = _sign_env(tmp_path, key.read_text(encoding="utf-8"), "true", "composed")
+    message = b"lovspor-publication-seal v1\n\n# kept verbatim\n[]\n"
+    (tmp_path / "runner-temp" / "publication-seal.txt").write_bytes(message)
+
+    result = _run_sign(repo, env)
+
+    assert result.returncode == 0, result.stderr
+    output = (tmp_path / "github-output").read_text(encoding="utf-8")
+    assert output == "sealing=on\ntag=sync/seal-41-2\n"
+    assert list((tmp_path / "runner-temp").iterdir()) == [
+        tmp_path / "runner-temp" / "publication-seal.txt"
+    ], "the key file must be removed"
+    raw = subprocess.run(
+        ["git", "cat-file", "tag", "sync/seal-41-2"], cwd=repo, capture_output=True, check=True
+    ).stdout
+    assert b"\n\n" + message + b"-----BEGIN SSH SIGNATURE-----" in raw
+
+
+def test_sign_does_nothing_on_an_already_sealed_head(tmp_path: Path) -> None:
+    repo = _signing_repo(tmp_path)
+
+    result = _run_sign(repo, _sign_env(tmp_path, "not-a-key", "true", "already-sealed"))
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "github-output").read_text(encoding="utf-8") == "sealing=on\n"
+    assert list((tmp_path / "runner-temp").iterdir()) == []

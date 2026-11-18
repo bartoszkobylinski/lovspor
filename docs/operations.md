@@ -2683,6 +2683,8 @@ The workflow:
    the next keyed run triggers the backfill migration.)
 6. Pushes corpus changes only if HEAD is ahead of `origin/main`.
 
+Between the audit and the push the run seals the audited HEAD with an SSH-signed tag: see [`publication-seal.md`](publication-seal.md).
+
 Concurrency is set to a single `sync` group: a second invocation queues until the active one finishes, never races.
 
 ### Keepalive — preventing 60-day auto-disable

@@ -11,14 +11,7 @@ import typer
 from pydantic import SecretStr, ValidationError
 
 from lovspor import __version__
-from lovspor.access import (
-    default_credentials_path,
-    describe_credential,
-    issue_credential,
-    load_credentials,
-    revoke_credential,
-    write_credential_file,
-)
+from lovspor.access import default_credentials_path
 from lovspor.corpus_audit import AuditFinding, AuditReport, audit_published_corpus
 from lovspor.corpus_fetch import default_corpus_path, fetch_corpus, is_corpus
 from lovspor.errors import ConfigError
@@ -29,6 +22,7 @@ from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.observatory.entrypoint import observatory_app
 from lovspor.ops_cli import ops_app
 from lovspor.promotion.app import promote_app
+from lovspor.publication_seal_cli import publication_seal_app
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
 from lovspor.publish.pages import SITE_ORIGIN
@@ -62,6 +56,8 @@ from lovspor.sync.input_annotation import annotate_embedding_input_identity
 from lovspor.sync.lspe_cutover import migrate_lspe_v2
 from lovspor.sync.orchestrator import mark_undersized_embeddings_stale, run_sync
 from lovspor.temporal_epoch_cli import temporal_epoch_app
+from lovspor.tokens_cli import CredentialsOption as _CredentialsOption
+from lovspor.tokens_cli import tokens_app
 
 app = typer.Typer(
     name="lovspor",
@@ -70,79 +66,22 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-tokens_app = typer.Typer(
-    name="tokens",
-    help="Issue, list and revoke hosted-MCP beta credentials.",
-    no_args_is_help=True,
-)
-for _sub in (tokens_app, observatory_app, release_app, temporal_epoch_app, ops_app, promote_app):
+for _sub in (
+    tokens_app,
+    observatory_app,
+    release_app,
+    temporal_epoch_app,
+    ops_app,
+    promote_app,
+    publication_seal_app,
+):
     app.add_typer(_sub)
-
-_CredentialsOption = Annotated[
-    Path | None,
-    typer.Option(
-        "--credentials",
-        help="Path to the credential store (default: ~/.config/lovspor/credentials.json).",
-        envvar="LOVSPOR_CREDENTIALS",
-    ),
-]
 
 
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"lovspor {__version__}")
         raise typer.Exit
-
-
-@tokens_app.command("issue")
-def tokens_issue(
-    label: Annotated[str, typer.Option("--label", help="Who this credential is for.")],
-    expires_in_days: Annotated[
-        int,
-        typer.Option("--expires-in-days", help="Lifetime in days. 0 means never expires."),
-    ] = 90,
-    credentials_path: _CredentialsOption = None,
-) -> None:
-    """Mint a beta credential and print its token once.
-
-    The token is never stored — only its SHA-256 — so it cannot be recovered
-    later, only reissued.
-    """
-    path = (credentials_path or default_credentials_path()).expanduser()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = load_credentials(path)
-    credential, token = issue_credential(existing, label, expires_in_days or None)
-    write_credential_file(path, [*existing, credential])
-    typer.echo(f"Issued {credential.credential_id} ({label}) -> {path}")
-    expiry = credential.expires_at.date().isoformat() if credential.expires_at else "never"
-    typer.echo(f"Expires: {expiry}")
-    typer.echo("\nToken (shown once, store it now):\n")
-    typer.echo(f"  {token}\n")
-    typer.echo("The server re-reads the store on change, so it is live immediately.")
-
-
-@tokens_app.command("list")
-def tokens_list(credentials_path: _CredentialsOption = None) -> None:
-    """List issued credentials. Never prints tokens — they are not stored."""
-    path = (credentials_path or default_credentials_path()).expanduser()
-    credentials = load_credentials(path)
-    if not credentials:
-        typer.echo(f"No credentials in {path}.")
-        return
-    for credential in credentials:
-        state = describe_credential(credential)
-        typer.echo(f"{credential.credential_id}  {state}  {credential.label}")
-
-
-@tokens_app.command("revoke")
-def tokens_revoke(
-    credential_id: Annotated[str, typer.Argument(help="Credential id, e.g. beta-001.")],
-    credentials_path: _CredentialsOption = None,
-) -> None:
-    """Revoke a credential. Takes effect on the running server without a restart."""
-    path = (credentials_path or default_credentials_path()).expanduser()
-    write_credential_file(path, revoke_credential(load_credentials(path), credential_id))
-    typer.echo(f"Revoked {credential_id}. The running server picks this up on its next call.")
 
 
 @app.callback()
