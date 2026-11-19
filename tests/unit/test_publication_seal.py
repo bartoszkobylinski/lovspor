@@ -316,6 +316,33 @@ def test_a_tampered_note_does_not_affect_a_valid_seal(repo: Path, signer: Signer
 
 
 @requires_ssh_keygen
+def test_verify_rejects_a_signed_tag_with_a_tampered_embedded_attestation(
+    repo: Path, signer: Signer
+) -> None:
+    _seal_head(repo, signer)
+    raw = subprocess.run(
+        ["git", "cat-file", "tag", SEAL], cwd=repo, capture_output=True, check=True
+    ).stdout
+    tampered = raw.replace(b"parser_version", b"parser_versiom", 1)
+    assert tampered != raw
+    oid = (
+        subprocess.run(
+            ["git", "hash-object", "-t", "tag", "-w", "--stdin"],
+            cwd=repo,
+            input=tampered,
+            capture_output=True,
+            check=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    git(repo, "update-ref", f"refs/tags/{SEAL}", oid)
+
+    with pytest.raises(SealVerificationError, match="signature not accepted"):
+        verify_seal(repo, _head(repo), signer.signers, SEAL)
+
+
+@requires_ssh_keygen
 def test_verify_by_commit_tries_every_seal_and_reports_each_failure(
     repo: Path, signer: Signer
 ) -> None:
