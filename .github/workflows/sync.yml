@@ -18,7 +18,8 @@ on:
         default: false
 
 # Engine repo only needs read access to itself; corpus push uses the deploy
-# key configured in repo secrets (LOVVERK_DEPLOY_KEY). issues:write lets the
+# key LOVVERK_DEPLOY_KEY, a secret of the `lovverk-sync` and `lovverk-seal`
+# environments (a repository secret until the owner moves it). issues:write lets the
 # run file an upstream-schema-drift issue against this repo (see the last step).
 permissions:
   contents: read
@@ -34,10 +35,23 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # Holds the lovverk write key. With this environment restricted to `main`
+    # and the key stored as its secret instead of a repository secret, a run
+    # from any other branch (a dispatch, a push or a pull request carrying a
+    # modified workflow) cannot read it. Until the owner sets that up, GitHub
+    # creates the environment unrestricted on first use and the repository
+    # secret keeps working (docs/publication-seal.md, Owner setup).
+    environment: lovverk-sync
     # Routine syncs finish in under a minute; the one-time Sprint 9
     # embeddings backfill (first keyed run over the whole corpus) needed
     # room for ~1000 batched OpenAI calls plus retries.
     timeout-minutes: 120
+    # Read by the `seal` job below (docs/publication-seal.md).
+    outputs:
+      seal_state: ${{ steps.seal_compose.outputs.state }}
+      seal_tag: ${{ steps.seal_compose.outputs.tag }}
+      head: ${{ steps.seal_compose.outputs.head }}
+      published: ${{ steps.published.outputs.published }}
     env:
       LOVVERK_PATH: ${{ github.workspace }}/../lovverk
       LOVSPOR_DATA_DIR: ${{ github.workspace }}/../lovspor-data
@@ -165,6 +179,35 @@ jobs:
             fi
           done
 
+      # Publication seal, chain of custody (docs/publication-seal.md): the run
+      # may only build on a head that the seal key already vouched for, so a
+      # commit pushed with a stolen deploy key is never sealed by a later run.
+      # A glob refspec that matches nothing is fine (bootstrap).
+      - name: Fetch publication seal tags
+        working-directory: ${{ env.LOVVERK_PATH }}
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/tags/sync/*:refs/tags/sync/*'
+
+      # Required: the starting head must carry a verifying seal, or the job
+      # stops before any corpus work. Not required: a warning, and only once
+      # ops/publication-signers holds a key.
+      - name: Verify starting head seal
+        env:
+          SEAL_REQUIRED: ${{ vars.LOVVERK_SEAL_REQUIRED }}
+        run: |
+          set -euo pipefail
+          if [ "${SEAL_REQUIRED:-}" = "true" ]; then
+            uv run --no-dev lovspor publication-seal verify --corpus-path "$LOVVERK_PATH" \
+              --commit HEAD --allowed-signers ops/publication-signers
+          elif grep -Eq '^[[:space:]]*[^#[:space:]]' ops/publication-signers; then
+            uv run --no-dev lovspor publication-seal verify --corpus-path "$LOVVERK_PATH" \
+              --commit HEAD --allowed-signers ops/publication-signers \
+              || echo "::warning::The starting corpus head carries no verifying publication seal."
+          else
+            echo "ops/publication-signers holds no key; the starting head is not checked."
+          fi
+
       - name: Configure git author for sync commits
         working-directory: ${{ env.LOVVERK_PATH }}
         run: |
@@ -237,6 +280,39 @@ jobs:
       - name: Audit corpus integrity before push
         run: uv run --no-dev lovspor audit --corpus-path "$LOVVERK_PATH"
 
+      # The unsigned seal tag for the audited HEAD, composed without any key
+      # and handed to the `seal` job as an artifact. No message when a seal
+      # on HEAD already verifies: a sealed head is never sealed again.
+      - name: Compose publication seal
+        id: seal_compose
+        env:
+          SEAL_TAG: sync/seal-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/publication-seal/payload"
+          mkdir -p "$RUNNER_TEMP/publication-seal"
+          rm -f "$payload"
+          uv run --no-dev lovspor publication-seal compose --corpus-path "$LOVVERK_PATH" \
+            --tag-name "$SEAL_TAG" --allowed-signers ops/publication-signers --out "$payload"
+          if [ -f "$payload" ]; then
+            {
+              echo "state=composed"
+              echo "tag=$SEAL_TAG"
+              echo "head=$(sed -n '1s/^object //p' "$payload")"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "state=already-sealed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload publication seal payload
+        if: steps.seal_compose.outputs.state == 'composed'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: publication-seal-payload
+          path: ${{ runner.temp }}/publication-seal/payload
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Push corpus changes if any
         working-directory: ${{ env.LOVVERK_PATH }}
         run: |
@@ -256,6 +332,13 @@ jobs:
           else
             echo "No new commits — nothing to push."
           fi
+
+      # Marks the push as done, so the seal job still runs when a later
+      # notification step fails: a pushed head must not stay unsealed (with
+      # sealing required, the next sync would refuse to start from it).
+      - name: Record that the corpus push completed
+        id: published
+        run: echo "published=true" >> "$GITHUB_OUTPUT"
 
       # LovdataArchive tolerates unknown /list fields (extra="allow") so an
       # additive upstream change can never take the nightly sync offline. That
@@ -302,6 +385,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SYNC_OUTCOME: ${{ steps.sync.outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PUBLISHED: ${{ steps.published.outputs.published }}
+          SEAL_HEAD: ${{ steps.seal_compose.outputs.head }}
+          SEAL_STATE: ${{ steps.seal_compose.outputs.state }}
         run: |
           set -euo pipefail
           title="Nightly sync did not complete"
@@ -314,6 +400,17 @@ jobs:
             "A keyed sync that ran long may have spent embedding budget on work it then lost" \
             "(#790, #802). Read the log before re-running or waiting for the next schedule." \
             > sync-alert.md
+          # A run cancelled after its push skips the seal job, whose own report
+          # then never runs: name the published, unsealed head here.
+          if [ "${PUBLISHED:-}" = "true" ] && [ "${SEAL_STATE:-}" = "composed" ]; then
+            printf '%s\n' "" \
+              "main WAS pushed (head \`${SEAL_HEAD}\`) and a publication seal was due." \
+              "Cancelled run: the seal job did not run, the head is unsealed, and only a re-bootstrap" \
+              "recovers it (re-running the workflow brings back the sync job, which refuses an" \
+              "unsealed head once LOVVERK_SEAL_REQUIRED=true). Failed run: the seal job still ran;" \
+              "check its result, and if it failed, re-run only that job within six hours, else" \
+              "re-bootstrap (docs/publication-seal.md)." >> sync-alert.md
+          fi
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
             --json number,title \
             --jq "[.[] | select(.title == \"$title\")][0].number // empty")
@@ -321,4 +418,100 @@ jobs:
             gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file sync-alert.md
           else
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file sync-alert.md
+          fi
+
+  # Publication seal signing (docs/publication-seal.md). A fresh runner that
+  # never runs lovspor engine code, uv or Python: engine code in the sync job
+  # could otherwise plant git config, BASH_ENV or PATH entries that the
+  # signing step would execute. It re-derives the composed tag from origin
+  # and signs only an exact match. The seal lands shortly after main;
+  # consumers that require one hold until it does.
+  seal:
+    needs: sync
+    if: ${{ !cancelled() && needs.sync.outputs.seal_state == 'composed' && needs.sync.outputs.published == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: lovverk-seal
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out the seal script and pinned signers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            scripts/seal/sign-and-tag.sh
+            ops/publication-signers
+
+      - name: Download publication seal payload
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: publication-seal-payload
+          path: ${{ runner.temp }}/publication-seal
+
+      - name: Configure SSH for lovverk push
+        env:
+          DEPLOY_KEY: ${{ secrets.LOVVERK_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/lovverk_deploy_key
+          chmod 600 ~/.ssh/lovverk_deploy_key
+          cat >> ~/.ssh/known_hosts <<'EOF'
+          github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+          EOF
+          chmod 600 ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/lovverk_deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+
+      # The only step that sees LOVVERK_SEAL_SIGNING_KEY.
+      - name: Sign and push publication seal
+        env:
+          SEAL_SIGNING_KEY: ${{ secrets.LOVVERK_SEAL_SIGNING_KEY }}
+          SEAL_REQUIRED: ${{ vars.LOVVERK_SEAL_REQUIRED }}
+          SEAL_PAYLOAD: ${{ runner.temp }}/publication-seal/payload
+          SEAL_HEAD: ${{ needs.sync.outputs.head }}
+          SEAL_TAG: ${{ needs.sync.outputs.seal_tag }}
+          SEAL_SIGNERS: ops/publication-signers
+          SEAL_REMOTE: git@github.com:bartoszkobylinski/lovverk.git
+        run: scripts/seal/sign-and-tag.sh
+
+      # main is already pushed when this job runs, so a seal that did not land
+      # leaves a published head unsealed: consumers that require seals hold,
+      # and with sealing required the next sync refuses to start. Say so where
+      # the maintainer looks, with the recovery (re-run only this job within
+      # six hours, else re-bootstrap; docs/publication-seal.md).
+      - name: Report a seal that did not complete
+        if: failure() || cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SEAL_HEAD: ${{ needs.sync.outputs.head }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Publication seal did not complete"
+          printf '%s\n' \
+            "The seal job failed after the corpus push. Run: ${RUN_URL}" \
+            "" \
+            "Published head \`${SEAL_HEAD}\` is unsealed. Consumers that require a seal hold;" \
+            "with LOVVERK_SEAL_REQUIRED=true the next sync refuses to start from it." \
+            "Recovery: re-run only the seal job within six hours of the run while origin main" \
+            "is still that head; otherwise re-bootstrap (docs/publication-seal.md)." \
+            > seal-alert.md
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,title \
+            --jq "[.[] | select(.title == \"$title\")][0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file seal-alert.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file seal-alert.md
           fi

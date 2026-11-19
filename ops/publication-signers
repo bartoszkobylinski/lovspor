@@ -1,0 +1,16 @@
+# Trusted signers of lovverk publication seals (docs/publication-seal.md).
+# OpenSSH allowed_signers format (ssh-keygen(1), "ALLOWED SIGNERS"); lines
+# starting with "#" and blank lines are ignored.
+#
+# EMPTY ON PURPOSE: no seal key has been installed yet. While this file holds
+# no key line, `lovspor publication-seal verify` and the seal job
+# (scripts/seal/sign-and-tag.sh) refuse every seal.
+#
+# One line per key, namespace "git" (git's SSH signing namespace), optionally
+# bounded in time for a rotation overlap (UTC, checked against the tagger date):
+#
+#   lovverk-publication-seal namespaces="git" ssh-ed25519 <key>
+#   lovverk-publication-seal namespaces="git",valid-before="YYYYMMDDHHMMSSZ" ssh-ed25519 <old key>
+#   lovverk-publication-seal namespaces="git",valid-after="YYYYMMDDHHMMSSZ" ssh-ed25519 <new key>
+#
+# Public keys only. A change here is an owner-reviewed, owner-merged change.
