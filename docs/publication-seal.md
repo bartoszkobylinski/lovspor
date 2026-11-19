@@ -128,6 +128,7 @@ hold until it appears, which is the fail-closed direction.
 | Malicious engine code or crafted upstream data in the `sync` job (git config, `BASH_ENV`, `GITHUB_ENV`, `GITHUB_PATH`, the runner's sudo) | Cannot reach the key | The key exists only in the `seal` job, a fresh runner that runs no engine code and takes nothing from the sync job but the payload, which it re-derives from origin. |
 | Compromised `sync` job (the same malicious engine code) | Gets its own newly published head sealed | Residual. What is sealed is what that run published; the seal attests publication by the workflow, not that the engine was uncompromised. |
 | Fork pull requests | No access | The workflow runs on schedule and manual dispatch only; forks get no secrets. The environment admits `main` only. |
+| A workflow run from a branch other than `main` (a dispatch of an unreviewed branch, a pushed workflow file, a same-repository pull request) | Would read every repository secret | Neither lovverk key is a repository secret: both are secrets of environments that admit `main` only (`lovverk-sync`, `lovverk-seal`). The sync workflow is never dispatched on another branch (Live verification). |
 | Write access to `lovspor` (can edit `sync.yml` or the script) | Could change the seal job to leak the key | Branch protection and review on `main`; the environment is restricted to `main`. Residual: a merged malicious change. |
 | Steals the seal key | Can seal arbitrary commits | Revocation (remove the key from every allowed-signers file) and a new key. |
 | SHA-1 collisions on git object ids | Same strength as git commit signing | Noted, not mitigated here. |
@@ -175,22 +176,66 @@ failed.
 
 ## Owner setup
 
-1. Generate the key (no passphrase: CI must use it unattended):
+Each step is a separate decision. Steps 1 and 2 change nothing about what is
+published; run them between sync runs (`gh run list --repo
+bartoszkobylinski/lovspor --workflow sync.yml --status in_progress` prints
+nothing).
+
+1. Create both environments, each admitting the `main` branch only:
+
+   ```bash
+   for env in lovverk-sync lovverk-seal; do
+     gh api --method PUT "repos/bartoszkobylinski/lovspor/environments/$env" --input - <<'EOF'
+   {"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+   EOF
+     gh api --method POST "repos/bartoszkobylinski/lovspor/environments/$env/deployment-branch-policies" \
+       -f name=main -f type=branch
+   done
+   for env in lovverk-sync lovverk-seal; do
+     gh api "repos/bartoszkobylinski/lovspor/environments/$env/deployment-branch-policies" \
+       --jq "\"$env: \" + ([.branch_policies[] | .name + \" \" + .type] | join(\", \"))"
+   done
+   ```
+
+   Expected: `lovverk-sync: main branch` and `lovverk-seal: main branch`.
+
+2. Move the lovverk write key out of repository secrets. A secret value
+   cannot be read back, so this is a deploy-key rotation: install a new key in
+   both environments, let a scheduled run publish with it, then remove the old
+   key and the repository secret.
+
+   ```bash
+   ssh-keygen -t ed25519 -C lovverk-deploy -N '' -f ./lovverk-deploy
+   gh repo deploy-key add ./lovverk-deploy.pub --repo bartoszkobylinski/lovverk \
+     --allow-write --title "lovspor sync (environment secret)"
+   gh secret set LOVVERK_DEPLOY_KEY --repo bartoszkobylinski/lovspor --env lovverk-sync < ./lovverk-deploy
+   gh secret set LOVVERK_DEPLOY_KEY --repo bartoszkobylinski/lovspor --env lovverk-seal < ./lovverk-deploy
+   rm ./lovverk-deploy ./lovverk-deploy.pub
+   ```
+
+   An environment secret takes precedence over a repository secret of the
+   same name. After the next scheduled run succeeds, delete the repository
+   secret and the old deploy key (`gh repo deploy-key list` shows its id):
+
+   ```bash
+   gh secret delete LOVVERK_DEPLOY_KEY --repo bartoszkobylinski/lovspor
+   gh repo deploy-key list --repo bartoszkobylinski/lovverk
+   gh repo deploy-key delete <old key id> --repo bartoszkobylinski/lovverk
+   ```
+
+   The run after that is the one that proves the environment key alone works.
+
+3. Generate the seal key (no passphrase: CI must use it unattended), store it
+   in `lovverk-seal`, and delete the local private key (a lost key is rotated,
+   not recovered). Keep the `.pub` file for step 4:
 
    ```bash
    ssh-keygen -t ed25519 -C lovverk-publication-seal -N '' -f ./lovverk-publication-seal
-   ```
-
-2. Create the environment `lovverk-seal` with deployment branches restricted
-   to `main` (repository Settings, Environments), store the private key as its
-   secret, then delete the local copy (a lost key is rotated, not recovered):
-
-   ```bash
    gh secret set LOVVERK_SEAL_SIGNING_KEY --repo bartoszkobylinski/lovspor --env lovverk-seal < ./lovverk-publication-seal
    rm ./lovverk-publication-seal
    ```
 
-3. Commit the public key line to `ops/publication-signers` through a reviewed
+4. Commit the public key line to `ops/publication-signers` through a reviewed
    pull request:
 
    ```bash
@@ -198,7 +243,9 @@ failed.
      "$(cut -d' ' -f1,2 ./lovverk-publication-seal.pub)" >> ops/publication-signers
    ```
 
-4. Protect the seal tags on `lovverk` from update and deletion:
+5. Protect the seal tags on `lovverk` from update and deletion (no bypass, so
+   the seals are a permanent ledger; a forged new tag under `sync/` does not
+   verify):
 
    ```bash
    gh api --method POST repos/bartoszkobylinski/lovverk/rulesets --input - <<'EOF'
@@ -212,8 +259,9 @@ failed.
    EOF
    ```
 
-5. Only after a sealed head exists on origin (see Bootstrap), require the
-   seal:
+   Check: `gh api repos/bartoszkobylinski/lovverk/rulesets --jq '.[] | .name + " " + .target + " " + .enforcement'`.
+
+6. Only after origin `main` passes the gate below, require the seal:
 
    ```bash
    gh variable set LOVVERK_SEAL_REQUIRED --repo bartoszkobylinski/lovspor --body true
@@ -221,6 +269,39 @@ failed.
 
 Consumers copy the public key line into their own allowed-signers file; they
 do not read it from `lovspor` at verification time.
+
+## Live verification
+
+The sync workflow is dispatched on `main` only, never on an unmerged branch: a
+run executes the workflow file of the branch it runs on. Evidence before the
+merge comes from the tests. After it, each phase is checked on scheduled runs
+and from an unprivileged clone; nothing below needs a credential.
+
+- **Phase 0** (merged, nothing installed): the next scheduled run publishes as
+  before; its `seal` job warns that no signing key is configured and pushes no
+  tag.
+- **Phase 1** (keys installed): after a scheduled run that published, check the
+  seal from a fresh clone:
+
+  ```bash
+  work=$(mktemp -d)
+  git clone --quiet https://github.com/bartoszkobylinski/lovverk "$work/lovverk"
+  git -C "$work/lovverk" fetch --quiet origin \
+    '+refs/tags/sync/*:refs/tags/sync/*' '+refs/notes/*:refs/notes/*'
+  git -C "$work/lovverk" tag --points-at HEAD --list 'sync/*'
+  uv run lovspor publication-seal verify --corpus-path "$work/lovverk" \
+    --commit HEAD --allowed-signers ops/publication-signers
+  ```
+
+  Run the last command from a `lovspor` checkout of `main`. Expected: exit 0
+  and a `verified` line naming a `sync/seal-<run>-<attempt>` tag and the
+  `lovverk-publication-seal` signer.
+
+**Gate before `LOVVERK_SEAL_REQUIRED` = `true`, and before any consumer starts
+requiring seals:** the Phase 1 check passes on the current origin `main` head
+(a signed seal naming that exact commit and embedding its attestation entry),
+and all lovverk history pushed during phase 1 has been reviewed (Bootstrap).
+A head without a passing check is not enforced on.
 
 ## Bootstrap
 
@@ -244,11 +325,22 @@ lovverk-publication-seal namespaces="git",valid-before="20270301000000Z" ssh-ed2
 lovverk-publication-seal namespaces="git",valid-after="20270215000000Z" ssh-ed25519 <new key>
 ```
 
-1. Generate the new key; add its line with `valid-after` and set
-   `valid-before` on the old line, in `ops/publication-signers` and in every
-   consumer's file.
-2. Replace the `LOVVERK_SEAL_SIGNING_KEY` environment secret within the
-   overlap.
+1. Generate the new key and print its line; add that line with `valid-after`
+   and set `valid-before` on the old line, in `ops/publication-signers` (a
+   reviewed pull request) and in every consumer's file:
+
+   ```bash
+   ssh-keygen -t ed25519 -C lovverk-publication-seal -N '' -f ./lovverk-publication-seal-new
+   printf 'lovverk-publication-seal namespaces="git",valid-after="YYYYMMDD000000Z" %s\n' \
+     "$(cut -d' ' -f1,2 ./lovverk-publication-seal-new.pub)"
+   ```
+2. Within the overlap, once the new line is on `main` and in every consumer's
+   file, replace the environment secret and delete the local private key:
+
+   ```bash
+   gh secret set LOVVERK_SEAL_SIGNING_KEY --repo bartoszkobylinski/lovspor --env lovverk-seal < ./lovverk-publication-seal-new
+   rm ./lovverk-publication-seal-new
+   ```
 3. After the overlap, the old line can stay (old seals keep verifying) or be
    removed.
 
@@ -259,7 +351,7 @@ against a stolen key: a thief can backdate. Use it for planned rotation only.
 
 On suspected compromise: delete the key's line from `ops/publication-signers`
 and from every consumer's file, delete or replace the secret, and install a
-new key. Every seal made with the old key stops verifying, old ones included.
+new key (Owner setup step 3 commands, then step 4 with the new public key). Every seal made with the old key stops verifying, old ones included.
 With sealing required, the next run then refuses to start from the current
 head: unset `LOVVERK_SEAL_REQUIRED`, check the head, let one run seal with the
 new key, and set the variable again (the Bootstrap step).
@@ -269,7 +361,7 @@ new key, and set the variable again (the Bootstrap step).
 | Phase | State | Effect |
 | --- | --- | --- |
 | 0 | This change merged; secret absent, variable unset, no key in `ops/publication-signers` | The seal job warns; publication continues unsealed, as before. |
-| 1 | Key installed in `lovverk-seal`, public key committed | Each run seals the head it publishes; an unsealed starting head is a warning. |
+| 1 | Environments restricted to `main`, write key moved into them, seal key installed in `lovverk-seal`, public key committed | Each run seals the head it publishes; an unsealed starting head is a warning. |
 | 2 | `LOVVERK_SEAL_REQUIRED` = `true`, after a sealed head exists | Runs start only from a sealed head; a missing key fails the seal job. |
 | 3 | Consumers enable verification | Consumers serve only sealed heads. |
 

@@ -18,7 +18,8 @@ on:
         default: false
 
 # Engine repo only needs read access to itself; corpus push uses the deploy
-# key configured in repo secrets (LOVVERK_DEPLOY_KEY). issues:write lets the
+# key LOVVERK_DEPLOY_KEY, a secret of the `lovverk-sync` and `lovverk-seal`
+# environments (a repository secret until the owner moves it). issues:write lets the
 # run file an upstream-schema-drift issue against this repo (see the last step).
 permissions:
   contents: read
@@ -34,6 +35,13 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # Holds the lovverk write key. With this environment restricted to `main`
+    # and the key stored as its secret instead of a repository secret, a run
+    # from any other branch (a dispatch, a push or a pull request carrying a
+    # modified workflow) cannot read it. Until the owner sets that up, GitHub
+    # creates the environment unrestricted on first use and the repository
+    # secret keeps working (docs/publication-seal.md, Owner setup).
+    environment: lovverk-sync
     # Routine syncs finish in under a minute; the one-time Sprint 9
     # embeddings backfill (first keyed run over the whole corpus) needed
     # room for ~1000 batched OpenAI calls plus retries.

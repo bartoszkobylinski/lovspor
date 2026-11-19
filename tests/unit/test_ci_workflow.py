@@ -580,6 +580,18 @@ def test_the_sync_job_holds_no_secret_beyond_its_existing_ones() -> None:
     assert secrets == ["secrets.LOVVERK_DEPLOY_KEY", "secrets.OPENAI_API_KEY"], secrets
 
 
+def test_every_job_holding_the_lovverk_write_key_runs_in_an_environment() -> None:
+    # Environment secrets restricted to main are unreachable from runs on any
+    # other branch; a repository secret is not.
+    holders = {
+        name: job.get("environment")
+        for name, job in _workflow()["jobs"].items()
+        if "secrets.LOVVERK_DEPLOY_KEY" in json.dumps(job)
+    }
+
+    assert holders == {"sync": "lovverk-sync", "seal": "lovverk-seal"}, holders
+
+
 def test_the_seal_job_runs_no_engine_code_in_a_protected_environment() -> None:
     job = _seal_job()
     lines = "\n".join(str(step.get("run", "")) for step in job["steps"])
