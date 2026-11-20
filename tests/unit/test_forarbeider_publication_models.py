@@ -6,6 +6,7 @@ describe its own transaction.
 """
 
 import ast
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -153,3 +154,43 @@ def test_a_git_vector_outside_the_allowlist_never_runs(
 ) -> None:
     with pytest.raises(git_prepare.GitPrepareError):
         git_prepare.run_git(tmp_path, argv)
+
+
+def test_preparation_git_runs_with_an_isolated_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_DIR", "/unexpected/repository")
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, stdout=b"clean\x00", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    answer = git_prepare.run_git(tmp_path, ("remote",))
+
+    assert (answer.code, answer.out) == (0, b"clean\x00")
+    argv, kwargs = calls[0]
+    assert argv[-3:] == ["-C", str(tmp_path), "remote"]
+    assert "core.hooksPath=/dev/null" in argv
+    assert "core.fsmonitor=false" in argv
+    assert "--no-replace-objects" in argv
+    assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["timeout"] == git_prepare.TIMEOUT_SECONDS
+    assert kwargs["capture_output"] is True
+    assert "GIT_DIR" not in kwargs["env"]
+    assert "GIT_CONFIG_COUNT" not in kwargs["env"]
+    assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_preparation_git_timeout_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        raise subprocess.TimeoutExpired("git", git_prepare.TIMEOUT_SECONDS)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(git_prepare.GitPrepareError, match="git remote could not run"):
+        git_prepare.run_git(tmp_path, ("remote",))
