@@ -78,6 +78,9 @@ runner):
 - Modify only files under `tests/` (Python and `fixtures/`; mutation remediation:
   `tests/unit/*.py` only) — enforced mechanically by
   `scripts/ci/assert_codex_scope.sh` after every run. Reports never go under `tests/`.
+- Snapshots, goldens and the gate modules that pin them (`PROTECTED_PATTERNS` in that
+  script) are refused even under `tests/`: never add, edit or delete one. Put new
+  coverage for a pinned surface in a new sibling test module.
 - Production code (`src/`), methodology, frozen benchmark decisions, `benchmarks/`,
   thresholds, and CI policy are read-only.
 - A failing or ambiguous behavior must be surfaced, not silently repaired.
