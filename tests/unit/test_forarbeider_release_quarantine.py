@@ -363,6 +363,38 @@ def test_duplicate_findings_and_repeated_runs_change_nothing() -> None:
     assert merge(again, found, LATER + LATER.resolution) == again
 
 
+def test_duplicate_findings_union_evidence_independent_of_order() -> None:
+    store = Store()
+    rows = [blocked_row(store, 2, SOURCE_INCOMPLETE)]
+    (finding,) = findings_of(planned(store, rows, (2,)), rows, store).local
+    other = finding.model_copy(update={"evidence_sha256s": ("b" * 64,)})
+
+    forward = merge(EMPTY_LEDGER, [finding, other], CHECKED_AT)
+    reverse = merge(EMPTY_LEDGER, [other, finding], CHECKED_AT)
+
+    assert ledger_text(forward) == ledger_text(reverse)
+    (record,) = forward.records
+    assert record.evidence_sha256s == tuple(sorted({*finding.evidence_sha256s, "b" * 64}))
+    assert record.history[0].evidence_sha256s == record.evidence_sha256s
+
+
+def test_same_failure_on_new_version_keeps_both_active_records() -> None:
+    store = Store()
+    rows = [blocked_row(store, 2, SOURCE_INCOMPLETE)]
+    (finding,) = findings_of(planned(store, rows, (2,)), rows, store).local
+    ledger = merge(EMPTY_LEDGER, [finding], CHECKED_AT)
+    newer = finding.model_copy(update={"version_id": "9" * 64})
+
+    updated = merge(ledger, [newer], LATER)
+
+    assert len(updated.records) == 2
+    assert {record.version_id for record in updated.records} == {finding.version_id, "9" * 64}
+    assert all(record.state == "active" for record in updated.records)
+    old = next(record for record in updated.records if record.version_id == finding.version_id)
+    assert old == ledger.records[0]
+    assert successor_findings(ledger, updated) == ()
+
+
 def test_a_failure_no_longer_reported_stays_quarantined() -> None:
     store = Store()
     rows = [blocked_row(store, 2, SOURCE_INCOMPLETE)]
