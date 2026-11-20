@@ -29,9 +29,15 @@ FC7b and lineage records), each distinct digest once: ``size_basis`` is
 ``bound_artifacts``. AR4 renders the proposed publication bytes and must
 recount from them.
 
+**Exact bindings.** Every document with evidence names the digest of its FC8b
+selection *and* of its FC8b binding: the lineage head and the FC6, FC5, FC7
+and FC7b records of the very observation the plan was built from. Two
+observations can share a selection and a version yet rest on different
+records, so a batch must match both, document by document.
+
 **Identity.** ``plan_id`` is the digest of the basis, the documents and the
-batches. A batch id is derived from the basis and its documents' versions and
-artifacts, so the same inputs give the same ids and any change of policy,
+batches. A batch id is derived from the basis and its documents' versions,
+selections, bindings and artifacts, so the same inputs give the same ids and any change of policy,
 limits, inventory or version gives new ones: a stale plan never matches.
 """
 
@@ -103,6 +109,7 @@ class PlannedDocument(Frozen):
     disposition: Disposition
     version_id: Digest | None
     selection_sha256: Digest | None
+    binding_sha256: Digest | None
     artifact_sha256s: tuple[Digest, ...]
     files: int = Field(ge=0)
     bytes: int = Field(ge=0)
@@ -120,6 +127,8 @@ class PlannedDocument(Frozen):
             raise ValueError("a document is in a batch exactly when it is planned")
         if self.files != len(self.artifact_sha256s):
             raise ValueError("files counts the distinct artifacts")
+        if (self.selection_sha256 is None) != (self.binding_sha256 is None):
+            raise ValueError("a selection is planned together with its exact binding")
         return self
 
 

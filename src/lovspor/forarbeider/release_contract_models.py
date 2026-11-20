@@ -602,6 +602,7 @@ REFUSING_CODES: Final = frozenset(
         "approval_conflict",
         "approval_for_unknown_policy",
         "approval_signed_by_bot",
+        "batch_artifact_binding_mismatch",
         "batch_not_in_plan",
         "batch_selection_mismatch",
         "batch_size_contradicts_intent",

@@ -119,6 +119,7 @@ class _Draft(NamedTuple):
     disposition: Disposition
     version_id: str | None
     selection_sha256: str | None
+    binding_sha256: str | None
     artifact_sha256s: tuple[str, ...]
     bytes: int
     reasons: tuple[str, ...]
@@ -276,21 +277,20 @@ def _draft(
     size = sum(len(inputs.artifacts[key]) for key in keys)
     reasons = _blocking(inputs, found, len(keys), size)
     disposition: Disposition = "blocked" if reasons else "planned"
-    return _Draft(
-        document, disposition, selection.version_id, _selection_digest(found), keys, size, reasons
+    return _unsized(document, disposition, found, reasons)._replace(
+        artifact_sha256s=keys, bytes=size
     )
 
 
 def _unsized(
     document: str, disposition: Disposition, found: Row | None, reasons: tuple[str, ...]
 ) -> _Draft:
-    version = None if found is None else found.selection.version_id
-    digest = None if found is None else _selection_digest(found)
-    return _Draft(document, disposition, version, digest, (), 0, tuple(sorted(set(reasons))))
-
-
-def _selection_digest(found: Row) -> str:
-    return digest_of(found.selection)
+    if found is None:
+        return _Draft(document, disposition, None, None, None, (), 0, reasons)
+    selection, binding = digest_of(found.selection), digest_of(found.binding)
+    version = found.selection.version_id
+    ordered = tuple(sorted(set(reasons)))
+    return _Draft(document, disposition, version, selection, binding, (), 0, ordered)
 
 
 def _own_blockers(selection: DocumentSelection) -> tuple[str, ...]:
@@ -351,7 +351,8 @@ def _fits(caps: BatchCaps, group: list[_Draft]) -> bool:
 
 def _batch(basis: PlanBasis, sequence: int, group: list[_Draft]) -> PlannedBatch:
     members = tuple(
-        f"{d.document_id}:{d.version_id}:{d.selection_sha256}:{','.join(d.artifact_sha256s)}"
+        f"{d.document_id}:{d.version_id}:{d.selection_sha256}:{d.binding_sha256}:"
+        + ",".join(d.artifact_sha256s)
         for d in group
     )
     key = digest_of(_BatchKey(basis=basis, members=members))
@@ -371,6 +372,7 @@ def _document(draft: _Draft, batch_id: str | None) -> PlannedDocument:
         disposition=draft.disposition,
         version_id=draft.version_id,
         selection_sha256=draft.selection_sha256,
+        binding_sha256=draft.binding_sha256,
         artifact_sha256s=draft.artifact_sha256s,
         files=len(draft.artifact_sha256s),
         bytes=draft.bytes,

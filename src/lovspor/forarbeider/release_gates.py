@@ -14,9 +14,10 @@ hand-made registry, publisher, approval or reproduction as ``*_unverified``.
 
 - ``inventory``: a verified expected inventory from a trusted source, and a
   verified plan (AR2) bound to it and to the signed limits, of which this
-  manifest is exactly one batch,
-  selection by selection; every other expected document accounted for by the
-  plan, none without evidence. A document the plan did not plan blocks
+  manifest is exactly one batch, selection by selection and binding by
+  binding (the very lineage head and FC6, FC5, FC7 and FC7b records the plan
+  was built on); every other expected document accounted for by the plan,
+  none without evidence. A document the plan did not plan blocks
   (``document_not_planned``); planned documents grouped otherwise than in a
   batch refuse (``batch_not_in_plan``). Without a verified plan the manifest must
   equal the inventory;
@@ -204,10 +205,21 @@ def _in_plan(evidence: ReleaseEvidence, found: InventoryEvidence, plan: ReleaseP
     if _batch_of(evidence) is None:
         yield from _unplanned(evidence, plan)
         return
-    planned = {item.document_id: item.selection_sha256 for item in plan.documents}
-    for selection in evidence.manifest.content.documents:
-        if planned.get(selection.document_id) != digest_of(selection):
+    yield from _exact(evidence, plan)
+
+
+def _exact(evidence: ReleaseEvidence, plan: ReleasePlan) -> Reasons:
+    """Each batch document's selection and binding are exactly the ones the plan was built on."""
+    planned = {item.document_id: item for item in plan.documents}
+    manifest = evidence.manifest
+    for selection, binding in zip(manifest.content.documents, manifest.bindings, strict=True):
+        document = planned.get(selection.document_id)
+        if document is None or document.selection_sha256 != digest_of(selection):
             yield GateReason(code="batch_selection_mismatch", document_id=selection.document_id)
+        if document is None or document.binding_sha256 != digest_of(binding):
+            yield GateReason(
+                code="batch_artifact_binding_mismatch", document_id=binding.document_id
+            )
 
 
 def _unplanned(evidence: ReleaseEvidence, plan: ReleasePlan) -> Reasons:

@@ -984,6 +984,117 @@ def test_a_stale_selection_in_the_batch_is_refused() -> None:
     assert refusing(verdict) == {"batch_selection_mismatch"}
 
 
+BOUND_ARTIFACTS = (
+    "manifest_sha256",
+    "assessment_sha256",
+    "policy_decision_sha256",
+    "authorization_sha256",
+)
+
+
+def rebound(evidence: Any, index: int, field: str) -> Any:
+    """``evidence`` whose manifest binds document ``index`` to another observation's artifact."""
+    rows_now = [row_from(evidence.manifest, n) for n in range(len(evidence.manifest.bindings))]
+    other = rows_now[index].binding.model_copy(update={field: "6" * 64})
+    rows_now[index] = rows_now[index]._replace(binding=other)
+    manifest = manifest_of(rows_now)
+    return evidence.model_copy(
+        update={**consistent(manifest), "intent": intent(manifest, batch=evidence.intent.batch)}
+    )
+
+
+@pytest.mark.parametrize("field", BOUND_ARTIFACTS)
+def test_the_same_selection_from_another_observation_is_refused(field: str) -> None:
+    store = Store()
+    evidence = planned_evidence(store, (1, 2), (1, 2))
+    moved = rebound(evidence, 0, field)
+    assert digest_of(moved.manifest.content.documents[0]) == digest_of(
+        evidence.manifest.content.documents[0]
+    )
+    verdict = evaluate_release(moved)
+    found = documents_with(verdict, "batch_artifact_binding_mismatch")
+    assert found == {document(1)}
+    assert "batch_selection_mismatch" not in codes(verdict, "inventory")
+    assert (verdict.status, refusing(verdict)) == ("refused", {"batch_artifact_binding_mismatch"})
+
+
+def test_another_lineage_head_for_the_same_selection_is_refused() -> None:
+    store = Store()
+    evidence = planned_evidence(store, (1, 2), (1, 2))
+    verdict = evaluate_release(rebound(evidence, 1, "lineage_head_sha256"))
+    assert documents_with(verdict, "batch_artifact_binding_mismatch") == {document(2)}
+
+
+def test_exactly_matching_bindings_pass_the_binding_check() -> None:
+    store = Store()
+    verdict = evaluate_release(planned_evidence(store, (1, 2), (1, 2)))
+    assert not codes(verdict, "inventory") & {
+        "batch_artifact_binding_mismatch",
+        "batch_selection_mismatch",
+        "batch_not_in_plan",
+    }
+    assert refusing(verdict) == set()
+
+
+def test_each_batch_checks_only_its_own_bindings_against_the_whole_plan() -> None:
+    store = Store()
+    found = [row(store, n, sizes=(1,)) for n in (1, 2, 3)]
+    plan = build_plan(
+        context((1, 2, 3), found, constraints(max_documents_per_batch=2)), found, store.artifacts
+    )
+    assert [b.document_ids for b in plan.batches] == [
+        (document(1), document(2)),
+        (document(3),),
+    ]
+    second = manifest_of(found[2:])
+    assert second.bindings_sha256 != plan.basis.selection_bindings_sha256
+    evidence = planned_evidence(store, (1, 2, 3), (1, 2, 3)).model_copy(
+        update={
+            **consistent(second),
+            "intent": intent(second, batch=BatchSize(documents=1, files=1, bytes=1)),
+            "plan": issue_provenance(
+                PlanEvidence(
+                    status="verified",
+                    source="engine_release_planner",
+                    reasons=(),
+                    plan=plan,
+                    plan_sha256=digest_of(plan),
+                    trust_root_sha256=baseline().registry.trust_root_sha256,
+                ),
+                "batch_plan",
+            ),
+        }
+    )
+    verdict = evaluate_release(evidence)
+    assert refusing(verdict) == set()
+    assert "batch_artifact_binding_mismatch" not in codes(verdict, "inventory")
+    moved = evaluate_release(rebound(evidence, 0, "assessment_sha256"))
+    assert documents_with(moved, "batch_artifact_binding_mismatch") == {document(3)}
+
+
+def test_a_planned_document_names_its_exact_binding_and_the_batch_id_follows_it() -> None:
+    store = Store()
+    found = [row(store, 1)]
+    plan = build_plan(context((1,), found), found, store.artifacts)
+    assert plan.documents[0].binding_sha256 == digest_of(found[0].binding)
+    other = found[0]._replace(
+        binding=found[0].binding.model_copy(update={"lineage_head_sha256": "6" * 64})
+    )
+    moved = build_plan(context((1,), found), [other], store.artifacts)
+    assert moved.documents[0].binding_sha256 != plan.documents[0].binding_sha256
+    assert moved.batches[0].batch_id != plan.batches[0].batch_id
+
+
+def documents_with(verdict: Any, code: str) -> set[str | None]:
+    return {
+        r.document_id
+        for g in verdict.gates
+        if g.gate == "inventory"
+        for r in g.reasons
+        if r.code == code
+    }
+
+
 def row_from(manifest: Any, index: int) -> Any:
     return Row(manifest.content.documents[index], manifest.bindings[index])
 
