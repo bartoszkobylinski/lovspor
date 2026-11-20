@@ -184,6 +184,21 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   established, so the step samples `free -m` and `df -h` every 5 min. Handed over as
   `MUTMUT_PR_TOTAL_BUDGET_SECONDS`, which replaces the setup + per-file sum. The job's
   `timeout-minutes: 345` is strictly above the cap and under the hosted 360-min kill.
+- **Memory guard (#971).** mutmut bounds a mutant's CPU and wall time, never its memory. On
+  2026-11-20 nine mutants of `regjeringen_fetch/normalize.py` that keep a parser loop from
+  advancing each ran 11–19 min, the wall limit `(estimate + 7) * 15`, appending on every pass;
+  the 16 GiB runner was shut down at 14.5 GiB, 58 min before the budget, and no report was
+  written. `scripts/ci/mutant_memory_guard.py` runs beside `mutmut run` and reads `/proc`
+  every 2 s for the processes mutmut titles `mutmut: <mutant name>`. One that holds 2048 MiB
+  more than the process that forked it (resident plus swapped) is sent SIGXCPU, the signal of
+  mutmut's own timeout, so it is recorded as a `timeout`, the verdict it had before, and
+  carried in the ledger like any other. The allowance is a judgement between two measured
+  figures: the whole machine stayed under 3.6 GiB while healthy mutants ran, and four children
+  at the allowance stay under 12 GiB. The guard writes to the step log, never to
+  `mutation-raw.log`: a line when it starts, one when it first sees a mutant process (a night
+  without that line ran unguarded) and one naming each mutant it stops. A mutant stopped this
+  way was not killed by a test; it stays in the report's timeout list. Whether memory is what
+  ended the 2026-11-13/14 runs is still not established.
 - **Verdict.** `scripts/ci/nightly_mutation_verdict.py` buckets the gate reason that
   `mutation_to_json.py` computed: `clean` (ok, not_applicable, equivalent_mutants_only),
   `survivors` (surviving/timeout/suspicious/uncovered mutants), `partial` (run_incomplete,

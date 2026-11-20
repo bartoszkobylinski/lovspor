@@ -132,10 +132,17 @@ jobs:
           echo "seconds=$cap" >> "$GITHUB_OUTPUT"
           echo "budget: ${cap}s wall clock, independent of the start time"
 
-      # Two background loops beside mutmut (#943): a ledger checkpoint every
-      # 15 min, so a runner shutdown keeps what was measured, and a memory and
-      # disk sample every 5 min, because the cause of the 2026-11-13/14
-      # shutdowns is not established. Neither writes to mutation-raw.log.
+      # Three background loops beside mutmut. A ledger checkpoint every 15 min,
+      # so a runner shutdown keeps what was measured (#943). A memory and disk
+      # sample every 5 min, because the cause of the 2026-11-13/14 shutdowns
+      # is not established. And the memory guard (#971): mutmut bounds a
+      # mutant's time, not its memory, and on 2026-11-20 mutants that loop and
+      # append ran 17 min each until the 16 GiB runner was shut down at
+      # 14.5 GiB. The guard stops a mutant process holding 2048 MiB more than
+      # mutmut itself, with the signal of mutmut's own timeout, so it is
+      # recorded as one. Healthy runs stayed under 3.6 GiB for the whole
+      # machine; four children at the allowance stay under 12 GiB. None of
+      # the three writes to mutation-raw.log.
       - name: Nightly-scoped mutation testing (no LLM)
         id: mut
         env:
@@ -147,6 +154,13 @@ jobs:
           set +e
           ( while sleep 300; do echo "== resources $(date -u +%T)"; free -m; df -h / "$PWD"; done ) &
           sampler=$!
+          guard=""
+          if [ -x scripts/ci/mutant_memory_guard.py ]; then
+            .venv/bin/python scripts/ci/mutant_memory_guard.py --allowance-mb 2048 &
+            guard=$!
+          else
+            echo "::warning::mutant_memory_guard.py is not on this head; mutant memory is unbounded tonight (#971)"
+          fi
           checkpoints=""
           if [ -x scripts/ci/mutation_ledger.sh ]; then
             scripts/ci/mutation_ledger.sh loop "$BASE" "$HEAD" 900 &
@@ -154,8 +168,8 @@ jobs:
           fi
           scripts/mutmut-pr.sh "$BASE" 2>&1 | tee mutation-raw.log
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
-          kill "$sampler" $checkpoints 2>/dev/null
-          wait "$sampler" $checkpoints 2>/dev/null
+          kill "$sampler" $guard $checkpoints 2>/dev/null
+          wait "$sampler" $guard $checkpoints 2>/dev/null
           if [ -x scripts/ci/mutation_ledger.sh ]; then
             scripts/ci/mutation_ledger.sh save "$BASE" "$HEAD" \
               || echo "::warning::the final ledger checkpoint failed; the next night resumes from the last one"
