@@ -199,6 +199,8 @@ def _in_plan(evidence: ReleaseEvidence, found: InventoryEvidence, plan: ReleaseP
         yield GateReason(code="plan_inventory_mismatch")
     if plan.basis.limits_sha256 != evidence.limits.limits_sha256:
         yield GateReason(code="plan_limits_mismatch")
+    if plan.basis.quarantine_sha256 is None:
+        yield GateReason(code="plan_quarantine_unassessed")
     for item in plan.documents:
         if item.disposition == "missing":
             yield GateReason(code="inventory_document_missing", document_id=item.document_id)

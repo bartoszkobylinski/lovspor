@@ -146,6 +146,7 @@ SourceKind = Literal[
     "runner_budget_ledger",
     "engine_release_verifier",
     "engine_release_planner",
+    "engine_quarantine",
 ]
 EvidenceKind = Literal[
     "lineage_head_anchor",
@@ -159,6 +160,7 @@ EvidenceKind = Literal[
     "release_control",
     "budget_ledger",
     "batch_plan",
+    "quarantine_assessment",
 ]
 EvidenceStatus = Literal["missing", "invalid", "verified"]
 
@@ -220,6 +222,12 @@ TRUST_BOUNDARIES: Final = (
         accepted_sources=("engine_release_verifier",),
         verifier="lovspor.forarbeider.version_release.verify_release",
         implemented_by="FC8b",
+    ),
+    TrustBoundary(
+        evidence="quarantine_assessment",
+        accepted_sources=("engine_quarantine",),
+        verifier="lovspor.forarbeider.release_quarantine_run.run_quarantine",
+        implemented_by="AR3; atomic persistence and an anchor of the ledger are AR5",
     ),
     TrustBoundary(
         evidence="legal_assessment",
