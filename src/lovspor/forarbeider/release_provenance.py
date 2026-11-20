@@ -19,9 +19,10 @@ never serialized (``seal`` is excluded from every dump), so:
   signature (AR6), not this seal.
 
 Only kinds in :data:`VERIFIERS` can be sealed. Adding a kind there needs the
-verifier it names; the inventory, lineage-head anchors and the D10 legal
-assessment have none (AR2, AR6/AR8, D10), so no evidence of theirs can ever
-be sealed and the gates never trust it, whatever its label says.
+verifier it names; the lineage-head anchors and the D10 legal assessment have
+none (AR6/AR8, D10), so no evidence of theirs can ever be sealed and the gates
+never trust it, whatever its label says. AR2 added the owner-signed inventory
+and the batch plan, each with its verifier.
 
 The seal proves only that this process's verifier produced the record. It is
 no cryptographic proof to anyone else, and it does not make the evidence
@@ -55,6 +56,8 @@ VerifiedKind = Literal[
     "publication_limits",
     "release_control",
     "budget_ledger",
+    "document_inventory",
+    "batch_plan",
 ]
 #: Each kind that can be sealed and the verifier that seals it.
 VERIFIERS: Final[dict[VerifiedKind, str]] = {
@@ -65,6 +68,8 @@ VERIFIERS: Final[dict[VerifiedKind, str]] = {
     "publication_limits": "lovspor.forarbeider.release_limits.verify_limits",
     "release_control": "lovspor.forarbeider.release_control.verify_control",
     "budget_ledger": "lovspor.forarbeider.release_ledger.verify_ledger",
+    "document_inventory": "lovspor.forarbeider.release_inventory.verify_inventory",
+    "batch_plan": "lovspor.forarbeider.release_plan.plan_release",
 }
 _KEY: Final = secrets.token_bytes(32)
 

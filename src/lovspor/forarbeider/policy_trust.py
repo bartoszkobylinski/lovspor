@@ -10,8 +10,10 @@ crosswalk approval uses (``ssh-keygen -Y``, #792, #840):
 
 - ``policy-signers`` (allowed_signers): every entry names one role by its
   namespaces, either the owner's key (any of ``lovspor-forarbeider-policy``,
-  ``lovspor-forarbeider-limits`` and ``lovspor-forarbeider-control``; AR1b
-  added the last two for signed limits and stop/resume records) or the bot's
+  ``lovspor-forarbeider-limits``, ``lovspor-forarbeider-control`` and
+  ``lovspor-forarbeider-inventory``; AR1b added the limits and control
+  namespaces for signed limits and stop/resume records, AR2 the inventory
+  namespace for the owner-signed document inventory) or the bot's
   execution key (``lovspor-forarbeider-release`` and/or
   ``lovspor-forarbeider-publication``), and carries a UTC validity window. A
   key holding both roles, a wildcard principal, an entry without a window, any
@@ -47,7 +49,10 @@ RELEASE_NAMESPACE = "lovspor-forarbeider-release"
 PUBLICATION_NAMESPACE = "lovspor-forarbeider-publication"
 LIMITS_NAMESPACE = "lovspor-forarbeider-limits"
 CONTROL_NAMESPACE = "lovspor-forarbeider-control"
-OWNER_NAMESPACES = frozenset({POLICY_NAMESPACE, LIMITS_NAMESPACE, CONTROL_NAMESPACE})
+INVENTORY_NAMESPACE = "lovspor-forarbeider-inventory"
+OWNER_NAMESPACES = frozenset(
+    {POLICY_NAMESPACE, LIMITS_NAMESPACE, CONTROL_NAMESPACE, INVENTORY_NAMESPACE}
+)
 BOT_NAMESPACES = frozenset({RELEASE_NAMESPACE, PUBLICATION_NAMESPACE})
 TRUST_DIRECTORY = Path(__file__).with_name("trust")
 SIGNERS_FILE = "policy-signers"

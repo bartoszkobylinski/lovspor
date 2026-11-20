@@ -4,7 +4,8 @@ Each kind of evidence the gates need comes from an independent source,
 declared here as a protocol that a later slice implements:
 
 - :class:`AnchorSource`: lineage-head anchors (AR6 attestation reader, AR8);
-- :class:`InventorySource`: the expected document inventory (AR2, FC11/D5);
+- :class:`InventorySource`: the owner-signed document inventory and its
+  revocations (AR2); FC11 catalogue pages have no verifier yet (D7);
 - :class:`LegalAssessmentSource`: D10 assessment evidence (after D10);
 - :class:`LimitsSource`: owner-signed limits and their revocations (AR1b);
 - :class:`ControlSource`: the owner-signed stop/resume chain (AR1b);
@@ -13,23 +14,31 @@ declared here as a protocol that a later slice implements:
 :class:`Unavailable` implements all of them and offers nothing: every piece is
 ``missing`` and the gates block.
 
-**Provenance boundary.** The AR1b sources (limits, control, ledger) hand over
-raw bytes and signatures, never evidence; :func:`collect_evidence` verifies
-them and only its verifiers seal the result
-(:mod:`lovspor.forarbeider.release_provenance`). The anchor, inventory and
+**Provenance boundary.** The AR1b and AR2 sources (limits, control, ledger,
+inventory) hand over raw bytes and signatures, never evidence;
+:func:`collect_evidence` verifies them and only its verifiers seal the result
+(:mod:`lovspor.forarbeider.release_provenance`). The anchor and
 legal-assessment sources still return evidence objects, which the engine
-cannot seal, so the gates never trust them. Before any of them can count, its
+cannot seal, so the gates never trust them. Before either can count, its
 slice must turn it into a raw-material source with an engine verifier that
-proves the source's authenticity: AR2 (inventory, from FC11 discovery or an
-owner-signed inventory), AR6/AR8 (lineage-head anchors from bot-signed
-publication attestations) and D10 (a verifiable binding of the assessment).
+proves the source's authenticity: AR6/AR8 (lineage-head anchors from
+bot-signed publication attestations) and D10 (a verifiable binding of the
+assessment).
+
+**Scope and batch (AR2).** ``offers`` covers the whole planning scope: every
+document the caller offers for the inventory. The manifest is one batch of
+it. The FC8b reproduction is checked over the manifest's own documents; the
+planner (:func:`~lovspor.forarbeider.release_plan.plan_release`) rebuilds the
+plan over all of them, so the gates can tell whether the manifest is exactly
+one planned batch and count its size from the artifacts.
 
 **One trust root.** :func:`resolve_trust_root` resolves the root once: the
 request's, or the engine's pinned root when the request names none. That one
 object reaches the signer registry, the publisher, every FC7b
 re-verification, the FC8b reproduction and the limits and control verifiers.
 A stored FC7b verdict made under another root refuses the whole request
-(``trust root conflict``); nothing falls back silently.
+(``trust root conflict``); nothing falls back silently. The inventory verifier
+and the planner get the same root.
 
 :func:`collect_evidence` is the impure step: it verifies signatures and
 rebuilds the manifest. The pure gates of
@@ -71,8 +80,14 @@ from lovspor.forarbeider.release_contract_models import (
     SignerRegistry,
 )
 from lovspor.forarbeider.release_control import ControlRequest, verify_control
+from lovspor.forarbeider.release_inventory import (
+    InventoryMaterial,
+    InventoryRequest,
+    verify_inventory,
+)
 from lovspor.forarbeider.release_ledger import LedgerRequest, verify_ledger
 from lovspor.forarbeider.release_limits import LimitsMaterial, LimitsRequest, verify_limits
+from lovspor.forarbeider.release_plan import PlanRequest, plan_release
 from lovspor.forarbeider.release_provenance import issue_provenance
 from lovspor.forarbeider.version_release import DocumentOffer, parse_release, verify_release
 from lovspor.forarbeider.version_release_models import PolicyReference, ReleaseManifest
@@ -83,7 +98,7 @@ class AnchorSource(Protocol):
 
 
 class InventorySource(Protocol):
-    def inventory(self) -> InventoryEvidence: ...
+    def inventory(self) -> InventoryMaterial: ...
 
 
 class LegalAssessmentSource(Protocol):
@@ -114,14 +129,8 @@ class Unavailable:
             reasons=("anchor_source_not_implemented",),
         )
 
-    def inventory(self) -> InventoryEvidence:
-        return InventoryEvidence(
-            status="missing",
-            source=None,
-            inventory=None,
-            inventory_sha256=None,
-            reasons=("inventory_source_not_implemented",),
-        )
+    def inventory(self) -> InventoryMaterial:
+        return InventoryMaterial()
 
     def assessment(self) -> LegalAssessmentEvidence:
         return LegalAssessmentEvidence(
@@ -190,18 +199,36 @@ def collect_evidence(request: ReleaseRequest, sources: ReleaseSources) -> Releas
     root = resolve_trust_root(request.root)
     _one_root(manifest, request.artifacts, root)
     ids = [item.document_id for item in manifest.content.documents]
+    controls = _controls(request, sources, manifest, root)
+    inventory = _inventory(request, sources, manifest, root)
+    scope = PlanRequest(inventory, controls.limits, request.offers, request.artifacts)
     return ReleaseEvidence(
         intent=request.intent,
         manifest=manifest,
-        reproduction=reproduction_of(request, root),
-        inventory=sources.inventory.inventory(),
+        reproduction=reproduction_of(_batch_only(request, ids), root),
+        inventory=inventory,
+        plan=plan_release(scope, root),
         anchors=tuple(sources.anchors.anchor(document) for document in ids),
         registry=registry_of(root),
         publisher=publisher_of(root, request.intent.publisher_principal),
         approvals=approvals_of(request.offers, root),
         legal=sources.legal.assessment(),
-        **_controls(request, sources, manifest, root)._asdict(),
+        **controls._asdict(),
     )
+
+
+def _batch_only(request: ReleaseRequest, ids: list[str]) -> ReleaseRequest:
+    """The request with only the offers of the manifest's own documents."""
+    wanted = set(ids)
+    return request._replace(offers=tuple(o for o in request.offers if o.document_id in wanted))
+
+
+def _inventory(
+    request: ReleaseRequest, sources: ReleaseSources, manifest: ReleaseManifest, root: TrustRoot
+) -> InventoryEvidence:
+    policy = _policy_bytes(_single_policy(manifest), request.offers)
+    material = InventoryRequest(policy, sources.inventory.inventory(), request.checked_at)
+    return verify_inventory(material, root)
 
 
 def _one_root(manifest: ReleaseManifest, artifacts: Mapping[str, bytes], root: TrustRoot) -> None:

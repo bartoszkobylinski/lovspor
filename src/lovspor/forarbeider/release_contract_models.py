@@ -22,9 +22,11 @@ of the engine verifier that produced it
 (:mod:`lovspor.forarbeider.release_provenance`). ``api_request`` is never
 accepted: a head, an inventory or an approval is not trusted because a caller
 sent it, and a record built by hand with ``status="verified"`` has no seal.
-The inventory, lineage-head anchors and the D10 legal assessment have no
-verifier, so their evidence is never trusted whatever it claims (AR2,
-AR6/AR8, D10 must each prove source authenticity before they can be).
+The lineage-head anchors and the D10 legal assessment have no verifier, so
+their evidence is never trusted whatever it claims (AR6/AR8 and D10 must each
+prove source authenticity before they can be). A kind may have several
+boundaries, one per source: the document inventory is verified only when the
+owner signed it (AR2); an official catalogue (FC11, D7) has no verifier yet.
 
 **AR1b** adds the owner-signed limits (:mod:`release_limits_models`), the
 budget ledger (:mod:`release_ledger_models`) and the owner-signed stop/resume
@@ -33,6 +35,13 @@ chain (:mod:`release_control_models`), each with its verifier and the
 chains: neither proves append-only storage, completeness or concurrency
 safety, so both stay ``unanchored`` and their gates fail until AR5 provides
 :data:`LEDGER_REQUIREMENTS` and an external anchor for the control head.
+
+**AR2** adds the owner-signed document inventory
+(:mod:`release_inventory_models`) and the batch plan
+(:mod:`release_plan_models`), each with its verifier. A release is one batch
+of a plan: the inventory gate accounts for every expected document through
+the plan, and the constraints gate counts the batch the planner computed
+from the artifacts, never the caller's numbers.
 
 **Owner decisions.** D10 cannot be recorded as accepted
 (``independently_accepted`` is ``Literal[False]``) and D11 governance is the
@@ -49,6 +58,7 @@ from lovspor.forarbeider.identity import DocumentType
 from lovspor.forarbeider.policy_authorization_models import CheckStatus, Governance
 from lovspor.forarbeider.policy_trust import Origin, Role
 from lovspor.forarbeider.release_limits_models import ReleaseConstraints
+from lovspor.forarbeider.release_plan_models import ReleasePlan
 from lovspor.forarbeider.release_provenance import VERIFIERS, Provenance, authentic
 from lovspor.forarbeider.version_models import Digest, Frozen, NonBlank
 from lovspor.forarbeider.version_release_models import (
@@ -135,6 +145,7 @@ SourceKind = Literal[
     "owner_signed_control",
     "runner_budget_ledger",
     "engine_release_verifier",
+    "engine_release_planner",
 ]
 EvidenceKind = Literal[
     "lineage_head_anchor",
@@ -147,6 +158,7 @@ EvidenceKind = Literal[
     "publication_limits",
     "release_control",
     "budget_ledger",
+    "batch_plan",
 ]
 EvidenceStatus = Literal["missing", "invalid", "verified"]
 
@@ -169,9 +181,21 @@ TRUST_BOUNDARIES: Final = (
     ),
     TrustBoundary(
         evidence="document_inventory",
-        accepted_sources=("owner_signed_inventory", "official_catalogue"),
+        accepted_sources=("owner_signed_inventory",),
+        verifier="lovspor.forarbeider.release_inventory.verify_inventory",
+        implemented_by="AR2; owner key by owner-merged change (D6)",
+    ),
+    TrustBoundary(
+        evidence="document_inventory",
+        accepted_sources=("official_catalogue",),
         verifier="not_implemented",
-        implemented_by="AR2 with FC11 discovery (D5)",
+        implemented_by="FC11 discovery after D7, with a catalogue authenticity verifier",
+    ),
+    TrustBoundary(
+        evidence="batch_plan",
+        accepted_sources=("engine_release_planner",),
+        verifier="lovspor.forarbeider.release_plan.plan_release",
+        implemented_by="AR2",
     ),
     TrustBoundary(
         evidence="signer_registry",
@@ -236,9 +260,13 @@ def trusted(kind: EvidenceKind, status: EvidenceStatus, source: SourceKind | Non
 
     A label is a claim; :func:`verified` also demands the verifier's seal.
     """
-    boundary = next(item for item in TRUST_BOUNDARIES if item.evidence == kind)
-    return (
-        status == "verified" and source in boundary.accepted_sources and source in VERIFIED_SOURCES
+    if status != "verified" or source not in VERIFIED_SOURCES:
+        return False
+    return any(
+        item.evidence == kind
+        and source in item.accepted_sources
+        and item.verifier != "not_implemented"
+        for item in TRUST_BOUNDARIES
     )
 
 
@@ -285,13 +313,38 @@ class DocumentInventory(Frozen):
 
 
 class InventoryEvidence(_Evidence):
+    """The expected documents as verified: the inventory, its policy, version and signer."""
+
     inventory: DocumentInventory | None
     inventory_sha256: Digest | None
+    inventory_version: int | None = Field(default=None, ge=1)
+    policy: PolicyReference | None = None
+    discovery_sha256s: tuple[Digest, ...] = ()
+    trust_root_sha256: Digest | None = None
+    signer_fingerprint: NonBlank | None = None
+    signer_role: Role | None = None
 
     @model_validator(mode="after")
     def _complete(self) -> Self:
         self._require(self.inventory)
         return self
+
+
+class PlanEvidence(_Evidence):
+    """The batch plan as the engine's planner computed it from verified evidence."""
+
+    plan: ReleasePlan | None = None
+    plan_sha256: Digest | None = None
+    trust_root_sha256: Digest | None = None
+
+    @model_validator(mode="after")
+    def _complete(self) -> Self:
+        self._require(self.plan)
+        self._require(self.plan_sha256)
+        return self
+
+
+NO_PLAN: Final = PlanEvidence(status="missing", source=None, reasons=("plan_not_collected",))
 
 
 class HeadAnchor(Frozen):
@@ -501,6 +554,7 @@ class ReleaseEvidence(Frozen):
     manifest: ReleaseManifest
     reproduction: ReproductionEvidence
     inventory: InventoryEvidence
+    plan: PlanEvidence = NO_PLAN
     anchors: tuple[AnchorEvidence, ...]
     registry: SignerRegistry
     publisher: PublisherIdentity
@@ -548,12 +602,17 @@ REFUSING_CODES: Final = frozenset(
         "approval_conflict",
         "approval_for_unknown_policy",
         "approval_signed_by_bot",
+        "batch_not_in_plan",
+        "batch_selection_mismatch",
         "batch_size_contradicts_intent",
+        "batch_size_contradicts_plan",
         "document_outside_inventory",
         "head_ahead_of_anchor",
         "intent_bindings_mismatch",
         "intent_documents_mismatch",
         "intent_release_mismatch",
+        "plan_inventory_mismatch",
+        "plan_limits_mismatch",
         "publisher_mismatch",
         "publisher_self_approval",
         "release_already_settled",
