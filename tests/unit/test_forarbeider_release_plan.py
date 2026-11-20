@@ -257,6 +257,20 @@ def test_an_unverifiable_revocation_fails_closed(root: TrustRoot, keys: Keys) ->
     assert "revocation_not_verified" in reasons(found)
 
 
+def test_a_revoked_inventory_does_not_hide_an_invalid_successor(
+    root: TrustRoot, keys: Keys
+) -> None:
+    first = owner_inventory(keys, 1)
+    successor = owner_inventory(keys, 2, inventory_id="synthetic-inventory-2")
+    forged = SignedRecord(successor.record + b" ", successor.signature)
+    withdrawn = signed_by(revocation("synthetic-inventory-1"), keys.owner, POLICY_NAMESPACE)
+
+    found = inventory_of(root, first, forged, revocations=(withdrawn,))
+
+    assert found.status == "invalid"
+    assert found.inventory is None
+
+
 def malformed(record: dict[str, Any], root: TrustRoot, keys: Keys) -> InventoryEvidence:
     data = (json.dumps(record, **JSON_LAYOUT) + "\n").encode()
     found = inventory_of(root, SignedRecord(data, sign(keys.owner, data, INVENTORY_NAMESPACE)))
@@ -395,6 +409,22 @@ def test_an_altered_artifact_excludes_its_document() -> None:
     assert by_id[document(1)].disposition == "excluded"
     assert "artifact_altered" in by_id[document(1)].reasons
     assert by_id[document(2)].disposition == "planned"
+
+
+def test_missing_and_altered_artifacts_are_both_reported() -> None:
+    store = Store()
+    first = row(store, 1)
+    missing = first.binding.manifest_sha256
+    altered = first.selection.source_sha256s[0]
+    assert missing is not None and missing != altered
+    del store.artifacts[missing]
+    store.artifacts[altered] += b"tampered"
+
+    plan = build_plan(context((1,), [first]), [first], store.artifacts)
+
+    assert plan.documents[0].disposition == "excluded"
+    assert set(plan.documents[0].reasons) == {"artifact_missing", "artifact_altered"}
+    assert plan.batches == ()
 
 
 def test_a_missing_artifact_excludes_its_document() -> None:
