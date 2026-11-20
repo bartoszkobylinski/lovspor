@@ -19,7 +19,7 @@ import pytest
 
 import lovspor
 from lovspor import git_publish
-from lovspor.forarbeider import publication_attempts, publication_path_b
+from lovspor.forarbeider import publication_attempts, publication_path_a, publication_path_b
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.policy_trust import RELEASE_NAMESPACE, SignedBytes, check_signature
 from lovspor.forarbeider.publication_authorize import (
@@ -387,6 +387,41 @@ def test_a_duplicate_retry_never_publishes_twice(rig_a: Rig) -> None:
     assert states(rig_a) == ["prepared_to_send", "published"]
 
 
+def test_prepared_record_exists_before_graphql_post(
+    rig_a: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = stub(rig_a)
+    original = github.post
+
+    def post(payload: dict[str, Any]) -> Any:
+        assert states(rig_a) == ["prepared_to_send"]
+        return original(payload)
+
+    monkeypatch.setattr(github, "post", post)
+    assert execute(rig_a.request(), simulation_a(rig_a, github)).status == "published"
+    assert states(rig_a) == ["prepared_to_send", "published"]
+
+
+@pytest.mark.parametrize(
+    "answer,head",
+    [
+        (
+            {
+                "errors": [
+                    {"type": "STALE_DATA", "message": "Expected branch to point to base"},
+                    {"type": "INTERNAL", "message": "unknown error"},
+                ]
+            },
+            None,
+        ),
+        ({"data": {"createCommitOnBranch": {"commit": {"oid": "a" * 40}}}}, "b" * 40),
+        ({"data": {"createCommitOnBranch": {"commit": {"oid": "a" * 40}}}}, None),
+    ],
+)
+def test_ambiguous_graphql_answer_or_head_is_unknown(answer: object, head: str | None) -> None:
+    assert publication_path_a.judged(answer, head).status == "outcome_unknown"
+
+
 def test_a_head_mismatch_at_send_publishes_nothing(rig_a: Rig) -> None:
     github = stub(rig_a)
     github.reported_head = rig_a.base
@@ -496,6 +531,17 @@ def test_a_canonically_rewritten_earlier_attempt_breaks_the_chain(rig_a: Rig) ->
     first.write_text(canonical_text(record.model_copy(update={"state": "refused"})))
 
     with pytest.raises(ForarbeiderRefusedError):
+        execute(rig_a.request(), simulation_a(rig_a, github))
+    assert len(github.calls) == 1
+
+
+def test_a_missing_earlier_attempt_refuses_retry(rig_a: Rig) -> None:
+    github = stub(rig_a)
+    assert execute(rig_a.request(), simulation_a(rig_a, github)).status == "published"
+    folder = rig_a.workspace / rig_a.transaction.transaction_id
+    (folder / "000001.json").unlink()
+
+    with pytest.raises(ForarbeiderRefusedError, match="attempts"):
         execute(rig_a.request(), simulation_a(rig_a, github))
     assert len(github.calls) == 1
 
