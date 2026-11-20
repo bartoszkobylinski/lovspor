@@ -380,12 +380,21 @@ def test_verify_refuses_a_missing_tag(repo: Path, tmp_path: Path) -> None:
 
 
 @requires_ssh_keygen
-def test_a_signers_file_with_only_comments_holds_no_key(repo: Path, signer: Signer) -> None:
+def test_a_signers_file_with_only_comments_holds_no_key(
+    repo: Path, signer: Signer, tmp_path: Path
+) -> None:
     _seal_head(repo, signer)
+    # The shipped file's comment header alone (its key lines dropped) is not a key.
     shipped = Path(__file__).resolve().parents[2] / "ops" / "publication-signers"
+    lines = shipped.read_text(encoding="utf-8").splitlines(keepends=True)
+    comments = tmp_path / "comments-only"
+    comments.write_text(
+        "".join(line for line in lines if not line.strip() or line.lstrip().startswith("#")),
+        encoding="utf-8",
+    )
 
     with pytest.raises(SealVerificationError, match="holds no key"):
-        verify_seal(repo, _head(repo), shipped, SEAL)
+        verify_seal(repo, _head(repo), comments, SEAL)
 
 
 def test_an_empty_or_missing_signers_file_is_refused(repo: Path, tmp_path: Path) -> None:
