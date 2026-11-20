@@ -534,6 +534,16 @@ class TestPerMutantTimeLimit:
 
         assert limit >= 4 * self.DEFAULT_LIMIT_SECONDS
 
+    def test_a_62_second_estimate_gets_a_368_second_wall_limit(self) -> None:
+        constant, multiplier = self._config()
+
+        assert (62.0 + constant) * multiplier == 368.0
+
+    def test_the_826_second_kill_would_now_time_out(self) -> None:
+        constant, multiplier = self._config()
+
+        assert (59.0 + constant) * multiplier < 826.0
+
 
 # `run` is faked (it would run a test suite); `results` and `show` are the
 # installed mutmut, reading the mutants the script itself generated.
