@@ -70,7 +70,9 @@ One mutmut 3.8.0 run, scoped to **functions**, not files:
   `timeout_constant = 7.0`, `timeout_multiplier = 15.0` (#423).
 - Per-mutant memory, nightly lane only: `scripts/ci/mutant_memory_guard.py` sends SIGXCPU to a
   mutant process holding 2048 MiB more than the process that forked it, so it is recorded as
-  a `timeout` (#971). The step log names each mutant it stopped; a test did not kill it.
+  a `timeout` (#971). The step log names each mutant it stopped, or gives its pid where
+  mutmut's process title is missing (#978), and reports every 15 min what the guard has
+  seen; a test did not kill it.
 
 ## The budget
 
