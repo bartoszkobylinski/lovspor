@@ -67,7 +67,8 @@ One mutmut 3.8.0 run, scoped to **functions**, not files:
   mutant. Kill in process: call the function, or the typer app through `CliRunner`.
   `tests/unit/test_mutation_child_process.py` pins that behaviour of mutmut 3.8.0.
 - Per-mutant time limit: `(estimated_time + timeout_constant) * timeout_multiplier`, with
-  `timeout_constant = 7.0`, `timeout_multiplier = 15.0` (#423).
+  `timeout_constant = 30.0`, `timeout_multiplier = 4.0` (#423 for the constant, #975 for the
+  multiplier: a mutant that never ends waits out the whole limit).
 - Per-mutant memory, nightly lane only: `scripts/ci/mutant_memory_guard.py` sends SIGXCPU to a
   mutant process holding 2048 MiB more than the process that forked it, so it is recorded as
   a `timeout` (#971). The step log names each mutant it stopped; a test did not kill it.

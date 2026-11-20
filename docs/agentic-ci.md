@@ -255,6 +255,22 @@ mutants, the stats pass and the clean-test pass over the whole unit suite, a cos
 and not of the diff — plus `MUTMUT_PR_FILE_BUDGET_SECONDS` (default 1200 s) × the number of
 changed files (issue #102), enforced with `timeout(1)`; it is not a per-file budget.
 
+Each mutant also has its own wall limit, mutmut's
+`(estimated_time + timeout_constant) * timeout_multiplier`; past it mutmut ends the mutant's
+test process and records a `timeout`. `estimated_time` is the summed `call` phase of the tests
+that reach the function. `pyproject.toml` sets `timeout_constant = 30.0` and
+`timeout_multiplier = 4.0`. The constant covers what the estimate leaves out: on PR #395 two
+real survivors (0.71 s call, 4.75 s setup and teardown) ran out of the default 25.7 s and
+were reported as timeouts (#423); they now get 122.8 s. The multiplier bounds a mutant that
+never ends, because such a mutant waits out the whole limit. Until 2026-11-20 the pair was 7
+and 15, which gave a function with a 62 s estimate 17 min: 20 timeouts were 17 % of all
+measured worker time, and the runner's memory reached 15.4 of 16 GiB under them (#975, #978).
+The same function now gets 368 s. The margin is measured: of 12 084 mutants with an estimate
+of 5 s or more that reached a verdict, 99.9 % took at most 3.01 times their estimate.
+Replayed over 26 198 measured results the new pair changes one, a kill after 826 s on a 59 s
+estimate, which would be a timeout. A timeout is never counted as a kill, so a limit that is
+too short shows in the report's timeout list and not as a better score.
+
 A changed function with a `function-lines` entry in `scripts/quality/ratchet-baseline.toml`
 is a large legacy function (issue #228, owner decision 2026-09-30): only the mutants on its
 changed post-image lines run, not the whole body. `mutation_scope.py --legacy-plan` lists such

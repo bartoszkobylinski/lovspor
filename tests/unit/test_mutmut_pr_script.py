@@ -503,7 +503,11 @@ class TestPerMutantTimeLimit:
     (mutmut 3.8.0 `workers/isolation.py:875`), and `estimated_time` sums only the
     pytest `call` phase. On PR #395 two real survivors ran out of the default
     limit: 0.71 s call phase, 4.75 s setup+teardown, 6.3 s wall locally,
-    limit (0.71 + 1) * 15 ≈ 25.7 s. The constant carries the setup time."""
+    limit (0.71 + 1) * 15 ≈ 25.7 s. The constant carries the setup time.
+
+    Issue #975 (owner decision 2026-11-20): a mutant that never ends waits out
+    the whole limit, 17 min at (62 + 7) * 15. The multiplier came down to 4 and
+    the constant went up to 30, which keeps the #423 margin."""
 
     PR_395_CALL_SECONDS = 0.71
     DEFAULT_LIMIT_SECONDS = (0.71 + 1.0) * 15.0
@@ -521,7 +525,7 @@ class TestPerMutantTimeLimit:
                 reset_config()
 
     def test_the_repo_pins_the_timeout_values(self) -> None:
-        assert self._config() == (7.0, 15.0)
+        assert self._config() == (30.0, 4.0)
 
     def test_the_pr_395_survivors_get_four_times_the_limit_they_ran_out_of(self) -> None:
         constant, multiplier = self._config()

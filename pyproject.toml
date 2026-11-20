@@ -265,12 +265,21 @@ do_not_mutate_patterns = [
 pytest_add_cli_args_test_selection = ["tests/unit/"]
 # Per-mutant wall limit = (estimated_time + timeout_constant) * timeout_multiplier,
 # and estimated_time sums only the pytest `call` phase, never setup/teardown.
-# On PR #395 two real survivors (0.71 s call, 4.75 s setup+teardown) ran out of
-# the default (0.71 + 1) * 15 = 25.7 s in CI and reported as timeouts. The
-# constant carries the setup time: (0.71 + 7) * 15 = 115.7 s, 4x the limit they
-# ran out of (#423, owner decision (c)).
-timeout_constant = 7.0
-timeout_multiplier = 15.0
+# Two measured cases set the pair.
+# The constant: on PR #395 two real survivors (0.71 s call, 4.75 s
+# setup+teardown) ran out of the default (0.71 + 1) * 15 = 25.7 s in CI and
+# reported as timeouts. The constant carries the setup time and gives them 4x
+# the limit they ran out of (#423, owner decision (c)): (0.71 + 30) * 4 = 122.8 s.
+# The multiplier: a mutant that never ends waits out the whole limit, and on
+# the hosted runner nothing else stops it. With 7 and 15 a function whose tests
+# take 62 s got 17 min; 20 such timeouts were 17 % of all measured worker time
+# and the runner's memory reached 15.4 of 16 GiB (#975, #978). Of 12 084
+# mutants with an estimate of 5 s or more that reached a verdict, 99.9 % took at
+# most 3.01x their estimate, so 4 (owner decision 2026-11-20): (62 + 30) * 4 =
+# 368 s. Replayed over 26 198 measured results the pair changes one, a kill
+# after 826 s on a 59 s estimate, which would be a timeout.
+timeout_constant = 30.0
+timeout_multiplier = 4.0
 also_copy = [
     ".github/",
     "benchmarks/",
