@@ -808,7 +808,7 @@ def test_even_a_verified_resume_leaves_the_stop_gate_failed(root: TrustRoot, key
 
 def test_a_kind_without_a_verifier_cannot_be_sealed() -> None:
     with pytest.raises(ValueError, match="no verifier"):
-        issue_provenance(baseline().inventory, "document_inventory")
+        issue_provenance(baseline().legal, "legal_assessment")
 
 
 def test_a_copied_seal_does_not_vouch_for_other_evidence(root: TrustRoot, keys: Keys) -> None:
@@ -865,7 +865,7 @@ def test_hand_made_registry_publisher_approval_and_reproduction_are_unverified()
 
 def test_only_engine_verifiers_import_the_seal() -> None:
     allowed = {"release_provenance", "release_limits", "release_control", "release_ledger"}
-    allowed |= {"release_sources"}
+    allowed |= {"release_sources", "release_inventory", "release_plan"}
     importers = set()
     for path in Path("src/lovspor").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))

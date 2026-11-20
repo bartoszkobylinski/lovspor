@@ -30,7 +30,7 @@ from tests.unit.test_forarbeider_release_gates import (
 def test_only_implemented_independent_verifiers_are_trusted(
     status: EvidenceStatus, source: SourceKind | None
 ) -> None:
-    # AR1b documents exactly these implemented verifiers; even another kind's
+    # AR1b and AR2 document exactly these implemented verifiers; even another kind's
     # implemented source must not cross a trust boundary.
     implemented = {
         ("signer_registry", "engine_trust_root"),
@@ -40,6 +40,8 @@ def test_only_implemented_independent_verifiers_are_trusted(
         ("publication_limits", "owner_signed_policy_limits"),
         ("release_control", "owner_signed_control"),
         ("budget_ledger", "runner_budget_ledger"),
+        ("document_inventory", "owner_signed_inventory"),
+        ("batch_plan", "engine_release_planner"),
     }
     for boundary in TRUST_BOUNDARIES:
         assert trusted(boundary.evidence, status, source) == (
@@ -67,7 +69,8 @@ def test_daily_budget_accepts_equality_and_rejects_one_over(resource: str, exces
         limits=limits_evidence(constraints=limits),
         ledger=ledger_evidence(committed=used),
     )
-    expected = {"budget_ledger_not_anchored"}
+    # The baseline has no plan, so its stated batch size is unverified (AR2).
+    expected = {"budget_ledger_not_anchored", "batch_size_unverified"}
     if excess:
         expected.add(f"budget_{resource}_exceeded")
     assert codes(verdict, "constraints") == expected

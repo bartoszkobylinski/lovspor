@@ -19,15 +19,24 @@ never serialized (``seal`` is excluded from every dump), so:
   signature (AR6), not this seal.
 
 Only kinds in :data:`VERIFIERS` can be sealed. Adding a kind there needs the
-verifier it names; the inventory, lineage-head anchors and the D10 legal
-assessment have none (AR2, AR6/AR8, D10), so no evidence of theirs can ever
-be sealed and the gates never trust it, whatever its label says.
+verifier it names; the lineage-head anchors and the D10 legal assessment have
+none (AR6/AR8, D10), so no evidence of theirs can ever be sealed and the gates
+never trust it, whatever its label says. AR2 added the owner-signed inventory
+and the batch plan, each with its verifier.
 
 The seal proves only that this process's verifier produced the record. It is
 no cryptographic proof to anyone else, and it does not make the evidence
-sufficient: the gates still apply every other check. The AST test in
-``test_forarbeider_release_controls.py`` limits which modules may import
-:func:`issue_provenance`.
+sufficient: the gates still apply every other check.
+
+**Trust assumption.** The seal is not a runtime authorization boundary.
+:func:`issue_provenance` is an ordinary function: any code running in this
+process can import it and seal a record it built, without knowing the key.
+The AST test in ``test_forarbeider_release_controls.py`` limits which modules
+in this repository import it, which is a review aid and not runtime security.
+The model therefore assumes that every piece of code in the process is
+trusted: no untrusted code, plugin or API input may run in, or call into, the
+process that seals and judges evidence (architecture §9.9, a requirement for
+AR4 to AR8). Persisted or externally verified evidence needs signatures (AR6).
 """
 
 import hmac
@@ -47,6 +56,8 @@ VerifiedKind = Literal[
     "publication_limits",
     "release_control",
     "budget_ledger",
+    "document_inventory",
+    "batch_plan",
 ]
 #: Each kind that can be sealed and the verifier that seals it.
 VERIFIERS: Final[dict[VerifiedKind, str]] = {
@@ -57,6 +68,8 @@ VERIFIERS: Final[dict[VerifiedKind, str]] = {
     "publication_limits": "lovspor.forarbeider.release_limits.verify_limits",
     "release_control": "lovspor.forarbeider.release_control.verify_control",
     "budget_ledger": "lovspor.forarbeider.release_ledger.verify_ledger",
+    "document_inventory": "lovspor.forarbeider.release_inventory.verify_inventory",
+    "batch_plan": "lovspor.forarbeider.release_plan.plan_release",
 }
 _KEY: Final = secrets.token_bytes(32)
 

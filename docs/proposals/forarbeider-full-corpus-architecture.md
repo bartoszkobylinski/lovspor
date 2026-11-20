@@ -760,6 +760,27 @@ The owner role may now hold the policy, limits and control namespaces; a bot key
   - reconciliation against the published history.
 - **Control chain.** Whoever holds the chain can withhold its newest stop. AR5 must anchor the chain's head outside the runner.
 
+The provenance seal is narrower than it looks, too. It assumes that all code running in the engine process is trusted:
+- **`issue_provenance()` is an ordinary callable, not a runtime authorization boundary.** Any code in the same process can import it and seal a record it built itself, without knowing the HMAC key.
+- **The AST import test is a review aid, not runtime security.** It limits which modules in this repository import the function today. It cannot stop code loaded at runtime.
+- **Untrusted code must never reach the sealing capability.** Before AR4–AR8 integrate the gates into a production path, that path must guarantee that no untrusted code, plugin, extension or API input runs in, or can call into, the process that seals and judges evidence. Caller input reaches the engine only as raw material that a verifier checks, never as evidence.
+- **An in-process HMAC seal is not auditable proof.** It shows only that this process's verifier produced the record. It proves nothing to an auditor, another process or a later run, and it is lost on serialization by design.
+- **Persisted or externally verified evidence needs real signatures (AR6).** It must carry a signature that can be checked against the trust root, never a seal.
+
+**AR2 status.** AR2 adds the expected-document inventory and the batch planner:
+- **Owner-signed inventory** in the namespace `lovspor-forarbeider-inventory`. It binds the exact policy and scope, an inventory id and version, a validity window, the digests of the discovery evidence the owner reviewed, and every expected document with its stable upstream id, type and discovery URL. It attests `completeness: complete`. Two valid inventories conflict, and the owner replaces one by revoking it.
+- **No inventory from a catalogue yet.** FC11 discovery has no verifier of a catalogue's authenticity, and D7 is open. Catalogue pages alone therefore stay `missing` (`catalogue_verifier_not_implemented`) and never become an inventory.
+- **Deterministic planner.** FC8b rebuilds each offered document's selection, so only the newest verified version is used and a blocked head is never replaced. Every inventory document, and every document offered outside it, gets one visible disposition: `planned`, `blocked`, `excluded`, `missing` or `outside_inventory`.
+- **Sizes counted from artifacts.** Each document's file count and byte size are computed from its bound artifact bytes. An artifact that is missing, or does not hash to its key, excludes the document. Planned documents are split, in id order, into the fewest batches that keep both the hard caps and the signed batch limits. A document larger than any batch is blocked.
+- **Stable, binding identifiers.** Plan and batch ids are digests of the inventory, policy, limits, selection and artifacts, so any change makes a stored plan `stale`.
+- **What the planner leaves to the gates.** It plans a document only when its sole blockers are the release-wide ones that FC8b gives every document today: the unanchored head, D10 and D11. The plan names those blockers, and the AR1 gates still fail on them. Any other blocker, such as FC7, FC7b, completeness, privacy or a foreign policy, keeps the document out of every batch.
+- **Gate integration.** The inventory gate requires a sealed plan bound to the sealed inventory and the signed limits, of which the manifest is exactly one batch, selection by selection and binding by binding. Two observations can share a selection and a version yet rest on different FC6, FC5, FC7 or FC7b records or lineage heads, so each planned document names both digests, and a batch document whose binding differs refuses the release (`batch_artifact_binding_mismatch`). A document the plan did not plan blocks the release (`document_not_planned`). Planned documents grouped differently from the plan's batches refuse it (`batch_not_in_plan`). The constraints gate checks caps and budgets against the planner's count. The caller's batch size is only compared with that count; without a plan it is `batch_size_unverified`.
+
+Limitations:
+- Sizes use the bound private artifacts (`size_basis: bound_artifacts`). AR4 must recount them from the rendered publication bytes it proposes.
+- Daily budgets are checked when a batch is reserved, by the ledger and the constraints gate, not when it is planned.
+- Today no real document is plannable: publication completeness is never reached, so every selection carries a per-document blocker.
+
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
 **Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).

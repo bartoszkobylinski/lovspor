@@ -766,7 +766,8 @@ def test_a_batch_size_contradicting_the_intent_is_refused() -> None:
 def test_unavailable_sources_report_missing_never_verified() -> None:
     sources = Unavailable()
     assert sources.anchor(FIRST).status == "missing"
-    assert sources.inventory().status == "missing"
+    assert sources.inventory().records == ()
+    assert sources.inventory().catalogue == ()
     assert sources.assessment().status == "missing"
     assert sources.limits().records == ()
     assert sources.history() == ()

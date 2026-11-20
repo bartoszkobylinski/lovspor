@@ -12,8 +12,15 @@ seal of the engine verifier that produced it. A record a caller built with
 ``status="verified"`` fails its gate as ``<kind>_source_untrusted``, and a
 hand-made registry, publisher, approval or reproduction as ``*_unverified``.
 
-- ``inventory``: a verified expected inventory from a trusted source, equal to
-  the manifest's documents;
+- ``inventory``: a verified expected inventory from a trusted source, and a
+  verified plan (AR2) bound to it and to the signed limits, of which this
+  manifest is exactly one batch, selection by selection and binding by
+  binding (the very lineage head and FC6, FC5, FC7 and FC7b records the plan
+  was built on); every other expected document accounted for by the plan,
+  none without evidence. A document the plan did not plan blocks
+  (``document_not_planned``); planned documents grouped otherwise than in a
+  batch refuse (``batch_not_in_plan``). Without a verified plan the manifest must
+  equal the inventory;
 - ``lineage_anchor``: every document's FC8a head attested by a trusted anchor
   and equal to it; the lineage verified;
 - ``manifest_reproduced``: the FC8b verifier reproduced exactly this manifest,
@@ -34,7 +41,9 @@ hand-made registry, publisher, approval or reproduction as ``*_unverified``.
   approval;
 - ``constraints``: verified signed limits for the policy and a verified,
   anchored ledger (AR5); the release not already spent; batch caps and
-  budgets including every open reservation;
+  budgets including every open reservation, over the batch size the planner
+  counted from the artifacts. The caller's stated size is only compared with
+  it; without a verified plan it is ``batch_size_unverified``;
 - ``execution_controls``: the controls AR4 to AR7 build, none of which exists.
 
 ``execution_controls``, ``legal_assessment``, ``automated_publication``,
@@ -63,6 +72,7 @@ from lovspor.forarbeider.release_contract_models import (
     GateId,
     GateReason,
     GateResult,
+    InventoryEvidence,
     LedgerEvidence,
     ReleaseEvidence,
     ReleaseExecution,
@@ -76,6 +86,7 @@ from lovspor.forarbeider.release_limits_models import (
     MAX_BATCH_FILES,
     ReleaseConstraints,
 )
+from lovspor.forarbeider.release_plan_models import PlannedBatch, ReleasePlan
 from lovspor.forarbeider.release_provenance import authentic
 from lovspor.forarbeider.version_models import canonical_text
 from lovspor.forarbeider.version_release_models import (
@@ -156,13 +167,70 @@ def _inventory(evidence: ReleaseEvidence) -> Reasons:
     found = evidence.inventory
     for code in _evidence("inventory", "document_inventory", found):
         yield GateReason(code=code)
+    yield from (GateReason(code=c) for c in _evidence("plan", "batch_plan", evidence.plan))
     if found.inventory is None:
         return
     expected, present = set(found.inventory.document_ids), set(_ids(evidence))
-    for document in sorted(expected - present):
-        yield GateReason(code="inventory_document_missing", document_id=document)
     for document in sorted(present - expected):
         yield GateReason(code="document_outside_inventory", document_id=document)
+    plan = _plan(evidence)
+    if plan is None:
+        for document in sorted(expected - present):
+            yield GateReason(code="inventory_document_missing", document_id=document)
+        return
+    yield from _in_plan(evidence, found, plan)
+
+
+def _plan(evidence: ReleaseEvidence) -> ReleasePlan | None:
+    """The plan, only when the engine's planner sealed it."""
+    return evidence.plan.plan if verified("batch_plan", evidence.plan) else None
+
+
+def _batch_of(evidence: ReleaseEvidence) -> PlannedBatch | None:
+    """The batch of the verified plan that holds exactly this manifest's documents."""
+    plan, ids = _plan(evidence), _ids(evidence)
+    if plan is None:
+        return None
+    return next((batch for batch in plan.batches if batch.document_ids == ids), None)
+
+
+def _in_plan(evidence: ReleaseEvidence, found: InventoryEvidence, plan: ReleasePlan) -> Reasons:
+    if plan.basis.inventory_sha256 != found.inventory_sha256:
+        yield GateReason(code="plan_inventory_mismatch")
+    if plan.basis.limits_sha256 != evidence.limits.limits_sha256:
+        yield GateReason(code="plan_limits_mismatch")
+    for item in plan.documents:
+        if item.disposition == "missing":
+            yield GateReason(code="inventory_document_missing", document_id=item.document_id)
+    if _batch_of(evidence) is None:
+        yield from _unplanned(evidence, plan)
+        return
+    yield from _exact(evidence, plan)
+
+
+def _exact(evidence: ReleaseEvidence, plan: ReleasePlan) -> Reasons:
+    """Each batch document's selection and binding are exactly the ones the plan was built on."""
+    planned = {item.document_id: item for item in plan.documents}
+    manifest = evidence.manifest
+    for selection, binding in zip(manifest.content.documents, manifest.bindings, strict=True):
+        document = planned.get(selection.document_id)
+        if document is None or document.selection_sha256 != digest_of(selection):
+            yield GateReason(code="batch_selection_mismatch", document_id=selection.document_id)
+        if document is None or document.binding_sha256 != digest_of(binding):
+            yield GateReason(
+                code="batch_artifact_binding_mismatch", document_id=binding.document_id
+            )
+
+
+def _unplanned(evidence: ReleaseEvidence, plan: ReleasePlan) -> Reasons:
+    """A document the plan did not plan blocks; planned ones regrouped refuse."""
+    disposition = {item.document_id: item.disposition for item in plan.documents}
+    ids = _ids(evidence)
+    for document in ids:
+        if disposition.get(document) != "planned":
+            yield GateReason(code="document_not_planned", document_id=document)
+    if all(disposition.get(document) == "planned" for document in ids):
+        yield GateReason(code="batch_not_in_plan")
 
 
 def _anchors(evidence: ReleaseEvidence) -> dict[str, AnchorEvidence]:
@@ -256,8 +324,7 @@ def _authorization(evidence: ReleaseEvidence) -> Reasons:
         yield GateReason(code="trust_root_not_engine_pinned")
     if registry.owner_keys == 0:
         yield GateReason(code="trust_root_has_no_owner_key")
-    roots = {evidence.limits.trust_root_sha256, evidence.control.trust_root_sha256} - {None}
-    if roots - {registry.trust_root_sha256}:
+    if _roots(evidence) - {registry.trust_root_sha256}:
         yield GateReason(code="trust_root_conflict")
     yield from _carried(
         evidence,
@@ -265,6 +332,17 @@ def _authorization(evidence: ReleaseEvidence) -> Reasons:
             _of(s, "authorization") + [c for c in _of(s, "integrity") if c.startswith("fc7b_")]
         ),
     )
+
+
+def _roots(evidence: ReleaseEvidence) -> set[str]:
+    """The trust roots every root-bound piece of evidence names."""
+    named = (
+        evidence.limits.trust_root_sha256,
+        evidence.control.trust_root_sha256,
+        evidence.inventory.trust_root_sha256,
+        evidence.plan.trust_root_sha256,
+    )
+    return {root for root in named if root is not None}
 
 
 def _privacy_rights(evidence: ReleaseEvidence) -> Reasons:
@@ -372,21 +450,31 @@ def _stop_control(evidence: ReleaseEvidence) -> Reasons:
 
 
 def _constraints(evidence: ReleaseEvidence) -> Reasons:
-    limits, ledger, batch = evidence.limits, evidence.ledger, evidence.intent.batch
-    found = list(_evidence("limits", "publication_limits", limits))
+    limits, ledger = evidence.limits, evidence.ledger
+    batch, found = _batch_size(evidence)
+    found += _evidence("limits", "publication_limits", limits)
     found += _evidence("budget_ledger", "budget_ledger", ledger)
     found.append("budget_ledger_not_anchored")
     if limits.policy is not None and limits.policy.policy_sha256 not in _policies(evidence):
         found.append("limits_policy_mismatch")
-    if batch.documents != len(evidence.intent.document_ids):
+    if evidence.intent.batch.documents != len(evidence.intent.document_ids):
         found.append("batch_size_contradicts_intent")
     found += _batch(batch, limits.constraints)
-    found += _ledger(evidence, ledger)
+    found += _ledger(evidence, ledger, batch)
     yield from (GateReason(code=code) for code in found)
 
 
-def _ledger(evidence: ReleaseEvidence, ledger: LedgerEvidence) -> list[str]:
-    limits, batch = evidence.limits, evidence.intent.batch
+def _batch_size(evidence: ReleaseEvidence) -> tuple[BatchSize, list[str]]:
+    """The planner's count for this batch; the caller's statement only without a plan."""
+    stated, batch = evidence.intent.batch, _batch_of(evidence)
+    if batch is None:
+        return stated, ["batch_size_unverified"]
+    counted = BatchSize(documents=batch.documents, files=batch.files, bytes=batch.bytes)
+    return counted, [] if counted == stated else ["batch_size_contradicts_plan"]
+
+
+def _ledger(evidence: ReleaseEvidence, ledger: LedgerEvidence, batch: BatchSize) -> list[str]:
+    limits = evidence.limits
     found = []
     if ledger.limits_sha256 not in (None, limits.limits_sha256):
         found.append("ledger_limits_mismatch")
