@@ -69,7 +69,12 @@ def merge(
     at: datetime,
     plan_id: str | None = None,
 ) -> QuarantineLedger:
-    """``ledger`` with ``findings`` added; nothing is ever removed or reset."""
+    """``ledger`` with ``findings`` added; nothing is ever removed or reset.
+
+    Raises:
+        ForarbeiderRefusedError: ``schema_invalid`` for conflicting findings of
+            one quarantine id (:func:`finding_conflicts`).
+    """
     records = {item.quarantine_id: item for item in ledger.records}
     for finding in _unique(findings):
         current = records.get(finding.quarantine_id)
@@ -82,16 +87,40 @@ def merge(
 
 
 def _unique(findings: Iterable[QuarantineFinding]) -> list[QuarantineFinding]:
-    """One finding per quarantine id; duplicates of one failure unite their evidence."""
+    """One finding per quarantine id; consistent duplicates unite their evidence.
+
+    Raises:
+        ForarbeiderRefusedError: ``schema_invalid`` when two findings of one
+            quarantine id disagree on anything but their evidence (another
+            policy, another category): neither is picked by input order.
+    """
     merged: dict[str, QuarantineFinding] = {}
     for item in findings:
         known = merged.get(item.quarantine_id)
         if known is None:
             merged[item.quarantine_id] = item
             continue
+        if _identity(known) != _identity(item):
+            raise ForarbeiderRefusedError(
+                RefusalReason.SCHEMA_INVALID, "conflicting quarantine findings"
+            )
         evidence = tuple(sorted(set(known.evidence_sha256s) | set(item.evidence_sha256s)))
         merged[item.quarantine_id] = known.model_copy(update={"evidence_sha256s": evidence})
     return [merged[key] for key in sorted(merged)]
+
+
+def _identity(finding: QuarantineFinding) -> dict[str, object]:
+    """Everything a finding states except its evidence digests."""
+    return finding.model_dump(exclude={"evidence_sha256s"})
+
+
+def finding_conflicts(findings: Iterable[QuarantineFinding]) -> bool:
+    """Whether two findings of one quarantine id disagree on anything but their evidence."""
+    try:
+        _unique(findings)
+    except ForarbeiderRefusedError:
+        return True
+    return False
 
 
 def _opened(finding: QuarantineFinding, at: datetime, plan_id: str | None) -> QuarantineRecord:

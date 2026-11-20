@@ -7,6 +7,9 @@ the failures later stages report, a check time and the trust root:
 1. it rebuilds the AR2 plan without any quarantine (the *base*), from the
    verified inventory, limits and FC8b selections;
 2. it attributes every failure (:mod:`lovspor.forarbeider.release_attribution`);
+   two findings of one quarantine id that disagree on anything but their
+   evidence (another policy or category) are a global failure
+   (``quarantine_finding_conflict``): neither is picked by input order;
 3. it verifies every offered exception (:func:`verify_exceptions`);
 4. **any global failure halts the run**: nothing is merged, nothing is
    re-planned, the plan is ``invalid`` and the previous ledger is returned
@@ -53,6 +56,7 @@ from lovspor.forarbeider.release_provenance import issue_provenance
 from lovspor.forarbeider.release_quarantine import (
     EMPTY_LEDGER,
     VerifiedException,
+    finding_conflicts,
     latest_event,
     merge,
     metrics_of,
@@ -150,6 +154,8 @@ def run_quarantine(request: QuarantineRequest, root: TrustRoot) -> QuarantineOut
     attributed = attribute_plan(base, prepared.rows, request.plan.artifacts, request.reported)
     verdict = verify_exceptions(request.exceptions, request.policy, run.at, root)
     halts = [*attributed.halts, *verdict.halts, *_clock(ledger, run.at)]
+    if finding_conflicts(attributed.local):
+        halts.append(_failure("quarantine_finding_conflict", "unknown"))
     if halts:
         return _halted(ledger, halts, (base, prepared), verdict.rejected)
     merged = merge(ledger, attributed.local, run.at, base.plan_id)

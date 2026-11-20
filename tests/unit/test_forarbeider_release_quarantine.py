@@ -7,13 +7,15 @@ signs with a real key, writes a ledger outside ``tmp_path`` or publishes.
 
 import ast
 from collections.abc import Sequence
+from itertools import permutations
 from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
-from lovspor.forarbeider import release_plan, release_quarantine_run
+from lovspor.forarbeider import release_attribution, release_plan, release_quarantine_run
+from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.policy_authorization import SignedRecord
 from lovspor.forarbeider.policy_trust import (
     BOT_NAMESPACES,
@@ -376,6 +378,91 @@ def test_duplicate_findings_union_evidence_independent_of_order() -> None:
     (record,) = forward.records
     assert record.evidence_sha256s == tuple(sorted({*finding.evidence_sha256s, "b" * 64}))
     assert record.history[0].evidence_sha256s == record.evidence_sha256s
+
+
+def conflicting_pair() -> tuple[QuarantineFinding, QuarantineFinding]:
+    """Two findings of one failure (same quarantine id) under different policies."""
+    store = Store()
+    rows = [blocked_row(store, 2, SOURCE_INCOMPLETE)]
+    (finding,) = findings_of(planned(store, rows, (2,)), rows, store).local
+    assert finding.policy is not None
+    newer = finding.policy.model_copy(update={"policy_version": finding.policy.policy_version + 1})
+    other = finding.model_copy(update={"policy": newer, "evidence_sha256s": ("b" * 64,)})
+    assert other.quarantine_id == finding.quarantine_id
+    return finding, other
+
+
+@pytest.mark.parametrize("order", ["forward", "reverse"])
+def test_conflicting_policies_for_one_finding_are_refused_in_any_order(order: str) -> None:
+    finding, other = conflicting_pair()
+    pair = [finding, other] if order == "forward" else [other, finding]
+    with pytest.raises(ForarbeiderRefusedError, match="conflicting"):
+        merge(EMPTY_LEDGER, pair, CHECKED_AT)
+
+
+def test_a_conflict_never_picks_a_policy_by_input_order() -> None:
+    finding, other = conflicting_pair()
+    outcomes = set()
+    for pair in ([finding, other], [other, finding]):
+        try:
+            outcomes.add(ledger_text(merge(EMPTY_LEDGER, pair, CHECKED_AT)))
+        except ForarbeiderRefusedError:
+            outcomes.add("refused")
+    assert outcomes == {"refused"}
+
+
+def test_a_conflicting_category_for_one_finding_is_refused() -> None:
+    finding, _ = conflicting_pair()
+    other = finding.model_copy(update={"category": "rendering"})
+    with pytest.raises(ForarbeiderRefusedError, match="conflicting"):
+        merge(EMPTY_LEDGER, [other, finding], CHECKED_AT)
+
+
+def test_conflicting_findings_halt_the_run_with_the_ledger_untouched(
+    synthetic: Any, root: TrustRoot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _ = synthetic
+    finding, other = conflicting_pair()
+    real = release_attribution.attribute_plan
+
+    def doubled(*args: Any, **kwargs: Any) -> Any:
+        found = real(*args, **kwargs)
+        return found._replace(local=(*found.local, finding, other))
+
+    monkeypatch.setattr(release_quarantine_run, "attribute_plan", doubled)
+    outcome = run_quarantine(request_of(store), root)
+    assert outcome.status == "halted"
+    assert [(h.code, h.category) for h in outcome.halts] == [
+        ("quarantine_finding_conflict", "unknown")
+    ]
+    assert outcome.ledger == EMPTY_LEDGER
+    assert outcome.plan.plan is None
+
+
+def test_identical_duplicates_stay_idempotent_in_every_order() -> None:
+    store = Store()
+    rows = [blocked_row(store, 2, SOURCE_INCOMPLETE), blocked_row(store, 3, SOURCE_INCOMPLETE)]
+    found = list(findings_of(planned(store, rows, (2, 3)), rows, store).local)
+    once = ledger_text(merge(EMPTY_LEDGER, found, CHECKED_AT))
+    for pair in permutations([*found, *found]):
+        assert ledger_text(merge(EMPTY_LEDGER, list(pair), CHECKED_AT)) == once
+
+
+def test_consistent_duplicates_give_stable_bytes_under_any_order() -> None:
+    store = Store()
+    rows = [blocked_row(store, 2, SOURCE_INCOMPLETE), blocked_row(store, 3, SOURCE_INCOMPLETE)]
+    found = list(findings_of(planned(store, rows, (2, 3)), rows, store).local)
+    extra = [
+        f.model_copy(update={"evidence_sha256s": (c * 64,)})
+        for f, c in zip(found, "bc", strict=True)
+    ]
+    texts = {
+        ledger_text(merge(EMPTY_LEDGER, list(order), CHECKED_AT))
+        for order in permutations([*found, *extra])
+    }
+    assert len(texts) == 1
+    ledger = parse_ledger(next(iter(texts)).encode())
+    assert all(len(record.evidence_sha256s) == 2 for record in ledger.records)
 
 
 def test_same_failure_on_new_version_keeps_both_active_records() -> None:
