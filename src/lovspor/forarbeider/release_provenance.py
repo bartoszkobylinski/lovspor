@@ -59,6 +59,7 @@ VerifiedKind = Literal[
     "document_inventory",
     "batch_plan",
     "quarantine_assessment",
+    "publication_authorization",
 ]
 #: Each kind that can be sealed and the verifier that seals it.
 VERIFIERS: Final[dict[VerifiedKind, str]] = {
@@ -72,6 +73,7 @@ VERIFIERS: Final[dict[VerifiedKind, str]] = {
     "document_inventory": "lovspor.forarbeider.release_inventory.verify_inventory",
     "batch_plan": "lovspor.forarbeider.release_plan.plan_release",
     "quarantine_assessment": "lovspor.forarbeider.release_quarantine_run.run_quarantine",
+    "publication_authorization": "lovspor.forarbeider.publication_authorize.authorize",
 }
 _KEY: Final = secrets.token_bytes(32)
 

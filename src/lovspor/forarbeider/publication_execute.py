@@ -1,0 +1,357 @@
+"""AR4b-1: execute one prepared publication transaction, in simulation only (#738; §9.3).
+
+:func:`execute` is the only way to send, and it authorizes **itself**,
+immediately before sending; a caller cannot hand it a decision:
+
+1. The transaction's attempt records are read and proved linked. Already
+   ``published``: ``unchanged``, nothing is sent again. A ``prepared_to_send``
+   with nothing after it, or an ``outcome_unknown``: ``recovery_required``;
+   nothing is ever sent blindly (§9.3a recovery is AR4b-2).
+2. The attempt id is derived from the transaction and the next sequence
+   number. Path B first builds and validates its local commit (B6, B7).
+3. :func:`~lovspor.forarbeider.publication_authorize.authorize` runs every check now.
+   ``denied`` is recorded and returned; a STOP, a revocation or an unknown
+   outcome sets the persistent stop latch.
+4. :func:`publish_authorized` requires the authorizing verifier's seal, the
+   ``simulation_only`` decision, this transaction and attempt and a fresh
+   check time; records ``prepared_to_send`` durably **before** the mutation;
+   sends once; and records ``published``, ``refused`` or ``outcome_unknown``.
+
+**Production is disabled.** :class:`Production` carries no transport, no
+remote and no signer: its authorization is always denied (every AR5-AR7 check
+is unavailable) and nothing can be sent. :class:`Simulation` takes explicit
+test adapters only: a GraphQL transport object (in this repository, the
+tests' stub) and, for path B, an absolute path to a local bare repository and
+a signer over a throwaway key. :mod:`lovspor.git_publish` cannot reach a
+network remote or force a push.
+
+A document-local failure never reaches here: AR4a returns it to AR3 before a
+proposal exists, and a clone without a ``prepared`` proposal is denied.
+"""
+
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
+from hashlib import sha256
+from pathlib import Path
+from typing import Literal, NamedTuple
+
+from lovspor.forarbeider import (
+    publication_attempts,
+    publication_path_a,
+    publication_path_b,
+    publication_stage,
+)
+from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from lovspor.forarbeider.policy_trust import TrustRoot
+from lovspor.forarbeider.publication_authorize import (
+    AdapterFacts,
+    AuthorizationContext,
+    AuthorizationInputs,
+    authorize,
+)
+from lovspor.forarbeider.publication_execution_models import (
+    FRESH_SECONDS,
+    AttemptRecord,
+    AttemptState,
+    AuthorizationEvidence,
+)
+from lovspor.forarbeider.publication_path_a import GraphQLTransport
+from lovspor.forarbeider.publication_path_b import Signer
+from lovspor.forarbeider.release_provenance import authentic
+from lovspor.forarbeider.version_models import canonical_text
+
+Status = Literal[
+    "published", "unchanged", "denied", "refused", "outcome_unknown", "recovery_required"
+]
+
+
+class ExecutionRequest(NamedTuple):
+    inputs: AuthorizationInputs
+    root: TrustRoot
+    clone: Path
+    workspace: Path
+
+
+class Simulation(NamedTuple):
+    """Explicit test adapters; production has none."""
+
+    clock: Callable[[], datetime]
+    transport: GraphQLTransport | None = None
+    remote: Path | None = None
+    signer: Signer | None = None
+
+
+class Production(NamedTuple):
+    """Production execution: no adapter exists, so it is always denied."""
+
+
+Environment = Simulation | Production
+
+
+class ExecutionOutcome(NamedTuple):
+    status: Status
+    commit: str | None
+    evidence: AuthorizationEvidence | None
+    evidence_sha256: str | None
+    attempt: AttemptRecord | None
+
+
+class _Step(NamedTuple):
+    sequence: int
+    previous: str | None
+    attempt_id: str
+
+
+def _not_eligible(detail: str) -> ForarbeiderRefusedError:
+    return ForarbeiderRefusedError(RefusalReason.RELEASE_NOT_ELIGIBLE, detail)
+
+
+def evidence_digest(evidence: AuthorizationEvidence) -> str:
+    return sha256(canonical_text(evidence).encode()).hexdigest()
+
+
+def attempt_id_of(transaction_id: str, sequence: int) -> str:
+    """The id of a transaction's attempt at ``sequence``: derived, never chosen by a caller."""
+    return sha256(f"publication-attempt/1:{transaction_id}:{sequence}".encode()).hexdigest()
+
+
+def next_attempt_id(request: ExecutionRequest) -> str:
+    return _step(request).attempt_id
+
+
+def _step(request: ExecutionRequest) -> _Step:
+    tid = request.inputs.transaction.transaction_id
+    sequence, previous = publication_attempts.head(request.workspace, tid)
+    return _Step(sequence, previous, attempt_id_of(tid, sequence))
+
+
+def _record(
+    request: ExecutionRequest, step: _Step, state: AttemptState, extra: Mapping[str, object]
+) -> AttemptRecord:
+    content = request.inputs.transaction.content
+    fields: dict[str, object] = {
+        "transaction_id": request.inputs.transaction.transaction_id,
+        "release_manifest_sha256": content.release_manifest_sha256,
+        "base_commit": content.publication.base_commit,
+        "path": content.publication.path,
+        "attempt_id": step.attempt_id,
+        "sequence": step.sequence,
+        "state": state,
+        "previous_sha256": step.previous,
+        "authorization_sha256": None,
+        "commit": None,
+    }
+    record = AttemptRecord.model_validate({**fields, **extra})
+    publication_attempts.append(request.workspace, record)
+    return record
+
+
+def _settled(request: ExecutionRequest) -> ExecutionOutcome | None:
+    found = publication_attempts.records(
+        request.workspace, request.inputs.transaction.transaction_id
+    )
+    if not found:
+        return None
+    last = found[-1]
+    if last.state == "published":
+        return ExecutionOutcome("unchanged", last.commit, None, None, last)
+    if last.state in ("prepared_to_send", "outcome_unknown"):
+        return ExecutionOutcome("recovery_required", last.commit, None, None, last)
+    return None
+
+
+# --- adapters ------------------------------------------------------------------------------
+
+
+def _files(request: ExecutionRequest) -> dict[str, bytes]:
+    """The proposed bytes as the clone holds them, each re-hashed against the transaction.
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible: proposal_bytes``.
+    """
+    found = {}
+    for item in request.inputs.transaction.content.files:
+        data = publication_stage.read_file(request.clone, item.path)
+        if sha256(data).hexdigest() != item.sha256:
+            raise _not_eligible("proposal_bytes")
+        found[item.path] = data
+    return found
+
+
+def _remote(request: ExecutionRequest, environment: Simulation) -> Callable[[], str | None]:
+    settings = request.inputs.settings
+    if request.inputs.transaction.content.publication.path == "A":
+        transport = environment.transport
+        if transport is None:
+            raise _not_eligible("adapter")
+        return lambda: transport.head(settings.repository, settings.branch)
+    bare = environment.remote
+    if bare is None or environment.signer is None:
+        raise _not_eligible("adapter")
+    return lambda: publication_path_b.remote_head(bare)
+
+
+def _facts(request: ExecutionRequest, environment: Simulation, now: datetime) -> AdapterFacts:
+    latched = publication_attempts.latched(request.workspace)
+    transaction = request.inputs.transaction
+    if transaction.content.publication.path == "A":
+        transport = environment.transport
+        return AdapterFacts(app=transport.identity if transport else None, latched=latched)
+    signer = environment.signer
+    if signer is None:
+        raise _not_eligible("adapter")
+    try:
+        files = _files(request)
+        commit = publication_path_b.build_commit(request.clone, transaction, signer, now)
+        trust = (request.root, request.inputs.settings.bot_principal, now)
+        check = publication_path_b.verify_commit(request.clone, commit, (transaction, files), trust)
+    except ForarbeiderRefusedError as error:
+        return AdapterFacts(
+            local_commit=None, commit_reasons=(f"local_commit:{error.detail}",), latched=latched
+        )
+    return AdapterFacts(local_commit=check.commit, commit_reasons=check.reasons, latched=latched)
+
+
+# --- execution -----------------------------------------------------------------------------
+
+
+def _latch_reasons(evidence: AuthorizationEvidence) -> tuple[str, ...]:
+    found = [
+        f"{check.name}:{reason}"
+        for check in evidence.checks
+        if check.status == "failed"
+        for reason in check.reasons
+        if "revoked" in reason or reason.startswith("active_stop:")
+    ]
+    return tuple(sorted(found))
+
+
+def execute(request: ExecutionRequest, environment: Environment) -> ExecutionOutcome:
+    """Authorize now, record, send once, record; never twice, never blindly.
+
+    Raises:
+        ForarbeiderRefusedError: forged attempt records; a simulation without
+            the adapter its path needs.
+    """
+    settled = _settled(request)
+    if settled is not None:
+        return settled
+    step = _step(request)
+    evidence = authorize(_context(request, environment, step))
+    if evidence.decision == "denied":
+        return _denied(request, step, evidence)
+    return publish_authorized(evidence, request, environment)
+
+
+def _context(
+    request: ExecutionRequest, environment: Environment, step: _Step
+) -> AuthorizationContext:
+    base = (request.inputs, request.root, request.clone)
+    if isinstance(environment, Production):
+        return AuthorizationContext(*base, lambda: None, _utc_now(), step.attempt_id, "production")
+    now = environment.clock()
+    facts = _facts(request, environment, now)
+    remote = _remote(request, environment)
+    return AuthorizationContext(*base, remote, now, step.attempt_id, "simulation", facts)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _denied(
+    request: ExecutionRequest, step: _Step, evidence: AuthorizationEvidence
+) -> ExecutionOutcome:
+    digest = evidence_digest(evidence)
+    reasons = tuple(sorted(evidence.denied_by))
+    record = _record(
+        request,
+        step,
+        "denied",
+        {"authorization_sha256": digest, "reasons": reasons, "recorded_at": evidence.checked_at},
+    )
+    latch = _latch_reasons(evidence)
+    if latch:
+        publication_attempts.latch(
+            request.workspace, latch, evidence.checked_at, evidence.transaction_id
+        )
+    return ExecutionOutcome("denied", None, evidence, digest, record)
+
+
+def _require_authorized(
+    evidence: AuthorizationEvidence,
+    request: ExecutionRequest,
+    environment: Environment,
+    step: _Step,
+) -> datetime:
+    if not isinstance(environment, Simulation):
+        raise _not_eligible("production_execution_disabled")
+    if (
+        not authentic(evidence, "publication_authorization")
+        or evidence.decision != "simulation_only"
+    ):
+        raise _not_eligible("authorization_not_authentic")
+    if (evidence.transaction_id, evidence.attempt_id) != (
+        request.inputs.transaction.transaction_id,
+        step.attempt_id,
+    ):
+        raise _not_eligible("authorization_not_this_attempt")
+    now = environment.clock()
+    age = (now - evidence.checked_at).total_seconds()
+    if not 0 <= age <= FRESH_SECONDS:
+        raise _not_eligible("authorization_not_fresh")
+    return now
+
+
+def publish_authorized(
+    evidence: AuthorizationEvidence, request: ExecutionRequest, environment: Environment
+) -> ExecutionOutcome:
+    """Record ``prepared_to_send``, send once through the simulation adapter, record the outcome.
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible`` for evidence that is not
+            this verifier's, not ``simulation_only``, not this attempt's or not fresh.
+    """
+    step = _step(request)
+    now = _require_authorized(evidence, request, environment, step)
+    if not isinstance(environment, Simulation):  # _require_authorized proved it is
+        raise _not_eligible("production_execution_disabled")
+    digest = evidence_digest(evidence)
+    before = {"authorization_sha256": digest, "commit": evidence.local_commit, "recorded_at": now}
+    _record(request, step, "prepared_to_send", before)
+    sent = _send(request, environment, evidence)
+    return _after(request, environment, evidence, sent)
+
+
+def _after(
+    request: ExecutionRequest,
+    environment: Simulation,
+    evidence: AuthorizationEvidence,
+    sent: publication_path_a.Sent | publication_path_b.Sent,
+) -> ExecutionOutcome:
+    """Record what the send proved; an unknown outcome sets the stop latch."""
+    tid = evidence.transaction_id
+    digest = evidence_digest(evidence)
+    step = _Step(*publication_attempts.head(request.workspace, tid), evidence.attempt_id)
+    at = environment.clock()
+    extra = {"commit": sent.commit, "reasons": sent.reasons, "authorization_sha256": digest}
+    record = _record(request, step, sent.status, {**extra, "recorded_at": at})
+    if sent.status == "outcome_unknown":
+        publication_attempts.latch(request.workspace, ("outcome_unknown",), at, tid)
+    return ExecutionOutcome(sent.status, sent.commit, evidence, digest, record)
+
+
+def _send(
+    request: ExecutionRequest, environment: Simulation, evidence: AuthorizationEvidence
+) -> publication_path_a.Sent | publication_path_b.Sent:
+    if evidence.path == "A":
+        transport = environment.transport
+        if transport is None:
+            raise _not_eligible("adapter")
+        payload = publication_path_a.payload_of(
+            request.inputs.transaction, _files(request), request.inputs.settings
+        )
+        return publication_path_a.send(transport, payload, request.inputs.settings)
+    if environment.remote is None or evidence.local_commit is None:
+        raise _not_eligible("adapter")
+    return publication_path_b.push(request.clone, environment.remote, evidence.local_commit)

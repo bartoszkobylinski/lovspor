@@ -866,6 +866,7 @@ def test_hand_made_registry_publisher_approval_and_reproduction_are_unverified()
 def test_only_engine_verifiers_import_the_seal() -> None:
     allowed = {"release_provenance", "release_limits", "release_control", "release_ledger"}
     allowed |= {"release_sources", "release_inventory", "release_plan", "release_quarantine_run"}
+    allowed |= {"publication_authorize"}
     importers = set()
     for path in Path("src/lovspor").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
