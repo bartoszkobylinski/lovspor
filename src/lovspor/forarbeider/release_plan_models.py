@@ -10,7 +10,10 @@ every document offered outside it, each with one disposition:
 - ``excluded``: its evidence does not hold (an integrity blocker, an altered or
   missing artifact);
 - ``missing``: in the inventory, but no evidence was offered for it;
-- ``outside_inventory``: offered, but not in the inventory.
+- ``outside_inventory``: offered, but not in the inventory;
+- ``quarantined``: an active AR3 quarantine or a permanent owner exclusion
+  keeps it out, whatever else holds (``quarantine:*`` and
+  ``owner_exclusion:*`` reasons, next to every other reason it has).
 
 Nothing is dropped silently, and nothing but ``planned`` is ever in a batch.
 
@@ -69,7 +72,9 @@ PENDING_RELEASE_BLOCKERS: Final = tuple(
     f"{category}:{code}" for category, code in sorted(RELEASE_WIDE_BLOCKERS)
 )
 
-Disposition = Literal["planned", "blocked", "excluded", "missing", "outside_inventory"]
+Disposition = Literal[
+    "planned", "blocked", "excluded", "missing", "outside_inventory", "quarantined"
+]
 _BatchId = Field(pattern=r"^batch-[0-9a-f]{56}$")
 
 
@@ -100,6 +105,8 @@ class PlanBasis(Frozen):
     selection_bindings_sha256: Digest
     size_basis: Literal["bound_artifacts"] = "bound_artifacts"
     pending_release_blockers: tuple[NonBlank, ...] = PENDING_RELEASE_BLOCKERS
+    #: The digest of the AR3 quarantine set the plan honours; ``None``: not assessed.
+    quarantine_sha256: Digest | None = None
 
 
 class PlannedDocument(Frozen):
@@ -159,6 +166,7 @@ class PlanCoverage(Frozen):
     excluded: int = Field(ge=0)
     missing: int = Field(ge=0)
     outside_inventory: int = Field(ge=0)
+    quarantined: int = Field(ge=0)
     state: Literal["complete", "incomplete"]
 
 
@@ -216,6 +224,7 @@ def coverage_of(documents: tuple[PlannedDocument, ...]) -> PlanCoverage:
         excluded=counted["excluded"],
         missing=counted["missing"],
         outside_inventory=counted["outside_inventory"],
+        quarantined=counted["quarantined"],
         state="incomplete" if incomplete else "complete",
     )
 

@@ -42,6 +42,7 @@ def test_only_implemented_independent_verifiers_are_trusted(
         ("budget_ledger", "runner_budget_ledger"),
         ("document_inventory", "owner_signed_inventory"),
         ("batch_plan", "engine_release_planner"),
+        ("quarantine_assessment", "engine_quarantine"),
     }
     for boundary in TRUST_BOUNDARIES:
         assert trusted(boundary.evidence, status, source) == (

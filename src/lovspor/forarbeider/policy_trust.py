@@ -10,10 +10,12 @@ crosswalk approval uses (``ssh-keygen -Y``, #792, #840):
 
 - ``policy-signers`` (allowed_signers): every entry names one role by its
   namespaces, either the owner's key (any of ``lovspor-forarbeider-policy``,
-  ``lovspor-forarbeider-limits``, ``lovspor-forarbeider-control`` and
-  ``lovspor-forarbeider-inventory``; AR1b added the limits and control
-  namespaces for signed limits and stop/resume records, AR2 the inventory
-  namespace for the owner-signed document inventory) or the bot's
+  ``lovspor-forarbeider-limits``, ``lovspor-forarbeider-control``,
+  ``lovspor-forarbeider-inventory`` and ``lovspor-forarbeider-quarantine``;
+  AR1b added the limits and control namespaces for signed limits and
+  stop/resume records, AR2 the inventory
+  namespace for the owner-signed document inventory, AR3 the quarantine
+  namespace for owner-signed quarantine exceptions) or the bot's
   execution key (``lovspor-forarbeider-release`` and/or
   ``lovspor-forarbeider-publication``), and carries a UTC validity window. A
   key holding both roles, a wildcard principal, an entry without a window, any
@@ -50,8 +52,15 @@ PUBLICATION_NAMESPACE = "lovspor-forarbeider-publication"
 LIMITS_NAMESPACE = "lovspor-forarbeider-limits"
 CONTROL_NAMESPACE = "lovspor-forarbeider-control"
 INVENTORY_NAMESPACE = "lovspor-forarbeider-inventory"
+QUARANTINE_NAMESPACE = "lovspor-forarbeider-quarantine"
 OWNER_NAMESPACES = frozenset(
-    {POLICY_NAMESPACE, LIMITS_NAMESPACE, CONTROL_NAMESPACE, INVENTORY_NAMESPACE}
+    {
+        POLICY_NAMESPACE,
+        LIMITS_NAMESPACE,
+        CONTROL_NAMESPACE,
+        INVENTORY_NAMESPACE,
+        QUARANTINE_NAMESPACE,
+    }
 )
 BOT_NAMESPACES = frozenset({RELEASE_NAMESPACE, PUBLICATION_NAMESPACE})
 TRUST_DIRECTORY = Path(__file__).with_name("trust")

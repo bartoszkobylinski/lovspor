@@ -17,6 +17,14 @@ It takes no count, status, eligibility or selection from the caller:
    in document-id order, into the fewest consecutive batches that keep the
    lower of §9.3's hard caps and the signed batch limits.
 
+An AR3 quarantine assessment (:mod:`lovspor.forarbeider.release_quarantine_run`)
+may come with the request. It is honoured only when it carries the quarantine
+verifier's seal, comes from ``root``, binds the same inventory and limits, and
+was made for exactly the plan these inputs give without it; otherwise there is
+no plan. A document it restricts is ``quarantined``: visible, with its version,
+binding, artifacts and every reason, and never in a batch. The plan names the
+quarantine set's digest, so a change of membership gives new plan and batch ids.
+
 The result is sealed as ``batch_plan``. It is not an authorization: every
 batch is still judged by the AR1 gates, which fail on the release-wide
 blockers the plan names. :func:`verify_plan` tells whether a stored plan is
@@ -65,6 +73,11 @@ from lovspor.forarbeider.release_plan_models import (
     plan_digest,
 )
 from lovspor.forarbeider.release_provenance import issue_provenance
+from lovspor.forarbeider.release_quarantine_models import (
+    NO_QUARANTINE,
+    QuarantineEvidence,
+    QuarantineSet,
+)
 from lovspor.forarbeider.version_models import Frozen, NonBlank, canonical_text
 from lovspor.forarbeider.version_release import DocumentOffer, build_release
 from lovspor.forarbeider.version_release_models import (
@@ -92,6 +105,7 @@ class PlanRequest(NamedTuple):
     limits: LimitsEvidence
     offers: tuple[DocumentOffer, ...]
     artifacts: Mapping[str, bytes]
+    quarantine: QuarantineEvidence = NO_QUARANTINE
 
 
 class PlanContext(NamedTuple):
@@ -112,6 +126,13 @@ class Row(NamedTuple):
 
     selection: DocumentSelection
     binding: DocumentBinding
+
+
+class Prepared(NamedTuple):
+    """The verified context and FC8b rows a plan is built from."""
+
+    context: PlanContext
+    rows: tuple[Row, ...]
 
 
 class _Draft(NamedTuple):
@@ -142,18 +163,20 @@ class _BatchKey(Frozen):
 
 
 def plan_release(request: PlanRequest, root: TrustRoot) -> PlanEvidence:
-    """The sealed plan for ``request`` under ``root``; ``invalid`` without verified inputs."""
-    refused = _input_reasons(request, root)
-    if refused:
-        return _invalid(refused)
-    try:
-        manifest = build_release(request.offers, request.artifacts, root)
-    except ForarbeiderRefusedError:
-        return _invalid(["plan_offers_refused"])
-    context = _context(request, manifest)
-    if context is None:
-        return _invalid(["plan_inputs_incomplete"])
-    plan = build_plan(context, _rows(manifest), request.artifacts)
+    """The sealed plan for ``request`` under ``root``; ``invalid`` without verified inputs.
+
+    With an AR3 quarantine assessment, the plan honours it only when it carries
+    the quarantine verifier's seal, comes from ``root``, binds the same
+    inventory and limits and was made for exactly the plan these inputs give
+    without it; otherwise there is no plan.
+    """
+    prepared = prepare_plan(request, root)
+    if not isinstance(prepared, Prepared):
+        return _invalid(list(prepared))
+    quarantine = _quarantine_of(request, prepared, root)
+    if not isinstance(quarantine, QuarantineSet) and quarantine is not None:
+        return _invalid(list(quarantine))
+    plan = build_plan(prepared.context, prepared.rows, request.artifacts, quarantine)
     evidence = PlanEvidence(
         status="verified",
         source="engine_release_planner",
@@ -163,6 +186,39 @@ def plan_release(request: PlanRequest, root: TrustRoot) -> PlanEvidence:
         trust_root_sha256=root.sha256,
     )
     return issue_provenance(evidence, "batch_plan")
+
+
+def prepare_plan(request: PlanRequest, root: TrustRoot) -> Prepared | tuple[str, ...]:
+    """The verified context and FC8b rows of ``request``, or why there are none."""
+    refused = _input_reasons(request, root)
+    if refused:
+        return tuple(refused)
+    try:
+        manifest = build_release(request.offers, request.artifacts, root)
+    except ForarbeiderRefusedError:
+        return ("plan_offers_refused",)
+    context = _context(request, manifest)
+    if context is None:
+        return ("plan_inputs_incomplete",)
+    return Prepared(context, tuple(_rows(manifest)))
+
+
+def _quarantine_of(
+    request: PlanRequest, prepared: Prepared, root: TrustRoot
+) -> QuarantineSet | tuple[str, ...] | None:
+    found = request.quarantine
+    if found.status == "missing":
+        return None
+    if not verified("quarantine_assessment", found) or found.quarantine is None:
+        return ("plan_quarantine_unverified",)
+    context = prepared.context
+    bound = (found.trust_root_sha256, found.inventory_sha256, found.limits_sha256)
+    if bound != (root.sha256, context.inventory_sha256, context.limits_sha256):
+        return ("plan_quarantine_mismatch",)
+    base = build_plan(context, prepared.rows, request.artifacts)
+    if base.plan_id != found.base_plan_id:
+        return ("plan_quarantine_stale",)
+    return found.quarantine
 
 
 def _input_reasons(request: PlanRequest, root: TrustRoot) -> list[str]:
@@ -217,15 +273,23 @@ def _rows(manifest: ReleaseManifest) -> list[Row]:
 
 
 def build_plan(
-    context: PlanContext, rows: Sequence[Row], artifacts: Mapping[str, bytes]
+    context: PlanContext,
+    rows: Sequence[Row],
+    artifacts: Mapping[str, bytes],
+    quarantine: QuarantineSet | None = None,
 ) -> ReleasePlan:
-    """Every document's disposition and the bounded batches; the same inputs, the same bytes."""
-    basis = _basis(context)
+    """Every document's disposition and the bounded batches; the same inputs, the same bytes.
+
+    A document ``quarantine`` restricts keeps its version, binding, artifacts and
+    every reason, and is ``quarantined``: never in a batch. The others keep
+    their order and are partitioned again within the same caps.
+    """
+    basis = _basis(context, quarantine)
     by_id = {item.selection.document_id: item for item in rows}
     expected = frozenset(context.inventory.document_ids)
     inputs = _Inputs(context, basis, artifacts)
     drafts = [
-        _draft(document, by_id.get(document), expected, inputs)
+        _restricted(_draft(document, by_id.get(document), expected, inputs), quarantine)
         for document in sorted(expected | by_id.keys())
     ]
     batches, placed = _partition(basis, [d for d in drafts if d.disposition == "planned"])
@@ -239,9 +303,10 @@ def build_plan(
     )
 
 
-def _basis(context: PlanContext) -> PlanBasis:
+def _basis(context: PlanContext, quarantine: QuarantineSet | None) -> PlanBasis:
     limits = context.constraints
     return PlanBasis(
+        quarantine_sha256=None if quarantine is None else digest_of(quarantine),
         inventory_id=context.inventory.inventory_id,
         inventory_version=context.inventory_version,
         inventory_sha256=context.inventory_sha256,
@@ -280,6 +345,16 @@ def _draft(
     return _unsized(document, disposition, found, reasons)._replace(
         artifact_sha256s=keys, bytes=size
     )
+
+
+def _restricted(draft: _Draft, quarantine: QuarantineSet | None) -> _Draft:
+    restriction = quarantine.reasons_of(draft.document_id) if quarantine else ()
+    if not restriction:
+        return draft
+    kept = draft.disposition in ("missing", "outside_inventory")
+    disposition: Disposition = draft.disposition if kept else "quarantined"
+    reasons = tuple(sorted(set(draft.reasons) | set(restriction)))
+    return draft._replace(disposition=disposition, reasons=reasons)
 
 
 def _unsized(
