@@ -124,7 +124,7 @@ the same coverage as deleting it.
 It also fails the job, on every lane, when a **preservation contract** was added,
 modified or deleted: the snapshots, goldens and gate modules named in the script's
 `PROTECTED_PATTERNS` (served MCP call snapshot and tool-surface anchor, rendering and
-page goldens, the forarbeider corpus golden, the site route map, and the future
+page goldens, the forarbeider corpus golden, the site route map, the guard's own tests, and the future
 `tests/fixtures/add_only/` goldens). They sit inside the `tests/` allowlist but freeze a
 served surface on purpose (#958; owner decision: goldens are never
 auto-regenerated or silently updated), so a change to one is an owner-reviewed PR. New

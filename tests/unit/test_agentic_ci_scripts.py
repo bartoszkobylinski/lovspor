@@ -386,6 +386,9 @@ def test_scope_guard_stays_silent_when_existing_test_only_gains_lines(tmp_path: 
 _REPO = _SCRIPTS.parents[1]
 _PROTECTED_GOLDEN = "tests/fixtures/mcp-existing-calls.json"
 _PROTECTED_GATE = "tests/unit/test_site_routes.py"
+# This module: the guard's own tests, so an agent cannot weaken the checks that
+# keep PROTECTED_PATTERNS and CODEOWNERS in step.
+_PROTECTED_GUARD_TESTS = "tests/unit/test_agentic_ci_scripts.py"
 
 
 def _protected_patterns() -> list[str]:
@@ -407,7 +410,7 @@ def _scope_repo_with(tmp_path: Path, *relative: str) -> tuple[Path, str]:
 
 @pytest.mark.parametrize("lane", [(), ("remediation",)])
 @pytest.mark.parametrize("state", ["committed", "staged", "unstaged"])
-@pytest.mark.parametrize("protected", [_PROTECTED_GOLDEN, _PROTECTED_GATE])
+@pytest.mark.parametrize("protected", [_PROTECTED_GOLDEN, _PROTECTED_GATE, _PROTECTED_GUARD_TESTS])
 def test_scope_guard_refuses_editing_a_preservation_contract(
     tmp_path: Path, protected: str, state: str, lane: tuple[str, ...]
 ) -> None:
