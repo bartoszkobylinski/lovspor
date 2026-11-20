@@ -40,6 +40,47 @@ changed="$(
   } | sort -u
 )"
 
+# Preservation contracts: snapshots, goldens and the gate modules that pin
+# them. Each freezes a served surface on purpose (#958;
+# owner decision: goldens are never auto-regenerated or silently updated), so
+# no lane may add, modify or delete one, although tests/*.py and fixtures are
+# otherwise allowed. A change to any of them is an owner-reviewed PR. Every
+# entry is also a .github/CODEOWNERS line; a unit test keeps the two lists in
+# step and fails when an exact path no longer exists, so a rename cannot drop
+# a contract out of the guard unnoticed. New coverage for a pinned surface
+# goes in a new sibling test module.
+PROTECTED_PATTERNS=(
+  "tests/fixtures/add_only/*"
+  "tests/fixtures/mcp-existing-calls.json"
+  "tests/fixtures/synthetic-flat-law.xml"
+  "tests/fixtures/forarbeider/corpus/*"
+  "tests/unit/fixtures/site/pre-envelope/*"
+  "tests/unit/test_mcp_existing_calls.py"
+  "tests/unit/test_llhb_mcp_surface.py"
+  "tests/unit/test_rendering_golden.py"
+  "tests/unit/test_publish_pages_golden.py"
+  "tests/unit/test_forarbeider_corpus_golden.py"
+  "tests/unit/test_site_routes.py"
+)
+
+protected=()
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  for pat in "${PROTECTED_PATTERNS[@]}"; do
+    # shellcheck disable=SC2254
+    case "$f" in
+      $pat) protected+=("$f"); break ;;
+    esac
+  done
+done <<< "$changed"
+
+if [ "${#protected[@]}" -gt 0 ]; then
+  echo "SCOPE VIOLATION — Codex touched protected preservation contracts (snapshots, goldens, gate modules); refusing to commit:" >&2
+  printf '  %s\n' "${protected[@]}" >&2
+  echo "Put new coverage in a new sibling test module; changing a pinned contract is an owner-reviewed PR." >&2
+  exit 1
+fi
+
 violations=()
 while IFS= read -r f; do
   [ -z "$f" ] && continue
