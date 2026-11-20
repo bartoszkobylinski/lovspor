@@ -30,6 +30,54 @@ def test_scan_identifies_only_mutants_and_counts_resident_and_swap(tmp_path):
     assert guard.mutant_processes(tmp_path) == [guard.Mutant(2, "pkg.x__mutmut_12", 130)]
 
 
+def test_scan_recognises_untitled_fork_but_not_mutmut_or_other_commands(tmp_path):
+    command = b"/venv/bin/python3\0/venv/bin/mutmut\0run\0pkg.*\0"
+    process(tmp_path, 1, b"timeout\0", "VmRSS: 10 kB\n")
+    process(tmp_path, 2, command, "PPid: 1\nVmRSS: 100 kB\nVmSwap: 20 kB\n")
+    process(tmp_path, 3, command, "PPid: 2\nVmRSS: 200 kB\nVmSwap: 50 kB\n")
+    process(tmp_path, 4, command + b"different\0", "PPid: 2\nVmRSS: 900 kB\n")
+    other = b"python3\0/venv/bin/mutmut\0results\0"
+    process(tmp_path, 5, other, "PPid: 1\n")
+    process(tmp_path, 6, other, "PPid: 5\nVmRSS: 900 kB\n")
+    process(tmp_path, 7, command, "PPid: 99\nVmRSS: 900 kB\n")
+
+    assert guard.mutant_processes(tmp_path) == [guard.Mutant(3, guard.UNTITLED, 130)]
+
+
+def test_watch_reports_cumulative_scans_and_signals_untitled_fork(monkeypatch, tmp_path, capsys):
+    command = b"python3\0/venv/bin/mutmut\0run\0"
+    process(tmp_path, 1, b"timeout\0", "VmRSS: 0 kB\n")
+    process(tmp_path, 2, command, "PPid: 1\nVmRSS: 100 kB\n")
+    process(tmp_path, 3, command, "PPid: 2\nVmRSS: 1125 kB\n")
+    calls = []
+    parents = iter([10, 10, 10, 11])
+    clock = iter([0.0, 1.0, 899.0, 900.0, 900.0])
+    monkeypatch.setattr(guard.os, "getppid", lambda: next(parents))
+    monkeypatch.setattr(guard.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(guard.os, "kill", lambda pid, sig: calls.append((pid, sig)))
+    monkeypatch.setattr(guard.time, "sleep", lambda _: None)
+
+    guard.watch(tmp_path, 1024, 2)
+
+    assert calls == [(3, signal.SIGXCPU), (3, signal.SIGKILL)]
+    output = capsys.readouterr().out
+    assert "first pid 3, a fork of `mutmut run`" in output
+    assert "untitled mutant (pid 3)" in output
+    assert "0 titled and 1 untitled mutant process(es), 1 over the allowance" in output
+    assert "largest held 1 MiB more than its parent" in output
+
+
+def test_tally_counts_unique_processes_and_strict_allowance():
+    tally = guard.Tally()
+    assert tally.line() == "no mutant process seen in the scans so far"
+    tally.note([guard.Mutant(1, "a__mutmut_1", 1024)], 1024)
+    tally.note([guard.Mutant(1, "a__mutmut_1", 2048), guard.Mutant(2, guard.UNTITLED, 1)], 1024)
+    assert tally.line() == (
+        "scans so far saw 1 titled and 1 untitled mutant process(es), 1 over the allowance; "
+        "the largest held 2 MiB more than its parent"
+    )
+
+
 @pytest.mark.parametrize(
     "title", [b"mutmut: ", b"mutmut: example__mutmut_x", b"mutmut: example__mutmut_1 extra"]
 )
