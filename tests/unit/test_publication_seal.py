@@ -3,6 +3,8 @@
 Real git, real annotated tags and real SSH signatures from throwaway keys.
 """
 
+import base64
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -37,6 +39,26 @@ from tests.unit.publication_seal_support import (
 )
 
 SEAL = "sync/seal-1-1"
+
+
+def test_shipped_signer_pins_the_owner_key() -> None:
+    shipped = Path(__file__).resolve().parents[2] / "ops" / "publication-signers"
+    entries = [
+        line.split()
+        for line in shipped.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert len(entries) == 1
+    principal, options, key_type, encoded_key = entries[0]
+    assert principal == "lovverk-publication-seal"
+    assert options == 'namespaces="git"'
+    assert key_type == "ssh-ed25519"
+    key = base64.b64decode(encoded_key, validate=True)
+    assert key[:15] == b"\x00\x00\x00\x0bssh-ed25519"
+    assert key[15:19] == b"\x00\x00\x00\x20"
+    assert len(key) == 51
+    fingerprint = base64.b64encode(hashlib.sha256(key).digest()).decode().rstrip("=")
+    assert fingerprint == "f/PzXf91YUy3WdQQVqz3tSy8HHLbXpadlxbBXXQ3wVs"
 
 
 @pytest.fixture
@@ -380,12 +402,21 @@ def test_verify_refuses_a_missing_tag(repo: Path, tmp_path: Path) -> None:
 
 
 @requires_ssh_keygen
-def test_a_signers_file_with_only_comments_holds_no_key(repo: Path, signer: Signer) -> None:
+def test_a_signers_file_with_only_comments_holds_no_key(
+    repo: Path, signer: Signer, tmp_path: Path
+) -> None:
     _seal_head(repo, signer)
+    # The shipped file's comment header alone (its key lines dropped) is not a key.
     shipped = Path(__file__).resolve().parents[2] / "ops" / "publication-signers"
+    lines = shipped.read_text(encoding="utf-8").splitlines(keepends=True)
+    comments = tmp_path / "comments-only"
+    comments.write_text(
+        "".join(line for line in lines if not line.strip() or line.lstrip().startswith("#")),
+        encoding="utf-8",
+    )
 
     with pytest.raises(SealVerificationError, match="holds no key"):
-        verify_seal(repo, _head(repo), shipped, SEAL)
+        verify_seal(repo, _head(repo), comments, SEAL)
 
 
 def test_an_empty_or_missing_signers_file_is_refused(repo: Path, tmp_path: Path) -> None:
