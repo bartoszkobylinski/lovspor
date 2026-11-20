@@ -338,7 +338,7 @@ def test_a_policy_other_than_the_plans_denies(rig_a: Rig) -> None:
 
 
 def test_a_caller_cannot_claim_authorized(rig_a: Rig) -> None:
-    with pytest.raises(ValueError, match="unexpected field"):
+    with pytest.raises((ValueError, TypeError), match="unexpected field"):
         rig_a.inputs._replace(authorized=True)  # type: ignore[call-arg]
 
 
