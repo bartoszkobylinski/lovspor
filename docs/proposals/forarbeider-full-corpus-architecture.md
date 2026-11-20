@@ -760,6 +760,13 @@ The owner role may now hold the policy, limits and control namespaces; a bot key
   - reconciliation against the published history.
 - **Control chain.** Whoever holds the chain can withhold its newest stop. AR5 must anchor the chain's head outside the runner.
 
+The provenance seal is narrower than it looks, too. It assumes that all code running in the engine process is trusted:
+- **`issue_provenance()` is an ordinary callable, not a runtime authorization boundary.** Any code in the same process can import it and seal a record it built itself, without knowing the HMAC key.
+- **The AST import test is a review aid, not runtime security.** It limits which modules in this repository import the function today. It cannot stop code loaded at runtime.
+- **Untrusted code must never reach the sealing capability.** Before AR4–AR8 integrate the gates into a production path, that path must guarantee that no untrusted code, plugin, extension or API input runs in, or can call into, the process that seals and judges evidence. Caller input reaches the engine only as raw material that a verifier checks, never as evidence.
+- **An in-process HMAC seal is not auditable proof.** It shows only that this process's verifier produced the record. It proves nothing to an auditor, another process or a later run, and it is lost on serialization by design.
+- **Persisted or externally verified evidence needs real signatures (AR6).** It must carry a signature that can be checked against the trust root, never a seal.
+
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
 **Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).

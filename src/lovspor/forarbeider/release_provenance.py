@@ -25,9 +25,17 @@ be sealed and the gates never trust it, whatever its label says.
 
 The seal proves only that this process's verifier produced the record. It is
 no cryptographic proof to anyone else, and it does not make the evidence
-sufficient: the gates still apply every other check. The AST test in
-``test_forarbeider_release_controls.py`` limits which modules may import
-:func:`issue_provenance`.
+sufficient: the gates still apply every other check.
+
+**Trust assumption.** The seal is not a runtime authorization boundary.
+:func:`issue_provenance` is an ordinary function: any code running in this
+process can import it and seal a record it built, without knowing the key.
+The AST test in ``test_forarbeider_release_controls.py`` limits which modules
+in this repository import it, which is a review aid and not runtime security.
+The model therefore assumes that every piece of code in the process is
+trusted: no untrusted code, plugin or API input may run in, or call into, the
+process that seals and judges evidence (architecture §9.9, a requirement for
+AR4 to AR8). Persisted or externally verified evidence needs signatures (AR6).
 """
 
 import hmac
