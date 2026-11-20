@@ -63,6 +63,10 @@ def _callers_of(name: str) -> set[tuple[str, str]]:
     return found
 
 
+# Reads src/ as AST and compares enclosing function names. mutmut runs the suite
+# from mutants/, where every function in scope is x_<name>__mutmut_<n>, so the
+# exact sets below fail there and the night stops in the stats run (#967).
+@pytest.mark.structural
 def test_only_the_rebuild_quantizer_and_the_cutover_write_sidecars() -> None:
     """A new sidecar writer must keep the rebuild-quantizer provenance, or reuse is unsound."""
     assert _callers_of("write_embeddings") == {
