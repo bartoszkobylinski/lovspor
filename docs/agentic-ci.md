@@ -195,7 +195,7 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   established, so the step samples `free -m` and `df -h` every 5 min. Handed over as
   `MUTMUT_PR_TOTAL_BUDGET_SECONDS`, which replaces the setup + per-file sum. The job's
   `timeout-minutes: 345` is strictly above the cap and under the hosted 360-min kill.
-- **Memory guard (#971, #978).** mutmut bounds a mutant's CPU and wall time, never its memory.
+- **Memory guard (#971, #978, #983).** mutmut bounds a mutant's CPU and wall time, never its memory.
   On 2026-11-20 nine mutants of `regjeringen_fetch/normalize.py` that keep a parser loop from
   advancing each ran 11–19 min, the wall limit `(estimate + 7) * 15`, appending on every pass;
   the 16 GiB runner was shut down at 14.5 GiB, 58 min before the budget, and no report was
@@ -206,16 +206,30 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   carried in the ledger like any other. The allowance is a judgement between two measured
   figures: the whole machine stayed under 3.6 GiB while healthy mutants ran, and four children
   at the allowance stay under 12 GiB. A mutant process is recognised by the title mutmut gives
-  its fork (`mutmut: <mutant name>`) or, without one, as a fork of `mutmut run`: a process
-  that still carries its parent's command line, where that line is `python .../mutmut run
-  ...`. The second rule exists because the first one failed on the hosted runner: in run
-  44780986245 the guard saw no titled process in three hours while memory reached 15.4 of
-  16 GiB (#978; why the title is missing there is not established). An untitled mutant is
-  named by its pid; mutmut's own records name the mutant that timed out. The guard writes to
-  the step log, never to `mutation-raw.log`: a line when it starts, one when it first sees a
-  mutant process, one every 15 min with what its scans have seen (titled, untitled, over the
-  allowance, the largest), and one for each process it stops. A night whose 15-minute lines
-  report no mutant process ran unguarded. A mutant stopped this way was not killed by a test;
+  its fork (`mutmut: <mutant name>`) or, without one, as a fork of `mutmut run` under a
+  CPU-time limit: a process that still carries its parent's command line, where that line is
+  `python .../mutmut run ...`, and whose `/proc/<pid>/limits` names a limit. The second rule
+  exists because the first one failed on the hosted runner: in run 44780986245 the guard saw
+  no titled process in three hours while memory reached 15.4 of 16 GiB (#978), and in run
+  44837229442 all 1300 processes it saw were untitled (why the title is missing there is not
+  established). The CPU limit is what separates a mutant from mutmut's other forks: mutmut
+  sets one in every fork that tests a mutant (`workers/isolation.py:865` in 3.8.0), while the
+  pool that generates the mutants is four forks of `mutmut run` with the same command line
+  and no limit. Run 44837229442 counted those four as mutants, announced "mutant processes
+  are visible" 47 min before the first mutant ran, and reported a pool worker's 524 MiB as
+  the largest mutant (#983). A fork without a CPU limit is counted apart and never stopped: a
+  pool that loses a worker waits for its result until the budget is spent. Limits that cannot
+  be read count as a limit. When more than 64 forks have run without one, more than any pool
+  has, the limit is not telling mutants apart on that machine, and from then on every fork is
+  treated as a mutant. An untitled mutant is named by its pid; mutmut's own records name the
+  mutant that timed out. The guard writes to the step log, never to `mutation-raw.log`: a
+  line when it starts, one when it first sees a mutant process, one when it first sees a fork
+  without a CPU limit, one every 15 min with what its scans have seen (titled, untitled, over
+  the allowance, the largest, and the forks it left alone), and one for each process it
+  stops. A night whose 15-minute lines report no mutant process ran unguarded. That the
+  limit rule holds on the hosted runner is read from the first night's lines, not assumed:
+  the mutant count has to rise once "Running mutation testing" starts. A mutant stopped this
+  way was not killed by a test;
   it stays in the report's timeout list. Whether memory is what ended the 2026-11-13/14 runs
   is still not established.
 - **Verdict.** `scripts/ci/nightly_mutation_verdict.py` buckets the gate reason that
