@@ -247,6 +247,25 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   missing), body rewritten every night: verdict, range and where its base came from,
   whether the tag moved, the run link, and `mutation_gate.py --summary` (counts, survivors,
   timed-out and suspicious mutants). GitHub mails on create, not on edit.
+- **Every mutant (#984).** The result above names survivors only: no kind for any mutant,
+  no time, and a killed mutant not at all, although mutmut wrote all of it down and the
+  runner threw it away with the job. `scripts/ci/mutation_night.py` reads `mutants/**/*.meta`
+  (verdict, duration, the estimate of the tests) and the shadow tree through mutmut's line
+  index (`*.spans`) while they are on disk, and adds two files to the artifact.
+  `mutation-mutants.jsonl.gz` has one line per measured mutant: id, file, symbol, status,
+  exit code, kind, the tokens removed and added, seconds, estimate. `mutation-night.json`
+  has the night in sums: by status, by kind, by file, by function with the number of tests
+  mutmut charged to it, the 50 slowest, and where its counts differ from
+  `mutation-result.json`. The sums by kind and the files with most mutants left alive also
+  go to the job summary. The status is mutmut's own word for the exit code. **The kind is
+  not mutmut's**: mutmut 3 records no operator, so `scripts/ci/mutation_kinds.py` reads it
+  off the tokens of the mutant and of its original and names it after the operator of
+  mutmut 3.8.0 that makes such a change (`argument: replaced by None`, `string: XX added`,
+  `operator: comparison`, ...). It is written as `kind`, never as `operator`, and a change
+  that fits no rule is `other`. Checked against the 74 662 mutants of a shadow tree
+  generated on 2026-11-12: none was `other`, in 14 s. The step gives no verdict and cannot
+  fail the night; what it could not read is listed under `problems`. The files live as long
+  as the artifact, 90 days: a lasting register and history are the next step of #984.
 - **Run status.** After the report, a night whose verdict is not complete (`partial`,
   `budget_exceeded`, `tool_failure`) fails its last step, so the run ends red and GitHub's
   failed-run mail fires; `clean` and `survivors` end green (#879). Before this a non-complete
