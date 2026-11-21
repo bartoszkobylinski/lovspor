@@ -47,10 +47,34 @@ Sort each entry into one of three:
 - **Provably equivalent.** No test can tell it apart. Do not write a test and do not touch
   the entry: follow the `mutation-testing` skill (`# pragma: no mutate` with a reason, or
   an entry in `mutation-equivalents/`, owner-reviewed), in a pull request of its own.
-- **Only the text of a message changes** (`string: XX added`, `string: upper case`,
-  `string: lower case` on a log line, an error message or a label). Do not pin a string to
-  kill it. Whether such text is to be tested is the owner's ruling, not made yet: list
-  these in the pull request body as left alone and move on.
+- **Only the wording of a message changes.** Leave it, list it in the pull request body as
+  left alone and move on.
+
+### A mutant on a string
+
+`string: XX added`, `string: upper case` and `string: lower case` say what was done to the
+string, not what the string is. About four in ten registered survivors are of these kinds
+(1 130 of 2 759 on 2026-11-21), and the owner ruled on them that day:
+
+- **A string that is data gets a test.** A finding or status code
+  (`"privacy_review_required"`), a key or field name of an output (`"planned_documents"`),
+  a value a comparison reads (`slot.state == "settled"`), the name of an environment
+  variable. When such a mutant survives, no test checks the value. The test is an ordinary
+  one of behaviour: it asserts the code, the field or the outcome, and it usually kills
+  `XX added` and `upper case` of the same string together. By a rough count of the changed
+  lines, about seven in ten string survivors were of this sort.
+- **The wording of an exception or a refusal is left alone**
+  (`raise _refused("an entry needs exactly ...")`). `XX added` wraps the whole string, so a
+  test that matches a part of the message still passes; only a comparison of the whole
+  message, character for character, kills it, and that test breaks at every rewording. What
+  the message carries as data is the first case: the reason code, the id or the path it
+  names.
+- **A separator or a default** (`"; ".join(...)`, `value or ""`) is decided entry by
+  entry: data when an output a reader or a program depends on changes with it, left alone
+  when not. Say which in the pull request body.
+
+Log calls are not in the register: `do_not_mutate_patterns` in `pyproject.toml` keeps
+mutmut off them.
 
 An entry whose status is `timeout` or `suspicious` was not killed and was not shown to
 survive either. A test does not settle it; say so in the pull request body.
