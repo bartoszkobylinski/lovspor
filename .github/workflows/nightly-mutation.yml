@@ -277,8 +277,46 @@ jobs:
             scripts/ci/mutation_ledger.sh drop
           fi
 
-      # One rolling issue, its body rewritten every night: GitHub mails on
-      # create, not on edit, so a night costs no notification after the first.
+      # What must outlive the artifact goes to the `mutation-reports` branch
+      # (#984): the register of mutants left alive over all nights, one history
+      # line for this night whatever its verdict, and the night's report in
+      # full. The register changes only on a completed night, the rule the tag
+      # follows. The step also writes the two texts the report step below puts
+      # on the issue. It cannot fail the night: without it the night is still
+      # in the artifact. The `[ -x ]` guard is the repo rule (#381).
+      - name: Keep the night on the mutation-reports branch
+        if: always() && steps.verdict.outcome == 'success'
+        env:
+          VERDICT: ${{ steps.verdict.outputs.verdict }}
+          COMPLETE: ${{ steps.verdict.outputs.complete }}
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -x scripts/ci/mutation_reports.sh ]; then
+            scripts/ci/mutation_reports.sh publish "$RUNNER_TEMP/mutation-reports" \
+              --result mutation-result.json \
+              --night mutation-night.json \
+              --mutants mutation-mutants.jsonl.gz \
+              --date "$(TZ=Europe/Oslo date '+%F')" \
+              --run-id "$GITHUB_RUN_ID" \
+              --run-url "$RUN_URL" \
+              --base "${BASE:-unknown}" \
+              --head "${HEAD:-$GITHUB_SHA}" \
+              --verdict "$VERDICT" \
+              --complete "${COMPLETE:-false}" \
+              --repo "$GITHUB_REPOSITORY" \
+              || echo "::warning::the night was not written to the mutation-reports branch; it is in the artifact only (#984)"
+          else
+            echo "::warning::scripts/ci/mutation_reports.sh is not on this head; the night is in the artifact only (#984)"
+          fi
+
+      # One rolling issue. Its body is rewritten every night and holds the
+      # state as it stands: this night's verdict and the register over all
+      # nights. Each night also gets one comment, so the nights can be read in
+      # order and GitHub mails them (owner decision 2026-11-21, #984): an edit
+      # mails nobody, which is how the survivors of 2026-11-20 left the issue
+      # unseen the night after.
       - name: Report — rewrite the Nightly mutation issue
         if: always() && steps.verdict.outcome == 'success'
         env:
@@ -323,6 +361,10 @@ jobs:
             echo "Mutation is a nightly report, not a merge gate (docs/agentic-ci.md). Survivors are"
             echo "killed by a test, or, when provably equivalent, marked \`# pragma: no mutate\` with a"
             echo "one-line reason or registered in \`mutation-equivalents/\`. Never a \`src/\` rewrite."
+            if [ -f "$RUNNER_TEMP/mutation-reports/issue-section.md" ]; then
+              echo ""
+              cat "$RUNNER_TEMP/mutation-reports/issue-section.md"
+            fi
           } > "$body"
           gh label create "$ISSUE_LABEL" --color BFD4F2 \
             --description "Rolling nightly mutation report" --force
@@ -332,7 +374,12 @@ jobs:
             gh issue edit "$number" --body-file "$body"
             echo "updated issue #$number"
           else
-            gh issue create --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body-file "$body"
+            number="$(gh issue create --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body-file "$body")"
+            echo "created $number"
+          fi
+          if [ -f "$RUNNER_TEMP/mutation-reports/comment.md" ]; then
+            gh issue comment "$number" --body-file "$RUNNER_TEMP/mutation-reports/comment.md" \
+              || echo "::warning::the night's comment was not posted (#984)"
           fi
           cat "$body" >> "$GITHUB_STEP_SUMMARY"
 

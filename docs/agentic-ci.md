@@ -245,8 +245,33 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   measures the same range again, starting from the ledger.
 - **Report.** One open issue titled `Nightly mutation`, label `mutation-nightly` (created if
   missing), body rewritten every night: verdict, range and where its base came from,
-  whether the tag moved, the run link, and `mutation_gate.py --summary` (counts, survivors,
-  timed-out and suspicious mutants). GitHub mails on create, not on edit.
+  whether the tag moved, the run link, `mutation_gate.py --summary` (counts, survivors,
+  timed-out and suspicious mutants), and the register over all nights (below). Each night
+  also gets one comment with its counts and a link to its report: GitHub mails a comment and
+  does not mail an edit, and the comments are the nights in order (owner decision
+  2026-11-21, #984).
+- **What is kept (#984).** A night used to live in a 90-day run artifact and in the issue
+  body until the next night rewrote it: after two completed nights 2 795 mutants were on
+  record as alive and nothing held the list. The step "Keep the night" commits it to the
+  `mutation-reports` branch through `scripts/ci/mutation_reports.sh`, one commit a night on
+  top of the last, never forced; a push that loses a race merges the night again onto the
+  branch as it then stands. `scripts/ci/mutation_register.py` writes the files.
+  `register.jsonl` is every mutant known to be alive, one JSON object per line: file,
+  function, status, kind, the diff, the head it was first seen at and last measured at.
+  `history.jsonl` has one line per night, failed nights included. `nights/<date>-<head>/`
+  has the night's `report.md` (by kind, by file, the functions with mutants left alive, the
+  slowest mutants, every mutant not killed with its changed lines, the register after the
+  night) and its `night.json`. **The register is a record of measurements.** A function
+  measured that night has its entries replaced by the night's result, so a mutant a test now
+  kills leaves and a new survivor arrives; a function not measured keeps its entries; a
+  function no longer in the tree takes its entries with it. Only a completed night changes
+  it, the tag's rule: a partial night has measured part of a function. An entry is
+  identified by its file, its function and the changed lines of the mutation, the rule of
+  `mutation-equivalents/`, never by mutmut's id, which renumbers. Registered equivalents
+  are not listed. The step cannot fail the night; without it the night is in the artifact,
+  the section is left out of the issue body and the night's comment says the branch was not
+  written. A night merged from its artifact outside the lane says so in the `written_by` of
+  its history line (`seed: ...`).
 - **Every mutant (#984).** The result above names survivors only: no kind for any mutant,
   no time, and a killed mutant not at all, although mutmut wrote all of it down and the
   runner threw it away with the job. `scripts/ci/mutation_night.py` reads `mutants/**/*.meta`
