@@ -286,6 +286,16 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   alive. A key the register does not hold, or one whose function is no longer in the tree,
   is reported and not measured. A commit without the line is not looked at: its kills stay
   in the register as alive until the function is measured for another reason.
+- **Working the register down (#984).** A session kills survivors on request, by the
+  procedure in `.claude/skills/mutant-killing/SKILL.md`: it reads the register with
+  `scripts/ci/mutant_check.py` (`list`, `show`), writes tests, and may try them against one
+  registered mutant with `mutant_check.py try <key> -- <pytest arguments>`. That command
+  runs the tests on the tree as it is, where they must pass, then against a temporary copy
+  of `src/` that holds the registered change, where they must fail; the working tree is
+  not touched and mutmut does not run. It is an aid and not a measurement: mutmut chooses
+  the tests and the timeout of a mutant, this runs the tests it is given. So the session
+  records nothing as killed and never writes to `mutation-reports`; it names the keys in
+  its commit (above) and the night decides.
 - **Every mutant (#984).** The result above names survivors only: no kind for any mutant,
   no time, and a killed mutant not at all, although mutmut wrote all of it down and the
   runner threw it away with the job. `scripts/ci/mutation_night.py` reads `mutants/**/*.meta`
