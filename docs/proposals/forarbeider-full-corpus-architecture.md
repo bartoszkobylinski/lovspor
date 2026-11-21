@@ -818,6 +818,67 @@ Limitations:
 - **Left to AR4b:** step 5's publication authorization and attempt record; paths A and B themselves (the GraphQL mutation and the local commit and push); the post-publication verification; §9.3a. **Left to AR5:** the stop latch, budget reservation and a durable halt record. **Left to AR6:** the bot signature on the release manifest (`signature: not_signed_ar6_pending`). **Left to AR7:** the remote settings, and comparing the source `main` with the remote. Each is listed in `unavailable_checks` and never reported as passed.
 - The renderer is a first, deterministic format for spans only. Tables, footnotes and annexes are not rendered.
 
+**AR4b-1 status.** AR4b-1 adds §9.3 step 5 and the publication call of both paths, executable **in simulation only**. Production execution is denied by construction.
+- **Authorization evidence** (`publication_execution_models`, version `publication-authorization/1`). It binds:
+  - the attempt id, which is derived from the transaction and its next sequence number, never chosen;
+  - the transaction, plan, batch and release manifest;
+  - every proposed file and its digest;
+  - the path, the base commit and the remote `main` as read at that moment;
+  - the policy, the trust root and the publisher's key;
+  - the STOP state, the quarantine, the limits and the budget reservation;
+  - the check time and every check.
+- **Check results.** Each check is `passed`, `failed` or `unavailable`, and unavailable is never passed. The decision follows from the checks alone, and the verifier seals the evidence. Evidence built or edited by a caller is refused, and so is evidence for another attempt or older than 120 seconds.
+- **`authorize` checks everything itself, at the moment of the attempt:**
+  - the AR4a `prepared` journal and its read-back;
+  - the sealed plan and quarantine;
+  - the trust root;
+  - the FC7b approvals and revocations;
+  - the bot publisher key;
+  - the owner-signed limits;
+  - the STOP/RESUME chain and the persistent stop latch;
+  - a ledger reservation for exactly this transaction that covers the batch and one commit;
+  - the remote head against the base;
+  - the configured path and App identity;
+  - on path B, the local commit's parent, paths, blobs and bot signature in the release namespace.
+- **What stays unavailable.** The following cannot pass yet:
+  - the AR1 gate verdict, which has no passing state;
+  - FC7b's pending blockers (D6, D10, D11, the missing integration, an unpinned trust root);
+  - the AR5 anchors of the control chain and the ledger;
+  - the AR6 manifest signature;
+  - the AR7 settings.
+
+  Production needs every check passed, so it is denied. A simulation may waive exactly those, each listed in `waived`.
+- **Attempt records** (`publication_attempts`). They are append-only and hash-linked, with one folder per transaction. `prepared_to_send` is written and synced **before** the mutation; after it comes exactly one of `published`, `refused` (provably nothing published) or `outcome_unknown`. Retries follow the last record:
+  - after `published`, a retry is `unchanged`;
+  - after a `prepared_to_send` with nothing following, or after `outcome_unknown`, a retry is `recovery_required`, and nothing is sent blindly.
+
+  A STOP, a revocation or an unknown outcome sets the persistent stop latch, which only an AR5 owner resume will clear.
+- **Simulation adapters** (`publication_sandbox`). A simulation waives the checks above, so its label is no boundary. It sends only through these two adapters. Each is proved before authorization, again before `prepared_to_send` is recorded, and again right before the mutation:
+  - **Path A** uses exactly the in-memory `SimulatedGitHub`, checked by type identity. It is a slotted, final class, so an instance cannot swap its methods and a subclass is refused. Any other transport, a real client included, is refused before it is read or posted to.
+  - **Path B** uses a `DisposableRemote`. `create_disposable_remote` makes it fresh, with no template, as the only entry of a private, empty sandbox. Before every use it is re-verified on disk:
+    - no symlink or `..` in its name;
+    - exactly its fixed configuration (bare, `denyNonFastForwards`, `denyDeletes`);
+    - no hooks and no alternates;
+    - the marker holds its random token.
+
+  Any other path, a pre-existing repository included, is refused.
+- **Path A** (`publication_path_a`). It builds one `createCommitOnBranch` with `expectedHeadOid` = the base. The mutation binds the repository, `main`, a headline naming the manifest digest, a body naming the transaction, plan and batch, and exactly the proposed bytes. The response is judged as follows:
+  - a stale-head refusal is `refused`;
+  - a well-formed commit with `main` reading as it is `published`;
+  - anything else, including a lost response, is `outcome_unknown`.
+
+  The module holds no transport. The only implementation is the tests' in-memory stub.
+- **Path B** (`publication_path_b`, `lovspor.git_publish`).
+  - The commit object is built from a separate index, so the clone's index and the AR4a read-back are untouched. It is signed in the `gpgsig` header by the caller's signer, in the release namespace, and validated before authorization.
+  - It is pushed `<commit>:refs/heads/main` to an **absolute local `.git` path** only. The allowlist has no force, delete or mirror shape, no `+` refspec and no URL.
+  - The result is judged from the remote `main` afterwards.
+
+Limitations:
+- **Production is disabled.** No GitHub transport, network remote or production signer exists. Real Prop. 31 L remains blocked upstream: the AR3 run halts on the unpinned trust root.
+- **Unknown outcomes stop at `recovery_required`.** Resolving them from the remote history (§9.3a), post-publication verification (A7/B10), receipts and attestations are AR4b-2 and AR6.
+- **The attempt folder and the stop latch are local.** Like the AR3 ledger, they prove neither that they were not withheld nor that the newest record was not replaced by an equally canonical one. Anchoring is AR5.
+- **The budget reservation is only read.** Writing it atomically, reserving before the call and settling after verification are AR5.
+
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
 **Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).
