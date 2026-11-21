@@ -44,6 +44,66 @@ def test_scan_recognises_untitled_fork_but_not_mutmut_or_other_commands(tmp_path
     assert guard.mutant_processes(tmp_path) == [guard.Mutant(3, guard.UNTITLED, 130)]
 
 
+def test_scan_separates_unlimited_pool_from_limited_and_unreadable_forks(tmp_path):
+    command = b"python3\0/venv/bin/mutmut\0run\0"
+    process(tmp_path, 1, b"timeout\0", "VmRSS: 0 kB\n")
+    process(tmp_path, 2, command, "PPid: 1\nVmRSS: 100 kB\n")
+    for pid in range(3, 8):
+        process(tmp_path, pid, command, "PPid: 2\nVmRSS: 200 kB\n")
+    (tmp_path / "3" / "limits").write_text(
+        "Max cpu time              unlimited            unlimited            seconds\n"
+    )
+    (tmp_path / "4" / "limits").write_text(
+        "Max cpu time              60                   60                   seconds\n"
+    )
+    (tmp_path / "5" / "limits").write_text(
+        "Max open files            unlimited            unlimited            files\n"
+    )
+    (tmp_path / "6" / "limits").write_text(
+        "Max cpu time              60                   unlimited            seconds\n"
+    )
+    # PID 7 has no readable limits file: guard it when in doubt.
+
+    mutants, unlimited = guard.forks(tmp_path)
+
+    assert unlimited == [guard.Unlimited(3, 100)]
+    assert mutants == [guard.Mutant(pid, guard.UNTITLED, 100) for pid in range(4, 8)]
+
+
+def test_titled_mutant_is_guarded_even_with_unlimited_cpu(tmp_path):
+    process(tmp_path, 1, b"parent", "VmRSS: 100 kB\n")
+    process(tmp_path, 2, b"mutmut: example__mutmut_1", "PPid: 1\nVmRSS: 300 kB\n")
+    (tmp_path / "2" / "limits").write_text(
+        "Max cpu time              unlimited unlimited seconds\n"
+    )
+
+    assert guard.forks(tmp_path) == ([guard.Mutant(2, "example__mutmut_1", 200)], [])
+
+
+def test_watch_leaves_pool_alone_then_guards_forks_after_threshold(monkeypatch, tmp_path, capsys):
+    scans = iter(
+        [
+            ([], [guard.Unlimited(pid, 2048) for pid in range(1, 65)]),
+            ([], [guard.Unlimited(65, 3072)]),
+            ([], [guard.Unlimited(66, 4096)]),
+        ]
+    )
+    parents = iter([10, 10, 10, 10, 11])
+    calls = []
+    monkeypatch.setattr(guard, "forks", lambda _: next(scans))
+    monkeypatch.setattr(guard.os, "getppid", lambda: next(parents))
+    monkeypatch.setattr(guard.os, "kill", lambda pid, sig: calls.append((pid, sig)))
+    monkeypatch.setattr(guard.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(guard.time, "sleep", lambda _: None)
+
+    guard.watch(tmp_path, 1024, 2)
+
+    assert calls == [(66, signal.SIGXCPU)]
+    output = capsys.readouterr().out
+    assert output.count("forks of `mutmut run` under no CPU limit are running") == 1
+    assert output.count(guard.POOL_EXCEEDED) == 1
+
+
 def test_watch_reports_cumulative_scans_and_signals_untitled_fork(monkeypatch, tmp_path, capsys):
     command = b"python3\0/venv/bin/mutmut\0run\0"
     process(tmp_path, 1, b"timeout\0", "VmRSS: 0 kB\n")

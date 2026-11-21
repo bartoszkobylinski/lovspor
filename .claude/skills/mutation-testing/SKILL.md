@@ -73,7 +73,8 @@ One mutmut 3.8.0 run, scoped to **functions**, not files:
   mutant process holding 2048 MiB more than the process that forked it, so it is recorded as
   a `timeout` (#971). The step log names each mutant it stopped, or gives its pid where
   mutmut's process title is missing (#978), and reports every 15 min what the guard has
-  seen; a test did not kill it.
+  seen; a test did not kill it. A fork of `mutmut run` under no CPU limit is not a mutant
+  (mutmut's generation pool) and is never stopped (#983).
 
 ## The budget
 
