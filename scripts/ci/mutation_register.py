@@ -543,9 +543,12 @@ def run_merge(args: argparse.Namespace) -> int:
         merged, movement = register, unchanged(register)
         notes.append("the register was not changed: only a completed night changes it")
     else:
+        # A function with a mutant left alive tonight was measured tonight,
+        # whatever the per-mutant record holds. Left out of `measured`, its
+        # entries of earlier nights stayed beside tonight's: one key, two lines (#993).
         measured = {function_of(record) for record in mutants}
+        measured |= {function_of(entry) for entry in tonight}
         if not mutants:
-            measured = {function_of(entry) for entry in tonight}
             notes.append(
                 "no per-mutant record: only functions with a mutant left alive were replaced, "
                 "so a function a test now kills completely keeps its old entries"
