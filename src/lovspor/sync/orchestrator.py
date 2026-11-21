@@ -75,7 +75,7 @@ from lovspor.errors import (
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_lineage
 from lovspor.identity import registered_ownership, replace_manifest, verified_corpus_identity
-from lovspor.identity.history import write_document_history
+from lovspor.identity.history import preserve_displaced, write_document_history
 from lovspor.parsing.placeholder import is_content_placeholder
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.rendering.document import (
@@ -1455,9 +1455,7 @@ def _commit_history_followup(
     replace_manifest(manifest, manifest_path)
     git_add(repo, [manifest_path, *history_paths])
     if has_staged_changes(repo):
-        documents = sum(
-            1 for p in history_paths if p.parent.name == "history" and p.suffix == ".json"
-        )
+        documents = sum(p.parent.name == "history" and p.suffix == ".json" for p in history_paths)
         git_commit_msg(repo, f"sync: update history for {documents} documents")
 
 
@@ -1513,6 +1511,7 @@ def _generate_and_apply_history(
     """For each target ``doc_id``, extract history from git, write the
     history files (slug and by-id, #871), and return updated records with
     ``total_changes`` / ``last_changed`` populated plus all written paths.
+    A slug's displaced holder is kept first by ``preserve_displaced`` (this run's records).
 
     Tombstones (``status='removed'``) and slug-less records (legacy
     Sprint 3 format) are skipped — see decisions.md §12d for the
@@ -1535,6 +1534,7 @@ def _generate_and_apply_history(
             # overwrite the doc's history files with an empty record.
             continue
         history_target_dir = dataset_dir(repo, record.source_dataset)
+        written_paths.extend(preserve_displaced(repo, history, history_target_dir, updated))
         written_paths.extend(write_document_history(repo, lineage, history, history_target_dir))
         updated[doc_id] = _record_with_history(record, history)
     return updated, written_paths

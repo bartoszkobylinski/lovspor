@@ -21,6 +21,7 @@ from lovspor.history import (
     _parse_blocks,
     _run_git_log,
     classify_commit,
+    extract_earlier_lineage,
     extract_lineage,
     write_history,
 )
@@ -28,6 +29,7 @@ from lovspor.identity.history import (
     FILES_PER_HISTORY,
     by_id_path,
     identity_history,
+    preserve_displaced,
     read_identity_history,
     write_document_history,
 )
@@ -52,10 +54,15 @@ SLUG = "endr-i-merverdiavgiftsforskriften"
 MD = f"forskrifter/{SLUG}.md"
 
 
-def _publish(repo: Path, doc_id: str) -> list[Path]:
-    """Extract and write ``doc_id``'s history for the file at ``MD``, as a sync does."""
+def _publish(
+    repo: Path, doc_id: str, holders: dict[str, ManifestRecord] | None = None
+) -> list[Path]:
+    """Extract and write ``doc_id``'s history for the file at ``MD``, as a sync
+    does; ``holders`` are the run's records (none: every earlier holder pruned)."""
     lineage = extract_lineage(repo, MD, doc_id)
-    return write_document_history(repo, lineage, lineage.record(SLUG), repo / "forskrifter")
+    history = lineage.record(SLUG)
+    paths = preserve_displaced(repo, history, repo / "forskrifter", holders or {})
+    return [*paths, *write_document_history(repo, lineage, history, repo / "forskrifter")]
 
 
 def _slug_history(repo: Path) -> dict:
@@ -385,6 +392,11 @@ def test_a_foreign_document_behind_an_untracked_move_is_not_attributed(repo: Pat
     assert "add(forskrift): gammel" in [e.subject for e in kept.events]
 
 
+def _moved_holder() -> dict[str, ManifestRecord]:
+    """The run's records: FIRST current at ny.md."""
+    return {FIRST: ManifestRecord.model_validate(record(FIRST, "ny"))}
+
+
 def test_a_holder_moved_to_another_slug_is_left_to_its_own_sync(repo: Path) -> None:
     """The previous holder moved and is current: its own history is not duplicated."""
     write_doc(repo, MD, doc_text(FIRST, SLUG, "v1"))
@@ -393,11 +405,10 @@ def test_a_holder_moved_to_another_slug_is_left_to_its_own_sync(repo: Path) -> N
     by_id_path(repo / "forskrifter", FIRST).unlink()
     git(repo, "mv", MD, "forskrifter/ny.md")
     commit_all(repo, "rename(forskrift): ny")
-    write_manifest_json(repo, {FIRST: record(FIRST, "ny")}, "2026-06-02T00:00:00Z")
     commit_all(repo, "sync: update manifest, index, and history")
     _take_slug(repo, SECOND)
 
-    paths = _publish(repo, SECOND)
+    paths = _publish(repo, SECOND, _moved_holder())
 
     assert len(paths) == FILES_PER_HISTORY
     assert not by_id_path(repo / "forskrifter", FIRST).exists()
@@ -419,11 +430,10 @@ def test_a_moved_holder_keeps_the_events_its_own_lineage_cannot_reach(repo: Path
     (repo / MD).unlink()
     write_doc(repo, "forskrifter/ny.md", doc_text(FIRST, "ny", "entirely rewritten"))
     move = commit_all(repo, "update(forskrift): ny")
-    write_manifest_json(repo, {FIRST: record(FIRST, "ny")}, "2026-06-02T00:00:00Z")
     commit_all(repo, "sync: update manifest, index, and history")
     _take_slug(repo, SECOND)
 
-    _publish(repo, SECOND)
+    _publish(repo, SECOND, _moved_holder())
 
     kept = read_identity_history(by_id_path(repo / "forskrifter", FIRST))
     assert kept is not None
@@ -434,3 +444,74 @@ def test_a_moved_holder_keeps_the_events_its_own_lineage_cannot_reach(repo: Path
     merged = read_identity_history(by_id_path(repo / "forskrifter", FIRST))
     assert merged is not None
     assert sorted(event.commit for event in merged.events) == sorted([add[:7], move[:7]])
+
+
+NEW_MD = "forskrifter/ny.md"
+
+
+def _move_then_leave_in_the_run(repo: Path, *, by_id_written: bool) -> list[str]:
+    """FIRST holds the slug, moves to ny.md and is published current there;
+    then, in one run, it leaves upstream and SECOND gets the slug it left.
+
+    ``manifest.json`` on disk is the prior manifest, still naming FIRST
+    current at ny.md, as when the sync writes history. Returns FIRST's
+    commits newest first: its removal, its move, its addition.
+    """
+    write_doc(repo, MD, doc_text(FIRST, SLUG, "v1"))
+    add = commit_all(repo, f"add(forskrift): {SLUG}")
+    _publish(repo, FIRST)
+    git(repo, "mv", MD, NEW_MD)
+    move = commit_all(repo, "rename(forskrift): ny")
+    own = extract_lineage(repo, NEW_MD, FIRST)
+    write_document_history(repo, own, own.record("ny"), repo / "forskrifter")
+    if not by_id_written:
+        by_id_path(repo / "forskrifter", FIRST).unlink()
+    write_manifest_json(repo, {FIRST: record(FIRST, "ny")}, "2026-06-02T00:00:00Z")
+    commit_all(repo, "sync: update manifest, index, and history")
+    (repo / NEW_MD).unlink()
+    removal = commit_all(repo, "remove(forskrift): ny")
+    _take_slug(repo, SECOND)
+    return [removal[:7], move[:7], add[:7]]
+
+
+def _run_records() -> dict[str, ManifestRecord]:
+    """This run's records: FIRST tombstoned at ny.md, SECOND current at the slug."""
+    return {
+        FIRST: ManifestRecord.model_validate(record(FIRST, "ny", status="removed")),
+        SECOND: _record(SECOND),
+    }
+
+
+@pytest.mark.parametrize("by_id_written", [False, True])
+def test_a_holder_removed_in_the_same_run_keeps_its_whole_history_in_by_id(
+    repo: Path, by_id_written: bool
+) -> None:
+    """The run's records, not the prior manifest on disk, decide: FIRST is
+    removed in this run, so no sync of its own writes its by-id file again."""
+    commits = _move_then_leave_in_the_run(repo, by_id_written=by_id_written)
+
+    updated, paths = orchestrator_module._generate_and_apply_history(repo, _run_records(), [SECOND])
+
+    assert by_id_path(repo / "forskrifter", FIRST) in paths
+    kept = read_identity_history(by_id_path(repo / "forskrifter", FIRST))
+    assert kept is not None
+    assert [event.commit for event in kept.events] == commits
+    assert identity_history(extract_lineage(repo, NEW_MD, FIRST)).events == kept.events
+    assert updated[FIRST] == _run_records()[FIRST]
+    assert _slug_history(repo)["doc_id"] == SECOND
+
+
+def test_a_holder_back_for_a_second_stretch_is_walked_from_its_newest(repo: Path) -> None:
+    """X, then Y, then X again, then Z: X's earlier stretch is behind Y's boundary."""
+    write_doc(repo, MD, doc_text(FIRST, SLUG, "first stretch"))
+    commit_all(repo, f"add(forskrift): {SLUG}")
+    write_doc(repo, MD, doc_text(SECOND, SLUG, "between"))
+    commit_all(repo, f"update(forskrift): {SLUG}")
+    write_doc(repo, MD, doc_text(FIRST, SLUG, "second stretch"))
+    back = commit_all(repo, f"update(forskrift): {SLUG}")
+    write_doc(repo, MD, doc_text(THIRD, SLUG, "last"))
+    commit_all(repo, f"update(forskrift): {SLUG}")
+
+    lineage = extract_earlier_lineage(repo, MD, FIRST)
+
+    assert [step.event.commit for step in lineage.steps] == [back[:7]]

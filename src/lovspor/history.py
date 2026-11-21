@@ -303,7 +303,10 @@ def extract_earlier_lineage(repo_path: Path, current_path: str, doc_id: str) -> 
     the path's later holders are passed over (their renames still tracked)
     until the first revision whose frontmatter ``id`` is ``doc_id``; from
     there the lineage runs to its own identity boundary. Empty when no
-    revision of the path carries ``doc_id``.
+    revision of the path carries ``doc_id``. When ``doc_id`` held the path in
+    more than one stretch (X, then Y, then X again, then Z), the walk starts
+    at X's newest stretch and stops at Y's boundary: X's earlier stretch is
+    not reached.
     """
     blocks = list(_parse_blocks(_run_git_log(repo_path, current_path)))
     path = current_path
