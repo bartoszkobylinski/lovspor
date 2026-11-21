@@ -34,10 +34,14 @@ def test_verification_is_manual_main_only_and_environment_scoped() -> None:
 
 @pytest.mark.parametrize("matches", [True, False])
 def test_fingerprint_check_rejects_the_wrong_key(tmp_path: Path, matches: bool) -> None:
+    # The second call reads the key from its stdin, as `ssh-keygen -lf -` does.
+    # A fake that answered without reading could exit before the first call
+    # wrote: the writer then died of SIGPIPE and `pipefail` made the step exit
+    # 141, in about 2 runs in 100 (#977).
     fake = tmp_path / "ssh-keygen"
     fake.write_text(
         '#!/bin/sh\nif [ "$1" = "-y" ]; then echo public-key; '
-        'else echo "256 SHA256:actual public-key"; fi\n',
+        'else cat >/dev/null; echo "256 SHA256:actual public-key"; fi\n',
         encoding="utf-8",
     )
     fake.chmod(0o755)
