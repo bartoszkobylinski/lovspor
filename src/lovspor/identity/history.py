@@ -207,29 +207,48 @@ def _displaced_lineage(
     return lineage
 
 
+def _unwritten(lineage: Lineage, dataset_dir: Path) -> Lineage:
+    """``lineage`` without the commits its document's by-id file already holds.
+
+    A commit is at most one event of one document. A holder displaced from
+    more than one path (it moved, and both paths were taken) has its move
+    seen from each path, under each path; the append-only file keeps it once.
+    """
+    written = read_identity_history(by_id_path(dataset_dir, lineage.doc_id))
+    if written is None:
+        return lineage
+    known = {event.commit for event in written.events}
+    steps = [step for step in lineage.steps if step.event.commit not in known]
+    return lineage.model_copy(update={"steps": steps})
+
+
 def preserve_displaced(
     repo: Path, record: HistoryRecord, dataset_dir: Path, holders: Mapping[str, ManifestRecord]
 ) -> list[Path]:
     """Before ``record``'s slug history is written, keep the holder it displaces.
 
-    When ``history/<slug>.json`` names another document, that document's
-    lineage is merged into its by-id file (append-only); the path to stage is
-    returned. ``holders`` are this run's manifest records. A by-id file that cannot be merged is
-    logged and left as it is: keeping the earlier holder's history never stops
-    the sync from publishing.
+    When ``history/<slug>.json`` names another document, the events of that
+    document's lineage its by-id file lacks are merged into it (append-only);
+    the path to stage is returned, or none when nothing is new. ``holders``
+    are this run's manifest records. A by-id file that cannot be read or
+    merged is logged and left as it is: keeping the earlier holder's history
+    never stops the sync from publishing.
     """
     lineage = _displaced_lineage(repo, record, dataset_dir, holders)
     if lineage is None:
         return []
-    logger.warning(
-        "%s/history/%s.json held %s; preserving its %d events in by-id before writing %s",
-        dataset_dir.name,
-        record.slug,
-        lineage.doc_id,
-        len(lineage.steps),
-        record.doc_id,
-    )
     try:
+        lineage = _unwritten(lineage, dataset_dir)
+        if not lineage.steps:
+            return []
+        logger.warning(
+            "%s/history/%s.json held %s; preserving %d events in by-id before writing %s",
+            dataset_dir.name,
+            record.slug,
+            lineage.doc_id,
+            len(lineage.steps),
+            record.doc_id,
+        )
         return [write_identity_history(identity_history(lineage), dataset_dir)]
     except (ParseError, HistoryIdentityError, ValidationError) as exc:
         logger.warning("by-id history of %s not written: %s", lineage.doc_id, exc)

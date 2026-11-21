@@ -515,3 +515,39 @@ def test_a_holder_back_for_a_second_stretch_is_walked_from_its_newest(repo: Path
     lineage = extract_earlier_lineage(repo, MD, FIRST)
 
     assert [step.event.commit for step in lineage.steps] == [back[:7]]
+
+
+NEW_SLUG = "ny"
+FOURTH = "sf-20270202-0002"
+
+
+def _publish_at(repo: Path, slug: str, doc_id: str, holders: dict[str, ManifestRecord]) -> None:
+    lineage = extract_lineage(repo, f"forskrifter/{slug}.md", doc_id)
+    history = lineage.record(slug)
+    preserve_displaced(repo, history, repo / "forskrifter", holders)
+    write_document_history(repo, lineage, history, repo / "forskrifter")
+
+
+@pytest.mark.parametrize("old_slug_first", [True, False])
+def test_a_removed_holder_displaced_from_both_its_paths_gets_each_commit_once(
+    repo: Path, old_slug_first: bool
+) -> None:
+    """FIRST moved to ny.md and was removed; SECOND takes its old slug and
+    FOURTH its new one. Each displacement sees FIRST's move from its own
+    path; the by-id file, append-only, holds that commit once."""
+    commits = _move_then_leave_in_the_run(repo, by_id_written=False)
+    write_doc(repo, NEW_MD, doc_text(FOURTH, NEW_SLUG, f"{FOURTH} v1"))
+    commit_all(repo, f"add(forskrift): {NEW_SLUG}")
+    holders = {
+        **_run_records(),
+        FOURTH: ManifestRecord.model_validate(record(FOURTH, NEW_SLUG)),
+    }
+    takers = [(SLUG, SECOND), (NEW_SLUG, FOURTH)]
+
+    for slug, doc_id in takers if old_slug_first else reversed(takers):
+        _publish_at(repo, slug, doc_id, holders)
+
+    kept = read_identity_history(by_id_path(repo / "forskrifter", FIRST))
+    assert kept is not None
+    assert sorted(event.commit for event in kept.events) == sorted(commits)
+    assert len(kept.events) == len(commits)
