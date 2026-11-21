@@ -13,9 +13,12 @@ else is returned with reasons and no digests, and is never trusted.
 - **held by the caller**, given as the exact bytes it holds:
   ``budget_ledger`` (AR1b entries, linked by the digest of the entry before),
   ``control_history`` (owner-signed control records, linked the same way;
-  their signatures stay :func:`~lovspor.forarbeider.release_control.verify_control`'s
-  to check) and ``quarantine_ledger`` (one canonical AR3 document, a chain of
-  at most one: its digest).
+  each entry's digest binds the record bytes **and** the exact detached
+  signature bytes, so a removed or replaced signature changes the head; whether
+  the signature is the owner's stays
+  :func:`~lovspor.forarbeider.release_control.verify_control`'s to check, and an
+  anchored entry is never an authorized one) and ``quarantine_ledger`` (one
+  canonical AR3 document, a chain of at most one: its digest).
 """
 
 import os
@@ -37,6 +40,7 @@ from lovspor.forarbeider.release_quarantine_models import QuarantineLedger
 from lovspor.forarbeider.version_models import canonical_text
 
 LATCH = "stop-latch.json"
+_CONTROL_ENTRY = b"lovspor-forarbeider-control-entry/1\n"
 
 
 class LocalChain(NamedTuple):
@@ -107,8 +111,27 @@ def ledger_chain(entries: tuple[bytes, ...], ledger_id: str) -> LocalChain:
     return _of(list(entries))
 
 
+def control_entry(item: SignedRecord) -> bytes:
+    """One control entry as anchored: the record and its detached signature, length-framed.
+
+    A missing signature is framed as absent, never as an empty one, so removing
+    it changes the entry's digest as surely as replacing it does.
+    """
+    signature = item.signature
+    framed = [_CONTROL_ENTRY, len(item.record).to_bytes(8, "big"), item.record]
+    if signature is None:
+        framed.append(b"\x00")
+    else:
+        framed += [b"\x01", len(signature).to_bytes(8, "big"), signature]
+    return b"".join(framed)
+
+
 def control_chain(history: tuple[SignedRecord, ...], policy_id: str) -> LocalChain:
-    """The owner's control records for ``policy_id``, each naming the one before."""
+    """The owner's control records for ``policy_id``, each naming the one before.
+
+    The predecessor link is the control chain's own (the digest of the record
+    bytes); the anchored digest of each entry is :func:`control_entry`'s.
+    """
     previous: str | None = None
     for index, item in enumerate(history):
         try:
@@ -120,7 +143,7 @@ def control_chain(history: tuple[SignedRecord, ...], policy_id: str) -> LocalCha
         if not _linked(index, previous, record.sequence, record.previous_control_sha256):
             return _invalid("control_chain_broken")
         previous = sha256(item.record).hexdigest()
-    return _of([item.record for item in history])
+    return _of([control_entry(item) for item in history])
 
 
 def quarantine_chain(ledger: bytes) -> LocalChain:

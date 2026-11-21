@@ -175,8 +175,25 @@ def _chain(
             return "anchor_chain_broken"
         if previous is not None and found.record_count < previous.record_count:
             return "anchor_count_decreased"
+        if _replaced(query.family, previous, found):
+            return "quarantine_successor_unverified"
         chain.append(found)
     return chain
+
+
+def _replaced(
+    family: Family, previous: ControlPlaneAnchor | None, found: ControlPlaneAnchor
+) -> bool:
+    """A document anchored once and then anchored as another document.
+
+    Until AR5 integrates the AR3 successor check (``successor_findings``
+    against the anchored predecessor's bytes, under the owner's verified
+    exceptions), no transition of an anchored quarantine ledger is proven, so
+    every one is refused: a second document is never verified over the first.
+    """
+    if family not in _DOCUMENTS or previous is None or previous.record_count == 0:
+        return False
+    return found.head_sha256 != previous.head_sha256
 
 
 def _pinned(chain: list[ControlPlaneAnchor], pin: AnchorPin | None) -> bool:

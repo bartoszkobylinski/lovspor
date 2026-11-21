@@ -43,6 +43,7 @@ from lovspor.forarbeider.control_plane_chains import (
 )
 from lovspor.forarbeider.control_plane_witness import AnchorKey, OfflineAnchorWitness
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from lovspor.forarbeider.policy_authorization import SignedRecord
 from lovspor.forarbeider.policy_trust import (
     ANCHOR_NAMESPACE,
     CONTROL_NAMESPACE,
@@ -60,6 +61,7 @@ from tests.unit.forarbeider_authorization_support import (
     CHECKED_AT,
     Key,
     new_key,
+    sign,
     signer_line,
     trust_root,
 )
@@ -943,3 +945,122 @@ def test_witness_validity_window_is_enforced_when_verifying_anchors(world: World
         ).status
         == "verified"
     )
+
+
+# --- review fix: anchors bind the whole record (control signatures, quarantine successors) ------
+
+
+def _control_history(world: World) -> tuple[Any, Any]:
+    resume = signed_by(control("resume", 1, None), world.owner, CONTROL_NAMESPACE)
+    stop = signed_by(control("stop", 2, resume), world.owner, CONTROL_NAMESPACE)
+    return resume, stop
+
+
+def _control_query(history: tuple[Any, ...]) -> AnchorQuery:
+    return AnchorQuery(
+        "control_history", REPOSITORY, "policy-1", control_chain(history, "policy-1")
+    )
+
+
+def _anchored_control(world: World) -> tuple[Any, Any, AnchorAuthority]:
+    resume, stop = _control_history(world)
+    authority = world.authority(workspace=None)
+    assert initialize(_control_query(()), authority).status == "verified"
+    assert anchor_pending(_control_query((resume,)), authority).status == "verified"
+    assert anchor_pending(_control_query((resume, stop)), authority).status == "verified"
+    return resume, stop, authority
+
+
+@pytest.mark.parametrize("removed", [b"", None])
+def test_a_removed_control_signature_changes_the_anchored_head(
+    world: World, removed: bytes | None
+) -> None:
+    resume, stop, authority = _anchored_control(world)
+    unsigned = SignedRecord(stop.record, removed)
+
+    verdict = verify(_control_query((resume, unsigned)), authority)
+
+    assert verdict.status != "verified"
+    assert_refused(lambda: verified_state(_control_query((resume, unsigned)), authority), "anchor:")
+
+
+def test_a_replaced_control_signature_changes_the_anchored_head(world: World) -> None:
+    resume, stop, authority = _anchored_control(world)
+    other = SignedRecord(stop.record, sign(world.bot, stop.record, CONTROL_NAMESPACE))
+    assert other.signature != stop.signature and other.record == stop.record
+
+    verdict = verify(_control_query((resume, other)), authority)
+
+    assert verdict.status == "diverged"
+
+
+def test_the_legitimate_control_history_still_verifies(world: World) -> None:
+    resume, stop, authority = _anchored_control(world)
+
+    state = verified_state(_control_query((resume, stop)), authority)
+
+    assert state.record_count == 2
+    assert verify(_control_query((resume,)), authority).status == "local_rolled_back"
+
+
+def _quarantine(world: World) -> tuple[bytes, bytes]:
+    a = canonical_text(QuarantineLedger()).encode()
+    exclusion = ExclusionEntry(
+        document_id="regjeringen-1",
+        reason_code="owner_excluded",
+        exception_sha256="6" * 64,
+        excluded_at=CHECKED_AT,
+    )
+    b = canonical_text(QuarantineLedger(exclusions=(exclusion,))).encode()
+    return a, b
+
+
+def _quarantine_query(ledger: bytes) -> AnchorQuery:
+    return AnchorQuery("quarantine_ledger", REPOSITORY, "default", quarantine_chain(ledger))
+
+
+def test_the_first_quarantine_anchor_follows_a_valid_initialization(world: World) -> None:
+    a, _ = _quarantine(world)
+    authority = world.authority(workspace=None)
+
+    assert initialize(_quarantine_query(b""), authority).status == "verified"
+    assert anchor_pending(_quarantine_query(a), authority).status == "verified"
+    assert verified_state(_quarantine_query(a), authority).record_count == 1
+
+
+def test_a_witnessed_quarantine_document_replaced_by_another_is_never_verified(
+    world: World,
+) -> None:
+    a, b = _quarantine(world)
+    authority = world.authority(workspace=None)
+    initialize(_quarantine_query(b""), authority)
+    first = anchor_pending(_quarantine_query(a), authority).latest
+    assert first is not None
+    replacement = first.model_copy(
+        update={
+            "head_sha256": sha256(b).hexdigest(),
+            "anchor_sequence": first.anchor_sequence + 1,
+            "previous_anchor_sha256": anchor_digest(first),
+        }
+    )
+    world.witness.submit(replacement)
+
+    for ledger in (a, b):
+        verdict = verify(_quarantine_query(ledger), authority)
+        assert verdict.status == "anchor_invalid"
+        assert verdict.reasons == ("quarantine_successor_unverified",)
+        assert_refused(
+            lambda: verified_state(_quarantine_query(ledger), authority),  # noqa: B023
+            "anchor:anchor_invalid",
+        )
+
+
+def test_anchoring_a_different_quarantine_document_is_refused(world: World) -> None:
+    a, b = _quarantine(world)
+    authority = world.authority(workspace=None)
+    initialize(_quarantine_query(b""), authority)
+    anchor_pending(_quarantine_query(a), authority)
+    before = tree(world.store)
+
+    assert_refused(lambda: anchor_pending(_quarantine_query(b), authority), "anchor:diverged")
+    assert tree(world.store) == before

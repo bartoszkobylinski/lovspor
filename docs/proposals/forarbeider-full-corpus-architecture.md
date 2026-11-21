@@ -934,6 +934,7 @@ Limitations:
   - the AR3 `quarantine_ledger`, one canonical document.
 
   The workspace families are read through the existing readers. The caller holds the bytes of the other three and passes them in. The records stay the source of truth.
+- **Control entries bind their signatures.** Each control entry is anchored as the record bytes together with the exact detached signature bytes, length-framed; a missing signature is framed as absent. Removing or replacing a signature therefore changes the head, and the state is no longer `verified`. Whether a signature is the owner's stays `verify_control`'s to judge: an anchored entry is never an authorized one.
 - **Anchor contract** (`control-plane-anchor/1`, `control_plane_anchor_models`). One canonical anchor binds:
   - the family and its record schema;
   - the repository, and the scope with its kind;
@@ -975,7 +976,17 @@ Limitations:
 
   An append-only production witness (for example a transparency log, or a protected remote) is AR7, together with a production signer for the witness key.
 - **Existing AR4 records have no anchors.** They are `unanchored`, and adopting them needs an owner decision (AR5).
-- **A new quarantine ledger version is not advanced here.** Anchoring a successor needs the AR3 successor check against the anchored predecessor. The ledger, control and quarantine writers are AR5.
+- **An anchored quarantine ledger cannot be succeeded yet.**
+  - Once a quarantine ledger is anchored, anchoring a different one is refused (`diverged`).
+  - A witness chain in which a second document follows the first is `anchor_invalid` (`quarantine_successor_unverified`), for both documents.
+  - Initializing an empty ledger and anchoring the first document still work.
+  - **Later integration (AR5).** A successor may be verified only when all of these hold:
+    - the predecessor's bytes reproduce the anchored head;
+    - AR3's `successor_findings(previous, current)` is empty;
+    - every clearance it relies on was re-verified under the owner's signed exceptions.
+
+    The proof must travel with the new anchor, so the verifier can check it.
+- **The ledger, control and quarantine writers are AR5.**
 - **Not in this PR:** wiring `verified_state` into the STOP/RESUME and budget gates, owner resume, and budget reservation and settlement (AR5).
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
