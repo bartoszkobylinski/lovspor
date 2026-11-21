@@ -133,14 +133,32 @@ if ! git rev-parse --verify --quiet "$base_ref" >/dev/null; then
   exit 2
 fi
 
+# The nightly lane hands over the functions of registered survivors that a
+# commit in its range claims to kill (#984, scripts/ci/mutation_remeasure.py),
+# one whole-function pattern a line. They are measured again whatever the diff
+# says: a test is not a change of `src/`, so nothing else would look at them.
+remeasure=()
+remeasure_file="${MUTMUT_PR_REMEASURE_FILE:-}"
+if [ -n "$remeasure_file" ] && [ -s "$remeasure_file" ]; then
+  while IFS= read -r pattern; do
+    [ -n "$pattern" ] && remeasure+=("$pattern")
+  done <"$remeasure_file"
+fi
+
 changed="$(git diff --name-only --diff-filter=ACMR "$base_ref"...HEAD -- 'src/lovspor/' | grep '\.py$' || true)"
-if [ -z "$changed" ]; then
+if [ -z "$changed" ] && [ "${#remeasure[@]}" -eq 0 ]; then
   echo "mutation not applicable: no src/lovspor logic changed relative to $base_ref"
   exit 0
 fi
 
-count="$(printf '%s\n' "$changed" | wc -l | tr -d ' ')"
+count=0
+if [ -n "$changed" ]; then
+  count="$(printf '%s\n' "$changed" | wc -l | tr -d ' ')"
+fi
 echo "mutation scope: $count changed file(s) relative to $base_ref"
+if [ "${#remeasure[@]}" -gt 0 ]; then
+  echo "re-measuring ${#remeasure[@]} function(s) of registered survivors a commit claims to kill"
+fi
 
 patterns=()
 # A changed function on the function-lines ratchet baseline is legacy (#228):
@@ -155,7 +173,7 @@ if [ -s "$legacy_plan" ]; then
   legacy_count="$("$python_bin" -c 'import json, sys; print(len(json.load(open(sys.argv[1]))))' "$legacy_plan")"
 fi
 
-if [ "${#patterns[@]}" -eq 0 ] && [ "$legacy_count" -eq 0 ]; then
+if [ "${#patterns[@]}" -eq 0 ] && [ "$legacy_count" -eq 0 ] && [ "${#remeasure[@]}" -eq 0 ]; then
   echo "mutation not applicable: $count changed file(s), but no mutatable function changed relative to $base_ref"
   exit 0
 fi
@@ -227,7 +245,7 @@ if [ "$legacy_count" -gt 0 ]; then
   while IFS= read -r name; do
     [ -n "$name" ] && patterns+=("$name")
   done <"$selected"
-  if [ "${#patterns[@]}" -eq 0 ]; then
+  if [ "${#patterns[@]}" -eq 0 ] && [ "${#remeasure[@]}" -eq 0 ]; then
     echo "mutation not applicable: no mutant sits on a changed line of the legacy function(s) — the remainder is reported above, not measured"
     exit 0
   fi
@@ -250,13 +268,19 @@ if [ "$resumed" -eq 1 ]; then
   while IFS= read -r name; do
     [ -n "$name" ] && patterns+=("$name")
   done <"$narrowed"
-  if [ "${#patterns[@]}" -eq 0 ]; then
+  if [ "${#patterns[@]}" -eq 0 ] && [ "${#remeasure[@]}" -eq 0 ]; then
     # `mutmut run` with no name measures the whole package, never this range.
     echo "error: the ledger left no mutant name to run" >&2
     echo "no score for this PR — do not report one" >&2
     exit 3
   fi
   echo "ledger: ${#patterns[@]} target(s) left to measure after the earlier nights' results"
+fi
+# Claimed kills join after the ledger narrowed the rest: a result the ledger
+# restored for one of them was measured before the test that claims the kill,
+# and mutmut measures a named mutant again whatever result it holds.
+if [ "${#remeasure[@]}" -gt 0 ]; then
+  patterns+=("${remeasure[@]}")
 fi
 timeout_bin="$(command -v timeout || true)"
 run_status=0

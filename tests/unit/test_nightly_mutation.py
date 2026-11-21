@@ -236,6 +236,7 @@ def test_the_mutation_step_receives_the_published_total_budget() -> None:
     assert step["env"] == {
         "MUTMUT_PR_TOTAL_BUDGET_SECONDS": "${{ steps.budget.outputs.seconds }}",
         "MUTMUT_PR_RESUME_ARCHIVE": "${{ steps.ledger.outputs.archive }}",
+        "MUTMUT_PR_REMEASURE_FILE": "${{ steps.claims.outputs.patterns }}",
         "BASE": "${{ steps.range.outputs.base }}",
         "HEAD": "${{ steps.range.outputs.head }}",
     }
