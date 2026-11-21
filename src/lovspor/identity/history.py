@@ -11,6 +11,7 @@ slug's permanent owner.
 """
 
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -18,7 +19,13 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import HistoryIdentityError, ParseError, SlugOwnershipError
-from lovspor.history import HistoryEvent, HistoryRecord, Lineage, write_history
+from lovspor.history import (
+    HistoryEvent,
+    HistoryRecord,
+    Lineage,
+    extract_earlier_lineage,
+    write_history,
+)
 from lovspor.identity.registry import LegacyCorpus, corpus_identity
 
 BY_ID_DIRNAME = "by-id"
@@ -26,6 +33,8 @@ IDENTITY_HISTORY_SCHEMA_VERSION = 1
 #: ``history/<slug>.json``, ``history/<slug>.md`` and ``history/by-id/<doc_id>.json``.
 FILES_PER_HISTORY = 3
 _SAFE_DOC_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+logger = logging.getLogger(__name__)
 
 
 class IdentityEvent(HistoryEvent):
@@ -134,6 +143,62 @@ def _ensure_slug_owner(repo: Path, directory: str, record: HistoryRecord) -> Non
         )
 
 
+def _displaced_lineage(repo: Path, record: HistoryRecord, dataset_dir: Path) -> Lineage | None:
+    """The lineage of the document ``history/<slug>.json`` names, when not ``record``'s.
+
+    On a legacy corpus a slug whose earlier holder left the manifest can be
+    handed to a new document, and writing the new document's slug history
+    would overwrite the only published copy of the earlier holder's events.
+    The file's ``doc_id`` is read first; that document's lineage is then
+    extracted from git by ``extract_earlier_lineage`` (the paths and identity
+    boundary ``extract_lineage`` uses), never copied from the file, which may
+    hold events of a still earlier holder. ``None`` when the file is absent,
+    names ``record.doc_id``, cannot be read, or no revision carries its id.
+    """
+    path = dataset_dir / "history" / f"{record.slug}.json"
+    if not path.exists():
+        return None
+    try:
+        prior_id = HistoryRecord.model_validate(json.loads(path.read_text(encoding="utf-8"))).doc_id
+        current = (dataset_dir / f"{record.slug}.md").relative_to(repo).as_posix()
+    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError, ValueError) as exc:
+        logger.warning(
+            "%s: unreadable; a previous holder's events are not preserved: %s", path, exc
+        )
+        return None
+    if prior_id == record.doc_id:
+        return None
+    lineage = extract_earlier_lineage(repo, current, prior_id)
+    if not lineage.steps:
+        logger.warning("%s names %s, but no revision of %s carries it", path, prior_id, current)
+        return None
+    return lineage
+
+
+def _preserve_displaced(repo: Path, record: HistoryRecord, dataset_dir: Path) -> list[Path]:
+    """Merge a displaced holder's lineage into its by-id file; the path to stage.
+
+    A by-id file that cannot be merged is logged and left as it is: keeping
+    the earlier holder's history never stops the sync from publishing.
+    """
+    lineage = _displaced_lineage(repo, record, dataset_dir)
+    if lineage is None:
+        return []
+    logger.warning(
+        "%s/history/%s.json held %s; preserving its %d events in by-id before writing %s",
+        dataset_dir.name,
+        record.slug,
+        lineage.doc_id,
+        len(lineage.steps),
+        record.doc_id,
+    )
+    try:
+        return [write_identity_history(identity_history(lineage), dataset_dir)]
+    except (ParseError, HistoryIdentityError, ValidationError) as exc:
+        logger.warning("by-id history of %s not written: %s", lineage.doc_id, exc)
+        return []
+
+
 def write_document_history(
     repo: Path,
     lineage: Lineage,
@@ -143,8 +208,15 @@ def write_document_history(
     """Write a document's slug history and its by-id history; the paths to stage.
 
     ``record`` is ``lineage.record(slug)``. ``FILES_PER_HISTORY`` paths are
-    returned: the slug's JSON and Markdown and the by-id JSON.
+    returned: the slug's JSON and Markdown and the by-id JSON. When the slug's
+    history names another document, that document's lineage is first merged
+    into its own by-id file (append-only), whose path is returned before them,
+    so no published event is lost when a slug changes holder.
     """
     _ensure_slug_owner(repo, dataset_dir.name, record)
+    paths = _preserve_displaced(repo, record, dataset_dir)
     json_path, md_path = write_history(record, dataset_dir)
-    return [json_path, md_path, write_identity_history(identity_history(lineage), dataset_dir)]
+    paths.extend(
+        [json_path, md_path, write_identity_history(identity_history(lineage), dataset_dir)]
+    )
+    return paths

@@ -75,7 +75,7 @@ from lovspor.errors import (
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_lineage
 from lovspor.identity import registered_ownership, replace_manifest, verified_corpus_identity
-from lovspor.identity.history import FILES_PER_HISTORY, write_document_history
+from lovspor.identity.history import write_document_history
 from lovspor.parsing.placeholder import is_content_placeholder
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.rendering.document import (
@@ -1455,10 +1455,10 @@ def _commit_history_followup(
     replace_manifest(manifest, manifest_path)
     git_add(repo, [manifest_path, *history_paths])
     if has_staged_changes(repo):
-        git_commit_msg(
-            repo,
-            f"sync: update history for {len(history_paths) // FILES_PER_HISTORY} documents",
+        documents = sum(
+            1 for p in history_paths if p.parent.name == "history" and p.suffix == ".json"
         )
+        git_commit_msg(repo, f"sync: update history for {documents} documents")
 
 
 def _commit_per_doc_actions_only(

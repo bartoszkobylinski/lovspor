@@ -296,6 +296,27 @@ def _run_git_log(repo_path: Path, file_path: str) -> str:
     return result.stdout
 
 
+def extract_earlier_lineage(repo_path: Path, current_path: str, doc_id: str) -> Lineage:
+    """The lineage of ``doc_id``, an earlier holder of ``current_path``.
+
+    The same walk as ``extract_lineage``, except that the newer revisions of
+    the path's later holders are passed over (their renames still tracked)
+    until the first revision whose frontmatter ``id`` is ``doc_id``; from
+    there the lineage runs to its own identity boundary. Empty when no
+    revision of the path carries ``doc_id``.
+    """
+    blocks = list(_parse_blocks(_run_git_log(repo_path, current_path)))
+    path = current_path
+    for index, (sha, _iso_date, _subject, stat_lines) in enumerate(blocks):
+        if _frontmatter_id_at(repo_path, sha, path) == doc_id:
+            steps = _walk(repo_path, path, doc_id, blocks[index:])
+            return Lineage(doc_id=doc_id, steps=steps)
+        from_path, to_path = _parse_rename_paths(stat_lines)
+        if from_path and to_path:
+            path = from_path
+    return Lineage(doc_id=doc_id, steps=[])
+
+
 def _lineage(repo_path: Path, current_path: str, doc_id: str, raw: str) -> list[LineageStep]:
     """Build events from raw git log, stopping at the identity boundary.
 
@@ -306,9 +327,19 @@ def _lineage(repo_path: Path, current_path: str, doc_id: str, raw: str) -> list[
     ``doc_id``; the first mismatch ends the lineage — see
     ``extract_history`` for the rule on revisions without a parseable id.
     """
+    return _walk(repo_path, current_path, doc_id, list(_parse_blocks(raw)))
+
+
+def _walk(
+    repo_path: Path,
+    current_path: str,
+    doc_id: str,
+    blocks: list[tuple[str, str, str, list[str]]],
+) -> list[LineageStep]:
+    """``_lineage``'s walk over already parsed commits, newest first."""
     steps: list[LineageStep] = []
     path = current_path
-    for sha, iso_date, subject, stat_lines in _parse_blocks(raw):
+    for sha, iso_date, subject, stat_lines in blocks:
         blob_id = _frontmatter_id_at(repo_path, sha, path)
         if blob_id is not None and blob_id != doc_id:
             break
