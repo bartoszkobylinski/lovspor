@@ -60,8 +60,9 @@ Before every push: `scripts/quality/verify-deep.sh` — green (the fast gate, th
    (`gh pr ready`) when the implementation is done.
 2. From ready, **GitHub Actions owns the handoff** (`docs/agentic-ci.md`): fast-ci, the
    existing Test matrix, and ONE round of an independent Codex test author on the
-   self-hosted runner run automatically. Mutation is not a PR check: it runs nightly on
-   `main` and reports in the `Nightly mutation` issue.
+   self-hosted runner run automatically. A PR that changes nothing outside `tests/` gets no
+   author round (#986). Mutation is not a PR check: it runs nightly on `main` and reports
+   in the `Nightly mutation` issue.
 3. Do not manually invoke Codex for PR testing. Do not run or wait for mutation locally.
 4. The pipeline ends READY TO MERGE (all checks green) or BLOCKED with a label:
    `needs-implementation-fix` or `needs-human:pipeline` + a short PR comment.

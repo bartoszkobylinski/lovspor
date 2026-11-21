@@ -6,7 +6,8 @@ name: PR Pipeline
 on:
   pull_request:
     # ready_for_review: a draft gets fast-ci only; marking it ready is what
-    # starts the independent test author (the `author_lane` condition below).
+    # starts the independent test author (the `author_lane` condition below),
+    # unless the pull request changes nothing outside tests/ (`diff-scope`).
     types: [opened, synchronize, reopened, ready_for_review]
   # Post-merge check: fast-ci on every commit that lands on main catches the
   # combined breakage of two PRs that were each green alone. Only fast-ci and
@@ -95,6 +96,64 @@ jobs:
         # pass/skip/xfail counts under xdist as serially (docs/agentic-ci.md).
         run: uv run pytest tests/unit/ -n auto
 
+  # Owner decision 2026-11-21 (#986): a pull request made only of tests does not
+  # start the independent test author. The author writes tests for the code a
+  # pull request changes; a tests-only one holds no such code, and its round
+  # would still cost a session of the agent's quota and a place in the one
+  # runner's queue. Survivors of the nightly mutation lane are killed in exactly
+  # such pull requests, by the dozen (#984).
+  # The answer is read from the diff, never from a label. It runs on the same
+  # events as the author and nowhere else, hosted, with a read-only token.
+  diff-scope:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]' &&
+      (github.event.action == 'ready_for_review' ||
+       (github.event.action == 'opened' && github.event.pull_request.draft == false))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      tests_only: ${{ steps.scope.outputs.tests_only }}
+    steps:
+      # The PR head, as `ready` takes it: the pull request that changes the
+      # helper must be able to call the version it ships.
+      - name: Check out the scope helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+
+      - name: Does the pull request change anything outside tests/?
+        id: scope
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -euo pipefail
+          # The `[ -x ]` guard is the repo rule for new scripts/ci calls (#381).
+          # Without the helper nothing can earn the skip, so the author runs.
+          if [ -x scripts/ci/pr_diff_scope.py ]; then
+            # A failure here fails the job with no output, and `codex-author`
+            # reads a missing answer as "not tests-only".
+            gh api --paginate "repos/$GH_REPO/pulls/$PR/files" \
+              --jq '.[] | {filename, previous_filename}' > "$RUNNER_TEMP/changed-files.jsonl"
+            python3 scripts/ci/pr_diff_scope.py --changed-files "$CHANGED_FILES" \
+              < "$RUNNER_TEMP/changed-files.jsonl" | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "::warning::scripts/ci/pr_diff_scope.py is not on this head; the test author runs"
+            echo "tests_only=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -qx 'tests_only=true' "$GITHUB_OUTPUT"; then
+            echo "Every changed file is under \`tests/\`: the independent test author is not started (#986)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # The agent lane runs on two machines on purpose. `codex-author` stays on the
   # self-hosted Mac mini runner because the Codex session's `auth.json` is a long-lived
   # ChatGPT credential that cannot be handed to a hosted runner. Everything
@@ -127,12 +186,19 @@ jobs:
     # or on `opened` when the PR was opened ready. Never on a draft, never on
     # `synchronize` (a later push, the author's own push included) and never on
     # `reopened`. A skipped author is not a failure: `ready` accepts it.
+    # Nor on a pull request that changes nothing outside tests/ (#986). Only
+    # the answer `true` skips: when `diff-scope` failed or said nothing, the
+    # author runs. `!cancelled()` is what lets this job judge a `diff-scope`
+    # that failed, instead of being skipped with it.
+    needs: [diff-scope]
     if: >-
+      !cancelled() &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]' &&
       (github.event.action == 'ready_for_review' ||
-       (github.event.action == 'opened' && github.event.pull_request.draft == false))
+       (github.event.action == 'opened' && github.event.pull_request.draft == false)) &&
+      needs.diff-scope.outputs.tests_only != 'true'
     # No push token and no write scopes on this lane: the box produces a
     # patch, the hosted verifier is the only leg that can reach the branch.
     permissions:

@@ -70,6 +70,7 @@ Draft PR (opened as draft, every push)
 
 Marked "Ready for review" (or opened ready) — the author runs ONCE
   ├─ fast-ci, Test, mutation (as above)
+  ├─ diff-scope     (ubuntu: is every changed file under tests/? then no author round, #986)
   ├─ codex-author   (self-hosted `codex-lovspor` runner on the Mac mini: independent test author ONLY)
   │     └─ hands its work to the verdict lane as artifact `agent-tests-<head-sha>`
   ├─ codex-tests    (ubuntu: applies that patch, lints, runs the suite, verdict, push)
@@ -372,6 +373,20 @@ unchanged.
   group per commit.
 - The test author runs once per PR: on `ready_for_review`, or on `opened` when the PR is not a
   draft. `synchronize` and `reopened` skip it, and `ready` accepts the skipped round.
+- **A pull request made only of tests gets no author round** (owner decision 2026-11-21,
+  #986). The author writes tests for the code a PR changes; a tests-only PR holds none, and
+  its round still cost a session of the agent's quota and a place in the runner's queue.
+  Survivors of the nightly lane are killed in exactly such PRs. The hosted job `diff-scope`
+  runs on the author's events, reads the PR's file list from the API and hands it to
+  `scripts/ci/pr_diff_scope.py`; `codex-author` needs that job and is skipped only on the
+  answer `tests_only=true`. `codex-tests` skips with the author and `ready` accepts that, as
+  it does for a later push. The answer comes from the diff, never from a label, which would
+  let any PR excuse itself. Doubt runs the author: no file listed, fewer files listed than
+  the PR reports (the API lists 3000 at most), a renamed file whose earlier name is outside
+  `tests/`, a helper missing from the head, or `diff-scope` failing (`!cancelled()` on the
+  author is what lets it judge a failed need). READY on such a PR claims fast-ci and the
+  Test matrix, and no independent round. A docs-only PR and a `mutation-equivalents/` entry
+  still get the round.
 - **One Codex run at a time is the runner's job, not a concurrency group's.** There is one
   `codex`-labelled runner and one Codex subscription behind it, and GitHub queues jobs for a
   busy runner in a real FIFO. `codex-author` and `remediate` therefore declare no shared group;
