@@ -27,8 +27,9 @@ import os
 import re
 import subprocess
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -71,6 +72,7 @@ COMMANDS: Final[tuple[tuple[Part, ...], ...]] = (
     ("write-tree",),
     ("hash-object", "-t", "commit", "-w", "--stdin"),
     ("cat-file", "commit", _commit),
+    ("cat-file", "blob", _commit),
     ("diff-tree", "--no-commit-id", "--name-only", "-r", "-z", _commit, _commit),
     ("ls-tree", "-r", "-z", _commit),
     ("ls-remote", _local_bare, "refs/heads/main"),
@@ -113,8 +115,12 @@ def allowed(argv: tuple[str, ...]) -> bool:
     return any(_fits(argv, shape) for shape in COMMANDS)
 
 
-def environment(directory: Path, index: Path | None) -> dict[str, str]:
-    """The whole environment Git gets; nothing is inherited but ``PATH``."""
+def environment(directory: Path, index: Path | None, at: datetime | None = None) -> dict[str, str]:
+    """The whole environment Git gets; nothing is inherited but ``PATH``.
+
+    ``at`` fixes the identity and time Git records for a ref update, so a
+    simulated remote's reflog states the simulation's clock.
+    """
     found = {
         "PATH": os.environ.get("PATH", os.defpath),
         "LC_ALL": "C",
@@ -127,11 +133,25 @@ def environment(directory: Path, index: Path | None) -> dict[str, str]:
     }
     if index is not None:
         found["GIT_INDEX_FILE"] = str(index)
+    if at is not None:
+        found["GIT_COMMITTER_NAME"] = "lovspor-simulated-remote"
+        found["GIT_COMMITTER_EMAIL"] = "remote@lovspor.invalid"
+        found["GIT_COMMITTER_DATE"] = f"{int(at.timestamp())} +0000"
     return found
 
 
+class GitContext(NamedTuple):
+    """Where the private index lives and the time a ref update records, when either is set."""
+
+    index_file: Path | None = None
+    at: datetime | None = None
+
+
 def run_git(
-    directory: Path, argv: tuple[str, ...], stdin: bytes | None = None, index: Path | None = None
+    directory: Path,
+    argv: tuple[str, ...],
+    stdin: bytes | None = None,
+    context: GitContext = GitContext(),  # noqa: B008 - an immutable NamedTuple
 ) -> GitAnswer:
     """Run one allowed command in ``directory``; ``index`` names a private index file.
 
@@ -141,6 +161,7 @@ def run_git(
     """
     if not allowed(argv):
         raise GitPublishError(f"git argument vector not allowed: {argv[:1]}")
+    index, at = context
     if index is not None and index.parent != directory / ".git":
         raise GitPublishError("the index file lives in the clone's .git")
     try:
@@ -151,7 +172,7 @@ def run_git(
             capture_output=True,
             timeout=TIMEOUT_SECONDS,
             check=False,
-            env=environment(directory, index),
+            env=environment(directory, index, at),
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise GitPublishError(f"git {argv[0]} could not run") from error

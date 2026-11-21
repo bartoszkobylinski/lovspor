@@ -42,7 +42,7 @@ def _name(sequence: int) -> str:
     return f"{sequence:06d}.json"
 
 
-def _create(folder: Path, name: str, payload: bytes) -> None:
+def create_once(folder: Path, name: str, payload: bytes) -> None:
     """Create ``name`` once; an existing name is a refusal, never overwritten."""
     with directory(folder, "attempts") as parent:
         try:
@@ -127,7 +127,7 @@ def append(workspace: Path, record: AttemptRecord) -> None:
     if head(workspace, record.transaction_id) != (record.sequence, record.previous_sha256):
         raise _refused("attempts")
     folder = _folder(workspace, record.transaction_id, create=True)
-    _create(folder, _name(record.sequence), canonical_text(record).encode())
+    create_once(folder, _name(record.sequence), canonical_text(record).encode())
 
 
 def latched(workspace: Path) -> bool:
@@ -140,7 +140,7 @@ def latch(workspace: Path, reasons: tuple[str, ...], at: datetime, transaction_i
     if latched(workspace):
         return
     record = StopLatch(reasons=reasons, set_at=at, transaction_id=transaction_id)
-    _create(workspace, _LATCH, canonical_text(record).encode())
+    create_once(workspace, _LATCH, canonical_text(record).encode())
 
 
 def private_workspace(workspace: Path) -> bool:

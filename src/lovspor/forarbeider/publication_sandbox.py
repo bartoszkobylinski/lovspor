@@ -21,7 +21,9 @@ import hmac
 import os
 import secrets
 import stat
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, final
 
@@ -34,9 +36,16 @@ MARKER = "lovspor-disposable-remote"
 NOT_SANDBOXED = "simulation_transport_not_sandboxed"
 NOT_DISPOSABLE = "simulation_remote_not_disposable"
 CONFIG = (
-    b"[core]\n\trepositoryformatversion = 0\n\tbare = true\n"
+    b"[core]\n\trepositoryformatversion = 0\n\tbare = true\n\tlogAllRefUpdates = always\n"
     b"[receive]\n\tdenyNonFastForwards = true\n\tdenyDeletes = true\n"
 )
+
+
+SimulatedSigner = tuple[AppIdentity | None, bool]
+_STALE_ANSWER: dict[str, Any] = {
+    "data": {"createCommitOnBranch": None},
+    "errors": [{"type": "STALE_DATA", "message": "Expected branch to point to another commit"}],
+}
 
 
 class SimulatedLostResponseError(Exception):
@@ -47,15 +56,36 @@ class SimulatedCrash(BaseException):
     """The simulated process died after the mutation was applied."""
 
 
+@dataclass(frozen=True, slots=True)
+class SimulatedCommit:
+    """One commit as the simulated endpoint reports it, with its ref-update event.
+
+    ``app`` and ``verified`` are what GitHub would report about the signature
+    (§9.3a 2a, ``github_app``); ``at`` is the time of the ref update GitHub
+    would assert in its activity record (§9.3a 2b ii), ``None`` when it kept none.
+    """
+
+    oid: str
+    parent: str
+    headline: str
+    body: str
+    changes: tuple[tuple[str, bytes], ...]
+    app: AppIdentity | None
+    verified: bool
+    at: datetime | None
+
+
 @final
 @dataclass(slots=True)
 class SimulatedGitHub:
     """``main`` of one repository, held in memory, answering as GitHub would.
 
     ``post`` refuses a stale ``expectedHeadOid`` with ``STALE_DATA``; otherwise
-    it applies the additions and moves ``main``. ``fault`` loses the answer or
-    kills the process after applying; ``response`` replaces the answer;
-    ``reported_head`` replaces what ``head`` reads.
+    it creates a commit signed as ``identity`` and moves ``main``. ``fault``
+    loses the answer or kills the process after applying; ``response`` replaces
+    the answer; ``reported_head`` replaces what ``head`` reads; ``now`` is the
+    time the endpoint records for a ref update. ``advance`` is someone else
+    moving ``main``: another App, a person, or a commit GitHub did not verify.
     """
 
     head_oid: str
@@ -66,6 +96,38 @@ class SimulatedGitHub:
     fault: Literal["lost", "crash"] | None = None
     response: Any = None
     reported_head: str | None = None
+    now: datetime | None = None
+    commits: dict[str, SimulatedCommit] = field(default_factory=dict)
+
+    def _apply(
+        self, changes: Mapping[str, bytes], message: tuple[str, str], signer: SimulatedSigner
+    ) -> str:
+        oid = format(len(self.commits) + 1, "040x")
+        headline, body = message
+        app, verified = signer
+        made = SimulatedCommit(
+            oid,
+            self.head_oid,
+            headline,
+            body,
+            tuple(sorted(changes.items())),
+            app,
+            verified,
+            self.now,
+        )
+        self.commits[oid] = made
+        self.files.update(changes)
+        self.head_oid = oid
+        return oid
+
+    def advance(
+        self, changes: Mapping[str, bytes], message: tuple[str, str], signer: SimulatedSigner
+    ) -> str:
+        """Someone else moves ``main`` by one commit: ``signer`` is (App or none, verified)."""
+        return self._apply(changes, message, signer)
+
+    def commit(self, oid: str) -> SimulatedCommit | None:
+        return self.commits.get(oid)
 
     def head(self, repository: str, branch: str) -> str | None:
         if (repository, branch) != (self.repository, "main"):
@@ -76,15 +138,13 @@ class SimulatedGitHub:
         self.calls.append(payload)
         given = payload["variables"]["input"]
         if given["expectedHeadOid"] != self.head_oid:
-            return {
-                "data": {"createCommitOnBranch": None},
-                "errors": [
-                    {"type": "STALE_DATA", "message": "Expected branch to point to another commit"}
-                ],
-            }
-        for item in given["fileChanges"]["additions"]:
-            self.files[item["path"]] = base64.b64decode(item["contents"])
-        self.head_oid = format(len(self.calls), "040x")
+            return _STALE_ANSWER
+        changes = {
+            item["path"]: base64.b64decode(item["contents"])
+            for item in given["fileChanges"]["additions"]
+        }
+        message = given["message"]
+        self._apply(changes, (message["headline"], message["body"]), (self.identity, True))
         if self.fault == "lost":
             raise SimulatedLostResponseError
         if self.fault == "crash":

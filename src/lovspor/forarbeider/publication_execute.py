@@ -46,6 +46,7 @@ from lovspor.forarbeider import (
     publication_attempts,
     publication_path_a,
     publication_path_b,
+    publication_receipts,
     publication_sandbox,
     publication_stage,
 )
@@ -155,9 +156,17 @@ def _record(
 
 
 def _settled(request: ExecutionRequest) -> ExecutionOutcome | None:
-    found = publication_attempts.records(
-        request.workspace, request.inputs.transaction.transaction_id
-    )
+    tid = request.inputs.transaction.transaction_id
+    found = publication_attempts.records(request.workspace, tid)
+    receipted = [
+        r
+        for r in publication_receipts.receipts(request.workspace)
+        if r.transaction_id == tid and r.published
+    ]
+    if receipted:
+        return ExecutionOutcome(
+            "unchanged", receipted[0].commit, None, None, found[-1] if found else None
+        )
     if not found:
         return None
     last = found[-1]
@@ -379,4 +388,4 @@ def _send(
     if environment.remote is None or evidence.local_commit is None:
         raise _not_eligible("adapter")
     bare = publication_sandbox.verified_remote(environment.remote)
-    return publication_path_b.push(request.clone, bare, evidence.local_commit)
+    return publication_path_b.push(request.clone, bare, evidence.local_commit, environment.clock())
