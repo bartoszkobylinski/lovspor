@@ -158,7 +158,8 @@ def test_the_sandbox_imports_nothing_that_can_reach_a_network() -> None:
         elif isinstance(node, ast.Import):
             imported.update(alias.name for alias in node.names)
 
-    allowed = {"base64", "dataclasses", "hmac", "os", "pathlib", "secrets", "stat", "typing"}
+    allowed = {"base64", "collections.abc", "dataclasses", "datetime", "hmac", "os"}
+    allowed |= {"pathlib", "secrets", "stat", "typing"}
     foreign = {
         name
         for name in imported
