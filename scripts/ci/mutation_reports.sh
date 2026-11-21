@@ -11,6 +11,11 @@
 #
 # Usage:
 #   mutation_reports.sh publish OUT_DIR ARGS...
+#   mutation_reports.sh register OUT_FILE
+#
+# `register` writes the register as the branch holds it to OUT_FILE, empty
+# when there is no branch yet: what the lane reads before it measures, to find
+# the survivors a commit claims to kill (mutation_remeasure.py).
 #
 # ARGS are the arguments of `mutation_register.py merge` without --register-in,
 # --history-in and --out, which this script supplies. OUT_DIR receives
@@ -74,6 +79,18 @@ attempt() {
   rm -rf "$work"
 }
 
+# The register as the branch holds it. A branch that is there and cannot be
+# fetched is an error: an empty file would say that nothing is registered.
+register() {
+  local out="$1"
+  : >"$out"
+  if on_remote; then
+    git fetch -q --no-tags origin "+refs/heads/$BRANCH:$LOCAL_REF"
+    git show "$LOCAL_REF:register.jsonl" >"$out" 2>/dev/null || : >"$out"
+  fi
+  echo "reports: $(wc -l <"$out" | tr -d ' ') registered mutant(s) read from $BRANCH"
+}
+
 # The texts for the issue describe the branch. When the night did not reach it
 # they would describe a register nobody can read and link to a report that is
 # not there: the section for the body is withdrawn and the comment says so.
@@ -117,8 +134,13 @@ case "${1:-}" in
     shift
     attempt "$@"
     ;;
+  register)
+    shift
+    [ "$#" -eq 1 ] || { echo "usage: mutation_reports.sh register OUT_FILE" >&2; exit 2; }
+    register "$1"
+    ;;
   *)
-    echo "usage: mutation_reports.sh publish OUT_DIR ARGS..." >&2
+    echo "usage: mutation_reports.sh publish OUT_DIR ARGS... | register OUT_FILE" >&2
     exit 2
     ;;
 esac

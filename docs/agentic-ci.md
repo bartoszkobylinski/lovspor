@@ -272,6 +272,20 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   the section is left out of the issue body and the night's comment says the branch was not
   written. A night merged from its artifact outside the lane says so in the `written_by` of
   its history line (`seed: ...`).
+- **Claimed kills (#984).** A survivor is killed by a test, and a test changes nothing in
+  `src/`: the range alone never measures its function again, so the register would keep
+  the mutant as alive until the function itself changed. A commit that kills registered
+  mutants names them in its message, one line a mutant or several keys on a line:
+  `Kills-mutant: <key>`, the `key` of the entry in `register.jsonl`. Before it measures,
+  the lane reads those lines over its range (`scripts/ci/mutation_remeasure.py`), looks the
+  keys up in the register and hands the functions to `mutmut-pr.sh`
+  (`MUTMUT_PR_REMEASURE_FILE`), which measures all their mutants again beside the diff's,
+  also when the range changed nothing in `src/` and also over a result the ledger carried.
+  **The claim decides nothing.** The register changes by that night's measurement alone,
+  and the night's report says of each claimed key whether it was found killed or still
+  alive. A key the register does not hold, or one whose function is no longer in the tree,
+  is reported and not measured. A commit without the line is not looked at: its kills stay
+  in the register as alive until the function is measured for another reason.
 - **Every mutant (#984).** The result above names survivors only: no kind for any mutant,
   no time, and a killed mutant not at all, although mutmut wrote all of it down and the
   runner threw it away with the job. `scripts/ci/mutation_night.py` reads `mutants/**/*.meta`

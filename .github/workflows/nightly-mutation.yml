@@ -118,6 +118,39 @@ jobs:
             echo "state=none for this base: the range is measured from the start" >> "$GITHUB_OUTPUT"
           fi
 
+      # A survivor is killed by a test, and a test changes nothing in `src/`,
+      # so the range alone never measures its function again (#984). A commit
+      # that kills registered mutants names their keys (`Kills-mutant: <key>`);
+      # this finds those keys in the range and hands their functions to the
+      # measuring step. The claim decides nothing: the night measures. Without
+      # this step the night measures the diff alone, as before. The `[ -x ]`
+      # guards are the repo rule (#381).
+      - name: Find the registered survivors a commit claims to kill
+        id: claims
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
+        run: |
+          patterns="$RUNNER_TEMP/remeasure-patterns.txt"
+          if [ -x scripts/ci/mutation_reports.sh ] && [ -x scripts/ci/mutation_remeasure.py ]; then
+            if scripts/ci/mutation_reports.sh register "$RUNNER_TEMP/register.jsonl" \
+              && .venv/bin/python scripts/ci/mutation_remeasure.py \
+                --base "$BASE" --head "$HEAD" \
+                --register "$RUNNER_TEMP/register.jsonl" \
+                --out-patterns "$patterns" \
+                --out-claims "$RUNNER_TEMP/mutation-claims.json"; then
+              cp "$RUNNER_TEMP/mutation-claims.json" mutation-claims.json
+            else
+              rm -f "$patterns"
+              echo "::warning::the claimed kills of this range were not read; the night measures the diff alone (#984)"
+            fi
+          else
+            echo "::warning::mutation_reports.sh or mutation_remeasure.py is not on this head; the night measures the diff alone (#984)"
+          fi
+          if [ -s "$patterns" ]; then
+            echo "patterns=$patterns" >> "$GITHUB_OUTPUT"
+          fi
+
       # One wall-clock budget for the whole run (the wrapper's model, spec
       # §6a): a fixed 210 min, whatever the start time. The job runs on a hosted
       # runner, so no morning deadline protects anything here. 210, not 300:
@@ -148,6 +181,7 @@ jobs:
         env:
           MUTMUT_PR_TOTAL_BUDGET_SECONDS: ${{ steps.budget.outputs.seconds }}
           MUTMUT_PR_RESUME_ARCHIVE: ${{ steps.ledger.outputs.archive }}
+          MUTMUT_PR_REMEASURE_FILE: ${{ steps.claims.outputs.patterns }}
           BASE: ${{ steps.range.outputs.base }}
           HEAD: ${{ steps.range.outputs.head }}
         run: |
@@ -238,6 +272,7 @@ jobs:
             mutation-raw.log
             mutation-night.json
             mutation-mutants.jsonl.gz
+            mutation-claims.json
           if-no-files-found: ignore
 
       # Always yields a verdict: a missing result is `tool_failure`, never clean.
@@ -298,6 +333,7 @@ jobs:
               --result mutation-result.json \
               --night mutation-night.json \
               --mutants mutation-mutants.jsonl.gz \
+              --claims mutation-claims.json \
               --date "$(TZ=Europe/Oslo date '+%F')" \
               --run-id "$GITHUB_RUN_ID" \
               --run-url "$RUN_URL" \

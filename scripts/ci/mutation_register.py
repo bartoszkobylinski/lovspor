@@ -29,7 +29,11 @@ are not work.
 Usage:
     mutation_register.py merge --result R --register-in F --history-in F --out DIR
         --date D --run-id N --run-url U --base SHA --head SHA --verdict V --complete true|false
-        --repo OWNER/NAME [--night N] [--mutants M] [--root .] [--written-by TEXT]
+        --repo OWNER/NAME [--night N] [--mutants M] [--claims C] [--root .] [--written-by TEXT]
+
+`--claims` is what `mutation_remeasure.py` wrote: the registered survivors a
+commit in the range claims to kill. The report says of each whether the night
+found it killed. The claim itself moves nothing.
 """
 
 from __future__ import annotations
@@ -191,6 +195,51 @@ def merge(
     return merged, movement
 
 
+KILLED = "killed"
+STILL_ALIVE = "still alive"
+UNDECIDED = "not decided: the night did not measure its function"
+
+
+def claim_outcomes(
+    claims: list[Entry], before: list[Entry], after: list[Entry], measured: set[Function]
+) -> list[Entry]:
+    """What the night found for each claimed key.
+
+    A claim is `killed` only when the night measured the entry's function and
+    the entry is no longer alive. A key that was never in the register, or
+    whose function is gone, keeps the state `mutation_remeasure.py` gave it.
+    """
+    was = {entry["key"]: entry for entry in before}
+    alive_now = {entry["key"] for entry in after}
+    outcomes = []
+    for claim in claims:
+        entry = was.get(claim["key"])
+        if entry is None or claim.get("pattern") is None:
+            outcome = claim.get("state") or "unknown"
+        elif function_of(entry) not in measured:
+            outcome = UNDECIDED
+        else:
+            outcome = STILL_ALIVE if claim["key"] in alive_now else KILLED
+        outcomes.append({**claim, "outcome": outcome})
+    return outcomes
+
+
+def _claims(outcomes: list[Entry]) -> list[str]:
+    if not outcomes:
+        return []
+    rows = [
+        [
+            f"`{claim['key']}`",
+            f"`{claim['file']}` `{claim['symbol']}`" if claim.get("file") else "",
+            f"`{claim['commit'][:8]}`",
+            claim["outcome"],
+        ]
+        for claim in outcomes
+    ]
+    heading = f"## Claimed killed by a commit in this range ({len(outcomes)})"
+    return [heading, "", *table(["key", "function", "commit", "this night found"], rows)]
+
+
 def unchanged(register: list[Entry]) -> dict[str, int]:
     """The movement of a night that did not touch the register."""
     files = len({entry["file"] for entry in register})
@@ -338,6 +387,15 @@ def comment(line: Entry, movement: dict[str, int], links: dict[str, str]) -> str
     """The night in a few lines, for a comment on the issue."""
     counts = line.get("result") or {}
     total, killed = counts.get("total") or 0, counts.get("killed") or 0
+    claims = line.get("claims") or {}
+    claimed_line = (
+        [
+            f"- Claims by commits in the range: {claims['claimed']}, of them killed "
+            f"{claims.get(KILLED, 0)}, still alive {claims.get(STILL_ALIVE, 0)}"
+        ]
+        if claims
+        else []
+    )
     return "\n".join(
         [
             f"**{line['date']}** · verdict **{line['verdict']}** · head `{line['head'][:8]}`",
@@ -345,6 +403,7 @@ def comment(line: Entry, movement: dict[str, int], links: dict[str, str]) -> str
             f"- Mutants: {total}, killed {killed} ({_share(killed, total)}), "
             f"survived {counts.get('survived', 'n/a')}, timeout {counts.get('timeout', 'n/a')}",
             f"- Register: {_moved(movement)}",
+            *claimed_line,
             f"- [Report]({links['report']}) · [run]({line['run_url']})",
             "",
         ]
@@ -378,6 +437,7 @@ def report(
     register: list[Entry],
     movement: dict[str, int],
     notes: list[str],
+    outcomes: list[Entry],
 ) -> str:
     """The night in full, as Markdown."""
     counts = line.get("result") or {}
@@ -438,6 +498,7 @@ def report(
                 for m in night["slowest"]
             ],
         )
+    lines += _claims(outcomes)
     lines += _not_killed(tonight)
     lines += ["## The register after this night", "", f"- {_moved(movement)}", ""]
     lines += table(["kind", "open"], _counted(register, "kind"))
@@ -477,6 +538,7 @@ def run_merge(args: argparse.Namespace) -> int:
     tonight, equivalents = alive(result, kinds)
     if equivalents:
         notes.append(f"{equivalents} registered equivalent(s) are not in the register")
+    measured: set[Function] = set()
     if not args.complete:
         merged, movement = register, unchanged(register)
         notes.append("the register was not changed: only a completed night changes it")
@@ -490,7 +552,11 @@ def run_merge(args: argparse.Namespace) -> int:
             )
         stamp = {"date": args.date, "commit": args.head, "run": args.run_id}
         merged, movement = merge(register, tonight, measured, stamp, args.root)
+    claims = (read_object(args.claims) or {}).get("claims") or []
+    outcomes = claim_outcomes(claims, register, merged, measured)
     line = {**history_line(args, result, night), "notes": notes}
+    if outcomes:
+        line["claims"] = {"claimed": len(outcomes), **Counter(c["outcome"] for c in outcomes)}
     movement = first_merge(history, line, movement)
     line["register"] = movement
     history = with_night(history, line)
@@ -501,7 +567,7 @@ def run_merge(args: argparse.Namespace) -> int:
     write_lines(branch / REGISTER, merged)
     write_lines(branch / HISTORY, history)
     (branch / "nights" / night_dir / "report.md").write_text(
-        report(line, night, tonight, merged, movement, notes), encoding="utf-8"
+        report(line, night, tonight, merged, movement, notes, outcomes), encoding="utf-8"
     )
     if args.night is not None and args.night.is_file():
         shutil.copyfile(args.night, branch / "nights" / night_dir / "night.json")
@@ -529,7 +595,7 @@ def main(argv: list[str] | None = None) -> int:
     merge_args = commands.add_parser("merge")
     for name in ("--result", "--register-in", "--history-in", "--out"):
         merge_args.add_argument(name, required=True, type=Path)
-    for name in ("--night", "--mutants"):
+    for name in ("--night", "--mutants", "--claims"):
         merge_args.add_argument(name, type=Path)
     for name in ("--date", "--run-id", "--run-url", "--base", "--head", "--verdict", "--repo"):
         merge_args.add_argument(name, required=True)
