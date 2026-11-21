@@ -22,6 +22,15 @@ it never sends: it holds no transport call, no push and no execution.
 4. Any commit after a published one is not this transaction's: it is
    receipted as foreign and the latch is set.
 
+``main`` is read before and after the walk; one that moved, or that cannot be
+read the second time, is ``halted_history_unverifiable`` too, with no receipt.
+The whole recovery, from the first remote read through the receipts, the
+attempt records and the latch, runs under the workspace lock
+(:func:`~lovspor.forarbeider.publication_attempts.workspace_lock`), which an
+execution holds as well: a second recovery, or an execution, is refused
+(``corpus_locked``) rather than interleaved, and retried later it finds the
+receipts already written.
+
 Receipts are deterministic from these facts. A receipt already on record is
 re-derived and must match exactly; one the remote contradicts is refused
 (``receipt_conflict``) and sets the latch. Recovery may run while a STOP is in
@@ -317,12 +326,19 @@ def recover(request: ExecutionRequest, environment: Environment) -> RecoveryOutc
 
     Raises:
         ForarbeiderRefusedError: an adapter not sandboxed (``release_not_eligible``);
-            forged or truncated attempt records or receipts
+            another execution or recovery holding the workspace
+            (``corpus_locked: workspace``); forged or truncated attempt records or receipts
             (``corpus_tree_mismatch``); a receipt the remote contradicts
             (``release_not_eligible: receipt_conflict``, latch set).
     """
     reader = _reader(request, environment)
     assert isinstance(environment, Simulation)  # noqa: S101 - _reader proved it
+    with publication_attempts.workspace_lock(request.workspace):
+        return _recover(request, environment, reader)
+
+
+def _recover(request: ExecutionRequest, environment: Simulation, reader: Reader) -> RecoveryOutcome:
+    """:func:`recover` under the workspace lock, from the first remote read to the last record."""
     at = environment.clock()
     tid = request.inputs.transaction.transaction_id
     records = publication_attempts.records(request.workspace, tid)

@@ -178,14 +178,15 @@ def _bare_commit(
     return RemoteCommit(oid, tuple(parents), headline, body, files, reasons, at)
 
 
-def history(reader: Reader, anchor: str) -> History:
-    """The commits after ``anchor`` up to the remote ``main``, oldest first.
+def _head(reader: Reader) -> str | None:
+    """The remote ``main``; a read that fails is no answer."""
+    try:
+        return reader.head()
+    except ForarbeiderRefusedError:
+        return None
 
-    ``broken`` names why the history cannot be trusted: ``main`` unreadable, a
-    commit unreadable, a merge, a root or more than :data:`HISTORY_LIMIT`
-    commits before ``anchor`` is reached, so ``main`` does not descend from it.
-    """
-    oid = reader.head()
+
+def _walk(reader: Reader, oid: str | None, anchor: str) -> History:
     found: list[RemoteCommit] = []
     while oid != anchor:
         if oid is None:
@@ -198,3 +199,31 @@ def history(reader: Reader, anchor: str) -> History:
         found.append(commit)
         oid = commit.parents[0]
     return History(tuple(reversed(found)), None)
+
+
+def history(reader: Reader, anchor: str) -> History:
+    """The commits after ``anchor`` up to the remote ``main``, oldest first.
+
+    ``main`` is read before the walk and again after it, an empty walk
+    included; the walk counts only if both reads name the same commit.
+
+    ``broken`` names why the history cannot be trusted: ``main`` unreadable
+    (before, or on the final read), a commit unreadable, a merge, a root or
+    more than :data:`HISTORY_LIMIT` commits before ``anchor`` is reached, so
+    ``main`` does not descend from it; or ``main`` moved while it was read.
+
+    The two reads bound the walk; they are not an atomic snapshot. ``main``
+    may still move after the final read, and GitHub offers no read that pins
+    it (AR7): what recovery records is what the remote showed, unchanged,
+    across the whole read.
+    """
+    first = _head(reader)
+    found = _walk(reader, first, anchor)
+    if found.broken is not None:
+        return found
+    last = _head(reader)
+    if last is None:
+        return History((), "remote_main_unreadable")
+    if last != first:
+        return History((), "remote_head_moved_during_read")
+    return found

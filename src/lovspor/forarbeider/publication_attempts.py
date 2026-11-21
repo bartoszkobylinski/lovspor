@@ -11,14 +11,26 @@ set once by a STOP, a revocation or an unknown outcome, and read before every
 authorization. Clearing it needs an owner-signed resume that AR5 adds; nothing
 here removes it.
 
+``<workspace>/workspace.lock`` serializes everything that reads and appends
+the workspace's attempt records, receipts and latch (§9.3a): an execution
+from authorization to its last record, and a recovery from its first remote
+read to its last record. Whoever holds the file's ``flock`` owns the
+workspace; a second holder is refused at once (``corpus_locked: workspace``),
+never queued, so no wait can deadlock. The file stays in place; after the
+``flock`` is taken its name must still be that file, a single private regular
+file. The workspace lock is a leaf: nothing holding it takes another lock (the
+AR4a clone lock is never taken under it).
+
 Limitation, as for the AR3 ledger: a local folder proves neither that it was
 not withheld nor that its newest record was not replaced by an equally
 canonical one. An external anchor of the head is AR5.
 """
 
+import fcntl
 import os
 import stat
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -32,6 +44,8 @@ from lovspor.forarbeider.version_models import canonical_text
 
 _CREATE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
 _LATCH = "stop-latch.json"
+_LOCK = "workspace.lock"
+_LOCK_OPEN = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
 
 
 def _refused(detail: str) -> ForarbeiderRefusedError:
@@ -146,3 +160,52 @@ def latch(workspace: Path, reasons: tuple[str, ...], at: datetime, transaction_i
 def private_workspace(workspace: Path) -> bool:
     status = os.lstat(workspace)
     return stat.S_ISDIR(status.st_mode) and not status.st_mode & 0o077
+
+
+def _lock_refused(reason: RefusalReason, detail: str) -> ForarbeiderRefusedError:
+    return ForarbeiderRefusedError(reason, detail)
+
+
+def _claim(parent: int, descriptor: int) -> None:
+    """Take the ``flock``, then prove the name still holds the one private file locked.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_locked: workspace`` (another holder, or
+            the lock moved), ``checkout_unsafe: workspace_lock``.
+    """
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        raise _lock_refused(RefusalReason.CORPUS_LOCKED, "workspace") from error
+    mine = os.fstat(descriptor)
+    try:
+        named = os.stat(_LOCK, dir_fd=parent, follow_symlinks=False)
+    except FileNotFoundError as error:
+        raise _lock_refused(RefusalReason.CORPUS_LOCKED, "workspace") from error
+    if (named.st_dev, named.st_ino) != (mine.st_dev, mine.st_ino):
+        raise _lock_refused(RefusalReason.CORPUS_LOCKED, "workspace")
+    private = mine.st_uid == os.geteuid() and not stat.S_IMODE(mine.st_mode) & 0o077
+    if not stat.S_ISREG(mine.st_mode) or mine.st_nlink != 1 or not private:
+        raise _lock_refused(RefusalReason.CHECKOUT_UNSAFE, "workspace_lock")
+
+
+@contextmanager
+def workspace_lock(workspace: Path) -> Iterator[None]:
+    """The workspace, exclusively, until the block ends; a second holder is refused.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_locked: workspace`` while another
+            execution or recovery holds it; ``checkout_unsafe: workspace_lock``
+            for a link or a shared file; ``unsafe_output_path`` for a workspace
+            that is not a private directory.
+    """
+    with directory(workspace, "workspace") as parent:
+        try:
+            descriptor = os.open(_LOCK, _LOCK_OPEN, 0o600, dir_fd=parent)
+        except OSError as error:
+            raise _lock_refused(RefusalReason.CHECKOUT_UNSAFE, "workspace_lock") from error
+        try:
+            _claim(parent, descriptor)
+            yield
+        finally:
+            os.close(descriptor)

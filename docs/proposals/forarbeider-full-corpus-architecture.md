@@ -913,8 +913,14 @@ Limitations:
   - **integrity failure** (`halted_integrity_failed`, or `halted_foreign_commit` for a commit not naming the transaction), **or any commit after ours:** the latch is set.
 
   Recovery runs under STOP and under the latch, and clears neither.
+- **Races.**
+  - **A moving remote.** `main` is read before the history walk and again after it, an empty walk included. A `main` that moved meanwhile gives `halted_history_unverifiable` (`remote_head_moved_during_read`); one that cannot be read the second time gives `remote_main_unreadable`. Either way there is no receipt, no attempt is closed, and the latch is set.
+  - **Concurrent runs on one workspace.** Every execution (from authorization to its last record) and every recovery (from its first remote read through receipts, attempt records and the latch) holds `<workspace>/workspace.lock` by `flock`. A second holder is refused at once with `corpus_locked: workspace`, never queued, so it cannot deadlock; retried later, it finds the receipts already written.
+  - **Lock ordering.** The workspace lock is a leaf: nothing takes another lock while holding it, and the AR4a clone lock is never taken under it.
 
 Limitations:
+- **The two reads of `main` bound the walk; they are not an atomic snapshot.** `main` can still move after the final read and before the receipt is written, and GitHub offers no read that pins it. A pinned or conditional read, or matching the activity API, is AR7. Until then a move after the final read is caught by the next recovery, as a foreign commit after ours.
+- **The workspace lock is advisory and local.** It serializes processes that use it on one machine and one filesystem. It is not a distributed lock, and it does not stop the owner, who can write the private workspace directly.
 - **The ref-update times are simulated.** On path A they are the endpoint's `now`; on path B they are the reflog written with the simulation clock. Reading GitHub's activity API, with its retention limits [A, verify], belongs to the production transport (AR7 and later).
 - **Revocations in the trust root carry no time.** Any revoked key makes authorization unknown. Owner-signed, timed key revocations are AR5.
 - **Receipts and attempt records are local.** Anchoring them is AR5. The ledger settlement is planned, not written.
