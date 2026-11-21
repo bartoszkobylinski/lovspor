@@ -925,6 +925,70 @@ Limitations:
 - **Revocations in the trust root carry no time.** Any revoked key makes authorization unknown. Owner-signed, timed key revocations are AR5.
 - **Receipts and attempt records are local.** Anchoring them is AR5. The ledger settlement is planned, not written.
 
+**AR5a status.** AR5a adds durable, independently anchored control-plane state. It changes no AR1–AR4 behavior: the AR5 gates (`ar5_control_anchor`, `ar5_ledger_anchor`) stay unavailable until AR5 wires this evidence in.
+- **Record families covered:**
+  - `publication_attempts`, per transaction;
+  - `recovery_receipts` and the `stop_latch`, per workspace;
+  - the AR1b `budget_ledger`, per ledger;
+  - the owner's `control_history`, per policy;
+  - the AR3 `quarantine_ledger`, one canonical document.
+
+  The workspace families are read through the existing readers. The caller holds the bytes of the other three and passes them in. The records stay the source of truth.
+- **Control entries bind their signatures.** Each control entry is anchored as the record bytes together with the exact detached signature bytes, length-framed; a missing signature is framed as absent. Removing or replacing a signature therefore changes the head, and the state is no longer `verified`. Whether a signature is the owner's stays `verify_control`'s to judge: an anchored entry is never an authorized one.
+- **Anchor contract** (`control-plane-anchor/1`, `control_plane_anchor_models`). One canonical anchor binds:
+  - the family and its record schema;
+  - the repository, and the scope with its kind;
+  - the digest of the chain head, the record count and the last sequence;
+  - the anchor's own sequence and the digest of the anchor before it;
+  - `verification: verified`.
+
+  It is deterministic and holds no record content.
+- **Trust model.** An anchor counts only if an **anchor witness** outside the runner signed it:
+  - **Its own role.** The witness key holds a new trust-root role, `anchor_witness`, in the namespace `lovspor-forarbeider-anchor` only. A key holding that role together with the owner's or the bot's is refused, and neither an owner nor a bot key can sign an anchor.
+  - **Compare-and-swap.** The witness keeps one append-only chain per family and scope. It accepts an anchor only if it names the current head and the next sequence. It never replaces or removes an anchor, and never lowers a record count.
+  - **Verification.** The verifier checks every anchor against the trust root: signature, role, revocation and validity window. Hashes alone authenticate nothing.
+  - **Independence.** A witness located inside the workspace it anchors, or holding it, is refused (`store_not_independent`). A second file in the same workspace is never an anchor.
+  - **The offline witness** (`OfflineAnchorWitness`) has its own private directory and its own key, which never enter the workspace. It writes each anchor as a temporary file, flushes it, then links it to its final name. Writers are serialized by an `flock` on the witness's own lock file.
+- **Verification** (`control_plane_anchor.verify`):
+  - The local chain must have canonical bytes and intact hash links (`local_invalid`).
+  - The witness chain must be canonical, belong to this family and scope, be unbroken, never lower its count, and be witness-signed (`anchor_invalid`). An unreadable witness is `store_unavailable`.
+  - A caller's pin of the newest anchor it has seen must still be in the chain (`anchor_rolled_back`).
+  - Then the state is one of:
+    - `unanchored`: there is no anchor, even if the family is empty. A missing anchor is never a clean history; `initialize` anchors an empty family explicitly, once, and refuses existing records that have no anchor.
+    - `local_rolled_back`: fewer records than anchored (truncation, deletion, an older copy, a deleted stop latch, a withheld newest stop).
+    - `diverged`: an anchored head the records do not reproduce (substitution, a rewritten chain, a forked writer).
+    - `verified`: exactly the anchored records. Only this state is exposed, as `verified_state`.
+    - `pending_anchor`: exactly one record more than anchored.
+    - `unanchored_tail`: more than one record more than anchored.
+- **Crash safety** (`durable_append`, for the workspace families). It holds the workspace lock, verifies, appends through the existing writer, re-reads the chain, then anchors. An interruption:
+  - **before the append** leaves the state verified and unchanged;
+  - **after the append, before the anchor** leaves `pending_anchor`, which only a retry of the same record completes;
+  - **during the anchor update** leaves no partial anchor, so the state is `pending_anchor`;
+  - **after the anchor, before the acknowledgement** leaves the state verified, and a retry is `already_applied`.
+
+  `anchor_pending` anchors exactly one pending record. More than one halts.
+- **Lock ordering:** clone lock (AR4a, never under the workspace lock), then the workspace lock, then the witness lock, which is a leaf. AR4's execution and recovery never take the witness lock.
+
+Limitations:
+- **The offline witness is not a production authority.** Whoever holds its directory can roll it back. Then:
+  - a newer workspace shows as `pending_anchor` or `unanchored_tail`, never as verified;
+  - a consistent rollback of both the workspace and the witness is caught only by a caller's pin kept elsewhere.
+
+  An append-only production witness (for example a transparency log, or a protected remote) is AR7, together with a production signer for the witness key.
+- **Existing AR4 records have no anchors.** They are `unanchored`, and adopting them needs an owner decision (AR5).
+- **An anchored quarantine ledger cannot be succeeded yet.**
+  - Once a quarantine ledger is anchored, anchoring a different one is refused (`diverged`).
+  - A witness chain in which a second document follows the first is `anchor_invalid` (`quarantine_successor_unverified`), for both documents.
+  - Initializing an empty ledger and anchoring the first document still work.
+  - **Later integration (AR5).** A successor may be verified only when all of these hold:
+    - the predecessor's bytes reproduce the anchored head;
+    - AR3's `successor_findings(previous, current)` is empty;
+    - every clearance it relies on was re-verified under the owner's signed exceptions.
+
+    The proof must travel with the new anchor, so the verifier can check it.
+- **The ledger, control and quarantine writers are AR5.**
+- **Not in this PR:** wiring `verified_state` into the STOP/RESUME and budget gates, owner resume, and budget reservation and settlement (AR5).
+
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
 **Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).

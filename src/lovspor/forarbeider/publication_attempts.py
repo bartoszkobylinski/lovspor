@@ -18,8 +18,10 @@ read to its last record. Whoever holds the file's ``flock`` owns the
 workspace; a second holder is refused at once (``corpus_locked: workspace``),
 never queued, so no wait can deadlock. The file stays in place; after the
 ``flock`` is taken its name must still be that file, a single private regular
-file. The workspace lock is a leaf: nothing holding it takes another lock (the
-AR4a clone lock is never taken under it).
+file. Lock ordering: the AR4a clone lock is never taken under the workspace
+lock. The only lock taken while holding it is the AR5a anchor witness's
+(:func:`~lovspor.forarbeider.control_plane_anchor.durable_append`), and that
+one is a leaf: nothing holding it takes another lock.
 
 Limitation, as for the AR3 ledger: a local folder proves neither that it was
 not withheld nor that its newest record was not replaced by an equally
