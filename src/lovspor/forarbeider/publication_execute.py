@@ -46,6 +46,7 @@ from lovspor.forarbeider import (
     publication_attempts,
     publication_path_a,
     publication_path_b,
+    publication_receipts,
     publication_sandbox,
     publication_stage,
 )
@@ -155,9 +156,17 @@ def _record(
 
 
 def _settled(request: ExecutionRequest) -> ExecutionOutcome | None:
-    found = publication_attempts.records(
-        request.workspace, request.inputs.transaction.transaction_id
-    )
+    tid = request.inputs.transaction.transaction_id
+    found = publication_attempts.records(request.workspace, tid)
+    receipted = [
+        r
+        for r in publication_receipts.receipts(request.workspace)
+        if r.transaction_id == tid and r.published
+    ]
+    if receipted:
+        return ExecutionOutcome(
+            "unchanged", receipted[0].commit, None, None, found[-1] if found else None
+        )
     if not found:
         return None
     last = found[-1]
@@ -245,17 +254,19 @@ def execute(request: ExecutionRequest, environment: Environment) -> ExecutionOut
     """Authorize now, record, send once, record; never twice, never blindly.
 
     Raises:
-        ForarbeiderRefusedError: forged attempt records; a simulation without
-            the adapter its path needs.
+        ForarbeiderRefusedError: ``corpus_locked: workspace`` while another
+            execution or a recovery holds the workspace; forged attempt records;
+            a simulation without the adapter its path needs.
     """
-    settled = _settled(request)
-    if settled is not None:
-        return settled
-    step = _step(request)
-    evidence = authorize(_context(request, environment, step))
-    if evidence.decision == "denied":
-        return _denied(request, step, evidence)
-    return publish_authorized(evidence, request, environment)
+    with publication_attempts.workspace_lock(request.workspace):
+        settled = _settled(request)
+        if settled is not None:
+            return settled
+        step = _step(request)
+        evidence = authorize(_context(request, environment, step))
+        if evidence.decision == "denied":
+            return _denied(request, step, evidence)
+        return _publish(evidence, request, environment)
 
 
 def _context(
@@ -325,8 +336,17 @@ def publish_authorized(
 
     Raises:
         ForarbeiderRefusedError: ``release_not_eligible`` for evidence that is not
-            this verifier's, not ``simulation_only``, not this attempt's or not fresh.
+            this verifier's, not ``simulation_only``, not this attempt's or not fresh;
+            ``corpus_locked: workspace`` while another execution or a recovery holds it.
     """
+    with publication_attempts.workspace_lock(request.workspace):
+        return _publish(evidence, request, environment)
+
+
+def _publish(
+    evidence: AuthorizationEvidence, request: ExecutionRequest, environment: Environment
+) -> ExecutionOutcome:
+    """:func:`publish_authorized` under the workspace lock its caller holds."""
     step = _step(request)
     now = _require_authorized(evidence, request, environment, step)
     if not isinstance(environment, Simulation):  # _require_authorized proved it is
@@ -379,4 +399,4 @@ def _send(
     if environment.remote is None or evidence.local_commit is None:
         raise _not_eligible("adapter")
     bare = publication_sandbox.verified_remote(environment.remote)
-    return publication_path_b.push(request.clone, bare, evidence.local_commit)
+    return publication_path_b.push(request.clone, bare, evidence.local_commit, environment.clock())

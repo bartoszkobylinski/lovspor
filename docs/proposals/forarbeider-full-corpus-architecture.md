@@ -879,6 +879,52 @@ Limitations:
 - **The attempt folder and the stop latch are local.** Like the AR3 ledger, they prove neither that they were not withheld nor that the newest record was not replaced by an equally canonical one. Anchoring is AR5.
 - **The budget reservation is only read.** Writing it atomically, reserving before the call and settling after verification are AR5.
 
+**AR4b-2 status.** AR4b-2 adds §9.3a recovery from the remote history and post-publication verification for both paths, in simulation only. Production stays disabled, and recovery holds no send, push or execute.
+- **Reading the remote** (`publication_remote`). The history after the transaction's base is read oldest first from the remote itself, never from the attempt records, an API answer or the local clone:
+  - path A reads the in-memory `SimulatedGitHub`, standing in for GitHub's commit and activity records: parent, message, changed files, whether GitHub verified the signature and for which App, and the ref-update time;
+  - path B reads the `DisposableRemote` bare repository's own objects and its reflog. The disposable remote now logs ref updates, and a push records the simulation clock.
+
+  `main` that does not descend from the base (a root, a merge, an unreadable commit, more than 32 commits) halts as `halted_history_unverifiable`.
+- **Integrity** (`publication_integrity`, §9.3a 2a). Every check is `passed`, `failed` or `unavailable`:
+  - `ancestry`: one parent, the base;
+  - `signature_class`: on path A, GitHub verified the signature for the pinned App; on path B, the bot key the root lists, in the release namespace, at the commit's stated time. A key revoked since is judged as if not revoked here, because the revocation carries no time;
+  - `message`: the transaction's headline and body;
+  - `files`: exactly the proposed paths, each with its SHA-256;
+  - `manifest`: exactly one release file, named by its digest, binding this transaction's plan, batch, path and policy, and listing every other changed file;
+  - the manifest's bot signature stays `unavailable` (AR6) and is waived in simulation only.
+- **Authorization** (§9.3a 2b) is classified separately, as a judgement from evidence and never a proof. The owner's revocation and control records are evaluated as of a moment, by keeping only those signed by then:
+  - a key revoked in the trust root has no time, so the result is `authorization_unknown`;
+  - the policy not holding at the runner's `prepared_to_send` time is `unauthorized`;
+  - a missing attempt record or a missing remote event is `authorization_unknown`;
+  - otherwise the policy is evaluated at the event and at ±300 seconds: holding at all three is `authorized`, at none is `unauthorized`, and anything mixed is `authorization_unknown`.
+
+  The AR1 verdict, FC7b's pending blockers and the AR5/AR7 anchors are listed as waived and never passed.
+- **Receipts** (`publication_recovery_models`, `publication_receipts`, version `publication-receipt/1`). They are canonical, append-only and hash-linked, and bind:
+  - the transaction, attempt and manifest;
+  - the commit, its parent and the path;
+  - both verdicts with their checks and reasons;
+  - the classification.
+
+  They hold no time of their own, so recovering twice writes nothing. A receipt on record is re-derived, and one the remote contradicts is refused (`receipt_conflict`, latch set). Edited, reordered or truncated receipts are refused on read.
+- **Outcomes** (`publication_remote_recovery`):
+  - **nothing after the base:** `not_published`. An attempt left `prepared_to_send` or `outcome_unknown` is closed `refused`.
+  - **integrity verified:** the commit is recorded as published, with a receipt and a `published` attempt record. It is never resent; `execute` returns `unchanged` whenever a published receipt exists, even with the attempt records gone. It is counted once, through an idempotent AR3 ledger `commit` settlement that recovery plans and the caller appends.
+  - **any authorization but `authorized`:** the latch is set.
+  - **integrity failure** (`halted_integrity_failed`, or `halted_foreign_commit` for a commit not naming the transaction), **or any commit after ours:** the latch is set.
+
+  Recovery runs under STOP and under the latch, and clears neither.
+- **Races.**
+  - **A moving remote.** `main` is read before the history walk and again after it, an empty walk included. A `main` that moved meanwhile gives `halted_history_unverifiable` (`remote_head_moved_during_read`); one that cannot be read the second time gives `remote_main_unreadable`. Either way there is no receipt, no attempt is closed, and the latch is set.
+  - **Concurrent runs on one workspace.** Every execution (from authorization to its last record) and every recovery (from its first remote read through receipts, attempt records and the latch) holds `<workspace>/workspace.lock` by `flock`. A second holder is refused at once with `corpus_locked: workspace`, never queued, so it cannot deadlock; retried later, it finds the receipts already written.
+  - **Lock ordering.** The workspace lock is a leaf: nothing takes another lock while holding it, and the AR4a clone lock is never taken under it.
+
+Limitations:
+- **The two reads of `main` bound the walk; they are not an atomic snapshot.** `main` can still move after the final read and before the receipt is written, and GitHub offers no read that pins it. A pinned or conditional read, or matching the activity API, is AR7. Until then a move after the final read is caught by the next recovery, as a foreign commit after ours.
+- **The workspace lock is advisory and local.** It serializes processes that use it on one machine and one filesystem. It is not a distributed lock, and it does not stop the owner, who can write the private workspace directly.
+- **The ref-update times are simulated.** On path A they are the endpoint's `now`; on path B they are the reflog written with the simulation clock. Reading GitHub's activity API, with its retention limits [A, verify], belongs to the production transport (AR7 and later).
+- **Revocations in the trust root carry no time.** Any revoked key makes authorization unknown. Owner-signed, timed key revocations are AR5.
+- **Receipts and attempt records are local.** Anchoring them is AR5. The ledger settlement is planned, not written.
+
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
 **Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).

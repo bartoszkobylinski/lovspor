@@ -28,7 +28,7 @@ throwaway key exists. No production key is read anywhere.
 """
 
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from hashlib import sha1
 from pathlib import Path
 from typing import Literal, NamedTuple, Protocol
@@ -42,10 +42,11 @@ from lovspor.forarbeider.policy_trust import (
 )
 from lovspor.forarbeider.publication_models import PublicationTransaction
 from lovspor.forarbeider.publication_path_a import body, headline
-from lovspor.git_publish import GitAnswer, GitPublishError, run_git
+from lovspor.git_publish import GitAnswer, GitContext, GitPublishError, run_git
 
 INDEX = "lovspor-publication-index"
 _GPGSIG = b"gpgsig "
+_REFLOG_FIELDS = 5  # old, new, an identity of at least one word, seconds, zone
 
 
 class Signer(Protocol):
@@ -78,7 +79,7 @@ def _refused(detail: str) -> ForarbeiderRefusedError:
 
 def _git(clone: Path, argv: tuple[str, ...], stdin: bytes | None = None) -> bytes:
     try:
-        answer = run_git(clone, argv, stdin, clone / ".git" / INDEX)
+        answer = run_git(clone, argv, stdin, GitContext(index_file=clone / ".git" / INDEX))
     except GitPublishError as error:
         raise _refused(argv[0]) from error
     if answer.code != 0:
@@ -244,10 +245,14 @@ def remote_head(bare: Path) -> str | None:
     return line.split()[0] if line else None
 
 
-def push(clone: Path, bare: Path, commit: str) -> Sent:
-    """B9: the fast-forward push, once, then what the remote's ``main`` proves."""
+def push(clone: Path, bare: Path, commit: str, at: datetime | None = None) -> Sent:
+    """B9: the fast-forward push, once, then what the remote's ``main`` proves.
+
+    ``at`` is the simulation's clock, which the remote records in its reflog.
+    """
+    argv = ("push", "--porcelain", str(bare), f"{commit}:refs/heads/main")
     try:
-        answer = run_git(clone, ("push", "--porcelain", str(bare), f"{commit}:refs/heads/main"))
+        answer = run_git(clone, argv, context=GitContext(at=at))
     except GitPublishError:
         return Sent("outcome_unknown", commit, ("push_could_not_run",))
     try:
@@ -260,3 +265,59 @@ def push(clone: Path, bare: Path, commit: str) -> Sent:
     if rejected:
         return Sent("refused", commit, ("push_rejected_non_fast_forward",))
     return Sent("outcome_unknown", commit, ("remote_not_at_pushed_commit",))
+
+
+# --- reading the remote itself (AR4b-2 recovery), never the clone ----------------------------
+
+
+class RefEvent(NamedTuple):
+    """One update of the remote ``main`` as the remote recorded it in its reflog."""
+
+    before: str
+    after: str
+    actor: str
+    at: datetime
+
+
+def remote_object(bare: Path, kind: Literal["commit", "blob"], oid: str) -> bytes:
+    """The raw commit or blob ``oid`` as the bare remote stores it.
+
+    Raises:
+        ForarbeiderRefusedError: ``checkout_unverifiable`` when it cannot be read.
+    """
+    answer = _answer(bare, ("cat-file", kind, oid))
+    if answer.code != 0:
+        raise _refused("cat-file")
+    return answer.out
+
+
+def remote_tree(bare: Path, commit: str) -> dict[str, str]:
+    """Every path of ``commit`` in the bare remote and its blob id."""
+    answer = _answer(bare, ("ls-tree", "-r", "-z", commit))
+    if answer.code != 0:
+        raise _refused("ls-tree")
+    found: dict[str, str] = {}
+    for record in answer.out.split(b"\0"):
+        if record:
+            meta, _, path = record.partition(b"\t")
+            found[path.decode()] = meta.split()[2].decode()
+    return found
+
+
+def ref_event(bare: Path, before: str, after: str) -> RefEvent | None:
+    """The remote's own record of ``main`` moving from ``before`` to ``after``, if it kept one."""
+    try:
+        text = (bare / "logs" / "refs" / "heads" / "main").read_text("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    for line in text.splitlines():
+        head, _, _message = line.partition("\t")
+        parts = head.split()
+        if len(parts) < _REFLOG_FIELDS or (parts[0], parts[1]) != (before, after):
+            continue
+        try:
+            at = datetime.fromtimestamp(int(parts[-2]), UTC)
+        except ValueError:
+            return None
+        return RefEvent(before, after, " ".join(parts[2:-2]), at)
+    return None
