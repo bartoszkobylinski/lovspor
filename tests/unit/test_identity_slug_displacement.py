@@ -18,9 +18,9 @@ import pytest
 from lovspor.errors import SlugOwnershipError
 from lovspor.history import (
     HistoryRecord,
-    _classify_commit,
     _parse_blocks,
     _run_git_log,
+    classify_commit,
     extract_lineage,
     write_history,
 )
@@ -35,7 +35,15 @@ from lovspor.identity.registry import SlugOwner, SlugRegistry, replace_registry
 from lovspor.identity.schema import write_declaration
 from lovspor.storage.manifest import ManifestRecord
 from lovspor.sync import orchestrator as orchestrator_module
-from tests.unit.identity_git_fixtures import commit_all, doc_text, git, init_repo, write_doc
+from tests.unit.identity_git_fixtures import (
+    commit_all,
+    doc_text,
+    git,
+    init_repo,
+    record,
+    write_doc,
+    write_manifest_json,
+)
 
 FIRST = "sf-20260312-0390"
 SECOND = "sf-20261116-2362"
@@ -361,7 +369,7 @@ def test_a_foreign_document_behind_an_untracked_move_is_not_attributed(repo: Pat
     events = [
         event
         for sha, day, subject, stats in _parse_blocks(_run_git_log(repo, MD))
-        if (event := _classify_commit(sha, day, subject, stats)) is not None
+        if (event := classify_commit(sha, day, subject, stats)) is not None
     ]
     write_history(HistoryRecord(slug=SLUG, doc_id=FIRST, events=events), repo / "forskrifter")
     commit_all(repo, "sync: update manifest, index, and history")
@@ -375,3 +383,54 @@ def test_a_foreign_document_behind_an_untracked_move_is_not_attributed(repo: Pat
     assert kept is not None
     assert "remove(forskrift): gammel" not in [e.subject for e in kept.events]
     assert "add(forskrift): gammel" in [e.subject for e in kept.events]
+
+
+def test_a_holder_moved_to_another_slug_is_left_to_its_own_sync(repo: Path) -> None:
+    """The previous holder moved and is current: its own history is not duplicated."""
+    write_doc(repo, MD, doc_text(FIRST, SLUG, "v1"))
+    commit_all(repo, f"add(forskrift): {SLUG}")
+    _publish(repo, FIRST)
+    by_id_path(repo / "forskrifter", FIRST).unlink()
+    git(repo, "mv", MD, "forskrifter/ny.md")
+    commit_all(repo, "rename(forskrift): ny")
+    write_manifest_json(repo, {FIRST: record(FIRST, "ny")}, "2026-06-02T00:00:00Z")
+    commit_all(repo, "sync: update manifest, index, and history")
+    _take_slug(repo, SECOND)
+
+    paths = _publish(repo, SECOND)
+
+    assert len(paths) == FILES_PER_HISTORY
+    assert not by_id_path(repo / "forskrifter", FIRST).exists()
+    own = extract_lineage(repo, "forskrifter/ny.md", FIRST)
+    write_document_history(repo, own, own.record("ny"), repo / "forskrifter")
+    kept = read_identity_history(by_id_path(repo / "forskrifter", FIRST))
+    assert kept is not None
+    commits = [event.commit for event in kept.events]
+    assert len(commits) == len(set(commits))
+
+
+def test_a_moved_holder_keeps_the_events_its_own_lineage_cannot_reach(repo: Path) -> None:
+    """A move git does not see as a rename: the holder's own lineage starts at
+    its new path, so only its older events are preserved, each once."""
+    write_doc(repo, MD, doc_text(FIRST, SLUG, BODY))
+    add = commit_all(repo, f"add(forskrift): {SLUG}")
+    _publish(repo, FIRST)
+    by_id_path(repo / "forskrifter", FIRST).unlink()
+    (repo / MD).unlink()
+    write_doc(repo, "forskrifter/ny.md", doc_text(FIRST, "ny", "entirely rewritten"))
+    move = commit_all(repo, "update(forskrift): ny")
+    write_manifest_json(repo, {FIRST: record(FIRST, "ny")}, "2026-06-02T00:00:00Z")
+    commit_all(repo, "sync: update manifest, index, and history")
+    _take_slug(repo, SECOND)
+
+    _publish(repo, SECOND)
+
+    kept = read_identity_history(by_id_path(repo / "forskrifter", FIRST))
+    assert kept is not None
+    assert [event.commit for event in kept.events] == [add[:7]]
+    own = extract_lineage(repo, "forskrifter/ny.md", FIRST)
+    assert [step.event.commit for step in own.steps] == [move[:7]]
+    write_document_history(repo, own, own.record("ny"), repo / "forskrifter")
+    merged = read_identity_history(by_id_path(repo / "forskrifter", FIRST))
+    assert merged is not None
+    assert sorted(event.commit for event in merged.events) == sorted([add[:7], move[:7]])

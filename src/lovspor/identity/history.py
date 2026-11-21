@@ -24,15 +24,18 @@ from lovspor.history import (
     HistoryRecord,
     Lineage,
     extract_earlier_lineage,
+    extract_lineage,
     write_history,
 )
 from lovspor.identity.registry import LegacyCorpus, corpus_identity
+from lovspor.storage.manifest import read_manifest
 
 BY_ID_DIRNAME = "by-id"
 IDENTITY_HISTORY_SCHEMA_VERSION = 1
 #: ``history/<slug>.json``, ``history/<slug>.md`` and ``history/by-id/<doc_id>.json``.
 FILES_PER_HISTORY = 3
 _SAFE_DOC_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_MANIFEST_FILENAME = "manifest.json"
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +146,26 @@ def _ensure_slug_owner(repo: Path, directory: str, record: HistoryRecord) -> Non
         )
 
 
+def _beyond_own_lineage(repo: Path, lineage: Lineage) -> Lineage:
+    """``lineage`` without the events its document's own current lineage holds.
+
+    A previous holder that is still current under another path (it moved, and
+    its old slug's history file stayed) has its own lineage written by its own
+    sync; an event both hold, under two paths, would enter its by-id file
+    twice. Only the events its own lineage lacks are kept. A manifest that is
+    missing or unreadable, or a holder that is not current, keeps them all.
+    """
+    try:
+        held = read_manifest(repo / _MANIFEST_FILENAME).documents.get(lineage.doc_id)
+    except (OSError, ParseError):
+        return lineage
+    if held is None or held.status != "current":
+        return lineage
+    own = {s.event.commit for s in extract_lineage(repo, held.markdown_path, lineage.doc_id).steps}
+    steps = [step for step in lineage.steps if step.event.commit not in own]
+    return lineage.model_copy(update={"steps": steps})
+
+
 def _displaced_lineage(repo: Path, record: HistoryRecord, dataset_dir: Path) -> Lineage | None:
     """The lineage of the document ``history/<slug>.json`` names, when not ``record``'s.
 
@@ -153,7 +176,9 @@ def _displaced_lineage(repo: Path, record: HistoryRecord, dataset_dir: Path) -> 
     extracted from git by ``extract_earlier_lineage`` (the paths and identity
     boundary ``extract_lineage`` uses), never copied from the file, which may
     hold events of a still earlier holder. ``None`` when the file is absent,
-    names ``record.doc_id``, cannot be read, or no revision carries its id.
+    names ``record.doc_id``, cannot be read, or leaves no event to keep (for
+    a holder still current elsewhere, only events its own lineage lacks are
+    kept: ``_beyond_own_lineage``).
     """
     path = dataset_dir / "history" / f"{record.slug}.json"
     if not path.exists():
@@ -168,9 +193,9 @@ def _displaced_lineage(repo: Path, record: HistoryRecord, dataset_dir: Path) -> 
         return None
     if prior_id == record.doc_id:
         return None
-    lineage = extract_earlier_lineage(repo, current, prior_id)
+    lineage = _beyond_own_lineage(repo, extract_earlier_lineage(repo, current, prior_id))
     if not lineage.steps:
-        logger.warning("%s names %s, but no revision of %s carries it", path, prior_id, current)
+        logger.warning("%s names %s; no event of it to keep at %s", path, prior_id, current)
         return None
     return lineage
 
