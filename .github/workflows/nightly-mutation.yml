@@ -204,6 +204,30 @@ jobs:
             --tool-exit-code "${{ steps.mut.outputs.exit_code || '3' }}" \
             --out mutation-result.json
 
+      # Every measured mutant with its verdict, the kind of change it makes and
+      # its time, read while the shadow tree is still on disk (#984). The
+      # result above names survivors only, with no kind and no time, and a
+      # killed mutant not at all. Two files join the artifact and the sums go
+      # to the job summary. This step gives no verdict and cannot fail the
+      # night. The `[ -x ]` guard is the repo rule for new scripts/ci calls (#381).
+      - name: Record every mutant with its verdict, kind and time
+        if: always() && steps.mut.outcome != 'skipped'
+        run: |
+          if [ -x scripts/ci/mutation_night.py ]; then
+            uv run python scripts/ci/mutation_night.py \
+              --commit "${{ steps.range.outputs.head }}" \
+              --result mutation-result.json \
+              --out-night mutation-night.json \
+              --out-mutants mutation-mutants.jsonl.gz \
+              --summary mutation-night.md \
+              || echo "::warning::mutation_night.py failed; the artifact has no per-mutant record tonight (#984)"
+            if [ -f mutation-night.md ]; then
+              cat mutation-night.md >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "::warning::scripts/ci/mutation_night.py is not on this head; no per-mutant record tonight (#984)"
+          fi
+
       - name: Upload mutation artifact
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -212,6 +236,8 @@ jobs:
           path: |
             mutation-result.json
             mutation-raw.log
+            mutation-night.json
+            mutation-mutants.jsonl.gz
           if-no-files-found: ignore
 
       # Always yields a verdict: a missing result is `tool_failure`, never clean.
