@@ -212,7 +212,8 @@ def _unwritten(lineage: Lineage, dataset_dir: Path) -> Lineage:
 
     A commit is at most one event of one document. A holder displaced from
     more than one path (it moved, and both paths were taken) has its move
-    seen from each path, under each path; the append-only file keeps it once.
+    seen from each path, under each path; the append-only file keeps it once,
+    under the path of whichever displacement is written first.
     """
     written = read_identity_history(by_id_path(dataset_dir, lineage.doc_id))
     if written is None:
@@ -240,6 +241,7 @@ def preserve_displaced(
     try:
         lineage = _unwritten(lineage, dataset_dir)
         if not lineage.steps:
+            logger.info("by-id history of %s already holds every event to keep", lineage.doc_id)
             return []
         logger.warning(
             "%s/history/%s.json held %s; preserving %d events in by-id before writing %s",

@@ -551,3 +551,23 @@ def test_a_removed_holder_displaced_from_both_its_paths_gets_each_commit_once(
     assert kept is not None
     assert sorted(event.commit for event in kept.events) == sorted(commits)
     assert len(kept.events) == len(commits)
+
+
+def test_an_unreadable_by_id_file_of_the_displaced_holder_is_logged_and_kept(
+    repo: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The displaced holder's by-id file cannot be read: it is left as it is,
+    and the new holder's history is still written."""
+    _hold_then_remove(repo, FIRST, by_id_written=True)
+    unreadable = by_id_path(repo / "forskrifter", FIRST)
+    unreadable.write_text("{not json", encoding="utf-8")
+    _take_slug(repo, SECOND)
+
+    with caplog.at_level(logging.WARNING, logger="lovspor.identity.history"):
+        paths = _publish(repo, SECOND)
+
+    assert len(paths) == FILES_PER_HISTORY
+    assert unreadable.read_text(encoding="utf-8") == "{not json"
+    assert _slug_history(repo)["doc_id"] == SECOND
+    assert f"by-id history of {FIRST} not written" in caplog.text
