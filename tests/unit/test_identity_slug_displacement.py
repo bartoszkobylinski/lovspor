@@ -11,6 +11,7 @@ included), is now merged into its ``history/by-id/<doc_id>.json`` first
 
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -281,6 +282,44 @@ def test_the_sync_history_step_stages_the_preserved_file_and_leaves_records_alon
     preserved = read_identity_history(by_id_path(repo / "forskrifter", FIRST))
     assert preserved is not None
     assert [event.commit for event in preserved.events] == published
+
+
+def test_followup_counts_documents_not_preserved_by_id_files(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    history = repo / "forskrifter" / "history"
+    paths = [
+        path
+        for i in range(3)
+        for path in (
+            history / "by-id" / f"old-{i}.json",
+            history / f"new-{i}.json",
+            history / f"new-{i}.md",
+            history / "by-id" / f"new-{i}.json",
+        )
+    ]
+    staged: list[list[Path]] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_generate_and_apply_history",
+        lambda _repo, records, _ids: (records, paths),
+    )
+    monkeypatch.setattr(orchestrator_module, "replace_manifest", lambda *_args: None)
+    monkeypatch.setattr(orchestrator_module, "git_add", lambda _repo, files: staged.append(files))
+    monkeypatch.setattr(orchestrator_module, "has_staged_changes", lambda _repo: True)
+    monkeypatch.setattr(
+        orchestrator_module, "git_commit_msg", lambda _repo, message: messages.append(message)
+    )
+
+    manifest = repo / "manifest.json"
+    records = {f"new-{i}": _record(f"new-{i}") for i in range(3)}
+    orchestrator_module._commit_history_followup(
+        repo, manifest, records, list(records), datetime(2026, 6, 1, tzinfo=UTC)
+    )
+
+    assert staged == [[manifest, *paths]]
+    assert messages == ["sync: update history for 3 documents"]
 
 
 def test_a_tombstoned_holder_is_not_displaced_by_the_history_step(repo: Path) -> None:
