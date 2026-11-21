@@ -15,6 +15,8 @@ path B needs, as narrow as :mod:`lovspor.git_prepare`:
 - ``git add`` takes one publication path at a time, by the AR4a tree grammar,
   into a **separate index file** inside ``.git``, so the clone's own index,
   and with it the AR4a read-back, is never touched;
+- ``git init`` makes only a bare repository at such a path, with no
+  template, so no hook or other file is copied into it;
 - hooks, fsmonitor, replace objects and grafts are off; the environment is
   built here, never inherited.
 
@@ -63,6 +65,7 @@ def _refspec(part: str) -> bool:
 
 Part = str | Callable[[str], bool]
 COMMANDS: Final[tuple[tuple[Part, ...], ...]] = (
+    ("init", "--bare", "--quiet", "--template=", "--initial-branch=main", _local_bare),
     ("read-tree", _commit),
     ("add", "--", _tree_file),
     ("write-tree",),

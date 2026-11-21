@@ -221,6 +221,20 @@ def verify_commit(
     return CommitCheck(commit, not reasons, tuple(reasons), signer)
 
 
+def init_bare(bare: Path) -> None:
+    """A new, empty bare repository at ``bare``, made with no template.
+
+    Raises:
+        ForarbeiderRefusedError: ``checkout_unverifiable`` when Git refuses.
+    """
+    answer = _answer(
+        bare.parent,
+        ("init", "--bare", "--quiet", "--template=", "--initial-branch=main", str(bare)),
+    )
+    if answer.code != 0:
+        raise _refused("init")
+
+
 def remote_head(bare: Path) -> str | None:
     """The commit the bare remote's ``main`` names, ``None`` when it names none."""
     answer = _answer(bare.parent, ("ls-remote", str(bare), "refs/heads/main"))

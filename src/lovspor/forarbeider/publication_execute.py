@@ -19,11 +19,18 @@ immediately before sending; a caller cannot hand it a decision:
 
 **Production is disabled.** :class:`Production` carries no transport, no
 remote and no signer: its authorization is always denied (every AR5-AR7 check
-is unavailable) and nothing can be sent. :class:`Simulation` takes explicit
-test adapters only: a GraphQL transport object (in this repository, the
-tests' stub) and, for path B, an absolute path to a local bare repository and
-a signer over a throwaway key. :mod:`lovspor.git_publish` cannot reach a
-network remote or force a push.
+is unavailable) and nothing can be sent. A :class:`Simulation` waives the
+AR1, FC7b and AR5-AR7 checks, so its label is no boundary: it sends only
+through :mod:`~lovspor.forarbeider.publication_sandbox` adapters, proved before
+authorization, before ``prepared_to_send`` is recorded and again right before
+the mutation. Path A: exactly the in-memory
+:class:`~lovspor.forarbeider.publication_sandbox.SimulatedGitHub`, by type
+identity; any other transport is refused before it is read or posted to.
+Path B: a :class:`~lovspor.forarbeider.publication_sandbox.DisposableRemote`
+made fresh in a private sandbox and re-verified on disk (no symlink or ``..``,
+exactly its configuration, no hooks or alternates, its token); a signer over a
+throwaway key. :mod:`lovspor.git_publish` cannot reach a network remote or
+force a push.
 
 A document-local failure never reaches here: AR4a returns it to AR3 before a
 proposal exists, and a clone without a ``prepared`` proposal is denied.
@@ -39,6 +46,7 @@ from lovspor.forarbeider import (
     publication_attempts,
     publication_path_a,
     publication_path_b,
+    publication_sandbox,
     publication_stage,
 )
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
@@ -55,8 +63,8 @@ from lovspor.forarbeider.publication_execution_models import (
     AttemptState,
     AuthorizationEvidence,
 )
-from lovspor.forarbeider.publication_path_a import GraphQLTransport
 from lovspor.forarbeider.publication_path_b import Signer
+from lovspor.forarbeider.publication_sandbox import DisposableRemote, SimulatedGitHub
 from lovspor.forarbeider.release_provenance import authentic
 from lovspor.forarbeider.version_models import canonical_text
 
@@ -76,8 +84,8 @@ class Simulation(NamedTuple):
     """Explicit test adapters; production has none."""
 
     clock: Callable[[], datetime]
-    transport: GraphQLTransport | None = None
-    remote: Path | None = None
+    transport: SimulatedGitHub | None = None
+    remote: DisposableRemote | None = None
     signer: Signer | None = None
 
 
@@ -179,15 +187,22 @@ def _files(request: ExecutionRequest) -> dict[str, bytes]:
 
 
 def _remote(request: ExecutionRequest, environment: Simulation) -> Callable[[], str | None]:
+    """The read of the remote ``main``, through an adapter proved sandboxed first.
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible`` for a missing adapter,
+            a transport that is not the in-memory endpoint, or a remote that is
+            not a verified disposable one.
+    """
     settings = request.inputs.settings
     if request.inputs.transaction.content.publication.path == "A":
-        transport = environment.transport
-        if transport is None:
+        if environment.transport is None:
             raise _not_eligible("adapter")
+        transport = publication_sandbox.verified_transport(environment.transport)
         return lambda: transport.head(settings.repository, settings.branch)
-    bare = environment.remote
-    if bare is None or environment.signer is None:
+    if environment.remote is None or environment.signer is None:
         raise _not_eligible("adapter")
+    bare = publication_sandbox.verified_remote(environment.remote)
     return lambda: publication_path_b.remote_head(bare)
 
 
@@ -249,9 +264,9 @@ def _context(
     base = (request.inputs, request.root, request.clone)
     if isinstance(environment, Production):
         return AuthorizationContext(*base, lambda: None, _utc_now(), step.attempt_id, "production")
+    remote = _remote(request, environment)
     now = environment.clock()
     facts = _facts(request, environment, now)
-    remote = _remote(request, environment)
     return AuthorizationContext(*base, remote, now, step.attempt_id, "simulation", facts)
 
 
@@ -316,11 +331,20 @@ def publish_authorized(
     now = _require_authorized(evidence, request, environment, step)
     if not isinstance(environment, Simulation):  # _require_authorized proved it is
         raise _not_eligible("production_execution_disabled")
+    _sandboxed(environment, evidence.path)
     digest = evidence_digest(evidence)
     before = {"authorization_sha256": digest, "commit": evidence.local_commit, "recorded_at": now}
     _record(request, step, "prepared_to_send", before)
     sent = _send(request, environment, evidence)
     return _after(request, environment, evidence, sent)
+
+
+def _sandboxed(environment: Simulation, path: str) -> None:
+    """Prove the adapter sandboxed before anything is recorded; :func:`_send` proves it again."""
+    if path == "A":
+        publication_sandbox.verified_transport(environment.transport)
+    else:
+        publication_sandbox.verified_remote(environment.remote)
 
 
 def _after(
@@ -345,13 +369,14 @@ def _send(
     request: ExecutionRequest, environment: Simulation, evidence: AuthorizationEvidence
 ) -> publication_path_a.Sent | publication_path_b.Sent:
     if evidence.path == "A":
-        transport = environment.transport
-        if transport is None:
+        if environment.transport is None:
             raise _not_eligible("adapter")
+        transport = publication_sandbox.verified_transport(environment.transport)
         payload = publication_path_a.payload_of(
             request.inputs.transaction, _files(request), request.inputs.settings
         )
         return publication_path_a.send(transport, payload, request.inputs.settings)
     if environment.remote is None or evidence.local_commit is None:
         raise _not_eligible("adapter")
-    return publication_path_b.push(request.clone, environment.remote, evidence.local_commit)
+    bare = publication_sandbox.verified_remote(environment.remote)
+    return publication_path_b.push(request.clone, bare, evidence.local_commit)

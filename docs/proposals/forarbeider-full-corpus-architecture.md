@@ -853,6 +853,15 @@ Limitations:
   - after a `prepared_to_send` with nothing following, or after `outcome_unknown`, a retry is `recovery_required`, and nothing is sent blindly.
 
   A STOP, a revocation or an unknown outcome sets the persistent stop latch, which only an AR5 owner resume will clear.
+- **Simulation adapters** (`publication_sandbox`). A simulation waives the checks above, so its label is no boundary. It sends only through these two adapters. Each is proved before authorization, again before `prepared_to_send` is recorded, and again right before the mutation:
+  - **Path A** uses exactly the in-memory `SimulatedGitHub`, checked by type identity. It is a slotted, final class, so an instance cannot swap its methods and a subclass is refused. Any other transport, a real client included, is refused before it is read or posted to.
+  - **Path B** uses a `DisposableRemote`. `create_disposable_remote` makes it fresh, with no template, as the only entry of a private, empty sandbox. Before every use it is re-verified on disk:
+    - no symlink or `..` in its name;
+    - exactly its fixed configuration (bare, `denyNonFastForwards`, `denyDeletes`);
+    - no hooks and no alternates;
+    - the marker holds its random token.
+
+  Any other path, a pre-existing repository included, is refused.
 - **Path A** (`publication_path_a`). It builds one `createCommitOnBranch` with `expectedHeadOid` = the base. The mutation binds the repository, `main`, a headline naming the manifest digest, a body naming the transaction, plan and batch, and exactly the proposed bytes. The response is judged as follows:
   - a stale-head refusal is `refused`;
   - a well-formed commit with `main` reading as it is `published`;

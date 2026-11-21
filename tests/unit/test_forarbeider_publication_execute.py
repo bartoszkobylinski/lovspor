@@ -43,6 +43,7 @@ from lovspor.forarbeider.publication_execution_models import (
     decide,
 )
 from lovspor.forarbeider.publication_prepare import recover_preparation
+from lovspor.forarbeider.publication_sandbox import SimulatedCrash, SimulatedGitHub
 from lovspor.forarbeider.release_contract_models import BudgetUsage
 from lovspor.forarbeider.release_limits import LimitsRequest, verify_limits
 from lovspor.forarbeider.version_models import canonical_text
@@ -51,11 +52,8 @@ from tests.unit.forarbeider_execution_support import (
     APP,
     NOW,
     OWNER_KEYS,
-    Crash,
     KeySigner,
     Rig,
-    StubGitHub,
-    TransportLostError,
     batch_usage,
     control_history,
     make_rig,
@@ -76,17 +74,17 @@ def rig_b(tmp_path: Path) -> Rig:
     return make_rig(tmp_path / "b", "B")
 
 
-def stub(rig: Rig) -> StubGitHub:
-    return StubGitHub(head_oid=rig.base)
+def stub(rig: Rig) -> SimulatedGitHub:
+    return SimulatedGitHub(head_oid=rig.base, identity=APP)
 
 
-def simulation_a(rig: Rig, github: StubGitHub) -> Simulation:
+def simulation_a(rig: Rig, github: SimulatedGitHub) -> Simulation:
     return Simulation(clock=lambda: NOW, transport=github)
 
 
 def simulation_b(rig: Rig, signer: KeySigner | None = None) -> Simulation:
     chosen = signer or KeySigner(BOT, rig.bot)
-    return Simulation(clock=lambda: NOW, remote=rig.bare, signer=chosen)
+    return Simulation(clock=lambda: NOW, remote=rig.remote, signer=chosen)
 
 
 def raw_git(repository: Path, *argv: str) -> bytes:
@@ -159,7 +157,7 @@ def test_production_is_denied_whatever_else_passes(rig_a: Rig) -> None:
     assert states(rig_a) == ["denied"]
 
 
-def _authorized(rig: Rig, github: StubGitHub, at: datetime, attempt: str | None = None) -> Any:
+def _authorized(rig: Rig, github: SimulatedGitHub, at: datetime, attempt: str | None = None) -> Any:
     """Evidence for the very next attempt, as the executor would make it at ``at``."""
     facts = AdapterFacts(app=github.identity)
     chosen = attempt or next_attempt_id(rig.request())
@@ -194,7 +192,7 @@ def test_a_forged_or_edited_authorization_is_never_accepted(rig_a: Rig) -> None:
     assert states(rig_a) == []
 
 
-def github_head(github: StubGitHub) -> Any:
+def github_head(github: SimulatedGitHub) -> Any:
     return lambda: github.head(github.repository, "main")
 
 
@@ -391,13 +389,13 @@ def test_prepared_record_exists_before_graphql_post(
     rig_a: Rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     github = stub(rig_a)
-    original = github.post
+    original = SimulatedGitHub.post
 
-    def post(payload: dict[str, Any]) -> Any:
+    def post(self: SimulatedGitHub, payload: dict[str, Any]) -> Any:
         assert states(rig_a) == ["prepared_to_send"]
-        return original(payload)
+        return original(self, payload)
 
-    monkeypatch.setattr(github, "post", post)
+    monkeypatch.setattr(SimulatedGitHub, "post", post)
     assert execute(rig_a.request(), simulation_a(rig_a, github)).status == "published"
     assert states(rig_a) == ["prepared_to_send", "published"]
 
@@ -436,12 +434,9 @@ def test_a_head_mismatch_at_send_publishes_nothing(rig_a: Rig) -> None:
 def test_a_lost_response_requires_recovery_never_a_blind_retry(rig_a: Rig) -> None:
     github = stub(rig_a)
 
-    def lose() -> None:
-        raise TransportLostError
-
-    github.after = lose
+    github.fault = "lost"
     outcome = execute(rig_a.request(), simulation_a(rig_a, github))
-    github.after = None
+    github.fault = None
     again = execute(rig_a.request(), simulation_a(rig_a, github))
 
     assert outcome.status == "outcome_unknown"
@@ -472,13 +467,10 @@ def test_a_malformed_or_ambiguous_response_is_an_unknown_outcome(rig_a: Rig, res
 def test_a_crash_after_sending_requires_recovery(rig_a: Rig) -> None:
     github = stub(rig_a)
 
-    def die() -> None:
-        raise Crash
-
-    github.after = die
-    with pytest.raises(Crash):
+    github.fault = "crash"
+    with pytest.raises(SimulatedCrash):
         execute(rig_a.request(), simulation_a(rig_a, github))
-    github.after = None
+    github.fault = None
     again = execute(rig_a.request(), simulation_a(rig_a, github))
 
     assert states(rig_a) == ["prepared_to_send"]
@@ -493,10 +485,10 @@ def test_a_crash_before_the_attempt_is_recorded_sends_nothing_and_retries_once(
     original = publication_attempts.append
 
     def die(*args: Any) -> Any:
-        raise Crash
+        raise SimulatedCrash
 
     monkeypatch.setattr(publication_attempts, "append", die)
-    with pytest.raises(Crash):
+    with pytest.raises(SimulatedCrash):
         execute(rig_a.request(), simulation_a(rig_a, github))
     monkeypatch.setattr(publication_attempts, "append", original)
     assert github.calls == [] and states(rig_a) == []
@@ -669,6 +661,7 @@ def test_the_publication_git_has_no_force_shape() -> None:
 
     assert not literals & {"--force", "-f", "--force-with-lease", "--delete", "--mirror", "--all"}
     assert {shape[0] for shape in git_publish.COMMANDS} <= {
+        "init",
         "read-tree",
         "add",
         "write-tree",
