@@ -917,3 +917,29 @@ def test_a_non_canonical_stop_latch_is_invalid(world: World) -> None:
     assert workspace_chain("stop_latch", world.workspace, "workspace").reasons == (
         "stop_latch_not_canonical",
     )
+
+
+def test_witness_validity_window_is_enforced_when_verifying_anchors(world: World) -> None:
+    appended(world, 1)
+    witness_entry = next(entry for entry in world.root.entries if entry.role == "anchor_witness")
+
+    for instant in (
+        witness_entry.valid_after - timedelta(seconds=1),
+        witness_entry.valid_before,
+    ):
+        authority = world.authority(checked_at=instant)
+        verdict = verify(world.attempts(), authority)
+        assert verdict.status == "anchor_invalid"
+        assert verdict.reasons == ("anchor_signature:signer_key_outside_validity",)
+        assert_refused(lambda: verified_state(world.attempts(), authority), "anchor_invalid")  # noqa: B023
+
+    assert verify(
+        world.attempts(), world.authority(checked_at=witness_entry.valid_after)
+    ).status == ("verified")
+    assert (
+        verify(
+            world.attempts(),
+            world.authority(checked_at=witness_entry.valid_before - timedelta(seconds=1)),
+        ).status
+        == "verified"
+    )
