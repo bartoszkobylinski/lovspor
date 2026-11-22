@@ -414,7 +414,7 @@ def _publish(
 def _still_current(
     evidence: AuthorizationEvidence, request: ExecutionRequest, now: datetime
 ) -> None:
-    """Under the lock: the STOP state the evidence was issued against is still the state now.
+    """Under the locks: the STOP state and the reservation the evidence rests on still hold now.
 
     Sealed evidence stays fresh for a while; an owner STOP, a latch transition
     or an advanced control history since it was issued makes it stale. Read
@@ -424,7 +424,9 @@ def _still_current(
     Raises:
         ForarbeiderRefusedError: ``release_not_eligible`` with ``stop_latch_set``,
             ``authorization_stale:stop_latch``, ``stop_control:<why>``,
-            ``authorization_stale:control_history`` or ``anchor:<family>:<status>``.
+            ``authorization_stale:control_history``, ``anchor:<family>:<status>`` or
+            ``authorization_stale:reservation:<why>`` (AR5c: cancelled, settled,
+            another batch, smaller than the batch, over the caps, another open one).
     """
     held = request.workspace
     if publication_attempts.latched(held):
@@ -443,6 +445,9 @@ def _still_current(
     found += publication_ledger.anchor_reasons(request.ledger, authority, repository)
     if found:
         raise _not_eligible(f"anchor:{','.join(found)}")
+    reservation = publication_ledger.reservation_reasons(request, now)
+    if reservation:
+        raise _not_eligible(f"authorization_stale:reservation:{','.join(reservation)}")
 
 
 def _sandboxed(environment: Simulation, path: str) -> None:

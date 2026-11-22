@@ -18,7 +18,12 @@ from typing import Any
 
 import pytest
 
-from lovspor.forarbeider import publication_attempts, publication_ledger, publication_receipts
+from lovspor.forarbeider import (
+    publication_attempts,
+    publication_execute,
+    publication_ledger,
+    publication_receipts,
+)
 from lovspor.forarbeider.control_plane_anchor import (
     AnchorAuthority,
     anchor_pending,
@@ -1140,3 +1145,193 @@ def test_concurrent_processes_hold_at_most_one_open_reservation(rig: Rig) -> Non
     assert all(r == "appended" or "ledger_reservation_open" in r for r in results), results
     assert operations(rig, ledger) == ["reserve"]
     assert anchored(rig, ledger) == "verified"
+
+
+# --- review fix 3: sealed evidence never outlives its reservation --------------------------------
+
+
+def cancellation(rig: Rig, at: Any = NOW) -> LedgerOperation:
+    """The real AR1b cancel of the rig's reservation (same batch, day and amounts)."""
+    slot = entries(rig)[0]
+    return LedgerOperation(
+        operation="cancel",
+        ledger_id=slot.ledger_id,
+        day=slot.day,
+        release_id=slot.release_id,
+        batch_id=slot.batch_id,
+        amounts=slot.amounts,
+        recorded_at=at,
+    )
+
+
+def states(rig: Rig) -> list[str]:
+    return [
+        r.state for r in publication_attempts.records(rig.workspace, rig.transaction.transaction_id)
+    ]
+
+
+def test_a_reservation_cancelled_after_authorization_refuses_the_old_evidence(either: Rig) -> None:
+    environment = environment_of(either)
+    remote_before = either.remote_files()
+    evidence = authorized(either.request(), environment)
+    cancelled = publication_ledger.record(
+        either.ledger, cancellation(either), limits_of(either), anchoring(either)
+    )
+    assert cancelled.status == "appended" and anchored(either) == "verified"
+
+    error = refused(lambda: publish_authorized(evidence, either.request(), environment))
+
+    assert "authorization_stale:reservation" in error.detail
+    assert "prepared_to_send" not in states(either)
+    assert either.remote_files() == remote_before
+    if environment.transport is not None:
+        assert environment.transport.calls == []
+
+
+def test_a_cancel_left_pending_after_authorization_refuses_the_old_evidence(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = endpoint(rig)
+    evidence = authorized(rig.request(), sim(github))
+    crash_on(monkeypatch, "budget_ledger")
+    with pytest.raises(SimulatedCrash):
+        publication_ledger.record(rig.ledger, cancellation(rig), limits_of(rig), anchoring(rig))
+    monkeypatch.undo()
+
+    error = refused(lambda: publish_authorized(evidence, rig.request(), sim(github)))
+
+    assert "budget_ledger:pending_anchor" in error.detail
+    assert "prepared_to_send" not in states(rig)
+    assert github.calls == []
+
+
+def test_the_ledger_witness_lost_after_authorization_refuses_the_old_evidence(rig: Rig) -> None:
+    github = endpoint(rig)
+    evidence = authorized(rig.request(), sim(github))
+    shutil.move(str(rig.tmp / "witness"), str(rig.tmp / "witness-away"))
+
+    error = refused(lambda: publish_authorized(evidence, rig.request(), sim(github)))
+
+    assert "store_unavailable" in error.detail
+    assert "prepared_to_send" not in states(rig)
+    assert github.calls == []
+
+
+def test_evidence_over_a_live_reservation_publishes_once_and_settles_once(either: Rig) -> None:
+    environment = environment_of(either)
+    evidence = authorized(either.request(), environment)
+
+    published = publish_authorized(evidence, either.request(), environment)
+    first = recover(either.request(), environment)
+    again = recover(either.request(), environment)
+
+    assert published.status == "published"
+    assert first.settlement is not None and first.settlement.status == "settled"
+    assert again.settlement is not None and again.settlement.status == "already_settled"
+    assert operations(either) == ["reserve", "commit"]
+
+
+def test_a_cancel_racing_the_publication_never_leaves_a_send_without_a_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cancel in another process at about the moment the old evidence is used.
+
+    Either the cancel holds the ledger first, and nothing is sent, or the
+    publication holds it and the cancel is refused (``corpus_locked``); a cancel
+    that starts after the publication ended is a later, separate event.
+    """
+    sent_at: list[float] = []
+    real_send = publication_execute._send
+
+    def timed_send(*args: Any) -> Any:
+        sent_at.append(time.time())
+        return real_send(*args)
+
+    monkeypatch.setattr(publication_execute, "_send", timed_send)
+    rounds = []
+    with multiprocessing.get_context("spawn").Pool(1) as pool:
+        for number, offset in enumerate((0.4, 0.0, -0.01, 0.01, 0.02)):
+            rig = make_rig(tmp_path / f"round-{number}", "A")
+            github = endpoint(rig)
+            evidence = authorized(rig.request(), sim(github))
+            start = time.time() + 1.5
+            job = (
+                rig.root,
+                rig.ledger,
+                rig.tmp / "witness",
+                rig.witness_key,
+                (rig.inputs.policy.policy, rig.inputs.limits),
+                rig.inputs.settings.repository,
+                cancellation(rig),
+                start,
+            )
+            pending = pool.apply_async(_cancel_in_process, (job,))
+            while time.time() < start + offset:
+                time.sleep(0.001)
+            sent_at.clear()
+            try:
+                outcome = publish_authorized(evidence, rig.request(), sim(github)).status
+            except ForarbeiderRefusedError as error:
+                outcome = f"refused:{error.detail}"
+            ended = time.time()
+            cancel, attempted = pending.get(timeout=60)
+            rounds.append((offset, cancel, outcome, len(github.calls)))
+            if cancel == "appended" and github.calls:
+                assert attempted >= ended, rounds  # the cancel came after the send, not before
+            if cancel == "appended" and attempted < ended:
+                assert github.calls == [] and "prepared_to_send" not in states(rig), rounds
+            if github.calls:
+                assert sent_at, rounds
+
+    assert any(c == "appended" and calls == 0 for _, c, _, calls in rounds), rounds
+
+
+def test_a_cancel_between_the_final_check_and_the_send_is_refused(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Added after the sabotage pass: another process cancels from inside the send itself."""
+    github = endpoint(rig)
+    evidence = authorized(rig.request(), sim(github))
+    job = (
+        rig.root,
+        rig.ledger,
+        rig.tmp / "witness",
+        rig.witness_key,
+        (rig.inputs.policy.policy, rig.inputs.limits),
+        rig.inputs.settings.repository,
+        cancellation(rig),
+        0.0,
+    )
+    seen: list[str] = []
+    real_send = publication_execute._send
+
+    def send_after_a_cancel(*args: Any) -> Any:
+        with multiprocessing.get_context("spawn").Pool(1) as pool:
+            seen.append(pool.apply(_cancel_in_process, (job,))[0])
+        return real_send(*args)
+
+    monkeypatch.setattr(publication_execute, "_send", send_after_a_cancel)
+    published = publish_authorized(evidence, rig.request(), sim(github))
+
+    assert published.status == "published"
+    assert seen == ["refused:corpus_locked:ledger"]
+    assert operations(rig) == ["reserve"]
+    assert len(github.calls) == 1
+
+
+def _cancel_in_process(job: tuple[Any, ...]) -> tuple[str, float]:
+    """One process: one cancel at ``start``, no retry; its outcome and when it was attempted."""
+    root, ledger, witness_dir, witness_key, material, repository, cancel, start = job
+    policy, offered = material
+    limits = verify_limits(LimitsRequest(policy, offered, NOW), root)  # the seal is per process
+    witness = OfflineAnchorWitness(witness_dir, KeySigner(WITNESS, witness_key))
+    authority = AnchorAuthority(witness, root, NOW, None, ledger.root)
+    while time.time() < start:
+        time.sleep(0.001)
+    attempted = time.time()
+    try:
+        return publication_ledger.record(
+            ledger, cancel, limits, (authority, repository)
+        ).status, attempted
+    except ForarbeiderRefusedError as error:
+        return f"refused:{error.reason.value}:{error.detail}", attempted

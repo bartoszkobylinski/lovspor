@@ -77,7 +77,7 @@ from lovspor.forarbeider.control_plane_witness import AnchorWitness
 from lovspor.forarbeider.corpus_leaves import directory, read_leaf
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.release_contract_models import BudgetUsage, LimitsEvidence
-from lovspor.forarbeider.release_ledger import entry_bytes, plan_entry
+from lovspor.forarbeider.release_ledger import LedgerRequest, entry_bytes, plan_entry, verify_ledger
 from lovspor.forarbeider.release_ledger_models import LedgerEntry, LedgerOperation
 from lovspor.forarbeider.release_limits import LimitsRequest, verify_limits
 from lovspor.forarbeider.version_models import canonical_text
@@ -497,6 +497,41 @@ def anchor_reasons(
         return ("anchor_authority_missing",)
     status = verify(query(ledger, repository), ledger_authority(ledger, authority)).status
     return () if status == "verified" else (f"budget_ledger:{status}",)
+
+
+def _covers(reserved: BudgetUsage | None, wanted: BudgetUsage) -> bool:
+    names = ("documents", "files", "bytes", "commits")
+    return reserved is not None and all(getattr(reserved, n) >= getattr(wanted, n) for n in names)
+
+
+def reservation_reasons(request: "ExecutionRequest", now: datetime) -> tuple[str, ...]:
+    """Why this transaction's exact, open reservation is not in the ledger now; empty if it is.
+
+    Read from the durable ledger under the ledger lock the caller holds (an
+    execution holds it from authorization to its last record, so nothing
+    cancels, settles or reserves in between), against the owner's limits
+    verified at ``now``: the reservation is still ``reserved`` (not cancelled,
+    not settled), under this batch, covering its usage, within the caps, and
+    no other release holds an open reservation.
+    """
+    ledger, transaction = request.ledger, request.inputs.transaction
+    if ledger is None:
+        return ("ledger_store_missing",)
+    try:
+        held = entries(ledger)
+    except (ForarbeiderRefusedError, OSError):
+        return ("ledger_unreadable",)
+    release = transaction.transaction_id
+    found = verify_ledger(LedgerRequest(held, _limits(request, now), now.date(), release))
+    reasons = list(found.reasons)
+    if found.status != "verified" or found.release_state != "reserved":
+        reasons.append(f"reservation_{found.release_state}")
+    elif not _covers(found.release_reserved, usage_of(transaction)):
+        reasons.append("reservation_smaller_than_the_batch")
+    if reservation_batch(held, release) != transaction.content.batch_id:
+        reasons.append("reservation_not_this_batch")
+    reasons += [f"reservation_open:{other}" for other in outstanding(held, release)]
+    return tuple(reasons)
 
 
 def reservation_batch(held: tuple[bytes, ...], release_id: str) -> str | None:
