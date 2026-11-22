@@ -377,6 +377,12 @@ def _latched(context: AuthorizationContext) -> bool:
     return context.facts.latched or (held is not None and publication_attempts.latched(held))
 
 
+def _latch_head(context: AuthorizationContext) -> str | None:
+    """The latch transition the evidence is issued against (AR5b)."""
+    held = context.workspace
+    return None if held is None else publication_attempts.latch_head(held)[1]
+
+
 def _control_anchor(context: AuthorizationContext, plan: ReleasePlan | None) -> AuthorizationCheck:
     """AR5b: the control history, the latch and the attempts, verified against the witness."""
     if context.mode == "production":
@@ -422,6 +428,7 @@ def _bound(context: AuthorizationContext, found: _Found) -> dict[str, object]:
         "remote_head": found.remote_head,
         "local_commit": context.facts.local_commit,
         "checked_at": context.now,
+        "stop_latch_head_sha256": _latch_head(context),
     }
 
 

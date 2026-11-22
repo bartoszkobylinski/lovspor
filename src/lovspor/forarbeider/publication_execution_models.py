@@ -154,6 +154,8 @@ class AuthorizationEvidence(Frozen):
     publisher_fingerprint: str | None
     control_state: Literal["stopped", "not_stopped"]
     control_head_sha256: Digest | None
+    #: AR5b: the stop latch's newest transition when authorized; ``None`` for no transition.
+    stop_latch_head_sha256: Digest | None = None
     quarantine_sha256: Digest | None
     limits_sha256: Digest | None
     budget_state: str

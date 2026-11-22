@@ -995,6 +995,12 @@ Limitations:
   - Any state other than `verified` denies: missing, stale, rolled back, diverged, unavailable, or not independent. No simulation may waive this check.
   - Nothing the caller passes counts as verified. The verifier also reads the latch from the workspace itself, not only from the adapter.
   - **A STOP cannot be bypassed by offering older valid control records.** Once the STOP is anchored, withholding it is `local_rolled_back`.
+- **Sealed evidence never outlives a later STOP.** `publish_authorized` accepts evidence while it is fresh (120 s), but under the workspace lock and before `prepared_to_send` it re-reads the state the evidence was issued against:
+  - the latch in force is refused (`stop_latch_set`);
+  - a latch transition since the evidence is refused (`authorization_stale:stop_latch`); the evidence binds `stop_latch_head_sha256`;
+  - the owner records are verified again at the send time: a stop in force or a lapsed resume lease is refused (`stop_control:…`), and a control head other than the evidence's is refused (`authorization_stale:control_history`);
+  - the three anchored families are verified again against the witness (`anchor:…`).
+  - The latch is read once more right before the send. A refusal sends nothing and makes no network call. `execute` is unaffected: it authorizes fresh under the same lock.
 - **Appends are anchored.**
   - Execution and recovery anchor every attempt record, receipt and latch transition they write.
   - A denial is recorded only while the attempts verify. When the witness is down nothing unanchorable is written, and the denial still stands.
