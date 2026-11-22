@@ -356,6 +356,14 @@ def test_a_resume_signed_before_the_latch_is_refused(rig: Rig) -> None:
     assert latch_kinds(rig) == ["set"]
 
 
+def test_a_resume_signed_at_the_latch_time_is_refused(rig: Rig) -> None:
+    r1, stop, _ = stopped(rig)
+    simultaneous = resume_of(rig, stop, 3, stop, at=NOW)
+
+    assert_refused(lambda: resume(with_control(rig, r1, stop, simultaneous), LATER), "predates")
+    assert latch_kinds(rig) == ["set"]
+
+
 def test_a_resume_while_the_witness_is_down_is_refused(rig: Rig) -> None:
     r1, stop, _ = stopped(rig)
     r3 = resume_of(rig, stop, 3, stop)
@@ -682,6 +690,27 @@ def test_two_sets_in_a_row_are_refused_when_the_latch_is_read(rig: Rig) -> None:
         reasons=("another_stop",),
     )
     publication_attempts.create_once(folder, "000002.json", canonical_text(second).encode())
+
+    with pytest.raises(ForarbeiderRefusedError) as raised:
+        publication_attempts.latch_events(rig.workspace)
+    assert raised.value.detail == "stop_latch"
+
+
+def test_a_clearing_with_the_wrong_predecessor_is_refused(rig: Rig) -> None:
+    publication_attempts.latch(
+        rig.workspace, ("synthetic_stop",), NOW, rig.transaction.transaction_id
+    )
+    folder = rig.workspace / "stop-latch"
+    clearing = LatchEvent(
+        sequence=2,
+        previous_sha256="a" * 64,
+        kind="cleared",
+        at=LATER,
+        transaction_id=rig.transaction.transaction_id,
+        reasons=("resolved",),
+        resume_control_sha256="b" * 64,
+    )
+    publication_attempts.create_once(folder, "000002.json", canonical_text(clearing).encode())
 
     with pytest.raises(ForarbeiderRefusedError) as raised:
         publication_attempts.latch_events(rig.workspace)
