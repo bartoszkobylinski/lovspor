@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from lovspor.forarbeider import publication_attempts, publication_ledger
+from lovspor.forarbeider import publication_attempts, publication_ledger, publication_receipts
 from lovspor.forarbeider.control_plane_anchor import (
     AnchorAuthority,
     anchor_pending,
@@ -41,12 +41,14 @@ from lovspor.forarbeider.publication_execution_models import (
     AttemptRecord,
 )
 from lovspor.forarbeider.publication_ledger import BudgetLedger
+from lovspor.forarbeider.publication_recovery_models import RecoveryReceipt
 from lovspor.forarbeider.publication_remote_recovery import recover
 from lovspor.forarbeider.publication_sandbox import SimulatedCrash, SimulatedGitHub
 from lovspor.forarbeider.release_contract_models import BudgetUsage, LimitsEvidence
 from lovspor.forarbeider.release_ledger import entry_bytes, plan_entry
 from lovspor.forarbeider.release_ledger_models import LedgerEntry, LedgerOperation
 from lovspor.forarbeider.release_limits import LimitsRequest, verify_limits
+from lovspor.forarbeider.version_models import canonical_text
 from tests.unit.forarbeider_execution_support import (
     APP,
     LEDGER_ID,
@@ -55,6 +57,7 @@ from tests.unit.forarbeider_execution_support import (
     KeySigner,
     Rig,
     _root,
+    anchor_queries,
     batch_usage,
     ledger_bytes,
     ledger_folder,
@@ -373,19 +376,27 @@ def test_a_conflicting_reservation_is_refused_and_writes_nothing(rig: Rig) -> No
 
 
 def test_an_exhausted_daily_limit_refuses_the_next_reservation(rig: Rig) -> None:
-    for n in (1, 2):
-        publication_ledger.record(rig.ledger, operation(release(n)), limits_of(rig), anchoring(rig))
-    before = ledger_bytes(rig)
+    """Three releases reserved and settled one after another use today's three commits."""
+    ledger = empty_ledger(rig, "daily")
+    held = replace(rig, ledger=ledger)
+    for n in (1, 2, 3):
+        for kind in ("reserve", "commit"):
+            step = operation(release(n), ledger_id=ledger.ledger_id, operation=kind)
+            publication_ledger.record(ledger, step, limits_of(rig), anchoring(held))
+    before = ledger_bytes(held)
 
     error = refused(
         lambda: publication_ledger.record(
-            rig.ledger, operation(release(3)), limits_of(rig), anchoring(rig)
+            ledger,
+            operation(release(4), ledger_id=ledger.ledger_id),
+            limits_of(rig),
+            anchoring(held),
         )
     )
 
     assert "budget_commits_exceeded" in error.detail
-    assert ledger_bytes(rig) == before
-    assert anchored(rig) == "verified"
+    assert ledger_bytes(held) == before
+    assert anchored(rig, ledger) == "verified"
 
 
 def test_revoked_owner_limits_refuse_reservation_and_publication(rig: Rig) -> None:
@@ -440,9 +451,8 @@ def _reserve_in_process(job: tuple[Any, ...]) -> str:
     deadline = time.time() + 60
     while time.time() < deadline:
         try:
-            done = publication_ledger.record(
-                ledger, operation(release(number)), limits, (authority, repository)
-            )
+            mine = operation(release(number), ledger_id=ledger.ledger_id)
+            done = publication_ledger.record(ledger, mine, limits, (authority, repository))
         except ForarbeiderRefusedError as error:
             if error.reason is RefusalReason.CORPUS_LOCKED:
                 time.sleep(0.002)
@@ -450,32 +460,6 @@ def _reserve_in_process(job: tuple[Any, ...]) -> str:
             return f"refused:{error.reason.value}:{error.detail}:{error.__cause__!r}"
         return done.status
     return "timeout"
-
-
-def test_concurrent_processes_never_reserve_beyond_the_daily_budget(rig: Rig) -> None:
-    """Six processes, two free commits left today (the rig's reservation holds the third)."""
-    start = time.time() + 2.0
-    repository = rig.inputs.settings.repository
-    jobs = [
-        (
-            rig.root,
-            rig.ledger,
-            rig.tmp / "witness",
-            rig.witness_key,
-            (rig.inputs.policy.policy, rig.inputs.limits),
-            repository,
-            n,
-            start,
-        )
-        for n in range(1, 7)
-    ]
-    with multiprocessing.get_context("spawn").Pool(6) as pool:
-        results = pool.map(_reserve_in_process, jobs)
-
-    assert results.count("appended") == 2, results
-    assert all(r == "appended" or "budget_commits_exceeded" in r for r in results), results
-    assert operations(rig) == ["reserve"] * 3
-    assert anchored(rig) == "verified"
 
 
 # --- settlement ------------------------------------------------------------------------------
@@ -878,3 +862,281 @@ def test_a_settlement_against_a_reservation_of_another_batch_is_refused(rig: Rig
     assert outcome.settlement is not None and outcome.settlement.status == "refused"
     assert outcome.settlement.reasons == ("ledger_settlement_batch_mismatch",)
     assert operations(rig, misfiled) == ["reserve"]
+
+
+# --- review fix 1: a settlement rests on a receipt of the anchored chain --------------------------
+
+
+@pytest.fixture(params=["A", "B"])
+def either(request: pytest.FixtureRequest, tmp_path: Path) -> Rig:
+    return make_rig(tmp_path / f"path-{request.param.lower()}", request.param)
+
+
+def environment_of(rig: Rig) -> Simulation:
+    return sim(endpoint(rig)) if rig.path == "A" else sim_b(rig)
+
+
+def recovered_unsettled(rig: Rig, environment: Simulation) -> RecoveryReceipt:
+    """Publish, then recover without a ledger: the receipt is written and anchored, not settled."""
+    assert execute(rig.request(), environment).status == "published"
+    found = recover(rig.request(ledger=None), environment)
+    assert found.receipt is not None and found.settlement is None
+    assert found.receipt.classification == "published_authorized"
+    assert operations(rig) == ["reserve"]
+    return found.receipt
+
+
+def altered(receipt: RecoveryReceipt, **changes: Any) -> RecoveryReceipt:
+    return RecoveryReceipt.model_validate(receipt.model_dump() | changes)
+
+
+def anchor_receipts(rig: Rig) -> None:
+    """Test setup with AR5a primitives only: anchor the workspace's receipts as they stand."""
+    query = anchor_queries(rig)["recovery_receipts"]
+    assert anchor_pending(query, rig.anchoring()).status == "verified"
+
+
+def test_a_forged_published_authorized_receipt_never_settles(either: Rig) -> None:
+    genuine = recovered_unsettled(either, environment_of(either))
+    forged_receipt = altered(genuine, remote_event_at=NOW - timedelta(days=1))
+    assert forged_receipt.classification == "published_authorized"
+
+    outcome = publication_ledger.settle(either.request(), forged_receipt, NOW)
+
+    assert outcome.status == "refused"
+    assert "receipt_not_in_anchored_chain" in outcome.reasons
+    assert operations(either) == ["reserve"]
+
+
+def test_an_anchored_chain_holding_another_receipt_settles_nothing_for_a_substitute(
+    either: Rig,
+) -> None:
+    genuine = recovered_unsettled(either, environment_of(either))
+    substitute = altered(genuine, commit="f" * 40)
+
+    outcome = publication_ledger.settle(either.request(), substitute, NOW)
+
+    assert outcome.status == "refused"
+    assert "receipt_not_in_anchored_chain" in outcome.reasons
+    assert operations(either) == ["reserve"]
+
+
+def test_a_receipt_of_another_transaction_never_settles(rig: Rig, shared: Rig) -> None:
+    genuine = recovered_unsettled(rig, sim(endpoint(rig)))
+    publication_receipts.append(shared.workspace, genuine)  # the other chain truly holds it
+    anchor_receipts(shared)
+
+    outcome = publication_ledger.settle(shared.request(), genuine, NOW)
+
+    assert outcome.status == "refused"
+    assert "receipt_transaction_mismatch" in outcome.reasons
+    assert operations(rig) == ["reserve"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("release_manifest_sha256", "a" * 64, "receipt_manifest_mismatch"),
+        ("path", "B", "receipt_path_mismatch"),
+        ("expected_head_oid", "c" * 40, "receipt_base_mismatch"),
+    ],
+)
+def test_a_receipt_of_another_manifest_path_or_base_never_settles(
+    rig: Rig, field: str, value: str, reason: str
+) -> None:
+    genuine = recovered_unsettled(rig, sim(endpoint(rig)))
+    content = rig.transaction.content
+    if field == "release_manifest_sha256":
+        content = content.model_copy(update={field: value})
+    else:
+        publication = content.publication.model_copy(update={field: value})
+        content = content.model_copy(update={"publication": publication})
+    transaction = rig.transaction.model_copy(update={"content": content})
+    inputs = rig.inputs._replace(transaction=transaction)
+
+    outcome = publication_ledger.settle(rig.request(inputs=inputs), genuine, NOW)
+
+    assert outcome.status == "refused"
+    assert reason in outcome.reasons
+    assert operations(rig) == ["reserve"]
+
+
+def test_conflicting_published_receipts_for_one_transaction_settle_nothing(rig: Rig) -> None:
+    genuine = recovered_unsettled(rig, sim(endpoint(rig)))
+    first = (rig.workspace / "receipts" / "000001.json").read_bytes()
+    second = altered(
+        genuine, sequence=2, previous_sha256=hashlib.sha256(first).hexdigest(), commit="f" * 40
+    )
+    publication_receipts.append(rig.workspace, second)
+    anchor_receipts(rig)
+
+    outcome = publication_ledger.settle(rig.request(), genuine, NOW)
+
+    assert outcome.status == "refused"
+    assert "receipt_ambiguous" in outcome.reasons
+    assert operations(rig) == ["reserve"]
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    [
+        ({"ours": False}, "receipt_pipeline_commit_mismatch"),
+        ({"parent": "d" * 40}, "receipt_parent_mismatch"),
+    ],
+)
+def test_an_anchored_receipt_not_of_this_pipeline_commit_on_its_base_never_settles(
+    rig: Rig, changes: dict[str, Any], reason: str
+) -> None:
+    """Added after the implementation: each isolates one binding of the remote commit."""
+    genuine = recovered_unsettled(rig, sim(endpoint(rig)))
+    first = (rig.workspace / "receipts" / "000001.json").read_bytes()
+    linked = {"sequence": 2, "previous_sha256": hashlib.sha256(first).hexdigest()}
+    unbound = altered(genuine, **(linked | changes))
+    assert unbound.classification == "published_authorized"
+    publication_receipts.append(rig.workspace, unbound)
+    anchor_receipts(rig)
+
+    outcome = publication_ledger.settle(rig.request(), unbound, NOW)
+
+    assert outcome.status == "refused"
+    assert reason in outcome.reasons
+    assert operations(rig) == ["reserve"]
+
+
+def test_the_exact_anchored_receipt_settles_once(either: Rig) -> None:
+    genuine = recovered_unsettled(either, environment_of(either))
+
+    first = publication_ledger.settle(either.request(), genuine, NOW)
+    again = publication_ledger.settle(either.request(), genuine, NOW)
+
+    assert (first.status, again.status) == ("settled", "already_settled")
+    commit = entries(either)[-1]
+    assert operations(either) == ["reserve", "commit"]
+    assert commit.commit == genuine.commit
+    assert commit.receipt_sha256 == hashlib.sha256(canonical_text(genuine).encode()).hexdigest()
+    assert anchored(either) == "verified"
+
+
+# --- review fix 2: one ledger, several workspaces ------------------------------------------------
+
+
+@pytest.fixture
+def shared(rig: Rig, tmp_path: Path) -> Rig:
+    """Another workspace, transaction and workspace witness, on ``rig``'s ledger and keys."""
+    return make_rig(tmp_path / "workspace-b", "A", share=rig)
+
+
+def test_a_publication_unsettled_in_one_workspace_denies_spending_in_another(
+    rig: Rig, shared: Rig
+) -> None:
+    assert execute(rig.request(), sim(endpoint(rig))).status == "published"
+    pending = rig.transaction.transaction_id
+
+    error = refused(lambda: publication_ledger.reserve(shared.request(), NOW))
+    other = endpoint(shared)
+    outcome = execute(shared.request(), sim(other))
+
+    assert f"ledger_reservation_open:{pending}" in error.detail
+    assert outcome.status == "denied"
+    assert f"ledger_settlement_pending:{pending}" in reasons_of(outcome, "budget")
+    assert other.calls == []
+    assert operations(rig) == ["reserve"]
+
+
+def test_once_settled_another_workspace_reserves_and_publishes(rig: Rig, shared: Rig) -> None:
+    github = endpoint(rig)
+    assert execute(rig.request(), sim(github)).status == "published"
+    settled = recover(rig.request(), sim(github))
+    assert settled.settlement is not None and settled.settlement.status == "settled"
+    other = endpoint(shared)
+
+    reserved = publication_ledger.reserve(shared.request(), NOW)
+    published = execute(shared.request(), sim(other))
+    accounted = recover(shared.request(), sim(other))
+
+    assert reserved.status == "appended"
+    assert published.status == "published"
+    assert check(published, "ar5_ledger_anchor")[1] == "passed"
+    assert accounted.settlement is not None and accounted.settlement.status == "settled"
+    assert operations(rig) == ["reserve", "commit", "reserve", "commit"]
+    assert anchored(rig) == "verified"
+    assert len(github.calls) == len(other.calls) == 1
+
+
+def test_a_rolled_back_shared_ledger_denies_the_other_workspace(rig: Rig, shared: Rig) -> None:
+    github = endpoint(rig)
+    execute(rig.request(), sim(github))
+    recover(rig.request(), sim(github))
+    publication_ledger.reserve(shared.request(), NOW)
+    (ledger_folder(rig) / "000002.json").unlink()
+    (ledger_folder(rig) / "000003.json").rename(ledger_folder(rig) / "000002.json")
+    other = endpoint(shared)
+
+    outcome = execute(shared.request(), sim(other))
+
+    assert outcome.status == "denied"
+    assert any("budget_ledger:" in r for r in reasons_of(outcome, "ar5_ledger_anchor"))
+    assert reasons_of(outcome, "ar5_ledger_anchor") != ("budget_ledger:unanchored",)
+    assert other.calls == []
+
+
+def test_the_ledger_witness_unavailable_denies_the_other_workspace(rig: Rig, shared: Rig) -> None:
+    github = endpoint(rig)
+    execute(rig.request(), sim(github))
+    recover(rig.request(), sim(github))
+    shutil.move(str(rig.tmp / "witness"), str(rig.tmp / "witness-away"))
+    other = endpoint(shared)
+
+    error = refused(lambda: publication_ledger.reserve(shared.request(), NOW))
+    outcome = execute(shared.request(), sim(other))
+
+    assert "anchor:budget_ledger:store_unavailable" in error.detail
+    assert outcome.status == "denied"
+    assert "budget_ledger:store_unavailable" in reasons_of(outcome, "ar5_ledger_anchor")
+    assert other.calls == []
+
+
+def test_a_crash_while_settling_blocks_the_other_workspace_until_retried(
+    rig: Rig, shared: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = endpoint(rig)
+    execute(rig.request(), sim(github))
+    crash_on(monkeypatch, "budget_ledger")
+    with pytest.raises(SimulatedCrash):
+        recover(rig.request(), sim(github))
+    monkeypatch.undo()
+
+    blocked = refused(lambda: publication_ledger.reserve(shared.request(), NOW))
+    again = recover(rig.request(), sim(github))
+    reserved = publication_ledger.reserve(shared.request(), NOW)
+
+    assert "anchor:budget_ledger:pending_anchor" in blocked.detail
+    assert again.settlement is not None and again.settlement.status == "settled"
+    assert reserved.status == "appended"
+    assert operations(rig) == ["reserve", "commit", "reserve"]
+
+
+def test_concurrent_processes_hold_at_most_one_open_reservation(rig: Rig) -> None:
+    """Six processes (any workspace) on one anchored, empty ledger: one reserves, five wait."""
+    ledger = empty_ledger(rig, "race")
+    start = time.time() + 2.0
+    jobs = [
+        (
+            rig.root,
+            ledger,
+            rig.tmp / "witness",
+            rig.witness_key,
+            (rig.inputs.policy.policy, rig.inputs.limits),
+            rig.inputs.settings.repository,
+            n,
+            start,
+        )
+        for n in range(1, 7)
+    ]
+    with multiprocessing.get_context("spawn").Pool(6) as pool:
+        results = pool.map(_reserve_in_process, jobs)
+
+    assert results.count("appended") == 1, results
+    assert all(r == "appended" or "ledger_reservation_open" in r for r in results), results
+    assert operations(rig, ledger) == ["reserve"]
+    assert anchored(rig, ledger) == "verified"

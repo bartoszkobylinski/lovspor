@@ -36,7 +36,6 @@ canonical one. An external anchor of the head is AR5.
 
 import fcntl
 import os
-import re
 import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -56,7 +55,6 @@ _LATCH = "stop-latch.json"
 LATCH_FOLDER = "stop-latch"
 _LOCK = "workspace.lock"
 _LOCK_OPEN = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
-_TRANSACTION = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _refused(detail: str) -> ForarbeiderRefusedError:
@@ -124,13 +122,6 @@ def _walk(folder: Path, transaction_id: str) -> Iterator[tuple[AttemptRecord, by
             raise _refused("attempts")
         previous = sha256(raw).hexdigest()
         yield record, raw
-
-
-def transactions(workspace: Path) -> list[str]:
-    """The ids of the transactions that have attempt records in ``workspace``."""
-    if not os.path.lexists(workspace):
-        return []
-    return sorted(item.name for item in workspace.iterdir() if _TRANSACTION.match(item.name))
 
 
 def records(workspace: Path, transaction_id: str) -> list[AttemptRecord]:

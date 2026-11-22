@@ -207,22 +207,40 @@ def settings_for(path: str, **changes: Any) -> PublicationSettings:
     return PublicationSettings(**(fields | changes))
 
 
-def make_rig(tmp: Path, path: str = "A") -> Rig:
+def make_rig(tmp: Path, path: str = "A", share: "Rig | None" = None) -> Rig:
+    """A rig; with ``share``, another workspace and transaction on ``share``'s keys and ledger.
+
+    The shared rig has its own workspace, its own witness store for its
+    workspace families and its own documents (3 and 4), so its transaction is
+    another; its ledger is ``share``'s, anchored by ``share``'s witness.
+    """
     tmp.mkdir(mode=0o700, exist_ok=True)
     keys = tmp / "keys"
-    owner, bot, stranger, witness_key = (
-        new_key(keys, name) for name in ("owner", "bot", "stranger", "witness")
-    )
-    root = _root(tmp / "root", owner, bot, witness_key)
+    if share is None:
+        owner, bot, stranger, witness_key = (
+            new_key(keys, name) for name in ("owner", "bot", "stranger", "witness")
+        )
+        root = _root(tmp / "root", owner, bot, witness_key)
+    else:
+        owner, bot, stranger, witness_key = (
+            share.owner,
+            share.bot,
+            share.stranger,
+            share.witness_key,
+        )
+        root = share.root
+    numbers = [1, 2] if share is None else [3, 4]
     signed_limits = signed_by(limits(), owner, LIMITS_NAMESPACE)
     material = LimitsMaterial(records=(signed_limits,))
     limits_evidence = verify_limits(LimitsRequest(policy_bytes(), material, NOW), root)
     assert limits_evidence.status == "verified", limits_evidence.reasons
     store = Store()
-    rows = [synthetic_row(store, 1), synthetic_row(store, 2)]
+    rows = [synthetic_row(store, n) for n in numbers]
     found = quarantine_of()
     limits_sha = limits_evidence.limits_sha256
-    plan = build_plan(context([1, 2], rows, limits_sha256=limits_sha), rows, store.artifacts, found)
+    plan = build_plan(
+        context(numbers, rows, limits_sha256=limits_sha), rows, store.artifacts, found
+    )
     plan_evidence = sealed_plan(plan).model_copy(update={"provenance": None})
     sealed = issue_provenance(
         plan_evidence.model_copy(update={"trust_root_sha256": root.sha256}), "batch_plan"
@@ -287,9 +305,11 @@ def make_rig(tmp: Path, path: str = "A") -> Rig:
         inputs,
         witness,
         witness_key,
-        BudgetLedger(tmp / "ledger", LEDGER_ID),
+        BudgetLedger(tmp / "ledger", LEDGER_ID)
+        if share is None
+        else BudgetLedger(share.ledger.root, share.ledger.ledger_id, share.witness),
     )
-    anchor_rig(rig)
+    anchor_rig(rig, seed=share is None)
     return rig
 
 
@@ -327,7 +347,7 @@ def policy_id_of(rig: "Rig") -> str:
     return plan.basis.policy.policy_id
 
 
-def anchor_rig(rig: "Rig") -> None:
+def anchor_rig(rig: "Rig", seed: bool = True) -> None:
     """Test setup: anchor the rig's empty families and its owner control records (AR5a)."""
     authority = rig.anchoring()
     queries = anchor_queries(rig)
@@ -343,7 +363,8 @@ def anchor_rig(rig: "Rig") -> None:
         step = AnchorQuery("control_history", repository, policy_id, prefix)
         assert anchor_pending(step, authority).status == "verified"
     assert control.local.reasons == ()
-    seed_ledger(rig, rig.inputs.ledger)
+    if seed:
+        seed_ledger(rig, rig.inputs.ledger)
 
 
 # --- AR5c: the durable budget ledger, written here with AR1b and AR5a primitives only -----------

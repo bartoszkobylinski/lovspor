@@ -326,14 +326,10 @@ def _ledger_entries(context: AuthorizationContext) -> tuple[bytes, ...] | str:
 
 
 def _unsettled(context: AuthorizationContext, held: tuple[bytes, ...]) -> list[str]:
-    """AR5c: a publication of this workspace the ledger has not settled blocks spending."""
-    if context.mode != "simulation" or context.workspace is None or context.ledger is None:
+    """AR5c: another release's open reservation, from any workspace, blocks spending."""
+    if context.mode != "simulation" or context.ledger is None:
         return []
-    tid = context.inputs.transaction.transaction_id
-    try:
-        pending = publication_ledger.unsettled(context.workspace, held, tid)
-    except ForarbeiderRefusedError as error:
-        return [f"ledger_settlement_unknown:{error.detail}"]
+    pending = publication_ledger.outstanding(held, context.inputs.transaction.transaction_id)
     return [f"ledger_settlement_pending:{other}" for other in pending]
 
 

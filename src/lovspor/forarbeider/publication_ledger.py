@@ -5,7 +5,9 @@ entries (:class:`~lovspor.forarbeider.release_ledger_models.LedgerEntry`), each
 the exact canonical bytes its successor's digest covers, created once and
 never replaced or removed. It lives outside every workspace, so transactions of
 different workspaces share it. Its head is anchored by the independent witness
-(AR5a) as the ``budget_ledger`` family, scope ``<ledger_id>``.
+(AR5a) as the ``budget_ledger`` family, scope ``<ledger_id>``: the ledger's own
+witness (:attr:`BudgetLedger.witness`) when several workspaces share it, each
+of them keeping its own witness for its workspace families.
 
 **Consistency model.** Only a ledger whose local chain reproduces exactly the
 witnessed head (``verified``) is read or extended. Every write is:
@@ -24,9 +26,20 @@ chain and completes the anchor. A pending entry anything else wrote is never
 anchored and blocks the ledger (fail closed). A missing, unanchored, truncated,
 rewritten, forked or unreadable ledger, or an unreachable witness, refuses.
 
-**Settlement.** :func:`settle` accounts one remote publication once: only a
-receipt AR4b-2 classified ``published_authorized``, from the anchored receipts,
-for the transaction's single reservation under its batch, with the batch's
+**At most one open reservation.** A reservation is open until the ledger
+settles (``commit``) or cancels it. It may have been sent, so its outcome is
+unresolved for the whole ledger: while it is open no other release, from any
+workspace, is reserved (``ledger_reservation_open``) or authorized
+(``ledger_settlement_pending``). The rule reads the witnessed ledger alone,
+under the ledger lock, so two workspaces cannot both pass it.
+
+**Settlement.** :func:`settle` accounts one remote publication once. The
+workspace's whole receipt chain is read once and verified against the witness;
+what is settled is the chain's receipt with exactly the offered receipt's
+canonical bytes, classified ``published_authorized`` by AR4b-2, naming this
+transaction, its release manifest, path and base, a pipeline commit whose
+parent is that base, and the transaction's only published receipt there. It
+settles the transaction's single reservation under its batch, with the batch's
 exact usage (never above the reservation); the ``commit`` entry names the
 verified remote commit and the receipt's digest. A
 second settlement naming another commit or receipt is refused. Any other
@@ -60,6 +73,7 @@ from lovspor.forarbeider.control_plane_anchor import (
     verify,
 )
 from lovspor.forarbeider.control_plane_chains import LocalChain, ledger_chain
+from lovspor.forarbeider.control_plane_witness import AnchorWitness
 from lovspor.forarbeider.corpus_leaves import directory, read_leaf
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.release_contract_models import BudgetUsage, LimitsEvidence
@@ -78,10 +92,15 @@ _SAME = ("operation", "ledger_id", "day", "release_id", "batch_id", "amounts")
 
 
 class BudgetLedger(NamedTuple):
-    """One ledger: ``<root>/<ledger_id>/NNNNNN.json``, its lock ``<root>/<ledger_id>.lock``."""
+    """One ledger: ``<root>/<ledger_id>/NNNNNN.json``, its lock ``<root>/<ledger_id>.lock``.
+
+    ``witness`` anchors the ledger for every workspace that shares it; ``None``
+    is the witness of the request at hand (a ledger only one workspace uses).
+    """
 
     root: Path
     ledger_id: str
+    witness: AnchorWitness | None = None
 
 
 class LedgerOutcome(NamedTuple):
@@ -165,6 +184,12 @@ def ledger_lock(ledger: BudgetLedger) -> Iterator[None]:
         yield
 
 
+def ledger_authority(ledger: BudgetLedger, authority: AnchorAuthority) -> AnchorAuthority:
+    """The authority that verifies the ledger: its own witness when it names one."""
+    witness = authority.witness if ledger.witness is None else ledger.witness
+    return authority._replace(witness=witness, workspace=ledger.root)
+
+
 def query(ledger: BudgetLedger, repository: str) -> AnchorQuery:
     """The ledger as the witness anchors it; an unreadable folder is an invalid chain."""
     try:
@@ -242,6 +267,8 @@ def _record(
         return LedgerOutcome("completed", entry, anchor_pending(found, authority))
     if verdict.status != "verified":
         raise _refused(f"anchor:budget_ledger:{verdict.status}")
+    if operation.operation == "reserve" and (others := outstanding(held, operation.release_id)):
+        raise _refused(f"ledger:ledger_reservation_open:{others[0]}")
     if _settlement_conflict(held, operation):
         raise _refused("ledger:ledger_conflicting_settlement")
     planned = plan_entry(held, operation, limits)
@@ -281,7 +308,7 @@ def record(
             a cap, unverified limits, ``ledger_conflicting_settlement``) or
             ``record_not_appended``; the witness's refusals.
     """
-    authority = anchoring[0]._replace(workspace=ledger.root)
+    authority = ledger_authority(ledger, anchoring[0])
     with ledger_lock(ledger):
         return _record(ledger, operation, limits, (authority, anchoring[1]))
 
@@ -303,7 +330,7 @@ def _held(request: "ExecutionRequest") -> tuple[BudgetLedger, AnchorAuthority]:
         raise _refused("ledger_store_missing")
     if authority is None:
         raise _refused("anchor_authority_missing")
-    return ledger, authority._replace(workspace=ledger.root)
+    return ledger, ledger_authority(ledger, authority)
 
 
 def _limits(request: "ExecutionRequest", at: datetime) -> LimitsEvidence:
@@ -333,15 +360,57 @@ def reserve(request: "ExecutionRequest", at: datetime) -> LedgerOutcome:
     return record(ledger, operation, _limits(request, at), (authority, repository))
 
 
-def _receipts_anchored(request: "ExecutionRequest") -> str | None:
+def _anchored_receipts(request: "ExecutionRequest") -> list[tuple["RecoveryReceipt", bytes]] | str:
+    """The workspace's whole receipt chain, as read once, proved to be the witnessed one."""
     authority = publication_anchors.authority_of(request)
     if authority is None:
         return "anchor_authority_missing"
-    found = publication_anchors.workspace_query(
-        request.inputs, request.workspace, "recovery_receipts", "workspace"
-    )
+    try:
+        chain = publication_receipts.chain(request.workspace)
+    except ForarbeiderRefusedError as error:
+        return f"recovery_receipts_invalid:{error.detail}"
+    raws = [raw for _, raw in chain]
+    local = LocalChain(tuple(sha256(r).hexdigest() for r in raws), raws[-1] if raws else None, ())
+    found = AnchorQuery("recovery_receipts", request.inputs.settings.repository, "workspace", local)
     status = verify(found, authority).status
-    return None if status == "verified" else f"anchor:recovery_receipts:{status}"
+    return chain if status == "verified" else f"anchor:recovery_receipts:{status}"
+
+
+def _binding(request: "ExecutionRequest", receipt: "RecoveryReceipt") -> tuple[str, ...]:
+    """Why ``receipt`` is not this transaction's publication on its own base."""
+    content = request.inputs.transaction.content
+    base = content.publication.base_commit
+    checks = (
+        (receipt.transaction_id == request.inputs.transaction.transaction_id, "transaction"),
+        (receipt.release_manifest_sha256 == content.release_manifest_sha256, "manifest"),
+        (receipt.path == content.publication.path, "path"),
+        (receipt.base_commit == base, "base"),
+        (receipt.parent == base, "parent"),
+        (receipt.ours, "pipeline_commit"),
+    )
+    return tuple(f"receipt_{name}_mismatch" for held, name in checks if not held)
+
+
+def _proved(request: "ExecutionRequest", receipt: "RecoveryReceipt") -> "RecoveryReceipt | str":
+    """The receipt of the anchored chain with exactly ``receipt``'s bytes, bound to the transaction.
+
+    The chain's receipt, never the caller's object, is what is settled; it must
+    be the transaction's only published receipt.
+    """
+    chain = _anchored_receipts(request)
+    if isinstance(chain, str):
+        return chain
+    wanted = canonical_text(receipt).encode()
+    found = [held for held, raw in chain if raw == wanted]
+    if len(found) != 1:
+        return "receipt_not_in_anchored_chain"
+    proved = found[0]
+    unbound = _binding(request, proved)
+    if unbound:
+        return ",".join(unbound)
+    tid = request.inputs.transaction.transaction_id
+    published = [held for held, _ in chain if held.transaction_id == tid and held.published]
+    return proved if published == [proved] else "receipt_ambiguous"
 
 
 def _reservation(held: tuple[bytes, ...], release_id: str) -> LedgerEntry | None:
@@ -405,12 +474,14 @@ def settle(request: "ExecutionRequest", receipt: "RecoveryReceipt", at: datetime
     """
     if receipt.classification != "published_authorized":
         return Settlement("withheld", (receipt.classification,), None)
-    unanchored = _receipts_anchored(request)
-    if unanchored is not None:
-        return Settlement("refused", (unanchored,), None)
+    proved = _proved(request, receipt)
+    if isinstance(proved, str):
+        return Settlement("refused", tuple(proved.split(",")), None)
+    if proved.classification != "published_authorized":
+        return Settlement("withheld", (proved.classification,), None)
     ledger, _ = _held(request)
     with ledger_lock(ledger):
-        return _settle(request, receipt, at)
+        return _settle(request, proved, at)
 
 
 # --- what authorization reads ------------------------------------------------------------
@@ -424,7 +495,7 @@ def anchor_reasons(
         return ("ledger_store_missing",)
     if authority is None:
         return ("anchor_authority_missing",)
-    status = verify(query(ledger, repository), authority._replace(workspace=ledger.root)).status
+    status = verify(query(ledger, repository), ledger_authority(ledger, authority)).status
     return () if status == "verified" else (f"budget_ledger:{status}",)
 
 
@@ -434,17 +505,25 @@ def reservation_batch(held: tuple[bytes, ...], release_id: str) -> str | None:
     return None if slot is None else slot.batch_id
 
 
-def unsettled(workspace: Path, held: tuple[bytes, ...], current: str) -> tuple[str, ...]:
-    """Releases reserved in this ledger, published by this workspace, that it has not settled.
+def outstanding(held: tuple[bytes, ...], current: str | None) -> tuple[str, ...]:
+    """Releases with an open reservation in this ledger, other than ``current``.
 
-    A publication the ledger has not accounted for is an unresolved outcome of
-    this budget: until AR4b-2 recovery settles it, nothing more is spent from it.
+    A reservation is open until the ledger settles (``commit``) or cancels it.
+    Whichever workspace made it, it may have been sent, so its outcome is
+    unresolved for the whole ledger: nothing else reserves or spends until it
+    is closed. The answer rests on the witnessed ledger alone, never on a
+    workspace's own records.
     """
     parsed_entries = [e for raw in held if (e := _parsed(raw)) is not None]
-    reserved = {e.release_id for e in parsed_entries if e.operation == "reserve"}
-    settled = {e.release_id for e in parsed_entries if e.operation == "commit"}
-    published = {r.transaction_id for r in publication_receipts.receipts(workspace) if r.published}
-    for tid in publication_attempts.transactions(workspace):
-        if any(r.state == "published" for r in publication_attempts.records(workspace, tid)):
-            published.add(tid)
-    return tuple(sorted((published & reserved) - settled - {current}))
+    closed = {e.release_id for e in parsed_entries if e.operation in ("commit", "cancel")}
+    return tuple(
+        sorted(
+            {
+                e.release_id
+                for e in parsed_entries
+                if e.operation == "reserve"
+                and e.release_id is not None
+                and e.release_id not in closed | {current}
+            }
+        )
+    )
