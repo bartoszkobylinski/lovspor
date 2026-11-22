@@ -6,10 +6,14 @@ and never removed. Each names the digest of the one before it, so a record
 cut, reordered or rewritten in place is refused when the folder is read
 (``corpus_tree_mismatch: attempts``), and nothing is sent on its account.
 
-``<workspace>/stop-latch.json`` is the persistent stop latch (§9.3 step 5):
-set once by a STOP, a revocation or an unknown outcome, and read before every
-authorization. Clearing it needs an owner-signed resume that AR5 adds; nothing
-here removes it.
+``<workspace>/stop-latch/<sequence>.json`` is the persistent stop latch
+(§9.3 step 5), since AR5b an append-only chain of transitions: ``set`` by a
+STOP, a revocation, an unknown outcome or a halt, and ``cleared`` only by an
+owner-signed RESUME after the cause is resolved
+(:mod:`~lovspor.forarbeider.publication_stop_resume`). It is read before every
+authorization. No transition is removed or replaced, so every ``set`` stays as
+evidence. The AR4b-1 single-file latch (``stop-latch.json``) is read as set for
+good and is never cleared.
 
 ``<workspace>/workspace.lock`` serializes everything that reads and appends
 the workspace's attempt records, receipts and latch (§9.3a): an execution
@@ -41,11 +45,12 @@ from pydantic import ValidationError
 
 from lovspor.forarbeider.corpus_leaves import directory, read_leaf
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
-from lovspor.forarbeider.publication_execution_models import AttemptRecord, StopLatch
+from lovspor.forarbeider.publication_execution_models import AttemptRecord, LatchEvent
 from lovspor.forarbeider.version_models import canonical_text
 
 _CREATE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
 _LATCH = "stop-latch.json"
+LATCH_FOLDER = "stop-latch"
 _LOCK = "workspace.lock"
 _LOCK_OPEN = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
 
@@ -146,17 +151,120 @@ def append(workspace: Path, record: AttemptRecord) -> None:
     create_once(folder, _name(record.sequence), canonical_text(record).encode())
 
 
+def _latch_folder(workspace: Path) -> Path:
+    folder = workspace / LATCH_FOLDER
+    if os.path.lexists(folder) and (folder.is_symlink() or not folder.is_dir()):
+        raise _refused("stop_latch")
+    return folder
+
+
+def _latch_event(folder: Path, name: str) -> tuple[LatchEvent, bytes]:
+    try:
+        with directory(folder, "stop_latch") as parent:
+            raw = read_leaf(parent, name, "stop_latch")
+        event = LatchEvent.model_validate_json(raw)
+    except (OSError, ValidationError, ForarbeiderRefusedError) as error:
+        raise _refused("stop_latch") from error
+    if canonical_text(event).encode() != raw:
+        raise _refused("stop_latch")
+    return event, raw
+
+
+def _latch_chain(workspace: Path) -> list[tuple[LatchEvent, bytes]]:
+    folder = _latch_folder(workspace)
+    chain: list[tuple[LatchEvent, bytes]] = []
+    for index, name in enumerate(_names(folder), start=1):
+        event, raw = _latch_event(folder, name)
+        previous = chain[-1] if chain else None
+        link = sha256(previous[1]).hexdigest() if previous else None
+        expected = "cleared" if previous and previous[0].kind == "set" else "set"
+        if (event.sequence, event.previous_sha256, event.kind) != (index, link, expected):
+            raise _refused("stop_latch")
+        chain.append((event, raw))
+    return chain
+
+
+def latch_events(workspace: Path) -> list[LatchEvent]:
+    """Every latch transition, in order: ``set`` and ``cleared`` alternating, never removed.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_tree_mismatch: stop_latch``.
+    """
+    return [event for event, _ in _latch_chain(workspace)]
+
+
+def effective_latch(workspace: Path) -> LatchEvent | None:
+    """The ``set`` in force, or ``None`` when the newest transition is a clearing."""
+    chain = latch_events(workspace)
+    return chain[-1] if chain and chain[-1].kind == "set" else None
+
+
 def latched(workspace: Path) -> bool:
-    """Whether the stop latch is set; anything at its name counts as set."""
-    return os.path.lexists(workspace / _LATCH)
+    """Whether the stop latch is in force.
+
+    The AR4b-1 single-file latch, or anything at its name, counts as set for
+    good: it predates the auditable transitions and nothing clears it.
+    """
+    return os.path.lexists(workspace / _LATCH) or effective_latch(workspace) is not None
+
+
+def latch_head(workspace: Path) -> tuple[int, str | None]:
+    """The next transition's sequence and the digest it must name."""
+    chain = _latch_chain(workspace)
+    return len(chain) + 1, sha256(chain[-1][1]).hexdigest() if chain else None
+
+
+def append_latch(workspace: Path, event: LatchEvent) -> None:
+    """Persist ``event`` as the next transition: linked, and alternating with the one before.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_tree_mismatch: stop_latch`` when it is not the next.
+    """
+    current = effective_latch(workspace)
+    expected = "cleared" if current is not None else "set"
+    if (event.sequence, event.previous_sha256) != latch_head(workspace) or event.kind != expected:
+        raise _refused("stop_latch")
+    folder = _latch_folder(workspace)
+    if not os.path.lexists(folder):
+        folder.mkdir(mode=0o700)
+    create_once(folder, _name(event.sequence), canonical_text(event).encode())
+
+
+def _append_latch(workspace: Path, fields: dict[str, object]) -> LatchEvent:
+    sequence, previous = latch_head(workspace)
+    event = LatchEvent.model_validate({**fields, "sequence": sequence, "previous_sha256": previous})
+    append_latch(workspace, event)
+    return event
 
 
 def latch(workspace: Path, reasons: tuple[str, ...], at: datetime, transaction_id: str) -> None:
-    """Set the stop latch, once; a latch already set stays as it is."""
+    """Set the stop latch; a latch already in force stays as it is."""
     if latched(workspace):
         return
-    record = StopLatch(reasons=reasons, set_at=at, transaction_id=transaction_id)
-    create_once(workspace, _LATCH, canonical_text(record).encode())
+    fields = {"kind": "set", "at": at, "transaction_id": transaction_id, "reasons": reasons}
+    _append_latch(workspace, fields)
+
+
+def clear_latch(
+    workspace: Path, at: datetime, resume_control_sha256: str, resolution: tuple[str, ...]
+) -> LatchEvent:
+    """Append the clearing of the latch in force; only an owner RESUME (AR5b) may call it.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_tree_mismatch: stop_latch`` when no
+            transition ``set`` is in force (the AR4b-1 file latch is never cleared).
+    """
+    current = effective_latch(workspace)
+    if current is None or os.path.lexists(workspace / _LATCH):
+        raise _refused("stop_latch")
+    fields = {
+        "kind": "cleared",
+        "at": at,
+        "transaction_id": current.transaction_id,
+        "reasons": resolution,
+        "resume_control_sha256": resume_control_sha256,
+    }
+    return _append_latch(workspace, fields)
 
 
 def private_workspace(workspace: Path) -> bool:

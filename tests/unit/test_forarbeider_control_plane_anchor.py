@@ -50,7 +50,7 @@ from lovspor.forarbeider.policy_trust import (
     POLICY_NAMESPACE,
 )
 from lovspor.forarbeider.publication_execute import Simulation, attempt_id_of, execute
-from lovspor.forarbeider.publication_execution_models import AttemptRecord, StopLatch
+from lovspor.forarbeider.publication_execution_models import AttemptRecord, LatchEvent
 from lovspor.forarbeider.publication_remote_recovery import recover
 from lovspor.forarbeider.publication_sandbox import SimulatedCrash, SimulatedGitHub
 from lovspor.forarbeider.release_ledger_models import LedgerEntry
@@ -137,6 +137,19 @@ def attempt(sequence: int, previous: AttemptRecord | None, state: str = "denied"
             "reasons": (f"synthetic-{state}",),
             "previous_sha256": None if previous is None else digest_of(previous),
         }
+    )
+
+
+def latch_set(
+    sequence: int, previous: LatchEvent | None, reasons: tuple[str, ...] = ("synthetic_stop",)
+) -> LatchEvent:
+    return LatchEvent(
+        sequence=sequence,
+        previous_sha256=None if previous is None else digest_of(previous),
+        kind="set",
+        at=CHECKED_AT,
+        transaction_id=TID,
+        reasons=reasons,
     )
 
 
@@ -311,13 +324,13 @@ def test_an_edited_head_diverges_and_a_non_canonical_record_is_invalid(world: Wo
 
 def test_a_deleted_stop_latch_is_rolled_back(world: World) -> None:
     assert initialize(world.latch(), world.authority()).status == "verified"
-    latch = StopLatch(reasons=("synthetic_stop",), set_at=CHECKED_AT, transaction_id=TID)
+    latch = latch_set(1, None)
     assert durable_append(world.workspace, latch, REPOSITORY, world.authority()).status == (
         "appended"
     )
     assert publication_attempts.latched(world.workspace)
 
-    (world.workspace / "stop-latch.json").unlink()
+    shutil.rmtree(world.workspace / "stop-latch")
 
     assert verify(world.latch(), world.authority()).status == "local_rolled_back"
 
@@ -863,14 +876,14 @@ def test_the_witness_refuses_a_successor_that_lowers_the_count(world: World) -> 
 
 def test_a_second_latch_is_never_reported_as_appended(world: World) -> None:
     assert initialize(world.latch(), world.authority()).status == "verified"
-    first = StopLatch(reasons=("synthetic_stop",), set_at=CHECKED_AT, transaction_id=TID)
+    first = latch_set(1, None)
     durable_append(world.workspace, first, REPOSITORY, world.authority())
-    second = StopLatch(reasons=("another_stop",), set_at=CHECKED_AT, transaction_id=TID)
+    second = latch_set(2, first, ("another_stop",))
     anchors = tree(world.store)
 
     assert_refused(
         lambda: durable_append(world.workspace, second, REPOSITORY, world.authority()),
-        "record_not_appended",
+        "stop_latch",
     )
     assert tree(world.store) == anchors
 
@@ -911,13 +924,12 @@ def test_a_ledger_entry_naming_the_wrong_predecessor_is_invalid(world: World) ->
 
 
 def test_a_non_canonical_stop_latch_is_invalid(world: World) -> None:
-    latch = StopLatch(reasons=("synthetic_stop",), set_at=CHECKED_AT, transaction_id=TID)
-    publication_attempts.latch(world.workspace, latch.reasons, latch.set_at, TID)
-    path = world.workspace / "stop-latch.json"
+    publication_attempts.latch(world.workspace, ("synthetic_stop",), CHECKED_AT, TID)
+    path = world.workspace / "stop-latch" / "000001.json"
     path.write_bytes(path.read_bytes() + b" ")
 
     assert workspace_chain("stop_latch", world.workspace, "workspace").reasons == (
-        "stop_latch_not_canonical",
+        "stop_latch_invalid:stop_latch",
     )
 
 

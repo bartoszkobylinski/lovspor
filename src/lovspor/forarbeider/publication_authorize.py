@@ -14,7 +14,12 @@ it **itself**, at the time it is given, immediately before a publication:
 - ``limits``: the owner-signed limits, verified now, are the plan's and keep
   this batch within their caps;
 - ``stop_control`` and ``stop_latch``: the owner-signed STOP/RESUME chain,
-  verified now, is not stopped, and the persistent latch is not set;
+  verified now, is not stopped, and the persistent latch is not in force (read
+  by this verifier from the workspace, not only reported by the adapter);
+- ``ar5_control_anchor`` (AR5b, simulation): the control history for the
+  plan's policy, the latch transitions and this transaction's attempts all
+  verify against the independent witness
+  (:mod:`~lovspor.forarbeider.publication_anchors`); no simulation may waive it;
 - ``budget``: the ledger, replayed now, holds a reservation for exactly this
   transaction covering this batch and one commit;
 - ``remote_head``: ``main`` read now is the expected base;
@@ -26,7 +31,8 @@ it **itself**, at the time it is given, immediately before a publication:
 What no slice implements yet is ``unavailable``, never passed: the AR1 gate
 verdict (no passing state until D10, D11 and the lineage anchors),
 FC7b's pending blockers (D6, D10, D11, the missing integration and an
-unpinned trust root), the AR5 anchors of the control chain and the ledger, the
+unpinned trust root), the AR5 anchor of the ledger (and, in production, of the
+control chain, until AR7 provides a production witness), the
 AR6 manifest signature and the AR7 settings verification. Production needs
 every check passed, so it is denied; a simulation may waive exactly those, by
 name (:mod:`lovspor.forarbeider.publication_execution_models`).
@@ -41,7 +47,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
-from lovspor.forarbeider import publication_stage
+from lovspor.forarbeider import publication_attempts, publication_stage
+from lovspor.forarbeider.control_plane_anchor import AnchorAuthority
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.policy_authorization import (
     AuthorizationRequest,
@@ -50,6 +57,7 @@ from lovspor.forarbeider.policy_authorization import (
 )
 from lovspor.forarbeider.policy_authorization_models import PolicyAuthorization
 from lovspor.forarbeider.policy_trust import PUBLICATION_NAMESPACE, RELEASE_NAMESPACE, TrustRoot
+from lovspor.forarbeider.publication_anchors import anchor_reasons
 from lovspor.forarbeider.publication_execution_models import (
     AppIdentity,
     AuthorizationCheck,
@@ -79,7 +87,6 @@ from lovspor.forarbeider.version_release_models import PolicyReference, digest_o
 #: What stays unavailable until its slice exists; each a separate, named check.
 _PENDING: tuple[tuple[CheckName, str], ...] = (
     ("ar1_gate_verdict", "ar1_gate_verdict_has_no_passing_state_before_d10_d11_and_anchors"),
-    ("ar5_control_anchor", "control_chain_unanchored_ar5_pending"),
     ("ar5_ledger_anchor", "budget_ledger_unanchored_ar5_pending"),
     ("ar6_release_manifest_signature", "release_manifest_signature_ar6_pending"),
     ("ar7_repository_settings", "repository_settings_unverified_ar7_pending"),
@@ -117,6 +124,9 @@ class AuthorizationContext(NamedTuple):
     attempt_id: str
     mode: Mode
     facts: AdapterFacts = AdapterFacts()
+    #: AR5b: the independent witness and the workspace whose state it anchors.
+    anchoring: AnchorAuthority | None = None
+    workspace: Path | None = None
 
 
 class _Found(NamedTuple):
@@ -353,11 +363,27 @@ def _checks(context: AuthorizationContext) -> tuple[list[AuthorizationCheck], _F
     control_check, control = _control(context, plan)
     budget_check, ledger = _budget(context, limits)
     remote_check, head = _remote(context)
-    latch = _check("stop_latch", ["stop_latch_set"] if context.facts.latched else [])
-    found = [policy, pending, publisher, limits_check, control_check, latch, budget_check]
+    latch = _check("stop_latch", ["stop_latch_set"] if _latched(context) else [])
+    anchors = _control_anchor(context, plan)
+    found = [policy, pending, publisher, limits_check, control_check, latch, anchors, budget_check]
     return [*_bindings(context, plan), *found, remote_check, *_execution(context)], _Found(
         plan, limits, control, ledger, head, fingerprint
     )
+
+
+def _latched(context: AuthorizationContext) -> bool:
+    """The adapter's reading, and the verifier's own reading of the workspace."""
+    held = context.workspace
+    return context.facts.latched or (held is not None and publication_attempts.latched(held))
+
+
+def _control_anchor(context: AuthorizationContext, plan: ReleasePlan | None) -> AuthorizationCheck:
+    """AR5b: the control history, the latch and the attempts, verified against the witness."""
+    if context.mode == "production":
+        return _unavailable("ar5_control_anchor", "control_anchor_production_witness_ar7_pending")
+    policy_id = plan.basis.policy.policy_id if plan is not None else None
+    found = anchor_reasons(context.anchoring, context.workspace, context.inputs, policy_id)
+    return _check("ar5_control_anchor", found)
 
 
 def _bindings(context: AuthorizationContext, plan: ReleasePlan | None) -> list[AuthorizationCheck]:

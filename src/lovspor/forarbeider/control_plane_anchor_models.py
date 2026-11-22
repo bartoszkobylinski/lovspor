@@ -39,7 +39,7 @@ ScopeKind = Literal["transaction", "workspace", "ledger", "policy"]
 FAMILIES: Final[dict[Family, tuple[str, ScopeKind]]] = {
     "publication_attempts": ("forarbeider_publication_attempt/1", "transaction"),
     "recovery_receipts": ("publication-receipt/1", "workspace"),
-    "stop_latch": ("forarbeider_publication_stop_latch/1", "workspace"),
+    "stop_latch": ("forarbeider_publication_stop_latch_event/1", "workspace"),
     "budget_ledger": ("forarbeider_budget_ledger_entry/1", "ledger"),
     "control_history": ("forarbeider_release_control/1", "policy"),
     "quarantine_ledger": ("quarantine/1", "ledger"),

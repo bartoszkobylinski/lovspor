@@ -14,8 +14,17 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from lovspor.forarbeider.control_plane_anchor import (
+    AnchorAuthority,
+    AnchorQuery,
+    anchor_pending,
+    initialize,
+)
+from lovspor.forarbeider.control_plane_chains import control_chain, workspace_chain
+from lovspor.forarbeider.control_plane_witness import OfflineAnchorWitness
 from lovspor.forarbeider.policy_authorization import SignedRecord
 from lovspor.forarbeider.policy_trust import (
+    ANCHOR_NAMESPACE,
     CONTROL_NAMESPACE,
     INVENTORY_NAMESPACE,
     LIMITS_NAMESPACE,
@@ -106,6 +115,17 @@ class Rig:
     transaction: PublicationTransaction
     clone: Path
     inputs: AuthorizationInputs
+    witness: OfflineAnchorWitness
+    witness_key: Key
+
+    def anchoring(self, **changes: Any) -> AnchorAuthority:
+        fields: dict[str, Any] = {
+            "witness": self.witness,
+            "root": self.root,
+            "checked_at": NOW,
+            "workspace": self.workspace,
+        }
+        return AnchorAuthority(**(fields | changes))
 
     @property
     def bare(self) -> Path:
@@ -117,6 +137,7 @@ class Rig:
             "root": self.root,
             "clone": self.clone,
             "workspace": self.workspace,
+            "anchoring": self.anchoring(),
         }
         return ExecutionRequest(**(fields | changes))
 
@@ -125,8 +146,17 @@ class Rig:
         return {line.split("\t")[1]: line.split()[2] for line in listing.splitlines()}
 
 
-def _root(tmp: Path, owner: Key, bot: Key, revoked: tuple[Key, ...] = ()) -> TrustRoot:
-    lines = [signer_line(OWNER, owner, OWNER_KEYS), signer_line(BOT, bot, BOT_NAMESPACES)]
+WITNESS = "test-witness"
+
+
+def _root(
+    tmp: Path, owner: Key, bot: Key, witness: Key, revoked: tuple[Key, ...] = ()
+) -> TrustRoot:
+    lines = [
+        signer_line(OWNER, owner, OWNER_KEYS),
+        signer_line(BOT, bot, BOT_NAMESPACES),
+        signer_line(WITNESS, witness, ANCHOR_NAMESPACE),
+    ]
     return trust_root(tmp, lines, revoked)
 
 
@@ -173,8 +203,10 @@ def settings_for(path: str, **changes: Any) -> PublicationSettings:
 def make_rig(tmp: Path, path: str = "A") -> Rig:
     tmp.mkdir(mode=0o700, exist_ok=True)
     keys = tmp / "keys"
-    owner, bot, stranger = (new_key(keys, name) for name in ("owner", "bot", "stranger"))
-    root = _root(tmp / "root", owner, bot)
+    owner, bot, stranger, witness_key = (
+        new_key(keys, name) for name in ("owner", "bot", "stranger", "witness")
+    )
+    root = _root(tmp / "root", owner, bot, witness_key)
     signed_limits = signed_by(limits(), owner, LIMITS_NAMESPACE)
     material = LimitsMaterial(records=(signed_limits,))
     limits_evidence = verify_limits(LimitsRequest(policy_bytes(), material, NOW), root)
@@ -228,7 +260,10 @@ def make_rig(tmp: Path, path: str = "A") -> Rig:
     )
     workspace = tmp / "attempts"
     workspace.mkdir(mode=0o700)
-    return Rig(
+    witness_dir = tmp / "witness"
+    witness_dir.mkdir(mode=0o700)
+    witness = OfflineAnchorWitness(witness_dir, KeySigner(WITNESS, witness_key))
+    rig = Rig(
         tmp,
         owner,
         bot,
@@ -243,4 +278,60 @@ def make_rig(tmp: Path, path: str = "A") -> Rig:
         transaction,
         prepared.clone,
         inputs,
+        witness,
+        witness_key,
     )
+    anchor_rig(rig)
+    return rig
+
+
+def anchor_queries(rig: "Rig", workspace: Path | None = None) -> dict[str, AnchorQuery]:
+    """The rig's anchored families, read now: control (policy), latch, attempts, receipts."""
+    held = workspace or rig.workspace
+    tid = rig.transaction.transaction_id
+    policy_id = policy_id_of(rig)
+    repository = rig.inputs.settings.repository
+    return {
+        "control_history": AnchorQuery(
+            "control_history", repository, policy_id, control_chain(rig.inputs.control, policy_id)
+        ),
+        "stop_latch": AnchorQuery(
+            "stop_latch", repository, "workspace", workspace_chain("stop_latch", held, "workspace")
+        ),
+        "publication_attempts": AnchorQuery(
+            "publication_attempts",
+            repository,
+            tid,
+            workspace_chain("publication_attempts", held, tid),
+        ),
+        "recovery_receipts": AnchorQuery(
+            "recovery_receipts",
+            repository,
+            "workspace",
+            workspace_chain("recovery_receipts", held, "workspace"),
+        ),
+    }
+
+
+def policy_id_of(rig: "Rig") -> str:
+    plan = rig.inputs.plan.plan
+    assert plan is not None
+    return plan.basis.policy.policy_id
+
+
+def anchor_rig(rig: "Rig") -> None:
+    """Test setup: anchor the rig's empty families and its owner control records (AR5a)."""
+    authority = rig.anchoring()
+    queries = anchor_queries(rig)
+    for name in ("stop_latch", "publication_attempts", "recovery_receipts"):
+        assert initialize(queries[name], authority).status == "verified"
+    control = queries["control_history"]
+    policy_id = policy_id_of(rig)
+    repository = rig.inputs.settings.repository
+    empty = AnchorQuery("control_history", repository, policy_id, control_chain((), policy_id))
+    assert initialize(empty, authority).status == "verified"
+    for count in range(1, len(rig.inputs.control) + 1):
+        prefix = control_chain(rig.inputs.control[:count], policy_id)
+        step = AnchorQuery("control_history", repository, policy_id, prefix)
+        assert anchor_pending(step, authority).status == "verified"
+    assert control.local.reasons == ()
