@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_replace"
+registered = "2026-11-22, from register key bc48212e16cf43b6 (GREEN under scripts/ci/mutant_check.py try with the PR #1004 tests)"
+mutation = """
+-    position = 0
++    position = None
+"""
+justification = """
+`position` is only used as a slice bound: `raw[position:start]` before the
+first span and `raw[position:]` when there are none. A `None` start bound of a
+slice is index 0, so `raw[None:start] == raw[0:start]` and `raw[None:] ==
+raw`. After the first span `position` is reassigned to an int. Same bytes for
+every input.
+"""
