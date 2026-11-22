@@ -35,12 +35,23 @@ Receipts are deterministic from these facts. A receipt already on record is
 re-derived and must match exactly; one the remote contradicts is refused
 (``receipt_conflict``) and sets the latch. Recovery may run while a STOP is in
 force and while the latch is set; it never clears either (AR5 resumes).
+
+AR5c: with a durable ledger, a ``published_authorized`` receipt is settled
+exactly once (:func:`~lovspor.forarbeider.publication_ledger.settle`), under
+the ledger lock taken inside the workspace lock; any other classification is
+withheld and its reservation stays open. A repeated recovery settles nothing
+twice and sends nothing.
 """
 
 from datetime import datetime
 from typing import Any, Literal, NamedTuple
 
-from lovspor.forarbeider import publication_anchors, publication_attempts, publication_receipts
+from lovspor.forarbeider import (
+    publication_anchors,
+    publication_attempts,
+    publication_ledger,
+    publication_receipts,
+)
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.publication_authorize import batch_usage
 from lovspor.forarbeider.publication_execute import (
@@ -57,6 +68,7 @@ from lovspor.forarbeider.publication_integrity import (
     integrity_checks,
     ours,
 )
+from lovspor.forarbeider.publication_ledger import Settlement
 from lovspor.forarbeider.publication_recovery_models import (
     Classification,
     RecoveryReceipt,
@@ -85,6 +97,8 @@ class RecoveryOutcome(NamedTuple):
     receipt: RecoveryReceipt | None
     ledger: LedgerPlan | None
     reasons: tuple[str, ...]
+    #: AR5c: the durable settlement of a verified publication, when a ledger is given.
+    settlement: Settlement | None = None
 
 
 def _not_eligible(detail: str) -> ForarbeiderRefusedError:
@@ -329,10 +343,13 @@ def _settle(
         reasons = tuple(f"{r.classification}:{r.commit}" for r in halts)
         _halt(request, reasons, at)
     ledger = _ledger(request, published) if published is not None else None
+    settlement = None
+    if published is not None and request.ledger is not None:
+        settlement = publication_ledger.settle(request, published, at)
     primary = published or receipts[0]
     chosen = halts[-1].classification if halts else primary.classification
     classification: OutcomeClass = chosen if fresh else "already_receipted"
-    return RecoveryOutcome(classification, primary, ledger, ())
+    return RecoveryOutcome(classification, primary, ledger, (), settlement)
 
 
 def recover(request: ExecutionRequest, environment: Environment) -> RecoveryOutcome:

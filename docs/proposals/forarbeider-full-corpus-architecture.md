@@ -1036,8 +1036,22 @@ Limitations:
 
 Limitations:
 - **Withdrawal after a halt is AR5c with the owner.** A foreign commit, a failed integrity check or an unverifiable history is never resumed here.
-- **The budget ledger anchor, reservation and settlement are AR5c.**
+- **The budget ledger anchor, reservation and settlement are AR5c** (see the AR5c status below).
 - **A STOP that is neither offered nor anchored cannot be seen.** Its effect starts once it is offered or recorded.
+
+**AR5c status.** AR5c anchors the budget ledger and settles every verified publication exactly once. Simulation only. Production stays denied: in production `ar5_ledger_anchor` is unavailable until AR7 provides a production witness; AR6 and AR7 are unchanged.
+- **Durable ledger** (`publication_ledger`, `<root>/<ledger_id>/NNNNNN.json`, outside every workspace, shared by them): the AR1b entries, created once, never replaced or removed, anchored by the witness as the `budget_ledger` family, scope `<ledger_id>`.
+- **Consistency model.** Only a ledger whose chain reproduces exactly the witnessed head is read or extended. Every write: under the ledger lock, verify against the witness, judge the operation with `plan_entry` on that chain (next entry, `already_applied` for an exact retry, or a refusal), create the entry `O_EXCL`, read it back, anchor it. A crash between write and anchor leaves `pending_anchor`, which blocks the ledger until the **same** operation is retried: the retry proves the pending bytes are exactly what it would append and completes the anchor. A pending entry anything else wrote is never anchored.
+- **Before a simulation publishes:** `ar5_ledger_anchor` verifies the durable ledger against the witness, never waived. `budget` reads only the durable ledger: a reservation for exactly this transaction and batch, covering its usage, within the owner-signed limits and daily caps (AR1b). A missing ledger is never zero usage. A publication of the same workspace that the same ledger has not settled denies (`ledger_settlement_pending`). `publish_authorized` re-verifies the ledger anchor under the lock.
+- **Reservation** (`reserve`): the transaction's exact usage for the day, anchored; a retry is `already_applied`; a conflicting reservation, an exceeded cap or unverified limits is refused and writes nothing.
+- **Settlement** (`settle`, from AR4b-2 recovery only): a `published_authorized` receipt, verified against the anchored receipts, for the single reservation under the same batch; the `commit` entry carries the batch's exact usage, the verified remote commit and the receipt's digest, and is anchored. A second settlement naming another commit or receipt is refused (`ledger_conflicting_settlement`). An API answer or an attempt record never settles. `published_authorization_unknown` and integrity failures are withheld: the reservation stays open and the latch stops the workspace.
+- **Locks.** Workspace lock, then the ledger lock (`<root>/<ledger_id>.lock`, across workspaces and processes), then the witness lock (a leaf). Nothing holding the ledger lock takes a workspace lock; the clone lock is never taken under either. A second holder is refused at once (`corpus_locked: ledger`).
+- **Crashes** (each a test): before the reservation (nothing written, denied); after its append, before its anchor (denied until the same reservation is retried); after the anchor, before the send (recovery: `not_published`, one send later); after the mutation, before the response (recovery settles once); after the receipt, before the ledger commit (the next recovery settles); after the ledger commit, before its anchor (the next recovery completes it); after the anchor, before the acknowledgement (the next recovery is `already_settled`, nothing more is charged).
+
+Limitations:
+- **Withdrawal after a halt, adopting pre-existing unanchored records, and quarantine successors remain open.**
+- **A withheld settlement is resolved by the owner** (AR5b RESUME does not settle it); its reservation keeps counting against the day.
+- **Settlement under revoked owner limits is refused**: the publication stays unsettled and spending stays blocked until the owner signs limits again.
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 

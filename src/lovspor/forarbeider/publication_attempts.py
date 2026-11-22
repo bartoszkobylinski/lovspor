@@ -23,9 +23,11 @@ workspace; a second holder is refused at once (``corpus_locked: workspace``),
 never queued, so no wait can deadlock. The file stays in place; after the
 ``flock`` is taken its name must still be that file, a single private regular
 file. Lock ordering: the AR4a clone lock is never taken under the workspace
-lock. The only lock taken while holding it is the AR5a anchor witness's
-(:func:`~lovspor.forarbeider.control_plane_anchor.durable_append`), and that
-one is a leaf: nothing holding it takes another lock.
+lock. Taken while holding it: the AR5c budget ledger's lock
+(:func:`~lovspor.forarbeider.publication_ledger.ledger_lock`), which never
+takes a workspace lock, and the AR5a anchor witness's
+(:func:`~lovspor.forarbeider.control_plane_anchor.durable_append`), a leaf:
+nothing holding it takes another lock. Order: workspace, ledger, witness.
 
 Limitation, as for the AR3 ledger: a local folder proves neither that it was
 not withheld nor that its newest record was not replaced by an equally
@@ -34,6 +36,7 @@ canonical one. An external anchor of the head is AR5.
 
 import fcntl
 import os
+import re
 import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -53,6 +56,7 @@ _LATCH = "stop-latch.json"
 LATCH_FOLDER = "stop-latch"
 _LOCK = "workspace.lock"
 _LOCK_OPEN = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
+_TRANSACTION = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _refused(detail: str) -> ForarbeiderRefusedError:
@@ -120,6 +124,13 @@ def _walk(folder: Path, transaction_id: str) -> Iterator[tuple[AttemptRecord, by
             raise _refused("attempts")
         previous = sha256(raw).hexdigest()
         yield record, raw
+
+
+def transactions(workspace: Path) -> list[str]:
+    """The ids of the transactions that have attempt records in ``workspace``."""
+    if not os.path.lexists(workspace):
+        return []
+    return sorted(item.name for item in workspace.iterdir() if _TRANSACTION.match(item.name))
 
 
 def records(workspace: Path, transaction_id: str) -> list[AttemptRecord]:
@@ -276,27 +287,49 @@ def _lock_refused(reason: RefusalReason, detail: str) -> ForarbeiderRefusedError
     return ForarbeiderRefusedError(reason, detail)
 
 
-def _claim(parent: int, descriptor: int) -> None:
+def _claim(parent: int, descriptor: int, name: str, what: str) -> None:
     """Take the ``flock``, then prove the name still holds the one private file locked.
 
     Raises:
-        ForarbeiderRefusedError: ``corpus_locked: workspace`` (another holder, or
-            the lock moved), ``checkout_unsafe: workspace_lock``.
+        ForarbeiderRefusedError: ``corpus_locked: <what>`` (another holder, or
+            the lock moved), ``checkout_unsafe: <what>_lock``.
     """
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as error:
-        raise _lock_refused(RefusalReason.CORPUS_LOCKED, "workspace") from error
+        raise _lock_refused(RefusalReason.CORPUS_LOCKED, what) from error
     mine = os.fstat(descriptor)
     try:
-        named = os.stat(_LOCK, dir_fd=parent, follow_symlinks=False)
+        named = os.stat(name, dir_fd=parent, follow_symlinks=False)
     except FileNotFoundError as error:
-        raise _lock_refused(RefusalReason.CORPUS_LOCKED, "workspace") from error
+        raise _lock_refused(RefusalReason.CORPUS_LOCKED, what) from error
     if (named.st_dev, named.st_ino) != (mine.st_dev, mine.st_ino):
-        raise _lock_refused(RefusalReason.CORPUS_LOCKED, "workspace")
+        raise _lock_refused(RefusalReason.CORPUS_LOCKED, what)
     private = mine.st_uid == os.geteuid() and not stat.S_IMODE(mine.st_mode) & 0o077
     if not stat.S_ISREG(mine.st_mode) or mine.st_nlink != 1 or not private:
-        raise _lock_refused(RefusalReason.CHECKOUT_UNSAFE, "workspace_lock")
+        raise _lock_refused(RefusalReason.CHECKOUT_UNSAFE, f"{what}_lock")
+
+
+@contextmanager
+def exclusive(folder: Path, name: str, what: str) -> Iterator[None]:
+    """The lock file ``name`` in the private ``folder``, exclusively; a second holder is refused.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_locked: <what>``; ``checkout_unsafe:
+            <what>_lock``; ``unsafe_output_path`` for a folder that is not private.
+    """
+    with directory(folder, what) as parent:
+        try:
+            descriptor = os.open(name, _LOCK_OPEN, 0o600, dir_fd=parent)
+        except FileNotFoundError as error:  # a concurrent creation of the lock file (macOS)
+            raise _lock_refused(RefusalReason.CORPUS_LOCKED, what) from error
+        except OSError as error:
+            raise _lock_refused(RefusalReason.CHECKOUT_UNSAFE, f"{what}_lock") from error
+        try:
+            _claim(parent, descriptor, name, what)
+            yield
+        finally:
+            os.close(descriptor)
 
 
 @contextmanager
@@ -309,13 +342,5 @@ def workspace_lock(workspace: Path) -> Iterator[None]:
             for a link or a shared file; ``unsafe_output_path`` for a workspace
             that is not a private directory.
     """
-    with directory(workspace, "workspace") as parent:
-        try:
-            descriptor = os.open(_LOCK, _LOCK_OPEN, 0o600, dir_fd=parent)
-        except OSError as error:
-            raise _lock_refused(RefusalReason.CHECKOUT_UNSAFE, "workspace_lock") from error
-        try:
-            _claim(parent, descriptor)
-            yield
-        finally:
-            os.close(descriptor)
+    with exclusive(workspace, _LOCK, "workspace"):
+        yield

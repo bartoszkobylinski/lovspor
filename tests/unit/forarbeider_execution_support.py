@@ -9,7 +9,7 @@ documents. The GraphQL endpoint is
 production credential, no real repository.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -20,7 +20,7 @@ from lovspor.forarbeider.control_plane_anchor import (
     anchor_pending,
     initialize,
 )
-from lovspor.forarbeider.control_plane_chains import control_chain, workspace_chain
+from lovspor.forarbeider.control_plane_chains import control_chain, ledger_chain, workspace_chain
 from lovspor.forarbeider.control_plane_witness import OfflineAnchorWitness
 from lovspor.forarbeider.policy_authorization import SignedRecord
 from lovspor.forarbeider.policy_trust import (
@@ -35,6 +35,7 @@ from lovspor.forarbeider.policy_trust import (
 from lovspor.forarbeider.publication_authorize import AuthorizationInputs
 from lovspor.forarbeider.publication_execute import ExecutionRequest
 from lovspor.forarbeider.publication_execution_models import AppIdentity, PublicationSettings
+from lovspor.forarbeider.publication_ledger import BudgetLedger
 from lovspor.forarbeider.publication_models import PublicationTransaction
 from lovspor.forarbeider.publication_prepare import PreparationRequest, prepare_publication
 from lovspor.forarbeider.publication_sandbox import DisposableRemote, create_disposable_remote
@@ -117,6 +118,7 @@ class Rig:
     inputs: AuthorizationInputs
     witness: OfflineAnchorWitness
     witness_key: Key
+    ledger: BudgetLedger
 
     def anchoring(self, **changes: Any) -> AnchorAuthority:
         fields: dict[str, Any] = {
@@ -138,6 +140,7 @@ class Rig:
             "clone": self.clone,
             "workspace": self.workspace,
             "anchoring": self.anchoring(),
+            "ledger": self.ledger,
         }
         return ExecutionRequest(**(fields | changes))
 
@@ -147,6 +150,7 @@ class Rig:
 
 
 WITNESS = "test-witness"
+LEDGER_ID = "synthetic-ledger"
 
 
 def _root(
@@ -161,11 +165,14 @@ def _root(
 
 
 def reserve(
-    evidence: LimitsEvidence, transaction: PublicationTransaction, amounts: BudgetUsage
+    evidence: LimitsEvidence,
+    transaction: PublicationTransaction,
+    amounts: BudgetUsage,
+    ledger_id: str = LEDGER_ID,
 ) -> tuple[bytes, ...]:
     operation = LedgerOperation(
         operation="reserve",
-        ledger_id="synthetic-ledger",
+        ledger_id=ledger_id,
         day=NOW.date(),
         release_id=transaction.transaction_id,
         batch_id=transaction.content.batch_id,
@@ -280,6 +287,7 @@ def make_rig(tmp: Path, path: str = "A") -> Rig:
         inputs,
         witness,
         witness_key,
+        BudgetLedger(tmp / "ledger", LEDGER_ID),
     )
     anchor_rig(rig)
     return rig
@@ -335,3 +343,51 @@ def anchor_rig(rig: "Rig") -> None:
         step = AnchorQuery("control_history", repository, policy_id, prefix)
         assert anchor_pending(step, authority).status == "verified"
     assert control.local.reasons == ()
+    seed_ledger(rig, rig.inputs.ledger)
+
+
+# --- AR5c: the durable budget ledger, written here with AR1b and AR5a primitives only -----------
+
+
+def ledger_folder(rig: "Rig") -> Path:
+    return rig.ledger.root / rig.ledger.ledger_id
+
+
+def ledger_bytes(rig: "Rig") -> tuple[bytes, ...]:
+    """The ledger's entries as stored, oldest first."""
+    folder = ledger_folder(rig)
+    if not folder.exists():
+        return ()
+    return tuple(path.read_bytes() for path in sorted(folder.glob("*.json")))
+
+
+def ledger_query(rig: "Rig", entries: tuple[bytes, ...] | None = None) -> AnchorQuery:
+    held = ledger_bytes(rig) if entries is None else entries
+    chain = ledger_chain(held, rig.ledger.ledger_id)
+    return AnchorQuery("budget_ledger", rig.inputs.settings.repository, rig.ledger.ledger_id, chain)
+
+
+def write_entry(rig: "Rig", raw: bytes) -> None:
+    """Append one entry file as the ledger stores it, without anchoring it."""
+    folder = ledger_folder(rig)
+    path = folder / f"{len(ledger_bytes(rig)) + 1:06d}.json"
+    path.write_bytes(raw)
+    path.chmod(0o600)
+
+
+def seed_ledger(rig: "Rig", entries: tuple[bytes, ...]) -> None:
+    """Test setup: an anchored empty ledger, then each entry appended and anchored."""
+    rig.ledger.root.mkdir(mode=0o700, exist_ok=True)
+    ledger_folder(rig).mkdir(mode=0o700)
+    authority = rig.anchoring(workspace=rig.ledger.root)
+    assert initialize(ledger_query(rig), authority).status == "verified"
+    for raw in entries:
+        write_entry(rig, raw)
+        assert anchor_pending(ledger_query(rig), authority).status == "verified"
+
+
+def seeded_ledger(rig: "Rig", name: str, entries: tuple[bytes, ...] = ()) -> BudgetLedger:
+    """Another durable ledger, ``<tmp>/<name>``, id ``synthetic-ledger-<name>``, anchored."""
+    other = replace(rig, ledger=BudgetLedger(rig.tmp / name, f"{LEDGER_ID}-{name}"))
+    seed_ledger(other, entries)
+    return other.ledger

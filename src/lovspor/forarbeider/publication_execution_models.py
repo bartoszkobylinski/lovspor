@@ -82,7 +82,8 @@ AR5_TO_AR7_CHECKS: Final[tuple[CheckName, ...]] = (
 )
 #: Checks a simulation may waive, each listed; anything else unavailable denies.
 WAIVABLE_IN_SIMULATION: Final[frozenset[str]] = frozenset(
-    {*AR5_TO_AR7_CHECKS, "ar1_gate_verdict", "fc7b_pending_blockers"} - {"ar5_control_anchor"}
+    {*AR5_TO_AR7_CHECKS, "ar1_gate_verdict", "fc7b_pending_blockers"}
+    - {"ar5_control_anchor", "ar5_ledger_anchor"}
 )
 CheckStatus = Literal["passed", "failed", "unavailable"]
 Mode = Literal["production", "simulation"]

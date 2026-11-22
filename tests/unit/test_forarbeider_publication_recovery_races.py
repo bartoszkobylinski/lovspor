@@ -474,6 +474,7 @@ def test_genuine_evidence_is_not_spent_while_the_workspace_is_held(rig_a: Rig) -
         AdapterFacts(app=github.identity),
         rig_a.anchoring(),
         rig_a.workspace,
+        rig_a.ledger,
     )
     evidence = authorize(context)
     assert evidence.decision == "simulation_only", evidence.denied_by
