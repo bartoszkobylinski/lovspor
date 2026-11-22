@@ -285,6 +285,22 @@ def test_a_truncated_ledger_is_rolled_back_and_denies(rig: Rig) -> None:
     assert github.calls == []
 
 
+def test_a_gap_in_the_ledger_denies_without_changing_remaining_entries(rig: Rig) -> None:
+    github = endpoint(rig)
+    append_anchored(rig, operation(release(1)))
+    folder = ledger_folder(rig)
+    remaining = (folder / "000002.json").read_bytes()
+    (folder / "000001.json").unlink()
+
+    outcome = execute(rig.request(), sim(github))
+
+    assert outcome.status == "denied"
+    assert check(outcome, "ar5_ledger_anchor")[1] == "failed"
+    assert github.calls == []
+    assert sorted(path.name for path in folder.iterdir()) == ["000002.json"]
+    assert (folder / "000002.json").read_bytes() == remaining
+
+
 def test_a_rewritten_entry_diverges_and_denies(rig: Rig) -> None:
     github = endpoint(rig)
     other = replace(rig, ledger=BudgetLedger(rig.tmp / "scratch", LEDGER_ID))
