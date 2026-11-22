@@ -817,6 +817,29 @@ def test_assumption_os_link_follow_symlinks_none_does_not_follow(tmp_path: Path)
     assert not (tmp_path / "true").is_symlink()
 
 
+def test_assumption_os_stat_follow_symlinks_none_does_not_follow(tmp_path: Path) -> None:
+    """Pins mutation-equivalents/forarbeider.release_lock/_at_name-*.toml.
+
+    Called the way ``_at_name`` calls it, with a directory descriptor, ``None``
+    reports the symlink itself exactly as ``False`` does, and ``True`` follows
+    it: the flag is honoured, so only ``None`` is equivalent.
+    """
+    (tmp_path / "target").write_bytes(b"x")
+    (tmp_path / "symlink").symlink_to(tmp_path / "target")
+    handle = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        found = {
+            value: os.stat("symlink", dir_fd=handle, follow_symlinks=value)  # type: ignore[arg-type]
+            for value in (None, False, True)
+        }
+    finally:
+        os.close(handle)
+    link = (tmp_path / "symlink").lstat()
+    target = (tmp_path / "target").stat()
+    assert found[None].st_ino == found[False].st_ino == link.st_ino
+    assert found[True].st_ino == target.st_ino != link.st_ino
+
+
 def test_assumption_typing_cast_returns_its_value_unchanged() -> None:
     """Pins mutation-equivalents/embeddings.cache/quantized_document_vectors-*.toml."""
     scale = 0.0123

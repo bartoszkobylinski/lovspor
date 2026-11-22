@@ -1,0 +1,19 @@
+[[equivalent]]
+file = "src/lovspor/forarbeider/release_lock.py"
+symbol = "_at_name"
+registered = "2026-11-22, from register key 3c656c270b78a0d3 (first seen 2026-11-20 at 24f16450)"
+mutation = """
+-        return os.stat(_NAME, dir_fd=git, follow_symlinks=False)
++        return os.stat(_NAME, dir_fd=git, follow_symlinks=None)
+"""
+justification = """
+`os.stat` converts `follow_symlinks` with the argument-clinic `bool`
+converter (truth value), so `None` is falsy and selects exactly the
+`follow_symlinks=False` path: fstatat(2) with AT_SYMLINK_NOFOLLOW on the
+`.git` descriptor, which reports a symlink at the lock's name as itself rather
+than as its target. Both spellings return the same stat_result for every name.
+The non-equivalent mutants (`True`, omitted) follow the symlink and are killed
+by test_a_lock_swapped_for_a_symlink_to_it_is_left_for_the_owner; the
+assumption test pins None == False and True != False on this call shape.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_os_stat_follow_symlinks_none_does_not_follow"
