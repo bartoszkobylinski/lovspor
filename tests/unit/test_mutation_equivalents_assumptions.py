@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import tomllib
+import types
 import typing
 from datetime import UTC, datetime
 from email.message import EmailMessage
@@ -36,11 +37,14 @@ import pytest
 import typer
 from lxml import etree, html
 from mcp.types import JSONRPCMessage
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from lovspor import git_publish
+from lovspor.identity.audit import CollisionAudit, HolderFate, SlugFate
+from lovspor.identity.migration import RegistryConflict, Rename, RestoredTombstone
+from lovspor.identity.plan import HistoryMismatch, Threshold
 from lovspor.innsyn.sender import Sender
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
@@ -948,3 +952,44 @@ def test_assumption_git_rev_parse_verify_ignores_an_unknown_quiet_spelling(
         missing = rev_parse(flag, "absent^{commit}")
         assert missing.returncode != 0
         assert missing.stdout == ""
+
+
+_REPORT_ROW_MODELS: tuple[type[BaseModel], ...] = (
+    SlugFate,
+    HolderFate,
+    Rename,
+    CollisionAudit,
+    HistoryMismatch,
+    RegistryConflict,
+    RestoredTombstone,
+    Threshold,
+)
+
+
+def _json_native(annotation: object) -> bool:
+    """A field type whose python-mode dump already equals its json-mode dump."""
+    if annotation in (str, int, bool, type(None)) or annotation in _REPORT_ROW_MODELS:
+        return True
+    origin = typing.get_origin(annotation)
+    if origin in (list, typing.Union, types.UnionType):
+        return all(_json_native(arg) for arg in typing.get_args(annotation))
+    return False
+
+
+def test_assumption_pydantic_dumps_any_mode_but_json_as_python() -> None:
+    """Pins the argument behind the ``model_dump(mode=...)`` entries of
+    ``identity/report.py`` (``report_data``, ``_review_lists``): pydantic treats
+    every mode but "json" as "python", and the dumped models hold only types
+    for which the two modes agree, so the mutated modes dump equal dicts."""
+
+    class Probe(BaseModel):
+        values: tuple[int, ...] = (1,)
+        at: datetime = datetime(2026, 1, 1, tzinfo=UTC)
+
+    probe = Probe()
+    assert probe.model_dump(mode="json") != probe.model_dump(mode="python")
+    for mode in ("JSON", "XXjsonXX", None):
+        assert probe.model_dump(mode=mode) == probe.model_dump(mode="python")  # type: ignore[arg-type]
+    for model in _REPORT_ROW_MODELS:
+        for name, field in model.model_fields.items():
+            assert _json_native(field.annotation), f"{model.__name__}.{name}: {field.annotation}"
