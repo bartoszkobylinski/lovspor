@@ -1,0 +1,3337 @@
+{
+ "schema_version": 1,
+ "commit": "72c39d283c93e509d41e65d59e1597779055568c",
+ "written_by": "scripts/ci/mutation_night.py",
+ "mutmut": "3.8.0",
+ "kinds": "read off each mutant's source by scripts/ci/mutation_kinds.py; mutmut records no operator",
+ "problems": [],
+ "measured": {
+  "mutants": 4179,
+  "by_status": {
+   "killed": 3584,
+   "no tests": 7,
+   "survived": 588
+  },
+  "seconds": 30407.047
+ },
+ "not_checked": 94609,
+ "estimate_seconds": 27524.753,
+ "by_kind": {
+  "True / False swapped": {
+   "mutants": 21,
+   "by_status": {
+    "killed": 11,
+    "survived": 10
+   },
+   "seconds": 414.881
+  },
+  "argument: removed": {
+   "mutants": 890,
+   "by_status": {
+    "killed": 842,
+    "survived": 48
+   },
+   "seconds": 4087.41
+  },
+  "argument: replaced by None": {
+   "mutants": 1235,
+   "by_status": {
+    "killed": 1103,
+    "no tests": 2,
+    "survived": 130
+   },
+   "seconds": 7144.83
+  },
+  "assignment: None to empty string": {
+   "mutants": 4,
+   "by_status": {
+    "killed": 2,
+    "survived": 2
+   },
+   "seconds": 52.21
+  },
+  "assignment: value to None": {
+   "mutants": 398,
+   "by_status": {
+    "killed": 381,
+    "no tests": 1,
+    "survived": 16
+   },
+   "seconds": 1215.243
+  },
+  "augmented assignment to plain": {
+   "mutants": 2,
+   "by_status": {
+    "killed": 1,
+    "survived": 1
+   },
+   "seconds": 43.189
+  },
+  "break / continue swapped": {
+   "mutants": 7,
+   "by_status": {
+    "killed": 6,
+    "survived": 1
+   },
+   "seconds": 57.652
+  },
+  "is / in negated": {
+   "mutants": 92,
+   "by_status": {
+    "killed": 88,
+    "survived": 4
+   },
+   "seconds": 429.513
+  },
+  "lambda: body replaced": {
+   "mutants": 9,
+   "by_status": {
+    "killed": 9
+   },
+   "seconds": 49.548
+  },
+  "not / ~ removed": {
+   "mutants": 49,
+   "by_status": {
+    "killed": 47,
+    "no tests": 1,
+    "survived": 1
+   },
+   "seconds": 112.148
+  },
+  "number": {
+   "mutants": 75,
+   "by_status": {
+    "killed": 57,
+    "no tests": 1,
+    "survived": 17
+   },
+   "seconds": 864.961
+  },
+  "operator: and / or": {
+   "mutants": 101,
+   "by_status": {
+    "killed": 53,
+    "no tests": 1,
+    "survived": 47
+   },
+   "seconds": 1819.937
+  },
+  "operator: arithmetic": {
+   "mutants": 51,
+   "by_status": {
+    "killed": 48,
+    "survived": 3
+   },
+   "seconds": 238.191
+  },
+  "operator: augmented": {
+   "mutants": 2,
+   "by_status": {
+    "killed": 2
+   },
+   "seconds": 1.959
+  },
+  "operator: bitwise": {
+   "mutants": 14,
+   "by_status": {
+    "killed": 12,
+    "no tests": 1,
+    "survived": 1
+   },
+   "seconds": 91.298
+  },
+  "operator: comparison": {
+   "mutants": 143,
+   "by_status": {
+    "killed": 135,
+    "survived": 8
+   },
+   "seconds": 652.381
+  },
+  "string method swapped": {
+   "mutants": 8,
+   "by_status": {
+    "killed": 2,
+    "survived": 6
+   },
+   "seconds": 83.441
+  },
+  "string: XX added": {
+   "mutants": 503,
+   "by_status": {
+    "killed": 372,
+    "survived": 131
+   },
+   "seconds": 5961.245
+  },
+  "string: lower case": {
+   "mutants": 33,
+   "by_status": {
+    "killed": 19,
+    "survived": 14
+   },
+   "seconds": 811.787
+  },
+  "string: upper case": {
+   "mutants": 444,
+   "by_status": {
+    "killed": 329,
+    "survived": 115
+   },
+   "seconds": 4969.631
+  },
+  "ternary: condition forced": {
+   "mutants": 98,
+   "by_status": {
+    "killed": 65,
+    "survived": 33
+   },
+   "seconds": 1305.592
+  }
+ },
+ "by_file": {
+  "src/lovspor/forarbeider/publication_attempts.py": {
+   "mutants": 240,
+   "by_status": {
+    "killed": 191,
+    "no tests": 7,
+    "survived": 42
+   },
+   "seconds": 2340.949
+  },
+  "src/lovspor/forarbeider/publication_authorize.py": {
+   "mutants": 678,
+   "by_status": {
+    "killed": 537,
+    "survived": 141
+   },
+   "seconds": 7154.227
+  },
+  "src/lovspor/forarbeider/publication_execute.py": {
+   "mutants": 510,
+   "by_status": {
+    "killed": 458,
+    "survived": 52
+   },
+   "seconds": 4143.047
+  },
+  "src/lovspor/forarbeider/publication_execution_models.py": {
+   "mutants": 35,
+   "by_status": {
+    "killed": 31,
+    "survived": 4
+   },
+   "seconds": 202.34
+  },
+  "src/lovspor/forarbeider/publication_integrity.py": {
+   "mutants": 368,
+   "by_status": {
+    "killed": 314,
+    "survived": 54
+   },
+   "seconds": 1871.746
+  },
+  "src/lovspor/forarbeider/publication_path_a.py": {
+   "mutants": 194,
+   "by_status": {
+    "killed": 156,
+    "survived": 38
+   },
+   "seconds": 923.06
+  },
+  "src/lovspor/forarbeider/publication_path_b.py": {
+   "mutants": 521,
+   "by_status": {
+    "killed": 422,
+    "survived": 99
+   },
+   "seconds": 4491.306
+  },
+  "src/lovspor/forarbeider/publication_receipts.py": {
+   "mutants": 83,
+   "by_status": {
+    "killed": 78,
+    "survived": 5
+   },
+   "seconds": 642.372
+  },
+  "src/lovspor/forarbeider/publication_recovery_models.py": {
+   "mutants": 26,
+   "by_status": {
+    "killed": 26
+   },
+   "seconds": 36.954
+  },
+  "src/lovspor/forarbeider/publication_remote.py": {
+   "mutants": 310,
+   "by_status": {
+    "killed": 284,
+    "survived": 26
+   },
+   "seconds": 1011.45
+  },
+  "src/lovspor/forarbeider/publication_remote_recovery.py": {
+   "mutants": 556,
+   "by_status": {
+    "killed": 508,
+    "survived": 48
+   },
+   "seconds": 2479.598
+  },
+  "src/lovspor/forarbeider/publication_sandbox.py": {
+   "mutants": 239,
+   "by_status": {
+    "killed": 224,
+    "survived": 15
+   },
+   "seconds": 1092.265
+  },
+  "src/lovspor/git_publish.py": {
+   "mutants": 138,
+   "by_status": {
+    "killed": 85,
+    "survived": 53
+   },
+   "seconds": 3529.867
+  },
+  "src/lovspor/history.py": {
+   "mutants": 79,
+   "by_status": {
+    "killed": 76,
+    "survived": 3
+   },
+   "seconds": 153.765
+  },
+  "src/lovspor/identity/history.py": {
+   "mutants": 114,
+   "by_status": {
+    "killed": 109,
+    "survived": 5
+   },
+   "seconds": 227.091
+  },
+  "src/lovspor/sync/orchestrator.py": {
+   "mutants": 88,
+   "by_status": {
+    "killed": 85,
+    "survived": 3
+   },
+   "seconds": 107.01
+  }
+ },
+ "by_function": [
+  {
+   "function": "lovspor.git_publish.x_environment",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "environment",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 49,
+   "by_status": {
+    "killed": 16,
+    "survived": 33
+   },
+   "seconds": 2014.36
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_push",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 73,
+   "by_status": {
+    "killed": 46,
+    "survived": 27
+   },
+   "seconds": 2408.874
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x_authorization",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "authorization",
+   "class": null,
+   "tests": 35,
+   "estimate_seconds": 5.102,
+   "mutants": 94,
+   "by_status": {
+    "killed": 74,
+    "survived": 20
+   },
+   "seconds": 793.638
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__policy",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_policy",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 55,
+   "by_status": {
+    "killed": 37,
+    "survived": 18
+   },
+   "seconds": 844.179
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_a.x__stale",
+   "file": "src/lovspor/forarbeider/publication_path_a.py",
+   "symbol": "_stale",
+   "class": null,
+   "tests": 31,
+   "estimate_seconds": 2.342,
+   "mutants": 49,
+   "by_status": {
+    "killed": 31,
+    "survived": 18
+   },
+   "seconds": 344.062
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__plan",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_plan",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 35,
+   "by_status": {
+    "killed": 19,
+    "survived": 16
+   },
+   "seconds": 721.818
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__quarantine",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_quarantine",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 47,
+   "by_status": {
+    "killed": 33,
+    "survived": 14
+   },
+   "seconds": 647.226
+  },
+  {
+   "function": "lovspor.git_publish.x_run_git",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "tests": 128,
+   "estimate_seconds": 8.382,
+   "mutants": 52,
+   "by_status": {
+    "killed": 39,
+    "survived": 13
+   },
+   "seconds": 1088.546
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x__parsed",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "_parsed",
+   "class": null,
+   "tests": 65,
+   "estimate_seconds": 7.429,
+   "mutants": 25,
+   "by_status": {
+    "killed": 13,
+    "survived": 12
+   },
+   "seconds": 441.394
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__publisher",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_publisher",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 36,
+   "by_status": {
+    "killed": 24,
+    "survived": 12
+   },
+   "seconds": 540.329
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__limits",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_limits",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 48,
+   "by_status": {
+    "killed": 37,
+    "survived": 11
+   },
+   "seconds": 509.26
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__facts",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_facts",
+   "class": null,
+   "tests": 74,
+   "estimate_seconds": 7.743,
+   "mutants": 50,
+   "by_status": {
+    "killed": 39,
+    "survived": 11
+   },
+   "seconds": 725.802
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_ref_event",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "ref_event",
+   "class": null,
+   "tests": 14,
+   "estimate_seconds": 2.749,
+   "mutants": 48,
+   "by_status": {
+    "killed": 37,
+    "survived": 11
+   },
+   "seconds": 188.842
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__ledger",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_ledger",
+   "class": null,
+   "tests": 26,
+   "estimate_seconds": 4.885,
+   "mutants": 56,
+   "by_status": {
+    "killed": 45,
+    "survived": 11
+   },
+   "seconds": 272.972
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__path_identity",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_path_identity",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 32,
+   "by_status": {
+    "killed": 22,
+    "survived": 10
+   },
+   "seconds": 480.922
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__proposal",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_proposal",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 40,
+   "by_status": {
+    "killed": 30,
+    "survived": 10
+   },
+   "seconds": 565.953
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__remote",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_remote",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 21,
+   "by_status": {
+    "killed": 11,
+    "survived": 10
+   },
+   "seconds": 436.585
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_a.x_judged",
+   "file": "src/lovspor/forarbeider/publication_path_a.py",
+   "symbol": "judged",
+   "class": null,
+   "tests": 32,
+   "estimate_seconds": 2.38,
+   "mutants": 51,
+   "by_status": {
+    "killed": 41,
+    "survived": 10
+   },
+   "seconds": 239.205
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x__claim",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "_claim",
+   "class": null,
+   "tests": 110,
+   "estimate_seconds": 8.371,
+   "mutants": 54,
+   "by_status": {
+    "killed": 45,
+    "survived": 9
+   },
+   "seconds": 551.887
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x__content_reasons",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "_content_reasons",
+   "class": null,
+   "tests": 20,
+   "estimate_seconds": 3.575,
+   "mutants": 53,
+   "by_status": {
+    "killed": 44,
+    "survived": 9
+   },
+   "seconds": 183.012
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote.x__headers",
+   "file": "src/lovspor/forarbeider/publication_remote.py",
+   "symbol": "_headers",
+   "class": null,
+   "tests": 15,
+   "estimate_seconds": 2.781,
+   "mutants": 34,
+   "by_status": {
+    "killed": 25,
+    "survived": 9
+   },
+   "seconds": 136.953
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__reader",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_reader",
+   "class": null,
+   "tests": 50,
+   "estimate_seconds": 6.06,
+   "mutants": 26,
+   "by_status": {
+    "killed": 17,
+    "survived": 9
+   },
+   "seconds": 290.377
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x_create_once",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "create_once",
+   "class": null,
+   "tests": 88,
+   "estimate_seconds": 8.141,
+   "mutants": 28,
+   "by_status": {
+    "killed": 20,
+    "survived": 8
+   },
+   "seconds": 385.733
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__manifest",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_manifest",
+   "class": null,
+   "tests": 40,
+   "estimate_seconds": 5.197,
+   "mutants": 31,
+   "by_status": {
+    "killed": 23,
+    "survived": 8
+   },
+   "seconds": 220.542
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_split_signature",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "split_signature",
+   "class": null,
+   "tests": 25,
+   "estimate_seconds": 3.847,
+   "mutants": 35,
+   "by_status": {
+    "killed": 27,
+    "survived": 8
+   },
+   "seconds": 205.731
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_verify_commit",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "verify_commit",
+   "class": null,
+   "tests": 20,
+   "estimate_seconds": 3.575,
+   "mutants": 60,
+   "by_status": {
+    "killed": 52,
+    "survived": 8
+   },
+   "seconds": 179.768
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x_private_workspace",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "private_workspace",
+   "class": null,
+   "tests": null,
+   "estimate_seconds": 0.0,
+   "mutants": 7,
+   "by_status": {
+    "no tests": 7
+   },
+   "seconds": 0.0
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__approval_reasons",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_approval_reasons",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 13,
+   "by_status": {
+    "killed": 6,
+    "survived": 7
+   },
+   "seconds": 307.858
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__control",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_control",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 36,
+   "by_status": {
+    "killed": 29,
+    "survived": 7
+   },
+   "seconds": 343.853
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__remote",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_remote",
+   "class": null,
+   "tests": 87,
+   "estimate_seconds": 7.798,
+   "mutants": 25,
+   "by_status": {
+    "killed": 18,
+    "survived": 7
+   },
+   "seconds": 377.646
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__send",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_send",
+   "class": null,
+   "tests": 61,
+   "estimate_seconds": 7.136,
+   "mutants": 39,
+   "by_status": {
+    "killed": 32,
+    "survived": 7
+   },
+   "seconds": 369.88
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__settled",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_settled",
+   "class": null,
+   "tests": 88,
+   "estimate_seconds": 7.834,
+   "mutants": 57,
+   "by_status": {
+    "killed": 50,
+    "survived": 7
+   },
+   "seconds": 879.44
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_remote_head",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "remote_head",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 27,
+   "by_status": {
+    "killed": 20,
+    "survived": 7
+   },
+   "seconds": 474.062
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__attempt",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_attempt",
+   "class": null,
+   "tests": 15,
+   "estimate_seconds": 2.52,
+   "mutants": 55,
+   "by_status": {
+    "killed": 48,
+    "survived": 7
+   },
+   "seconds": 123.504
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x__folder",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "_folder",
+   "class": null,
+   "tests": 110,
+   "estimate_seconds": 8.371,
+   "mutants": 15,
+   "by_status": {
+    "killed": 9,
+    "survived": 6
+   },
+   "seconds": 340.768
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__budget",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_budget",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 38,
+   "by_status": {
+    "killed": 32,
+    "survived": 6
+   },
+   "seconds": 300.486
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__not_stopped",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_not_stopped",
+   "class": null,
+   "tests": 23,
+   "estimate_seconds": 4.721,
+   "mutants": 26,
+   "by_status": {
+    "killed": 20,
+    "survived": 6
+   },
+   "seconds": 121.709
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote.x__github_commit",
+   "file": "src/lovspor/forarbeider/publication_remote.py",
+   "symbol": "_github_commit",
+   "class": null,
+   "tests": 29,
+   "estimate_seconds": 3.471,
+   "mutants": 33,
+   "by_status": {
+    "killed": 27,
+    "survived": 6
+   },
+   "seconds": 143.037
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote.x__signature_reasons",
+   "file": "src/lovspor/forarbeider/publication_remote.py",
+   "symbol": "_signature_reasons",
+   "class": null,
+   "tests": 15,
+   "estimate_seconds": 2.781,
+   "mutants": 38,
+   "by_status": {
+    "killed": 32,
+    "survived": 6
+   },
+   "seconds": 134.886
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__checks",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_checks",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 55,
+   "by_status": {
+    "killed": 50,
+    "survived": 5
+   },
+   "seconds": 308.623
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__within",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_within",
+   "class": null,
+   "tests": 78,
+   "estimate_seconds": 7.918,
+   "mutants": 5,
+   "by_status": {
+    "survived": 5
+   },
+   "seconds": 207.952
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__manifest_file",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_manifest_file",
+   "class": null,
+   "tests": 40,
+   "estimate_seconds": 5.197,
+   "mutants": 17,
+   "by_status": {
+    "killed": 12,
+    "survived": 5
+   },
+   "seconds": 139.158
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x_integrity_checks",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "integrity_checks",
+   "class": null,
+   "tests": 40,
+   "estimate_seconds": 5.197,
+   "mutants": 66,
+   "by_status": {
+    "killed": 61,
+    "survived": 5
+   },
+   "seconds": 191.477
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__not_published",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_not_published",
+   "class": null,
+   "tests": 3,
+   "estimate_seconds": 0.265,
+   "mutants": 36,
+   "by_status": {
+    "killed": 31,
+    "survived": 5
+   },
+   "seconds": 55.706
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.x__intact",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "_intact",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 38,
+   "by_status": {
+    "killed": 33,
+    "survived": 5
+   },
+   "seconds": 362.105
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__require_authorized",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_require_authorized",
+   "class": null,
+   "tests": 67,
+   "estimate_seconds": 7.338,
+   "mutants": 32,
+   "by_status": {
+    "killed": 28,
+    "survived": 4
+   },
+   "seconds": 209.828
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execution_models.x_decide",
+   "file": "src/lovspor/forarbeider/publication_execution_models.py",
+   "symbol": "decide",
+   "class": null,
+   "tests": 82,
+   "estimate_seconds": 8.005,
+   "mutants": 35,
+   "by_status": {
+    "killed": 31,
+    "survived": 4
+   },
+   "seconds": 202.34
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_a.x__commit",
+   "file": "src/lovspor/forarbeider/publication_path_a.py",
+   "symbol": "_commit",
+   "class": null,
+   "tests": 29,
+   "estimate_seconds": 2.265,
+   "mutants": 30,
+   "by_status": {
+    "killed": 26,
+    "survived": 4
+   },
+   "seconds": 95.367
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x__git",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "_git",
+   "class": null,
+   "tests": 23,
+   "estimate_seconds": 3.768,
+   "mutants": 20,
+   "by_status": {
+    "killed": 16,
+    "survived": 4
+   },
+   "seconds": 80.834
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_remote_tree",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "remote_tree",
+   "class": null,
+   "tests": 15,
+   "estimate_seconds": 2.781,
+   "mutants": 25,
+   "by_status": {
+    "killed": 21,
+    "survived": 4
+   },
+   "seconds": 75.687
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__reconcile",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_reconcile",
+   "class": null,
+   "tests": 41,
+   "estimate_seconds": 5.457,
+   "mutants": 31,
+   "by_status": {
+    "killed": 27,
+    "survived": 4
+   },
+   "seconds": 290.618
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.x_create_disposable_remote",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "create_disposable_remote",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 46,
+   "by_status": {
+    "killed": 42,
+    "survived": 4
+   },
+   "seconds": 278.915
+  },
+  {
+   "function": "lovspor.git_publish.x__local_bare",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "_local_bare",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 11,
+   "by_status": {
+    "killed": 7,
+    "survived": 4
+   },
+   "seconds": 234.747
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x__walk",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "_walk",
+   "class": null,
+   "tests": 110,
+   "estimate_seconds": 8.371,
+   "mutants": 20,
+   "by_status": {
+    "killed": 17,
+    "survived": 3
+   },
+   "seconds": 199.055
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x_append",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "append",
+   "class": null,
+   "tests": 76,
+   "estimate_seconds": 7.841,
+   "mutants": 24,
+   "by_status": {
+    "killed": 21,
+    "survived": 3
+   },
+   "seconds": 146.087
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__bot_signature",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_bot_signature",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 22,
+   "by_status": {
+    "killed": 19,
+    "survived": 3
+   },
+   "seconds": 400.808
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__plan_of",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_plan_of",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 19,
+   "by_status": {
+    "killed": 16,
+    "survived": 3
+   },
+   "seconds": 155.743
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__after",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_after",
+   "class": null,
+   "tests": 57,
+   "estimate_seconds": 6.674,
+   "mutants": 53,
+   "by_status": {
+    "killed": 50,
+    "survived": 3
+   },
+   "seconds": 179.76
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__denied",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_denied",
+   "class": null,
+   "tests": 14,
+   "estimate_seconds": 0.667,
+   "mutants": 43,
+   "by_status": {
+    "killed": 40,
+    "survived": 3
+   },
+   "seconds": 71.247
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__files",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_files",
+   "class": null,
+   "tests": 65,
+   "estimate_seconds": 7.395,
+   "mutants": 12,
+   "by_status": {
+    "killed": 9,
+    "survived": 3
+   },
+   "seconds": 117.315
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__publish",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_publish",
+   "class": null,
+   "tests": 67,
+   "estimate_seconds": 7.338,
+   "mutants": 53,
+   "by_status": {
+    "killed": 50,
+    "survived": 3
+   },
+   "seconds": 184.963
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__files",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_files",
+   "class": null,
+   "tests": 40,
+   "estimate_seconds": 5.197,
+   "mutants": 18,
+   "by_status": {
+    "killed": 15,
+    "survived": 3
+   },
+   "seconds": 96.695
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x_sealed_plan",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "sealed_plan",
+   "class": null,
+   "tests": 35,
+   "estimate_seconds": 5.101,
+   "mutants": 19,
+   "by_status": {
+    "killed": 16,
+    "survived": 3
+   },
+   "seconds": 78.26
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_a.x_payload_of",
+   "file": "src/lovspor/forarbeider/publication_path_a.py",
+   "symbol": "payload_of",
+   "class": null,
+   "tests": 44,
+   "estimate_seconds": 4.348,
+   "mutants": 42,
+   "by_status": {
+    "killed": 39,
+    "survived": 3
+   },
+   "seconds": 130.818
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_a.x_send",
+   "file": "src/lovspor/forarbeider/publication_path_a.py",
+   "symbol": "send",
+   "class": null,
+   "tests": 44,
+   "estimate_seconds": 4.348,
+   "mutants": 21,
+   "by_status": {
+    "killed": 18,
+    "survived": 3
+   },
+   "seconds": 112.68
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_blob_id",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "blob_id",
+   "class": null,
+   "tests": 20,
+   "estimate_seconds": 3.575,
+   "mutants": 9,
+   "by_status": {
+    "killed": 6,
+    "survived": 3
+   },
+   "seconds": 48.711
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_init_bare",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "init_bare",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 21,
+   "by_status": {
+    "killed": 18,
+    "survived": 3
+   },
+   "seconds": 188.643
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_remote_object",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "remote_object",
+   "class": null,
+   "tests": 15,
+   "estimate_seconds": 2.781,
+   "mutants": 12,
+   "by_status": {
+    "killed": 9,
+    "survived": 3
+   },
+   "seconds": 43.202
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_signed_object",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "signed_object",
+   "class": null,
+   "tests": 23,
+   "estimate_seconds": 3.768,
+   "mutants": 20,
+   "by_status": {
+    "killed": 17,
+    "survived": 3
+   },
+   "seconds": 70.61
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__authorization_fields",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_authorization_fields",
+   "class": null,
+   "tests": 38,
+   "estimate_seconds": 5.191,
+   "mutants": 15,
+   "by_status": {
+    "killed": 12,
+    "survived": 3
+   },
+   "seconds": 81.865
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.xǁSimulatedGitHubǁ_apply",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "_apply",
+   "class": "SimulatedGitHub",
+   "tests": 51,
+   "estimate_seconds": 4.376,
+   "mutants": 33,
+   "by_status": {
+    "killed": 30,
+    "survived": 3
+   },
+   "seconds": 125.022
+  },
+  {
+   "function": "lovspor.git_publish.x__fits",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "_fits",
+   "class": null,
+   "tests": 128,
+   "estimate_seconds": 8.382,
+   "mutants": 15,
+   "by_status": {
+    "killed": 12,
+    "survived": 3
+   },
+   "seconds": 183.58
+  },
+  {
+   "function": "lovspor.identity.history.x__to_preserve",
+   "file": "src/lovspor/identity/history.py",
+   "symbol": "_to_preserve",
+   "class": null,
+   "tests": 18,
+   "estimate_seconds": 1.8,
+   "mutants": 28,
+   "by_status": {
+    "killed": 25,
+    "survived": 3
+   },
+   "seconds": 41.197
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__trust_root",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_trust_root",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 15,
+   "by_status": {
+    "killed": 13,
+    "survived": 2
+   },
+   "seconds": 101.932
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__verified",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_verified",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 22,
+   "by_status": {
+    "killed": 20,
+    "survived": 2
+   },
+   "seconds": 114.994
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__step",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_step",
+   "class": null,
+   "tests": 95,
+   "estimate_seconds": 8.07,
+   "mutants": 16,
+   "by_status": {
+    "killed": 14,
+    "survived": 2
+   },
+   "seconds": 136.244
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__policy_held",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_policy_held",
+   "class": null,
+   "tests": 24,
+   "estimate_seconds": 4.791,
+   "mutants": 38,
+   "by_status": {
+    "killed": 36,
+    "survived": 2
+   },
+   "seconds": 78.216
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x__answer",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "_answer",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 6,
+   "by_status": {
+    "killed": 4,
+    "survived": 2
+   },
+   "seconds": 119.185
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x__parent",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "_parent",
+   "class": null,
+   "tests": 20,
+   "estimate_seconds": 3.575,
+   "mutants": 15,
+   "by_status": {
+    "killed": 13,
+    "survived": 2
+   },
+   "seconds": 48.893
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_build_commit",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "build_commit",
+   "class": null,
+   "tests": 23,
+   "estimate_seconds": 3.768,
+   "mutants": 60,
+   "by_status": {
+    "killed": 58,
+    "survived": 2
+   },
+   "seconds": 100.983
+  },
+  {
+   "function": "lovspor.forarbeider.publication_receipts.x__read",
+   "file": "src/lovspor/forarbeider/publication_receipts.py",
+   "symbol": "_read",
+   "class": null,
+   "tests": 16,
+   "estimate_seconds": 3.574,
+   "mutants": 15,
+   "by_status": {
+    "killed": 13,
+    "survived": 2
+   },
+   "seconds": 38.444
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote.x_history",
+   "file": "src/lovspor/forarbeider/publication_remote.py",
+   "symbol": "history",
+   "class": null,
+   "tests": 54,
+   "estimate_seconds": 5.982,
+   "mutants": 26,
+   "by_status": {
+    "killed": 24,
+    "survived": 2
+   },
+   "seconds": 290.343
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__conflict",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_conflict",
+   "class": null,
+   "tests": 1,
+   "estimate_seconds": 0.22,
+   "mutants": 11,
+   "by_status": {
+    "killed": 9,
+    "survived": 2
+   },
+   "seconds": 15.821
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__drafts",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_drafts",
+   "class": null,
+   "tests": 41,
+   "estimate_seconds": 5.457,
+   "mutants": 27,
+   "by_status": {
+    "killed": 25,
+    "survived": 2
+   },
+   "seconds": 292.055
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__verdict",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_verdict",
+   "class": null,
+   "tests": 38,
+   "estimate_seconds": 5.191,
+   "mutants": 22,
+   "by_status": {
+    "killed": 20,
+    "survived": 2
+   },
+   "seconds": 78.356
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.x__write_new",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "_write_new",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 18,
+   "by_status": {
+    "killed": 16,
+    "survived": 2
+   },
+   "seconds": 133.07
+  },
+  {
+   "function": "lovspor.history.x_extract_earlier_lineage",
+   "file": "src/lovspor/history.py",
+   "symbol": "extract_earlier_lineage",
+   "class": null,
+   "tests": 19,
+   "estimate_seconds": 1.839,
+   "mutants": 37,
+   "by_status": {
+    "killed": 35,
+    "survived": 2
+   },
+   "seconds": 35.715
+  },
+  {
+   "function": "lovspor.identity.history.x__displaced_lineage",
+   "file": "src/lovspor/identity/history.py",
+   "symbol": "_displaced_lineage",
+   "class": null,
+   "tests": 109,
+   "estimate_seconds": 27.372,
+   "mutants": 36,
+   "by_status": {
+    "killed": 34,
+    "survived": 2
+   },
+   "seconds": 123.55
+  },
+  {
+   "function": "lovspor.sync.orchestrator.x__commit_history_followup",
+   "file": "src/lovspor/sync/orchestrator.py",
+   "symbol": "_commit_history_followup",
+   "class": null,
+   "tests": 11,
+   "estimate_seconds": 0.801,
+   "mutants": 35,
+   "by_status": {
+    "killed": 33,
+    "survived": 2
+   },
+   "seconds": 25.27
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x__names",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "_names",
+   "class": null,
+   "tests": 110,
+   "estimate_seconds": 8.371,
+   "mutants": 16,
+   "by_status": {
+    "killed": 15,
+    "survived": 1
+   },
+   "seconds": 172.497
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__context",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_context",
+   "class": null,
+   "tests": 88,
+   "estimate_seconds": 7.834,
+   "mutants": 39,
+   "by_status": {
+    "killed": 38,
+    "survived": 1
+   },
+   "seconds": 483.885
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__latch_reasons",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_latch_reasons",
+   "class": null,
+   "tests": 14,
+   "estimate_seconds": 0.667,
+   "mutants": 13,
+   "by_status": {
+    "killed": 12,
+    "survived": 1
+   },
+   "seconds": 31.286
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__attempt",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_attempt",
+   "class": null,
+   "tests": 35,
+   "estimate_seconds": 5.102,
+   "mutants": 7,
+   "by_status": {
+    "killed": 6,
+    "survived": 1
+   },
+   "seconds": 53.214
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__known_by",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_known_by",
+   "class": null,
+   "tests": 24,
+   "estimate_seconds": 4.791,
+   "mutants": 11,
+   "by_status": {
+    "killed": 10,
+    "survived": 1
+   },
+   "seconds": 32.601
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x__blobs",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "_blobs",
+   "class": null,
+   "tests": 20,
+   "estimate_seconds": 3.575,
+   "mutants": 19,
+   "by_status": {
+    "killed": 18,
+    "survived": 1
+   },
+   "seconds": 38.574
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x__identity",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "_identity",
+   "class": null,
+   "tests": 23,
+   "estimate_seconds": 3.768,
+   "mutants": 2,
+   "by_status": {
+    "killed": 1,
+    "survived": 1
+   },
+   "seconds": 17.565
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x__refused",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "_refused",
+   "class": null,
+   "tests": 1,
+   "estimate_seconds": 0.129,
+   "mutants": 4,
+   "by_status": {
+    "killed": 3,
+    "survived": 1
+   },
+   "seconds": 5.496
+  },
+  {
+   "function": "lovspor.forarbeider.publication_receipts.x__folder",
+   "file": "src/lovspor/forarbeider/publication_receipts.py",
+   "symbol": "_folder",
+   "class": null,
+   "tests": 99,
+   "estimate_seconds": 8.101,
+   "mutants": 6,
+   "by_status": {
+    "killed": 5,
+    "survived": 1
+   },
+   "seconds": 68.885
+  },
+  {
+   "function": "lovspor.forarbeider.publication_receipts.x__refused",
+   "file": "src/lovspor/forarbeider/publication_receipts.py",
+   "symbol": "_refused",
+   "class": null,
+   "tests": 2,
+   "estimate_seconds": 0.404,
+   "mutants": 4,
+   "by_status": {
+    "killed": 3,
+    "survived": 1
+   },
+   "seconds": 6.04
+  },
+  {
+   "function": "lovspor.forarbeider.publication_receipts.x_append",
+   "file": "src/lovspor/forarbeider/publication_receipts.py",
+   "symbol": "append",
+   "class": null,
+   "tests": 38,
+   "estimate_seconds": 5.191,
+   "mutants": 16,
+   "by_status": {
+    "killed": 15,
+    "survived": 1
+   },
+   "seconds": 39.42
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote.x__bare_commit",
+   "file": "src/lovspor/forarbeider/publication_remote.py",
+   "symbol": "_bare_commit",
+   "class": null,
+   "tests": 15,
+   "estimate_seconds": 2.781,
+   "mutants": 62,
+   "by_status": {
+    "killed": 61,
+    "survived": 1
+   },
+   "seconds": 108.46
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote.x__changed",
+   "file": "src/lovspor/forarbeider/publication_remote.py",
+   "symbol": "_changed",
+   "class": null,
+   "tests": 15,
+   "estimate_seconds": 2.781,
+   "mutants": 38,
+   "by_status": {
+    "killed": 37,
+    "survived": 1
+   },
+   "seconds": 84.292
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote.x__walk",
+   "file": "src/lovspor/forarbeider/publication_remote.py",
+   "symbol": "_walk",
+   "class": null,
+   "tests": 54,
+   "estimate_seconds": 5.982,
+   "mutants": 36,
+   "by_status": {
+    "killed": 35,
+    "survived": 1
+   },
+   "seconds": 48.939
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__draft",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_draft",
+   "class": null,
+   "tests": 38,
+   "estimate_seconds": 5.191,
+   "mutants": 62,
+   "by_status": {
+    "killed": 61,
+    "survived": 1
+   },
+   "seconds": 133.265
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__reservation",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_reservation",
+   "class": null,
+   "tests": 26,
+   "estimate_seconds": 4.885,
+   "mutants": 13,
+   "by_status": {
+    "killed": 12,
+    "survived": 1
+   },
+   "seconds": 143.845
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__settle",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_settle",
+   "class": null,
+   "tests": 38,
+   "estimate_seconds": 5.191,
+   "mutants": 52,
+   "by_status": {
+    "killed": 51,
+    "survived": 1
+   },
+   "seconds": 246.471
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.x__read",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "_read",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 12,
+   "by_status": {
+    "killed": 11,
+    "survived": 1
+   },
+   "seconds": 68.481
+  },
+  {
+   "function": "lovspor.history.x__walk",
+   "file": "src/lovspor/history.py",
+   "symbol": "_walk",
+   "class": null,
+   "tests": 156,
+   "estimate_seconds": 32.308,
+   "mutants": 32,
+   "by_status": {
+    "killed": 31,
+    "survived": 1
+   },
+   "seconds": 97.123
+  },
+  {
+   "function": "lovspor.sync.orchestrator.x__generate_and_apply_history",
+   "file": "src/lovspor/sync/orchestrator.py",
+   "symbol": "_generate_and_apply_history",
+   "class": null,
+   "tests": 97,
+   "estimate_seconds": 26.032,
+   "mutants": 53,
+   "by_status": {
+    "killed": 52,
+    "survived": 1
+   },
+   "seconds": 81.74
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x__lock_refused",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "_lock_refused",
+   "class": null,
+   "tests": 10,
+   "estimate_seconds": 1.202,
+   "mutants": 4,
+   "by_status": {
+    "killed": 4
+   },
+   "seconds": 3.975
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x__refused",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "_refused",
+   "class": null,
+   "tests": 3,
+   "estimate_seconds": 0.115,
+   "mutants": 4,
+   "by_status": {
+    "killed": 4
+   },
+   "seconds": 4.701
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x_head",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "head",
+   "class": null,
+   "tests": 95,
+   "estimate_seconds": 8.07,
+   "mutants": 18,
+   "by_status": {
+    "killed": 18
+   },
+   "seconds": 65.992
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x_latch",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "latch",
+   "class": null,
+   "tests": 48,
+   "estimate_seconds": 4.337,
+   "mutants": 15,
+   "by_status": {
+    "killed": 15
+   },
+   "seconds": 15.301
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x_latched",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "latched",
+   "class": null,
+   "tests": 87,
+   "estimate_seconds": 8.078,
+   "mutants": 2,
+   "by_status": {
+    "killed": 2
+   },
+   "seconds": 2.179
+  },
+  {
+   "function": "lovspor.forarbeider.publication_attempts.x_records",
+   "file": "src/lovspor/forarbeider/publication_attempts.py",
+   "symbol": "records",
+   "class": null,
+   "tests": 105,
+   "estimate_seconds": 8.204,
+   "mutants": 8,
+   "by_status": {
+    "killed": 8
+   },
+   "seconds": 11.38
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__bindings",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_bindings",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 10,
+   "by_status": {
+    "killed": 10
+   },
+   "seconds": 10.919
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__bound",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_bound",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 30,
+   "by_status": {
+    "killed": 30
+   },
+   "seconds": 32.598
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__check",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_check",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 16,
+   "by_status": {
+    "killed": 16
+   },
+   "seconds": 16.57
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__covers",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_covers",
+   "class": null,
+   "tests": 80,
+   "estimate_seconds": 7.971,
+   "mutants": 21,
+   "by_status": {
+    "killed": 21
+   },
+   "seconds": 34.901
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__execution",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_execution",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 6,
+   "by_status": {
+    "killed": 6
+   },
+   "seconds": 6.115
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x__unavailable",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "_unavailable",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 8,
+   "by_status": {
+    "killed": 8
+   },
+   "seconds": 8.456
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x_authorize",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "authorize",
+   "class": null,
+   "tests": 81,
+   "estimate_seconds": 8.005,
+   "mutants": 38,
+   "by_status": {
+    "killed": 38
+   },
+   "seconds": 45.307
+  },
+  {
+   "function": "lovspor.forarbeider.publication_authorize.x_batch_usage",
+   "file": "src/lovspor/forarbeider/publication_authorize.py",
+   "symbol": "batch_usage",
+   "class": null,
+   "tests": 80,
+   "estimate_seconds": 7.971,
+   "mutants": 10,
+   "by_status": {
+    "killed": 10
+   },
+   "seconds": 10.84
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__not_eligible",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_not_eligible",
+   "class": null,
+   "tests": 4,
+   "estimate_seconds": 0.132,
+   "mutants": 4,
+   "by_status": {
+    "killed": 4
+   },
+   "seconds": 4.679
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__record",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_record",
+   "class": null,
+   "tests": 76,
+   "estimate_seconds": 7.841,
+   "mutants": 28,
+   "by_status": {
+    "killed": 28
+   },
+   "seconds": 31.121
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__sandboxed",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_sandboxed",
+   "class": null,
+   "tests": 63,
+   "estimate_seconds": 7.206,
+   "mutants": 5,
+   "by_status": {
+    "killed": 5
+   },
+   "seconds": 7.557
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x__utc_now",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "_utc_now",
+   "class": null,
+   "tests": 1,
+   "estimate_seconds": 0.035,
+   "mutants": 1,
+   "by_status": {
+    "killed": 1
+   },
+   "seconds": 0.984
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x_attempt_id_of",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "attempt_id_of",
+   "class": null,
+   "tests": 95,
+   "estimate_seconds": 8.07,
+   "mutants": 1,
+   "by_status": {
+    "killed": 1
+   },
+   "seconds": 1.11
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x_evidence_digest",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "evidence_digest",
+   "class": null,
+   "tests": 76,
+   "estimate_seconds": 7.841,
+   "mutants": 2,
+   "by_status": {
+    "killed": 2
+   },
+   "seconds": 2.135
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x_execute",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "execute",
+   "class": null,
+   "tests": 91,
+   "estimate_seconds": 7.835,
+   "mutants": 29,
+   "by_status": {
+    "killed": 29
+   },
+   "seconds": 318.656
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x_next_attempt_id",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "next_attempt_id",
+   "class": null,
+   "tests": 6,
+   "estimate_seconds": 0.202,
+   "mutants": 1,
+   "by_status": {
+    "killed": 1
+   },
+   "seconds": 1.181
+  },
+  {
+   "function": "lovspor.forarbeider.publication_execute.x_publish_authorized",
+   "file": "src/lovspor/forarbeider/publication_execute.py",
+   "symbol": "publish_authorized",
+   "class": null,
+   "tests": 7,
+   "estimate_seconds": 0.236,
+   "mutants": 7,
+   "by_status": {
+    "killed": 7
+   },
+   "seconds": 8.328
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__check",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_check",
+   "class": null,
+   "tests": 40,
+   "estimate_seconds": 5.197,
+   "mutants": 13,
+   "by_status": {
+    "killed": 13
+   },
+   "seconds": 14.293
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__missing",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_missing",
+   "class": null,
+   "tests": 33,
+   "estimate_seconds": 4.989,
+   "mutants": 8,
+   "by_status": {
+    "killed": 8
+   },
+   "seconds": 26.19
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__signed_at",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_signed_at",
+   "class": null,
+   "tests": 24,
+   "estimate_seconds": 4.791,
+   "mutants": 1,
+   "by_status": {
+    "killed": 1
+   },
+   "seconds": 3.195
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x__untimed_revocation",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "_untimed_revocation",
+   "class": null,
+   "tests": 35,
+   "estimate_seconds": 5.102,
+   "mutants": 2,
+   "by_status": {
+    "killed": 2
+   },
+   "seconds": 4.712
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x_held_at",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "held_at",
+   "class": null,
+   "tests": 24,
+   "estimate_seconds": 4.791,
+   "mutants": 13,
+   "by_status": {
+    "killed": 13
+   },
+   "seconds": 13.878
+  },
+  {
+   "function": "lovspor.forarbeider.publication_integrity.x_ours",
+   "file": "src/lovspor/forarbeider/publication_integrity.py",
+   "symbol": "ours",
+   "class": null,
+   "tests": 40,
+   "estimate_seconds": 5.197,
+   "mutants": 4,
+   "by_status": {
+    "killed": 4
+   },
+   "seconds": 3.968
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_a.x_body",
+   "file": "src/lovspor/forarbeider/publication_path_a.py",
+   "symbol": "body",
+   "class": null,
+   "tests": 76,
+   "estimate_seconds": 7.621,
+   "mutants": 1,
+   "by_status": {
+    "killed": 1
+   },
+   "seconds": 0.928
+  },
+  {
+   "function": "lovspor.forarbeider.publication_path_b.x_commit_payload",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "commit_payload",
+   "class": null,
+   "tests": 23,
+   "estimate_seconds": 3.768,
+   "mutants": 12,
+   "by_status": {
+    "killed": 12
+   },
+   "seconds": 12.634
+  },
+  {
+   "function": "lovspor.forarbeider.publication_receipts.x__chain",
+   "file": "src/lovspor/forarbeider/publication_receipts.py",
+   "symbol": "_chain",
+   "class": null,
+   "tests": 99,
+   "estimate_seconds": 8.101,
+   "mutants": 31,
+   "by_status": {
+    "killed": 31
+   },
+   "seconds": 372.485
+  },
+  {
+   "function": "lovspor.forarbeider.publication_receipts.x_head",
+   "file": "src/lovspor/forarbeider/publication_receipts.py",
+   "symbol": "head",
+   "class": null,
+   "tests": 38,
+   "estimate_seconds": 5.191,
+   "mutants": 10,
+   "by_status": {
+    "killed": 10
+   },
+   "seconds": 115.576
+  },
+  {
+   "function": "lovspor.forarbeider.publication_receipts.x_receipts",
+   "file": "src/lovspor/forarbeider/publication_receipts.py",
+   "symbol": "receipts",
+   "class": null,
+   "tests": 99,
+   "estimate_seconds": 8.101,
+   "mutants": 1,
+   "by_status": {
+    "killed": 1
+   },
+   "seconds": 1.522
+  },
+  {
+   "function": "lovspor.forarbeider.publication_recovery_models.x_classification_of",
+   "file": "src/lovspor/forarbeider/publication_recovery_models.py",
+   "symbol": "classification_of",
+   "class": null,
+   "tests": 38,
+   "estimate_seconds": 5.191,
+   "mutants": 9,
+   "by_status": {
+    "killed": 9
+   },
+   "seconds": 17.379
+  },
+  {
+   "function": "lovspor.forarbeider.publication_recovery_models.x_integrity_of",
+   "file": "src/lovspor/forarbeider/publication_recovery_models.py",
+   "symbol": "integrity_of",
+   "class": null,
+   "tests": 39,
+   "estimate_seconds": 5.193,
+   "mutants": 17,
+   "by_status": {
+    "killed": 17
+   },
+   "seconds": 19.575
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote.x__stated_time",
+   "file": "src/lovspor/forarbeider/publication_remote.py",
+   "symbol": "_stated_time",
+   "class": null,
+   "tests": 15,
+   "estimate_seconds": 2.781,
+   "mutants": 8,
+   "by_status": {
+    "killed": 8
+   },
+   "seconds": 17.965
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote.x_bare_reader",
+   "file": "src/lovspor/forarbeider/publication_remote.py",
+   "symbol": "bare_reader",
+   "class": null,
+   "tests": 17,
+   "estimate_seconds": 2.969,
+   "mutants": 17,
+   "by_status": {
+    "killed": 17
+   },
+   "seconds": 22.471
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote.x_github_reader",
+   "file": "src/lovspor/forarbeider/publication_remote.py",
+   "symbol": "github_reader",
+   "class": null,
+   "tests": 34,
+   "estimate_seconds": 3.667,
+   "mutants": 18,
+   "by_status": {
+    "killed": 18
+   },
+   "seconds": 24.104
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__dumped",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_dumped",
+   "class": null,
+   "tests": 5,
+   "estimate_seconds": 1.362,
+   "mutants": 8,
+   "by_status": {
+    "killed": 8
+   },
+   "seconds": 11.527
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__entry",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_entry",
+   "class": null,
+   "tests": 26,
+   "estimate_seconds": 4.885,
+   "mutants": 1,
+   "by_status": {
+    "killed": 1
+   },
+   "seconds": 12.981
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__halt",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_halt",
+   "class": null,
+   "tests": 26,
+   "estimate_seconds": 1.95,
+   "mutants": 9,
+   "by_status": {
+    "killed": 9
+   },
+   "seconds": 9.345
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__not_eligible",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_not_eligible",
+   "class": null,
+   "tests": 1,
+   "estimate_seconds": 0.22,
+   "mutants": 4,
+   "by_status": {
+    "killed": 4
+   },
+   "seconds": 5.942
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__record_published",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_record_published",
+   "class": null,
+   "tests": 26,
+   "estimate_seconds": 4.885,
+   "mutants": 29,
+   "by_status": {
+    "killed": 29
+   },
+   "seconds": 101.608
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__recover",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_recover",
+   "class": null,
+   "tests": 47,
+   "estimate_seconds": 5.98,
+   "mutants": 63,
+   "by_status": {
+    "killed": 63
+   },
+   "seconds": 173.993
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__recovered",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_recovered",
+   "class": null,
+   "tests": 38,
+   "estimate_seconds": 5.191,
+   "mutants": 11,
+   "by_status": {
+    "killed": 11
+   },
+   "seconds": 111.647
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x__written",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "_written",
+   "class": null,
+   "tests": 38,
+   "estimate_seconds": 5.191,
+   "mutants": 13,
+   "by_status": {
+    "killed": 13
+   },
+   "seconds": 12.997
+  },
+  {
+   "function": "lovspor.forarbeider.publication_remote_recovery.x_recover",
+   "file": "src/lovspor/forarbeider/publication_remote_recovery.py",
+   "symbol": "recover",
+   "class": null,
+   "tests": 50,
+   "estimate_seconds": 6.06,
+   "mutants": 12,
+   "by_status": {
+    "killed": 12
+   },
+   "seconds": 14.703
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.x__not_disposable",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "_not_disposable",
+   "class": null,
+   "tests": 16,
+   "estimate_seconds": 0.132,
+   "mutants": 4,
+   "by_status": {
+    "killed": 4
+   },
+   "seconds": 4.351
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.x__private_directory",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "_private_directory",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 15,
+   "by_status": {
+    "killed": 15
+   },
+   "seconds": 20.394
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.x_verified_remote",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "verified_remote",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 5,
+   "by_status": {
+    "killed": 5
+   },
+   "seconds": 7.978
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.x_verified_transport",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "verified_transport",
+   "class": null,
+   "tests": 66,
+   "estimate_seconds": 4.828,
+   "mutants": 6,
+   "by_status": {
+    "killed": 6
+   },
+   "seconds": 6.68
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.xǁSimulatedGitHubǁadvance",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "advance",
+   "class": "SimulatedGitHub",
+   "tests": 10,
+   "estimate_seconds": 0.15,
+   "mutants": 6,
+   "by_status": {
+    "killed": 6
+   },
+   "seconds": 6.87
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.xǁSimulatedGitHubǁcommit",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "commit",
+   "class": "SimulatedGitHub",
+   "tests": 29,
+   "estimate_seconds": 3.471,
+   "mutants": 1,
+   "by_status": {
+    "killed": 1
+   },
+   "seconds": 0.923
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.xǁSimulatedGitHubǁhead",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "head",
+   "class": "SimulatedGitHub",
+   "tests": 67,
+   "estimate_seconds": 4.959,
+   "mutants": 4,
+   "by_status": {
+    "killed": 4
+   },
+   "seconds": 3.997
+  },
+  {
+   "function": "lovspor.forarbeider.publication_sandbox.xǁSimulatedGitHubǁpost",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "post",
+   "class": "SimulatedGitHub",
+   "tests": 44,
+   "estimate_seconds": 4.348,
+   "mutants": 51,
+   "by_status": {
+    "killed": 51
+   },
+   "seconds": 73.479
+  },
+  {
+   "function": "lovspor.git_publish.x__commit",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "_commit",
+   "class": null,
+   "tests": 25,
+   "estimate_seconds": 3.847,
+   "mutants": 2,
+   "by_status": {
+    "killed": 2
+   },
+   "seconds": 2.547
+  },
+  {
+   "function": "lovspor.git_publish.x__refspec",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "_refspec",
+   "class": null,
+   "tests": 119,
+   "estimate_seconds": 8.38,
+   "mutants": 2,
+   "by_status": {
+    "killed": 2
+   },
+   "seconds": 2.031
+  },
+  {
+   "function": "lovspor.git_publish.x__tree_file",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "_tree_file",
+   "class": null,
+   "tests": 24,
+   "estimate_seconds": 3.768,
+   "mutants": 2,
+   "by_status": {
+    "killed": 2
+   },
+   "seconds": 1.165
+  },
+  {
+   "function": "lovspor.git_publish.x_allowed",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "allowed",
+   "class": null,
+   "tests": 128,
+   "estimate_seconds": 8.382,
+   "mutants": 5,
+   "by_status": {
+    "killed": 5
+   },
+   "seconds": 2.891
+  },
+  {
+   "function": "lovspor.history.x__lineage",
+   "file": "src/lovspor/history.py",
+   "symbol": "_lineage",
+   "class": null,
+   "tests": 155,
+   "estimate_seconds": 32.268,
+   "mutants": 10,
+   "by_status": {
+    "killed": 10
+   },
+   "seconds": 20.927
+  },
+  {
+   "function": "lovspor.identity.history.x__unwritten",
+   "file": "src/lovspor/identity/history.py",
+   "symbol": "_unwritten",
+   "class": null,
+   "tests": 16,
+   "estimate_seconds": 1.633,
+   "mutants": 13,
+   "by_status": {
+    "killed": 13
+   },
+   "seconds": 22.475
+  },
+  {
+   "function": "lovspor.identity.history.x_preserve_displaced",
+   "file": "src/lovspor/identity/history.py",
+   "symbol": "preserve_displaced",
+   "class": null,
+   "tests": 109,
+   "estimate_seconds": 27.372,
+   "mutants": 21,
+   "by_status": {
+    "killed": 21
+   },
+   "seconds": 19.062
+  },
+  {
+   "function": "lovspor.identity.history.x_write_document_history",
+   "file": "src/lovspor/identity/history.py",
+   "symbol": "write_document_history",
+   "class": null,
+   "tests": 132,
+   "estimate_seconds": 27.612,
+   "mutants": 16,
+   "by_status": {
+    "killed": 16
+   },
+   "seconds": 20.807
+  }
+ ],
+ "slowest": [
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_4",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "number",
+   "removed": "1",
+   "added": "2",
+   "seconds": 60.149,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_sandbox.x_create_disposable_remote__mutmut_14",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "create_disposable_remote",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "32",
+   "added": "None",
+   "seconds": 60.135,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_46",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "number",
+   "removed": "0",
+   "added": "1",
+   "seconds": 60.124,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_14",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: upper case",
+   "removed": "\"the index file lives in the clone's .git\"",
+   "added": "\"THE INDEX FILE LIVES IN THE CLONE'S .GIT\"",
+   "seconds": 60.05,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_sandbox.x__intact__mutmut_19",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "_intact",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: upper case",
+   "removed": "\"commondir\"",
+   "added": "\"COMMONDIR\"",
+   "seconds": 60.0,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_sandbox.x_create_disposable_remote__mutmut_15",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "create_disposable_remote",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "number",
+   "removed": "32",
+   "added": "33",
+   "seconds": 59.981,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_45",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "f\" git  { argv [ 0 ] }  could not run \"",
+   "added": "None",
+   "seconds": 59.84,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_12",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "\"the index file lives in the clone's .git\"",
+   "added": "None",
+   "seconds": 59.644,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_30",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "\"outcome_unknown\" ,",
+   "added": "",
+   "seconds": 59.617,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_29",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "( \"remote_unreadable_after_push\" , )",
+   "added": "None",
+   "seconds": 59.466,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_28",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "commit",
+   "added": "None",
+   "seconds": 59.363,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_20",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "False",
+   "added": "None",
+   "seconds": 59.349,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_27",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "\"outcome_unknown\"",
+   "added": "None",
+   "seconds": 59.331,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_13",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: XX added",
+   "removed": "\"the index file lives in the clone's .git\"",
+   "added": "\"XXthe index file lives in the clone's .gitXX\"",
+   "seconds": 59.326,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_23",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: XX added",
+   "removed": "\"push_could_not_run\"",
+   "added": "\"XXpush_could_not_runXX\"",
+   "seconds": 59.299,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_22",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: upper case",
+   "removed": "\"outcome_unknown\"",
+   "added": "\"OUTCOME_UNKNOWN\"",
+   "seconds": 59.293,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_21",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: XX added",
+   "removed": "\"outcome_unknown\"",
+   "added": "\"XXoutcome_unknownXX\"",
+   "seconds": 59.286,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_31",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "commit ,",
+   "added": "",
+   "seconds": 59.216,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_26",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "check = False ,",
+   "added": "",
+   "seconds": 59.184,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_73",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: upper case",
+   "removed": "\"remote_not_at_pushed_commit\"",
+   "added": "\"REMOTE_NOT_AT_PUSHED_COMMIT\"",
+   "seconds": 59.163,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_72",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: XX added",
+   "removed": "\"remote_not_at_pushed_commit\"",
+   "added": "\"XXremote_not_at_pushed_commitXX\"",
+   "seconds": 59.148,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_35",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: XX added",
+   "removed": "\"remote_unreadable_after_push\"",
+   "added": "\"XXremote_unreadable_after_pushXX\"",
+   "seconds": 59.13,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_32",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "( \"remote_unreadable_after_push\" , )",
+   "added": "",
+   "seconds": 59.117,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_24",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: upper case",
+   "removed": "\"push_could_not_run\"",
+   "added": "\"PUSH_COULD_NOT_RUN\"",
+   "seconds": 59.106,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_20",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "( \"push_could_not_run\" , )",
+   "added": "",
+   "seconds": 59.074,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_19",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "commit ,",
+   "added": "",
+   "seconds": 59.042,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_36",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: upper case",
+   "removed": "\"remote_unreadable_after_push\"",
+   "added": "\"REMOTE_UNREADABLE_AFTER_PUSH\"",
+   "seconds": 59.012,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_34",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "ternary: condition forced",
+   "removed": "stdin is not None",
+   "added": "( stdin is not None ) or True",
+   "seconds": 58.952,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_34",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: upper case",
+   "removed": "\"outcome_unknown\"",
+   "added": "\"OUTCOME_UNKNOWN\"",
+   "seconds": 58.931,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_17",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "( \"push_could_not_run\" , )",
+   "added": "None",
+   "seconds": 58.911,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_33",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: XX added",
+   "removed": "\"outcome_unknown\"",
+   "added": "\"XXoutcome_unknownXX\"",
+   "seconds": 58.869,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.git_publish.x__fits__mutmut_15",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "_fits",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "True / False swapped",
+   "removed": "True",
+   "added": "False",
+   "seconds": 58.848,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_3",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "f\" git argument vector not allowed:  { argv [ : 1 ] } \"",
+   "added": "None",
+   "seconds": 58.814,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_sandbox.x__write_new__mutmut_7",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "_write_new",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "0o600",
+   "added": "",
+   "seconds": 58.792,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_15",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "\"outcome_unknown\"",
+   "added": "None",
+   "seconds": 58.719,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_18",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "\"outcome_unknown\" ,",
+   "added": "",
+   "seconds": 58.703,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_sandbox.x__write_new__mutmut_10",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "_write_new",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "number",
+   "removed": "0o600",
+   "added": "385",
+   "seconds": 58.644,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_19",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "TIMEOUT_SECONDS",
+   "added": "None",
+   "seconds": 58.558,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_36",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: XX added",
+   "removed": "b\"\"",
+   "added": "b\"XXXX\"",
+   "seconds": 58.481,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_47",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "operator: and / or",
+   "removed": "and",
+   "added": "or",
+   "seconds": 58.435,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_16",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "commit",
+   "added": "None",
+   "seconds": 58.406,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.git_publish.x_run_git__mutmut_25",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "run_git",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "timeout = TIMEOUT_SECONDS ,",
+   "added": "",
+   "seconds": 58.358,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.git_publish.x__fits__mutmut_11",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "_fits",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: replaced by None",
+   "removed": "True",
+   "added": "None",
+   "seconds": 58.099,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_sandbox.x_create_disposable_remote__mutmut_7",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "create_disposable_remote",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "True / False swapped",
+   "removed": "False",
+   "added": "True",
+   "seconds": 58.09,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_sandbox.x_create_disposable_remote__mutmut_6",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "create_disposable_remote",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "assignment: value to None",
+   "removed": "False",
+   "added": "None",
+   "seconds": 58.019,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.git_publish.x__fits__mutmut_14",
+   "file": "src/lovspor/git_publish.py",
+   "symbol": "_fits",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "strict = True",
+   "added": "",
+   "seconds": 58.019,
+   "estimate_seconds": 8.382
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_remote_head__mutmut_23",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "remote_head",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: XX added",
+   "removed": "\"replace\"",
+   "added": "\"XXreplaceXX\"",
+   "seconds": 57.862,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_push__mutmut_63",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "push",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "string: upper case",
+   "removed": "\"push_rejected_non_fast_forward\"",
+   "added": "\"PUSH_REJECTED_NON_FAST_FORWARD\"",
+   "seconds": 57.853,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_sandbox.x__read__mutmut_6",
+   "file": "src/lovspor/forarbeider/publication_sandbox.py",
+   "symbol": "_read",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "operator: bitwise",
+   "removed": "|",
+   "added": "&",
+   "seconds": 57.831,
+   "estimate_seconds": 8.38
+  },
+  {
+   "id": "lovspor.forarbeider.publication_path_b.x_remote_head__mutmut_20",
+   "file": "src/lovspor/forarbeider/publication_path_b.py",
+   "symbol": "remote_head",
+   "class": null,
+   "status": "survived",
+   "exit_code": 0,
+   "kind": "argument: removed",
+   "removed": "\"replace\"",
+   "added": "",
+   "seconds": 57.83,
+   "estimate_seconds": 8.38
+  }
+ ],
+ "result_check": {
+  "agrees": true,
+  "differences": {}
+ }
+}
