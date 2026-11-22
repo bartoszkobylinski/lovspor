@@ -133,3 +133,62 @@ def test_the_holder_keeps_an_advisory_lock_on_the_file(checkout: Path) -> None:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         finally:
             os.close(descriptor)
+
+
+def test_once_released_the_lock_is_no_longer_held_by_us(checkout: Path) -> None:
+    with release_lock(checkout) as held:
+        assert held_by_us(checkout, held)
+    assert not held_by_us(checkout, held)
+
+
+def test_a_lock_swapped_for_a_symlink_to_it_is_left_for_the_owner(checkout: Path) -> None:
+    moved = checkout / ".git" / "moved-away"
+    with release_lock(checkout) as held:
+        (checkout / LOCK).rename(moved)
+        (checkout / LOCK).symlink_to(moved)
+        assert not held_by_us(checkout, held)
+    assert (checkout / LOCK).is_symlink(), "a link at the lock's name is never removed"
+    assert moved.exists()
+
+
+@pytest.mark.parametrize("mode", [0o640, 0o604, 0o620, 0o602])
+def test_recovery_refuses_a_lock_others_may_read_or_write(checkout: Path, mode: int) -> None:
+    (checkout / LOCK).write_bytes(b"")
+    (checkout / LOCK).chmod(mode)
+
+    assert _refusal(recovered_lock, checkout) == "checkout_unsafe: lock"
+    assert (checkout / LOCK).exists()
+
+
+def test_recovery_takes_a_private_lock_its_owner_may_execute(checkout: Path) -> None:
+    (checkout / LOCK).write_bytes(b"")
+    (checkout / LOCK).chmod(0o700)
+
+    with recovered_lock(checkout) as held:
+        assert held_by_us(checkout, held)
+    assert not (checkout / LOCK).exists()
+
+
+def test_a_private_lock_with_a_second_name_is_refused(checkout: Path, tmp_path: Path) -> None:
+    (checkout / LOCK).write_bytes(b"")
+    (checkout / LOCK).chmod(0o600)
+    os.link(checkout / LOCK, tmp_path / "second-name")
+
+    assert _refusal(recovered_lock, checkout) == "checkout_unsafe: lock"
+    assert (tmp_path / "second-name").exists()
+
+
+def test_a_lock_replaced_before_the_flock_is_taken_is_refused(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_flock = fcntl.flock
+
+    def a_rival_replaces_the_lock(descriptor: int, operation: int) -> None:
+        (checkout / LOCK).unlink()
+        (checkout / LOCK).write_bytes(b"rival")
+        real_flock(descriptor, operation)
+
+    monkeypatch.setattr(fcntl, "flock", a_rival_replaces_the_lock)
+
+    assert _refusal(release_lock, checkout) == "corpus_locked: checkout"
+    assert (checkout / LOCK).read_bytes() == b"rival", "the rival's lock is never removed"
