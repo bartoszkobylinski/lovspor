@@ -185,7 +185,7 @@ def _set_latch(request: ExecutionRequest, reasons: tuple[str, ...], at: datetime
     """Set the latch at once, whatever the witness says; then anchor it when it can."""
     tid = request.inputs.transaction.transaction_id
     publication_attempts.latch(request.workspace, reasons, at, tid)
-    publication_anchors.settle(request, "stop_latch", "workspace")
+    publication_anchors.settle(request, "stop_latch")
 
 
 def _settled(request: ExecutionRequest) -> ExecutionOutcome | None:

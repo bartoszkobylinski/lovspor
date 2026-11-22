@@ -31,7 +31,18 @@ from lovspor.forarbeider.publication_execute import (
 )
 from lovspor.forarbeider.publication_remote_recovery import RecoveryOutcome, recover
 from lovspor.forarbeider.publication_sandbox import SimulatedCrash, SimulatedGitHub
-from tests.unit.forarbeider_execution_support import APP, NOW, KeySigner, Rig, make_rig
+from lovspor.forarbeider.release_limits import LimitsRequest, verify_limits
+from tests.unit.forarbeider_execution_support import (
+    APP,
+    LEDGER_ID,
+    NOW,
+    KeySigner,
+    Rig,
+    batch_usage,
+    make_rig,
+    reserve,
+    seeded_ledger,
+)
 from tests.unit.forarbeider_publication_support import commit_files, git
 from tests.unit.forarbeider_release_control_support import BOT
 
@@ -354,21 +365,31 @@ def test_two_concurrent_recoveries_of_one_transaction_write_one_receipt(
 def test_concurrent_recoveries_sharing_one_receipt_chain_link_it_in_turn(
     rig_a: Rig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    other = make_rig(tmp_path / "other", "B")
+    # AR5d-1: a workspace is anchored by the one witness that anchored its identity, so the
+    # second transaction runs on rig_a's keys and witness, with a ledger of its own.
+    other = make_rig(tmp_path / "other", "B", share=rig_a, one_witness=True)
     assert other.transaction.transaction_id != rig_a.transaction.transaction_id
     shared = rig_a.workspace
+    limits = verify_limits(
+        LimitsRequest(other.inputs.policy.policy, other.inputs.limits, NOW), other.root
+    )
+    own = f"{LEDGER_ID}-other"
+    entries = reserve(limits, other.transaction, batch_usage(other.transaction), own)
+    ledger = seeded_ledger(other, "other", entries)
     github = endpoint(rig_a)
     assert execute(rig_a.request(), sim_a(github)).status == "published"
-    assert execute(other.request(workspace=shared), sim_b(other)).status == "published"
+    assert execute(other.request(workspace=shared, ledger=ledger), sim_b(other)).status == (
+        "published"
+    )
     pause = Pause("first")
     monkeypatch.setattr(publication_receipts, "head", pause.wrap(publication_receipts.head))
 
     thread, result = in_thread("first", lambda: recover(rig_a.request(), sim_a(github)))
     assert pause.reached.wait(WAIT)
-    assert_locked(lambda: recover(other.request(workspace=shared), sim_b(other)))
+    assert_locked(lambda: recover(other.request(workspace=shared, ledger=ledger), sim_b(other)))
     pause.release.set()
     thread.join(WAIT)
-    later = recover(other.request(workspace=shared), sim_b(other))
+    later = recover(other.request(workspace=shared, ledger=ledger), sim_b(other))
 
     assert result[0].classification == "published_authorized"
     assert later.classification == "published_authorized"

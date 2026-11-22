@@ -121,15 +121,15 @@ def _reader(request: ExecutionRequest, environment: Environment) -> Reader:
 def _halt(request: ExecutionRequest, reasons: tuple[str, ...], at: datetime) -> None:
     tid = request.inputs.transaction.transaction_id
     publication_attempts.latch(request.workspace, reasons, at, tid)
-    publication_anchors.settle(request, "stop_latch", "workspace")
+    publication_anchors.settle(request, "stop_latch")
 
 
 def _settle_pending(request: ExecutionRequest) -> None:
     """Complete a record a crash left unanchored (AR5b), before recovery appends any."""
     tid = request.inputs.transaction.transaction_id
     publication_anchors.settle(request, "publication_attempts", tid)
-    publication_anchors.settle(request, "recovery_receipts", "workspace")
-    publication_anchors.settle(request, "stop_latch", "workspace")
+    publication_anchors.settle(request, "recovery_receipts")
+    publication_anchors.settle(request, "stop_latch")
 
 
 # --- deriving receipts from the remote -------------------------------------------------------
@@ -238,7 +238,7 @@ def _written(request: ExecutionRequest, draft: dict[str, Any]) -> RecoveryReceip
     fields = {**draft, "sequence": sequence, "previous_sha256": previous}
     receipt = RecoveryReceipt.model_validate(fields)
     publication_receipts.append(request.workspace, receipt)
-    publication_anchors.settle(request, "recovery_receipts", "workspace")
+    publication_anchors.settle(request, "recovery_receipts")
     return receipt
 
 
