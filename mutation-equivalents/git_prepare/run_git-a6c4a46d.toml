@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/git_prepare.py"
+symbol = "run_git"
+registered = "2026-11-22, from register key 49c9c72c2bab9ccf (GREEN under scripts/ci/mutant_check.py try with the PR #1008 tests)"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`check` is a keyword of `subprocess.run` whose default is `False`, and
+`subprocess.run` only reads it as `if check and retcode:`, so an omitted
+`check` or `check=None` (falsy) behaves exactly like `check=False`: no
+`CalledProcessError`, the return code is reported in `GitAnswer.code`. Same
+answer for every run. (`check=True` is not equivalent and is killed by
+test_a_failing_git_is_an_answer_with_its_exit_code.)
+"""
