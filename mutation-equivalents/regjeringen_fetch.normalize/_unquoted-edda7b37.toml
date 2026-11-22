@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_unquoted"
+registered = "2026-11-22, from register key 15d88002e5581ce6 (GREEN under scripts/ci/mutant_check.py try with the PR #1002 tests)"
+mutation = """
+-    value = attribute.value or b""
++    value = attribute.value or b"XXXX"
+"""
+justification = """
+The default applies only when `attribute.value` is falsy, and a parsed value
+is never `b""` (a quoted value holds both quotes, an unquoted one is
+non-empty), so only for an attribute without a value. `_unquoted`'s only
+caller, `_is_csp_meta`, compares the result's lower case with `b"csp-nonce"`;
+neither `b""` nor `b"XXXX"` starts with a quote, so each is returned as is
+and neither equals `b"csp-nonce"`. Same verdict for every attribute.
+"""

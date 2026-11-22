@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_value_end"
+registered = "2026-11-22, from register key 54618b9d397ab3d4 (GREEN under scripts/ci/mutant_check.py try with the PR #1002 tests)"
+mutation = """
+-        return (False, len(raw)) if closing == -1 else (True, closing + 1)
++        return (True, len(raw)) if closing == -1 else (True, closing + 1)
+"""
+justification = """
+An unterminated quoted value (`closing == -1`) ends at `len(raw)` either way.
+The original reports it unfit, so `_parse_attribute` returns `None, len(raw)`
+and `_parse_tag` returns `None, len(raw)`. The mutant reports it fit with the
+same end, so `_parse_attribute` returns an attribute and `len(raw)`, and
+the caller `_parse_tag` then appends the attribute, finds `after_space = len(raw)`, matches neither `>` nor `/>`, and returns `None, max(len(raw), opening + 1)`, which is `None, len(raw)` because `after_space == end`. Both give `_parse_tag` the same `(None, len(raw))`, so the tag
+is dropped and the scan resumes at the same byte. The non-equivalent mutants
+of this line (`(closing == -1) and False`, `closing == -2`, `closing == +1`)
+are killed by test_the_byte_where_a_tag_broke_is_never_scanned_again.
+"""

@@ -1,0 +1,19 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_parse_tag"
+registered = "2026-11-22, from register key d51104ced5c1b951 (GREEN under scripts/ci/mutant_check.py try with the PR #1002 tests)"
+mutation = """
+-        if after_space == end or after_space >= len(raw):
++        if after_space == end or after_space > len(raw):
+"""
+justification = """
+`after_space` comes from `_skip`, so it never exceeds `len(raw)`; the mutant
+differs only at `after_space == len(raw)` with `after_space != end` (trailing
+whitespace at the end of the page). The original returns `None, len(raw)`.
+The mutant calls `_parse_attribute(raw, len(raw))`, where `_until` returns
+`len(raw)` at once, so it returns `None, len(raw) + 1` and `_parse_tag`
+returns `None, len(raw) + 1`. Both callers only use that position for
+`raw.find(b"<", position)` (`_start_tags`, directly or through
+`_skip_non_start_tag`'s end-tag branch), which is -1 from `len(raw)` and from
+`len(raw) + 1`. Same tags, same bytes.
+"""

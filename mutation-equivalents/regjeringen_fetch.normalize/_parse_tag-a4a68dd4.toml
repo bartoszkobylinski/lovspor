@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_parse_tag"
+registered = "2026-11-22, from register key 6de7efac52f0cfdf (GREEN under scripts/ci/mutant_check.py try with the PR #1002 tests)"
+mutation = """
+-    end = _skip(raw, opening + 1, _TAG_NAME)
++    end = _skip(raw, opening + 2, _TAG_NAME)
+"""
+justification = """
+The line above returns unless `raw[opening + 1]` is a letter, and every letter
+is in `_TAG_NAME`, so `_skip(raw, opening + 1, _TAG_NAME)` steps over that
+byte to `opening + 2` and continues exactly as `_skip(raw, opening + 2,
+_TAG_NAME)` does. Same `end`, same tag name, for every input.
+"""
