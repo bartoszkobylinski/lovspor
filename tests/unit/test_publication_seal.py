@@ -5,6 +5,7 @@ Real git, real annotated tags and real SSH signatures from throwaway keys.
 
 import base64
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -448,3 +449,215 @@ def test_attestation_note_blob_separates_absent_from_unreadable(repo: Path, tmp_
     assert attestation_note_blob(repo, commit(repo, "second")) is None
     with pytest.raises(AttestationError, match="unreadable"):
         attestation_note_blob(tmp_path, head)
+
+
+# ------------------------------------------------------------------ verification details
+
+
+def _dummy_signers(tmp_path: Path) -> Path:
+    signers = tmp_path / "signers"
+    signers.write_text('p namespaces="git" ssh-ed25519 AAAA\n', encoding="utf-8")
+    return signers
+
+
+def _literal_tag(repo: Path, body: bytes, name: str = SEAL) -> None:
+    """A tag object written as given, bypassing git's own checks, under ``refs/tags/name``."""
+    oid = subprocess.run(
+        ["git", "hash-object", "-t", "tag", "--literally", "-w", "--stdin"],
+        cwd=repo,
+        input=body,
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    git(repo, "update-ref", f"refs/tags/{name}", oid.strip())
+
+
+def _fake_ssh_keygen(monkeypatch: pytest.MonkeyPatch, directory: Path, script: str) -> None:
+    directory.mkdir()
+    program = directory / "ssh-keygen"
+    program.write_text(f"#!/bin/sh\n{script}\n", encoding="utf-8")
+    program.chmod(0o700)
+    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_a_missing_tag_is_reported_without_gits_noise(repo: Path, tmp_path: Path) -> None:
+    with pytest.raises(SealVerificationError, match=r"exited 1: $"):
+        verify_seal(repo, _head(repo), _dummy_signers(tmp_path), SEAL)
+
+
+def test_a_seal_tag_naming_a_missing_object_is_refused(repo: Path, tmp_path: Path) -> None:
+    (repo / ".git" / "refs" / "tags" / "sync").mkdir(parents=True)
+    (repo / ".git" / "refs" / "tags" / SEAL).write_text("f" * 40 + "\n", encoding="utf-8")
+
+    with pytest.raises(SealVerificationError, match="cat-file -t"):
+        verify_seal(repo, _head(repo), _dummy_signers(tmp_path), SEAL)
+    with pytest.raises(PublicationSealError, match="for-each-ref"):
+        verify_seal(repo, _head(repo), _dummy_signers(tmp_path))
+
+
+@requires_ssh_keygen
+def test_a_corrupt_seal_tag_object_is_reported(repo: Path, signer: Signer) -> None:
+    _seal_head(repo, signer)
+    oid = git(repo, "rev-parse", f"refs/tags/{SEAL}")
+    loose = repo / ".git" / "objects" / oid[:2] / oid[2:]
+    data = loose.read_bytes()
+    loose.chmod(0o600)
+    loose.write_bytes(data[:-8] + b"\x00" * 8)
+
+    with pytest.raises(PublicationSealError, match="cat-file tag"):
+        verify_seal(repo, _head(repo), signer.signers, SEAL)
+
+
+@requires_ssh_keygen
+def test_a_message_failure_names_the_tag(repo: Path, signer: Signer) -> None:
+    tag(repo, SEAL, b"release notes\n\nnothing here\n", "HEAD", signer.key)
+
+    with pytest.raises(SealVerificationError) as refused:
+        verify_seal(repo, _head(repo), signer.signers, SEAL)
+    assert str(refused.value) == (
+        f"refs/tags/{SEAL}: message is not a 'lovspor-publication-seal v1' seal"
+    )
+
+
+@requires_ssh_keygen
+def test_each_tags_failure_is_listed_separated_by_a_semicolon(repo: Path, signer: Signer) -> None:
+    tag(repo, "sync/a-unsigned", _message(repo), "HEAD", None)
+    tag(repo, "sync/b-unsigned", _message(repo), "HEAD", None)
+
+    with pytest.raises(SealVerificationError) as refused:
+        verify_seal(repo, _head(repo), signer.signers)
+    failures = str(refused.value).split("; ")
+    assert [failure.split(":")[0] for failure in failures] == [
+        "refs/tags/sync/a-unsigned",
+        "refs/tags/sync/b-unsigned",
+    ]
+
+
+def test_an_indented_comment_in_the_signers_file_is_not_a_key(repo: Path, tmp_path: Path) -> None:
+    signers = tmp_path / "indented"
+    signers.write_text("   # the key is not committed yet\n", encoding="utf-8")
+
+    with pytest.raises(SealVerificationError, match="holds no key"):
+        verify_seal(repo, _head(repo), signers)
+
+
+@requires_ssh_keygen
+def test_a_tag_header_that_is_not_utf8_is_still_judged(repo: Path, signer: Signer) -> None:
+    head = _head(repo)
+    _literal_tag(
+        repo,
+        f"object {head}\ntype commit\ntag {SEAL}\n".encode()
+        + b"tagger \xff <x@example.invalid> 0 +0000\n\n"
+        + _message(repo),
+    )
+
+    with pytest.raises(SealVerificationError, match="signature not accepted"):
+        verify_seal(repo, head, signer.signers, SEAL)
+
+
+@requires_ssh_keygen
+def test_the_last_object_header_decides_what_a_tag_tags(repo: Path, signer: Signer) -> None:
+    head = _head(repo)
+    _literal_tag(
+        repo,
+        f"object {head}\ntype commit\ntag {SEAL}\n".encode()
+        + b"tagger t <t@example.invalid> 0 +0000\n"
+        + f"object {'f' * 40} trailing\n\n".encode()
+        + _message(repo),
+    )
+
+    with pytest.raises(SealVerificationError, match="does not tag commit"):
+        verify_seal(repo, head, signer.signers, SEAL)
+
+
+@requires_ssh_keygen
+def test_a_seal_header_line_that_is_not_utf8_does_not_void_the_seal(
+    repo: Path, signer: Signer
+) -> None:
+    message = _message(repo).replace(
+        b"attestation_ref refs/notes/temporal-attestations", b"attestation_ref \xff", 1
+    )
+    assert b"\xff" in message
+    tag(repo, SEAL, message, "HEAD", signer.key)
+
+    assert verify_seal(repo, _head(repo), signer.signers, SEAL).signer == PRINCIPAL
+
+
+@requires_ssh_keygen
+def test_the_last_corpus_commit_line_decides_whole(repo: Path, signer: Signer) -> None:
+    header, _, note = _message(repo).partition(b"\n\n")
+    forged = header + f"\ncorpus_commit {'f' * 40} trailing".encode() + b"\n\n" + note
+    tag(repo, SEAL, forged, "HEAD", signer.key)
+
+    with pytest.raises(SealVerificationError, match="corpus_commit does not name"):
+        verify_seal(repo, _head(repo), signer.signers, SEAL)
+
+
+@requires_ssh_keygen
+def test_an_embedded_note_may_hold_a_blank_line(repo: Path, signer: Signer) -> None:
+    head = _head(repo)
+    note = f'[\n\n{{"corpus_commit": "{head}"}}]\n'.encode()
+    tag(repo, SEAL, seal_message(head, "0" * 40, note), "HEAD", signer.key)
+
+    assert verify_seal(repo, head, signer.signers, SEAL).signer == PRINCIPAL
+
+
+@requires_ssh_keygen
+def test_a_signature_check_that_fails_silently_is_reported_by_its_exit_code(
+    repo: Path, signer: Signer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seal_head(repo, signer)
+    _fake_ssh_keygen(monkeypatch, repo.parent / "fake-bin", "exit 1")
+
+    with pytest.raises(SealVerificationError) as refused:
+        verify_seal(repo, _head(repo), signer.signers, SEAL)
+    assert str(refused.value) == (
+        f"refs/tags/{SEAL}: signature not accepted by {signer.signers.resolve()}: exit 1"
+    )
+
+
+@requires_ssh_keygen
+def test_a_good_signature_line_from_a_failing_check_is_not_accepted(
+    repo: Path, signer: Signer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seal_head(repo, signer)
+    good = f'Good "git" signature for {PRINCIPAL} with ED25519 key SHA256:x'
+    _fake_ssh_keygen(monkeypatch, repo.parent / "fake-bin", f"echo '{good}' >&2\nexit 1")
+
+    with pytest.raises(SealVerificationError, match="signature not accepted"):
+        verify_seal(repo, _head(repo), signer.signers, SEAL)
+
+
+@requires_ssh_keygen
+def test_a_refusal_reason_is_the_checks_words_on_one_line(
+    repo: Path, signer: Signer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seal_head(repo, signer)
+    _fake_ssh_keygen(
+        monkeypatch, repo.parent / "fake-bin", "printf 'bad\\377  key\\n  refused\\n' >&2\nexit 1"
+    )
+
+    with pytest.raises(SealVerificationError) as refused:
+        verify_seal(repo, _head(repo), signer.signers, SEAL)
+    assert "bad� key refused" in str(refused.value)
+
+
+@requires_ssh_keygen
+def test_verification_uses_ssh_keygen_whatever_the_global_configuration(
+    repo: Path, signer: Signer, tmp_path: Path
+) -> None:
+    _seal_head(repo, signer)
+    (tmp_path / "gitconfig").write_text(
+        '[gpg "ssh"]\n\tprogram = /usr/bin/false\n', encoding="utf-8"
+    )
+
+    assert verify_seal(repo, _head(repo), signer.signers, SEAL).signer == PRINCIPAL
+
+
+@requires_ssh_keygen
+def test_a_seal_tag_name_may_hold_non_ascii_whitespace(repo: Path, signer: Signer) -> None:
+    no_break_space = chr(0xA0)
+    name = f"sync/seal-1-1{no_break_space}retry"
+    _seal_head(repo, signer, name)
+
+    assert verify_seal(repo, _head(repo), signer.signers).tag == f"refs/tags/{name}"
