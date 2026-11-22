@@ -14,7 +14,10 @@ immediately before sending; a caller cannot hand it a decision:
    outcome sets the persistent stop latch.
 4. :func:`publish_authorized` requires the authorizing verifier's seal, the
    ``simulation_only`` decision, this transaction and attempt and a fresh
-   check time; records ``prepared_to_send`` durably **before** the mutation;
+   check time; re-reads, under the lock, the STOP state the evidence was
+   issued against (latch, latch transitions, owner control records, the
+   witness), so sealed evidence never outlives a later STOP (AR5b);
+   records ``prepared_to_send`` durably **before** the mutation;
    sends once; and records ``published``, ``refused`` or ``outcome_unknown``.
 
 **Production is disabled.** :class:`Production` carries no transport, no
@@ -43,6 +46,7 @@ from pathlib import Path
 from typing import Literal, NamedTuple
 
 from lovspor.forarbeider import (
+    publication_anchors,
     publication_attempts,
     publication_path_a,
     publication_path_b,
@@ -50,6 +54,7 @@ from lovspor.forarbeider import (
     publication_sandbox,
     publication_stage,
 )
+from lovspor.forarbeider.control_plane_anchor import AnchorAuthority, verify
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.policy_trust import TrustRoot
 from lovspor.forarbeider.publication_authorize import (
@@ -66,6 +71,7 @@ from lovspor.forarbeider.publication_execution_models import (
 )
 from lovspor.forarbeider.publication_path_b import Signer
 from lovspor.forarbeider.publication_sandbox import DisposableRemote, SimulatedGitHub
+from lovspor.forarbeider.release_control import ControlRequest, verify_control
 from lovspor.forarbeider.release_provenance import authentic
 from lovspor.forarbeider.version_models import canonical_text
 
@@ -79,6 +85,8 @@ class ExecutionRequest(NamedTuple):
     root: TrustRoot
     clone: Path
     workspace: Path
+    #: The independent anchor witness (AR5a); without one, authorization is denied.
+    anchoring: AnchorAuthority | None = None
 
 
 class Simulation(NamedTuple):
@@ -152,7 +160,27 @@ def _record(
     }
     record = AttemptRecord.model_validate({**fields, **extra})
     publication_attempts.append(request.workspace, record)
+    publication_anchors.settle(request, "publication_attempts", record.transaction_id)
     return record
+
+
+def _attempts_anchored(request: ExecutionRequest) -> bool:
+    """Whether this transaction's attempts verify against the witness (AR5b)."""
+    authority = publication_anchors.authority_of(request)
+    if authority is None:
+        return False
+    tid = request.inputs.transaction.transaction_id
+    query = publication_anchors.workspace_query(
+        request.inputs, request.workspace, "publication_attempts", tid
+    )
+    return verify(query, authority).status == "verified"
+
+
+def _set_latch(request: ExecutionRequest, reasons: tuple[str, ...], at: datetime) -> None:
+    """Set the latch at once, whatever the witness says; then anchor it when it can."""
+    tid = request.inputs.transaction.transaction_id
+    publication_attempts.latch(request.workspace, reasons, at, tid)
+    publication_anchors.settle(request, "stop_latch", "workspace")
 
 
 def _settled(request: ExecutionRequest) -> ExecutionOutcome | None:
@@ -278,7 +306,10 @@ def _context(
     remote = _remote(request, environment)
     now = environment.clock()
     facts = _facts(request, environment, now)
-    return AuthorizationContext(*base, remote, now, step.attempt_id, "simulation", facts)
+    anchoring = publication_anchors.authority_of(request)
+    return AuthorizationContext(
+        *base, remote, now, step.attempt_id, "simulation", facts, anchoring, request.workspace
+    )
 
 
 def _utc_now() -> datetime:
@@ -290,17 +321,13 @@ def _denied(
 ) -> ExecutionOutcome:
     digest = evidence_digest(evidence)
     reasons = tuple(sorted(evidence.denied_by))
-    record = _record(
-        request,
-        step,
-        "denied",
-        {"authorization_sha256": digest, "reasons": reasons, "recorded_at": evidence.checked_at},
-    )
+    record = None
+    if request.anchoring is None or _attempts_anchored(request):
+        extra = {"authorization_sha256": digest, "reasons": reasons}
+        record = _record(request, step, "denied", {**extra, "recorded_at": evidence.checked_at})
     latch = _latch_reasons(evidence)
     if latch:
-        publication_attempts.latch(
-            request.workspace, latch, evidence.checked_at, evidence.transaction_id
-        )
+        _set_latch(request, latch, evidence.checked_at)
     return ExecutionOutcome("denied", None, evidence, digest, record)
 
 
@@ -351,12 +378,49 @@ def _publish(
     now = _require_authorized(evidence, request, environment, step)
     if not isinstance(environment, Simulation):  # _require_authorized proved it is
         raise _not_eligible("production_execution_disabled")
+    _still_current(evidence, request, now)
     _sandboxed(environment, evidence.path)
     digest = evidence_digest(evidence)
     before = {"authorization_sha256": digest, "commit": evidence.local_commit, "recorded_at": now}
     _record(request, step, "prepared_to_send", before)
+    if not _attempts_anchored(request):
+        raise _not_eligible("anchor:publication_attempts_unanchored")
+    if publication_attempts.latched(request.workspace):
+        raise _not_eligible("stop_latch_set")
     sent = _send(request, environment, evidence)
     return _after(request, environment, evidence, sent)
+
+
+def _still_current(
+    evidence: AuthorizationEvidence, request: ExecutionRequest, now: datetime
+) -> None:
+    """Under the lock: the STOP state the evidence was issued against is still the state now.
+
+    Sealed evidence stays fresh for a while; an owner STOP, a latch transition
+    or an advanced control history since it was issued makes it stale. Read
+    here from the workspace, the owner's records and the witness, never from
+    the evidence or the caller.
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible`` with ``stop_latch_set``,
+            ``authorization_stale:stop_latch``, ``stop_control:<why>``,
+            ``authorization_stale:control_history`` or ``anchor:<family>:<status>``.
+    """
+    held = request.workspace
+    if publication_attempts.latched(held):
+        raise _not_eligible("stop_latch_set")
+    if publication_attempts.latch_head(held)[1] != evidence.stop_latch_head_sha256:
+        raise _not_eligible("authorization_stale:stop_latch")
+    policy_id = evidence.policy.policy_id if evidence.policy is not None else None
+    control = verify_control(ControlRequest(request.inputs.control, policy_id, now), request.root)
+    if control.state != "not_stopped":
+        raise _not_eligible(f"stop_control:{','.join(control.reasons) or 'stopped'}")
+    if control.head_sha256 != evidence.control_head_sha256:
+        raise _not_eligible("authorization_stale:control_history")
+    authority = publication_anchors.authority_of(request)
+    found = publication_anchors.anchor_reasons(authority, held, request.inputs, policy_id)
+    if found:
+        raise _not_eligible(f"anchor:{','.join(found)}")
 
 
 def _sandboxed(environment: Simulation, path: str) -> None:
@@ -381,7 +445,7 @@ def _after(
     extra = {"commit": sent.commit, "reasons": sent.reasons, "authorization_sha256": digest}
     record = _record(request, step, sent.status, {**extra, "recorded_at": at})
     if sent.status == "outcome_unknown":
-        publication_attempts.latch(request.workspace, ("outcome_unknown",), at, tid)
+        _set_latch(request, ("outcome_unknown",), at)
     return ExecutionOutcome(sent.status, sent.commit, evidence, digest, record)
 
 

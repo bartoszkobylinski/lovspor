@@ -647,7 +647,7 @@ def test_a_receipted_publication_is_never_resent_even_without_its_attempt_record
     github.fault = None
     recover(rig_a.request(), sim_a(github))
     shutil.rmtree(rig_a.workspace / rig_a.transaction.transaction_id)
-    (rig_a.workspace / "stop-latch.json").unlink()
+    shutil.rmtree(rig_a.workspace / "stop-latch")
 
     assert execute(rig_a.request(), sim_a(github)).status == "unchanged"
     assert len(github.calls) == 1

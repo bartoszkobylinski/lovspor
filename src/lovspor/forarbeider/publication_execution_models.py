@@ -72,7 +72,8 @@ CheckName = Literal[
     "ar6_release_manifest_signature",
     "ar7_repository_settings",
 ]
-#: The checks AR5-AR7 will make; none has an implementation, so none can pass.
+#: The checks AR5-AR7 make. ``ar5_control_anchor`` is implemented for simulation
+#: (AR5b) and is no longer waivable; in production every one stays unavailable.
 AR5_TO_AR7_CHECKS: Final[tuple[CheckName, ...]] = (
     "ar5_control_anchor",
     "ar5_ledger_anchor",
@@ -81,7 +82,7 @@ AR5_TO_AR7_CHECKS: Final[tuple[CheckName, ...]] = (
 )
 #: Checks a simulation may waive, each listed; anything else unavailable denies.
 WAIVABLE_IN_SIMULATION: Final[frozenset[str]] = frozenset(
-    {*AR5_TO_AR7_CHECKS, "ar1_gate_verdict", "fc7b_pending_blockers"}
+    {*AR5_TO_AR7_CHECKS, "ar1_gate_verdict", "fc7b_pending_blockers"} - {"ar5_control_anchor"}
 )
 CheckStatus = Literal["passed", "failed", "unavailable"]
 Mode = Literal["production", "simulation"]
@@ -153,6 +154,8 @@ class AuthorizationEvidence(Frozen):
     publisher_fingerprint: str | None
     control_state: Literal["stopped", "not_stopped"]
     control_head_sha256: Digest | None
+    #: AR5b: the stop latch's newest transition when authorized; ``None`` for no transition.
+    stop_latch_head_sha256: Digest | None = None
     quarantine_sha256: Digest | None
     limits_sha256: Digest | None
     budget_state: str
@@ -218,7 +221,7 @@ class AttemptRecord(Frozen):
 
 
 class StopLatch(Frozen):
-    """Set by a STOP, a revocation or an unknown outcome; only an owner resume (AR5) clears it."""
+    """The AR4b-1 single-file latch; AR5b reads it as set for good and writes it no more."""
 
     schema_version: Literal[1] = 1
     record_type: Literal["forarbeider_publication_stop_latch"] = (
@@ -227,3 +230,32 @@ class StopLatch(Frozen):
     reasons: tuple[NonBlank, ...] = Field(min_length=1)
     set_at: Instant
     transaction_id: Digest
+
+
+class LatchEvent(Frozen):
+    """One append-only transition of the stop latch (AR5b): ``set``, then ``cleared``, then...
+
+    A ``set`` names why (a STOP, a revocation, an unknown outcome, a halt). A
+    ``cleared`` names the owner-signed RESUME it rests on and the verified
+    resolution of the cause; the ``set`` before it stays, as evidence.
+    """
+
+    schema_version: Literal[1] = 1
+    record_type: Literal["forarbeider_publication_stop_latch_event"] = (
+        "forarbeider_publication_stop_latch_event"
+    )
+    sequence: int = Field(ge=1)
+    previous_sha256: Digest | None
+    kind: Literal["set", "cleared"]
+    at: Instant
+    transaction_id: Digest
+    reasons: tuple[NonBlank, ...] = Field(min_length=1)
+    resume_control_sha256: Digest | None = None
+
+    @model_validator(mode="after")
+    def _linked(self) -> Self:
+        if (self.sequence == 1) != (self.previous_sha256 is None):
+            raise ValueError("only the first event has no previous event")
+        if (self.kind == "cleared") != (self.resume_control_sha256 is not None):
+            raise ValueError("exactly a clearing names the RESUME it rests on")
+        return self

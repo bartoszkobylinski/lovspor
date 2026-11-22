@@ -8,8 +8,9 @@ else is returned with reasons and no digests, and is never trusted.
 - **in the workspace**, read through the existing readers that already refuse
   edited, reordered or truncated-in-the-middle chains:
   ``publication_attempts`` (one transaction's attempt records),
-  ``recovery_receipts`` (the workspace's receipts) and ``stop_latch`` (absent,
-  or one canonical latch);
+  ``recovery_receipts`` (the workspace's receipts) and ``stop_latch`` (since
+  AR5b, the append-only chain of latch transitions; the AR4b-1 single-file
+  latch is never anchorable);
 - **held by the caller**, given as the exact bytes it holds:
   ``budget_ledger`` (AR1b entries, linked by the digest of the entry before),
   ``control_history`` (owner-signed control records, linked the same way;
@@ -30,10 +31,8 @@ from pydantic import BaseModel, ValidationError
 
 from lovspor.forarbeider import publication_attempts, publication_receipts
 from lovspor.forarbeider.control_plane_anchor_models import Family
-from lovspor.forarbeider.corpus_leaves import directory, read_leaf
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.policy_authorization import SignedRecord
-from lovspor.forarbeider.publication_execution_models import StopLatch
 from lovspor.forarbeider.release_control_models import ReleaseControl
 from lovspor.forarbeider.release_ledger_models import LedgerEntry
 from lovspor.forarbeider.release_quarantine_models import QuarantineLedger
@@ -64,15 +63,13 @@ def _canonical(model: BaseModel, raw: bytes) -> bool:
 
 
 def _latch(workspace: Path) -> LocalChain:
-    if not os.path.lexists(workspace / LATCH):
-        return _of([])
+    if os.path.lexists(workspace / LATCH):
+        return _invalid("stop_latch_legacy_file")
     try:
-        with directory(workspace, "workspace") as parent:
-            raw = read_leaf(parent, LATCH, "stop_latch")
-        latch = StopLatch.model_validate_json(raw)
-    except (OSError, ValidationError, ForarbeiderRefusedError):
-        return _invalid("stop_latch_unreadable")
-    return _of([raw]) if _canonical(latch, raw) else _invalid("stop_latch_not_canonical")
+        events = publication_attempts.latch_events(workspace)
+    except ForarbeiderRefusedError as error:
+        return _invalid(f"stop_latch_invalid:{error.detail}")
+    return _of([canonical_text(e).encode() for e in events])
 
 
 def workspace_chain(family: Family, workspace: Path, scope: str) -> LocalChain:

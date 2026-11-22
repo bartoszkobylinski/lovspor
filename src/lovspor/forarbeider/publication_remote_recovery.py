@@ -40,7 +40,7 @@ force and while the latch is set; it never clears either (AR5 resumes).
 from datetime import datetime
 from typing import Any, Literal, NamedTuple
 
-from lovspor.forarbeider import publication_attempts, publication_receipts
+from lovspor.forarbeider import publication_anchors, publication_attempts, publication_receipts
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.publication_authorize import batch_usage
 from lovspor.forarbeider.publication_execute import (
@@ -107,6 +107,15 @@ def _reader(request: ExecutionRequest, environment: Environment) -> Reader:
 def _halt(request: ExecutionRequest, reasons: tuple[str, ...], at: datetime) -> None:
     tid = request.inputs.transaction.transaction_id
     publication_attempts.latch(request.workspace, reasons, at, tid)
+    publication_anchors.settle(request, "stop_latch", "workspace")
+
+
+def _settle_pending(request: ExecutionRequest) -> None:
+    """Complete a record a crash left unanchored (AR5b), before recovery appends any."""
+    tid = request.inputs.transaction.transaction_id
+    publication_anchors.settle(request, "publication_attempts", tid)
+    publication_anchors.settle(request, "recovery_receipts", "workspace")
+    publication_anchors.settle(request, "stop_latch", "workspace")
 
 
 # --- deriving receipts from the remote -------------------------------------------------------
@@ -215,6 +224,7 @@ def _written(request: ExecutionRequest, draft: dict[str, Any]) -> RecoveryReceip
     fields = {**draft, "sequence": sequence, "previous_sha256": previous}
     receipt = RecoveryReceipt.model_validate(fields)
     publication_receipts.append(request.workspace, receipt)
+    publication_anchors.settle(request, "recovery_receipts", "workspace")
     return receipt
 
 
@@ -242,8 +252,12 @@ def _attempt(
         "previous_sha256": previous,
         "commit": None,
     }
-    record = AttemptRecord.model_validate(fields | extra)
+    _append_attempt(request, AttemptRecord.model_validate(fields | extra))
+
+
+def _append_attempt(request: ExecutionRequest, record: AttemptRecord) -> None:
     publication_attempts.append(request.workspace, record)
+    publication_anchors.settle(request, "publication_attempts", record.transaction_id)
 
 
 def _record_published(request: ExecutionRequest, receipt: RecoveryReceipt, at: datetime) -> None:
@@ -339,6 +353,7 @@ def recover(request: ExecutionRequest, environment: Environment) -> RecoveryOutc
 
 def _recover(request: ExecutionRequest, environment: Simulation, reader: Reader) -> RecoveryOutcome:
     """:func:`recover` under the workspace lock, from the first remote read to the last record."""
+    _settle_pending(request)
     at = environment.clock()
     tid = request.inputs.transaction.transaction_id
     records = publication_attempts.records(request.workspace, tid)

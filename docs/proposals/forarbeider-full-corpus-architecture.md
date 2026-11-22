@@ -989,6 +989,56 @@ Limitations:
 - **The ledger, control and quarantine writers are AR5.**
 - **Not in this PR:** wiring `verified_state` into the STOP/RESUME and budget gates, owner resume, and budget reservation and settlement (AR5).
 
+**AR5b status.** AR5b connects the AR5a anchors to STOP/RESUME and adds owner-authorized recovery from a stop. Simulation only. Production stays denied: in production `ar5_control_anchor` is still unavailable until AR7 provides a production witness, and `ar5_ledger_anchor` (AR5c), AR6 and AR7 are unchanged.
+- **Verified control state before authorization** (`publication_anchors`, check `ar5_control_anchor`):
+  - The verifier itself verifies three families against the witness: `control_history` for the plan's exact policy, the `stop_latch`, and the transaction's `publication_attempts`.
+  - Any state other than `verified` denies: missing, stale, rolled back, diverged, unavailable, or not independent. No simulation may waive this check.
+  - Nothing the caller passes counts as verified. The verifier also reads the latch from the workspace itself, not only from the adapter.
+  - **A STOP cannot be bypassed by offering older valid control records.** Once the STOP is anchored, withholding it is `local_rolled_back`.
+- **Sealed evidence never outlives a later STOP.** `publish_authorized` accepts evidence while it is fresh (120 s), but under the workspace lock and before `prepared_to_send` it re-reads the state the evidence was issued against:
+  - the latch in force is refused (`stop_latch_set`);
+  - a latch transition since the evidence is refused (`authorization_stale:stop_latch`); the evidence binds `stop_latch_head_sha256`;
+  - the owner records are verified again at the send time: a stop in force or a lapsed resume lease is refused (`stop_control:…`), and a control head other than the evidence's is refused (`authorization_stale:control_history`);
+  - the three anchored families are verified again against the witness (`anchor:…`).
+  - The latch is read once more right before the send. A refusal sends nothing and makes no network call. `execute` is unaffected: it authorizes fresh under the same lock.
+- **Appends are anchored.**
+  - Execution and recovery anchor every attempt record, receipt and latch transition they write.
+  - A denial is recorded only while the attempts verify. When the witness is down nothing unanchorable is written, and the denial still stands.
+  - A `prepared_to_send` that cannot be anchored is never sent.
+  - A recovery first completes any record a crash left unanchored.
+- **The latch is an auditable chain** (`<workspace>/stop-latch/NNNNNN.json`, `LatchEvent`):
+  - Transitions alternate `set` and `cleared`, are hash-linked and are never removed or replaced. A `cleared` names the owner RESUME it rests on, and the evidence that the cause was resolved.
+  - The AR4b-1 single-file latch reads as set for good, and nothing clears it.
+  - Execution, recovery and the bot never clear the latch.
+- **STOP** (`record_stop`):
+  - The newest owner record must be a STOP in force that `verify_control` accepts.
+  - The latch is set at once, even while the witness is down. The STOP record and the latch transition are anchored when the witness can.
+  - A STOP that is only offered also denies, through `stop_control`.
+- **Owner RESUME** (`resume`) clears the latch only when all of these hold:
+  - the newest owner record is a RESUME that `verify_control` accepts and that leaves the policy `not_stopped` (it names the stop it resumes, in that stop's scope, within its lease, with no later stop);
+  - it extends the anchored control history exactly;
+  - it was signed after the latch was set;
+  - the cause is resolved, by anchored attempts and receipts:
+    - no attempt is left at `prepared_to_send` or `outcome_unknown` (an unknown outcome needs AR4b-2 recovery first);
+    - every receipt is `published_authorized`;
+    - an unverifiable history or a receipt conflict is never resolved here;
+  - the `cleared` transition is anchored.
+
+  Refused: bot keys, forged signatures, another policy, a stale sequence, a replayed older history, a revoked owner key, a RESUME signed before the latch, a down witness.
+- **Ordering and crash safety.**
+  - STOP, RESUME, execution and recovery all hold the workspace lock, so they never interleave. The second of two concurrent calls is refused (`corpus_locked: workspace`) and decides nothing.
+  - An execution that holds the lock first completes. A STOP recorded after it denies every later execution.
+  - The only lock taken under the workspace lock is the witness's, which is a leaf.
+  - Crashes:
+    - after the STOP's latch is set, before its anchor: still stopped, and a retry anchors it;
+    - before the clearing: still latched, and a retry resumes;
+    - after the clearing, before its anchor: denied (`stop_latch:pending_anchor`) until a retry completes it.
+
+Limitations:
+- **Withdrawal after a halt is AR5c with the owner.** A foreign commit, a failed integrity check or an unverifiable history is never resumed here.
+- **The budget ledger anchor, reservation and settlement are AR5c.**
+- **A STOP that is neither offered nor anchored cannot be seen.** Its effect starts once it is offered or recorded.
+
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
 **Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).

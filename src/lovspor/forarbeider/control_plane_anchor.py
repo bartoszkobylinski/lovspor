@@ -67,7 +67,7 @@ from lovspor.forarbeider.policy_trust import (
     TrustRoot,
     check_signature,
 )
-from lovspor.forarbeider.publication_execution_models import AttemptRecord, StopLatch
+from lovspor.forarbeider.publication_execution_models import AttemptRecord, LatchEvent
 from lovspor.forarbeider.publication_recovery_models import RecoveryReceipt
 from lovspor.forarbeider.version_models import canonical_text
 
@@ -120,7 +120,7 @@ class DurableOutcome(NamedTuple):
     verdict: AnchorVerdict
 
 
-Durable = AttemptRecord | RecoveryReceipt | StopLatch
+Durable = AttemptRecord | RecoveryReceipt | LatchEvent
 
 
 def _refused(detail: str) -> ForarbeiderRefusedError:
@@ -361,7 +361,7 @@ def _write(workspace: Path, record: Durable) -> None:
     elif isinstance(record, RecoveryReceipt):
         publication_receipts.append(workspace, record)
     else:
-        publication_attempts.latch(workspace, record.reasons, record.set_at, record.transaction_id)
+        publication_attempts.append_latch(workspace, record)
 
 
 def durable_append(

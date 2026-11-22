@@ -126,7 +126,8 @@ def test_a_simulated_authorization_passes_every_check_it_can_make(rig_a: Rig) ->
     assert {c.name for c in evidence.checks if c.status == "failed"} == set()
     unavailable = {c.name for c in evidence.checks if c.status == "unavailable"}
     assert unavailable <= WAIVABLE_IN_SIMULATION
-    assert set(AR5_TO_AR7_CHECKS) <= unavailable
+    assert set(AR5_TO_AR7_CHECKS) - {"ar5_control_anchor"} <= unavailable
+    assert "ar5_control_anchor" not in unavailable  # AR5b: verified against the witness
     assert evidence.waived == tuple(sorted(unavailable))
     content = rig_a.transaction.content
     assert (evidence.transaction_id, evidence.plan_id, evidence.batch_id) == (
@@ -162,7 +163,16 @@ def _authorized(rig: Rig, github: SimulatedGitHub, at: datetime, attempt: str | 
     facts = AdapterFacts(app=github.identity)
     chosen = attempt or next_attempt_id(rig.request())
     context = AuthorizationContext(
-        rig.inputs, rig.root, rig.clone, github_head(github), at, chosen, "simulation", facts
+        rig.inputs,
+        rig.root,
+        rig.clone,
+        github_head(github),
+        at,
+        chosen,
+        "simulation",
+        facts,
+        rig.anchoring(),
+        rig.workspace,
     )
     evidence = authorize(context)
     assert evidence.decision == "simulation_only", evidence.denied_by
