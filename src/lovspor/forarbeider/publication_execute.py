@@ -40,6 +40,7 @@ proposal exists, and a clone without a ``prepared`` proposal is denied.
 """
 
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -48,6 +49,7 @@ from typing import Literal, NamedTuple
 from lovspor.forarbeider import (
     publication_anchors,
     publication_attempts,
+    publication_ledger,
     publication_path_a,
     publication_path_b,
     publication_receipts,
@@ -69,6 +71,7 @@ from lovspor.forarbeider.publication_execution_models import (
     AttemptState,
     AuthorizationEvidence,
 )
+from lovspor.forarbeider.publication_ledger import BudgetLedger
 from lovspor.forarbeider.publication_path_b import Signer
 from lovspor.forarbeider.publication_sandbox import DisposableRemote, SimulatedGitHub
 from lovspor.forarbeider.release_control import ControlRequest, verify_control
@@ -87,6 +90,8 @@ class ExecutionRequest(NamedTuple):
     workspace: Path
     #: The independent anchor witness (AR5a); without one, authorization is denied.
     anchoring: AnchorAuthority | None = None
+    #: AR5c: the durable budget ledger; without one, a simulation is denied.
+    ledger: BudgetLedger | None = None
 
 
 class Simulation(NamedTuple):
@@ -286,7 +291,7 @@ def execute(request: ExecutionRequest, environment: Environment) -> ExecutionOut
             execution or a recovery holds the workspace; forged attempt records;
             a simulation without the adapter its path needs.
     """
-    with publication_attempts.workspace_lock(request.workspace):
+    with publication_attempts.workspace_lock(request.workspace), _ledger_held(request):
         settled = _settled(request)
         if settled is not None:
             return settled
@@ -308,8 +313,23 @@ def _context(
     facts = _facts(request, environment, now)
     anchoring = publication_anchors.authority_of(request)
     return AuthorizationContext(
-        *base, remote, now, step.attempt_id, "simulation", facts, anchoring, request.workspace
+        *base,
+        remote,
+        now,
+        step.attempt_id,
+        "simulation",
+        facts,
+        anchoring,
+        request.workspace,
+        request.ledger,
     )
+
+
+def _ledger_held(request: ExecutionRequest) -> AbstractContextManager[None]:
+    """AR5c: the budget ledger's lock, taken inside the workspace lock (never the reverse)."""
+    if request.ledger is None:
+        return nullcontext()
+    return publication_ledger.ledger_lock(request.ledger)
 
 
 def _utc_now() -> datetime:
@@ -366,7 +386,7 @@ def publish_authorized(
             this verifier's, not ``simulation_only``, not this attempt's or not fresh;
             ``corpus_locked: workspace`` while another execution or a recovery holds it.
     """
-    with publication_attempts.workspace_lock(request.workspace):
+    with publication_attempts.workspace_lock(request.workspace), _ledger_held(request):
         return _publish(evidence, request, environment)
 
 
@@ -394,7 +414,7 @@ def _publish(
 def _still_current(
     evidence: AuthorizationEvidence, request: ExecutionRequest, now: datetime
 ) -> None:
-    """Under the lock: the STOP state the evidence was issued against is still the state now.
+    """Under the locks: the STOP state and the reservation the evidence rests on still hold now.
 
     Sealed evidence stays fresh for a while; an owner STOP, a latch transition
     or an advanced control history since it was issued makes it stale. Read
@@ -404,7 +424,9 @@ def _still_current(
     Raises:
         ForarbeiderRefusedError: ``release_not_eligible`` with ``stop_latch_set``,
             ``authorization_stale:stop_latch``, ``stop_control:<why>``,
-            ``authorization_stale:control_history`` or ``anchor:<family>:<status>``.
+            ``authorization_stale:control_history``, ``anchor:<family>:<status>`` or
+            ``authorization_stale:reservation:<why>`` (AR5c: cancelled, settled,
+            another batch, smaller than the batch, over the caps, another open one).
     """
     held = request.workspace
     if publication_attempts.latched(held):
@@ -419,8 +441,13 @@ def _still_current(
         raise _not_eligible("authorization_stale:control_history")
     authority = publication_anchors.authority_of(request)
     found = publication_anchors.anchor_reasons(authority, held, request.inputs, policy_id)
+    repository = request.inputs.settings.repository
+    found += publication_ledger.anchor_reasons(request.ledger, authority, repository)
     if found:
         raise _not_eligible(f"anchor:{','.join(found)}")
+    reservation = publication_ledger.reservation_reasons(request, now)
+    if reservation:
+        raise _not_eligible(f"authorization_stale:reservation:{','.join(reservation)}")
 
 
 def _sandboxed(environment: Simulation, path: str) -> None:

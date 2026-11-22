@@ -31,6 +31,7 @@ from typing import Literal, Self
 from pydantic import Field, model_validator
 
 from lovspor.forarbeider.policy_authorization_models import Instant
+from lovspor.forarbeider.publication_models import CommitId
 from lovspor.forarbeider.release_contract_models import (
     LEDGER_REQUIREMENTS as AR5_LEDGER_REQUIREMENTS,
 )
@@ -53,6 +54,9 @@ class LedgerOperation(Frozen):
     batch_id: str | None = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,62}$")
     amounts: BudgetUsage
     recorded_at: Instant
+    #: AR5c: a settlement names the verified remote commit and the receipt it rests on.
+    commit: CommitId | None = None
+    receipt_sha256: Digest | None = None
 
     @model_validator(mode="after")
     def _bound(self) -> Self:
@@ -64,6 +68,10 @@ class LedgerOperation(Frozen):
             raise ValueError("an accounting operation names its release and batch")
         if self.recorded_at.date() < self.day:
             raise ValueError("an operation is not recorded before its day")
+        if (self.commit is None) != (self.receipt_sha256 is None):
+            raise ValueError("a settlement names both its commit and its receipt, or neither")
+        if self.commit is not None and self.operation != "commit":
+            raise ValueError("only a settlement names a commit and a receipt")
         return self
 
 

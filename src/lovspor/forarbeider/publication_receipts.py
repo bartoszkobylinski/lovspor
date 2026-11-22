@@ -74,6 +74,15 @@ def _chain(workspace: Path) -> list[tuple[RecoveryReceipt, bytes]]:
     return chain
 
 
+def chain(workspace: Path) -> list[tuple[RecoveryReceipt, bytes]]:
+    """Every receipt with its exact canonical bytes, in order, each proved linked.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_tree_mismatch: receipts``.
+    """
+    return _chain(workspace)
+
+
 def receipts(workspace: Path) -> list[RecoveryReceipt]:
     """Every receipt, in order, each proved linked to the one before.
 

@@ -50,6 +50,7 @@ from lovspor.forarbeider.version_models import canonical_text
 from tests.unit.forarbeider_authorization_support import full_request, signer_line, trust_root
 from tests.unit.forarbeider_execution_support import (
     APP,
+    LEDGER_ID,
     NOW,
     OWNER_KEYS,
     KeySigner,
@@ -58,6 +59,7 @@ from tests.unit.forarbeider_execution_support import (
     control_history,
     make_rig,
     reserve,
+    seeded_ledger,
     settings_for,
 )
 from tests.unit.forarbeider_publication_support import commit_files, git
@@ -126,8 +128,9 @@ def test_a_simulated_authorization_passes_every_check_it_can_make(rig_a: Rig) ->
     assert {c.name for c in evidence.checks if c.status == "failed"} == set()
     unavailable = {c.name for c in evidence.checks if c.status == "unavailable"}
     assert unavailable <= WAIVABLE_IN_SIMULATION
-    assert set(AR5_TO_AR7_CHECKS) - {"ar5_control_anchor"} <= unavailable
-    assert "ar5_control_anchor" not in unavailable  # AR5b: verified against the witness
+    anchored = {"ar5_control_anchor", "ar5_ledger_anchor"}
+    assert set(AR5_TO_AR7_CHECKS) - anchored <= unavailable
+    assert not anchored & unavailable  # AR5b, AR5c: verified against the witness
     assert evidence.waived == tuple(sorted(unavailable))
     content = rig_a.transaction.content
     assert (evidence.transaction_id, evidence.plan_id, evidence.batch_id) == (
@@ -173,6 +176,7 @@ def _authorized(rig: Rig, github: SimulatedGitHub, at: datetime, attempt: str | 
         facts,
         rig.anchoring(),
         rig.workspace,
+        rig.ledger,
     )
     evidence = authorize(context)
     assert evidence.decision == "simulation_only", evidence.denied_by
@@ -280,7 +284,8 @@ def test_an_active_stop_denies_and_latches(rig_a: Rig) -> None:
 
 def test_a_missing_budget_reservation_denies(rig_a: Rig) -> None:
     github = stub(rig_a)
-    outcome = execute(with_inputs(rig_a, ledger=()), simulation_a(rig_a, github))
+    empty = seeded_ledger(rig_a, "empty")
+    outcome = execute(rig_a.request(ledger=empty), simulation_a(rig_a, github))
 
     assert "budget" in failed(outcome)
     assert github.calls == []
@@ -292,9 +297,11 @@ def test_a_reservation_smaller_than_the_batch_denies(rig_a: Rig) -> None:
     small = BudgetUsage(
         documents=usage.documents, files=usage.files, bytes=usage.bytes - 1, commits=1
     )
-    ledger = reserve(evidence, rig_a.transaction, small)
+    small_ledger = seeded_ledger(
+        rig_a, "small", reserve(evidence, rig_a.transaction, small, f"{LEDGER_ID}-small")
+    )
     github = stub(rig_a)
-    outcome = execute(with_inputs(rig_a, ledger=ledger), simulation_a(rig_a, github))
+    outcome = execute(rig_a.request(ledger=small_ledger), simulation_a(rig_a, github))
 
     assert "budget" in failed(outcome)
     assert github.calls == []

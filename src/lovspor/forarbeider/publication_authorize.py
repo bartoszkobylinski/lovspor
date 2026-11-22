@@ -21,7 +21,12 @@ it **itself**, at the time it is given, immediately before a publication:
   verify against the independent witness
   (:mod:`~lovspor.forarbeider.publication_anchors`); no simulation may waive it;
 - ``budget``: the ledger, replayed now, holds a reservation for exactly this
-  transaction covering this batch and one commit;
+  transaction, under this batch, covering it and one commit. In simulation the
+  ledger read is the durable one (AR5c, :mod:`~lovspor.forarbeider.publication_ledger`),
+  never the bytes a caller offers, and a publication of this workspace the
+  ledger has not settled yet denies (``ledger_settlement_pending``);
+- ``ar5_ledger_anchor`` (AR5c, simulation): that durable ledger verifies
+  against the independent witness; no simulation may waive it;
 - ``remote_head``: ``main`` read now is the expected base;
 - ``path_identity``: the configured path is the transaction's, and on path A
   the transport's App identity is the pinned one;
@@ -31,8 +36,8 @@ it **itself**, at the time it is given, immediately before a publication:
 What no slice implements yet is ``unavailable``, never passed: the AR1 gate
 verdict (no passing state until D10, D11 and the lineage anchors),
 FC7b's pending blockers (D6, D10, D11, the missing integration and an
-unpinned trust root), the AR5 anchor of the ledger (and, in production, of the
-control chain, until AR7 provides a production witness), the
+unpinned trust root), in production the AR5 anchors of the control chain and
+the ledger (until AR7 provides a production witness), the
 AR6 manifest signature and the AR7 settings verification. Production needs
 every check passed, so it is denied; a simulation may waive exactly those, by
 name (:mod:`lovspor.forarbeider.publication_execution_models`).
@@ -47,7 +52,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
-from lovspor.forarbeider import publication_attempts, publication_stage
+from lovspor.forarbeider import publication_attempts, publication_ledger, publication_stage
 from lovspor.forarbeider.control_plane_anchor import AnchorAuthority
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.policy_authorization import (
@@ -67,6 +72,7 @@ from lovspor.forarbeider.publication_execution_models import (
     PublicationSettings,
     decide,
 )
+from lovspor.forarbeider.publication_ledger import BudgetLedger
 from lovspor.forarbeider.publication_models import ProposalCounts, PublicationTransaction
 from lovspor.forarbeider.release_contract_models import (
     BudgetUsage,
@@ -87,7 +93,6 @@ from lovspor.forarbeider.version_release_models import PolicyReference, digest_o
 #: What stays unavailable until its slice exists; each a separate, named check.
 _PENDING: tuple[tuple[CheckName, str], ...] = (
     ("ar1_gate_verdict", "ar1_gate_verdict_has_no_passing_state_before_d10_d11_and_anchors"),
-    ("ar5_ledger_anchor", "budget_ledger_unanchored_ar5_pending"),
     ("ar6_release_manifest_signature", "release_manifest_signature_ar6_pending"),
     ("ar7_repository_settings", "repository_settings_unverified_ar7_pending"),
 )
@@ -127,6 +132,8 @@ class AuthorizationContext(NamedTuple):
     #: AR5b: the independent witness and the workspace whose state it anchors.
     anchoring: AnchorAuthority | None = None
     workspace: Path | None = None
+    #: AR5c: the durable budget ledger; in simulation the only ledger the budget reads.
+    ledger: BudgetLedger | None = None
 
 
 class _Found(NamedTuple):
@@ -308,17 +315,43 @@ def _covers(reserved: BudgetUsage | None, wanted: BudgetUsage) -> bool:
     return reserved is not None and all(getattr(reserved, n) >= getattr(wanted, n) for n in names)
 
 
+def _ledger_entries(context: AuthorizationContext) -> tuple[bytes, ...] | str:
+    """The entries the budget reads: the durable ledger in simulation, else what is offered."""
+    if context.mode != "simulation" or context.ledger is None:
+        return context.inputs.ledger
+    try:
+        return publication_ledger.entries(context.ledger)
+    except (ForarbeiderRefusedError, OSError):
+        return "ledger:unreadable"
+
+
+def _unsettled(context: AuthorizationContext, held: tuple[bytes, ...]) -> list[str]:
+    """AR5c: another release's open reservation, from any workspace, blocks spending."""
+    if context.mode != "simulation" or context.ledger is None:
+        return []
+    pending = publication_ledger.outstanding(held, context.inputs.transaction.transaction_id)
+    return [f"ledger_settlement_pending:{other}" for other in pending]
+
+
 def _budget(
     context: AuthorizationContext, limits: LimitsEvidence
 ) -> tuple[AuthorizationCheck, LedgerEvidence]:
     transaction = context.inputs.transaction
     day, release = context.now.date(), transaction.transaction_id
-    evidence = verify_ledger(LedgerRequest(context.inputs.ledger, limits, day, release))
-    reasons = [f"ledger:{r}" for r in evidence.reasons]
+    held = _ledger_entries(context)
+    if isinstance(held, str):
+        missing = LedgerEvidence(status="invalid", source=None, reasons=(held,))
+        return _check("budget", [held, "budget_not_reserved_for_this_transaction"]), missing
+    evidence = verify_ledger(LedgerRequest(held, limits, day, release))
+    reasons = [f"ledger:{r}" for r in evidence.reasons] + _unsettled(context, held)
     if evidence.status != "verified" or evidence.release_state != "reserved":
         reasons.append("budget_not_reserved_for_this_transaction")
     elif not _covers(evidence.release_reserved, batch_usage(transaction)):
         reasons.append("reservation_smaller_than_the_batch")
+    if evidence.release_state == "reserved" and context.ledger is not None:
+        batch = publication_ledger.reservation_batch(held, release)
+        if batch != transaction.content.batch_id:
+            reasons.append("reservation_not_this_batch")
     return _check("budget", reasons), evidence
 
 
@@ -365,7 +398,9 @@ def _checks(context: AuthorizationContext) -> tuple[list[AuthorizationCheck], _F
     remote_check, head = _remote(context)
     latch = _check("stop_latch", ["stop_latch_set"] if _latched(context) else [])
     anchors = _control_anchor(context, plan)
+    ledger_anchor = _ledger_anchor(context)
     found = [policy, pending, publisher, limits_check, control_check, latch, anchors, budget_check]
+    found.append(ledger_anchor)
     return [*_bindings(context, plan), *found, remote_check, *_execution(context)], _Found(
         plan, limits, control, ledger, head, fingerprint
     )
@@ -390,6 +425,15 @@ def _control_anchor(context: AuthorizationContext, plan: ReleasePlan | None) -> 
     policy_id = plan.basis.policy.policy_id if plan is not None else None
     found = anchor_reasons(context.anchoring, context.workspace, context.inputs, policy_id)
     return _check("ar5_control_anchor", found)
+
+
+def _ledger_anchor(context: AuthorizationContext) -> AuthorizationCheck:
+    """AR5c: the durable budget ledger, verified against the witness; never waived."""
+    if context.mode == "production":
+        return _unavailable("ar5_ledger_anchor", "ledger_anchor_production_witness_ar7_pending")
+    repository = context.inputs.settings.repository
+    found = publication_ledger.anchor_reasons(context.ledger, context.anchoring, repository)
+    return _check("ar5_ledger_anchor", found)
 
 
 def _bindings(context: AuthorizationContext, plan: ReleasePlan | None) -> list[AuthorizationCheck]:
