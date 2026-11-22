@@ -199,6 +199,14 @@ def test_compose_refuses_an_unparseable_note(repo: Path, no_key: Path) -> None:
         compose_seal(repo, _request(no_key))
 
 
+def test_compose_refuses_a_note_whose_blob_git_cannot_read(repo: Path, no_key: Path) -> None:
+    blob = str(attestation_note_blob(repo, _head(repo)))
+    (repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+
+    with pytest.raises(SealCompositionError, match=f"git cat-file blob {blob} "):
+        compose_seal(repo, _request(no_key))
+
+
 def test_compose_refuses_a_path_that_is_not_a_repository(tmp_path: Path, no_key: Path) -> None:
     with pytest.raises(SealCompositionError, match="not a commit"):
         compose_seal(tmp_path, _request(no_key))
