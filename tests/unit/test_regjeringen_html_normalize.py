@@ -7,7 +7,9 @@ the grammar, is left as served, so a change there still changes the digest.
 """
 
 import hashlib
+import signal
 import time
+from types import FrameType
 
 import pytest
 
@@ -245,6 +247,56 @@ def test_non_ascii_and_invalid_utf8_bytes_are_preserved() -> None:
     page = b'<p>\xc3\xa6\xff\xfe</p><script nonce="QUJD"></script>'
     expected = b'<p>\xc3\xa6\xff\xfe</p><script nonce="NONCE"></script>'
     assert normalize_regjeringen_html(page) == expected
+
+
+# Outside start tags: comments, end tags and bogus comments, and where the scan resumes.
+
+
+def _normalized_within_seconds(page: bytes, seconds: float = 2.0) -> bytes:
+    """``normalize_regjeringen_html(page)``, failing instead of hanging if the scan loops."""
+
+    def stuck(_signal: int, _frame: FrameType | None) -> None:
+        pytest.fail(f"the scan did not finish within {seconds} s")
+
+    previous = signal.signal(signal.SIGALRM, stuck)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        return normalize_regjeringen_html(page)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        b'<!-- a > <b nonce="QUJD"> -->',  # a ">" inside a comment does not end it
+        b"</p title='> <a nonce=\"QUJD\">'>",  # an end tag ends after its quoted values
+        b'</ <b nonce="QUJD">',  # "</" without a letter is a bogus comment up to ">"
+        b'ab <?x nonce="QUJD"',  # an unterminated bogus comment: the rest is text
+        b"<i>x</i> <!",  # a bogus comment cut off right after "<!"
+    ],
+)
+def test_markup_inside_a_skipped_construct_is_left_as_served(page: bytes) -> None:
+    assert _normalized_within_seconds(page) == page
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (b"<!-- x -->", b"<!-- y -->"),  # a comment ends at its first "-->"
+        (b"<!---->", b""),  # an empty comment
+        (b"<!--<!-->", b" -->"),  # "<!--" inside a comment does not open another
+        (b"<!x>", b""),  # a bogus comment ends at its ">"
+        (b"<!>", b""),  # a bogus comment ends at the ">" right after "<!"
+        (b"< ", b""),  # a "<" at the very start that opens nothing
+        (b"</style>", b""),  # an end tag before a raw-text element does not close it
+    ],
+)
+def test_a_tag_after_a_skipped_construct_is_normalized(before: bytes, after: bytes) -> None:
+    page = before + b'<b nonce="QUJD"><style nonce="QUJD">p{}</style>' + after
+    expected = before + b'<b nonce="NONCE"><style nonce="NONCE">p{}</style>' + after
+    assert _normalized_within_seconds(page) == expected
 
 
 @pytest.mark.parametrize(
