@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/publication_seal.py"
+symbol = "_git"
+registered = "2026-11-22, from register key 91c64d1b41fda8ef (GREEN under scripts/ci/mutant_check.py try with the PR #1010 tests)"
+mutation = '''
+-            check=False,
+-        )
++            )
+'''
+justification = """
+`check` defaults to False in the signature of `subprocess.run`, so dropping the
+explicit `check=False` leaves the call's behaviour unchanged. It is spelled out
+only because ruff PLW1510 demands it.
+"""

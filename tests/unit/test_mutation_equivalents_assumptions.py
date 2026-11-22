@@ -922,3 +922,29 @@ def test_assumption_httpx_follow_redirects_none_does_not_follow() -> None:
                 assert reply.status_code == 302, value
         assert seen == ["https://example.org/from"] * 2
         assert client.get("https://example.org/from").status_code == 200
+
+
+def test_assumption_git_rev_parse_verify_ignores_an_unknown_quiet_spelling(
+    tmp_path: Path,
+) -> None:
+    """Pins the argument that waives ``--QUIET`` for ``--quiet`` in
+    ``publication_seal.py::_resolve_commit``: ``git rev-parse --verify`` prints
+    the same id with either spelling when the revision resolves, and exits
+    non-zero with either when it does not; only stderr, which is discarded,
+    tells them apart."""
+    root, head = throwaway_checkout(tmp_path / "committed")
+
+    def rev_parse(flag: str, rev: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", flag, "--end-of-options", rev],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    for flag in ("--quiet", "--QUIET"):
+        found = rev_parse(flag, "HEAD^{commit}")
+        assert (found.returncode, found.stdout.strip()) == (0, head)
+        missing = rev_parse(flag, "absent^{commit}")
+        assert missing.returncode != 0
+        assert missing.stdout == ""
