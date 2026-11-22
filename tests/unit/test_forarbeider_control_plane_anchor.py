@@ -770,7 +770,13 @@ def test_forked_workspaces_racing_for_one_anchor_leave_one_winner(world: World) 
     winner = sorted(results)[0]
     loser = sorted(results)[1]
     assert winner == "appended"
-    assert loser in {"refused:anchor_head_moved", "refused:anchor:local_rolled_back"}
+    # Every interleaving fails closed (#999): the witness refuses the second anchor, the
+    # loser verifies after the winner, or it appends before the winner anchors and diverges.
+    assert loser in {
+        "refused:anchor_head_moved",
+        "refused:anchor:local_rolled_back",
+        "refused:anchor:diverged",
+    }
     statuses = {
         verify(world.attempts(ws), world.authority(workspace=ws)).status
         for ws in (world.workspace, fork)
