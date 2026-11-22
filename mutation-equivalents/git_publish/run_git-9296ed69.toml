@@ -1,0 +1,19 @@
+[[equivalent]]
+file = "src/lovspor/git_publish.py"
+symbol = "run_git"
+registered = "2026-11-22, from register key c59890b9ae929437 (GREEN under scripts/ci/mutant_check.py try with the PR #1007 tests)"
+mutation = """
+-            input=stdin if stdin is not None else b"",
++            input=stdin if stdin is not None else b"XXXX",
+"""
+justification = """
+The default input reaches Git only when a caller passes no `stdin`. Of the
+argument vectors in `COMMANDS` only `hash-object -t commit -w --stdin` reads
+its standard input; every other one ignores it. For that one Git runs fsck on
+the object before writing it, and refuses both `b""` and `b"XXXX"` as an
+unterminated commit header with the same exit code, the same (empty) output
+and the same message, so `GitAnswer` is identical. This argues from Git's
+behaviour, so the assumption test runs both inputs through `run_git` against
+a real bare repository.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_git_hash_object_refuses_empty_and_junk_commit_input_alike"

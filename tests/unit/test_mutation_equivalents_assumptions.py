@@ -40,6 +40,7 @@ from pydantic import ValidationError
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
+from lovspor import git_publish
 from lovspor.innsyn.sender import Sender
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
@@ -838,6 +839,25 @@ def test_assumption_os_stat_follow_symlinks_none_does_not_follow(tmp_path: Path)
     target = (tmp_path / "target").stat()
     assert found[None].st_ino == found[False].st_ino == link.st_ino
     assert found[True].st_ino == target.st_ino != link.st_ino
+
+
+def test_assumption_git_hash_object_refuses_empty_and_junk_commit_input_alike(
+    tmp_path: Path,
+) -> None:
+    """Pins mutation-equivalents/git_publish/run_git-*.toml (default input ``b"XXXX"``).
+
+    Of the allowed commands only ``hash-object -t commit -w --stdin`` reads its
+    input, and Git's fsck refuses ``b""`` and ``b"XXXX"`` with the same code,
+    output and message, so the default input cannot change an answer.
+    """
+    bare = tmp_path / "remote.git"
+    init = ("init", "--bare", "--quiet", "--template=", "--initial-branch=main", str(bare))
+    assert git_publish.run_git(tmp_path, init).code == 0
+    command = ("hash-object", "-t", "commit", "-w", "--stdin")
+    empty = git_publish.run_git(bare, command, b"")
+    junk = git_publish.run_git(bare, command, b"XXXX")
+    assert empty.code != 0
+    assert (empty.code, empty.out, empty.err) == (junk.code, junk.out, junk.err)
 
 
 def test_assumption_typing_cast_returns_its_value_unchanged() -> None:
