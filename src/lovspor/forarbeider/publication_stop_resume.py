@@ -34,6 +34,11 @@ they never interleave. The second of two concurrent calls is refused at once
 (``corpus_locked: workspace``) and decides nothing. An execution that holds
 the lock first completes; a STOP recorded after it denies every later one.
 Under the workspace lock only the witness's lock (a leaf) is taken.
+
+Since AR5d-1 the latch is anchored in the scope of the workspace's own
+anchored identity, so a STOP or RESUME in one workspace never reads or moves
+another workspace's latch, even through one witness. The owner's control
+history stays per policy: an owner STOP binds every workspace of the policy.
 """
 
 from datetime import datetime
@@ -93,8 +98,12 @@ def _anchored(request: ExecutionRequest, family: str) -> bool:
     if family == "control_history":
         query = publication_anchors.control_query(request.inputs, _policy_id(request))
     else:
+        try:
+            scope = publication_anchors.scope_of(request)
+        except ForarbeiderRefusedError:
+            return False
         query = publication_anchors.workspace_query(
-            request.inputs, request.workspace, "stop_latch", "workspace"
+            request.inputs, request.workspace, "stop_latch", scope
         )
     return verify(query, authority).status == "verified"
 
@@ -105,7 +114,7 @@ def _anchor_stop(request: ExecutionRequest, now: datetime) -> bool:
         publication_anchors.sync_control(request, _policy_id(request), now)
     except ForarbeiderRefusedError:
         return False
-    publication_anchors.settle(request, "stop_latch", "workspace")
+    publication_anchors.settle(request, "stop_latch")
     return _anchored(request, "control_history") and _anchored(request, "stop_latch")
 
 
@@ -157,7 +166,7 @@ def _resolution(request: ExecutionRequest, latch: LatchEvent) -> tuple[str, ...]
         raise _refused(f"unresolved:{latch.reasons[0]}")
     tid = latch.transaction_id
     _verified(request, "attempts", tid)
-    _verified(request, "receipts", "workspace")
+    _verified(request, "receipts", publication_anchors.scope_of(request))
     records = publication_attempts.records(request.workspace, tid)
     last = records[-1].state if records else "none"
     if last in _UNRESOLVED_STATES:
@@ -186,7 +195,7 @@ def _clear(
     resolution = _resolution(request, latch)
     digest = sha256(signed.record).hexdigest()
     event = publication_attempts.clear_latch(request.workspace, now, digest, resolution)
-    if publication_anchors.settle(request, "stop_latch", "workspace") is None:
+    if publication_anchors.settle(request, "stop_latch") is None:
         raise _refused("anchor:stop_latch_clearing_unanchored")
     return ControlOutcome("resumed", event, True, resolution)
 
@@ -202,7 +211,7 @@ def resume(request: ExecutionRequest, now: datetime) -> ControlOutcome:
     if publication_anchors.authority_of(request) is None:
         raise _refused("anchor_authority_missing")
     with publication_attempts.workspace_lock(request.workspace):
-        publication_anchors.settle(request, "stop_latch", "workspace")
+        publication_anchors.settle(request, "stop_latch")
         signed, record, state = _newest(request, now, "resume")
         if state != "not_stopped":
             raise _refused("resume_not_verified:still_stopped")

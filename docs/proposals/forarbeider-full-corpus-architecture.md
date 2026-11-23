@@ -1054,7 +1054,56 @@ Limitations:
 - **A withheld settlement is resolved by the owner** (AR5b RESUME does not settle it); its reservation keeps counting against the day.
 - **Settlement under revoked owner limits is refused**: the publication stays unsettled and spending stays blocked until the owner signs limits again.
 - **One open reservation per ledger serializes publication**: reserve, publish, settle, then the next batch. An abandoned reservation (reserved, never sent) blocks the ledger until it is cancelled; an owner-authorized cancel is not implemented here.
-- **Workspace families share one scope per witness** (`stop_latch` and `recovery_receipts` are scoped `workspace`, #1013): workspaces must not share a witness store for them. This fails closed (a collision is a rollback or divergence), and a shared ledger therefore names its own witness.
+- **Workspace families shared one scope per witness** (`stop_latch` and `recovery_receipts` were scoped `workspace`, #1013): workspaces could not share a witness store for them. It failed closed (a collision is a rollback or divergence), and a shared ledger therefore names its own witness. AR5d-1 removes the collision (below); the ledger's own witness stays valid.
+
+**AR5d-1 status.** AR5d-1 gives each publication workspace an anchored identity and anchors the workspace families in its scope, so independent workspaces can share one witness store (#1013). Simulation only. Production stays denied; AR5c's ledger, settlement and reservation rules are unchanged.
+- **Identity contract** (`workspace-identity/1`, `workspace_identity_models`). One canonical, immutable record, `<workspace>/workspace-identity.json`:
+  - a random 256-bit `workspace_id`, drawn once;
+  - the `repository` and the publication `domain` (`forarbeider-publication`);
+  - the version and the creation time.
+
+  The path is not part of it. The scope of the workspace families is `workspace:` followed by the SHA-256 of the record's exact bytes, so the repository, the domain and the random id are bound into every anchor key.
+- **Trust model.** The record is a name, never a credential. It counts only once the witness has anchored it, as the one record of a new family, `workspace_identity`, in that same scope (`control_plane_anchor.workspace_scope`). Requests carry no identity: the verifier reads the file and asks the witness. Refused, with `workspace_identity:<why>` in `ar5_control_anchor`, and nothing sent:
+  - a missing file (`missing`);
+  - a link, a shared or hard-linked file, or a workspace that is not private (`unsafe`);
+  - unreadable or non-canonical bytes, another repository or domain (`unreadable`, `not_canonical`, `repository_mismatch`);
+  - a well-formed record the witness never anchored, such as a caller's claim (`unanchored`);
+  - an identity whose anchor is pending or rolled back at the witness (`pending_anchor`, `local_rolled_back`, …), or an unreachable witness (`store_unavailable`).
+- **Establishing** (`workspace_identity.establish`), under the workspace lock, with AR5a primitives only: anchor the empty family in the new scope, write the file once (a flushed temporary file hard-linked to the final name, never replaced), then anchor it as the family's one record. A crash before the write leaves no identity (the orphaned empty anchor names a random scope nobody holds); a crash after it leaves `pending_anchor`, which denies until a retry completes it; a retry after success is `already_established`. Leftover temporary files are removed under the lock first; a leftover hard link makes the identity `unsafe` until then. Only an **empty** workspace gets an identity (`workspace_not_empty`), and an identity file the witness does not hold is never registered again.
+- **Anchor isolation.** `stop_latch` and `recovery_receipts` (through `durable_append`, `publication_anchors`, STOP/RESUME, execution, recovery and the AR5c receipt binding) are anchored and verified in the identity scope. A latch set in one workspace never stops another on the same witness (tested both ways); STOP and RESUME read and write only their own workspace's latch, in its scope. Two things stay shared on purpose:
+  - `publication_attempts` stays per transaction. A transaction is content-addressed, so two workspaces attempting one transaction meet in one chain: that is the exactly-once guard, not a collision.
+  - `control_history` stays per policy: an owner STOP binds every workspace of the policy. The `budget_ledger` stays per ledger.
+- **Copies and relocation.**
+  - A moved workspace keeps its identity and its scope; the path never mattered.
+  - A copy, or the identity file copied into an empty workspace, is the **same identity**, and an identity has **one exclusive writer at a time** (below). The witness's compare-and-swap lets only one history continue: once either copy advances (a writer claim, an attempt, a receipt, a latch), the other is `local_rolled_back` or `diverged` and never re-anchored. Each case is a test, including the copy publishing first.
+- **One writer per identity** (`workspace_writer`, `workspace_writer_models`; review blocker on PR #1020). A copy has its own workspace lock, and attempts are scoped per transaction, so before this two copies could send two **different** transactions, each with its own reserved ledger and its own remote. Now every send first claims the identity's writer slot at the witness:
+  - a new family, `workspace_writer`, in the identity scope: an append-only chain of `claim` (random `claim_id`, transaction, attempt, time, lease end) and `release` records, anchored empty by `establish` before the identity file is written;
+  - `claim` requires the chain to be exactly the anchored one, the newest claim released or its lease (300 s) over, and time not running backwards; it appends the claim and anchors it through the witness's compare-and-swap. The anchored head is the fencing token: of two copies, one claim is anchored; the other is `anchor_head_moved`, `local_rolled_back` or `diverged`, whatever its transaction or ledger;
+  - right before the send, `require_current` proves the claim is still the anchored head with at least 60 s of lease left; a takeover is only possible after the lease, so a writer taken over never begins a send;
+  - the claim is released after the outcome is recorded, or when a check refuses before the send.
+
+  Writer exclusivity is told apart from, and tested separately from: same-transaction exactly-once (the attempt chain), budget serialization (a reservation per transaction), and remote expected-head protection (authorization's `remote_head` check and the remote's own `expectedHeadOid`).
+
+  Crashes: a claim appended but not anchored is `pending_anchor` and is anchored by the next claim; a claim anchored and never released holds every writer of the identity off until its lease ends, then exactly one claim takes over and the old holder is fenced (`local_rolled_back`); a release the witness missed is completed by the next claim. A removed writer chain is `local_rolled_back`, never restarted. No identity is regenerated.
+  - Another workspace's identity substituted into a workspace compares its chains with the other workspace's anchors, and is refused as soon as they differ.
+- **Legacy (pre-AR5d) workspaces and anchors.**
+
+  | Case | Behavior |
+  |---|---|
+  | Workspace with no identity | denied (`workspace_identity:missing`); nothing is written or anchored |
+  | Establishing on a workspace holding records, a latch or receipts | refused (`workspace_not_empty`); records, latch and legacy anchors untouched; no STOP is reset |
+  | Legacy anchors (scope `workspace`) | readable only through `legacy_verdicts`, read-only; never consulted for authorization |
+  | Legacy anchors copied under an identity scope | `anchor_invalid` (`anchor_foreign`): an anchor names its scope and is never reinterpreted |
+  | Nonempty family under a new identity | `unanchored`; `initialize` refuses existing records, so nothing is silently re-initialized |
+
+  Moving a legacy workspace onto an identity needs an owner-approved migration (AR5d-2). No anchors exist outside tests.
+- **Concurrency** (real processes): four processes establishing one workspace make exactly one identity (the others are refused `corpus_locked: workspace` or confirm it); two workspaces anchoring latches through one witness at once both verify; two processes publishing different transactions from two copies of one identity at once send exactly once, and the other is refused `workspace_writer:<why>`. Lock order is unchanged: workspace, ledger, witness (a leaf). Establishing takes no ledger lock.
+
+Limitations:
+- **A new workspace is a new writer.** An empty workspace with a fresh identity has empty families: a latch set in another workspace does not bind it. Workspace-wide halts belong to the owner's policy-scoped STOP; whether a halt in one workspace should block new identities for the repository is an owner decision (AR5d-2).
+- **The lease is a time bound, not a remote-side fence.** A send that begins with at least 60 s of lease left and outlasts it could overlap a takeover; the simulated remotes cannot check a fencing token. The expected-head check still refuses a second commit on one remote. A production remote and witness are AR7.
+- **The offline witness can be rolled back by whoever holds it** (AR5a). A truncated identity history shows as `pending_anchor`, which denies; `establish` then completes the same identity, never a new one.
+- **Migrating legacy workspaces is AR5d-2**, with the owner.
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 

@@ -10,7 +10,9 @@ else is returned with reasons and no digests, and is never trusted.
   ``publication_attempts`` (one transaction's attempt records),
   ``recovery_receipts`` (the workspace's receipts) and ``stop_latch`` (since
   AR5b, the append-only chain of latch transitions; the AR4b-1 single-file
-  latch is never anchorable);
+  latch is never anchorable); since AR5d-1 also ``workspace_identity``, the
+  workspace's identity record, a chain of exactly one, and ``workspace_writer``,
+  the claims and releases of the identity's one writer;
 - **held by the caller**, given as the exact bytes it holds:
   ``budget_ledger`` (AR1b entries, linked by the digest of the entry before),
   ``control_history`` (owner-signed control records, linked the same way;
@@ -29,7 +31,12 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ValidationError
 
-from lovspor.forarbeider import publication_attempts, publication_receipts
+from lovspor.forarbeider import (
+    publication_attempts,
+    publication_receipts,
+    workspace_identity_models,
+    workspace_writer_models,
+)
 from lovspor.forarbeider.control_plane_anchor_models import Family
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.policy_authorization import SignedRecord
@@ -72,20 +79,39 @@ def _latch(workspace: Path) -> LocalChain:
     return _of([canonical_text(e).encode() for e in events])
 
 
-def workspace_chain(family: Family, workspace: Path, scope: str) -> LocalChain:
-    """The chain of a family the workspace holds; ``scope`` is the transaction for attempts."""
+def _identity(workspace: Path) -> LocalChain:
     try:
-        if family == "publication_attempts":
-            records = publication_attempts.records(workspace, scope)
-            return _of([canonical_text(r).encode() for r in records])
-        if family == "recovery_receipts":
-            receipts = publication_receipts.receipts(workspace)
-            return _of([canonical_text(r).encode() for r in receipts])
+        raw = workspace_identity_models.read_identity(workspace)
     except ForarbeiderRefusedError as error:
-        return _invalid(f"{family}_invalid:{error.detail}")
+        return _invalid(error.detail)
+    return _of([] if raw is None else [raw])
+
+
+def _records(family: Family, workspace: Path, scope: str) -> list[bytes] | None:
+    if family == "publication_attempts":
+        return [canonical_text(r).encode() for r in publication_attempts.records(workspace, scope)]
+    if family == "recovery_receipts":
+        return [canonical_text(r).encode() for r in publication_receipts.receipts(workspace)]
+    if family == "workspace_writer":
+        return [raw for _, raw in workspace_writer_models.chain(workspace)]
+    return None
+
+
+def workspace_chain(family: Family, workspace: Path, scope: str) -> LocalChain:
+    """The chain of a family the workspace holds; ``scope`` is the transaction for attempts.
+
+    The ``workspace_identity`` family is the identity file alone: a chain of
+    one record, or of none when there is no identity (AR5d-1).
+    """
+    if family == "workspace_identity":
+        return _identity(workspace)
     if family == "stop_latch":
         return _latch(workspace)
-    return _invalid("not_a_workspace_family")
+    try:
+        raws = _records(family, workspace, scope)
+    except ForarbeiderRefusedError as error:
+        return _invalid(f"{family}_invalid:{error.detail}")
+    return _invalid("not_a_workspace_family") if raws is None else _of(raws)
 
 
 def _linked(index: int, previous: str | None, sequence: int, link: str | None) -> bool:

@@ -56,6 +56,8 @@ from lovspor.forarbeider.publication_sandbox import SimulatedCrash, SimulatedGit
 from lovspor.forarbeider.release_ledger_models import LedgerEntry
 from lovspor.forarbeider.release_quarantine_models import ExclusionEntry, QuarantineLedger
 from lovspor.forarbeider.version_models import canonical_text
+from lovspor.forarbeider.workspace_identity import establish
+from lovspor.forarbeider.workspace_identity_models import IDENTITY_FILE
 from tests.unit.forarbeider_authorization_support import (
     BOT_NAMESPACES,
     CHECKED_AT,
@@ -94,6 +96,7 @@ class World:
         self.workspace = tmp / "workspace"
         self.workspace.mkdir(mode=0o700)
         self.witness = OfflineAnchorWitness(self.store, KeySigner(WITNESS, self.witness_key))
+        self.scope = establish(self.workspace, REPOSITORY, self.authority(), CHECKED_AT).scope
 
     def authority(self, **changes: Any) -> AnchorAuthority:
         fields: dict[str, Any] = {
@@ -109,11 +112,17 @@ class World:
         return AnchorQuery("publication_attempts", REPOSITORY, TID, chain)
 
     def latch(self) -> AnchorQuery:
-        chain = workspace_chain("stop_latch", self.workspace, "workspace")
-        return AnchorQuery("stop_latch", REPOSITORY, "workspace", chain)
+        chain = workspace_chain("stop_latch", self.workspace, self.scope)
+        return AnchorQuery("stop_latch", REPOSITORY, self.scope, chain)
 
     def anchor_files(self) -> list[Path]:
-        return sorted(p for p in self.store.rglob("*.json") if p.is_file())
+        """The anchors of the families under test; identity and writer (AR5d-1) are apart."""
+        apart = (self.store / "workspace_identity", self.store / "workspace_writer")
+        return sorted(
+            p
+            for p in self.store.rglob("*.json")
+            if p.is_file() and not any(folder in p.parents for folder in apart)
+        )
 
 
 @pytest.fixture
@@ -257,7 +266,7 @@ def test_a_durable_append_refuses_an_unanchored_family_and_writes_nothing(world:
         lambda: durable_append(world.workspace, attempt(1, None), REPOSITORY, world.authority()),
         "unanchored",
     )
-    assert tree(world.workspace) == {}
+    assert tree(world.workspace).keys() == {IDENTITY_FILE}  # the AR5d-1 identity, nothing else
 
 
 # --- truncation, deletion, rollback, substitution -----------------------------------------------

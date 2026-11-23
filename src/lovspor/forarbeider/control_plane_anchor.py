@@ -26,7 +26,10 @@ anchors an independent witness holds
    - one record more: ``pending_anchor`` (a crash after the append, before
      the anchor); more than one: ``unanchored_tail``.
 
-Only ``verified`` is trusted (:func:`verified_state`). :func:`anchor_pending`
+Only ``verified`` is trusted (:func:`verified_state`). Since AR5d-1 the
+workspace families are anchored in the scope of the workspace's own anchored
+identity (:func:`workspace_scope`), so independent workspaces share one
+witness without sharing a chain. :func:`anchor_pending`
 anchors exactly one pending record and nothing else, and
 :func:`durable_append` writes a workspace record and anchors it under the
 workspace lock, so every interruption leaves a state that verification names
@@ -43,12 +46,17 @@ and budget enforcement, which are not in this module.
 """
 
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal, NamedTuple
 
 from pydantic import ValidationError
 
-from lovspor.forarbeider import publication_attempts, publication_receipts
+from lovspor.forarbeider import (
+    publication_attempts,
+    publication_receipts,
+    workspace_identity_models,
+)
 from lovspor.forarbeider.control_plane_anchor_models import (
     FAMILIES,
     ControlPlaneAnchor,
@@ -344,15 +352,45 @@ def verified_state(query: AnchorQuery, authority: AnchorAuthority) -> VerifiedSt
     )
 
 
+# --- the workspace's identity (AR5d-1) ------------------------------------------------------------
+
+
+def workspace_scope(workspace: Path, repository: str, authority: AnchorAuthority) -> str:
+    """The scope of the workspace's families: its identity, once the witness anchored it.
+
+    The identity file must be canonical, for ``repository`` and the
+    publication domain, and exactly the one record the witness anchored as the
+    ``workspace_identity`` family in the scope it names. A caller's claim, a
+    copy of a file the witness never saw, a pending or rolled-back identity
+    and an unreachable witness are all refused; the path plays no part.
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible: workspace_identity:<why>``
+            (``missing``, ``unsafe``, ``unreadable``, ``not_canonical``,
+            ``repository_mismatch`` or any status but ``verified``).
+    """
+    raw = workspace_identity_models.read_identity(workspace)
+    if raw is None:
+        raise workspace_identity_models.refused("missing")
+    workspace_identity_models.parse_identity(raw, repository)
+    scope = workspace_identity_models.scope_of(raw)
+    local = LocalChain((sha256(raw).hexdigest(),), raw, ())  # the bytes just read, once
+    query = AnchorQuery("workspace_identity", repository, scope, local)
+    status = verify(query, authority._replace(workspace=workspace)).status
+    if status != "verified":
+        raise workspace_identity_models.refused(status)
+    return scope
+
+
 # --- durable workspace appends -------------------------------------------------------------------
 
 
-def _family_of(record: Durable) -> tuple[Family, str]:
+def _family_of(record: Durable, scope: str) -> tuple[Family, str]:
     if isinstance(record, AttemptRecord):
         return "publication_attempts", record.transaction_id
     if isinstance(record, RecoveryReceipt):
-        return "recovery_receipts", "workspace"
-    return "stop_latch", "workspace"
+        return "recovery_receipts", scope
+    return "stop_latch", scope
 
 
 def _write(workspace: Path, record: Durable) -> None:
@@ -369,15 +407,22 @@ def durable_append(
 ) -> DurableOutcome:
     """Append ``record`` to its workspace family and anchor it, under the workspace lock.
 
+    Since AR5d-1 the workspace must hold an anchored identity
+    (:func:`workspace_scope`); the latch and the receipts are anchored in its
+    scope. Attempts stay per transaction: a transaction is content-addressed,
+    so two workspaces attempting one transaction meet in one chain, which is
+    the exactly-once guard rather than a collision.
+
     Raises:
         ForarbeiderRefusedError: ``corpus_locked: workspace``; ``release_not_eligible:
-            anchor:<status>`` unless the family verifies (or holds exactly this
-            record pending); ``record_not_appended``; the witness's refusals.
+            workspace_identity:<why>``; ``anchor:<status>`` unless the family
+            verifies (or holds exactly this record pending); ``record_not_appended``;
+            the witness's refusals.
     """
-    family, scope = _family_of(record)
     raw = canonical_text(record).encode()
     held = authority._replace(workspace=workspace)
     with publication_attempts.workspace_lock(workspace):
+        family, scope = _family_of(record, workspace_scope(workspace, repository, held))
         query = AnchorQuery(family, repository, scope, workspace_chain(family, workspace, scope))
         verdict = verify(query, held)
         if verdict.status == "verified" and query.local.last == raw:

@@ -71,6 +71,7 @@ from lovspor.forarbeider.control_plane_anchor import (
     AnchorVerdict,
     anchor_pending,
     verify,
+    workspace_scope,
 )
 from lovspor.forarbeider.control_plane_chains import LocalChain, ledger_chain
 from lovspor.forarbeider.control_plane_witness import AnchorWitness
@@ -369,9 +370,14 @@ def _anchored_receipts(request: "ExecutionRequest") -> list[tuple["RecoveryRecei
         chain = publication_receipts.chain(request.workspace)
     except ForarbeiderRefusedError as error:
         return f"recovery_receipts_invalid:{error.detail}"
+    repository = request.inputs.settings.repository
+    try:
+        scope = workspace_scope(request.workspace, repository, authority)
+    except ForarbeiderRefusedError as error:
+        return error.detail
     raws = [raw for _, raw in chain]
     local = LocalChain(tuple(sha256(r).hexdigest() for r in raws), raws[-1] if raws else None, ())
-    found = AnchorQuery("recovery_receipts", request.inputs.settings.repository, "workspace", local)
+    found = AnchorQuery("recovery_receipts", repository, scope, local)
     status = verify(found, authority).status
     return chain if status == "verified" else f"anchor:recovery_receipts:{status}"
 

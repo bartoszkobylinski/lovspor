@@ -17,8 +17,12 @@ immediately before sending; a caller cannot hand it a decision:
    check time; re-reads, under the lock, the STOP state the evidence was
    issued against (latch, latch transitions, owner control records, the
    witness), so sealed evidence never outlives a later STOP (AR5b);
-   records ``prepared_to_send`` durably **before** the mutation;
-   sends once; and records ``published``, ``refused`` or ``outcome_unknown``.
+   claims the workspace identity's one writer slot at the witness (AR5d-1,
+   :mod:`~lovspor.forarbeider.workspace_writer`), so a copy of the workspace
+   never sends as a second writer; records ``prepared_to_send`` durably
+   **before** the mutation; proves the claim still current; sends once;
+   records ``published``, ``refused`` or ``outcome_unknown``; and releases
+   the claim.
 
 **Production is disabled.** :class:`Production` carries no transport, no
 remote and no signer: its authorization is always denied (every AR5-AR7 check
@@ -55,6 +59,7 @@ from lovspor.forarbeider import (
     publication_receipts,
     publication_sandbox,
     publication_stage,
+    workspace_writer,
 )
 from lovspor.forarbeider.control_plane_anchor import AnchorAuthority, verify
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
@@ -77,6 +82,7 @@ from lovspor.forarbeider.publication_sandbox import DisposableRemote, SimulatedG
 from lovspor.forarbeider.release_control import ControlRequest, verify_control
 from lovspor.forarbeider.release_provenance import authentic
 from lovspor.forarbeider.version_models import canonical_text
+from lovspor.forarbeider.workspace_writer_models import WriterEvent
 
 Status = Literal[
     "published", "unchanged", "denied", "refused", "outcome_unknown", "recovery_required"
@@ -185,7 +191,7 @@ def _set_latch(request: ExecutionRequest, reasons: tuple[str, ...], at: datetime
     """Set the latch at once, whatever the witness says; then anchor it when it can."""
     tid = request.inputs.transaction.transaction_id
     publication_attempts.latch(request.workspace, reasons, at, tid)
-    publication_anchors.settle(request, "stop_latch", "workspace")
+    publication_anchors.settle(request, "stop_latch")
 
 
 def _settled(request: ExecutionRequest) -> ExecutionOutcome | None:
@@ -400,6 +406,26 @@ def _publish(
         raise _not_eligible("production_execution_disabled")
     _still_current(evidence, request, now)
     _sandboxed(environment, evidence.path)
+    claim = workspace_writer.claim(request, step.attempt_id, now)
+    try:
+        _prepared(evidence, request, environment, (step, claim, now))
+    except ForarbeiderRefusedError:
+        workspace_writer.release(request, claim, environment.clock())
+        raise
+    sent = _send(request, environment, evidence)
+    outcome = _after(request, environment, evidence, sent)
+    workspace_writer.release(request, claim, environment.clock())
+    return outcome
+
+
+def _prepared(
+    evidence: AuthorizationEvidence,
+    request: ExecutionRequest,
+    environment: Simulation,
+    held: tuple[_Step, WriterEvent, datetime],
+) -> None:
+    """Record ``prepared_to_send``, then prove the attempt, the latch and the writer claim hold."""
+    step, claim, now = held
     digest = evidence_digest(evidence)
     before = {"authorization_sha256": digest, "commit": evidence.local_commit, "recorded_at": now}
     _record(request, step, "prepared_to_send", before)
@@ -407,8 +433,7 @@ def _publish(
         raise _not_eligible("anchor:publication_attempts_unanchored")
     if publication_attempts.latched(request.workspace):
         raise _not_eligible("stop_latch_set")
-    sent = _send(request, environment, evidence)
-    return _after(request, environment, evidence, sent)
+    workspace_writer.require_current(request, claim, environment.clock())
 
 
 def _still_current(

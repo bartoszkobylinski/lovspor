@@ -7,7 +7,8 @@ verifies, against the independent witness (AR5a), three families:
   the caller offers must be exactly the anchored ones. A withheld newest STOP
   is ``local_rolled_back``; another history is ``diverged``;
 - ``stop_latch``: the workspace's latch transitions, so a deleted latch is not
-  a cleared one;
+  a cleared one; since AR5d-1 anchored in the scope of the workspace's own
+  anchored identity, and denied (``workspace_identity:<why>``) without one;
 - ``publication_attempts`` for the transaction.
 
 Anything but ``verified`` (missing, stale, rolled back, divergent, unavailable,
@@ -35,6 +36,7 @@ from lovspor.forarbeider.control_plane_anchor import (
     AnchorVerdict,
     anchor_pending,
     verify,
+    workspace_scope,
 )
 from lovspor.forarbeider.control_plane_anchor_models import Family
 from lovspor.forarbeider.control_plane_chains import control_chain, workspace_chain
@@ -68,6 +70,19 @@ def control_query(
     return AnchorQuery("control_history", inputs.settings.repository, policy_id, chain)
 
 
+def scope_of(request: "ExecutionRequest") -> str:
+    """The request workspace's verified identity scope (AR5d-1).
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible``: ``anchor_authority_missing``
+            or ``workspace_identity:<why>``.
+    """
+    authority = authority_of(request)
+    if authority is None:
+        raise _refused("anchor_authority_missing")
+    return workspace_scope(request.workspace, request.inputs.settings.repository, authority)
+
+
 def workspace_query(
     inputs: "AuthorizationInputs", workspace: Path, family: Family, scope: str
 ) -> AnchorQuery:
@@ -88,13 +103,18 @@ def anchor_reasons(
         return ("anchor_policy_unknown",)
     held = authority._replace(workspace=workspace)
     tid = inputs.transaction.transaction_id
-    queries = (
+    queries = [
         control_query(inputs, policy_id),
-        workspace_query(inputs, workspace, "stop_latch", "workspace"),
         workspace_query(inputs, workspace, "publication_attempts", tid),
-    )
+    ]
+    identity: tuple[str, ...] = ()
+    try:
+        scope = workspace_scope(workspace, inputs.settings.repository, held)
+        queries.insert(1, workspace_query(inputs, workspace, "stop_latch", scope))
+    except ForarbeiderRefusedError as error:
+        identity = (error.detail,)
     found = ((query.family, verify(query, held).status) for query in queries)
-    return tuple(f"{family}:{status}" for family, status in found if status != "verified")
+    return identity + tuple(f"{f}:{status}" for f, status in found if status != "verified")
 
 
 def _owner_chain_intact(request: "ExecutionRequest", policy_id: str, now: datetime) -> bool:
@@ -127,11 +147,22 @@ def sync_control(request: "ExecutionRequest", policy_id: str, now: datetime) -> 
     return verify(full, authority)
 
 
-def settle(request: "ExecutionRequest", family: Family, scope: str) -> AnchorVerdict | None:
-    """Anchor the record an append just wrote; ``None`` when that cannot be done now."""
+def settle(
+    request: "ExecutionRequest", family: Family, scope: str | None = None
+) -> AnchorVerdict | None:
+    """Anchor the record an append just wrote; ``None`` when that cannot be done now.
+
+    Without ``scope`` the family is a workspace family, anchored in the
+    workspace's verified identity scope; an unverified identity anchors nothing.
+    """
     authority = authority_of(request)
     if authority is None:
         return None
+    if scope is None:
+        try:
+            scope = scope_of(request)
+        except ForarbeiderRefusedError:
+            return None
     query = workspace_query(request.inputs, request.workspace, family, scope)
     try:
         return anchor_pending(query, authority)

@@ -4,7 +4,8 @@ An anchor is a statement, signed by an **anchor witness** outside the runner,
 that one record family in one scope had a given canonical head:
 
 - the family and the schema of its records; the repository and the scope (a
-  transaction, a policy, a ledger or the whole workspace);
+  transaction, a policy, a ledger or the whole workspace, which since AR5d-1
+  is ``workspace:<digest of the workspace's anchored identity>``);
 - the digest of the chain head, the number of records and the last sequence;
 - the anchor's own place in the witness's chain: its sequence and the digest
   of the anchor before it;
@@ -32,6 +33,8 @@ Family = Literal[
     "budget_ledger",
     "control_history",
     "quarantine_ledger",
+    "workspace_identity",
+    "workspace_writer",
 ]
 ScopeKind = Literal["transaction", "workspace", "ledger", "policy"]
 
@@ -43,6 +46,8 @@ FAMILIES: Final[dict[Family, tuple[str, ScopeKind]]] = {
     "budget_ledger": ("forarbeider_budget_ledger_entry/1", "ledger"),
     "control_history": ("forarbeider_release_control/1", "policy"),
     "quarantine_ledger": ("quarantine/1", "ledger"),
+    "workspace_identity": ("forarbeider_workspace_identity/1", "workspace"),
+    "workspace_writer": ("forarbeider_workspace_writer_event/1", "workspace"),
 }
 
 Status = Literal[

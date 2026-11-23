@@ -19,9 +19,12 @@ from lovspor.forarbeider.control_plane_anchor import (
     AnchorQuery,
     anchor_pending,
     initialize,
+    verify,
+    workspace_scope,
 )
 from lovspor.forarbeider.control_plane_chains import control_chain, ledger_chain, workspace_chain
 from lovspor.forarbeider.control_plane_witness import OfflineAnchorWitness
+from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.policy_authorization import SignedRecord
 from lovspor.forarbeider.policy_trust import (
     ANCHOR_NAMESPACE,
@@ -33,7 +36,12 @@ from lovspor.forarbeider.policy_trust import (
     TrustRoot,
 )
 from lovspor.forarbeider.publication_authorize import AuthorizationInputs
-from lovspor.forarbeider.publication_execute import ExecutionRequest
+from lovspor.forarbeider.publication_execute import (
+    ExecutionOutcome,
+    ExecutionRequest,
+    Simulation,
+    execute,
+)
 from lovspor.forarbeider.publication_execution_models import AppIdentity, PublicationSettings
 from lovspor.forarbeider.publication_ledger import BudgetLedger
 from lovspor.forarbeider.publication_models import PublicationTransaction
@@ -45,6 +53,8 @@ from lovspor.forarbeider.release_ledger_models import LedgerOperation
 from lovspor.forarbeider.release_limits import LimitsMaterial, LimitsRequest, verify_limits
 from lovspor.forarbeider.release_plan import build_plan
 from lovspor.forarbeider.release_provenance import issue_provenance
+from lovspor.forarbeider.workspace_identity import establish
+from lovspor.forarbeider.workspace_writer_models import LEASE
 from tests.unit.forarbeider_authorization_support import (
     BOT_NAMESPACES,
     Key,
@@ -207,12 +217,17 @@ def settings_for(path: str, **changes: Any) -> PublicationSettings:
     return PublicationSettings(**(fields | changes))
 
 
-def make_rig(tmp: Path, path: str = "A", share: "Rig | None" = None) -> Rig:
+def make_rig(
+    tmp: Path, path: str = "A", share: "Rig | None" = None, one_witness: bool = False
+) -> Rig:
     """A rig; with ``share``, another workspace and transaction on ``share``'s keys and ledger.
 
     The shared rig has its own workspace, its own witness store for its
     workspace families and its own documents (3 and 4), so its transaction is
-    another; its ledger is ``share``'s, anchored by ``share``'s witness.
+    another; its ledger is ``share``'s, anchored by ``share``'s witness. With
+    ``one_witness`` it also uses ``share``'s witness store for its workspace
+    families (AR5d-1, #1013), and the policy's control history, which ``share``
+    already anchored there, is not anchored again.
     """
     tmp.mkdir(mode=0o700, exist_ok=True)
     keys = tmp / "keys"
@@ -287,7 +302,11 @@ def make_rig(tmp: Path, path: str = "A", share: "Rig | None" = None) -> Rig:
     workspace.mkdir(mode=0o700)
     witness_dir = tmp / "witness"
     witness_dir.mkdir(mode=0o700)
-    witness = OfflineAnchorWitness(witness_dir, KeySigner(WITNESS, witness_key))
+    witness = (
+        share.witness
+        if share is not None and one_witness
+        else OfflineAnchorWitness(witness_dir, KeySigner(WITNESS, witness_key))
+    )
     rig = Rig(
         tmp,
         owner,
@@ -309,7 +328,7 @@ def make_rig(tmp: Path, path: str = "A", share: "Rig | None" = None) -> Rig:
         if share is None
         else BudgetLedger(share.ledger.root, share.ledger.ledger_id, share.witness),
     )
-    anchor_rig(rig, seed=share is None)
+    anchor_rig(rig, seed=share is None, control=not (share is not None and one_witness))
     return rig
 
 
@@ -319,12 +338,13 @@ def anchor_queries(rig: "Rig", workspace: Path | None = None) -> dict[str, Ancho
     tid = rig.transaction.transaction_id
     policy_id = policy_id_of(rig)
     repository = rig.inputs.settings.repository
+    scope = workspace_scope(held, repository, rig.anchoring(workspace=held))
     return {
         "control_history": AnchorQuery(
             "control_history", repository, policy_id, control_chain(rig.inputs.control, policy_id)
         ),
         "stop_latch": AnchorQuery(
-            "stop_latch", repository, "workspace", workspace_chain("stop_latch", held, "workspace")
+            "stop_latch", repository, scope, workspace_chain("stop_latch", held, scope)
         ),
         "publication_attempts": AnchorQuery(
             "publication_attempts",
@@ -335,8 +355,8 @@ def anchor_queries(rig: "Rig", workspace: Path | None = None) -> dict[str, Ancho
         "recovery_receipts": AnchorQuery(
             "recovery_receipts",
             repository,
-            "workspace",
-            workspace_chain("recovery_receipts", held, "workspace"),
+            scope,
+            workspace_chain("recovery_receipts", held, scope),
         ),
     }
 
@@ -347,15 +367,20 @@ def policy_id_of(rig: "Rig") -> str:
     return plan.basis.policy.policy_id
 
 
-def anchor_rig(rig: "Rig", seed: bool = True) -> None:
-    """Test setup: anchor the rig's empty families and its owner control records (AR5a)."""
+def anchor_rig(rig: "Rig", seed: bool = True, control: bool = True) -> None:
+    """Test setup: the workspace's identity (AR5d-1), then its empty families and the
+    owner control records anchored (AR5a)."""
     authority = rig.anchoring()
+    repository = rig.inputs.settings.repository
+    assert establish(rig.workspace, repository, authority, NOW).status == "established"
     queries = anchor_queries(rig)
     for name in ("stop_latch", "publication_attempts", "recovery_receipts"):
         assert initialize(queries[name], authority).status == "verified"
+    if not control:
+        assert verify(queries["control_history"], authority).status == "verified"
+        return
     control = queries["control_history"]
     policy_id = policy_id_of(rig)
-    repository = rig.inputs.settings.repository
     empty = AnchorQuery("control_history", repository, policy_id, control_chain((), policy_id))
     assert initialize(empty, authority).status == "verified"
     for count in range(1, len(rig.inputs.control) + 1):
@@ -412,3 +437,20 @@ def seeded_ledger(rig: "Rig", name: str, entries: tuple[bytes, ...] = ()) -> Bud
     other = replace(rig, ledger=BudgetLedger(rig.tmp / name, f"{LEDGER_ID}-{name}"))
     seed_ledger(other, entries)
     return other.ledger
+
+
+def retried_after_the_crashed_claim(
+    request: ExecutionRequest, simulation: Simulation
+) -> ExecutionOutcome:
+    """AR5d-1: a crash left the writer claim anchored and unreleased.
+
+    It holds every writer of the identity off, this workspace's next run too,
+    until its lease ends (``workspace_writer:claim_held``); then the retry runs.
+    """
+    try:
+        execute(request, simulation)
+    except ForarbeiderRefusedError as error:
+        assert error.detail == "workspace_writer:claim_held", error.detail
+    else:
+        raise AssertionError("the crashed claim did not hold the retry off")
+    return execute(request, simulation._replace(clock=lambda: NOW + LEASE))
