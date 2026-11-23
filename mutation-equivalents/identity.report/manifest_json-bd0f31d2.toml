@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/identity/report.py"
+symbol = "manifest_json"
+registered = "2026-11-23, from register key 1c5f3d5ca5f5e313 (GREEN under scripts/ci/mutant_check.py try with the PR #1021 tests)"
+mutation = '''
+-    return json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
++    return json.dumps(data, sort_keys=True, indent=2, ensure_ascii=None) + "\n"
+'''
+justification = """
+`json.dumps` passes `ensure_ascii` to `JSONEncoder`, which only tests its
+truth value (`if self.ensure_ascii:` picks the ASCII-escaping encoder, else
+the plain one; the C fast path is taken only when it is true). None is
+falsy, so `ensure_ascii=None` writes exactly what `ensure_ascii=False`
+writes, non-ASCII characters unescaped, for every input. Python's own
+standard library, no dependency.
+"""
