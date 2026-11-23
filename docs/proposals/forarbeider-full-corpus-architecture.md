@@ -1053,7 +1053,7 @@ Limitations:
 - **Withdrawal after a halt, adopting pre-existing unanchored records, and quarantine successors remain open.**
 - **A withheld settlement is resolved by the owner** (AR5b RESUME does not settle it); its reservation keeps counting against the day.
 - **Settlement under revoked owner limits is refused**: the publication stays unsettled and spending stays blocked until the owner signs limits again.
-- **One open reservation per ledger serializes publication**: reserve, publish, settle, then the next batch. An abandoned reservation (reserved, never sent) blocks the ledger until it is cancelled; an owner-authorized cancel is not implemented here.
+- **One open reservation per ledger serializes publication**: reserve, publish, settle, then the next batch. An abandoned reservation (reserved, never sent) blocks the ledger until it is cancelled; an owner-authorized cancel is not implemented here (AR5d-3 adds it, below).
 - **Workspace families shared one scope per witness** (`stop_latch` and `recovery_receipts` were scoped `workspace`, #1013): workspaces could not share a witness store for them. It failed closed (a collision is a rollback or divergence), and a shared ledger therefore names its own witness. AR5d-1 removes the collision (below); the ledger's own witness stays valid.
 
 **AR5d-1 status.** AR5d-1 gives each publication workspace an anchored identity and anchors the workspace families in its scope, so independent workspaces can share one witness store (#1013). Simulation only. Production stays denied; AR5c's ledger, settlement and reservation rules are unchanged.
@@ -1147,6 +1147,87 @@ Owner decisions left open:
 - whether to bind workspace records to their identity (a new receipt and latch schema), so that even legacy records the witness never anchored can be refused;
 - what to do if a real legacy workspace is ever found: it stays denied until then;
 - a repository-level halt for new identities (from AR5d-1).
+
+**AR5d-3 status.** AR5d-3 lets the owner cancel an abandoned reservation, only on proof that nothing was ever sent, and keeps every withheld settlement withheld. Simulation only; production stays denied. Routine settlement stays automatic (AR4b-2 recovery, AR5c): nothing here asks the owner about a normal publication.
+
+- **One reservation's states** (the ledger and the transaction's anchored attempts together):
+
+  | From | Event | To | Who |
+  |---|---|---|---|
+  | none | `reserve` | open, never sent | automatic |
+  | open, never sent | `prepared_to_send` anchored (under the workspace and ledger locks) | open, sent | automatic |
+  | open, never sent | owner instruction and the proof below | **cancelled** | owner, AR5d-3 |
+  | open, sent | recovery: `published_authorized` | settled | automatic (AR5c) |
+  | open, sent | recovery: `not_published` | open, sent; a retried send is safe (the remote's expected head refuses a duplicate) | automatic |
+  | open, sent | recovery: authorization unknown, integrity failed, revoked limits, receipt conflict | open, withheld; the latch is set | automatic halt |
+  | open, withheld | an owner decision | not implemented: design below | owner |
+  | cancelled, settled | anything | terminal; never reserved again (AR1b) | — |
+
+  **"Open, sent" never becomes "cancelled".** After a send begins, an unchanged remote proves nothing: the request may still be in flight, its response may be lost, or its process may have died after the mutation. A timeout, a lapsed lease or a missing answer is never evidence of nonpublication. Such a reservation is resolved by recovery, and a retried send if need be.
+- **Trust boundaries.**
+  - Trusted: the owner key (control namespace, owner role, trust root) and the witness (AR5a).
+  - Verified here, never trusted: everything the caller passes, every workspace record (attempts, receipts, writer claims, identity), the ledger and the remote.
+  - Outside the proof: a sender that anchors its attempts on a witness other than the ledger's (below).
+- **The proof** (`publication_cancel.cancel_reservation`), all read under the workspace lock, then the ledger lock, then the witness (a leaf), and held until the last write:
+  1. the workspace identity is the anchored one (AR5d-1);
+  2. the instruction verifies (below) and binds this repository, ledger, transaction, batch, path, base and identity scope;
+  3. the ledger's witness is the workspace's (same store), so every send of this ledger anchors its `prepared_to_send` where it is checked. Otherwise: `cancel:ledger_witness_not_workspace_witness`;
+  4. the transaction's attempts verify against that witness and hold no `prepared_to_send`, `outcome_unknown` or `published` (`cancel:send_initiated:<state>`); their head is the one the owner signed. A copied workspace, or another workspace on the witness that began a send, is `local_rolled_back` or `diverged` there;
+  5. no receipt for the transaction is in the anchored receipt chain (`cancel:receipt_on_record`);
+  6. no writer of the identity can be live: the writer chain verifies, and its newest claim is released or lapsed (`cancel:workspace_writer:claim_held`). The lapse only shows that the writer can no longer begin a send; step 4 shows that none began;
+  7. the ledger verifies against its witness; its head and the reservation's bytes are the ones the owner signed; the reservation is open and names this batch (`instruction_stale:ledger_head`, `instruction_reservation_mismatch`, `reservation_not_open`);
+  8. the remote `main` is the base, read before and after the walk (`cancel:remote_advanced`, `cancel:remote:<why>`).
+- **Writes.**
+  1. A `refused` attempt record carrying `reservation_cancelled_by_owner` and the instruction's digest, anchored for the transaction. It is the durable decision and a fence: `execute` returns `refused`, and `publish_authorized` refuses (`reservation_cancelled`), without sending.
+  2. The AR1b `cancel` entry, appended and anchored through the ledger's own write path.
+
+  `publication_ledger.record` now refuses a `cancel` (`ledger:cancel_needs_owner_instruction`). The cancellation clears no latch and no STOP, settles nothing and permits no publication.
+- **Owner instruction** (`ReservationCancellation`, namespace `lovspor-forarbeider-control`, its own record type and domain):
+  - Binds: the operation (`cancel_abandoned_reservation`), repository, ledger id, transaction, batch, path, base commit, the reservation entry's SHA-256, the ledger head's SHA-256, the attempts head's SHA-256 (or none), the identity scope, a reason, an instruction id, the signer, `signed_at` and `valid_until` (at most 24 hours later). There is no wildcard.
+  - Refused: an unlisted key, a bot key (it cannot hold the namespace), another namespace, a STOP or other record offered in its place, expired, signed after the check time, valid for more than a day, or bound to anything else.
+  - Stale: evidence that changed after signing (ledger head, attempts head).
+  - Replay: the same instruction completes or finds its own cancellation (`already_cancelled`). Another instruction for a cancelled reservation is refused. An instruction cannot apply elsewhere: it binds one reservation, and a cancelled release is never reserved again.
+- **Races.**
+  - Send against cancellation, in-process and across processes, from this workspace or from another on the same witness and ledger: both hold the workspace lock (same workspace) or the ledger lock (shared ledger) from their first check to their last write. The second is refused (`corpus_locked`); then it finds the first one's records (a cancellation fences the send; a begun send refuses the cancellation).
+  - Sealed evidence issued before a cancellation never sends (the fence, then AR5c's reservation recheck).
+  - Copied identities: step 4 above, and AR5d-1 writer fencing.
+  - **Remote mutation between the check and the cancel entry.** Only a send of this transaction could publish it. Every send anchors `prepared_to_send` first, under the ledger lock this cancellation holds, and step 4 proved that none exists. So no request for it exists anywhere, and none can start once the reservation is cancelled. A foreign commit in that interval is not this transaction's: the next recovery halts on it. No atomic remote read is needed, because no sender exists.
+- **Crash matrix** (each a test, both paths). In every case nothing is sent before the retry, the retry ends `cancelled` or `already_cancelled`, and there is exactly one decision record and one anchored `cancel` entry.
+
+  | Crash point | State left | Retry |
+  |---|---|---|
+  | during the remote verification | nothing written | proves again, cancels |
+  | after the decision record, before its anchor | attempts `pending_anchor`; a send is denied | completes the anchor, cancels |
+  | after the anchor, before the ledger entry | the reservation is still open, and the fence stops every send | appends the entry |
+  | after the ledger entry, before its anchor | ledger `pending_anchor` | completes it (the same operation) |
+  | after the anchor, before the acknowledgement | done | `already_cancelled` |
+
+- **Withheld settlement: unchanged, and never cancelled.** A transaction that was published, or whose outcome is unknown, is refused by step 4 or 5. Its reservation stays open, so it keeps counting against the day, and the latch keeps the workspace stopped:
+  - `published_authorization_unknown`;
+  - an integrity failure;
+  - revoked owner limits (nothing can be appended under unverified limits, a cancel included);
+  - a conflicting receipt;
+  - an unknown remote outcome.
+
+  The four facts stay apart:
+  - A, what happened remotely: the receipt;
+  - B, whether it was authorized: the receipt's classification, never rewritten;
+  - C, budget: the open reservation;
+  - D, further publication: the latch and STOP.
+
+  No owner signature relabels B.
+- **Why exceptional accounting is a design, not code.** Closing a withheld reservation means recording budget consumed by a publication that was not proved authorized. The v1 ledger can say this only as a `commit`, which `verify_ledger` reads as a routine settlement (`settled`). A reader of the ledger alone could not tell an owner exception from a verified, authorized publication. The entry also cannot name the owner instruction: every field is in the canonical bytes, so adding one changes every entry. Revoked limits are worse: each entry binds the limits' digest, so new limits make the whole ledger fail replay (`ledger_limits_mismatch`). **Bounded proposal (ledger schema v2, owner decision):**
+  - a `consume` operation, distinct from `commit`, naming the receipt's digest, its classification as recorded, the owner instruction's digest and the basis `owner_exception`. It closes the reservation at the batch's exact usage, and `verify_ledger` reports it apart from settled usage;
+  - an owner instruction `account_withheld`, bound like the cancellation to one receipt and one reservation, which neither relabels authorization nor clears a latch;
+  - RESUME unchanged: an unknown or unauthorized receipt still blocks it until a separate owner decision (acknowledge, or withdraw forward-only);
+  - ledger succession under new limits: a new ledger whose first entry names the predecessor's head and carries its open reservations over;
+  - a ledger-visible send intent, so that step 3 can be lifted. A `send_intent` entry appended before `prepared_to_send`, or the attempts anchored on the ledger's witness too, would make every begun send of a shared ledger visible wherever it is cancelled.
+
+Limitations and remaining blockers:
+- **A sender on another witness is outside the proof.** AR5c allows a workspace to verify a shared ledger against the ledger's witness while anchoring its attempts on its own. The reservation does not name its sender, so a cancellation made where the ledger's witness is the workspace's cannot see such a sender's `prepared_to_send`. Step 3 refuses the cancellation from such a workspace. A cancellation from a workspace that shares the ledger's witness still trusts that no workspace with another witness sends against that ledger, and the owner must confirm this before signing. If such a publication lands after a cancellation anyway, recovery classifies it (no attempt record, so its authorization is unknown), never settles it against the cancelled reservation, and sets the latch (tested). Closing this needs the send intent above.
+- Withheld settlements, revoked limits and ledger succession stay blocked until the owner decides on the v2 design.
+- The decision record lives in the canceller's workspace. The ledger's `cancel` entry does not name the instruction (v1 schema).
+- Not in this PR: a global halt, owner cancellation of a sent reservation, quarantine successors, AR6 and AR7.
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 

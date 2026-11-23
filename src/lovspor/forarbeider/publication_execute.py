@@ -70,6 +70,7 @@ from lovspor.forarbeider.publication_authorize import (
     AuthorizationInputs,
     authorize,
 )
+from lovspor.forarbeider.publication_cancel_models import CANCELLED
 from lovspor.forarbeider.publication_execution_models import (
     FRESH_SECONDS,
     AttemptRecord,
@@ -194,6 +195,21 @@ def _set_latch(request: ExecutionRequest, reasons: tuple[str, ...], at: datetime
     publication_anchors.settle(request, "stop_latch")
 
 
+def _cancelled(request: ExecutionRequest) -> AttemptRecord | None:
+    """AR5d-3: the owner's cancellation of this transaction, once on record; it never sends."""
+    tid = request.inputs.transaction.transaction_id
+    found = [
+        r for r in publication_attempts.records(request.workspace, tid) if CANCELLED in r.reasons
+    ]
+    return found[-1] if found else None
+
+
+def _fenced(request: ExecutionRequest) -> ExecutionOutcome | None:
+    """AR5d-3: ``refused``, nothing sent, once the owner cancelled the reservation."""
+    cancelled = _cancelled(request)
+    return None if cancelled is None else ExecutionOutcome("refused", None, None, None, cancelled)
+
+
 def _settled(request: ExecutionRequest) -> ExecutionOutcome | None:
     tid = request.inputs.transaction.transaction_id
     found = publication_attempts.records(request.workspace, tid)
@@ -298,7 +314,7 @@ def execute(request: ExecutionRequest, environment: Environment) -> ExecutionOut
             a simulation without the adapter its path needs.
     """
     with publication_attempts.workspace_lock(request.workspace), _ledger_held(request):
-        settled = _settled(request)
+        settled = _fenced(request) or _settled(request)
         if settled is not None:
             return settled
         step = _step(request)
@@ -402,6 +418,8 @@ def _publish(
     evidence: AuthorizationEvidence, request: ExecutionRequest, environment: Environment
 ) -> ExecutionOutcome:
     """:func:`publish_authorized` under the workspace lock its caller holds."""
+    if _cancelled(request) is not None:
+        raise _not_eligible("reservation_cancelled")
     step = _step(request)
     now = _require_authorized(evidence, request, environment, step)
     if not isinstance(environment, Simulation):  # _require_authorized proved it is

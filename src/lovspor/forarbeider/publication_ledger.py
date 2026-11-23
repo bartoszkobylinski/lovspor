@@ -302,13 +302,19 @@ def record(
     """Append ``operation`` to the verified ledger and anchor it; idempotent for an exact retry.
 
     ``anchoring`` is the witness and the repository the ledger is anchored for.
+    A ``cancel`` is never recorded here (AR5d-3): only
+    :func:`~lovspor.forarbeider.publication_cancel.cancel_reservation` cancels,
+    on the owner's instruction and proof that nothing was sent.
 
     Raises:
         ForarbeiderRefusedError: ``corpus_locked: ledger``; ``release_not_eligible``
             with ``anchor:budget_ledger:<status>``, ``ledger:<reasons>`` (a conflict,
             a cap, unverified limits, ``ledger_conflicting_settlement``) or
-            ``record_not_appended``; the witness's refusals.
+            ``record_not_appended``; ``ledger:cancel_needs_owner_instruction``;
+            the witness's refusals.
     """
+    if operation.operation == "cancel":
+        raise _refused("ledger:cancel_needs_owner_instruction")
     authority = ledger_authority(ledger, anchoring[0])
     with ledger_lock(ledger):
         return _record(ledger, operation, limits, (authority, anchoring[1]))
@@ -361,7 +367,7 @@ def reserve(request: "ExecutionRequest", at: datetime) -> LedgerOutcome:
     return record(ledger, operation, _limits(request, at), (authority, repository))
 
 
-def _anchored_receipts(request: "ExecutionRequest") -> list[tuple["RecoveryReceipt", bytes]] | str:
+def anchored_receipts(request: "ExecutionRequest") -> list[tuple["RecoveryReceipt", bytes]] | str:
     """The workspace's whole receipt chain, as read once, proved to be the witnessed one."""
     authority = publication_anchors.authority_of(request)
     if authority is None:
@@ -403,7 +409,7 @@ def _proved(request: "ExecutionRequest", receipt: "RecoveryReceipt") -> "Recover
     The chain's receipt, never the caller's object, is what is settled; it must
     be the transaction's only published receipt.
     """
-    chain = _anchored_receipts(request)
+    chain = anchored_receipts(request)
     if isinstance(chain, str):
         return chain
     wanted = canonical_text(receipt).encode()

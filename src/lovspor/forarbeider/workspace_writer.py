@@ -131,6 +131,25 @@ def claim(request: "ExecutionRequest", attempt_id: str, now: datetime) -> Writer
     return event
 
 
+def require_idle(request: "ExecutionRequest", now: datetime) -> None:
+    """AR5d-3: no writer of the identity can be live at ``now``.
+
+    The chain must be exactly the anchored one (a pending record is not
+    completed here), and its newest claim released or its lease over. A
+    lapsed lease shows only that its writer can no longer begin a send; it
+    never shows that nothing was sent (the attempt records do).
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible``: ``workspace_identity:<why>``;
+            ``workspace_writer:`` ``<status>``, ``clock_regressed`` or ``claim_held``.
+    """
+    authority, scope = _held(request)
+    status = verify(_query(request, scope), authority).status
+    if status != "verified":
+        raise _refused(status)
+    _free(workspace_writer_models.head(request.workspace)[2], now)
+
+
 def require_current(request: "ExecutionRequest", held: WriterEvent, now: datetime) -> None:
     """Right before the send: ``held`` is still the anchored head, with lease enough to send.
 

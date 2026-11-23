@@ -14,6 +14,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from lovspor.forarbeider import publication_ledger
 from lovspor.forarbeider.control_plane_anchor import (
     AnchorAuthority,
     AnchorQuery,
@@ -442,6 +443,24 @@ def seed_ledger(rig: "Rig", entries: tuple[bytes, ...]) -> None:
     for raw in entries:
         write_entry(rig, raw)
         assert anchor_pending(ledger_query(rig), authority).status == "verified"
+
+
+def record_cancel(
+    ledger: BudgetLedger,
+    operation: LedgerOperation,
+    limits: LimitsEvidence,
+    anchoring: tuple[AnchorAuthority, str],
+) -> publication_ledger.LedgerOutcome:
+    """Test setup: an AR1b ``cancel`` through the ledger's own locked write path.
+
+    AR5d-3: the public :func:`~lovspor.forarbeider.publication_ledger.record`
+    refuses a cancel; only ``publication_cancel.cancel_reservation`` records one,
+    after its proof, through this same path. The AR5c tests of a cancel's timing
+    against a send write it here.
+    """
+    authority = publication_ledger.ledger_authority(ledger, anchoring[0])
+    with publication_ledger.ledger_lock(ledger):
+        return publication_ledger._record(ledger, operation, limits, (authority, anchoring[1]))
 
 
 def seeded_ledger(rig: "Rig", name: str, entries: tuple[bytes, ...] = ()) -> BudgetLedger:
