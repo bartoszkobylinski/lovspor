@@ -83,6 +83,23 @@ def scope_of(request: "ExecutionRequest") -> str:
     return workspace_scope(request.workspace, request.inputs.settings.repository, authority)
 
 
+def identified(request: "ExecutionRequest") -> bool:
+    """Whether the request may write to its workspace (AR5d-2).
+
+    A request without a witness is AR4's: it anchors nothing, so nothing it
+    writes becomes current. With a witness, only a workspace whose identity the
+    witness anchored is written to; any other, a pre-AR5d workspace above all,
+    is read-only.
+    """
+    if request.anchoring is None:
+        return True
+    try:
+        scope_of(request)
+    except ForarbeiderRefusedError:
+        return False
+    return True
+
+
 def workspace_query(
     inputs: "AuthorizationInputs", workspace: Path, family: Family, scope: str
 ) -> AnchorQuery:

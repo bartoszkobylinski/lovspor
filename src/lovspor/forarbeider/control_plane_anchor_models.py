@@ -38,6 +38,11 @@ Family = Literal[
 ]
 ScopeKind = Literal["transaction", "workspace", "ledger", "policy"]
 
+#: The scope every pre-AR5d workspace family was anchored in, for every workspace (#1013).
+LEGACY_SCOPE: Final = "workspace"
+#: The workspace families anchored under :data:`LEGACY_SCOPE` before AR5d-1.
+LEGACY_FAMILIES: Final[frozenset[Family]] = frozenset({"stop_latch", "recovery_receipts"})
+
 #: Each family, the schema of its records and the kind of scope it is anchored in.
 FAMILIES: Final[dict[Family, tuple[str, ScopeKind]]] = {
     "publication_attempts": ("forarbeider_publication_attempt/1", "transaction"),

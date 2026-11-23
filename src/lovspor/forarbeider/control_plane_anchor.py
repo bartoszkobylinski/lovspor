@@ -59,6 +59,8 @@ from lovspor.forarbeider import (
 )
 from lovspor.forarbeider.control_plane_anchor_models import (
     FAMILIES,
+    LEGACY_FAMILIES,
+    LEGACY_SCOPE,
     ControlPlaneAnchor,
     Family,
     Status,
@@ -316,18 +318,42 @@ def initialize(query: AnchorQuery, authority: AnchorAuthority) -> AnchorVerdict:
     return verify(query, authority)
 
 
+def legacy_evidence(query: AnchorQuery, authority: AnchorAuthority) -> bool:
+    """Whether the witness holds the query's newest record as pre-AR5d evidence (AR5d-2).
+
+    True when the witness once anchored exactly this record (its bytes, which
+    carry its sequence) as the head of the family under :data:`LEGACY_SCOPE`,
+    or when that legacy history cannot be read or proved: an unprovable history
+    is never taken for the absence of one.
+    """
+    if query.family not in LEGACY_FAMILIES or not query.local.digests:
+        return False
+    legacy = query._replace(scope=LEGACY_SCOPE)
+    stored = _stored(legacy, authority)
+    chain = None if stored is None else _chain(stored, legacy, authority)
+    if not isinstance(chain, list):
+        return True
+    return any(anchor.head_sha256 == query.local.digests[-1] for anchor in chain)
+
+
 def anchor_pending(query: AnchorQuery, authority: AnchorAuthority) -> AnchorVerdict:
     """Anchor the one record a crash left unanchored; a verified family is left alone.
 
+    A record the witness holds as legacy evidence (:func:`legacy_evidence`) is
+    never anchored as the current state of an identity's scope (AR5d-2).
+
     Raises:
         ForarbeiderRefusedError: ``release_not_eligible: anchor:<status>`` for
-            any other status; the witness's ``anchor_head_moved``.
+            any other status, ``anchor:legacy_evidence``; the witness's
+            ``anchor_head_moved``.
     """
     verdict = verify(query, authority)
     if verdict.status == "verified":
         return verdict
     if verdict.status != "pending_anchor":
         raise _refused(f"anchor:{verdict.status}")
+    if legacy_evidence(query, authority):
+        raise _refused("anchor:legacy_evidence")
     authority.witness.submit(_next(query, verdict.latest))
     return verify(query, authority)
 

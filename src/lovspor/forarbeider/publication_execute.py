@@ -348,6 +348,8 @@ def _denied(
     digest = evidence_digest(evidence)
     reasons = tuple(sorted(evidence.denied_by))
     record = None
+    if not publication_anchors.identified(request):
+        return ExecutionOutcome("denied", None, evidence, digest, None)
     if request.anchoring is None or _attempts_anchored(request):
         extra = {"authorization_sha256": digest, "reasons": reasons}
         record = _record(request, step, "denied", {**extra, "recorded_at": evidence.checked_at})

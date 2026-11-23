@@ -360,7 +360,9 @@ def recover(request: ExecutionRequest, environment: Environment) -> RecoveryOutc
             another execution or recovery holding the workspace
             (``corpus_locked: workspace``); forged or truncated attempt records or receipts
             (``corpus_tree_mismatch``); a receipt the remote contradicts
-            (``release_not_eligible: receipt_conflict``, latch set).
+            (``release_not_eligible: receipt_conflict``, latch set); with a
+            witness, a workspace without its anchored identity
+            (``release_not_eligible: workspace_identity:<why>``, nothing written).
     """
     reader = _reader(request, environment)
     assert isinstance(environment, Simulation)  # noqa: S101 - _reader proved it
@@ -370,6 +372,8 @@ def recover(request: ExecutionRequest, environment: Environment) -> RecoveryOutc
 
 def _recover(request: ExecutionRequest, environment: Simulation, reader: Reader) -> RecoveryOutcome:
     """:func:`recover` under the workspace lock, from the first remote read to the last record."""
+    if request.anchoring is not None:
+        publication_anchors.scope_of(request)  # AR5d-2: an unidentified workspace is read-only
     _settle_pending(request)
     at = environment.clock()
     tid = request.inputs.transaction.transaction_id

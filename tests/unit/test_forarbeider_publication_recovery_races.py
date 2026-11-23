@@ -39,6 +39,7 @@ from tests.unit.forarbeider_execution_support import (
     KeySigner,
     Rig,
     batch_usage,
+    identified_workspace,
     make_rig,
     reserve,
     seeded_ledger,
@@ -280,8 +281,7 @@ def test_a_stable_history_reads_the_head_twice_and_still_recovers(
 
 def test_recovery_into_two_workspaces_writes_identical_receipt_bytes(rig_a: Rig) -> None:
     github = published_lost(rig_a)
-    twin = rig_a.tmp / "twin"
-    twin.mkdir(mode=0o700)
+    twin = identified_workspace(rig_a, "twin")
     tid = rig_a.transaction.transaction_id
     for record in publication_attempts.records(rig_a.workspace, tid):
         publication_attempts.append(twin, record)
