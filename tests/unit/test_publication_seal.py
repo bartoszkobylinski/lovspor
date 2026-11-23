@@ -200,6 +200,14 @@ def test_compose_refuses_an_unparseable_note(repo: Path, no_key: Path) -> None:
         compose_seal(repo, _request(no_key))
 
 
+def test_compose_refuses_a_note_whose_blob_git_cannot_read(repo: Path, no_key: Path) -> None:
+    blob = str(attestation_note_blob(repo, _head(repo)))
+    (repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+
+    with pytest.raises(SealCompositionError, match=f"git cat-file blob {blob} "):
+        compose_seal(repo, _request(no_key))
+
+
 def test_compose_refuses_a_path_that_is_not_a_repository(tmp_path: Path, no_key: Path) -> None:
     with pytest.raises(SealCompositionError, match="not a commit"):
         compose_seal(tmp_path, _request(no_key))
@@ -436,6 +444,44 @@ def test_verify_refuses_an_unknown_candidate(repo: Path, tmp_path: Path) -> None
 
     with pytest.raises(SealVerificationError, match="not a commit"):
         verify_seal(repo, "f" * 40, signers)
+
+
+@requires_ssh_keygen
+def test_a_candidate_spelled_like_an_option_is_still_a_revision(repo: Path, signer: Signer) -> None:
+    """A branch whose name starts with a dash names a commit; Git never reads it as a flag."""
+    _seal_head(repo, signer)
+    git(repo, "update-ref", "refs/heads/-sealed", "HEAD")
+
+    verdict = verify_seal(repo, "-sealed", signer.signers)
+
+    assert verdict == SealVerdict(tag=f"refs/tags/{SEAL}", signer=PRINCIPAL)
+
+
+def test_a_failing_git_is_reported_by_its_command_and_its_words_on_one_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Git's own complaint reaches the caller whole: one line, undecodable bytes replaced."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "git"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f'case "$*" in *"^{{commit}}") echo {"0" * 40}; exit 0;; esac\n'
+        "printf 'fatal: bad\\n\\tobject \\377x\\n' >&2\n"
+        "exit 3\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o700)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    signers = tmp_path / "signers"
+    signers.write_text('p namespaces="git" ssh-ed25519 AAAA\n', encoding="utf-8")
+
+    with pytest.raises(SealVerificationError) as refused:
+        verify_seal(tmp_path, "HEAD", signers, SEAL)
+
+    message = str(refused.value)
+    assert message.startswith(f"git rev-parse --verify --quiet refs/tags/{SEAL} (cwd={tmp_path})")
+    assert message.endswith("exited 3: fatal: bad object \ufffdx")
 
 
 # ------------------------------------------------------------------ registry read
