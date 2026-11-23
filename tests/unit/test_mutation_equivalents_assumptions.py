@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import tomllib
+import types
 import typing
 from datetime import UTC, datetime
 from email.message import EmailMessage
@@ -36,10 +37,14 @@ import pytest
 import typer
 from lxml import etree, html
 from mcp.types import JSONRPCMessage
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
+from lovspor import git_publish
+from lovspor.identity.audit import CollisionAudit, HolderFate, SlugFate
+from lovspor.identity.migration import RegistryConflict, Rename, RestoredTombstone
+from lovspor.identity.plan import HistoryMismatch, Threshold
 from lovspor.innsyn.sender import Sender
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
@@ -840,6 +845,25 @@ def test_assumption_os_stat_follow_symlinks_none_does_not_follow(tmp_path: Path)
     assert found[True].st_ino == target.st_ino != link.st_ino
 
 
+def test_assumption_git_hash_object_refuses_empty_and_junk_commit_input_alike(
+    tmp_path: Path,
+) -> None:
+    """Pins mutation-equivalents/git_publish/run_git-*.toml (default input ``b"XXXX"``).
+
+    Of the allowed commands only ``hash-object -t commit -w --stdin`` reads its
+    input, and Git's fsck refuses ``b""`` and ``b"XXXX"`` with the same code,
+    output and message, so the default input cannot change an answer.
+    """
+    bare = tmp_path / "remote.git"
+    init = ("init", "--bare", "--quiet", "--template=", "--initial-branch=main", str(bare))
+    assert git_publish.run_git(tmp_path, init).code == 0
+    command = ("hash-object", "-t", "commit", "-w", "--stdin")
+    empty = git_publish.run_git(bare, command, b"")
+    junk = git_publish.run_git(bare, command, b"XXXX")
+    assert empty.code != 0
+    assert (empty.code, empty.out, empty.err) == (junk.code, junk.out, junk.err)
+
+
 def test_assumption_typing_cast_returns_its_value_unchanged() -> None:
     """Pins mutation-equivalents/embeddings.cache/quantized_document_vectors-*.toml."""
     scale = 0.0123
@@ -902,3 +926,70 @@ def test_assumption_httpx_follow_redirects_none_does_not_follow() -> None:
                 assert reply.status_code == 302, value
         assert seen == ["https://example.org/from"] * 2
         assert client.get("https://example.org/from").status_code == 200
+
+
+def test_assumption_git_rev_parse_verify_ignores_an_unknown_quiet_spelling(
+    tmp_path: Path,
+) -> None:
+    """Pins the argument that waives ``--QUIET`` for ``--quiet`` in
+    ``publication_seal.py::_resolve_commit``: ``git rev-parse --verify`` prints
+    the same id with either spelling when the revision resolves, and exits
+    non-zero with either when it does not; only stderr, which is discarded,
+    tells them apart."""
+    root, head = throwaway_checkout(tmp_path / "committed")
+
+    def rev_parse(flag: str, rev: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", flag, "--end-of-options", rev],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    for flag in ("--quiet", "--QUIET"):
+        found = rev_parse(flag, "HEAD^{commit}")
+        assert (found.returncode, found.stdout.strip()) == (0, head)
+        missing = rev_parse(flag, "absent^{commit}")
+        assert missing.returncode != 0
+        assert missing.stdout == ""
+
+
+_REPORT_ROW_MODELS: tuple[type[BaseModel], ...] = (
+    SlugFate,
+    HolderFate,
+    Rename,
+    CollisionAudit,
+    HistoryMismatch,
+    RegistryConflict,
+    RestoredTombstone,
+    Threshold,
+)
+
+
+def _json_native(annotation: object) -> bool:
+    """A field type whose python-mode dump already equals its json-mode dump."""
+    if annotation in (str, int, bool, type(None)) or annotation in _REPORT_ROW_MODELS:
+        return True
+    origin = typing.get_origin(annotation)
+    if origin in (list, typing.Union, types.UnionType):
+        return all(_json_native(arg) for arg in typing.get_args(annotation))
+    return False
+
+
+def test_assumption_pydantic_dumps_any_mode_but_json_as_python() -> None:
+    """Pins the argument behind the ``model_dump(mode=...)`` entries of
+    ``identity/report.py`` (``report_data``, ``_review_lists``): pydantic treats
+    every mode but "json" as "python", and the dumped models hold only types
+    for which the two modes agree, so the mutated modes dump equal dicts."""
+
+    class Probe(BaseModel):
+        values: tuple[int, ...] = (1,)
+        at: datetime = datetime(2026, 1, 1, tzinfo=UTC)
+
+    probe = Probe()
+    assert probe.model_dump(mode="json") != probe.model_dump(mode="python")
+    for mode in ("JSON", "XXjsonXX", None):
+        assert probe.model_dump(mode=mode) == probe.model_dump(mode="python")  # type: ignore[arg-type]
+    for model in _REPORT_ROW_MODELS:
+        for name, field in model.model_fields.items():
+            assert _json_native(field.annotation), f"{model.__name__}.{name}: {field.annotation}"

@@ -1,0 +1,20 @@
+[[equivalent]]
+file = "src/lovspor/identity/report.py"
+symbol = "_review_lists"
+registered = "2026-11-22, from register key 7b7c466c93a1f574 (GREEN under scripts/ci/mutant_check.py try with the PR #1016 tests)"
+mutation = '''
+-        "history_owner_mismatches": [m.model_dump(mode="json") for m in plan.history_mismatches],
++        "history_owner_mismatches": [m.model_dump(mode=None) for m in plan.history_mismatches],
+'''
+justification = """
+pydantic (2.13) treats every `mode` of `model_dump` other than "json" as
+"python": "JSON", "XXjsonXX" and None all give the python-mode dump. The two
+modes differ only for values JSON has no type for (tuple, set, date, Path,
+enum, bytes, ...). Every field of the dumped models (SlugFate, HolderFate,
+Rename, CollisionAudit, HistoryMismatch, RegistryConflict, RestoredTombstone,
+Threshold) is a str, int, bool, None, list or one of those models. Both modes
+therefore return equal dicts, and report.json and report.md come out byte for
+byte the same. The assumption test pins pydantic's mode handling and the
+field types.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_pydantic_dumps_any_mode_but_json_as_python"

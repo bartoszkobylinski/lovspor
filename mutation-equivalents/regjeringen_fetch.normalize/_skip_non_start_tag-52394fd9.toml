@@ -1,0 +1,19 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_skip_non_start_tag"
+registered = "2026-11-22, from register key 0f9a6fd9736ca681 (GREEN under scripts/ci/mutant_check.py try with the PR #1004 tests)"
+mutation = """
+-        return -1 if closing == -1 else closing + 1
++        return -1 if closing == -1 else closing - 1
+"""
+justification = """
+The bogus-comment branch resumes at `closing - 1` instead of `closing + 1`,
+where `closing` is the first `>` at or after `opening + 2`. `raw[closing]` is
+`>`, so the next `raw.find(b"<", ...)` can differ only when
+`raw[closing - 1]` is `<`. That `<` is followed by `>`: `<>` is no comment
+(needs `<!--`), no end tag (needs `</`), no bogus comment (needs `!`, `?` or
+`/`) and no start tag (needs a letter), so `_parse_tag` returns
+`None, closing` and the scan finds the same next `<` as from `closing + 1`.
+`closing - 1 >= opening + 1`, which holds `!`, `?` or `/`, so the scan never
+goes back to `opening`. Same tags, same bytes for every input.
+"""

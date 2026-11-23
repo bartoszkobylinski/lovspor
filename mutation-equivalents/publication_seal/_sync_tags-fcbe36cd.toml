@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/publication_seal.py"
+symbol = "_sync_tags"
+registered = "2026-11-22, from register key 3e7f889e4bd78a22 (GREEN under scripts/ci/mutant_check.py try with the PR #1009 tests)"
+mutation = '''
+-    pairs = (line.split(" ", 1) for line in listed.splitlines() if line)
++    pairs = (line.split(" ", ) for line in listed.splitlines() if line)
+'''
+justification = """
+The line comes from `for-each-ref --format=%(refname) %(objectname)`. A git
+refname cannot contain an ASCII space (`git check-ref-format`), and an object
+name is hex, so every non-empty line holds exactly one ASCII space. Then
+`split(" ")`, `split(" ", 2)` and `rsplit(" ", 1)` all give the same two parts
+as `split(" ", 1)`. (`split(None, 1)` is not equivalent: it also cuts at
+non-ASCII whitespace, which a refname may hold; it is killed by
+test_a_seal_tag_name_may_hold_non_ascii_whitespace.)
+"""
