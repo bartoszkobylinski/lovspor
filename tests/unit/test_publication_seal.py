@@ -475,7 +475,9 @@ def _literal_tag(repo: Path, body: bytes, name: str = SEAL) -> None:
 def _fake_ssh_keygen(monkeypatch: pytest.MonkeyPatch, directory: Path, script: str) -> None:
     directory.mkdir()
     program = directory / "ssh-keygen"
-    program.write_text(f"#!/bin/sh\n{script}\n", encoding="utf-8")
+    # Git writes the signed payload to the program's stdin; a fake that exits
+    # unread kills Git with SIGPIPE on a fast runner, so it reads stdin first.
+    program.write_text(f"#!/bin/sh\ncat >/dev/null\n{script}\n", encoding="utf-8")
     program.chmod(0o700)
     monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
 
