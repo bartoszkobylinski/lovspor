@@ -4,10 +4,12 @@
 (:mod:`~lovspor.forarbeider.workspace_identity_models`), under the workspace
 lock, in three steps, each one an AR5a primitive:
 
-1. anchor the empty ``workspace_identity`` family, and the empty
-   ``workspace_writer`` family (:mod:`~lovspor.forarbeider.workspace_writer`),
-   in the new identity's scope
-   (:func:`~lovspor.forarbeider.control_plane_anchor.initialize`);
+1. anchor the empty ``workspace_identity`` family, and every family the
+   identity's scope holds (:data:`SCOPED`: ``stop_latch``,
+   ``recovery_receipts`` and ``workspace_writer``,
+   :mod:`~lovspor.forarbeider.workspace_writer`), empty, in the new identity's
+   scope (:func:`~lovspor.forarbeider.control_plane_anchor.initialize`), while
+   the workspace is provably empty (AR5d-2);
 2. write the identity file once, whole;
 3. anchor it as the family's one record
    (:func:`~lovspor.forarbeider.control_plane_anchor.anchor_pending`).
@@ -22,8 +24,8 @@ What is refused, so that nothing is adopted silently:
 
 - a workspace holding anything but its lock and leftovers
   (``workspace_not_empty``): a pre-AR5d workspace keeps its records, its latch
-  and its legacy anchors untouched, and is denied until an owner-approved
-  migration (AR5d-2) exists;
+  and its legacy anchors untouched, and stays denied. AR5d-2 decided that no
+  populated legacy workspace is migrated: none exists outside tests;
 - an identity file the witness never anchored (``unanchored``), or any other
   state but ``pending_anchor`` and ``verified``: an identity is never
   re-registered, so a forged, substituted or rolled-back one stays refused.
@@ -47,12 +49,17 @@ from lovspor.forarbeider.control_plane_anchor import (
     initialize,
     verify,
 )
-from lovspor.forarbeider.control_plane_anchor_models import Family, Status
+from lovspor.forarbeider.control_plane_anchor_models import (
+    LEGACY_FAMILIES,
+    LEGACY_SCOPE,
+    Family,
+    Status,
+)
 from lovspor.forarbeider.control_plane_chains import workspace_chain
 
-#: The scope every pre-AR5d workspace family was anchored in, for every workspace.
-LEGACY_SCOPE = "workspace"
-_LEGACY_FAMILIES: tuple[Family, ...] = ("stop_latch", "recovery_receipts")
+#: Every family anchored in an identity's scope, each anchored empty by :func:`establish`.
+SCOPED: tuple[Family, ...] = ("stop_latch", "recovery_receipts", "workspace_writer")
+_LEGACY_FAMILIES: tuple[Family, ...] = tuple(sorted(LEGACY_FAMILIES))
 
 
 class IdentityOutcome(NamedTuple):
@@ -107,8 +114,9 @@ def establish(
         raw = workspace_identity_models.identity_bytes(identity)
         scope = workspace_identity_models.scope_of(raw)
         initialize(_query(workspace, repository, scope), held)
-        writer = workspace_chain("workspace_writer", workspace, scope)
-        initialize(AnchorQuery("workspace_writer", repository, scope, writer), held)
+        for family in SCOPED:
+            chain = workspace_chain(family, workspace, scope)
+            initialize(AnchorQuery(family, repository, scope, chain), held)
         workspace_identity_models.write_identity(workspace, raw)
         if anchor_pending(_query(workspace, repository, scope), held).status != "verified":
             raise workspace_identity_models.refused("not_anchored")

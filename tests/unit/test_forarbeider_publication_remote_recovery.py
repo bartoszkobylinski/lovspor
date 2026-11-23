@@ -50,6 +50,7 @@ from tests.unit.forarbeider_execution_support import (
     OWNER_KEYS,
     KeySigner,
     Rig,
+    identified_workspace,
     make_rig,
     retried_after_the_crashed_claim,
 )
@@ -105,9 +106,8 @@ def proposal(rig: Rig) -> dict[str, bytes]:
 
 
 def fresh_workspace(rig: Rig, name: str = "elsewhere") -> Path:
-    folder = rig.tmp / name
-    folder.mkdir(mode=0o700)
-    return folder
+    """An empty workspace with its own anchored identity (AR5d-2)."""
+    return identified_workspace(rig, name)
 
 
 def approval_id(rig: Rig) -> str:

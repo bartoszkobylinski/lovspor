@@ -64,6 +64,7 @@ from tests.unit.forarbeider_execution_support import (
     _root,
     anchor_queries,
     batch_usage,
+    identified_workspace,
     ledger_bytes,
     ledger_folder,
     ledger_query,
@@ -514,8 +515,7 @@ def test_path_b_is_settled_from_the_remote(rig_b: Rig) -> None:
 def test_an_unknown_authorization_is_never_settled_as_authorized(rig: Rig) -> None:
     github = endpoint(rig)
     assert execute(rig.request(), sim(github)).status == "published"
-    elsewhere = rig.tmp / "elsewhere"
-    elsewhere.mkdir(mode=0o700)
+    elsewhere = identified_workspace(rig, "elsewhere")
 
     outcome = recover(rig.request(workspace=elsewhere), sim(github))
 

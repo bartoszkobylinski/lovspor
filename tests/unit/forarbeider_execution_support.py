@@ -361,6 +361,16 @@ def anchor_queries(rig: "Rig", workspace: Path | None = None) -> dict[str, Ancho
     }
 
 
+def identified_workspace(rig: "Rig", name: str) -> Path:
+    """Another empty workspace on ``rig``'s witness, given its own identity (AR5d-2: a
+    workspace without one is read-only)."""
+    folder = rig.tmp / name
+    folder.mkdir(mode=0o700)
+    authority = rig.anchoring(workspace=folder)
+    assert establish(folder, rig.inputs.settings.repository, authority, NOW).status == "established"
+    return folder
+
+
 def policy_id_of(rig: "Rig") -> str:
     plan = rig.inputs.plan.plan
     assert plan is not None
@@ -368,14 +378,16 @@ def policy_id_of(rig: "Rig") -> str:
 
 
 def anchor_rig(rig: "Rig", seed: bool = True, control: bool = True) -> None:
-    """Test setup: the workspace's identity (AR5d-1), then its empty families and the
-    owner control records anchored (AR5a)."""
+    """Test setup: the workspace's identity, which anchors its scope's families empty
+    (AR5d-1, AR5d-2), the transaction's empty attempts and the owner control records
+    anchored (AR5a)."""
     authority = rig.anchoring()
     repository = rig.inputs.settings.repository
     assert establish(rig.workspace, repository, authority, NOW).status == "established"
     queries = anchor_queries(rig)
-    for name in ("stop_latch", "publication_attempts", "recovery_receipts"):
-        assert initialize(queries[name], authority).status == "verified"
+    for name in ("stop_latch", "recovery_receipts"):
+        assert verify(queries[name], authority).status == "verified"
+    assert initialize(queries["publication_attempts"], authority).status == "verified"
     if not control:
         assert verify(queries["control_history"], authority).status == "verified"
         return

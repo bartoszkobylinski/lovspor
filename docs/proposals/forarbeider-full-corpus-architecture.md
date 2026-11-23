@@ -1096,14 +1096,57 @@ Limitations:
   | Legacy anchors copied under an identity scope | `anchor_invalid` (`anchor_foreign`): an anchor names its scope and is never reinterpreted |
   | Nonempty family under a new identity | `unanchored`; `initialize` refuses existing records, so nothing is silently re-initialized |
 
-  Moving a legacy workspace onto an identity needs an owner-approved migration (AR5d-2). No anchors exist outside tests.
+  AR5d-2 (below) decided that no populated legacy workspace is migrated. No anchors exist outside tests.
 - **Concurrency** (real processes): four processes establishing one workspace make exactly one identity (the others are refused `corpus_locked: workspace` or confirm it); two workspaces anchoring latches through one witness at once both verify; two processes publishing different transactions from two copies of one identity at once send exactly once, and the other is refused `workspace_writer:<why>`. Lock order is unchanged: workspace, ledger, witness (a leaf). Establishing takes no ledger lock.
 
 Limitations:
 - **A new workspace is a new writer.** An empty workspace with a fresh identity has empty families: a latch set in another workspace does not bind it. Workspace-wide halts belong to the owner's policy-scoped STOP; whether a halt in one workspace should block new identities for the repository is an owner decision (AR5d-2).
 - **The lease is a time bound, not a remote-side fence.** A send that begins with at least 60 s of lease left and outlasts it could overlap a takeover; the simulated remotes cannot check a fencing token. The expected-head check still refuses a second commit on one remote. A production remote and witness are AR7.
 - **The offline witness can be rolled back by whoever holds it** (AR5a). A truncated identity history shows as `pending_anchor`, which denies; `establish` then completes the same identity, never a new one.
-- **Migrating legacy workspaces is AR5d-2**, with the owner.
+- **Migrating legacy workspaces is AR5d-2**, with the owner. Decided below: none is migrated.
+
+**AR5d-2 status.** AR5d-2 closes legacy workspace admission without a migration mechanism. Simulation only; production stays denied.
+- **Inventory.** No durable publication workspace, witness store or ledger exists outside tests:
+  - no CLI or deployment reaches `publication_execute`, `publication_remote_recovery`, `publication_stop_resume`, `publication_ledger` or `workspace_identity`;
+  - a search of the owner's machine (home directory, the external volume) found no `workspace-identity.json`, `stop-latch.json`, `stop-latch/`, `workspace-writer/` or `workspace.lock` outside pytest temporary folders;
+  - the hosted droplet runs the MCP server only.
+
+  Every legacy state (a workspace without identity, anchors under the literal scope `workspace`, historical attempts and receipts, the AR4b-1 `stop-latch.json`, pending anchors, quarantine and budget histories) is therefore a test fixture. **No migration framework is built.** If real legacy state appears, it stays denied until the owner decides.
+- **Policy.**
+  - A populated legacy workspace is never migrated, and its evidence is kept read-only.
+  - New identities come only from `establish`, only for an empty workspace.
+  - Historical records are never anchored under a new identity.
+  - STOP, pending outcomes and open reservations are never cleared silently.
+  - An ambiguous state stays denied.
+- **`establish` completes the identity.** Step 1 now anchors every family of the new scope empty (`stop_latch`, `recovery_receipts`, `workspace_writer`; `workspace_identity.SCOPED`), while the workspace is locked and provably empty. Before this, a workspace given its identity by `establish` alone was denied `stop_latch:unanchored`: the families were anchored only by the test rig, through the raw `initialize` primitive.
+- **Legacy evidence is never anchored as current** (`control_plane_anchor.legacy_evidence`, checked in `anchor_pending`, the one path that completes a pending record). Suppose an identity file is copied by hand next to legacy state. The legacy latch or receipt is then one record ahead of the new scope's empty anchor, so it reads as `pending_anchor`, just like a crash's record. Before this check, recovery or a durable append would anchor it: the copy took over the identity's latch, and the identity's own workspace became `local_rolled_back`. Now a record that the witness holds as a legacy head, under the literal scope, is refused (`anchor:legacy_evidence`) and stays pending, so the copy is denied. A legacy history that cannot be proved (unreadable, unsigned, unavailable) is never taken to mean there is none.
+- **A workspace without an anchored identity is read-only** (`publication_anchors.identified`), whenever a witness is given:
+  - a denied execution writes no attempt record and sets no latch. Before this, it appended a `denied` attempt and anchored it in the transaction's chain, which every workspace shares;
+  - recovery is refused (`workspace_identity:<why>`) before it completes a pending record, writes a receipt or attempt, or anchors anything.
+
+  An owner STOP is the one exception: `record_stop` still sets the latch locally (fail-safe; it can never be anchored there), and RESUME stays refused (`workspace_identity:missing`). Requests without a witness are AR4's: they anchor nothing.
+- **Admission matrix.**
+
+  | State | establish | execute / publish | recovery | STOP / RESUME | writer claim | ledger |
+  |---|---|---|---|---|---|---|
+  | Empty workspace | establishes; all families anchored empty | admitted | admitted | admitted | admitted | per ledger |
+  | Populated, no identity (legacy) | `workspace_not_empty`; nothing touched | denied (`workspace_identity:missing`); nothing written | refused; nothing written | STOP sets the local latch; RESUME refused | refused | cannot settle (no anchored receipts) |
+  | AR4b-1 `stop-latch.json` | `workspace_not_empty` | denied (`stop_latch_legacy_file`) | refused | refused | refused | n/a |
+  | Identity copied by hand next to legacy records | not called | denied (pending or tail at the witness); the identity's own workspace still publishes | runs; the legacy record is never anchored | latch stays pending | `local_rolled_back` once the original claims | n/a |
+  | Legacy anchors copied into an identity scope | n/a | `anchor_invalid` (`anchor_foreign`) | refused | refused | n/a | n/a |
+  | Missing, corrupt, forged or unanchored identity | refused with its reason | denied | refused | RESUME refused | refused | n/a |
+  | Another workspace's open reservation or attempts for the transaction | n/a | denied (`publication_attempts:local_rolled_back`); the ledger is unchanged | per remote evidence only | n/a | n/a | never cleared |
+
+- **Not covered** (an owner decision, below): a legacy record that the witness **never** anchored is indistinguishable from a crash's record, if someone copies an identity file next to it by hand. Records carry no identity, so only a schema change could tell them apart. The effect is bounded:
+  - a single such record can be completed under the copied identity;
+  - from then on the identity's own workspace is `local_rolled_back`, and is therefore denied;
+  - a latch so adopted only halts;
+  - a receipt so adopted is re-derived from the remote by every recovery, and halts on conflict.
+
+Owner decisions left open:
+- whether to bind workspace records to their identity (a new receipt and latch schema), so that even legacy records the witness never anchored can be refused;
+- what to do if a real legacy workspace is ever found: it stays denied until then;
+- a repository-level halt for new identities (from AR5d-1).
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 

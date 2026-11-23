@@ -97,6 +97,7 @@ class World:
         self.workspace.mkdir(mode=0o700)
         self.witness = OfflineAnchorWitness(self.store, KeySigner(WITNESS, self.witness_key))
         self.scope = establish(self.workspace, REPOSITORY, self.authority(), CHECKED_AT).scope
+        self.genesis = frozenset(self.store.rglob("*.json"))
 
     def authority(self, **changes: Any) -> AnchorAuthority:
         fields: dict[str, Any] = {
@@ -116,12 +117,15 @@ class World:
         return AnchorQuery("stop_latch", REPOSITORY, self.scope, chain)
 
     def anchor_files(self) -> list[Path]:
-        """The anchors of the families under test; identity and writer (AR5d-1) are apart."""
+        """The anchors of the families under test: what ``establish`` anchored (the identity
+        and its scope's empty families, AR5d-1/AR5d-2) and the writer's anchors are apart."""
         apart = (self.store / "workspace_identity", self.store / "workspace_writer")
         return sorted(
             p
             for p in self.store.rglob("*.json")
-            if p.is_file() and not any(folder in p.parents for folder in apart)
+            if p.is_file()
+            and p not in self.genesis
+            and not any(folder in p.parents for folder in apart)
         )
 
 
@@ -332,7 +336,7 @@ def test_an_edited_head_diverges_and_a_non_canonical_record_is_invalid(world: Wo
 
 
 def test_a_deleted_stop_latch_is_rolled_back(world: World) -> None:
-    assert initialize(world.latch(), world.authority()).status == "verified"
+    assert verify(world.latch(), world.authority()).status == "verified"  # by establish
     latch = latch_set(1, None)
     assert durable_append(world.workspace, latch, REPOSITORY, world.authority()).status == (
         "appended"
@@ -890,7 +894,7 @@ def test_the_witness_refuses_a_successor_that_lowers_the_count(world: World) -> 
 
 
 def test_a_second_latch_is_never_reported_as_appended(world: World) -> None:
-    assert initialize(world.latch(), world.authority()).status == "verified"
+    assert verify(world.latch(), world.authority()).status == "verified"  # by establish
     first = latch_set(1, None)
     durable_append(world.workspace, first, REPOSITORY, world.authority())
     second = latch_set(2, first, ("another_stop",))
