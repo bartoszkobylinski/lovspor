@@ -44,7 +44,7 @@ from pypdf.errors import PdfReadError
 from lovspor import git_publish
 from lovspor.identity.audit import CollisionAudit, HolderFate, SlugFate
 from lovspor.identity.migration import RegistryConflict, Rename, RestoredTombstone
-from lovspor.identity.plan import HistoryMismatch, Threshold
+from lovspor.identity.plan import HistoryMismatch, Threshold, plan_migration
 from lovspor.innsyn.sender import Sender
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
@@ -64,6 +64,7 @@ from tests.unit.site_fixtures import (
     throwaway_checkout,
     unobserved_transport,
 )
+from tests.unit.test_identity_migration import _base_repo
 
 _ROOT = Path(__file__).resolve().parents[2]
 _REGISTER = _ROOT / "mutation-equivalents"
@@ -858,10 +859,12 @@ def test_assumption_git_hash_object_refuses_empty_and_junk_commit_input_alike(
     init = ("init", "--bare", "--quiet", "--template=", "--initial-branch=main", str(bare))
     assert git_publish.run_git(tmp_path, init).code == 0
     command = ("hash-object", "-t", "commit", "-w", "--stdin")
+    stored_before = sorted((bare / "objects").rglob("*"))
     empty = git_publish.run_git(bare, command, b"")
     junk = git_publish.run_git(bare, command, b"XXXX")
     assert empty.code != 0
     assert (empty.code, empty.out, empty.err) == (junk.code, junk.out, junk.err)
+    assert sorted((bare / "objects").rglob("*")) == stored_before  # neither input wrote
 
 
 def test_assumption_typing_cast_returns_its_value_unchanged() -> None:
@@ -993,3 +996,31 @@ def test_assumption_pydantic_dumps_any_mode_but_json_as_python() -> None:
     for model in _REPORT_ROW_MODELS:
         for name, field in model.model_fields.items():
             assert _json_native(field.annotation), f"{model.__name__}.{name}: {field.annotation}"
+        # A computed field or a custom serializer can make the modes differ with no
+        # declared field changing, so none may exist on a dumped model.
+        decorators = model.__pydantic_decorators__
+        assert not model.model_computed_fields, model.__name__
+        assert not decorators.field_serializers, model.__name__
+        assert not decorators.model_serializers, model.__name__
+
+
+def test_assumption_real_report_rows_dump_alike_in_json_and_python_mode(
+    tmp_path: Path,
+) -> None:
+    """The rows a real plan holds dump to equal dicts in both modes (same argument)."""
+    repo, shas = _base_repo(tmp_path)
+    rows: list[BaseModel] = []
+    for plan in (plan_migration(repo, "HEAD"), plan_migration(repo, "HEAD", shas["r4"])):
+        rows += [
+            plan.threshold,
+            *plan.restored,
+            *plan.fates,
+            *plan.renames,
+            *plan.collisions,
+            *plan.history_mismatches,
+            *plan.registry_conflicts,
+        ]
+    dumped = {type(row) for row in rows}
+    assert {Threshold, RestoredTombstone, SlugFate, Rename, CollisionAudit} <= dumped
+    for row in rows:
+        assert row.model_dump(mode="json") == row.model_dump(mode="python"), row
