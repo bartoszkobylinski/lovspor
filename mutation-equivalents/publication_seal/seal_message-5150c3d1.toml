@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/publication_seal.py"
+symbol = "seal_message"
+registered = "2026-11-22, from register key 4b9f75a4522606f2 (GREEN under scripts/ci/mutant_check.py try with the PR #1010 tests)"
+mutation = '''
+-    return header.encode("ascii") + note
++    return header.encode("ASCII") + note
+'''
+justification = """
+Python looks codecs up by a normalized, case-insensitive name:
+`codecs.lookup("ASCII")` and `codecs.lookup("ascii")` return the same codec,
+so the encode behaves identically, including the error on a non-ASCII
+character, for every input.
+"""

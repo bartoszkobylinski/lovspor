@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_start_tags"
+registered = "2026-11-22, from register key 19e79cb9cef93251 (GREEN under scripts/ci/mutant_check.py try with the PR #1004 tests)"
+mutation = """
+-    position = 0
++    position = None
+"""
+justification = """
+`position` starts the loop. `None != -1` holds like `0 != -1`, and
+`bytes.find(sub, None)` searches from index 0, exactly as `bytes.find(sub, 0)`
+does (a `None` start is Python's documented "from the beginning"). After the
+first iteration `position` is always an int from the code below. Same tags
+for every input.
+"""

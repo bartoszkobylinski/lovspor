@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_start_tags"
+registered = "2026-11-22, from register key 1322603cb0054ee4 (GREEN under scripts/ci/mutant_check.py try with the PR #1004 tests)"
+mutation = """
+-    while position != -1 and (opening := raw.find(b"<", position)) != -1:
++    while position != -2 and (opening := raw.find(b"<", position)) != -1:
+"""
+justification = """
+With `position == -1` the original loop stops. The mutant runs it once more
+with `raw.find(b"<", -1)`, which searches only the last byte. Every construct
+that returns -1 starts at least two bytes from the end (`<!`, `<?`, `</`,
+`<!--`, or a raw-text or plaintext start tag), so a `<` found there is a lone
+`<` at the end of the page: no comment, end tag or bogus comment
+(`raw[opening + 1:opening + 2]` is empty) and no start tag, so `_parse_tag`
+returns `None, len(raw)` and `raw.find(b"<", len(raw))` ends the loop. No tag
+is added; the output is the same.
+"""

@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/git_publish.py"
+symbol = "_local_bare"
+registered = "2026-11-22, from register key 96ef58f8320eac77 (GREEN under scripts/ci/mutant_check.py try with the PR #1007 tests)"
+mutation = """
+-        and "://" not in part
++        and "XX://XX" not in part
+"""
+justification = """
+The `"://" not in part` test is already implied by the two before it on
+POSIX. `part` is absolute, so it starts with `/`, and any `"://"` in it puts a
+run of two slashes at index 2 or later. `posixpath.normpath` collapses every
+run of slashes into one except exactly two at the very start, so such a
+`part` is never equal to `os.path.normpath(part)` and the conjunction is
+`False` before the `"://"` test is reached. Changing that test to look for
+`"XX://XX"` therefore changes no verdict. (`os.path` is `posixpath`: lovspor
+runs on macOS and Linux only.)
+"""

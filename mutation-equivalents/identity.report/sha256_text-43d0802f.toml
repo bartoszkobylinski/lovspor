@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/identity/report.py"
+symbol = "sha256_text"
+registered = "2026-11-23, from register key 886b92301d037a4d (GREEN under scripts/ci/mutant_check.py try with the PR #1021 tests)"
+mutation = '''
+-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
++    return hashlib.sha256(text.encode("UTF-8")).hexdigest()
+'''
+justification = """
+Python looks codecs up by a normalized, case-insensitive name:
+`codecs.lookup("UTF-8")` and `codecs.lookup("utf-8")` return the same codec,
+so the encoded bytes, and the digest over them, are identical for every
+input.
+"""

@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_skip_non_start_tag"
+registered = "2026-11-22, from register key fab9c64b58539d2b (GREEN under scripts/ci/mutant_check.py try with the PR #1004 tests)"
+mutation = """
+-        return -1 if closing == -1 else closing + 3
++        return -2 if closing == -1 else closing + 3
+"""
+justification = """
+After an unterminated comment the original returns -1 and `_start_tags`
+stops. The mutant returns -2, so the loop runs once more with
+`raw.find(b"<", -2)`, which searches only the last two bytes. The comment's
+own `<` is at least four bytes from the end (`<!--`), so any `<` found is
+another one. A construct that starts in the last two bytes is at most `<` and one byte, too short for a start tag (`<`, a letter, `>`); from there `_skip_non_start_tag` returns -1 (`<!`, `<?` or `</` find no `>`) or `_parse_tag` returns `None` and a position past that `<`, so the scan ends within those two bytes with no tag added. The tag list, and so the output, is the same.
+"""

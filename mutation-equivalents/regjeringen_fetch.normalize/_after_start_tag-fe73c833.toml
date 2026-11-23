@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_after_start_tag"
+registered = "2026-11-22, from register key 2a1554944f346821 (GREEN under scripts/ci/mutant_check.py try with the PR #1004 tests)"
+mutation = """
+-    return -1 if found is None else found.start()
++    return -2 if found is None else found.start()
+"""
+justification = """
+After a raw-text element whose closing tag never comes, the original returns
+-1 and `_start_tags` stops. The mutant returns -2, so the loop runs once more
+with `raw.find(b"<", -2)`, which searches only the last two bytes. The
+element's own start tag ends with `>` and its `<` is at least four bytes
+before that (`<xmp>`, the shortest), so any `<` found is in the raw text.
+A construct that starts in the last two bytes is at most `<` and one byte, too short for a start tag (`<`, a letter, `>`); from there `_skip_non_start_tag` returns -1 (`<!`, `<?` or `</` find no `>`) or `_parse_tag` returns `None` and a position past that `<`, so the scan ends within those two bytes with no tag added. The tag list, and so the output, is the same.
+"""
