@@ -59,6 +59,7 @@ from tests.unit.forarbeider_execution_support import (
     control_history,
     make_rig,
     reserve,
+    retried_after_the_crashed_claim,
     seeded_ledger,
     settings_for,
 )
@@ -510,7 +511,7 @@ def test_a_crash_before_the_attempt_is_recorded_sends_nothing_and_retries_once(
     monkeypatch.setattr(publication_attempts, "append", original)
     assert github.calls == [] and states(rig_a) == []
 
-    outcome = execute(rig_a.request(), simulation_a(rig_a, github))
+    outcome = retried_after_the_crashed_claim(rig_a.request(), simulation_a(rig_a, github))
     assert outcome.status == "published"
     assert len(github.calls) == 1
 

@@ -51,6 +51,7 @@ from tests.unit.forarbeider_execution_support import (
     KeySigner,
     Rig,
     make_rig,
+    retried_after_the_crashed_claim,
 )
 from tests.unit.forarbeider_publication_support import commit_files, git
 from tests.unit.forarbeider_release_control_support import BOT, OWNER, control, signed_by
@@ -390,7 +391,7 @@ def test_recovery_with_nothing_on_the_remote_lets_a_clean_retry_run(
     assert outcome.receipt is None
     assert states(rig_a) == ["prepared_to_send", "refused"]
     assert not publication_attempts.latched(rig_a.workspace)
-    assert execute(rig_a.request(), sim_a(github)).status == "published"
+    assert retried_after_the_crashed_claim(rig_a.request(), sim_a(github)).status == "published"
     assert len(github.calls) == 1
 
 
@@ -490,7 +491,7 @@ def test_b_a_local_commit_never_pushed_is_not_published(
     assert outcome.classification == "not_published"
     assert states(rig_b) == ["prepared_to_send", "refused"]
     assert git(rig_b.bare, "rev-parse", "main") == rig_b.base
-    assert execute(rig_b.request(), sim_b(rig_b)).status == "published"
+    assert retried_after_the_crashed_claim(rig_b.request(), sim_b(rig_b)).status == "published"
 
 
 @pytest.mark.parametrize("after_push", ["lost", "crash"])

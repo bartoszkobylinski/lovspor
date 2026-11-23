@@ -68,6 +68,7 @@ from tests.unit.forarbeider_execution_support import (
     ledger_folder,
     ledger_query,
     make_rig,
+    retried_after_the_crashed_claim,
     seed_ledger,
     seeded_ledger,
     write_entry,
@@ -669,7 +670,7 @@ def test_a_crash_after_the_anchor_before_the_send_is_sent_once_after_recovery(
 
     assert github.calls == []
     assert recover(rig.request(), sim(github)).classification == "not_published"
-    assert execute(rig.request(), sim(github)).status == "published"
+    assert retried_after_the_crashed_claim(rig.request(), sim(github)).status == "published"
     settled = recover(rig.request(), sim(github))
     assert settled.settlement is not None and settled.settlement.status == "settled"
     assert operations(rig) == ["reserve", "commit"]

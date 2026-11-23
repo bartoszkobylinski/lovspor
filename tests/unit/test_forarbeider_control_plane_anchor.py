@@ -116,10 +116,12 @@ class World:
         return AnchorQuery("stop_latch", REPOSITORY, self.scope, chain)
 
     def anchor_files(self) -> list[Path]:
-        """The anchors of the families under test; the workspace's identity (AR5d-1) is apart."""
-        identity = self.store / "workspace_identity"
+        """The anchors of the families under test; identity and writer (AR5d-1) are apart."""
+        apart = (self.store / "workspace_identity", self.store / "workspace_writer")
         return sorted(
-            p for p in self.store.rglob("*.json") if p.is_file() and identity not in p.parents
+            p
+            for p in self.store.rglob("*.json")
+            if p.is_file() and not any(folder in p.parents for folder in apart)
         )
 
 

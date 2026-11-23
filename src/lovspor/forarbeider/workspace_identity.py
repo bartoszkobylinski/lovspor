@@ -4,7 +4,9 @@
 (:mod:`~lovspor.forarbeider.workspace_identity_models`), under the workspace
 lock, in three steps, each one an AR5a primitive:
 
-1. anchor the empty ``workspace_identity`` family in the new identity's scope
+1. anchor the empty ``workspace_identity`` family, and the empty
+   ``workspace_writer`` family (:mod:`~lovspor.forarbeider.workspace_writer`),
+   in the new identity's scope
    (:func:`~lovspor.forarbeider.control_plane_anchor.initialize`);
 2. write the identity file once, whole;
 3. anchor it as the family's one record
@@ -105,6 +107,8 @@ def establish(
         raw = workspace_identity_models.identity_bytes(identity)
         scope = workspace_identity_models.scope_of(raw)
         initialize(_query(workspace, repository, scope), held)
+        writer = workspace_chain("workspace_writer", workspace, scope)
+        initialize(AnchorQuery("workspace_writer", repository, scope, writer), held)
         workspace_identity_models.write_identity(workspace, raw)
         if anchor_pending(_query(workspace, repository, scope), held).status != "verified":
             raise workspace_identity_models.refused("not_anchored")

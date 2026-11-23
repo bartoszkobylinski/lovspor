@@ -24,6 +24,7 @@ from lovspor.forarbeider.control_plane_anchor import (
 )
 from lovspor.forarbeider.control_plane_chains import control_chain, ledger_chain, workspace_chain
 from lovspor.forarbeider.control_plane_witness import OfflineAnchorWitness
+from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.policy_authorization import SignedRecord
 from lovspor.forarbeider.policy_trust import (
     ANCHOR_NAMESPACE,
@@ -35,7 +36,12 @@ from lovspor.forarbeider.policy_trust import (
     TrustRoot,
 )
 from lovspor.forarbeider.publication_authorize import AuthorizationInputs
-from lovspor.forarbeider.publication_execute import ExecutionRequest
+from lovspor.forarbeider.publication_execute import (
+    ExecutionOutcome,
+    ExecutionRequest,
+    Simulation,
+    execute,
+)
 from lovspor.forarbeider.publication_execution_models import AppIdentity, PublicationSettings
 from lovspor.forarbeider.publication_ledger import BudgetLedger
 from lovspor.forarbeider.publication_models import PublicationTransaction
@@ -48,6 +54,7 @@ from lovspor.forarbeider.release_limits import LimitsMaterial, LimitsRequest, ve
 from lovspor.forarbeider.release_plan import build_plan
 from lovspor.forarbeider.release_provenance import issue_provenance
 from lovspor.forarbeider.workspace_identity import establish
+from lovspor.forarbeider.workspace_writer_models import LEASE
 from tests.unit.forarbeider_authorization_support import (
     BOT_NAMESPACES,
     Key,
@@ -430,3 +437,20 @@ def seeded_ledger(rig: "Rig", name: str, entries: tuple[bytes, ...] = ()) -> Bud
     other = replace(rig, ledger=BudgetLedger(rig.tmp / name, f"{LEDGER_ID}-{name}"))
     seed_ledger(other, entries)
     return other.ledger
+
+
+def retried_after_the_crashed_claim(
+    request: ExecutionRequest, simulation: Simulation
+) -> ExecutionOutcome:
+    """AR5d-1: a crash left the writer claim anchored and unreleased.
+
+    It holds every writer of the identity off, this workspace's next run too,
+    until its lease ends (``workspace_writer:claim_held``); then the retry runs.
+    """
+    try:
+        execute(request, simulation)
+    except ForarbeiderRefusedError as error:
+        assert error.detail == "workspace_writer:claim_held", error.detail
+    else:
+        raise AssertionError("the crashed claim did not hold the retry off")
+    return execute(request, simulation._replace(clock=lambda: NOW + LEASE))

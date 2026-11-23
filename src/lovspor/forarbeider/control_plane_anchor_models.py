@@ -34,6 +34,7 @@ Family = Literal[
     "control_history",
     "quarantine_ledger",
     "workspace_identity",
+    "workspace_writer",
 ]
 ScopeKind = Literal["transaction", "workspace", "ledger", "policy"]
 
@@ -46,6 +47,7 @@ FAMILIES: Final[dict[Family, tuple[str, ScopeKind]]] = {
     "control_history": ("forarbeider_release_control/1", "policy"),
     "quarantine_ledger": ("quarantine/1", "ledger"),
     "workspace_identity": ("forarbeider_workspace_identity/1", "workspace"),
+    "workspace_writer": ("forarbeider_workspace_writer_event/1", "workspace"),
 }
 
 Status = Literal[
