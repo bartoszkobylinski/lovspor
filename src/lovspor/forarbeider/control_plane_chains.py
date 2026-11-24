@@ -20,8 +20,11 @@ else is returned with reasons and no digests, and is never trusted.
   signature bytes, so a removed or replaced signature changes the head; whether
   the signature is the owner's stays
   :func:`~lovspor.forarbeider.release_control.verify_control`'s to check, and an
-  anchored entry is never an authorized one) and ``quarantine_ledger`` (one
-  canonical AR3 document, a chain of at most one: its digest).
+  anchored entry is never an authorized one), ``quarantine_ledger`` (one
+  canonical AR3 document, a chain of at most one: its digest) and, since
+  AR5d-4, ``quarantine_succession`` (the ledger's proved successors, linked by
+  the digest of the entry before; whether each proof holds stays
+  :mod:`~lovspor.forarbeider.quarantine_succession`'s to check).
 """
 
 import os
@@ -40,6 +43,7 @@ from lovspor.forarbeider import (
 from lovspor.forarbeider.control_plane_anchor_models import Family
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.policy_authorization import SignedRecord
+from lovspor.forarbeider.quarantine_succession_models import QuarantineSuccession
 from lovspor.forarbeider.release_control_models import ReleaseControl
 from lovspor.forarbeider.release_ledger_models import LedgerEntry
 from lovspor.forarbeider.release_quarantine_models import QuarantineLedger
@@ -178,3 +182,20 @@ def quarantine_chain(ledger: bytes) -> LocalChain:
     except ValidationError:
         return _invalid("quarantine_ledger_unreadable")
     return _of([ledger]) if _canonical(parsed, ledger) else _invalid("quarantine_not_canonical")
+
+
+def succession_chain(entries: tuple[bytes, ...], repository: str, ledger_id: str) -> LocalChain:
+    """AR5d-4: canonical successions of one ledger, each naming the one before."""
+    previous: str | None = None
+    for index, raw in enumerate(entries):
+        try:
+            entry = QuarantineSuccession.model_validate_json(raw)
+        except ValidationError:
+            return _invalid("quarantine_succession_unreadable")
+        foreign = (entry.repository, entry.ledger_id) != (repository, ledger_id)
+        if not _canonical(entry, raw) or foreign:
+            return _invalid("quarantine_succession_not_canonical_or_foreign")
+        if not _linked(index, previous, entry.sequence, entry.previous_succession_sha256):
+            return _invalid("quarantine_succession_chain_broken")
+        previous = sha256(raw).hexdigest()
+    return _of(list(entries))

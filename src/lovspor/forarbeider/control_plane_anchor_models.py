@@ -33,6 +33,7 @@ Family = Literal[
     "budget_ledger",
     "control_history",
     "quarantine_ledger",
+    "quarantine_succession",
     "workspace_identity",
     "workspace_writer",
 ]
@@ -51,6 +52,8 @@ FAMILIES: Final[dict[Family, tuple[str, ScopeKind]]] = {
     "budget_ledger": ("forarbeider_budget_ledger_entry/1", "ledger"),
     "control_history": ("forarbeider_release_control/1", "policy"),
     "quarantine_ledger": ("quarantine/1", "ledger"),
+    # AR5d-4: the chain of proved successors of one quarantine ledger
+    "quarantine_succession": ("forarbeider_quarantine_succession/1", "ledger"),
     "workspace_identity": ("forarbeider_workspace_identity/1", "workspace"),
     "workspace_writer": ("forarbeider_workspace_writer_event/1", "workspace"),
 }

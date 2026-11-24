@@ -1050,7 +1050,7 @@ Limitations:
 - **Crashes** (each a test): before the reservation (nothing written, denied); after its append, before its anchor (denied until the same reservation is retried); after the anchor, before the send (recovery: `not_published`, one send later); after the mutation, before the response (recovery settles once); after the receipt, before the ledger commit (the next recovery settles); after the ledger commit, before its anchor (the next recovery completes it); after the anchor, before the acknowledgement (the next recovery is `already_settled`, nothing more is charged).
 
 Limitations:
-- **Withdrawal after a halt, adopting pre-existing unanchored records, and quarantine successors remain open.**
+- **Withdrawal after a halt and adopting pre-existing unanchored records remain open; quarantine successors: AR5d-4, below.**
 - **A withheld settlement is resolved by the owner** (AR5b RESUME does not settle it); its reservation keeps counting against the day.
 - **Settlement under revoked owner limits is refused**: the publication stays unsettled and spending stays blocked until the owner signs limits again.
 - **One open reservation per ledger serializes publication**: reserve, publish, settle, then the next batch. An abandoned reservation (reserved, never sent) blocks the ledger until it is cancelled; an owner-authorized cancel is not implemented here (AR5d-3 adds it, below).
@@ -1229,6 +1229,48 @@ Limitations and remaining blockers:
 - Withheld settlements, revoked limits and ledger succession stay blocked until the owner decides on the v2 design.
 - The decision record lives in the canceller's workspace. The ledger's `cancel` entry does not name the instruction (v1 schema).
 - Not in this PR: a global halt, owner cancellation of a sent reservation, quarantine successors, AR6 and AR7.
+
+**AR5d-4 status.** AR5d-4 adds anchored, independently re-provable successors of the AR3 quarantine ledger. Simulation only; production stays denied; nothing clears a quarantine automatically.
+
+- **Before.** AR5a anchors the ledger as one document (`quarantine_ledger`). A changed document is `diverged` and can never be anchored; a signed anchor over another document is `anchor_invalid` (`quarantine_successor_unverified`). That family is unchanged: an old anchor never authorizes a changed document.
+- **New family** `quarantine_succession` (`forarbeider_quarantine_succession/1`, scope = ledger id), anchor schema unchanged (`control-plane-anchor/1`). Its records are `QuarantineSuccession` entries in `<root>/<ledger_id>/NNNNNN.json`, created once (AR5c storage primitives), linked by the digest of the entry before. Each entry carries:
+  - the predecessor's digest (and, for a first entry continuing a `quarantine_ledger` document, that document);
+  - the successor document and its digest;
+  - the exact signed owner exceptions and revocations it relies on (record bytes and detached signature), the policy digest they were judged under, and the judgement time.
+- **The proof of one transition** (`quarantine_succession.transition_reasons`), replayed by every reader and by the writer before it writes, with the real AR3 engine:
+  1. the predecessor's digest is the one named; both documents are canonical AR3 ledgers;
+  2. `successor_findings` is empty: no record dropped, no history rewritten, no exclusion dropped (AR3 has no justified removal, so none is accepted);
+  3. the named policy is one the reader holds, by digest (`policy_unavailable`);
+  4. `verify_exceptions` re-verifies every carried exception and revocation against the **reader's** trust root at the judgement time; a signature failure fails the proof (`exception:quarantine_exception_untrusted`), so a key revoked later fails every later read;
+  5. every new `cleared` event names a carried, verified clearance that `clears` the record as it then stood (policy, version, evidence, target); every new exclusion names a verified exclusion of that document (`unjustified_clearance`, `unjustified_exclusion`);
+  6. the successor is a fixed point of `settle` under exactly those exceptions (`not_settled_under_the_verified_exceptions`): a stored `cleared` without a verified clearance is never accepted;
+  7. time does not run backwards (`clock_regressed`, `event_after_the_judgement`).
+- **Genesis.** A first entry either starts from the empty ledger, which requires that `quarantine_ledger` holds no document for the scope (verified empty or unanchored), or continues the document anchored there, which must be `verified` with exactly that document. A document anchored there after the chain began breaks the chain (`genesis:quarantine_ledger:local_rolled_back`): it is never silently adopted, and anchored history is never discarded.
+- **Reading** (`read_quarantine`): the chain must be `verified` against the witness (a pending entry is untrusted), the genesis must agree, every transition is replayed. Anything else refuses (`quarantine_succession:<why>`).
+- **Writing** (`append_successor`), under the store lock (a leaf above the witness lock; no workspace or budget-ledger lock is taken):
+  1. read and verify the chain; anchor an unanchored, empty chain empty first;
+  2. the caller's expected predecessor must be the verified head (`predecessor_not_the_anchored_head`): one successor per anchored predecessor; the same successor again is `already_applied`;
+  3. prove, create (`O_EXCL`), anchor; the witness's compare-and-set refuses a competing anchor.
+- **Crash and race matrix** (each a test):
+
+  | Case | Result |
+  |---|---|
+  | crash before the create | nothing written; retry `appended` |
+  | crash after the create, before the anchor | `pending_anchor`: readers refuse; a different successor or another time is `pending_entry_is_another_successor`; the exact retry `completed`, then `already_applied` |
+  | two processes, two successors of one predecessor | exactly one `appended`; the other `corpus_locked: ledger` or `predecessor_not_the_anchored_head` |
+  | a copied store adds a competing successor | `anchor:local_rolled_back` |
+  | witness unavailable | `anchor:store_unavailable`, nothing written; readers refuse |
+  | witness rolled back | readers refuse (`anchor:pending_anchor`) |
+  | local entry deleted, edited or truncated | `anchor:local_rolled_back`, `anchor:local_invalid`, `store:ledger` |
+  | an entry the witness signed but whose proof fails | `entry_<n>:<reason>` on every read |
+  | a fresh process with only the files, the witness and the trust root | proves the same head |
+
+Limitations:
+- The witness is trusted, not proved (AR5a): one that drops or forks anchors could hide a successor; a production witness is AR7.
+- The writer needs every policy the chain's entries name, to replay them (matched by digest, never trusted).
+- No AR3 path removes a quarantine record, so no justified removal exists; an owner decision would be needed to add one.
+- `run_quarantine` still takes the previous ledger's bytes from its caller; wiring it to `read_quarantine` is the integration step (production stays disabled).
+- A global halt, AR6 and AR7 are not in this PR.
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
