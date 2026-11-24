@@ -69,6 +69,7 @@ from tests.unit.forarbeider_execution_support import (
     ledger_folder,
     ledger_query,
     make_rig,
+    record_cancel,
     retried_after_the_crashed_claim,
     seed_ledger,
     seeded_ledger,
@@ -1175,7 +1176,7 @@ def test_a_reservation_cancelled_after_authorization_refuses_the_old_evidence(ei
     environment = environment_of(either)
     remote_before = either.remote_files()
     evidence = authorized(either.request(), environment)
-    cancelled = publication_ledger.record(
+    cancelled = record_cancel(
         either.ledger, cancellation(either), limits_of(either), anchoring(either)
     )
     assert cancelled.status == "appended" and anchored(either) == "verified"
@@ -1196,7 +1197,7 @@ def test_a_cancel_left_pending_after_authorization_refuses_the_old_evidence(
     evidence = authorized(rig.request(), sim(github))
     crash_on(monkeypatch, "budget_ledger")
     with pytest.raises(SimulatedCrash):
-        publication_ledger.record(rig.ledger, cancellation(rig), limits_of(rig), anchoring(rig))
+        record_cancel(rig.ledger, cancellation(rig), limits_of(rig), anchoring(rig))
     monkeypatch.undo()
 
     error = refused(lambda: publish_authorized(evidence, rig.request(), sim(github)))
@@ -1331,8 +1332,6 @@ def _cancel_in_process(job: tuple[Any, ...]) -> tuple[str, float]:
         time.sleep(0.001)
     attempted = time.time()
     try:
-        return publication_ledger.record(
-            ledger, cancel, limits, (authority, repository)
-        ).status, attempted
+        return record_cancel(ledger, cancel, limits, (authority, repository)).status, attempted
     except ForarbeiderRefusedError as error:
         return f"refused:{error.reason.value}:{error.detail}", attempted

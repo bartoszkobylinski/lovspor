@@ -146,7 +146,11 @@ def record_stop(request: ExecutionRequest, now: datetime) -> ControlOutcome:
 
 
 def _verified(request: ExecutionRequest, family: str, scope: str) -> None:
-    authority = publication_anchors.authority_of(request)
+    authority = (
+        publication_anchors.attempts_authority_of(request)
+        if family == "attempts"
+        else publication_anchors.authority_of(request)
+    )
     if authority is None:
         raise _refused("anchor_authority_missing")
     query = publication_anchors.workspace_query(

@@ -105,7 +105,7 @@ def _not_eligible(detail: str) -> ForarbeiderRefusedError:
     return ForarbeiderRefusedError(RefusalReason.RELEASE_NOT_ELIGIBLE, detail)
 
 
-def _reader(request: ExecutionRequest, environment: Environment) -> Reader:
+def reader_of(request: ExecutionRequest, environment: Environment) -> Reader:
     if not isinstance(environment, Simulation):
         raise _not_eligible("recovery_needs_a_sandboxed_adapter")
     settings = request.inputs.settings
@@ -364,8 +364,8 @@ def recover(request: ExecutionRequest, environment: Environment) -> RecoveryOutc
             witness, a workspace without its anchored identity
             (``release_not_eligible: workspace_identity:<why>``, nothing written).
     """
-    reader = _reader(request, environment)
-    assert isinstance(environment, Simulation)  # noqa: S101 - _reader proved it
+    reader = reader_of(request, environment)
+    assert isinstance(environment, Simulation)  # noqa: S101 - reader_of proved it
     with publication_attempts.workspace_lock(request.workspace):
         return _recover(request, environment, reader)
 

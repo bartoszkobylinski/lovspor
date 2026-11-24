@@ -9,7 +9,19 @@ verifies, against the independent witness (AR5a), three families:
 - ``stop_latch``: the workspace's latch transitions, so a deleted latch is not
   a cleared one; since AR5d-1 anchored in the scope of the workspace's own
   anchored identity, and denied (``workspace_identity:<why>``) without one;
-- ``publication_attempts`` for the transaction.
+- ``publication_attempts`` for the transaction, on the transaction's
+  authoritative witness (:func:`attempts_witness`).
+
+**The authoritative attempt history (AR5d-3).** A transaction reserved in a
+budget ledger has one attempt history, anchored on the ledger's witness: the
+witness that anchors its reservation. A workspace that keeps another witness
+for its own families (AR5c) still anchors the transaction's attempts there, so
+a ``prepared_to_send`` it records is visible to every workspace that verifies
+the transaction's attempts, and a workspace whose local records lack it reads
+``local_rolled_back``. A send is begun only once its ``prepared_to_send`` is
+anchored on that witness (AR4b-1), so a writer that cannot anchor there never
+sends. Without a ledger, or with a ledger that names no witness of its own,
+it is the request's witness, as before.
 
 Anything but ``verified`` (missing, stale, rolled back, divergent, unavailable,
 not independent) fails the ``ar5_control_anchor`` check, which no simulation
@@ -46,6 +58,7 @@ from lovspor.forarbeider.release_control import ControlRequest, verify_control
 if TYPE_CHECKING:
     from lovspor.forarbeider.publication_authorize import AuthorizationInputs
     from lovspor.forarbeider.publication_execute import ExecutionRequest
+    from lovspor.forarbeider.publication_ledger import BudgetLedger
 
 REQUIRED: tuple[Family, ...] = ("control_history", "stop_latch", "publication_attempts")
 #: A lapsed resume lease leaves the chain intact (it only stops again).
@@ -60,6 +73,24 @@ def authority_of(request: "ExecutionRequest") -> AnchorAuthority | None:
     """The request's witness, bound to the request's own workspace."""
     found = request.anchoring
     return None if found is None else found._replace(workspace=request.workspace)
+
+
+def attempts_witness(authority: AnchorAuthority, ledger: "BudgetLedger | None") -> AnchorAuthority:
+    """The authority of a transaction's attempts: on the ledger's witness when it names one.
+
+    The workspace is kept (the attempt records are the workspace's); only the
+    witness the chain is anchored on is the ledger's, never the caller's choice
+    of another.
+    """
+    if ledger is None or ledger.witness is None:
+        return authority
+    return authority._replace(witness=ledger.witness)
+
+
+def attempts_authority_of(request: "ExecutionRequest") -> AnchorAuthority | None:
+    """The request's authority for the transaction's attempts (AR5d-3)."""
+    authority = authority_of(request)
+    return None if authority is None else attempts_witness(authority, request.ledger)
 
 
 def control_query(
@@ -108,29 +139,34 @@ def workspace_query(
 
 
 def anchor_reasons(
-    authority: AnchorAuthority | None,
+    anchoring: tuple[AnchorAuthority | None, "BudgetLedger | None"],
     workspace: Path | None,
     inputs: "AuthorizationInputs",
     policy_id: str | None,
 ) -> tuple[str, ...]:
-    """Why the required families are not all verified; empty when they are."""
+    """Why the required families are not all verified; empty when they are.
+
+    ``anchoring`` is the request's witness and its budget ledger. The
+    transaction's attempts are verified on their authoritative witness
+    (:func:`attempts_witness`), the other families on the workspace's.
+    """
+    authority, ledger = anchoring
     if authority is None or workspace is None:
         return ("anchor_authority_missing",)
     if policy_id is None:
         return ("anchor_policy_unknown",)
     held = authority._replace(workspace=workspace)
     tid = inputs.transaction.transaction_id
-    queries = [
-        control_query(inputs, policy_id),
-        workspace_query(inputs, workspace, "publication_attempts", tid),
-    ]
+    attempts = workspace_query(inputs, workspace, "publication_attempts", tid)
+    queries = [(control_query(inputs, policy_id), held)]
     identity: tuple[str, ...] = ()
     try:
         scope = workspace_scope(workspace, inputs.settings.repository, held)
-        queries.insert(1, workspace_query(inputs, workspace, "stop_latch", scope))
+        queries.append((workspace_query(inputs, workspace, "stop_latch", scope), held))
     except ForarbeiderRefusedError as error:
         identity = (error.detail,)
-    found = ((query.family, verify(query, held).status) for query in queries)
+    queries.append((attempts, attempts_witness(held, ledger)))
+    found = ((query.family, verify(query, by).status) for query, by in queries)
     return identity + tuple(f"{f}:{status}" for f, status in found if status != "verified")
 
 
@@ -171,10 +207,14 @@ def settle(
 
     Without ``scope`` the family is a workspace family, anchored in the
     workspace's verified identity scope; an unverified identity anchors nothing.
+    The transaction's attempts are anchored on their authoritative witness
+    (:func:`attempts_witness`).
     """
     authority = authority_of(request)
     if authority is None:
         return None
+    if family == "publication_attempts":
+        authority = attempts_witness(authority, request.ledger)
     if scope is None:
         try:
             scope = scope_of(request)

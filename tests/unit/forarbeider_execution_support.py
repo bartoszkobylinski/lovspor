@@ -14,6 +14,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from lovspor.forarbeider import publication_ledger
 from lovspor.forarbeider.control_plane_anchor import (
     AnchorAuthority,
     AnchorQuery,
@@ -379,15 +380,21 @@ def policy_id_of(rig: "Rig") -> str:
 
 def anchor_rig(rig: "Rig", seed: bool = True, control: bool = True) -> None:
     """Test setup: the workspace's identity, which anchors its scope's families empty
-    (AR5d-1, AR5d-2), the transaction's empty attempts and the owner control records
-    anchored (AR5a)."""
+    (AR5d-1, AR5d-2), the transaction's empty attempts (on the ledger's witness when it
+    names one, AR5d-3; already anchored there by another workspace of the same
+    transaction: left as it is) and the owner control records anchored (AR5a)."""
     authority = rig.anchoring()
     repository = rig.inputs.settings.repository
     assert establish(rig.workspace, repository, authority, NOW).status == "established"
     queries = anchor_queries(rig)
     for name in ("stop_latch", "recovery_receipts"):
         assert verify(queries[name], authority).status == "verified"
-    assert initialize(queries["publication_attempts"], authority).status == "verified"
+    # AR5d-3: the transaction's attempts live on the ledger's witness, when it names one
+    attempts = (
+        authority if rig.ledger.witness is None else rig.anchoring(witness=rig.ledger.witness)
+    )
+    if verify(queries["publication_attempts"], attempts).status != "verified":
+        assert initialize(queries["publication_attempts"], attempts).status == "verified"
     if not control:
         assert verify(queries["control_history"], authority).status == "verified"
         return
@@ -442,6 +449,24 @@ def seed_ledger(rig: "Rig", entries: tuple[bytes, ...]) -> None:
     for raw in entries:
         write_entry(rig, raw)
         assert anchor_pending(ledger_query(rig), authority).status == "verified"
+
+
+def record_cancel(
+    ledger: BudgetLedger,
+    operation: LedgerOperation,
+    limits: LimitsEvidence,
+    anchoring: tuple[AnchorAuthority, str],
+) -> publication_ledger.LedgerOutcome:
+    """Test setup: an AR1b ``cancel`` through the ledger's own locked write path.
+
+    AR5d-3: the public :func:`~lovspor.forarbeider.publication_ledger.record`
+    refuses a cancel; only ``publication_cancel.cancel_reservation`` records one,
+    after its proof, through this same path. The AR5c tests of a cancel's timing
+    against a send write it here.
+    """
+    authority = publication_ledger.ledger_authority(ledger, anchoring[0])
+    with publication_ledger.ledger_lock(ledger):
+        return publication_ledger._record(ledger, operation, limits, (authority, anchoring[1]))
 
 
 def seeded_ledger(rig: "Rig", name: str, entries: tuple[bytes, ...] = ()) -> BudgetLedger:

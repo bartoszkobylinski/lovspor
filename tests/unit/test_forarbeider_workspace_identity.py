@@ -57,6 +57,7 @@ from tests.unit.forarbeider_execution_support import (
     KeySigner,
     Rig,
     make_rig,
+    record_cancel,
 )
 
 IDENTITY = "workspace-identity.json"
@@ -215,7 +216,7 @@ def cancel_reservation(rig: Rig) -> None:
         LimitsRequest(rig.inputs.policy.policy, rig.inputs.limits, NOW), rig.root
     )
     authority = rig.anchoring(workspace=rig.ledger.root)
-    publication_ledger.record(rig.ledger, cancel, limits, (authority, repository(rig)))
+    record_cancel(rig.ledger, cancel, limits, (authority, repository(rig)))
 
 
 def test_the_other_workspace_latch_stays_its_own(rig: Rig, neighbour: Rig) -> None:
