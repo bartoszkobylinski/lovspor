@@ -1,0 +1,25 @@
+{
+ "schema_version": 1,
+ "commit": "7908793b393fe5a65aa184383d86560d896193d5",
+ "written_by": "scripts/ci/mutation_night.py",
+ "mutmut": "3.8.0",
+ "kinds": "read off each mutant's source by scripts/ci/mutation_kinds.py; mutmut records no operator",
+ "problems": [
+  "no mutants/mutmut-stats.json: the tests charged to a function are not known"
+ ],
+ "measured": {
+  "mutants": 0,
+  "by_status": {},
+  "seconds": 0
+ },
+ "not_checked": 102769,
+ "estimate_seconds": 0,
+ "by_kind": {},
+ "by_file": {},
+ "by_function": [],
+ "slowest": [],
+ "result_check": {
+  "agrees": true,
+  "differences": {}
+ }
+}
