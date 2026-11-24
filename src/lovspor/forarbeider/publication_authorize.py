@@ -423,7 +423,9 @@ def _control_anchor(context: AuthorizationContext, plan: ReleasePlan | None) -> 
     if context.mode == "production":
         return _unavailable("ar5_control_anchor", "control_anchor_production_witness_ar7_pending")
     policy_id = plan.basis.policy.policy_id if plan is not None else None
-    found = anchor_reasons(context.anchoring, context.workspace, context.inputs, policy_id)
+    found = anchor_reasons(
+        (context.anchoring, context.ledger), context.workspace, context.inputs, policy_id
+    )
     return _check("ar5_control_anchor", found)
 
 

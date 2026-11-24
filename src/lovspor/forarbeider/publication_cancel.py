@@ -31,13 +31,18 @@ request anywhere, so nothing can publish it later.
 2. the instruction verifies (owner role, control namespace, signer, key valid
    now, signed before now, not expired) and binds this repository, ledger,
    transaction, batch, path, base and identity scope;
-3. the ledger names no witness other than the workspace's: attempts anchored
-   on another witness cannot be seen (the reservation does not name its
-   sender), so nothing could prove no send was begun there;
+3. (the witness) the transaction's attempts are read on their one
+   authoritative witness, the ledger's
+   (:func:`~lovspor.forarbeider.publication_anchors.attempts_witness`): every
+   sender of a reserved transaction, whichever witness keeps its own
+   workspace's families, must anchor its ``prepared_to_send`` there before it
+   sends, so this history is complete. Nothing a caller names is compared:
+   the ledger is verified against that same witness in step 7, so a
+   substituted witness has no anchored ledger and refuses;
 4. the transaction's attempts verify against that witness and hold no
    ``prepared_to_send``, ``outcome_unknown`` or ``published`` record; their
-   head is the one the owner signed. A copy, or another workspace on the
-   witness that began a send, makes them ``local_rolled_back`` or ``diverged``;
+   head is the one the owner signed. A copy, or another workspace (on any
+   witness) that began a send, makes them ``local_rolled_back`` or ``diverged``;
 5. no receipt for the transaction is in the workspace's anchored receipt chain;
 6. no writer of the identity can be live (the writer chain verifies; its newest
    claim is released or lapsed);
@@ -150,7 +155,6 @@ def _cancel(
     """:func:`cancel_reservation` under the workspace and ledger locks it holds."""
     scope = _scope(held.request)
     order, digest = _instruction(held.request, offered, scope, now)
-    _same_witness(held)
     record = _recorded(held.request, digest, order)
     if record is None:
         if now >= order.valid_until:
@@ -196,17 +200,6 @@ def _instruction(
     return order, sha256(offered.record).hexdigest()
 
 
-def _same_witness(held: _Held) -> None:
-    """The ledger's witness is the workspace's, so every begun send of it is visible here."""
-    mine, theirs = held.workspace.witness, held.budget.witness
-    if mine is theirs:
-        return
-    if mine is None or theirs is None or mine.location is None:
-        raise _refused("ledger_witness_not_workspace_witness")
-    if mine.location != theirs.location:
-        raise _refused("ledger_witness_not_workspace_witness")
-
-
 # --- the proof that no send was ever begun -----------------------------------------------------
 
 
@@ -232,7 +225,8 @@ def _never_sent(held: _Held, order: ReservationCancellation) -> None:
     query = publication_anchors.workspace_query(
         request.inputs, request.workspace, "publication_attempts", tid
     )
-    status = verify(query, held.workspace).status
+    authoritative = publication_anchors.attempts_witness(held.workspace, held.ledger)
+    status = verify(query, authoritative).status
     if status != "verified":
         raise _refused(f"anchor:publication_attempts:{status}")
     sent = [

@@ -380,15 +380,21 @@ def policy_id_of(rig: "Rig") -> str:
 
 def anchor_rig(rig: "Rig", seed: bool = True, control: bool = True) -> None:
     """Test setup: the workspace's identity, which anchors its scope's families empty
-    (AR5d-1, AR5d-2), the transaction's empty attempts and the owner control records
-    anchored (AR5a)."""
+    (AR5d-1, AR5d-2), the transaction's empty attempts (on the ledger's witness when it
+    names one, AR5d-3; already anchored there by another workspace of the same
+    transaction: left as it is) and the owner control records anchored (AR5a)."""
     authority = rig.anchoring()
     repository = rig.inputs.settings.repository
     assert establish(rig.workspace, repository, authority, NOW).status == "established"
     queries = anchor_queries(rig)
     for name in ("stop_latch", "recovery_receipts"):
         assert verify(queries[name], authority).status == "verified"
-    assert initialize(queries["publication_attempts"], authority).status == "verified"
+    # AR5d-3: the transaction's attempts live on the ledger's witness, when it names one
+    attempts = (
+        authority if rig.ledger.witness is None else rig.anchoring(witness=rig.ledger.witness)
+    )
+    if verify(queries["publication_attempts"], attempts).status != "verified":
+        assert initialize(queries["publication_attempts"], attempts).status == "verified"
     if not control:
         assert verify(queries["control_history"], authority).status == "verified"
         return

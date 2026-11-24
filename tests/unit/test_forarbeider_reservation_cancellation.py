@@ -524,32 +524,6 @@ def test_a_copied_workspace_cannot_cancel_after_the_original_began_a_send(
     unchanged_ledger(either, before)
 
 
-def test_a_ledger_on_another_witness_than_the_workspace_is_never_cancelled(
-    rig: Rig, tmp_path: Path
-) -> None:
-    """The reservation does not name its sender: attempts anchored on another witness than
-    the ledger's cannot be seen there, so nothing proves no send was begun."""
-    shared = make_rig(tmp_path / "shared", "A", share=rig)
-    repository = rig.inputs.settings.repository
-    scope = workspace_scope(shared.workspace, repository, shared.anchoring())
-    offered = signed(rig, instruction(rig, workspace_scope=scope, attempts_head_sha256=None))
-    before = ledger_bytes(rig)
-
-    error = refused(
-        lambda: cancel(
-            rig,
-            offered,
-            environment_of(rig),
-            ledger=shared.ledger,
-            anchoring=shared.anchoring(),
-            workspace=shared.workspace,
-        )
-    )
-
-    assert error.detail == "cancel:ledger_witness_not_workspace_witness", error.detail
-    unchanged_ledger(rig, before)
-
-
 def test_a_send_during_the_remote_verification_is_refused(
     rig: Rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -821,8 +795,9 @@ def test_a_cancellation_never_clears_the_latch(either: Rig) -> None:
 def test_a_publication_from_outside_the_proof_after_a_cancellation_halts_unsettled(
     rig: Rig,
 ) -> None:
-    """The residual the proof cannot see (a sender anchoring its attempts on another witness):
-    its publication after the cancellation is never settled and stops the workspace."""
+    """The residual the proof cannot see (a sender that bypasses ``execute`` and talks to the
+    remote directly): its publication after the cancellation is never settled and stops the
+    workspace."""
     environment = environment_of(rig)
     assert cancel(rig, signed(rig), environment).status == "cancelled"
     github = environment.transport

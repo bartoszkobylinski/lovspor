@@ -7,7 +7,11 @@ never replaced or removed. It lives outside every workspace, so transactions of
 different workspaces share it. Its head is anchored by the independent witness
 (AR5a) as the ``budget_ledger`` family, scope ``<ledger_id>``: the ledger's own
 witness (:attr:`BudgetLedger.witness`) when several workspaces share it, each
-of them keeping its own witness for its workspace families.
+of them keeping its own witness for its workspace families. The attempts of a
+transaction the ledger reserves are the exception (AR5d-3): they are anchored
+on the ledger's witness, so every begun send of the ledger is visible to every
+workspace that shares it
+(:func:`~lovspor.forarbeider.publication_anchors.attempts_witness`).
 
 **Consistency model.** Only a ledger whose local chain reproduces exactly the
 witnessed head (``verified``) is read or extended. Every write is:

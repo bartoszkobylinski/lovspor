@@ -177,8 +177,9 @@ def _record(
 
 
 def _attempts_anchored(request: ExecutionRequest) -> bool:
-    """Whether this transaction's attempts verify against the witness (AR5b)."""
-    authority = publication_anchors.authority_of(request)
+    """Whether this transaction's attempts verify against their authoritative witness (AR5b,
+    AR5d-3: the ledger's)."""
+    authority = publication_anchors.attempts_authority_of(request)
     if authority is None:
         return False
     tid = request.inputs.transaction.transaction_id
@@ -484,15 +485,21 @@ def _still_current(
         raise _not_eligible(f"stop_control:{','.join(control.reasons) or 'stopped'}")
     if control.head_sha256 != evidence.control_head_sha256:
         raise _not_eligible("authorization_stale:control_history")
-    authority = publication_anchors.authority_of(request)
-    found = publication_anchors.anchor_reasons(authority, held, request.inputs, policy_id)
-    repository = request.inputs.settings.repository
-    found += publication_ledger.anchor_reasons(request.ledger, authority, repository)
+    found = _anchor_reasons(request, policy_id)
     if found:
         raise _not_eligible(f"anchor:{','.join(found)}")
     reservation = publication_ledger.reservation_reasons(request, now)
     if reservation:
         raise _not_eligible(f"authorization_stale:reservation:{','.join(reservation)}")
+
+
+def _anchor_reasons(request: ExecutionRequest, policy_id: str | None) -> tuple[str, ...]:
+    """Why the anchored families or the ledger are not verified now; empty when they are."""
+    authority = publication_anchors.authority_of(request)
+    held = (authority, request.ledger)
+    found = publication_anchors.anchor_reasons(held, request.workspace, request.inputs, policy_id)
+    repository = request.inputs.settings.repository
+    return found + publication_ledger.anchor_reasons(request.ledger, authority, repository)
 
 
 def _sandboxed(environment: Simulation, path: str) -> None:
