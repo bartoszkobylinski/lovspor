@@ -105,20 +105,43 @@ jobs:
       - name: Owner-change pin file is changed alone
         # A pull request that changes the pin file changes nothing else and
         # carries no automated agent commit (scripts/ci/check_owner_change_pr.py).
+        # Whether the file changed is read from git, so a pull request that
+        # does not touch it makes no API call and keeps its old behaviour; one
+        # that does is checked from the API listing and fails closed.
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          COMMITS: ${{ github.event.pull_request.commits }}
         run: |
           set -euo pipefail
+          git fetch -q --no-tags --depth=1 origin "$BASE_SHA"
+          if git diff --quiet "$BASE_SHA" HEAD -- ops/lovverk-owner-changes; then
+            echo "ops/lovverk-owner-changes: not changed"
+            exit 0
+          fi
+          # Creating the file with no pin carries no authority (the pull request
+          # that introduced it): the grammar step above has already parsed it.
+          if ! git cat-file -e "$BASE_SHA:ops/lovverk-owner-changes" 2>/dev/null &&
+            uv run lovspor ops owner-changes check --file ops/lovverk-owner-changes |
+              grep -qx 'ok ops/lovverk-owner-changes: 0 pins'; then
+            echo "ops/lovverk-owner-changes: created with no pin"
+            exit 0
+          fi
+          if [ -x scripts/ci/check_owner_change_pr.py ]; then :; else
+            echo "::error::the pin file changed but scripts/ci/check_owner_change_pr.py is missing"
+            exit 1
+          fi
           gh api --paginate "repos/$GH_REPO/pulls/$PR/files" \
             --jq '.[] | {filename, previous_filename}' > "$RUNNER_TEMP/pin-files.jsonl"
           gh api --paginate "repos/$GH_REPO/pulls/$PR/commits" \
             --jq '.[].commit.message | split("\n")[0]' > "$RUNNER_TEMP/pin-subjects.txt"
-          python3 scripts/ci/check_owner_change_pr.py --changed-files "$CHANGED_FILES" \
-            --files "$RUNNER_TEMP/pin-files.jsonl" --subjects "$RUNNER_TEMP/pin-subjects.txt"
+          scripts/ci/check_owner_change_pr.py --changed-files "$CHANGED_FILES" \
+            --commits "$COMMITS" --files "$RUNNER_TEMP/pin-files.jsonl" \
+            --subjects "$RUNNER_TEMP/pin-subjects.txt"
 
       - name: Unit tests
         # -n auto (pytest-xdist): ~20 000 tests ran serially for ~22 min. The

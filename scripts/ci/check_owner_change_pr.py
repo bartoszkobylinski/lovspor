@@ -13,12 +13,15 @@ Usage:
         --jq '.[] | {filename, previous_filename}' > files.jsonl
     gh api --paginate repos/<repo>/pulls/<n>/commits \
         --jq '.[].commit.message | split("\\n")[0]' > subjects.txt
-    check_owner_change_pr.py --changed-files <n reported> \
+    check_owner_change_pr.py --changed-files <n reported> --commits <n reported> \
         --files files.jsonl --subjects subjects.txt
 
-A pull request that does not touch the file passes. Every doubt fails: a
-listing shorter than the count the pull request reports, or a rename into or
-out of the file. Exit 0 = pass, 1 = refused (reasons on stderr), 2 = bad input.
+The workflow calls it only when git shows the file changed. A complete listing
+without the file passes (reached only on a stale base). For a pull request
+that touches it, every doubt fails: a file or commit listing shorter than the
+count the pull request reports (the API lists 3000 files and 250 commits at
+most), or a rename into or out of the file.
+Exit 0 = pass, 1 = refused (reasons on stderr), 2 = bad input.
 """
 
 from __future__ import annotations
@@ -49,7 +52,7 @@ def names(lines: list[str]) -> list[list[str]]:
     return files
 
 
-def refusals(files: list[list[str]], reported: int, subjects: list[str]) -> list[str]:
+def refusals(files: list[list[str]], reported: int, subjects: list[str], commits: int) -> list[str]:
     """Why the pull request may not change the pin file; empty when it may."""
     if not any(PIN_FILE in file for file in files):
         if len(files) != reported:
@@ -60,6 +63,8 @@ def refusals(files: list[list[str]], reported: int, subjects: list[str]) -> list
         others = sorted({name for file in files for name in file} - {PIN_FILE})
         detail = f": {', '.join(others)}" if others else " (renamed)"
         problems.append(f"{PIN_FILE} must be the only file changed{detail}")
+    if len(subjects) != commits:
+        problems.append(f"listed {len(subjects)} commits, the pull request reports {commits}")
     agents = [subject for subject in subjects if AGENT_SUBJECT.search(subject)]
     if agents:
         problems.append(f"automated agent commit on a pin-file pull request: {agents[0]}")
@@ -69,6 +74,7 @@ def refusals(files: list[list[str]], reported: int, subjects: list[str]) -> list
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--changed-files", type=int, required=True)
+    parser.add_argument("--commits", type=int, required=True)
     parser.add_argument("--files", type=Path, required=True)
     parser.add_argument("--subjects", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -78,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"check_owner_change_pr: bad input: {exc}", file=sys.stderr)
         return 2
-    problems = refusals(files, args.changed_files, subjects)
+    problems = refusals(files, args.changed_files, subjects, args.commits)
     for problem in problems:
         print(f"refused: {problem}", file=sys.stderr)
     if problems:

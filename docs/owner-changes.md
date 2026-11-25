@@ -20,7 +20,7 @@ in this repository.
 `ops/lovverk-owner-changes` is ASCII with LF line endings, at most 64 KiB, and
 ends with a newline unless empty. Each line is one of:
 
-- blank;
+- empty (no characters, not even spaces);
 - a comment: `#` followed by printable ASCII;
 - a pin: `<commit> <pull request> <attempt> <reason>`, separated by single spaces:
   - `commit`: the reviewed lovverk commit, 40 lowercase hex digits;
@@ -43,9 +43,11 @@ line number.
 Both run in the `fast-ci` job of `.github/workflows/pr-pipeline.yml`:
 
 - the grammar check, on every pull request and every push to `main`;
-- on a pull request that changes the pin file: it must be the only file
-  changed (a rename into or out of it is refused), and no commit may carry an
-  automated agent stamp (`[agent:<lane>]` at the end of its subject). The
+- on a pull request that changes the pin file (read from git; other pull
+  requests make no API call): it must be the only file changed (a rename into or out of it is refused), and no commit may carry an
+  automated agent stamp (`[agent:<lane>]` at the end of its subject); a file
+  or commit listing shorter than the pull request reports is refused. The one
+  exception is creating the file with no pin, which carries no authority. The
   independent test author is not started for such a pull request, since its
   round would add a commit.
 

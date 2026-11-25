@@ -16,7 +16,11 @@ PIN = "ops/lovverk-owner-changes"
 
 
 def _check(
-    tmp_path: Path, entries: list[object], reported: int, subjects: list[str]
+    tmp_path: Path,
+    entries: list[object],
+    reported: int,
+    subjects: list[str],
+    commits: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     files = tmp_path / "files.jsonl"
     files.write_text("\n".join(json.dumps(entry) for entry in entries), encoding="utf-8")
@@ -28,6 +32,8 @@ def _check(
             str(CHECK),
             "--changed-files",
             str(reported),
+            "--commits",
+            str(len(subjects) if commits is None else commits),
             "--files",
             str(files),
             "--subjects",
@@ -98,6 +104,13 @@ def test_agent_word_inside_subject_is_not_a_stamp(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_short_commit_listing_on_pin_pull_request_is_refused(tmp_path: Path) -> None:
+    """The commits API lists 250 at most: an agent stamp could hide past it."""
+    result = _check(tmp_path, [{"filename": PIN}], 1, ["ops: pin"] * 250, commits=251)
+    assert result.returncode == 1
+    assert "listed 250 commits, the pull request reports 251" in result.stderr
+
+
 def test_truncated_listing_with_pin_file_is_refused(tmp_path: Path) -> None:
     result = _check(tmp_path, [{"filename": PIN}], 2, ["ops: pin"])
     assert result.returncode == 1
@@ -160,6 +173,15 @@ def test_fast_ci_runs_both_pin_checks() -> None:
     alone = steps["Owner-change pin file is changed alone"]
     assert alone["if"] == "github.event_name == 'pull_request'"
     assert "set -euo pipefail" in alone["run"]
+    run = alone["run"]
+    gate = run.index('git diff --quiet "$BASE_SHA" HEAD -- ops/lovverk-owner-changes')
+    assert gate < run.index("gh api"), "a pull request without the pin file makes no API call"
+    assert "if [ -x scripts/ci/check_owner_change_pr.py ]; then :; else" in run
+    assert '--commits "$COMMITS"' in run
+    created = run.index('git cat-file -e "$BASE_SHA:ops/lovverk-owner-changes"')
+    assert gate < created < run.index("gh api")
+    assert "grep -qx 'ok ops/lovverk-owner-changes: 0 pins'" in run
+    assert alone["env"]["COMMITS"] == "${{ github.event.pull_request.commits }}"
     assert "scripts/ci/check_owner_change_pr.py" in alone["run"]
     assert '"repos/$GH_REPO/pulls/$PR/commits"' in alone["run"]
     names = [step.get("name") for step in fast["steps"]]
