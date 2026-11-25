@@ -61,10 +61,12 @@ def remote(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
     return bare, _git(bare, "rev-parse", "HEAD")
 
 
-def _run(step: str, tmp_path: Path, bare: Path, target: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    step: str, tmp_path: Path, bare: Path, target: str, created: str = "true"
+) -> subprocess.CompletedProcess[str]:
     env = _job()["env"]
     return subprocess.run(
-        ["bash", "-c", _step(step)],
+        ["bash", "-e", "-o", "pipefail", "-c", _step(step)],
         env={
             **os.environ,
             "RUNNER_TEMP": str(tmp_path / "runner"),
@@ -72,6 +74,7 @@ def _run(step: str, tmp_path: Path, bare: Path, target: str) -> subprocess.Compl
             "PROBE_REF": env["PROBE_REF"],
             "TARGET": target,
             "WATCHED": env["WATCHED"],
+            "CREATED": created,
         },
         capture_output=True,
         text=True,
@@ -187,3 +190,23 @@ def test_final_check_fails_if_main_moved(tmp_path: Path, remote: tuple[Path, str
     )
     _git(work, "push", "-q", "origin", "HEAD:main")
     assert _run(_SEQUENCE[-1], tmp_path, bare, target).returncode == 1
+
+
+def test_final_check_runs_after_a_failed_write_and_expects_no_probe(
+    tmp_path: Path, remote: tuple[Path, str]
+) -> None:
+    bare, target = remote
+    (tmp_path / "runner").mkdir()
+    final = next(step for step in _job()["steps"] if step["name"] == _SEQUENCE[-1])
+    assert final["if"] == "always() && steps.before.outcome == 'success'"
+    assert final["env"]["CREATED"] == "${{ steps.create.outcome == 'success' }}"
+    assert _run(_SEQUENCE[0], tmp_path, bare, target).returncode == 0
+    assert _run(_SEQUENCE[-1], tmp_path, bare, target, created="false").returncode == 0
+    assert _run(_SEQUENCE[-1], tmp_path, bare, target, created="true").returncode == 1
+
+
+def test_probe_runs_one_at_a_time() -> None:
+    assert _workflow()["concurrency"] == {
+        "group": "owner-changes-ref-probe",
+        "cancel-in-progress": False,
+    }

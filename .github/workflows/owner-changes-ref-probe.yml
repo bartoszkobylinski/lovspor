@@ -6,7 +6,8 @@ name: Probe owner-change attempt ref
 # (docs/proposals/owner-changes-sync-step.md).
 #
 # Exactly one write: PROBE_REF is created, pointing at TARGET, an existing
-# sealed lovverk commit, so no object is added. PROBE_REF cannot be a real
+# sealed lovverk commit (any pack sent holds only objects lovverk already
+# has). PROBE_REF cannot be a real
 # attempt ref: those are refs/owner-changes/<40 hex>/<attempt>. The push is
 # create-only on the server (`--force-with-lease=<ref>:` with an empty
 # expected value). If PROBE_REF already exists, the job stops before any push,
@@ -21,10 +22,17 @@ name: Probe owner-change attempt ref
 #
 # The key comes from the `lovverk-sync` environment, whose deployment branch
 # policy admits `main` only. Remove this workflow after the run.
+#
+# Steps run under GitHub's default `bash -e`: every command whose failure is
+# expected is captured with `if ...; then rc=0; else rc=$?; fi`.
 on:
   workflow_dispatch:
 
 permissions: {}
+
+concurrency:
+  group: owner-changes-ref-probe
+  cancel-in-progress: false
 
 jobs:
   probe:
@@ -73,8 +81,10 @@ jobs:
           fi
 
       - name: Record remote refs before
+        id: before
         run: |
           set -euo pipefail
+          set -f
           # shellcheck disable=SC2086
           git ls-remote "$LOVVERK_URL" $WATCHED | sort | tee "$RUNNER_TEMP/watched-before"
           awk '$2 == "refs/heads/main" {found=1} END {exit !found}' "$RUNNER_TEMP/watched-before"
@@ -95,51 +105,62 @@ jobs:
       - name: Create the probe ref, create-only
         id: create
         run: |
-          set -uo pipefail
-          out=$(git -C "$RUNNER_TEMP/probe" push --porcelain --force-with-lease="$PROBE_REF:" \
-            "$LOVVERK_URL" "$TARGET:$PROBE_REF" 2>&1)
-          code=$?
+          set -euo pipefail
+          if out=$(git -C "$RUNNER_TEMP/probe" push --porcelain --force-with-lease="$PROBE_REF:" \
+            "$LOVVERK_URL" "$TARGET:$PROBE_REF" 2>&1); then code=0; else code=$?; fi
           printf '%s\n' "$out"
           echo "exit=$code"
-          printf '%s\n' "$out" | grep -qxF "$(printf '*\t%s:%s\t[new reference]' "$TARGET" "$PROBE_REF")" || {
+          new=$(printf '*\t%s:%s\t[new reference]' "$TARGET" "$PROBE_REF")
+          if [ "$code" -ne 0 ] || ! printf '%s\n' "$out" | grep -qxF "$new"; then
             echo "::error::the probe ref was not created as a new reference"
             exit 1
-          }
+          fi
 
       - name: Check a repeated create cannot overwrite it (dry run, no write)
         run: |
-          set -uo pipefail
+          set -euo pipefail
           probe="$RUNNER_TEMP/probe"
           git -C "$probe" -c user.name=probe -c user.email=probe@invalid \
             commit -q --allow-empty -m "descendant of the target (never pushed)"
-          lease=$(git -C "$probe" push --dry-run --porcelain --force-with-lease="$PROBE_REF:" \
-            "$LOVVERK_URL" "HEAD:$PROBE_REF" 2>&1)
-          printf 'create-only, different commit:\n%s\n' "$lease"
-          printf '%s\n' "$lease" | grep -qxF "$(printf '!\tHEAD:%s\t[rejected] (stale info)' "$PROBE_REF")" || {
+          if lease=$(git -C "$probe" push --dry-run --porcelain --force-with-lease="$PROBE_REF:" \
+            "$LOVVERK_URL" "HEAD:$PROBE_REF" 2>&1); then rc=0; else rc=$?; fi
+          printf 'create-only, different commit (exit %s):\n%s\n' "$rc" "$lease"
+          if [ "$rc" -eq 0 ] || ! printf '%s\n' "$lease" \
+            | grep -qxF "$(printf '!\tHEAD:%s\t[rejected] (stale info)' "$PROBE_REF")"; then
             echo "::error::a create-only push over the existing ref was not refused"
             exit 1
-          }
-          same=$(git -C "$probe" push --dry-run --porcelain --force-with-lease="$PROBE_REF:" \
-            "$LOVVERK_URL" "$TARGET:$PROBE_REF" 2>&1)
-          printf 'create-only, same commit:\n%s\n' "$same"
-          printf '%s\n' "$same" | grep -qE "^[!=]$(printf '\t')$TARGET:$PROBE_REF$(printf '\t')" || {
+          fi
+          if same=$(git -C "$probe" push --dry-run --porcelain --force-with-lease="$PROBE_REF:" \
+            "$LOVVERK_URL" "$TARGET:$PROBE_REF" 2>&1); then rc=0; else rc=$?; fi
+          printf 'create-only, same commit (exit %s):\n%s\n' "$rc" "$same"
+          if ! printf '%s\n' "$same" | grep -qE "^[!=]$(printf '\t')$TARGET:$PROBE_REF$(printf '\t')"; then
             echo "::error::a create-only push of the same commit did not report up-to-date or rejected"
             exit 1
-          }
-          plain=$(git -C "$probe" push --dry-run --porcelain "$LOVVERK_URL" "HEAD:$PROBE_REF" 2>&1)
-          printf 'plain push, descendant (for the record):\n%s\n' "$plain"
+          fi
+          if plain=$(git -C "$probe" push --dry-run --porcelain "$LOVVERK_URL" "HEAD:$PROBE_REF" 2>&1)
+          then rc=0; else rc=$?; fi
+          printf 'plain push, descendant, for the record (exit %s):\n%s\n' "$rc" "$plain"
 
+      # Runs after any failure past the before-record, so the evidence exists
+      # whatever happened to the write.
       - name: Confirm nothing else changed
+        if: always() && steps.before.outcome == 'success'
+        env:
+          CREATED: ${{ steps.create.outcome == 'success' }}
         run: |
           set -euo pipefail
+          set -f
           # shellcheck disable=SC2086
           git ls-remote "$LOVVERK_URL" $WATCHED | sort > "$RUNNER_TEMP/watched-after"
+          git ls-remote "$LOVVERK_URL" 'refs/owner-changes/*' | sort | tee "$RUNNER_TEMP/owner-after"
+          cp "$RUNNER_TEMP/owner-before" "$RUNNER_TEMP/owner-expected"
+          if [ "$CREATED" = true ]; then
+            printf '%s\t%s\n' "$TARGET" "$PROBE_REF" >> "$RUNNER_TEMP/owner-expected"
+          fi
+          sort -o "$RUNNER_TEMP/owner-expected" "$RUNNER_TEMP/owner-expected"
           diff "$RUNNER_TEMP/watched-before" "$RUNNER_TEMP/watched-after"
-          git ls-remote "$LOVVERK_URL" 'refs/owner-changes/*' | sort > "$RUNNER_TEMP/owner-after"
-          printf '%s\t%s\n' "$TARGET" "$PROBE_REF" | cat - "$RUNNER_TEMP/owner-before" | sort \
-            > "$RUNNER_TEMP/owner-expected"
           diff "$RUNNER_TEMP/owner-expected" "$RUNNER_TEMP/owner-after"
-          echo "Only $PROBE_REF -> $TARGET was added; main, notes and sync/* tags are unchanged."
+          echo "main, notes and sync/* tags unchanged; owner-change refs as expected (created: $CREATED)."
 
       - name: Remove the key
         if: always()
