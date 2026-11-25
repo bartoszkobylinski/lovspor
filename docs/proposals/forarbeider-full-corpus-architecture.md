@@ -1314,6 +1314,7 @@ Limitations:
 | Component | Authority | Verified at | Failure mode | Tests | Status |
 |---|---|---|---|---|---|
 | Quarantine membership | AR5d-4 chain on the ledger's witness, owner exceptions re-verified now | `plan_witnessed`; `authorize` (`ar5_quarantine_anchor`); `_still_current` | refuse or deny; `successor_required` | `test_forarbeider_quarantine_integration` | fixed here |
+| Planning and batch preparation | the anchored quarantine head | `plan_witnessed`, `prepare_witnessed` | `successor_required`; refuse, nothing staged | `test_forarbeider_quarantine_integration` | fixed here |
 | Anchor trust root | the request's trust root | `authorize` (`trust_root`); `_still_current` | deny; `authorization_stale:trust_root` | same | fixed here |
 | Plan, policy approvals, limits | owner signatures, trust root | `authorize` | deny | `test_forarbeider_publication_execute` | existing |
 | STOP/RESUME, latch | owner records anchored on the ledger's witness; latch anchored, a clearing only on an anchored owner RESUME | `authorize`, `_still_current`, `settle` | deny; latch; clearing `pending_anchor` | `test_forarbeider_publication_stop_resume`, `_stale_authorization`, `_forged_control_records` | #1027 and #1029 fixed here |
@@ -1321,7 +1322,7 @@ Limitations:
 | Attempts, receipts | anchored on the ledger's witness (AR5d-3) | `execute`, recovery | `recovery_required`; latch | `test_forarbeider_publication_remote_recovery`, `_recovery_races` | existing |
 | Budget ledger | durable, anchored | `authorize`, `_still_current` | deny | `test_forarbeider_publication_ledger` | existing; ledger identity unbound to limits: ledger v2 |
 | Cancellation | owner instruction and proof; a resumed decision bound to the signed head | `cancel_reservation` | refuse | `test_forarbeider_reservation_cancellation`, `_cross_witness_cancellation`, `_forged_control_records` | #1028 fixed here |
-| Bootstrap | the owner's explicit operation | `initialize_quarantine`, `initialize_attempts`, `initialize_ledger` | refuse any existing history | `_quarantine_integration`, `_forged_control_records` | fixed here (quarantine, attempts, ledger, control history) |
+| Bootstrap | the owner's explicit operation | `initialize_quarantine`, `initialize_attempts`, `initialize_ledger`, `initialize_control` | refuse any existing history | `_quarantine_integration`, `_forged_control_records` | fixed here (quarantine, attempts, ledger, control history) |
 
 Remaining gaps, classified:
 - **Fixed here:** #1027, #1028 and #1029 (above), and the bootstrap of every family: quarantine, `publication_attempts`, `budget_ledger` and `control_history`.
