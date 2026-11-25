@@ -134,8 +134,6 @@ Not yet done: one pin exercised end to end before sealing is required.
 
 ## Open questions
 
-- Whether GitHub accepts the deploy key's push to `refs/owner-changes/*`:
-  see "Deploy-key probe" below.
 - Whether GitHub marks the lovverk pull request merged when its head reaches
   `main` through the sync push. If not, it is closed by hand.
 - The git version on the runner. The gate does not depend on merge options.
@@ -146,4 +144,51 @@ Not yet done: one pin exercised end to end before sealing is required.
 
 ## Deploy-key probe
 
-(pending)
+Question: can the sync's deploy key create a ref under `refs/owner-changes/`
+on lovverk, create-only, as `_record_attempt` does? Answered by one
+owner-authorised run on 2026-11-25. The answer is yes.
+
+- Workflow: `.github/workflows/owner-changes-ref-probe.yml`, added in lovspor
+  #1033, merged as `c1b2b71094fbe06605fb07016add8eab7adb1711`, removed again
+  in this pull request.
+- The workflow was dispatched once, as run 45649164024 (2026-11-25T15:50:52Z). It
+  ran on `c1b2b710` in environment `lovverk-sync`. Every step succeeded.
+- Key: the run logged fingerprint
+  `SHA256:2u9LOHT5MvZzD43sKSefASZU7ATifgXb8ydhP4vAwwA` (deploy key
+  170454523). The private key was not printed, and it was removed at the end
+  of the job.
+- The one write was `git push --porcelain --force-with-lease=<ref>: <url>
+  <target>:<ref>`. Exit 0, porcelain line:
+  `*	c8c4bec40cd07effbee7dafd8ed735c49d3e69cc:refs/owner-changes/probe-20261125/1	[new reference]`.
+- Ref created: `refs/owner-changes/probe-20261125/1` points at
+  `c8c4bec40cd07effbee7dafd8ed735c49d3e69cc`, a lovverk commit sealed by
+  `sync/seal-45415948204-1`, so the push carried no new object. The name
+  cannot collide with a real attempt ref: real attempt refs use a 40-hex
+  commit. The ref is kept as evidence.
+- A repeated create was checked with dry runs only. There was no second write.
+  - Create-only, different commit (a descendant of the target): exit 1,
+    `!	HEAD:refs/owner-changes/probe-20261125/1	[rejected] (stale info)`.
+  - Create-only, same commit: exit 0,
+    `=	c8c4bec4…:refs/owner-changes/probe-20261125/1	[up to date]`.
+    No write happens, but there is also no refusal. `_record_attempt` does not
+    accept this: it requires the `[new reference]` line, and `plan` refuses
+    before the push when the attempt ref exists.
+  - Plain push of the descendant, without a lease: exit 0,
+    `HEAD:refs/owner-changes/probe-20261125/1	c8c4bec4..56ee5fbe`. A plain
+    push would fast-forward the ref. This is why `_record_attempt` uses the
+    lease.
+- Before and after:
+  - The job compared `git ls-remote` of `refs/heads/main`, both notes refs
+    and `refs/tags/sync/*`. They were identical. The only addition under
+    `refs/owner-changes/*` was the probe ref.
+  - An independent read-only snapshot, taken before (15:32:56Z) and after
+    (15:52:43Z), gave the same diff: one added line, the probe ref.
+  - main stayed `bcea15786c90a9f51f3194228eb4e50b716aba3b`, so the corpus tree
+    and manifest are unchanged. Notes stayed `c3fab9d0` and the epoch stayed
+    `37215650`. The ten `sync/*` tags were unchanged.
+- An unrelated change happened earlier. At 12:45Z lovverk main was `c8c4bec4`.
+  The scheduled sync, run 45628688850 (started 13:56Z), then moved it to
+  `bcea1578` and added `sync/seal-45628688850-1`. That run finished before the
+  probe's before-snapshot, and no sync run started between the two snapshots.
+- Not tested: whether GitHub rulesets would block this namespace in future.
+  Today the only lovverk ruleset (27725547) covers tags.
