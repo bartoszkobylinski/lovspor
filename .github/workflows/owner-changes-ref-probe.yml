@@ -1,0 +1,146 @@
+name: Probe owner-change attempt ref
+
+# One-time, owner-authorised test (2026-11-25): can the sync's deploy key
+# create a ref under refs/owner-changes/ on lovverk, create-only? The planned
+# owner-change sync step records each pin attempt there before merging
+# (docs/proposals/owner-changes-sync-step.md).
+#
+# Exactly one write: PROBE_REF is created, pointing at TARGET, an existing
+# sealed lovverk commit, so no object is added. PROBE_REF cannot be a real
+# attempt ref: those are refs/owner-changes/<40 hex>/<attempt>. The push is
+# create-only on the server (`--force-with-lease=<ref>:` with an empty
+# expected value). If PROBE_REF already exists, the job stops before any push,
+# so a second dispatch writes nothing. A repeated create is then checked with
+# dry-run pushes only.
+#
+# What it does NOT do:
+# - check out or run any project code (no actions, no checkout);
+# - change main, the notes refs, any sync/* tag or any other owner-change ref:
+#   the job fails if one moved while it ran;
+# - print the key: only its public fingerprint is logged.
+#
+# The key comes from the `lovverk-sync` environment, whose deployment branch
+# policy admits `main` only. Remove this workflow after the run.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: lovverk-sync
+    env:
+      LOVVERK_URL: git@github.com:bartoszkobylinski/lovverk.git
+      # Public fingerprint of deploy key 170454523; not a secret.
+      EXPECTED_FINGERPRINT: SHA256:2u9LOHT5MvZzD43sKSefASZU7ATifgXb8ydhP4vAwwA
+      PROBE_REF: refs/owner-changes/probe-20261125/1
+      # lovverk main on 2026-11-25, sealed by sync/seal-45415948204-1.
+      TARGET: c8c4bec40cd07effbee7dafd8ed735c49d3e69cc
+      WATCHED: refs/heads/main refs/notes/temporal-attestations refs/notes/temporal-attestations-epoch refs/tags/sync/*
+    steps:
+      # Same host-key pin as sync.yml: no ssh-keyscan, fail closed on rotation.
+      - name: Install the key and pin github.com
+        env:
+          DEPLOY_KEY: ${{ secrets.LOVVERK_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/lovverk_deploy_key
+          cat > ~/.ssh/known_hosts <<'EOF'
+          github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+          EOF
+          cat > ~/.ssh/config <<'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/lovverk_deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+
+      - name: Check it is the environment-scoped key
+        run: |
+          set -euo pipefail
+          actual=$(ssh-keygen -y -f ~/.ssh/lovverk_deploy_key | ssh-keygen -lf - | awk '{print $2}')
+          echo "key fingerprint: $actual"
+          if [ "$actual" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "::error::The job was not handed deploy key 170454523."
+            exit 1
+          fi
+
+      - name: Record remote refs before
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          git ls-remote "$LOVVERK_URL" $WATCHED | sort | tee "$RUNNER_TEMP/watched-before"
+          awk '$2 == "refs/heads/main" {found=1} END {exit !found}' "$RUNNER_TEMP/watched-before"
+          git ls-remote "$LOVVERK_URL" 'refs/owner-changes/*' | sort | tee "$RUNNER_TEMP/owner-before"
+          if awk -v ref="$PROBE_REF" '$2 == ref {found=1} END {exit !found}' "$RUNNER_TEMP/owner-before"; then
+            echo "::error::$PROBE_REF already exists; the probe ran before. No push."
+            exit 1
+          fi
+
+      - name: Fetch the target commit
+        run: |
+          set -euo pipefail
+          git init -q "$RUNNER_TEMP/probe"
+          git -C "$RUNNER_TEMP/probe" fetch -q --depth=1 "$LOVVERK_URL" "$TARGET"
+          test "$(git -C "$RUNNER_TEMP/probe" rev-parse "$TARGET^{commit}")" = "$TARGET"
+
+      # The one write.
+      - name: Create the probe ref, create-only
+        id: create
+        run: |
+          set -uo pipefail
+          out=$(git -C "$RUNNER_TEMP/probe" push --porcelain --force-with-lease="$PROBE_REF:" \
+            "$LOVVERK_URL" "$TARGET:$PROBE_REF" 2>&1)
+          code=$?
+          printf '%s\n' "$out"
+          echo "exit=$code"
+          printf '%s\n' "$out" | grep -qxF "$(printf '*\t%s:%s\t[new reference]' "$TARGET" "$PROBE_REF")" || {
+            echo "::error::the probe ref was not created as a new reference"
+            exit 1
+          }
+
+      - name: Check a repeated create cannot overwrite it (dry run, no write)
+        run: |
+          set -uo pipefail
+          probe="$RUNNER_TEMP/probe"
+          git -C "$probe" -c user.name=probe -c user.email=probe@invalid \
+            commit -q --allow-empty -m "descendant of the target (never pushed)"
+          lease=$(git -C "$probe" push --dry-run --porcelain --force-with-lease="$PROBE_REF:" \
+            "$LOVVERK_URL" "HEAD:$PROBE_REF" 2>&1)
+          printf 'create-only, different commit:\n%s\n' "$lease"
+          printf '%s\n' "$lease" | grep -qxF "$(printf '!\tHEAD:%s\t[rejected] (stale info)' "$PROBE_REF")" || {
+            echo "::error::a create-only push over the existing ref was not refused"
+            exit 1
+          }
+          same=$(git -C "$probe" push --dry-run --porcelain --force-with-lease="$PROBE_REF:" \
+            "$LOVVERK_URL" "$TARGET:$PROBE_REF" 2>&1)
+          printf 'create-only, same commit:\n%s\n' "$same"
+          printf '%s\n' "$same" | grep -qE "^[!=]$(printf '\t')$TARGET:$PROBE_REF$(printf '\t')" || {
+            echo "::error::a create-only push of the same commit did not report up-to-date or rejected"
+            exit 1
+          }
+          plain=$(git -C "$probe" push --dry-run --porcelain "$LOVVERK_URL" "HEAD:$PROBE_REF" 2>&1)
+          printf 'plain push, descendant (for the record):\n%s\n' "$plain"
+
+      - name: Confirm nothing else changed
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          git ls-remote "$LOVVERK_URL" $WATCHED | sort > "$RUNNER_TEMP/watched-after"
+          diff "$RUNNER_TEMP/watched-before" "$RUNNER_TEMP/watched-after"
+          git ls-remote "$LOVVERK_URL" 'refs/owner-changes/*' | sort > "$RUNNER_TEMP/owner-after"
+          printf '%s\t%s\n' "$TARGET" "$PROBE_REF" | cat - "$RUNNER_TEMP/owner-before" | sort \
+            > "$RUNNER_TEMP/owner-expected"
+          diff "$RUNNER_TEMP/owner-expected" "$RUNNER_TEMP/owner-after"
+          echo "Only $PROBE_REF -> $TARGET was added; main, notes and sync/* tags are unchanged."
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/lovverk_deploy_key
