@@ -92,6 +92,35 @@ def attempts_witness(authority: AnchorAuthority, ledger: "BudgetLedger | None") 
     return authority._replace(witness=ledger.witness)
 
 
+def control_authority_of(request: "ExecutionRequest") -> AnchorAuthority | None:
+    """The authority of the owner's control history: the ledger's witness when it names one.
+
+    Every workspace that shares a ledger reads one control history, so a STOP
+    anchored by one binds them all (#1029); never the caller's choice of witness.
+    """
+    authority = authority_of(request)
+    return None if authority is None else attempts_witness(authority, request.ledger)
+
+
+def initialize_control(request: "ExecutionRequest", policy_id: str) -> AnchorVerdict:
+    """Bootstrap: anchor one policy's empty control history on its authoritative witness, once.
+
+    The owner's records are then anchored by :func:`sync_control`. It never
+    adopts or resets a history: any anchored chain refuses it (an empty one
+    ``already_anchored``, one holding records ``anchor:local_rolled_back``).
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible`` with ``anchor_authority_missing``,
+            ``already_anchored`` or ``anchor:<status>``.
+    """
+    authority = control_authority_of(request)
+    if authority is None:
+        raise _refused("anchor_authority_missing")
+    chain = control_chain((), policy_id)
+    empty = AnchorQuery("control_history", request.inputs.settings.repository, policy_id, chain)
+    return initialize(empty, authority)
+
+
 def attempts_authority_of(request: "ExecutionRequest") -> AnchorAuthority | None:
     """The request's authority for the transaction's attempts (AR5d-3)."""
     authority = authority_of(request)
@@ -151,9 +180,10 @@ def anchor_reasons(
 ) -> tuple[str, ...]:
     """Why the required families are not all verified; empty when they are.
 
-    ``anchoring`` is the request's witness and its budget ledger. The
-    transaction's attempts are verified on their authoritative witness
-    (:func:`attempts_witness`), the other families on the workspace's.
+    ``anchoring`` is the request's witness and its budget ledger. The owner's
+    control history and the transaction's attempts are verified on their
+    authoritative witness, the ledger's when it names one (:func:`attempts_witness`,
+    #1029); the workspace's own families on the workspace's.
     """
     authority, ledger = anchoring
     if authority is None or workspace is None:
@@ -163,14 +193,15 @@ def anchor_reasons(
     held = authority._replace(workspace=workspace)
     tid = inputs.transaction.transaction_id
     attempts = workspace_query(inputs, workspace, "publication_attempts", tid)
-    queries = [(control_query(inputs, policy_id), held)]
+    shared = attempts_witness(held, ledger)
+    queries = [(control_query(inputs, policy_id), shared)]
     identity: tuple[str, ...] = ()
     try:
         scope = workspace_scope(workspace, inputs.settings.repository, held)
         queries.append((workspace_query(inputs, workspace, "stop_latch", scope), held))
     except ForarbeiderRefusedError as error:
         identity = (error.detail,)
-    queries.append((attempts, attempts_witness(held, ledger)))
+    queries.append((attempts, shared))
     found = ((query.family, verify(query, by).status) for query, by in queries)
     return identity + tuple(f"{f}:{status}" for f, status in found if status != "verified")
 
@@ -189,7 +220,7 @@ def sync_control(request: "ExecutionRequest", policy_id: str, now: datetime) -> 
             carry (``control_chain_not_verified``), or one that does not extend
             the anchored head (``anchor:control_history:<status>``).
     """
-    authority = authority_of(request)
+    authority = control_authority_of(request)
     if authority is None:
         raise _refused("anchor_authority_missing")
     if not _owner_chain_intact(request, policy_id, now):
@@ -315,6 +346,7 @@ def _resume_reasons(
     if record.action != "resume" or digest != cleared.resume_control_sha256:
         reasons.append("latch_clearing_not_the_newest_resume")
     reasons += _cause_reasons(request, before, record.signed_at)
-    if verify(control_query(request.inputs, policy_id), authority).status != "verified":
+    shared = attempts_witness(authority, request.ledger)
+    if verify(control_query(request.inputs, policy_id), shared).status != "verified":
         reasons.append("latch_clearing_resume_unanchored")
     return tuple(reasons)

@@ -12,17 +12,17 @@ from typing import Any
 
 import pytest
 
-from lovspor.forarbeider import publication_anchors, publication_attempts
+from lovspor.forarbeider import publication_anchors, publication_attempts, publication_ledger
 from lovspor.forarbeider.control_plane_anchor import verify
 from lovspor.forarbeider.control_plane_witness import OfflineAnchorWitness
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
-from lovspor.forarbeider.publication_anchors import initialize_attempts
+from lovspor.forarbeider.publication_anchors import initialize_attempts, initialize_control
 from lovspor.forarbeider.publication_cancel_models import CANCELLED
 from lovspor.forarbeider.publication_execute import attempt_id_of, execute
 from lovspor.forarbeider.publication_execution_models import AttemptRecord, LatchEvent
 from lovspor.forarbeider.publication_ledger import BudgetLedger, initialize_ledger
 from lovspor.forarbeider.publication_remote_recovery import recover
-from lovspor.forarbeider.publication_stop_resume import resume
+from lovspor.forarbeider.publication_stop_resume import record_stop, resume
 from lovspor.forarbeider.version_models import canonical_text
 from tests.unit.forarbeider_execution_support import (
     NOW,
@@ -202,4 +202,56 @@ def test_a_forged_clearing_naming_a_real_resume_never_lifts_an_unresolvable_latc
     assert reasons == ("latch_clearing_cause_unresolved",)
     assert publication_anchors.settle(request, "stop_latch") is None
     assert execute(request, sim(github, LATER)).status == "denied"
+    assert github.calls == []
+
+
+# --- #1029: one control history per shared ledger ----------------------------------------------
+
+
+def test_a_stop_anchored_by_one_workspace_binds_another_on_its_own_witness(
+    tmp_path: Path,
+) -> None:
+    """B uses its own witness and shares A's ledger: withholding A's STOP no longer publishes."""
+    rig = make_rig(tmp_path / "a", "A")
+    shared = make_rig(tmp_path / "b", "A", share=rig)  # its own witness, rig's ledger
+    github = endpoint(rig)
+    assert execute(rig.request(), sim(github)).status == "published"
+    assert recover(rig.request(), sim(github)).settlement.status == "settled"
+    stop = stop_of(rig, first(rig))
+    recorded = record_stop(with_control(rig, first(rig), stop), NOW)
+    assert recorded.status == "stop_recorded" and recorded.anchored
+    assert publication_ledger.reserve(shared.request(), NOW).status == "appended"
+    other = endpoint(shared)
+
+    outcome = execute(shared.request(), sim(other))  # offers only the first record
+
+    assert outcome.status == "denied"
+    assert outcome.evidence is not None
+    assert "ar5_control_anchor" in outcome.evidence.denied_by
+    assert other.calls == []
+
+
+def test_the_control_history_bootstrap_runs_once(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path / "a", "A")  # bootstrapped through initialize_control
+    error = refused(lambda: initialize_control(rig.request(), policy_id_of(rig)))
+    # The witness holds the owner's records: an empty history would roll them back.
+    assert error.detail == "anchor:local_rolled_back"
+
+
+def test_a_stop_recorded_from_the_other_workspace_binds_the_ledgers_owner(
+    tmp_path: Path,
+) -> None:
+    """The STOP goes to the ledger's witness wherever it is recorded from."""
+    rig = make_rig(tmp_path / "a", "A")
+    shared = make_rig(tmp_path / "b", "A", share=rig)
+    stop = stop_of(shared, first(shared))
+    recorded = record_stop(with_control(shared, first(shared), stop), NOW)
+    assert recorded.status == "stop_recorded" and recorded.anchored
+    github = endpoint(rig)
+
+    outcome = execute(rig.request(), sim(github))  # A never saw the STOP locally
+
+    assert outcome.status == "denied"
+    assert outcome.evidence is not None
+    assert "ar5_control_anchor" in outcome.evidence.denied_by
     assert github.calls == []

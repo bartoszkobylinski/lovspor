@@ -97,6 +97,7 @@ def _anchored(request: ExecutionRequest, family: str) -> bool:
         return False
     if family == "control_history":
         query = publication_anchors.control_query(request.inputs, _policy_id(request))
+        authority = publication_anchors.attempts_witness(authority, request.ledger)
     else:
         try:
             scope = publication_anchors.scope_of(request)

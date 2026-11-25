@@ -19,7 +19,6 @@ from lovspor.forarbeider.control_plane_anchor import (
     AnchorAuthority,
     AnchorQuery,
     anchor_pending,
-    initialize,
     verify,
     workspace_scope,
 )
@@ -36,7 +35,7 @@ from lovspor.forarbeider.policy_trust import (
     QUARANTINE_NAMESPACE,
     TrustRoot,
 )
-from lovspor.forarbeider.publication_anchors import initialize_attempts
+from lovspor.forarbeider.publication_anchors import initialize_attempts, initialize_control
 from lovspor.forarbeider.publication_authorize import AuthorizationInputs
 from lovspor.forarbeider.publication_execute import (
     ExecutionOutcome,
@@ -336,7 +335,7 @@ def make_rig(
         else BudgetLedger(share.ledger.root, share.ledger.ledger_id, share.witness),
         quarantine_source(tmp) if share is None else share.quarantine,
     )
-    anchor_rig(rig, seed=share is None, control=not (share is not None and one_witness))
+    anchor_rig(rig, seed=share is None, control_anchoring=share is None)
     if share is None:
         verdict = initialize_quarantine(quarantine_store(tmp), REPOSITORY_OF_RIG, rig.anchoring())
         assert verdict.status == "verified"
@@ -401,7 +400,7 @@ def policy_id_of(rig: "Rig") -> str:
     return plan.basis.policy.policy_id
 
 
-def anchor_rig(rig: "Rig", seed: bool = True, control: bool = True) -> None:
+def anchor_rig(rig: "Rig", seed: bool = True, control_anchoring: bool = True) -> None:
     """Test setup: the workspace's identity, which anchors its scope's families empty
     (AR5d-1, AR5d-2), the transaction's empty attempts (on the ledger's witness when it
     names one, AR5d-3; already anchored there by another workspace of the same
@@ -418,17 +417,20 @@ def anchor_rig(rig: "Rig", seed: bool = True, control: bool = True) -> None:
     )
     if verify(queries["publication_attempts"], attempts).status != "verified":
         assert initialize_attempts(rig.request()).status == "verified"
-    if not control:
-        assert verify(queries["control_history"], authority).status == "verified"
-        return
+    # #1029: the owner's control history lives on the ledger's witness too; a rig
+    # sharing a ledger finds it already anchored there by the rig it shares with.
     control = queries["control_history"]
+    if not control_anchoring or verify(control, attempts).status == "verified":
+        assert verify(control, attempts).status == "verified"
+        if seed:
+            seed_ledger(rig, rig.inputs.ledger)
+        return
     policy_id = policy_id_of(rig)
-    empty = AnchorQuery("control_history", repository, policy_id, control_chain((), policy_id))
-    assert initialize(empty, authority).status == "verified"
+    assert initialize_control(rig.request(), policy_id).status == "verified"
     for count in range(1, len(rig.inputs.control) + 1):
         prefix = control_chain(rig.inputs.control[:count], policy_id)
         step = AnchorQuery("control_history", repository, policy_id, prefix)
-        assert anchor_pending(step, authority).status == "verified"
+        assert anchor_pending(step, attempts).status == "verified"
     assert control.local.reasons == ()
     if seed:
         seed_ledger(rig, rig.inputs.ledger)
