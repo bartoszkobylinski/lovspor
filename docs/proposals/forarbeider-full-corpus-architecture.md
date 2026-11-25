@@ -1315,6 +1315,7 @@ Limitations:
 |---|---|---|---|---|---|
 | Quarantine membership | AR5d-4 chain on the ledger's witness, owner exceptions re-verified now | `plan_witnessed`; `authorize` (`ar5_quarantine_anchor`); `_still_current` | refuse or deny; `successor_required` | `test_forarbeider_quarantine_integration` | fixed here |
 | Planning and batch preparation | the anchored quarantine head | `plan_witnessed`, `prepare_witnessed` | `successor_required`; refuse, nothing staged | `test_forarbeider_quarantine_integration` | fixed here |
+| Quarantine source identity | none trusted: the caller names the chain (`ExecutionRequest.quarantine`, `Witnessing`) | nowhere | a valid foreign chain on the same witness and root governs the publication (reproduced, paths A and B) | `test_forarbeider_quarantine_source` (strict `xfail`) | **owner decision, #1037** |
 | Anchor trust root | the request's trust root | `authorize` (`trust_root`); `_still_current` | deny; `authorization_stale:trust_root` | same | fixed here |
 | Plan, policy approvals, limits | owner signatures, trust root | `authorize` | deny | `test_forarbeider_publication_execute` | existing |
 | STOP/RESUME, latch | owner records anchored on the ledger's witness; latch anchored, a clearing only on an anchored owner RESUME | `authorize`, `_still_current`, `settle` | deny; latch; clearing `pending_anchor` | `test_forarbeider_publication_stop_resume`, `_stale_authorization`, `_forged_control_records` | #1027 and #1029 fixed here |
@@ -1327,6 +1328,10 @@ Limitations:
 Remaining gaps, classified:
 - **Fixed here:** #1027, #1028 and #1029 (above), and the bootstrap of every family: quarantine, `publication_attempts`, `budget_ledger` and `control_history`.
 - **Owner confirmation:** #1029's witness choice (the ledger's) is a default, to be confirmed or rejected in review.
+- **Owner decision: #1037, quarantine source identity.** The witness anchors `quarantine_succession` per repository and ledger id, so a second chain anchored on the same witness under the same root verifies as fully as the publication's own. No owner-signed record (policy, approvals, limits) names a quarantine chain or a ledger id, `PublicationSettings` is unverified until AR7, and the budget ledger's identity is unbound (ledger v2). Nothing trusted can tell the chains apart yet. Options:
+  - recommended: the owner-signed limits, or a new owner-signed binding record, name the budget ledger id and the quarantine chain id, and every check refuses another source (part of ledger v2);
+  - interim and unsigned: one chain per budget ledger, which stops pairing a genuine ledger with a foreign chain and leaves only the ledger-identity gap;
+  - AR7's pin names the chain, in production only.
 - **Production-only (AR7):** the witness pin, a production witness and an unpinned trust root (FC7b). `AuthorizationInputs.ledger` is read only without a durable ledger, which simulation denies.
 - **Ledger v2 / exceptional accounting:** ledger identity bound to the owner-signed limits; anchored policy and limits revocations.
 - **AR4a at the publishing boundary.** `prepare_witnessed` chooses a batch's membership only once the sealed assessment and the sealed plan are proved to be the anchored head's quarantine now (`quarantine_witness:prepare:<why>`, nothing cloned or staged). The raw AR2 planner (`plan_release`) and AR4a `prepare_publication` stay as they are for independent use, as `run_quarantine` does for AR3. The publishing pipeline enters through `plan_witnessed` and `prepare_witnessed`, and nothing prepared from another quarantine can be authorized or sent (`ar5_quarantine_anchor`, the final check).
