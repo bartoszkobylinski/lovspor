@@ -1,7 +1,7 @@
 # Owner changes to lokale-forskrifter/ in lovverk, pinned for the sync.
 # Grammar and procedure: docs/owner-changes.md. Checked on every pull request
-# and push to main by `lovspor ops owner-changes check`; applied by the sync
-# step "Apply pinned owner changes".
+# and push to main by `lovspor ops owner-changes check`. The sync does not
+# read this file yet.
 #
 # One line per pin:
 # <lovverk commit, 40 lowercase hex> <lovverk PR number> <attempt> <reason>
