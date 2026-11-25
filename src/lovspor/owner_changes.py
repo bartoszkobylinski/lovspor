@@ -2,8 +2,8 @@
 
 A pin names a reviewed lovverk commit that a later sync step may merge into
 ``lokale-forskrifter/`` (docs/owner-changes.md). This module only reads the
-file. Nothing in the sync reads it yet, so an empty file, or one holding only
-comments, changes nothing.
+file; :mod:`lovspor.owner_changes_run` applies it. An empty file, or one
+holding only comments, changes nothing.
 
 The grammar is strict on purpose: the file is authority over published
 content, so anything unexpected refuses the whole file rather than skipping a
