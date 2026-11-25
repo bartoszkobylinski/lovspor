@@ -103,3 +103,25 @@ def test_existing_sync_steps_keep_their_order() -> None:
 
 def test_sync_workflow_runs_owner_change_steps_in_order() -> None:
     assert order_problems(_sync_steps()) == []
+
+
+def _sync_step(name: str) -> dict[str, Any]:
+    workflow: dict[str, Any] = yaml.safe_load(
+        (ROOT / ".github/workflows/sync.yml").read_text(encoding="utf-8")
+    )
+    step: dict[str, Any] = next(
+        s for s in workflow["jobs"]["sync"]["steps"] if s.get("name") == name
+    )
+    return step
+
+
+def test_apply_runs_only_after_a_recorded_epoch_and_check_only_after_apply() -> None:
+    assert _sync_step(EPOCH)["id"] == "epoch"
+    assert _sync_step(EPOCH)["continue-on-error"] is True
+    assert _sync_step(APPLY)["if"] == "steps.epoch.outcome == 'success'"
+    assert "continue-on-error" not in _sync_step(APPLY)
+    assert _sync_step(CHECK)["if"] == "steps.owner_changes.outcome == 'success'"
+    assert "continue-on-error" not in _sync_step(CHECK)
+    report = _sync_step(REPORT)
+    assert report["continue-on-error"] is True
+    assert "--search" not in report["run"]

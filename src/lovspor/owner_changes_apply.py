@@ -53,7 +53,14 @@ def plan(repo: Path, pin: Pin, pr_head: str, attempt_used: bool) -> str | None:
         raise PinRefusedError(pin, "attempt-consumed", f"attempt {pin.attempt} was already tried")
     if pr_head != pin.commit:
         raise PinRefusedError(pin, "stale-pin", f"pull request head is {pr_head}")
-    base = _git(repo, "merge-base", "HEAD", pin.commit)
+    return _checked_base(repo, pin)
+
+
+def _checked_base(repo: Path, pin: Pin) -> str:
+    try:
+        base = _git(repo, "merge-base", "HEAD", pin.commit)
+    except LovsporError as exc:
+        raise PinRefusedError(pin, "no-merge-base", "the pin shares no history with main") from exc
     if _git(repo, "rev-list", "--merges", f"{base}..{pin.commit}"):
         raise PinRefusedError(pin, "merge-commit", "the pinned range contains a merge commit")
     problems = scope_violations(repo, base, pin.commit)

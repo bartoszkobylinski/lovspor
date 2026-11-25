@@ -70,4 +70,6 @@ The file is listed in `.github/CODEOWNERS`.
 
 A refusal opens one issue, "Pinned owner change not applied", per commit and
 attempt. Fix the cause, then replace the pin (rebased commit, attempt 1) or
-raise the attempt number.
+raise the attempt number. Each attempt is recorded on lovverk before the merge, so a
+run that fails later (for example a Lovdata outage) publishes nothing and
+uses the attempt: raise the attempt number to try again.

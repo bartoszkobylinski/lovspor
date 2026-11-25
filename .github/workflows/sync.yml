@@ -224,6 +224,7 @@ jobs:
       # continue-on-error: the corpus sync must never be blocked by it. A
       # missing record fails closed at serving time (AttestationError).
       - name: Record the temporal gate epoch before any corpus work
+        id: epoch
         continue-on-error: true
         run: >-
           uv run --no-dev lovspor temporal-epoch --corpus-path "$LOVVERK_PATH"
@@ -253,8 +254,11 @@ jobs:
       # and reported below; an empty pin file makes no git call. Only a git
       # failure that leaves the clone in an unknown state fails the job, before
       # anything is pushed.
+      # Only after a successful epoch step: its note must be on origin before
+      # the head moves. Otherwise the pins wait for the next run.
       - name: Apply pinned owner changes
         id: owner_changes
+        if: steps.epoch.outcome == 'success'
         run: >-
           uv run --no-dev lovspor ops owner-changes apply --corpus-path "$LOVVERK_PATH"
           --file ops/lovverk-owner-changes --report "$RUNNER_TEMP/owner-changes.json"
@@ -295,6 +299,7 @@ jobs:
       # Nothing in the run may change a file a pin set: if the sync did, the
       # step fails and nothing is pushed.
       - name: Check pinned owner changes are unchanged
+        if: steps.owner_changes.outcome == 'success'
         run: >-
           uv run --no-dev lovspor ops owner-changes check-applied --corpus-path "$LOVVERK_PATH"
           --report "$RUNNER_TEMP/owner-changes.json"
@@ -315,7 +320,7 @@ jobs:
           set -euo pipefail
           file_issue() {
             local title="$1" body="$2" state="$3"
-            if gh issue list --repo "$GITHUB_REPOSITORY" --state "$state" --search "in:title $title" \
+            if gh issue list --repo "$GITHUB_REPOSITORY" --state "$state" --limit 1000 \
               --json title --jq '.[].title' | grep -qxF "$title"; then
               echo "already reported: $title"
               return 0
@@ -324,7 +329,7 @@ jobs:
           }
           jq -c '.refused[]' "$REPORT" | while IFS= read -r entry; do
             title=$(jq -r '"Pinned owner change not applied: lovverk#\(.pin.pull_request) \(.pin.commit) attempt \(.pin.attempt)"' <<<"$entry")
-            body=$(jq -r --arg run "$RUN_URL" '"The sync skipped this pin and published without it.\n\nRefusal: `\(.code)`\n\n\(.detail)\n\nRun: \($run)\n\nHow to fix and re-pin: docs/owner-changes.md"' <<<"$entry")
+            body=$(jq -r --arg run "$RUN_URL" '"This pin was not applied in this run. Whether the run published anything else is in its log.\n\nRefusal: `\(.code)`\n\n\(.detail)\n\nRun: \($run)\n\nHow to fix and re-pin: docs/owner-changes.md"' <<<"$entry")
             file_issue "$title" "$body" all
           done
           if [ "$(jq '.file_problems | length' "$REPORT")" -gt 0 ]; then

@@ -89,9 +89,13 @@ def lovverk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Lovverk:
 def test_empty_pin_file_makes_no_git_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Regression for the existing sync: no pin, no git, no change."""
     hermetic_git(monkeypatch, tmp_path)
-    calls: list[tuple[str, ...]] = []
-    monkeypatch.setattr("lovspor.owner_changes_run.git_bytes", lambda *a: calls.append(a) or b"")
-    monkeypatch.setattr("lovspor.owner_changes_apply.git_bytes", lambda *a: calls.append(a) or b"")
+    calls: list[object] = []
+
+    def no_subprocess(*args: object, **kwargs: object) -> None:
+        calls.append(args)
+        raise AssertionError("an empty pin file must not run git")
+
+    monkeypatch.setattr("lovspor.owner_changes_apply.subprocess.run", no_subprocess)
     pins = tmp_path / "pins"
     pins.write_text((ROOT / "ops/lovverk-owner-changes").read_text(encoding="utf-8"))
     report = apply_pins(tmp_path / "no-such-clone", pins, CONTEXT)
@@ -194,6 +198,15 @@ def test_attempt_ref_created_meanwhile_is_not_overwritten(lovverk: Lovverk) -> N
         _record_attempt(lovverk.clone, pin)
     assert caught.value.code == "attempt-not-recorded"
     assert lovverk.remote_ref(attempt_ref(pin)) == other
+
+
+def test_pin_without_shared_history_is_refused_not_fatal(lovverk: Lovverk) -> None:
+    orphan = lovverk.owner
+    git(orphan, "checkout", "-q", "--orphan", "unrelated")
+    _write(orphan, {DOC: "unrelated\n"})
+    tip = _commit(orphan, "unrelated root")
+    git(orphan, "push", "-q", "-f", "origin", "HEAD:refs/pull/44/head")
+    assert _refusal(lovverk, lovverk.pins(f"{tip} 44 1 x")) == "no-merge-base"
 
 
 def test_detached_head_is_an_error(lovverk: Lovverk) -> None:
