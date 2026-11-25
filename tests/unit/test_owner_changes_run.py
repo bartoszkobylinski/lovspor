@@ -211,6 +211,63 @@ def test_attempt_ref_created_meanwhile_is_not_overwritten(lovverk: Lovverk) -> N
     assert lovverk.remote_ref(attempt_ref(pin)) == other
 
 
+def test_attempt_ref_created_meanwhile_at_same_commit_is_not_accepted(lovverk: Lovverk) -> None:
+    tip = lovverk.pull_request(42, {DOC: "changed\n"})
+    git(lovverk.clone, "fetch", "-q", "origin", "refs/pull/42/head")
+    pin = Pin(1, tip, 42, 1, "x")
+    git(lovverk.origin, "update-ref", attempt_ref(pin), tip)
+
+    with pytest.raises(PinRefusedError) as caught:
+        _record_attempt(lovverk.clone, pin)
+    assert caught.value.code == "attempt-not-recorded"
+    assert lovverk.remote_ref(attempt_ref(pin)) == tip
+
+
+def test_report_indents_each_line_of_refusal_detail(tmp_path: Path) -> None:
+    report = tmp_path / "report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "file_problems": [],
+                "refused": [
+                    {
+                        "pin": {"pull_request": 42, "commit": "c" * 40, "attempt": 1},
+                        "code": "out-of-scope",
+                        "detail": "first `path`\n# second path",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    fake = tmp_path / "gh"
+    fake.write_text(
+        '#!/bin/sh\nif [ "$2" = create ]; then\n'
+        '  while [ "$#" -gt 0 ]; do\n'
+        '    if [ "$1" = --body ]; then printf "%s" "$2" > "$BODY"; exit; fi\n'
+        "    shift\n  done\nfi\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    body = tmp_path / "body"
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", _report_step()["run"]],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "BODY": str(body),
+            "REPORT": str(report),
+            "RUN_URL": "https://example.invalid/run",
+            "GITHUB_REPOSITORY": "o/r",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Refusal: `out-of-scope`\n\n    first `path`\n    # second path\n" in body.read_text()
+
+
 def test_pin_without_shared_history_is_refused_not_fatal(lovverk: Lovverk) -> None:
     orphan = lovverk.owner
     git(orphan, "checkout", "-q", "--orphan", "unrelated")
