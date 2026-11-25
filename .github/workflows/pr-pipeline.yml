@@ -29,6 +29,11 @@ permissions:
 jobs:
   fast-ci:
     runs-on: ubuntu-latest
+    # pull-requests: read lets the pin-file step list the pull request's files
+    # and commits. Nothing in this job writes.
+    permissions:
+      contents: read
+      pull-requests: read
     env:
       UV_PYTHON: "3.12"
     steps:
@@ -90,6 +95,31 @@ jobs:
         # docs/decisions.md §9j).
         run: uv run python scripts/quality/check_dependency_policy.py
 
+      - name: Owner-change pin file follows the grammar
+        # ops/lovverk-owner-changes names lovverk commits the sync may later
+        # merge into lokale-forskrifter/ (docs/owner-changes.md). A malformed
+        # file is refused here, on every pull request and on main. A step in
+        # fast-ci, not a job, because the ruleset requires fast-ci by name.
+        run: uv run lovspor ops owner-changes check --file ops/lovverk-owner-changes
+
+      - name: Owner-change pin file is changed alone
+        # A pull request that changes the pin file changes nothing else and
+        # carries no automated agent commit (scripts/ci/check_owner_change_pr.py).
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GH_REPO/pulls/$PR/files" \
+            --jq '.[] | {filename, previous_filename}' > "$RUNNER_TEMP/pin-files.jsonl"
+          gh api --paginate "repos/$GH_REPO/pulls/$PR/commits" \
+            --jq '.[].commit.message | split("\n")[0]' > "$RUNNER_TEMP/pin-subjects.txt"
+          python3 scripts/ci/check_owner_change_pr.py --changed-files "$CHANGED_FILES" \
+            --files "$RUNNER_TEMP/pin-files.jsonl" --subjects "$RUNNER_TEMP/pin-subjects.txt"
+
       - name: Unit tests
         # -n auto (pytest-xdist): ~20 000 tests ran serially for ~22 min. The
         # suite was checked parallel-safe before this was enabled: the same
@@ -118,6 +148,7 @@ jobs:
       pull-requests: read
     outputs:
       tests_only: ${{ steps.scope.outputs.tests_only }}
+      pin_only: ${{ steps.scope.outputs.pin_only }}
     steps:
       # The PR head, as `ready` takes it: the pull request that changes the
       # helper must be able to call the version it ships.
@@ -149,6 +180,7 @@ jobs:
           else
             echo "::warning::scripts/ci/pr_diff_scope.py is not on this head; the test author runs"
             echo "tests_only=false" >> "$GITHUB_OUTPUT"
+            echo "pin_only=false" >> "$GITHUB_OUTPUT"
           fi
           if grep -qx 'tests_only=true' "$GITHUB_OUTPUT"; then
             echo "Every changed file is under \`tests/\`: the independent test author is not started (#986)." >> "$GITHUB_STEP_SUMMARY"
@@ -186,6 +218,9 @@ jobs:
     # or on `opened` when the PR was opened ready. Never on a draft, never on
     # `synchronize` (a later push, the author's own push included) and never on
     # `reopened`. A skipped author is not a failure: `ready` accepts it.
+    # Nor on a pull request that changes only ops/lovverk-owner-changes: that
+    # file must be changed alone with no agent commit, and the round would add
+    # one (scripts/ci/check_owner_change_pr.py).
     # Nor on a pull request that changes nothing outside tests/ (#986). Only
     # the answer `true` skips: when `diff-scope` failed or said nothing, the
     # author runs. `!cancelled()` is what lets this job judge a `diff-scope`
@@ -198,7 +233,8 @@ jobs:
       github.actor != 'dependabot[bot]' &&
       (github.event.action == 'ready_for_review' ||
        (github.event.action == 'opened' && github.event.pull_request.draft == false)) &&
-      needs.diff-scope.outputs.tests_only != 'true'
+      needs.diff-scope.outputs.tests_only != 'true' &&
+      needs.diff-scope.outputs.pin_only != 'true'
     # No push token and no write scopes on this lane: the box produces a
     # patch, the hosted verifier is the only leg that can reach the branch.
     permissions:

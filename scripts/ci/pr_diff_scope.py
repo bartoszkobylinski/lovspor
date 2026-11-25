@@ -18,10 +18,14 @@ Usage:
 Input: one JSON object per changed file. A renamed file counts under both of
 its names, so a file moved out of `src/` is a change outside tests/.
 
-Output: one line, `tests_only=true` or `tests_only=false`, in the form
-$GITHUB_OUTPUT takes. A skipped author is the answer that has to be earned, so
-every doubt is `false`: no file listed, or fewer files listed than the pull
-request reports (the API lists 3000 at most). Input that is not what the usage
+Output: two lines in the form $GITHUB_OUTPUT takes: `tests_only=true|false`,
+and `pin_only=true|false`, which says the pull request changes only the
+owner-change pin file `ops/lovverk-owner-changes`. That file must be changed
+alone and carry no agent commit (`check_owner_change_pr.py`), so the author,
+whose round would add a commit, is not started for it either. A skipped
+author is the answer that has to be earned, so every doubt is `false`: no
+file listed, or fewer files listed than the pull request reports (the API
+lists 3000 at most). Input that is not what the usage
 shows ends the program with an error, and the workflow runs the author.
 """
 
@@ -32,6 +36,7 @@ import json
 import sys
 
 TESTS = "tests/"
+PIN_FILE = "ops/lovverk-owner-changes"
 
 
 def names(lines: list[str]) -> list[list[str]]:
@@ -53,12 +58,19 @@ def tests_only(files: list[list[str]], reported: int) -> bool:
     return all(name.startswith(TESTS) for file in files for name in file)
 
 
+def pin_only(files: list[list[str]], reported: int) -> bool:
+    """Whether the pull request changes the pin file and nothing else, with none missing."""
+    return reported == 1 and files == [[PIN_FILE]]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--changed-files", type=int, required=True)
     args = parser.parse_args(argv)
-    answer = tests_only(names(sys.stdin.read().splitlines()), args.changed_files)
+    files = names(sys.stdin.read().splitlines())
+    answer = tests_only(files, args.changed_files)
     print(f"tests_only={'true' if answer else 'false'}")
+    print(f"pin_only={'true' if pin_only(files, args.changed_files) else 'false'}")
     return 0
 
 

@@ -42,7 +42,7 @@ def test_scope_requires_complete_tests_only_diff(
 ) -> None:
     result = _run(entries, reported)
     assert result.returncode == 0
-    assert result.stdout == f"tests_only={answer}\n"
+    assert result.stdout.splitlines()[0] == f"tests_only={answer}"
 
 
 @pytest.mark.parametrize("entry", [{}, {"filename": None}, [], "bad"])
@@ -73,6 +73,7 @@ def test_workflow_connects_scope_to_author_and_defaults_to_running() -> None:
     author_condition = " ".join(author["if"].split())
     assert author_condition == (
         f"!cancelled() && {scope_condition} && needs.diff-scope.outputs.tests_only != 'true'"
+        " && needs.diff-scope.outputs.pin_only != 'true'"
     )
     assert "diff-scope" in author["needs"]
     assert "!cancelled()" in author["if"]
