@@ -83,11 +83,15 @@ def scope_violations(repo: Path, base: str, tip: str) -> list[str]:
 def merge_pin(repo: Path, pin: Pin, base: str, message: str) -> Applied:
     """Merge ``pin`` into HEAD with ``message`` and prove the merge changed
     exactly what the pin changes; on a conflict or any difference, leave HEAD
-    as it was and raise ``PinRefusedError``."""
+    as it was and raise ``PinRefusedError``. A work tree with uncommitted
+    changes is refused first, so undoing the merge cannot discard them."""
+    if _git(repo, "status", "--porcelain", "--untracked-files=no"):
+        raise PinRefusedError(pin, "dirty", "the work tree has uncommitted changes")
     before = _git(repo, "rev-parse", "HEAD")
     if not _git_ok(repo, "merge", "--no-ff", "--no-edit", "-m", message, pin.commit):
+        code = "conflict" if _git(repo, "ls-files", "-u") else "merge-failed"
         _git_ok(repo, "merge", "--abort")
-        raise PinRefusedError(pin, "conflict", "the merge did not apply cleanly")
+        raise PinRefusedError(pin, code, "the merge did not apply cleanly")
     merged = _raw_text(repo, before, "HEAD")
     if merged != _raw_text(repo, base, pin.commit):
         _git(repo, "reset", "-q", "--hard", before)
@@ -96,12 +100,12 @@ def merge_pin(repo: Path, pin: Pin, base: str, message: str) -> Applied:
 
 
 def changed_since_pin(repo: Path, applied: Sequence[Applied]) -> list[str]:
-    """Paths of applied pins whose blob at HEAD differs from the blob at the pin
+    """Paths of applied pins whose mode or blob at HEAD differs from the pin
     (present in one and absent in the other counts). Empty means intact."""
     changed = []
     for entry in applied:
         for path in sorted(_names(repo, entry.base, entry.pin.commit)):
-            if _blob(repo, entry.pin.commit, path) != _blob(repo, "HEAD", path):
+            if _entry(repo, entry.pin.commit, path) != _entry(repo, "HEAD", path):
                 changed.append(f"lovverk#{entry.pin.pull_request}: {path}")
     return changed
 
@@ -135,9 +139,10 @@ def _names(repo: Path, old: str, new: str) -> set[str]:
     return {name.decode("utf-8", "surrogateescape") for name in out.split(b"\0") if name}
 
 
-def _blob(repo: Path, commit: str, path: str) -> str | None:
-    result = _run(repo, "rev-parse", "-q", "--verify", f"{commit}:{path}")
-    return result.stdout.decode().strip() if result.returncode == 0 else None
+def _entry(repo: Path, commit: str, path: str) -> bytes:
+    """``<mode> <type> <id>`` of ``path`` in ``commit``, empty when absent."""
+    out = _git_bytes(repo, "--literal-pathspecs", "ls-tree", "-z", commit, "--", path)
+    return out.split(b"\t", 1)[0]
 
 
 def _git(repo: Path, *args: str) -> str:

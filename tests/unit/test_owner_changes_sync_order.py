@@ -104,6 +104,8 @@ def test_existing_sync_steps_keep_their_order() -> None:
     assert [names.index(name) for name in anchors] == sorted(names.index(name) for name in anchors)
 
 
-@pytest.mark.xfail(strict=True, reason="owner-change steps are not wired into sync.yml yet")
+@pytest.mark.xfail(
+    strict=True, raises=AssertionError, reason="owner-change steps are not wired into sync.yml yet"
+)
 def test_sync_workflow_runs_owner_change_steps_in_order() -> None:
     assert order_problems(_sync_steps()) == []

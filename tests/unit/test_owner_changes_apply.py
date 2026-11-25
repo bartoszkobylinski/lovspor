@@ -204,6 +204,26 @@ def test_pinned_file_changed_after_the_merge_is_reported(corpus: Path) -> None:
     assert changed_since_pin(corpus, [applied]) == [f"lovverk#42: {DOC}"]
 
 
+def test_pinned_file_mode_changed_after_the_merge_is_reported(corpus: Path) -> None:
+    tip = _branch(corpus, {DOC: "owner\n"})
+    applied = _apply(corpus, _pin(tip))
+    (corpus / DOC).chmod(0o755)
+    _commit(corpus, "chmod")
+    assert changed_since_pin(corpus, [applied]) == [f"lovverk#42: {DOC}"]
+
+
+def test_dirty_work_tree_is_refused_before_merging(corpus: Path) -> None:
+    tip = _branch(corpus, {DOC: "owner\n"})
+    head = git(corpus, "rev-parse", "HEAD")
+    _write(corpus, {"README.md": "uncommitted\n"})
+    base = git(corpus, "merge-base", "HEAD", tip)
+    with pytest.raises(PinRefusedError) as caught:
+        merge_pin(corpus, _pin(tip), base, "owner-change")
+    assert caught.value.code == "dirty"
+    assert git(corpus, "rev-parse", "HEAD") == head
+    assert (corpus / "README.md").read_text(encoding="utf-8") == "uncommitted\n"
+
+
 def test_pinned_deletion_restored_after_the_merge_is_reported(corpus: Path) -> None:
     git(corpus, "checkout", "-q", "-b", "owner")
     git(corpus, "rm", "-q", DOC)

@@ -58,15 +58,18 @@ reported once.
    - a merge commit inside the pinned range: refuse `merge-commit`;
    - any change, in any single commit or in the range as a whole, outside
      `lokale-forskrifter/`, on a path with a component starting with `.`, or
-     with a mode other than `100644`: refuse `out-of-scope`;
+     with a mode other than `100644` (or `000000` for an added or deleted
+     side): refuse `out-of-scope`;
    - any path changed by the pin also changed on `main` since the merge base,
      compared without rename detection: refuse `overlap`.
 2. Record the attempt, create-only:
    `git push --porcelain origin <commit>:refs/owner-changes/<commit>/<attempt>`;
    continue only if the porcelain flag is `*` (new ref).
-3. `merge_pin(repo, pin, base, message)` with the message
+3. `merge_pin(repo, pin, base, message)` refuses `dirty` if the work tree has
+   uncommitted tracked changes, then merges with the message
    `owner-change: lovverk#<N> <commit> attempt <K> (pinned in lovspor <sha>, run <id>)`:
-   a conflict aborts the merge and refuses `conflict`; a merge whose raw diff
+   a conflict aborts the merge and refuses `conflict` (`merge-failed` for any
+   other merge failure); a merge whose raw diff
    (`--no-renames --no-abbrev --raw`) against its first parent differs from the
    pin's raw diff against its merge base is reset and refused `gate`.
 4. After all pins, only if one was applied: regenerate the README
@@ -77,8 +80,10 @@ A refused pin is skipped; the run continues and publishes without it.
 ## Step 7: run-end check
 
 `changed_since_pin(repo, applied)`: for every applied pin and every path it
-changed, the blob at HEAD equals the blob at the pinned commit (absent in both
-for a deletion). Any difference fails the step.
+changed, the mode and blob at HEAD equal those at the pinned commit (absent in
+both for a deletion). Any difference fails the step. A git failure while
+undoing a refused merge raises an error instead of a refusal, so the run fails
+and pushes nothing.
 
 ## Step 9: report
 
@@ -122,3 +127,5 @@ repository, and one pin exercised end to end before sealing is required.
 - Whether GitHub marks the lovverk pull request merged when its head reaches
   `main` through the sync push. If not, it is closed by hand.
 - The git version on the runner. The gate does not depend on merge options.
+- The sync clone is on the `main` branch; the wiring should refuse to apply
+  pins on a detached HEAD.
