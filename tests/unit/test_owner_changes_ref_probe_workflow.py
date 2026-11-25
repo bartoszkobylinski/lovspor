@@ -210,3 +210,19 @@ def test_probe_runs_one_at_a_time() -> None:
         "group": "owner-changes-ref-probe",
         "cancel-in-progress": False,
     }
+
+
+def test_dry_run_commit_is_a_descendant_of_the_target(
+    tmp_path: Path, remote: tuple[Path, str]
+) -> None:
+    """The plain-push record is about a fast-forward, so the probe commit must
+    sit on top of the target, not on an unrelated root."""
+    bare, target = remote
+    (tmp_path / "runner").mkdir()
+    for step in _SEQUENCE[:4]:
+        result = _run(step, tmp_path, bare, target)
+        assert result.returncode == 0, f"{step}\n{result.stdout}\n{result.stderr}"
+    probe = tmp_path / "runner" / "probe"
+    assert _git(probe, "rev-parse", "HEAD^") == target
+    plain = _run(_SEQUENCE[3], tmp_path, bare, target)
+    assert "plain push, descendant" in plain.stdout

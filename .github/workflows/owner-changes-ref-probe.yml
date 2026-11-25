@@ -120,6 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           probe="$RUNNER_TEMP/probe"
+          git -C "$probe" checkout -q --detach "$TARGET"
           git -C "$probe" -c user.name=probe -c user.email=probe@invalid \
             commit -q --allow-empty -m "descendant of the target (never pushed)"
           if lease=$(git -C "$probe" push --dry-run --porcelain --force-with-lease="$PROBE_REF:" \
