@@ -22,9 +22,10 @@ parser, so ``build_server`` imports it at call time.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple
 
+from lovspor.act_links import known_acts
 from lovspor.errors import LocalScopeError
 from lovspor.local_corpus import (
     LOCAL_DATASET,
@@ -48,6 +49,7 @@ from lovspor.mcp import (
     _with_section_notice,
 )
 from lovspor.observation_history import observation_history
+from lovspor.slug_index import SlugEntry
 from lovspor.temporal import append_notice, evaluation_date_today
 
 ToolDecorator = Callable[[], Callable[[Callable[..., Any]], Callable[..., Any]]]
@@ -59,7 +61,7 @@ _KLASS_CODE = re.compile(r"\d{2}|\d{4}")
 class _Central(NamedTuple):
     """The central namespace a local section's cross-references are validated against."""
 
-    slugs: Callable[[], Iterable[str]]
+    slugs: Callable[[], Mapping[str, SlugEntry]]
     index_for: Callable[[str], SectionIndex]
 
 
@@ -273,7 +275,7 @@ def _local_section(
     canonical = _normalize_section_id(section_id)
     section, _ = _section_from_body(served.address, body, canonical, occurrence)
     index_for = _index_for(served.address, _section_index_from_body(body), central.index_for)
-    known = {*central.slugs(), served.address}
+    known = known_acts(central.slugs(), served.address)
     references = _cross_references_for(section["body"], served.address, known, index_for)
     return {
         **_section_result(served.address, canonical, section, references),

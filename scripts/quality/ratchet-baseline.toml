@@ -383,7 +383,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/mcp.py"
-value = 4874
+value = 4854
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -502,7 +502,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 rule = "function-lines"
 path = "src/lovspor/mcp.py"
 name = "_extract_cross_references"
-value = 30
+value = 27
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]

@@ -71,7 +71,9 @@ from lovspor.access import (
     ServiceLimits,
     self_service_limits_from_env,
 )
+from lovspor.act_links import ActLinks, LinkedAct, known_acts
 from lovspor.attestation import compute_attestation, corpus_present
+from lovspor.cross_reference_window import window_of
 from lovspor.embeddings import (
     EmbeddingConfig,
     EmbeddingFile,
@@ -289,14 +291,6 @@ section body for cross-reference extraction. Captures the bare
 section_id (no ``§`` prefix). Permissive about whitespace between
 ``§`` and the id, covering all section_id shapes the renderer
 produces: plain integer, chapter-section, trailing letter."""
-
-_CROSS_REF_CONTEXT_CHARS = 80
-"""Characters of context on each side of a ``§`` match to scan for
-slug tokens during cross-reference resolution. 80 chars typically
-captures a cue word (``i``, ``jf.``, ``iht.``) plus the slug
-token; longer windows risk picking up an unrelated slug from the
-previous sentence and false-positively classifying a same-act
-ref as cross-act."""
 
 _SLUG_TOKEN_PATTERN = re.compile(r"[a-z0-9æøåäöü-]+")
 """Tokenize text by sequences of slug-class characters.
@@ -621,9 +615,8 @@ class CorpusReader:
         in the body, deduplicated by target, with each entry already
         validated against the manifest. Each entry is
         ``{text, target_slug, target_section_id, valid, reason}``;
-        ``target_slug`` defaults to the current act when no other
-        slug appears within ``±_CROSS_REF_CONTEXT_CHARS`` of the
-        match. The field is empty when the body has no ``§``
+        ``target_slug`` is the act a ``§`` link names, else a slug near
+        the match, else the current act. Empty when the body has no ``§``
         patterns. See ``_extract_cross_references`` for the parser
         contract and its deliberate MVP limitations.
 
@@ -650,7 +643,7 @@ class CorpusReader:
         cross_references = _cross_references_for(
             section["body"],
             record.slug or "",
-            set(self._load_slug_index()),
+            known_acts(self._load_slug_index()),
             self._section_index_for,
         )
         return _section_result(record.slug, section_id, section, cross_references)
@@ -2671,6 +2664,14 @@ def _verdict(
     return False, f"§ {section_id} not found in {target_slug!r}"
 
 
+def _judge(
+    section_id: str, slug: str, known_slugs: set[str], index_for: Callable[[str], SectionIndex]
+) -> tuple[bool | None, str | None]:
+    known = slug in known_slugs
+    index = index_for(slug) if known else SectionIndex(ids=set(), complete=True)
+    return _verdict(section_id, slug, index, known=known)
+
+
 def _extract_cross_references(
     body: str,
     current_slug: str,
@@ -2679,72 +2680,51 @@ def _extract_cross_references(
 ) -> list[dict[str, Any]]:
     """Extract validated cross-references from a section body.
 
-    Walks the body for ``§ N-M`` patterns. For each match, scans a
-    ``±_CROSS_REF_CONTEXT_CHARS`` window for slug tokens; if a token
-    matches a current manifest slug different from ``current_slug``,
-    the reference is treated as cross-act. Otherwise it is treated
-    as a same-act reference (validated against ``current_slug``'s
-    section set).
+    Walks the body for ``§ N-M`` patterns; one inside a link target (a URL)
+    only bounds its neighbours' windows. A ``§`` that is the text of a link
+    to an act (``[§ 5-2](lov/1969-06-13-26/§5-2)``) belongs to the act the
+    link names (#1034), and to the link's section when that is the parsed
+    one plus a letter (``§ 13 a`` -> ``13a``); ``valid: null`` when the act
+    is not current here or the link's section is otherwise different. Any other match
+    scans a ``±CONTEXT_CHARS`` window for a known slug other than
+    ``current_slug`` (cross-act), else same-act.
 
-    ``known_slugs`` is the full set of current manifest slugs (cheap
-    — no body parsing). ``section_index`` resolves one slug to its
-    section-id set lazily, so only acts actually referenced get
-    parsed, and carries whether that set is complete.
+    ``known_slugs`` is the set of current slugs; as ``KnownActs`` it also
+    maps doc_ids to them, without which no link resolves. ``section_index``
+    resolves one slug to its section-id set lazily and says whether that
+    set is complete. Output is deduplicated by ``(target_slug,
+    target_section_id)``, keeping the first occurrence's verbatim ``text``.
 
-    Output is deduplicated by ``(target_slug, target_section_id)``
-    so a section that mentions ``§ 5-12`` three times produces one
-    entry. The first occurrence's verbatim ``text`` is kept.
-
-    Output entries: ``text`` (verbatim ``§ N-M`` substring as it
-    appears in the body), ``target_slug`` (resolved act, defaults
-    to ``current_slug`` when no other slug appears in the window),
-    ``target_section_id`` (the parsed id), ``valid`` (``True`` the
-    target section exists, ``False`` it provably does not, ``None``
-    the target act's index is incomplete so neither can be shown),
+    Output entries: ``text`` (verbatim ``§ N-M``), ``target_slug``,
+    ``target_section_id``, ``valid`` (``True`` the target section exists,
+    ``False`` it provably does not, ``None`` neither can be shown),
     ``reason`` (null when valid; otherwise human-readable).
 
-    Limitations (deliberate MVP scope, deferred to a possible
-    follow-up):
-
-    - References by descriptive name (``i lov om X`` without a
-      canonical slug) are silently treated as same-act and may
-      false-positive validate against the current act.
-    - Chapter / part references (``kapittel 4``, ``del III``)
-      are not extracted.
+    Limitations:
+    - An unlinked reference by descriptive name (``i lov om X``) is
+      treated as same-act and may false-positive validate.
+    - Chapter / part references (``kapittel 4``, ``del III``) are not extracted.
     - Paragraph qualifiers (``første ledd``) are stripped — only
       the section_id is reported. A consumer that needs to verify
       a paragraph-level quote falls back to ``verify_quote``.
     """
-    seen: dict[tuple[str, str], dict[str, Any]] = {}
+    seen: dict[tuple[str | None, str], dict[str, Any]] = {}
     body_lower = body.lower()
+    links = ActLinks(body, known_slugs)
     matches = list(_CROSS_REF_SECTION.finditer(body))
     owner_starts = _compute_match_owner_starts(body_lower, matches, known_slugs)
     for idx, match in enumerate(matches):
         section_id = match.group(1)
-        # Bound the slug-resolution window by the surrounding ``§``
-        # matches so adjacent refs do not share context. Without this
-        # bound, ``"jf. § 5-13. Likevel kan det iht. § 9-3 i annen-
-        # lov"`` would resolve § 5-13 to ``annen-lov`` (which sits
-        # in § 9-3's clause) and falsely classify a same-act ref as
-        # cross-act. ``owner_starts`` further trims the AFTER-window
-        # when the next ``§`` has a slug owner that precedes it
-        # (slug-before-§ pattern, e.g. ``"annen-lov § 9-3"``);
-        # without that trim, the slug owner of the next ``§`` would
-        # leak backward into the current ``§``'s window.
-        prev_end = matches[idx - 1].end() if idx > 0 else 0
-        next_start = matches[idx + 1].start() if idx + 1 < len(matches) else len(body)
-        if idx in owner_starts:
-            next_start = min(next_start, owner_starts[idx])
-        start = max(prev_end, match.start() - _CROSS_REF_CONTEXT_CHARS)
-        end = min(next_start, match.end() + _CROSS_REF_CONTEXT_CHARS)
-        target_slug = _resolve_slug_in_window(
-            body_lower[start:end],
-            current_slug,
-            known_slugs,
-        )
-        known = target_slug in known_slugs
-        index = section_index(target_slug) if known else SectionIndex(ids=set(), complete=True)
-        valid, reason = _verdict(section_id, target_slug, index, known=known)
+        if links.in_target(match.start()):
+            continue
+        context = window_of(body_lower, matches, idx, owner_starts)
+        window = _resolve_slug_in_window(context, current_slug, known_slugs)
+        linked = links.act_at(match.start(), section_id) or LinkedAct(window, None, section_id)
+        section_id, target_slug = linked.section, linked.slug
+        if linked.problem is None:
+            valid, reason = _judge(section_id, target_slug or "", known_slugs, section_index)
+        else:
+            valid, reason = None, linked.problem
         key = (target_slug, section_id)
         if key not in seen:
             seen[key] = {
@@ -3905,7 +3885,7 @@ class _SnapshotState:
         cross_references = _cross_references_for(
             section["body"],
             record.slug or "",
-            set(self._slug_index()),
+            known_acts(self._slug_index()),
             self._section_index_for,
         )
         result = _section_result(record.slug, section_id, section, cross_references)
