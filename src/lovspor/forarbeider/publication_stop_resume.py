@@ -164,7 +164,7 @@ def _verified(request: ExecutionRequest, family: str, scope: str) -> None:
         raise _refused(f"unresolved:{family}_{status}")
 
 
-def _resolution(request: ExecutionRequest, latch: LatchEvent) -> tuple[str, ...]:
+def resolution_of(request: ExecutionRequest, latch: LatchEvent) -> tuple[str, ...]:
     """The verified evidence that the latch's cause is resolved, or why it is not."""
     if any(reason.startswith(_NEVER_RESOLVED) for reason in latch.reasons):
         raise _refused(f"unresolved:{latch.reasons[0]}")
@@ -196,7 +196,7 @@ def _clear(
         raise _refused("not_latched")
     if record.signed_at <= latch.at:
         raise _refused("resume_predates_latch")
-    resolution = _resolution(request, latch)
+    resolution = resolution_of(request, latch)
     digest = sha256(signed.record).hexdigest()
     event = publication_attempts.clear_latch(request.workspace, now, digest, resolution)
     if publication_anchors.settle(request, "stop_latch") is None:

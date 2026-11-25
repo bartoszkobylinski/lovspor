@@ -74,6 +74,7 @@ from lovspor.forarbeider.control_plane_anchor import (
     AnchorQuery,
     AnchorVerdict,
     anchor_pending,
+    initialize,
     verify,
     workspace_scope,
 )
@@ -193,6 +194,23 @@ def ledger_authority(ledger: BudgetLedger, authority: AnchorAuthority) -> Anchor
     """The authority that verifies the ledger: its own witness when it names one."""
     witness = authority.witness if ledger.witness is None else ledger.witness
     return authority._replace(witness=witness, workspace=ledger.root)
+
+
+def initialize_ledger(
+    ledger: BudgetLedger, authority: AnchorAuthority, repository: str
+) -> AnchorVerdict:
+    """Bootstrap: anchor one budget ledger's empty chain on its witness, explicitly, once.
+
+    It never adopts or resets a history: an entry on disk, or a ledger the
+    witness already anchored, refuses it.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_locked: ledger``; ``release_not_eligible``
+            with ``already_anchored`` or ``anchor:<status>``.
+    """
+    with ledger_lock(ledger):
+        (ledger.root / ledger.ledger_id).mkdir(mode=0o700, exist_ok=True)
+        return initialize(query(ledger, repository), ledger_authority(ledger, authority))
 
 
 def query(ledger: BudgetLedger, repository: str) -> AnchorQuery:

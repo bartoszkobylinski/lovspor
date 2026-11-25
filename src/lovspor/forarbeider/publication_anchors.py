@@ -39,21 +39,26 @@ Anchoring new records is narrow:
 """
 
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from lovspor.forarbeider import publication_attempts
 from lovspor.forarbeider.control_plane_anchor import (
     AnchorAuthority,
     AnchorQuery,
     AnchorVerdict,
     anchor_pending,
+    initialize,
     verify,
     workspace_scope,
 )
 from lovspor.forarbeider.control_plane_anchor_models import Family
 from lovspor.forarbeider.control_plane_chains import control_chain, workspace_chain
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from lovspor.forarbeider.publication_execution_models import LatchEvent
 from lovspor.forarbeider.release_control import ControlRequest, verify_control
+from lovspor.forarbeider.release_control_models import ReleaseControl
 
 if TYPE_CHECKING:
     from lovspor.forarbeider.publication_authorize import AuthorizationInputs
@@ -221,7 +226,95 @@ def settle(
         except ForarbeiderRefusedError:
             return None
     query = workspace_query(request.inputs, request.workspace, family, scope)
+    if family == "stop_latch" and clearing_reasons(request, query, authority):
+        return None
     try:
         return anchor_pending(query, authority)
     except ForarbeiderRefusedError:
         return None
+
+
+def initialize_attempts(request: "ExecutionRequest") -> AnchorVerdict:
+    """Bootstrap: anchor one transaction's empty attempts on their authoritative witness, once.
+
+    The owner's explicit operation before a transaction's first attempt, on the
+    ledger's witness when the ledger names one (AR5d-3). It never adopts or
+    resets a history: a record on disk, or a chain the witness already anchored,
+    refuses it.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_locked: workspace``; ``release_not_eligible``
+            with ``anchor_authority_missing``, ``already_anchored`` or ``anchor:<status>``.
+    """
+    authority = attempts_authority_of(request)
+    if authority is None:
+        raise _refused("anchor_authority_missing")
+    tid = request.inputs.transaction.transaction_id
+    with publication_attempts.workspace_lock(request.workspace):
+        query = workspace_query(request.inputs, request.workspace, "publication_attempts", tid)
+        return initialize(query, authority)
+
+
+def clearing_reasons(
+    request: "ExecutionRequest", query: AnchorQuery, authority: AnchorAuthority
+) -> tuple[str, ...]:
+    """Why a pending latch clearing is not the owner's; empty when it is or none is pending.
+
+    A ``cleared`` event lifts a latch only the owner may lift, so the witness
+    anchors one only on proof (#1027): it names the newest record of the
+    request's owner control history, that history verifies now as a RESUME
+    leaving the policy not stopped and is itself anchored, and that RESUME was
+    signed after the ``set`` it clears, whose cause is verifiably resolved now
+    (``resolution_of``). A ``set`` is anchored without proof:
+    it only ever stops.
+    """
+    events = publication_attempts.latch_events(request.workspace)
+    if not events or events[-1].kind != "cleared":
+        return ()
+    if verify(query, authority).status != "pending_anchor":
+        return ()
+    before = events[-2] if len(events) > 1 else None
+    return _resume_reasons(request, (before, events[-1]), authority)
+
+
+def _cause_reasons(
+    request: "ExecutionRequest", before: LatchEvent | None, signed: datetime
+) -> list[str]:
+    """The RESUME follows the ``set``, whose cause is verifiably resolved now."""
+    if before is None or before.kind != "set" or signed <= before.at:
+        return ["latch_clearing_resume_predates_latch"]
+    from lovspor.forarbeider.publication_stop_resume import (  # noqa: PLC0415 - builds on this module
+        resolution_of,
+    )
+
+    try:
+        resolution_of(request, before)
+    except ForarbeiderRefusedError:
+        return ["latch_clearing_cause_unresolved"]
+    return []
+
+
+def _resume_reasons(
+    request: "ExecutionRequest",
+    latch: tuple[LatchEvent | None, LatchEvent],
+    authority: AnchorAuthority,
+) -> tuple[str, ...]:
+    """Why the request's owner history is not the anchored RESUME a clearing names."""
+    before, cleared = latch
+    plan = request.inputs.plan.plan
+    history = request.inputs.control
+    if plan is None or not history:
+        return ("latch_clearing_without_resume",)
+    policy_id = plan.basis.policy.policy_id
+    found = verify_control(ControlRequest(history, policy_id, cleared.at), request.root)
+    record = ReleaseControl.model_validate_json(history[-1].record)
+    reasons = []
+    if found.status != "verified" or found.reasons or found.state != "not_stopped":
+        reasons.append("latch_clearing_resume_not_verified")
+    digest = sha256(history[-1].record).hexdigest()
+    if record.action != "resume" or digest != cleared.resume_control_sha256:
+        reasons.append("latch_clearing_not_the_newest_resume")
+    reasons += _cause_reasons(request, before, record.signed_at)
+    if verify(control_query(request.inputs, policy_id), authority).status != "verified":
+        reasons.append("latch_clearing_resume_unanchored")
+    return tuple(reasons)

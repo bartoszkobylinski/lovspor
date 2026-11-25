@@ -36,6 +36,7 @@ from lovspor.forarbeider.policy_trust import (
     QUARANTINE_NAMESPACE,
     TrustRoot,
 )
+from lovspor.forarbeider.publication_anchors import initialize_attempts
 from lovspor.forarbeider.publication_authorize import AuthorizationInputs
 from lovspor.forarbeider.publication_execute import (
     ExecutionOutcome,
@@ -44,7 +45,7 @@ from lovspor.forarbeider.publication_execute import (
     execute,
 )
 from lovspor.forarbeider.publication_execution_models import AppIdentity, PublicationSettings
-from lovspor.forarbeider.publication_ledger import BudgetLedger
+from lovspor.forarbeider.publication_ledger import BudgetLedger, initialize_ledger
 from lovspor.forarbeider.publication_models import PublicationTransaction
 from lovspor.forarbeider.publication_prepare import PreparationRequest, prepare_publication
 from lovspor.forarbeider.publication_quarantine import WitnessedSource
@@ -416,7 +417,7 @@ def anchor_rig(rig: "Rig", seed: bool = True, control: bool = True) -> None:
         authority if rig.ledger.witness is None else rig.anchoring(witness=rig.ledger.witness)
     )
     if verify(queries["publication_attempts"], attempts).status != "verified":
-        assert initialize(queries["publication_attempts"], attempts).status == "verified"
+        assert initialize_attempts(rig.request()).status == "verified"
     if not control:
         assert verify(queries["control_history"], authority).status == "verified"
         return
@@ -464,10 +465,9 @@ def write_entry(rig: "Rig", raw: bytes) -> None:
 
 def seed_ledger(rig: "Rig", entries: tuple[bytes, ...]) -> None:
     """Test setup: an anchored empty ledger, then each entry appended and anchored."""
-    rig.ledger.root.mkdir(mode=0o700, exist_ok=True)
-    ledger_folder(rig).mkdir(mode=0o700)
     authority = rig.anchoring(workspace=rig.ledger.root)
-    assert initialize(ledger_query(rig), authority).status == "verified"
+    repository = rig.inputs.settings.repository
+    assert initialize_ledger(rig.ledger, rig.anchoring(), repository).status == "verified"
     for raw in entries:
         write_entry(rig, raw)
         assert anchor_pending(ledger_query(rig), authority).status == "verified"

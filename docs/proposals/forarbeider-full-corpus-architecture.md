@@ -1291,28 +1291,39 @@ Limitations:
   - the trust roots are the evidence's (`authorization_stale:trust_root`);
   - the anchored head is still the evidence's (`authorization_stale:quarantine:<why>`).
   - The chain's lock is held from the authorization to the outcome record. Lock order: workspace, budget ledger, quarantine chain, witness. `append_successor` takes only the last two, so no successor is anchored between the final check and the send, and no send starts while a successor is written (`corpus_locked: ledger`).
-- **Bootstrap.**
+- **Forged control records** (found by the gate's audit, reproduced on `7fbfedae`):
+  - **#1027.** `publication_anchors.settle` anchors a pending latch `cleared` event only on proof (`clearing_reasons`):
+    - it names the newest record of the request's owner control history;
+    - that history verifies at the clearing's time as a RESUME that leaves the policy not stopped;
+    - that history is itself anchored;
+    - the RESUME was signed after the `set` it clears.
+    A hand-written clearing stays `pending_anchor`, so recovery and `resume` never adopt it and the send is denied.
+  - **#1028.** The cancellation resume path accepts its decision record only when it directly follows the attempts head the owner signed, with no `prepared_to_send`, `outcome_unknown` or `published` before it (`cancellation_record_not_the_owners`).
+- **Bootstrap.** Each operation is explicit and runs once; none adopts or resets a history.
   - `initialize_quarantine` anchors one ledger's empty chain, explicitly and once.
   - It refuses entries on disk, an anchored chain (`already_anchored`) and a document anchored under `quarantine_ledger` (`genesis:quarantine_ledger:<status>`); such a document is continued by the first `append_successor`.
   - Without it, readers refuse `anchor:unanchored`: a fresh deployment cannot publish until the owner bootstraps.
+  - `publication_anchors.initialize_attempts` anchors one transaction's empty attempts on their authoritative witness (the ledger's, AR5d-3). Records on disk or an anchored chain refuse it.
+  - `publication_ledger.initialize_ledger` anchors one budget ledger's empty chain on its witness. Entries or an anchored ledger refuse it.
+  - The test rig now bootstraps through these operations.
 
 | Component | Authority | Verified at | Failure mode | Tests | Status |
 |---|---|---|---|---|---|
 | Quarantine membership | AR5d-4 chain on the ledger's witness, owner exceptions re-verified now | `plan_witnessed`; `authorize` (`ar5_quarantine_anchor`); `_still_current` | refuse or deny; `successor_required` | `test_forarbeider_quarantine_integration` | fixed here |
 | Anchor trust root | the request's trust root | `authorize` (`trust_root`); `_still_current` | deny; `authorization_stale:trust_root` | same | fixed here |
 | Plan, policy approvals, limits | owner signatures, trust root | `authorize` | deny | `test_forarbeider_publication_execute` | existing |
-| STOP/RESUME, latch | owner records anchored on the request's witness; latch anchored | `authorize`, `_still_current` | deny; latch | `test_forarbeider_publication_stop_resume`, `_stale_authorization` | existing; gaps #1027, #1029 |
+| STOP/RESUME, latch | owner records anchored on the request's witness; latch anchored, a clearing only on an anchored owner RESUME | `authorize`, `_still_current`, `settle` | deny; latch; clearing `pending_anchor` | `test_forarbeider_publication_stop_resume`, `_stale_authorization`, `_forged_control_records` | #1027 fixed here; #1029 owner decision |
 | Workspace identity, writer | anchored identity and writer chain | `authorize`, `claim`, `require_current` | deny; refuse | `test_forarbeider_workspace_identity`, `_workspace_writer` | existing |
 | Attempts, receipts | anchored on the ledger's witness (AR5d-3) | `execute`, recovery | `recovery_required`; latch | `test_forarbeider_publication_remote_recovery`, `_recovery_races` | existing |
 | Budget ledger | durable, anchored | `authorize`, `_still_current` | deny | `test_forarbeider_publication_ledger` | existing; ledger identity unbound to limits: ledger v2 |
-| Cancellation | owner instruction and proof | `cancel_reservation` | refuse | `test_forarbeider_reservation_cancellation`, `_cross_witness_cancellation` | existing; gap #1028 |
+| Cancellation | owner instruction and proof; a resumed decision bound to the signed head | `cancel_reservation` | refuse | `test_forarbeider_reservation_cancellation`, `_cross_witness_cancellation`, `_forged_control_records` | #1028 fixed here |
+| Bootstrap | the owner's explicit operation | `initialize_quarantine`, `initialize_attempts`, `initialize_ledger` | refuse any existing history | `_quarantine_integration`, `_forged_control_records` | fixed here; `control_history` after #1029 |
 
 Remaining gaps, classified:
-- **Separate bounded fixes, filed with reproductions** (each against a contract stated above, outside the quarantine adapter, so left to one PR each):
-  - #1027: a forged `cleared` latch event is anchored by `settle`/`anchor_pending` without an owner RESUME.
-  - #1028: the cancel resume path skips the never-sent proof.
-- **Owner architecture decision:** #1029, which witness is authoritative for the control history when workspaces on different witnesses share a ledger.
-- **Bootstrap** of `publication_attempts`, `control_history` and `budget_ledger` has no operator command; only the test rig initializes them. A fresh deployment is denied (fail-closed), and nothing initializes or resets an existing history. One explicit command per family, after #1029.
+- **Fixed here:** #1027 and #1028 (above), and the bootstrap of `publication_attempts` and `budget_ledger`.
+- **Owner architecture decision: #1029.** When workspaces on different witnesses share a ledger, which witness is authoritative for a policy's control history?
+  - Bounded proposal: the ledger's witness, as for attempts (AR5d-3). Verify and anchor `control_history` there, and refuse a workspace on another witness that does not present the head.
+  - The `control_history` bootstrap follows from that choice. Until then a fresh family is initialized only by the owner's raw `initialize`, which refuses any existing history.
 - **Production-only (AR7):** the witness pin, a production witness and an unpinned trust root (FC7b). `AuthorizationInputs.ledger` is read only without a durable ledger, which simulation denies.
 - **Ledger v2 / exceptional accounting:** ledger identity bound to the owner-signed limits; anchored policy and limits revocations.
 - AR4a preparation still reads the caller's sealed assessment to choose the batch. A stale one is denied at authorization and again before the send.

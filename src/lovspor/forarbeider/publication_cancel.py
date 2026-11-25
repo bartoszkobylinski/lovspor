@@ -302,6 +302,14 @@ def _recorded(
     record = found[-1]
     if len(found) > 1 or record.authorization_sha256 != digest:
         raise _refused("already_cancelled_by_another_instruction")
+    # The decision is written right after the attempts head the owner signed, with
+    # nothing sent before it; anything else was not written by this path (#1028).
+    every = publication_attempts.records(request.workspace, tid)
+    before = every[: every.index(record)]
+    if record.previous_sha256 != order.attempts_head_sha256 or any(
+        r.state in _SENT for r in before
+    ):
+        raise _refused("cancellation_record_not_the_owners")
     if record.recorded_at >= order.valid_until:
         raise _refused("instruction:expired")
     _anchored(request)
