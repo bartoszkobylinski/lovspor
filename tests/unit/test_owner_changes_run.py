@@ -139,6 +139,17 @@ def test_applied_pin_is_skipped_on_a_later_run(lovverk: Lovverk) -> None:
     assert git(lovverk.clone, "rev-parse", "HEAD") == head
 
 
+def test_applied_pin_is_skipped_without_the_remote(lovverk: Lovverk) -> None:
+    """A pin already on main must not depend on the network: with the origin
+    gone, it is still skipped, not refused as pr-unavailable."""
+    tip = lovverk.pull_request(42, {DOC: "changed\n"})
+    pins = lovverk.pins(f"{tip} 42 1 x")
+    apply_pins(lovverk.clone, pins, CONTEXT)
+    git(lovverk.clone, "remote", "set-url", "origin", str(lovverk.tmp / "gone.git"))
+    report = apply_pins(lovverk.clone, pins, CONTEXT)
+    assert report.skipped and not report.applied and not report.refused
+
+
 def _refusal(lovverk: Lovverk, pins: Path) -> str:
     head = git(lovverk.clone, "rev-parse", "HEAD")
     report = apply_pins(lovverk.clone, pins, CONTEXT)

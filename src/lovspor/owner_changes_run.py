@@ -89,7 +89,10 @@ def write_report(report: Report, path: Path) -> None:
 
 def _apply_one(repo: Path, pin: Pin, context: RunContext, report: Report) -> Applied | None:
     try:
-        base = plan(repo, pin, _pr_head(repo, pin), _attempt_exists(repo, pin))
+        # A pin already on main needs no remote call, so a network hiccup
+        # never reports it as not applied.
+        on_main = git_ok(repo, "merge-base", "--is-ancestor", pin.commit, "HEAD")
+        base = None if on_main else plan(repo, pin, _pr_head(repo, pin), _attempt_exists(repo, pin))
         if base is None:
             report.skipped.append({"pin": asdict(pin), "reason": "already on main"})
             return None

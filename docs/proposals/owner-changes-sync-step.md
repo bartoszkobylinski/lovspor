@@ -50,7 +50,9 @@ For each pin, in file order. The pin file is parsed first with
 `lovspor ops owner-changes check`; a malformed file applies no pin and is
 reported once.
 
-1. `plan(repo, pin, pr_head, attempt_used)`, where `pr_head` comes from
+1. A pin whose commit is already an ancestor of HEAD is skipped first, with
+   no remote call, so a network failure never reports an applied pin.
+   Otherwise `plan(repo, pin, pr_head, attempt_used)`, where `pr_head` comes from
    `git fetch origin refs/pull/<N>/head` and `attempt_used` from
    `git ls-remote origin refs/owner-changes/<commit>/<attempt>`:
    - commit already an ancestor of HEAD: skip, nothing to do;
@@ -93,8 +95,10 @@ and pushes nothing.
 
 One issue per (commit, attempt), "Pinned owner change not applied:
 lovverk#<N>", created once with the refusal code and detail, never
-re-commented on later nights. The existing "Nightly sync did not complete"
-issue names the pins applied in a failed run.
+re-commented on later nights. The refusal detail is shown as a code block,
+so path names from the pinned commit render literally. The existing
+"Nightly sync did not complete" issue does not name the pins applied in a
+failed run (see Open questions).
 
 ## Failure handling
 
@@ -137,8 +141,9 @@ Not yet done: one pin exercised end to end before sealing is required.
 - Whether GitHub marks the lovverk pull request merged when its head reaches
   `main` through the sync push. If not, it is closed by hand.
 - The git version on the runner. The gate does not depend on merge options.
-- The sync clone is on the `main` branch; the pass refuses to run on any
-  other branch or a detached HEAD (an error, so the job fails before pushing).
+- The sync clone is on the `main` branch; with at least one pin, the pass
+  refuses to run on any other branch or a detached HEAD (an error, so the
+  job fails before pushing). An empty pin file makes no git call at all.
 - "Nightly sync did not complete" does not yet name the pins applied in a
   failed run; the attempt refs and the job log do. Follow-up.
 

@@ -230,22 +230,6 @@ jobs:
           uv run --no-dev lovspor temporal-epoch --corpus-path "$LOVVERK_PATH"
           record-sync-run --sync-run "$GITHUB_RUN_ID"
 
-      # Clears embedding_hash on documents whose sidecar holds fewer vectors
-      # than the current chunker would write, so the sync below rebuilds them.
-      # Diagnostic/recovery tooling since ADR-0006: the embedding_input_hash
-      # staleness condition now catches pipeline drift automatically on every
-      # keyed sync (including the same-count case this heuristic cannot see);
-      # this step stays as an independent safety net during the rollout. The
-      # incident class it was built for: pipeline changes rather than law
-      # changes — the 2026-07-23 grammar/block changes stranded 797 documents
-      # (measured from the flag migration; an earlier comment here said 791),
-      # and only those whose Markdown also changed were ever rebuilt.
-      #
-      # Opt-in and never scheduled, for two reasons: it rewrites the manifest
-      # for documents the change detector calls current, and the re-embed it
-      # triggers spends real budget. Deliberately WITHOUT the OpenAI key — this
-      # step only reads Markdown and writes the manifest; the sync below is
-      # what talks to OpenAI.
       # Owner changes to lokale-forskrifter/ pinned in ops/lovverk-owner-changes
       # (docs/owner-changes.md; design: docs/proposals/owner-changes-sync-step.md).
       # After the epoch step, whose note is anchored at the starting head and
@@ -264,6 +248,22 @@ jobs:
           --file ops/lovverk-owner-changes --report "$RUNNER_TEMP/owner-changes.json"
           --run "$GITHUB_SHA:$GITHUB_RUN_ID"
 
+      # Clears embedding_hash on documents whose sidecar holds fewer vectors
+      # than the current chunker would write, so the sync below rebuilds them.
+      # Diagnostic/recovery tooling since ADR-0006: the embedding_input_hash
+      # staleness condition now catches pipeline drift automatically on every
+      # keyed sync (including the same-count case this heuristic cannot see);
+      # this step stays as an independent safety net during the rollout. The
+      # incident class it was built for: pipeline changes rather than law
+      # changes — the 2026-07-23 grammar/block changes stranded 797 documents
+      # (measured from the flag migration; an earlier comment here said 791),
+      # and only those whose Markdown also changed were ever rebuilt.
+      #
+      # Opt-in and never scheduled, for two reasons: it rewrites the manifest
+      # for documents the change detector calls current, and the re-embed it
+      # triggers spends real budget. Deliberately WITHOUT the OpenAI key — this
+      # step only reads Markdown and writes the manifest; the sync below is
+      # what talks to OpenAI.
       - name: Flag under-embedded documents for re-embed
         if: inputs.repair_embeddings
         run: uv run --no-dev lovspor repair-embeddings
@@ -286,6 +286,14 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: uv run --no-dev lovspor sync
 
+      # Nothing in the run may change a file a pin set: if the sync did, the
+      # step fails and nothing is pushed.
+      - name: Check pinned owner changes are unchanged
+        if: steps.owner_changes.outcome == 'success'
+        run: >-
+          uv run --no-dev lovspor ops owner-changes check-applied --corpus-path "$LOVVERK_PATH"
+          --report "$RUNNER_TEMP/owner-changes.json"
+
       # The audit is the only check that compares the manifest against disk;
       # every sync-time mechanism compares upstream against the manifest, so
       # drift like a tombstoned-but-present file (2026-07-24) or the 48
@@ -296,14 +304,6 @@ jobs:
       # only: the 18 pre-existing unparsed_section_heading findings are
       # registered follow-up work, and a gate that is permanently red is one
       # nobody reads. No continue-on-error — failing the job is the point.
-      # Nothing in the run may change a file a pin set: if the sync did, the
-      # step fails and nothing is pushed.
-      - name: Check pinned owner changes are unchanged
-        if: steps.owner_changes.outcome == 'success'
-        run: >-
-          uv run --no-dev lovspor ops owner-changes check-applied --corpus-path "$LOVVERK_PATH"
-          --report "$RUNNER_TEMP/owner-changes.json"
-
       - name: Audit corpus integrity before push
         run: uv run --no-dev lovspor audit --corpus-path "$LOVVERK_PATH"
 
@@ -320,8 +320,12 @@ jobs:
           set -euo pipefail
           file_issue() {
             local title="$1" body="$2" state="$3"
-            if gh issue list --repo "$GITHUB_REPOSITORY" --state "$state" --limit 1000 \
-              --json title --jq '.[].title' | grep -qxF "$title"; then
+            # Listed into a variable first: `grep -q` stops reading early, and
+            # a SIGPIPE in gh under pipefail would read as "not reported".
+            local titles
+            titles=$(gh issue list --repo "$GITHUB_REPOSITORY" --state "$state" --limit 1000 \
+              --json title --jq '.[].title')
+            if grep -qxF -- "$title" <<<"$titles"; then
               echo "already reported: $title"
               return 0
             fi
@@ -329,7 +333,7 @@ jobs:
           }
           jq -c '.refused[]' "$REPORT" | while IFS= read -r entry; do
             title=$(jq -r '"Pinned owner change not applied: lovverk#\(.pin.pull_request) \(.pin.commit) attempt \(.pin.attempt)"' <<<"$entry")
-            body=$(jq -r --arg run "$RUN_URL" '"This pin was not applied in this run. Whether the run published anything else is in its log.\n\nRefusal: `\(.code)`\n\n\(.detail)\n\nRun: \($run)\n\nHow to fix and re-pin: docs/owner-changes.md"' <<<"$entry")
+            body=$(jq -r --arg run "$RUN_URL" '"This pin was not applied in this run. Whether the run published anything else is in its log.\n\nRefusal: `\(.code)`\n\n\(.detail | split("\n") | map("    " + .) | join("\n"))\n\nRun: \($run)\n\nHow to fix and re-pin: docs/owner-changes.md"' <<<"$entry")
             file_issue "$title" "$body" all
           done
           if [ "$(jq '.file_problems | length' "$REPORT")" -gt 0 ]; then
