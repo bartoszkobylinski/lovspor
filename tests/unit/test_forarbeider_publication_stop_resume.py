@@ -582,6 +582,7 @@ def test_the_verifier_reads_the_latch_itself_not_only_the_adapter(rig: Rig) -> N
         rig.anchoring(),
         rig.workspace,
         rig.ledger,
+        rig.quarantine,
     )
 
     evidence = authorize(context)

@@ -1269,8 +1269,53 @@ Limitations:
 - The witness is trusted, not proved (AR5a): one that drops or forks anchors could hide a successor; a production witness is AR7.
 - The writer needs every policy the chain's entries name, to replay them (matched by digest, never trusted).
 - No AR3 path removes a quarantine record, so no justified removal exists; an owner decision would be needed to add one.
-- `run_quarantine` still takes the previous ledger's bytes from its caller; wiring it to `read_quarantine` is the integration step (production stays disabled).
+- `run_quarantine` still takes the previous ledger's bytes from its caller, for independent AR3 use; the publishing pipeline reads quarantine only through `read_quarantine` since the AR5 integration gate (below).
 - A global halt, AR6 and AR7 are not in this PR.
+
+**AR5 integration gate status.** The publishing pipeline no longer relies on a caller-supplied quarantine, and every anchor is verified under the request's one trust root. Simulation only; production stays denied; no flag is enabled.
+
+- **Before.** The planner, AR4a preparation and authorization accepted any `QuarantineEvidence` carrying the in-process `quarantine_assessment` seal. `run_quarantine` issues that seal over whatever ledger bytes its caller offers, so neither the AR5d-4 chain nor its witness was ever required. Reproduced on `7fbfedae`:
+  - a document the anchored chain quarantines was sent (paths A and B);
+  - a pending successor was ignored;
+  - evidence issued before a successor was spent after it;
+  - a witness authority under a second trust root was accepted.
+- **Adapter** `publication_quarantine` (no change to AR3, the planner or the metrics):
+  - `witnessed_quarantine` reads the head only through `read_quarantine` (the chain is `verified`, its genesis agrees, and every transition is replayed). It then verifies the head entry's carried owner exceptions **now**: `clock_regressed`, `exception:<halt>` (e.g. a signing key whose window has since closed), and `clearance_not_current` (`settle` is not a fixed point now: lapsed or revoked).
+  - `plan_witnessed` refuses a caller ledger (`caller_ledger_refused`). It runs AR3 on the anchored head with the head's exceptions and those offered. It plans only when the run leaves the head unchanged; otherwise it returns `successor_required` with the successor and the material for `append_successor`. A lapsed clearance is reinstated through that successor, never honoured.
+  - `quarantine_reasons` binds the sealed assessment's and the sealed plan's quarantine digests to the anchored head's set, and the head's policy digest to the plan's policy.
+- **Authorization.**
+  - New check `ar5_quarantine_anchor`: never waivable in simulation; in production `unavailable` (`quarantine_anchor_production_witness_ar7_pending`).
+  - It reads the chain on the ledger's witness, when the ledger names one, as the attempts are (AR5d-3).
+  - `trust_root` also requires the witness authority's root to be the request's (`anchor_trust_root_not_the_requests`).
+- **Before the send** (`_still_current`, under the locks):
+  - the trust roots are the evidence's (`authorization_stale:trust_root`);
+  - the anchored head is still the evidence's (`authorization_stale:quarantine:<why>`).
+  - The chain's lock is held from the authorization to the outcome record. Lock order: workspace, budget ledger, quarantine chain, witness. `append_successor` takes only the last two, so no successor is anchored between the final check and the send, and no send starts while a successor is written (`corpus_locked: ledger`).
+- **Bootstrap.**
+  - `initialize_quarantine` anchors one ledger's empty chain, explicitly and once.
+  - It refuses entries on disk, an anchored chain (`already_anchored`) and a document anchored under `quarantine_ledger` (`genesis:quarantine_ledger:<status>`); such a document is continued by the first `append_successor`.
+  - Without it, readers refuse `anchor:unanchored`: a fresh deployment cannot publish until the owner bootstraps.
+
+| Component | Authority | Verified at | Failure mode | Tests | Status |
+|---|---|---|---|---|---|
+| Quarantine membership | AR5d-4 chain on the ledger's witness, owner exceptions re-verified now | `plan_witnessed`; `authorize` (`ar5_quarantine_anchor`); `_still_current` | refuse or deny; `successor_required` | `test_forarbeider_quarantine_integration` | fixed here |
+| Anchor trust root | the request's trust root | `authorize` (`trust_root`); `_still_current` | deny; `authorization_stale:trust_root` | same | fixed here |
+| Plan, policy approvals, limits | owner signatures, trust root | `authorize` | deny | `test_forarbeider_publication_execute` | existing |
+| STOP/RESUME, latch | owner records anchored on the request's witness; latch anchored | `authorize`, `_still_current` | deny; latch | `test_forarbeider_publication_stop_resume`, `_stale_authorization` | existing; gaps #1027, #1029 |
+| Workspace identity, writer | anchored identity and writer chain | `authorize`, `claim`, `require_current` | deny; refuse | `test_forarbeider_workspace_identity`, `_workspace_writer` | existing |
+| Attempts, receipts | anchored on the ledger's witness (AR5d-3) | `execute`, recovery | `recovery_required`; latch | `test_forarbeider_publication_remote_recovery`, `_recovery_races` | existing |
+| Budget ledger | durable, anchored | `authorize`, `_still_current` | deny | `test_forarbeider_publication_ledger` | existing; ledger identity unbound to limits: ledger v2 |
+| Cancellation | owner instruction and proof | `cancel_reservation` | refuse | `test_forarbeider_reservation_cancellation`, `_cross_witness_cancellation` | existing; gap #1028 |
+
+Remaining gaps, classified:
+- **Separate bounded fixes, filed with reproductions** (each against a contract stated above, outside the quarantine adapter, so left to one PR each):
+  - #1027: a forged `cleared` latch event is anchored by `settle`/`anchor_pending` without an owner RESUME.
+  - #1028: the cancel resume path skips the never-sent proof.
+- **Owner architecture decision:** #1029, which witness is authoritative for the control history when workspaces on different witnesses share a ledger.
+- **Bootstrap** of `publication_attempts`, `control_history` and `budget_ledger` has no operator command; only the test rig initializes them. A fresh deployment is denied (fail-closed), and nothing initializes or resets an existing history. One explicit command per family, after #1029.
+- **Production-only (AR7):** the witness pin, a production witness and an unpinned trust root (FC7b). `AuthorizationInputs.ledger` is read only without a durable ledger, which simulation denies.
+- **Ledger v2 / exceptional accounting:** ledger identity bound to the owner-signed limits; anchored policy and limits revocations.
+- AR4a preparation still reads the caller's sealed assessment to choose the batch. A stale one is denied at authorization and again before the send.
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 

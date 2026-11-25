@@ -143,6 +143,8 @@ class VerifiedQuarantine(NamedTuple):
     ledger: QuarantineLedger
     ledger_sha256: str
     sequence: int
+    #: The newest entry, whose exceptions justify every clearance the ledger holds.
+    head: QuarantineSuccession | None = None
 
 
 class _Context(NamedTuple):
@@ -325,7 +327,30 @@ def read_quarantine(
     held = _entries(store)
     _witnessed(context, held)
     head = _replayed(context, held)
-    return VerifiedQuarantine(head, document_sha256(head), len(held))
+    newest = QuarantineSuccession.model_validate_json(held[-1]) if held else None
+    return VerifiedQuarantine(head, document_sha256(head), len(held), newest)
+
+
+def initialize_quarantine(
+    store: QuarantineStore, repository: str, authority: AnchorAuthority
+) -> AnchorVerdict:
+    """Bootstrap: anchor one ledger's empty chain once, explicitly, from nothing.
+
+    The owner's one-time operation for a deployment with no quarantine history.
+    It never resets or adopts a history: entries on disk, a chain the witness
+    already anchored, or a document anchored under ``quarantine_ledger`` (whose
+    chain starts by continuing it, :func:`append_successor`) refuse.
+
+    Raises:
+        ForarbeiderRefusedError: ``corpus_locked: ledger``;
+            ``release_not_eligible: quarantine_succession:genesis:quarantine_ledger:<status>``,
+            ``already_anchored`` or ``anchor:<status>``.
+    """
+    context = _Context(store, repository, authority, {})
+    with publication_ledger.ledger_lock(_handle(store)):
+        held = _entries(store)
+        _origin(context, None)
+        return initialize(_query(context, held), authority)
 
 
 # --- writing -------------------------------------------------------------------------------------

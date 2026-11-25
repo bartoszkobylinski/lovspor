@@ -127,6 +127,7 @@ def test_genuine_evidence_cannot_be_spent_on_a_foreign_transport(rig_a: Rig) -> 
         rig_a.anchoring(),
         rig_a.workspace,
         rig_a.ledger,
+        rig_a.quarantine,
     )
     evidence = authorize(context)
     assert evidence.decision == "simulation_only", evidence.denied_by

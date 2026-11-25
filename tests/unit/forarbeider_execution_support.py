@@ -47,13 +47,16 @@ from lovspor.forarbeider.publication_execution_models import AppIdentity, Public
 from lovspor.forarbeider.publication_ledger import BudgetLedger
 from lovspor.forarbeider.publication_models import PublicationTransaction
 from lovspor.forarbeider.publication_prepare import PreparationRequest, prepare_publication
+from lovspor.forarbeider.publication_quarantine import WitnessedSource
 from lovspor.forarbeider.publication_sandbox import DisposableRemote, create_disposable_remote
+from lovspor.forarbeider.quarantine_succession import QuarantineStore, initialize_quarantine
 from lovspor.forarbeider.release_contract_models import BudgetUsage, LimitsEvidence
 from lovspor.forarbeider.release_ledger import entry_bytes, plan_entry
 from lovspor.forarbeider.release_ledger_models import LedgerOperation
 from lovspor.forarbeider.release_limits import LimitsMaterial, LimitsRequest, verify_limits
 from lovspor.forarbeider.release_plan import build_plan
 from lovspor.forarbeider.release_provenance import issue_provenance
+from lovspor.forarbeider.release_quarantine import EMPTY_LEDGER, quarantine_set
 from lovspor.forarbeider.workspace_identity import establish
 from lovspor.forarbeider.workspace_writer_models import LEASE
 from tests.unit.forarbeider_authorization_support import (
@@ -67,7 +70,6 @@ from tests.unit.forarbeider_authorization_support import (
 )
 from tests.unit.forarbeider_publication_support import (
     git,
-    quarantine_of,
     sealed_plan,
     sealed_quarantine,
     source_repository,
@@ -130,6 +132,8 @@ class Rig:
     witness: OfflineAnchorWitness
     witness_key: Key
     ledger: BudgetLedger
+    #: AR5 integration: the anchored quarantine chain the publication reads.
+    quarantine: WitnessedSource | None = None
 
     def anchoring(self, **changes: Any) -> AnchorAuthority:
         fields: dict[str, Any] = {
@@ -152,6 +156,7 @@ class Rig:
             "workspace": self.workspace,
             "anchoring": self.anchoring(),
             "ledger": self.ledger,
+            "quarantine": self.quarantine,
         }
         return ExecutionRequest(**(fields | changes))
 
@@ -252,7 +257,7 @@ def make_rig(
     assert limits_evidence.status == "verified", limits_evidence.reasons
     store = Store()
     rows = [synthetic_row(store, n) for n in numbers]
-    found = quarantine_of()
+    found = quarantine_set(EMPTY_LEDGER)
     limits_sha = limits_evidence.limits_sha256
     plan = build_plan(
         context(numbers, rows, limits_sha256=limits_sha), rows, store.artifacts, found
@@ -328,9 +333,26 @@ def make_rig(
         BudgetLedger(tmp / "ledger", LEDGER_ID)
         if share is None
         else BudgetLedger(share.ledger.root, share.ledger.ledger_id, share.witness),
+        quarantine_source(tmp) if share is None else share.quarantine,
     )
     anchor_rig(rig, seed=share is None, control=not (share is not None and one_witness))
+    if share is None:
+        verdict = initialize_quarantine(quarantine_store(tmp), REPOSITORY_OF_RIG, rig.anchoring())
+        assert verdict.status == "verified"
     return rig
+
+
+QUARANTINE_ID = "synthetic-quarantine"
+REPOSITORY_OF_RIG = settings_for("A").repository
+
+
+def quarantine_store(tmp: Path) -> QuarantineStore:
+    """The rig's quarantine chain (AR5d-4), one per ledger, beside the budget ledger."""
+    return QuarantineStore(tmp / "quarantine", QUARANTINE_ID)
+
+
+def quarantine_source(tmp: Path) -> WitnessedSource:
+    return WitnessedSource(quarantine_store(tmp), (policy_bytes(),))
 
 
 def anchor_queries(rig: "Rig", workspace: Path | None = None) -> dict[str, AnchorQuery]:
