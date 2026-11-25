@@ -1,0 +1,18 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_value_end"
+registered = "2026-11-22, from register key 4f8e17fbd47d71c7 (GREEN under scripts/ci/mutant_check.py try with the PR #1002 tests)"
+mutation = """
+-        return False, start
++        return True, start
+"""
+justification = """
+`start` is a position from `_skip`, so it never exceeds `len(raw)`: the branch
+runs only at `start == len(raw)`, a value that would begin at the end of the
+page. The original returns `False, len(raw)`, so `_parse_attribute` and then
+`_parse_tag` return `None, len(raw)`. The mutant returns `True, len(raw)`: the
+value is `b""`, `_parse_attribute` returns an attribute and `len(raw)`, and
+the caller `_parse_tag` then appends the attribute, finds `after_space = len(raw)`, matches neither `>` nor `/>`, and returns `None, max(len(raw), opening + 1)`, which is `None, len(raw)` because `after_space == end`. Same tag (none), same resume position. The comparison mutant of
+this line (`start > len(raw)`, an IndexError) is killed by
+test_an_equals_sign_without_a_value_breaks_the_tag.
+"""

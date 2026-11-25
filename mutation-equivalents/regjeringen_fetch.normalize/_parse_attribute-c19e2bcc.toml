@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_parse_attribute"
+registered = "2026-11-22, from register key 32331c4f14500dfe (GREEN under scripts/ci/mutant_check.py try with the PR #1002 tests)"
+mutation = """
+-        return _Attribute(name, None, None, name_end), name_end
++        return _Attribute(name, None, None, None), name_end
+"""
+justification = """
+This return builds an attribute without a value (`value is None`). The only
+reader of `_Attribute.value_start` is `_strict_value`, which returns `None`
+when `value is None` before it reads `value_start`; no other code reads the
+field, and attributes are never compared or hashed. So `name_end` and `None`
+in that field give the same normalized bytes for every input.
+"""
