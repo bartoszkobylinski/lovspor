@@ -196,10 +196,11 @@ def _replaced(
 ) -> bool:
     """A document anchored once and then anchored as another document.
 
-    Until AR5 integrates the AR3 successor check (``successor_findings``
-    against the anchored predecessor's bytes, under the owner's verified
-    exceptions), no transition of an anchored quarantine ledger is proven, so
-    every one is refused: a second document is never verified over the first.
+    No transition of a document anchored here is proven, so every one is
+    refused: a second document is never verified over the first. Proved
+    successors are AR5d-4's separate ``quarantine_succession`` family
+    (:mod:`~lovspor.forarbeider.quarantine_succession`), which replays the AR3
+    successor check and the owner's exceptions; it never changes this family.
     """
     if family not in _DOCUMENTS or previous is None or previous.record_count == 0:
         return False
