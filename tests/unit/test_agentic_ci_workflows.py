@@ -1920,7 +1920,8 @@ def test_dependabot_prs_skip_the_codex_lanes_and_still_reach_ready() -> None:
         f"!cancelled() && github.event_name == 'pull_request' && {same_repo_non_dependabot} && "
         "(github.event.action == 'ready_for_review' || "
         "(github.event.action == 'opened' && github.event.pull_request.draft == false)) && "
-        "needs.diff-scope.outputs.tests_only != 'true'"
+        "needs.diff-scope.outputs.tests_only != 'true' && "
+        "needs.diff-scope.outputs.pin_only != 'true'"
     )
     assert jobs["codex-tests"]["if"] == (
         f"${{{{ !cancelled() && needs.codex-author.result != 'skipped' && "

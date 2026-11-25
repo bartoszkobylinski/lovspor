@@ -17,6 +17,8 @@
 /scripts/ci/                                     @bartoszkobylinski
 /scripts/seal/                                   @bartoszkobylinski
 /ops/publication-signers                         @bartoszkobylinski
+/ops/lovverk-owner-changes                       @bartoszkobylinski
+/docs/owner-changes.md                           @bartoszkobylinski
 /docs/publication-seal.md                        @bartoszkobylinski
 /benchmarks/llhb/runner/tool-surface-v*.json     @bartoszkobylinski
 
