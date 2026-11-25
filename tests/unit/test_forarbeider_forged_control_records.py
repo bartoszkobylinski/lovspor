@@ -28,6 +28,7 @@ from tests.unit.forarbeider_execution_support import (
     NOW,
     WITNESS,
     KeySigner,
+    _root,
     anchor_queries,
     make_rig,
     policy_id_of,
@@ -255,3 +256,83 @@ def test_a_stop_recorded_from_the_other_workspace_binds_the_ledgers_owner(
     assert outcome.evidence is not None
     assert "ar5_control_anchor" in outcome.evidence.denied_by
     assert github.calls == []
+
+
+# --- each layer of the clearing proof holds on its own -------------------------------------------
+
+
+def owner_stopped(rig: Any) -> tuple[Any, Any]:
+    """An owner STOP recorded (latch set, resolvable), then a genuine RESUME signed after it."""
+    stop = stop_of(rig, first(rig))
+    recorded = record_stop(with_control(rig, first(rig), stop), NOW)
+    assert recorded.status == "stop_recorded" and recorded.anchored
+    owner_resume = resume_of(rig, stop, 3, stop)
+    return with_control(rig, first(rig), stop, owner_resume), owner_resume
+
+
+def reasons_after_forging(rig: Any, request: Any, named: str) -> tuple[str, ...]:
+    forged_clearing(rig.workspace, rig.transaction.transaction_id, named)
+    query = anchor_queries(rig)["stop_latch"]
+    return publication_anchors.clearing_reasons(request, query, rig.anchoring())
+
+
+def test_a_clearing_on_a_resume_whose_owner_key_was_revoked_is_refused(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path / "a", "A")
+    request, owner_resume = owner_stopped(rig)
+    publication_anchors.sync_control(request, policy_id_of(rig), LATER)
+    revoked = _root(rig.tmp / "revoked", rig.owner, rig.bot, rig.witness_key, (rig.owner,))
+    later = request._replace(root=revoked)
+
+    reasons = reasons_after_forging(rig, later, sha256(owner_resume.record).hexdigest())
+
+    assert reasons == ("latch_clearing_resume_not_verified",)
+
+
+def test_a_clearing_on_a_resume_the_witness_never_anchored_is_refused(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path / "a", "A")
+    request, owner_resume = owner_stopped(rig)  # the RESUME is signed, never synced
+
+    reasons = reasons_after_forging(rig, request, sha256(owner_resume.record).hexdigest())
+
+    assert reasons == ("latch_clearing_resume_unanchored",)
+
+
+def test_a_clearing_that_names_another_record_than_the_resume_is_refused(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path / "a", "A")
+    request, _ = owner_stopped(rig)
+    publication_anchors.sync_control(request, policy_id_of(rig), LATER)
+
+    reasons = reasons_after_forging(rig, request, "d" * 64)
+
+    assert reasons == ("latch_clearing_not_the_newest_resume",)
+
+
+def test_a_forged_cancel_decision_after_a_send_the_owner_signed_over_never_cancels(
+    tmp_path: Path,
+) -> None:
+    """Even an instruction bound to a head that already holds a send never cancels it."""
+    rig = make_rig(tmp_path / "a", "A")
+    assert execute(rig.request(), environment_of(rig, fault="lost")).status == "outcome_unknown"
+    offered = signed(rig)  # bound to the head after the begun send
+    sequence, previous = publication_attempts.head(rig.workspace, tid(rig))
+    content = rig.transaction.content
+    forged = AttemptRecord(
+        transaction_id=tid(rig),
+        release_manifest_sha256=content.release_manifest_sha256,
+        base_commit=content.publication.base_commit,
+        path=content.publication.path,
+        attempt_id=attempt_id_of(tid(rig), sequence),
+        sequence=sequence,
+        state="refused",
+        recorded_at=NOW,
+        authorization_sha256=sha256(offered.record).hexdigest(),
+        commit=None,
+        reasons=(CANCELLED,),
+        previous_sha256=previous,
+    )
+    publication_attempts.append(rig.workspace, forged)
+
+    error = refused(lambda: cancel(rig, offered, environment_of(rig)))
+
+    assert error.detail.endswith("cancellation_record_not_the_owners"), error.detail
+    assert operations(rig) == ["reserve"]
