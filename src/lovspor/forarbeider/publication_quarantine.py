@@ -23,6 +23,12 @@ a caller supplied:
   successor and the exception material to anchor first
   (:func:`~lovspor.forarbeider.quarantine_succession.append_successor`); no
   plan is made from an unanchored ledger.
+- :func:`prepare_witnessed` is AR4a's preparation at the publishing boundary:
+  the batch's membership is chosen only after the sealed assessment and the
+  sealed plan are proved to be the anchored head's quarantine now; the raw
+  :func:`~lovspor.forarbeider.publication_prepare.prepare_publication` stays
+  for independent AR4a use, and nothing it prepares from another quarantine
+  can be authorized or sent (``ar5_quarantine_anchor``, the final check).
 - :func:`quarantine_reasons` is what authorization (``ar5_quarantine_anchor``)
   and the final check before a send ask: the quarantine the transaction's
   sealed plan honours is exactly the set of the anchored head, read now, for
@@ -35,10 +41,16 @@ workspace. Nothing here writes, except that the caller decides to anchor.
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import Literal, NamedTuple
 
 from lovspor.forarbeider.control_plane_anchor import AnchorAuthority
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from lovspor.forarbeider.publication_prepare import (
+    PreparationOutcome,
+    PreparationRequest,
+    prepare_publication,
+)
 from lovspor.forarbeider.quarantine_succession import (
     QuarantineStore,
     VerifiedQuarantine,
@@ -221,3 +233,33 @@ def quarantine_reasons(
     if named is not None and (policy is None or policy.policy_sha256 != named):
         reasons.append("quarantine_policy_not_the_plans")
     return tuple(reasons)
+
+
+class Witnessing(NamedTuple):
+    """Where and when a preparation proves its quarantine against the anchored chain."""
+
+    source: WitnessedSource
+    authority: AnchorAuthority
+    repository: str
+    at: datetime
+
+
+def prepare_witnessed(
+    request: PreparationRequest, witnessing: Witnessing, source: Path, work: Path
+) -> PreparationOutcome:
+    """AR4a's preparation, only once the batch's quarantine is the anchored head's now.
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible: quarantine_witness:prepare:<why>``
+            (the sealed assessment or plan is not the anchored head's quarantine, or
+            the chain is not verified), and everything ``prepare_publication`` raises.
+    """
+    plan = request.plan.plan
+    bound = (request.quarantine.quarantine_sha256, plan.basis.quarantine_sha256 if plan else None)
+    policy = plan.basis.policy if plan else None
+    claim = QuarantineClaim(witnessing.repository, bound, policy)
+    held = (witnessing.source, witnessing.authority)
+    found = quarantine_reasons(held, claim, witnessing.at)
+    if found:
+        raise _refused("prepare:" + ",".join(found))
+    return prepare_publication(request, source, work)

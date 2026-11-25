@@ -46,8 +46,12 @@ from lovspor.forarbeider.publication_execute import (
 from lovspor.forarbeider.publication_execution_models import AppIdentity, PublicationSettings
 from lovspor.forarbeider.publication_ledger import BudgetLedger, initialize_ledger
 from lovspor.forarbeider.publication_models import PublicationTransaction
-from lovspor.forarbeider.publication_prepare import PreparationRequest, prepare_publication
-from lovspor.forarbeider.publication_quarantine import WitnessedSource
+from lovspor.forarbeider.publication_prepare import PreparationRequest
+from lovspor.forarbeider.publication_quarantine import (
+    WitnessedSource,
+    Witnessing,
+    prepare_witnessed,
+)
 from lovspor.forarbeider.publication_sandbox import DisposableRemote, create_disposable_remote
 from lovspor.forarbeider.quarantine_succession import QuarantineStore, initialize_quarantine
 from lovspor.forarbeider.release_contract_models import BudgetUsage, LimitsEvidence
@@ -274,7 +278,15 @@ def make_rig(
     source, base = source_repository(tmp / "src")
     work = tmp / "work"
     work.mkdir(mode=0o700)
-    prepared = prepare_publication(
+    witness_dir = tmp / "witness"
+    witness_dir.mkdir(mode=0o700)
+    witness = (
+        share.witness
+        if share is not None and one_witness
+        else OfflineAnchorWitness(witness_dir, KeySigner(WITNESS, witness_key))
+    )
+    witnessing = chain_of(tmp, share, witness, root)
+    prepared = prepare_witnessed(
         PreparationRequest(
             plan=sealed,
             quarantine=quarantine,
@@ -284,6 +296,7 @@ def make_rig(
             path=path,  # type: ignore[arg-type]
             base_commit=base,
         ),
+        witnessing,
         source,
         work,
     )
@@ -306,13 +319,6 @@ def make_rig(
     )
     workspace = tmp / "attempts"
     workspace.mkdir(mode=0o700)
-    witness_dir = tmp / "witness"
-    witness_dir.mkdir(mode=0o700)
-    witness = (
-        share.witness
-        if share is not None and one_witness
-        else OfflineAnchorWitness(witness_dir, KeySigner(WITNESS, witness_key))
-    )
     rig = Rig(
         tmp,
         owner,
@@ -333,13 +339,29 @@ def make_rig(
         BudgetLedger(tmp / "ledger", LEDGER_ID)
         if share is None
         else BudgetLedger(share.ledger.root, share.ledger.ledger_id, share.witness),
-        quarantine_source(tmp) if share is None else share.quarantine,
+        witnessing.source,
     )
     anchor_rig(rig, seed=share is None, control_anchoring=share is None)
-    if share is None:
-        verdict = initialize_quarantine(quarantine_store(tmp), REPOSITORY_OF_RIG, rig.anchoring())
-        assert verdict.status == "verified"
     return rig
+
+
+def chain_of(
+    tmp: Path, share: "Rig | None", witness: OfflineAnchorWitness, root: TrustRoot
+) -> Witnessing:
+    """AR5: the rig's quarantine chain, anchored first on the ledger's witness.
+
+    The batch is prepared only once its quarantine is proved to be the anchored head's.
+    """
+    if share is None:
+        authority = AnchorAuthority(witness, root, NOW)
+        verdict = initialize_quarantine(quarantine_store(tmp), REPOSITORY_OF_RIG, authority)
+        assert verdict.status == "verified"
+        chain = quarantine_source(tmp)
+        on = witness
+    else:
+        assert share.quarantine is not None
+        chain, on = share.quarantine, share.witness
+    return Witnessing(chain, AnchorAuthority(on, root, NOW), REPOSITORY_OF_RIG, NOW)
 
 
 QUARANTINE_ID = "synthetic-quarantine"

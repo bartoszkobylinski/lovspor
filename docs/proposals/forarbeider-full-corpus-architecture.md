@@ -1282,6 +1282,7 @@ Limitations:
 - **Adapter** `publication_quarantine` (no change to AR3, the planner or the metrics):
   - `witnessed_quarantine` reads the head only through `read_quarantine` (the chain is `verified`, its genesis agrees, and every transition is replayed). It then verifies the head entry's carried owner exceptions **now**: `clock_regressed`, `exception:<halt>` (e.g. a signing key whose window has since closed), and `clearance_not_current` (`settle` is not a fixed point now: lapsed or revoked).
   - `plan_witnessed` refuses a caller ledger (`caller_ledger_refused`). It runs AR3 on the anchored head with the head's exceptions and those offered. It plans only when the run leaves the head unchanged; otherwise it returns `successor_required` with the successor and the material for `append_successor`. A lapsed clearance is reinstated through that successor, never honoured.
+  - `prepare_witnessed` runs AR4a only after that binding holds now.
   - `quarantine_reasons` binds the sealed assessment's and the sealed plan's quarantine digests to the anchored head's set, and the head's policy digest to the plan's policy.
 - **Authorization.**
   - New check `ar5_quarantine_anchor`: never waivable in simulation; in production `unavailable` (`quarantine_anchor_production_witness_ar7_pending`).
@@ -1327,7 +1328,7 @@ Remaining gaps, classified:
 - **Owner confirmation:** #1029's witness choice (the ledger's) is a default, to be confirmed or rejected in review.
 - **Production-only (AR7):** the witness pin, a production witness and an unpinned trust root (FC7b). `AuthorizationInputs.ledger` is read only without a durable ledger, which simulation denies.
 - **Ledger v2 / exceptional accounting:** ledger identity bound to the owner-signed limits; anchored policy and limits revocations.
-- AR4a preparation still reads the caller's sealed assessment to choose the batch. A stale one is denied at authorization and again before the send.
+- **AR4a at the publishing boundary.** `prepare_witnessed` chooses a batch's membership only once the sealed assessment and the sealed plan are proved to be the anchored head's quarantine now (`quarantine_witness:prepare:<why>`, nothing cloned or staged). The raw AR2 planner (`plan_release`) and AR4a `prepare_publication` stay as they are for independent use, as `run_quarantine` does for AR3. The publishing pipeline enters through `plan_witnessed` and `prepare_witnessed`, and nothing prepared from another quarantine can be authorized or sent (`ar5_quarantine_anchor`, the final check).
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 

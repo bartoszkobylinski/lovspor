@@ -48,11 +48,14 @@ from lovspor.forarbeider.publication_execute import (
     publish_authorized,
 )
 from lovspor.forarbeider.publication_ledger import BudgetLedger
+from lovspor.forarbeider.publication_prepare import PreparationRequest
 from lovspor.forarbeider.publication_quarantine import (
     QuarantineClaim,
     WitnessedPlan,
     WitnessedSource,
+    Witnessing,
     plan_witnessed,
+    prepare_witnessed,
     quarantine_reasons,
     witnessed_quarantine,
 )
@@ -861,3 +864,66 @@ def test_evidence_is_never_spent_under_another_trust_root(tmp_path: Path) -> Non
 
     assert error.detail == "authorization_stale:trust_root"
     assert remote_unchanged(chosen, github)
+
+
+# --- AR4a at the publishing boundary: membership chosen only from the anchored head -------------
+
+
+def preparation_of(chosen: Rig) -> PreparationRequest:
+    planned = chosen.inputs.plan.plan
+    assert planned is not None
+    return PreparationRequest(
+        plan=chosen.inputs.plan,
+        quarantine=chosen.inputs.quarantine,
+        batch_id=planned.batches[0].batch_id,
+        rows=(),
+        artifacts={},
+        path=chosen.path,  # type: ignore[arg-type]
+        base_commit=chosen.base,
+    )
+
+
+def witnessing_of(chosen: Rig) -> Witnessing:
+    assert chosen.quarantine is not None
+    authority = chosen.anchoring(workspace=None)
+    return Witnessing(chosen.quarantine, authority, chosen.inputs.settings.repository, NOW)
+
+
+def test_a_batch_is_never_prepared_from_a_stale_quarantine(sender: Rig) -> None:
+    quarantine_in_the_batch(sender)
+    work = sender.tmp / "work-again"
+    work.mkdir(mode=0o700)
+
+    error = refused(
+        lambda: prepare_witnessed(
+            preparation_of(sender), witnessing_of(sender), sender.source, work
+        )
+    )
+
+    assert error.detail == "quarantine_witness:prepare:quarantine_not_the_anchored_head"
+    assert list(work.iterdir()) == []  # nothing cloned, nothing staged
+
+
+def test_a_batch_is_never_prepared_on_a_pending_chain(
+    sender: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def crash(*args: Any) -> Any:
+        raise SimulatedCrash
+
+    monkeypatch.setattr(quarantine_succession, "anchor_pending", crash)
+    with pytest.raises(SimulatedCrash):
+        quarantine_in_the_batch(sender)
+    monkeypatch.undo()
+    work = sender.tmp / "work-again"
+    work.mkdir(mode=0o700)
+
+    error = refused(
+        lambda: prepare_witnessed(
+            preparation_of(sender), witnessing_of(sender), sender.source, work
+        )
+    )
+
+    assert error.detail == (
+        "quarantine_witness:prepare:quarantine_succession:anchor:pending_anchor"
+    )
+    assert list(work.iterdir()) == []
