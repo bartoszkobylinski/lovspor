@@ -1,8 +1,8 @@
 """Apply one pinned owner change to a lovverk clone, or refuse it.
 
 The planned sync step (docs/proposals/owner-changes-sync-step.md) calls these
-functions for each pin in ``ops/lovverk-owner-changes``. Nothing calls them
-yet: ``sync.yml`` is unchanged until that step is approved.
+functions, through :mod:`lovspor.owner_changes_run`, for each pin in
+``ops/lovverk-owner-changes``.
 
 Every check runs local git only. ``plan`` refuses a pin before any write;
 ``merge_pin`` merges it and proves the merged change equals the pinned one,
@@ -47,7 +47,7 @@ def plan(repo: Path, pin: Pin, pr_head: str, attempt_used: bool) -> str | None:
     ``pr_head`` is the commit ``refs/pull/<N>/head`` resolved to; ``attempt_used``
     says the attempt ref for (commit, attempt) already exists. Raises
     ``PinRefusedError`` on the first rule the pin breaks."""
-    if _git_ok(repo, "merge-base", "--is-ancestor", pin.commit, "HEAD"):
+    if git_ok(repo, "merge-base", "--is-ancestor", pin.commit, "HEAD"):
         return None
     if attempt_used:
         raise PinRefusedError(pin, "attempt-consumed", f"attempt {pin.attempt} was already tried")
@@ -88,9 +88,9 @@ def merge_pin(repo: Path, pin: Pin, base: str, message: str) -> Applied:
     if _git(repo, "status", "--porcelain", "--untracked-files=no"):
         raise PinRefusedError(pin, "dirty", "the work tree has uncommitted changes")
     before = _git(repo, "rev-parse", "HEAD")
-    if not _git_ok(repo, "merge", "--no-ff", "--no-edit", "-m", message, pin.commit):
+    if not git_ok(repo, "merge", "--no-ff", "--no-edit", "-m", message, pin.commit):
         code = "conflict" if _git(repo, "ls-files", "-u") else "merge-failed"
-        _git_ok(repo, "merge", "--abort")
+        git_ok(repo, "merge", "--abort")
         raise PinRefusedError(pin, code, "the merge did not apply cleanly")
     merged = _raw_text(repo, before, "HEAD")
     if merged != _raw_text(repo, base, pin.commit):
@@ -121,7 +121,7 @@ def _scope_problem(modes: tuple[str, str], path: str) -> str | None:
 
 
 def _raw(repo: Path, old: str, new: str) -> list[tuple[tuple[str, str], str]]:
-    out = _git_bytes(repo, "diff", "--no-renames", "--no-abbrev", "--raw", "-z", old, new)
+    out = git_bytes(repo, "diff", "--no-renames", "--no-abbrev", "--raw", "-z", old, new)
     fields = out.split(b"\0")
     entries = []
     for header, path in zip(fields[0:-1:2], fields[1::2], strict=True):
@@ -131,25 +131,25 @@ def _raw(repo: Path, old: str, new: str) -> list[tuple[tuple[str, str], str]]:
 
 
 def _raw_text(repo: Path, old: str, new: str) -> bytes:
-    return _git_bytes(repo, "diff", "--no-renames", "--no-abbrev", "--raw", "-z", old, new)
+    return git_bytes(repo, "diff", "--no-renames", "--no-abbrev", "--raw", "-z", old, new)
 
 
 def _names(repo: Path, old: str, new: str) -> set[str]:
-    out = _git_bytes(repo, "diff", "--no-renames", "--name-only", "-z", old, new)
+    out = git_bytes(repo, "diff", "--no-renames", "--name-only", "-z", old, new)
     return {name.decode("utf-8", "surrogateescape") for name in out.split(b"\0") if name}
 
 
 def _entry(repo: Path, commit: str, path: str) -> bytes:
     """``<mode> <type> <id>`` of ``path`` in ``commit``, empty when absent."""
-    out = _git_bytes(repo, "--literal-pathspecs", "ls-tree", "-z", commit, "--", path)
+    out = git_bytes(repo, "--literal-pathspecs", "ls-tree", "-z", commit, "--", path)
     return out.split(b"\t", 1)[0]
 
 
 def _git(repo: Path, *args: str) -> str:
-    return _git_bytes(repo, *args).decode().strip()
+    return git_bytes(repo, *args).decode().strip()
 
 
-def _git_bytes(repo: Path, *args: str) -> bytes:
+def git_bytes(repo: Path, *args: str) -> bytes:
     result = _run(repo, *args)
     if result.returncode != 0:
         detail = result.stderr.decode(errors="replace").strip()
@@ -157,7 +157,7 @@ def _git_bytes(repo: Path, *args: str) -> bytes:
     return result.stdout
 
 
-def _git_ok(repo: Path, *args: str) -> bool:
+def git_ok(repo: Path, *args: str) -> bool:
     return _run(repo, *args).returncode == 0
 
 

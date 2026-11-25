@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+import yaml  # type: ignore[import-untyped]
 from typer.testing import CliRunner
 
 from lovspor.cli import app
@@ -31,11 +32,15 @@ def test_committed_pin_file_is_valid_and_holds_no_pin() -> None:
     assert load_pin_file(ROOT / PIN_FILE) == ()
 
 
-def test_sync_workflow_does_not_read_the_pin_file() -> None:
-    """E1 adds the file only: the sync behaves exactly as before."""
-    sync = (ROOT / ".github/workflows/sync.yml").read_text(encoding="utf-8")
-    assert "lovverk-owner-changes" not in sync
-    assert "owner-changes" not in sync
+def test_sync_workflow_reads_the_pin_file_only_in_the_apply_step() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/sync.yml").read_text(encoding="utf-8"))
+    readers = [
+        step["name"]
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if "lovverk-owner-changes" in str(step.get("run", ""))
+    ]
+    assert readers == ["Apply pinned owner changes"]
 
 
 @pytest.mark.parametrize("data", [b"", b"\n", b"# only a comment\n", b"#\n\n#x\n"])

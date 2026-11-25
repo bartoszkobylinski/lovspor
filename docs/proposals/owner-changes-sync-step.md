@@ -1,14 +1,15 @@
 # Applying pinned owner changes in the sync: design (E2)
 
-* **Status:** design and tested library only. **Not wired.** `sync.yml` is
-  unchanged; changing it needs the maintainer's separate approval.
+* **Status:** implemented and wired into `sync.yml` on a draft pull request.
+  Merging it changes the production sync and needs the maintainer's approval.
 * **Date:** 2026-11-25
 * **Builds on:** `docs/owner-changes.md` (pin file, grammar, pull-request
   checks), `docs/publication-seal.md` (seal, continuous custody).
 * **In this change:** `src/lovspor/owner_changes_apply.py` (refusal rules,
-  merge gate, run-end check), its tests, and the step-order rule as a test
-  (`tests/unit/test_owner_changes_sync_order.py`, with a strict xfail on the
-  real `sync.yml`).
+  merge gate, run-end check), `src/lovspor/owner_changes_run.py` (the pass the
+  sync runs: pull-request head, attempt ref, README refresh, report),
+  `lovspor ops owner-changes apply` and `check-applied`, the three steps in
+  `sync.yml`, and their tests.
 
 ## Why
 
@@ -62,9 +63,12 @@ reported once.
      side): refuse `out-of-scope`;
    - any path changed by the pin also changed on `main` since the merge base,
      compared without rename detection: refuse `overlap`.
-2. Record the attempt, create-only:
-   `git push --porcelain origin <commit>:refs/owner-changes/<commit>/<attempt>`;
-   continue only if the porcelain flag is `*` (new ref).
+2. Record the attempt, create-only on the server:
+   `git push --porcelain --force-with-lease=<ref>: origin <commit>:<ref>` for
+   `<ref>` = `refs/owner-changes/<commit>/<attempt>` (an empty expected value
+   means the ref must not exist); continue only on the `*` new-reference line.
+   A plain push would fast-forward an existing ref, so the lease is what makes
+   one attempt per pin hold.
 3. `merge_pin(repo, pin, base, message)` refuses `dirty` if the work tree has
    uncommitted tracked changes, then merges with the message
    `owner-change: lovverk#<N> <commit> attempt <K> (pinned in lovspor <sha>, run <id>)`:
@@ -116,16 +120,30 @@ In this change:
 - step order: the rule above on synthetic step lists, the existing anchor
   steps in `sync.yml`, and a strict xfail on the real `sync.yml`.
 
-With the wiring (not in this change): the three steps in `sync.yml` (remove
-the xfail mark), the attempt-ref push and the issue step against a local bare
-repository, and one pin exercised end to end before sealing is required.
+Wiring, also in this change: the order test runs against the real
+`sync.yml`; `tests/unit/test_owner_changes_run.py` runs the whole pass against
+a local bare origin with `refs/pull/<N>/head` (applied, skipped on a later
+run, consumed attempt and the next attempt, stale and missing pull request,
+out of scope before any attempt ref, one refusal not stopping the next pin,
+an attempt ref created meanwhile not overwritten, detached HEAD, the run-end
+check and both CLI commands), the regression that the committed empty pin
+file makes no git call, and the report step with a fake `gh` (one issue per
+refusal, none when already filed).
+
+Not yet done: one pin exercised end to end before sealing is required.
 
 ## Open questions
 
-- Whether GitHub accepts the deploy key's push to `refs/owner-changes/*`.
-  Test against lovverk before wiring step 4.
+- Whether GitHub accepts the deploy key's push to `refs/owner-changes/*`:
+  see "Deploy-key probe" below.
 - Whether GitHub marks the lovverk pull request merged when its head reaches
   `main` through the sync push. If not, it is closed by hand.
 - The git version on the runner. The gate does not depend on merge options.
-- The sync clone is on the `main` branch; the wiring should refuse to apply
-  pins on a detached HEAD.
+- The sync clone is on the `main` branch; the pass refuses to run on any
+  other branch or a detached HEAD (an error, so the job fails before pushing).
+- "Nightly sync did not complete" does not yet name the pins applied in a
+  failed run; the attempt refs and the job log do. Follow-up.
+
+## Deploy-key probe
+
+(pending)

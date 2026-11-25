@@ -1,10 +1,7 @@
 """Where the planned owner-change steps must sit in ``sync.yml``.
 
-The rule is checked here against synthetic step lists, and against the real
-``sync.yml`` as a strict xfail: the steps are not wired yet (the change to the
-production workflow needs its own approval). When they are, the xfail turns
-into a failure until its mark is removed, so the order is proven on the first
-wiring commit.
+The rule is checked against synthetic step lists and against the real
+``sync.yml``.
 """
 
 from pathlib import Path
@@ -104,8 +101,5 @@ def test_existing_sync_steps_keep_their_order() -> None:
     assert [names.index(name) for name in anchors] == sorted(names.index(name) for name in anchors)
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason="owner-change steps are not wired into sync.yml yet"
-)
 def test_sync_workflow_runs_owner_change_steps_in_order() -> None:
     assert order_problems(_sync_steps()) == []

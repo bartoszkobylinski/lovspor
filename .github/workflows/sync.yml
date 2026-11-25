@@ -245,6 +245,21 @@ jobs:
       # triggers spends real budget. Deliberately WITHOUT the OpenAI key — this
       # step only reads Markdown and writes the manifest; the sync below is
       # what talks to OpenAI.
+      # Owner changes to lokale-forskrifter/ pinned in ops/lovverk-owner-changes
+      # (docs/owner-changes.md; design: docs/proposals/owner-changes-sync-step.md).
+      # After the epoch step, whose note is anchored at the starting head and
+      # already pushed, and before any corpus work, so the merged head is the
+      # head the sync attests and the seal job seals. A refused pin is skipped
+      # and reported below; an empty pin file makes no git call. Only a git
+      # failure that leaves the clone in an unknown state fails the job, before
+      # anything is pushed.
+      - name: Apply pinned owner changes
+        id: owner_changes
+        run: >-
+          uv run --no-dev lovspor ops owner-changes apply --corpus-path "$LOVVERK_PATH"
+          --file ops/lovverk-owner-changes --report "$RUNNER_TEMP/owner-changes.json"
+          --run "$GITHUB_SHA:$GITHUB_RUN_ID"
+
       - name: Flag under-embedded documents for re-embed
         if: inputs.repair_embeddings
         run: uv run --no-dev lovspor repair-embeddings
@@ -277,8 +292,45 @@ jobs:
       # only: the 18 pre-existing unparsed_section_heading findings are
       # registered follow-up work, and a gate that is permanently red is one
       # nobody reads. No continue-on-error — failing the job is the point.
+      # Nothing in the run may change a file a pin set: if the sync did, the
+      # step fails and nothing is pushed.
+      - name: Check pinned owner changes are unchanged
+        run: >-
+          uv run --no-dev lovspor ops owner-changes check-applied --corpus-path "$LOVVERK_PATH"
+          --report "$RUNNER_TEMP/owner-changes.json"
+
       - name: Audit corpus integrity before push
         run: uv run --no-dev lovspor audit --corpus-path "$LOVVERK_PATH"
+
+      # One issue per refused (commit, attempt), and one per refused pin file
+      # while open; never re-filed on later nights. Never fails the job.
+      - name: Report pinned owner changes not applied
+        if: ${{ !cancelled() && steps.owner_changes.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ runner.temp }}/owner-changes.json
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          file_issue() {
+            local title="$1" body="$2" state="$3"
+            if gh issue list --repo "$GITHUB_REPOSITORY" --state "$state" --search "in:title $title" \
+              --json title --jq '.[].title' | grep -qxF "$title"; then
+              echo "already reported: $title"
+              return 0
+            fi
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          }
+          jq -c '.refused[]' "$REPORT" | while IFS= read -r entry; do
+            title=$(jq -r '"Pinned owner change not applied: lovverk#\(.pin.pull_request) \(.pin.commit) attempt \(.pin.attempt)"' <<<"$entry")
+            body=$(jq -r --arg run "$RUN_URL" '"The sync skipped this pin and published without it.\n\nRefusal: `\(.code)`\n\n\(.detail)\n\nRun: \($run)\n\nHow to fix and re-pin: docs/owner-changes.md"' <<<"$entry")
+            file_issue "$title" "$body" all
+          done
+          if [ "$(jq '.file_problems | length' "$REPORT")" -gt 0 ]; then
+            body=$(jq -r --arg run "$RUN_URL" '"No pin was applied.\n\n" + (.file_problems | map("- " + .) | join("\n")) + "\n\nRun: \($run)"' "$REPORT")
+            file_issue "Owner-change pin file refused" "$body" open
+          fi
 
       # The unsigned seal tag for the audited HEAD, composed without any key
       # and handed to the `seal` job as an artifact. No message when a seal

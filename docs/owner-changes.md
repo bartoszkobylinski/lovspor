@@ -9,11 +9,12 @@ in this repository.
 
 ## Status
 
-- **In place:** the pin file `ops/lovverk-owner-changes`, its grammar check
+- The pin file `ops/lovverk-owner-changes`, its grammar check
   (`lovspor ops owner-changes check`) and the pull-request checks below.
-- **Not yet in place:** the sync step that applies pins. Until it exists, the
-  sync does not read the pin file, and a pin has no effect. An empty file (only
-  comments) is the normal state.
+- The sync steps that apply pins, check them after the sync and report
+  refusals (design: [proposals/owner-changes-sync-step.md](proposals/owner-changes-sync-step.md)).
+  An empty file (only comments) is the normal state and makes the sync behave
+  exactly as without it.
 
 ## Pin file
 
@@ -53,7 +54,7 @@ Both run in the `fast-ci` job of `.github/workflows/pr-pipeline.yml`:
 
 The file is listed in `.github/CODEOWNERS`.
 
-## Planned procedure
+## Procedure
 
 1. Prepare the change on a lovverk branch based on current `main`, committing
    only files under `lokale-forskrifter/`. Open the lovverk pull request, let
@@ -67,4 +68,6 @@ The file is listed in `.github/CODEOWNERS`.
    and files an issue; publication continues. Each attempt is tried in one run
    only.
 
-Step 3 describes the planned sync step and is not active yet.
+A refusal opens one issue, "Pinned owner change not applied", per commit and
+attempt. Fix the cause, then replace the pin (rebased commit, attempt 1) or
+raise the attempt number.
