@@ -19,6 +19,7 @@ ledger, on its own witness or on the same one) are pinned on both paths: the
 publication's own chain governs every one of them.
 """
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -46,10 +47,12 @@ from lovspor.forarbeider.quarantine_succession_models import document_sha256
 from lovspor.forarbeider.release_quarantine import EMPTY_LEDGER, merge
 from lovspor.forarbeider.release_quarantine_run import ExceptionMaterial
 from tests.unit.forarbeider_execution_support import NOW, KeySigner, Rig, make_rig
-from tests.unit.forarbeider_release_control_support import policy_bytes
+from tests.unit.forarbeider_release_control_support import CHECKED_AT, policy_bytes
 from tests.unit.test_forarbeider_quarantine_integration import (
+    anchored,
     batch_finding,
     batches,
+    bootstrapped,
     chain,
     chain_keys,
     chain_witness,
@@ -63,6 +66,7 @@ from tests.unit.test_forarbeider_quarantine_integration import (
 )
 from tests.unit.test_forarbeider_quarantine_succession import REPOSITORY, WITNESS
 from tests.unit.test_forarbeider_quarantine_succession import Rig as ChainRig
+from tests.unit.test_forarbeider_release_quarantine import render_failure
 
 __all__ = ["chain", "chain_keys", "chain_witness", "planner"]
 
@@ -241,3 +245,31 @@ def test_a_chain_id_alone_never_identifies_the_source(chain: ChainRig, planner: 
     assert same_id.ledger_id == chain.store.ledger_id
     assert len(own.ledger.records) == 1
     assert other.ledger.records == ()
+
+
+def test_a_witness_and_store_rolled_back_together_read_the_old_head_as_verified(
+    chain: ChainRig, planner: Any
+) -> None:
+    """The offline witness cannot prove it was not rolled back (AR5a); no independent pin exists.
+
+    Whoever holds both directories restores an older copy, and the newer
+    quarantine disappears with nothing to refuse it. The binding authority
+    needs a pin independent of the request and of the store, which AR5 has
+    not got: the missing AR7 contract in §9.9 (#1037).
+    """
+    store, rows = planner
+    bootstrapped(chain)
+    witness_dir, chain_dir = chain.tmp / "witness", chain.store.root
+    kept = chain.tmp / "kept"
+    shutil.copytree(witness_dir, kept / "witness")
+    shutil.copytree(chain_dir, kept / "quarantine")
+    anchored(chain, plan(chain, store, reported=(render_failure(rows, 2),)), CHECKED_AT)
+    policies = policies_of(policy_bytes())
+    assert len(read_quarantine(chain.store, REPOSITORY, chain.authority(), policies).ledger.records)
+
+    for live, copy in ((witness_dir, kept / "witness"), (chain_dir, kept / "quarantine")):
+        shutil.rmtree(live)
+        shutil.copytree(copy, live)
+
+    rolled_back = read_quarantine(chain.store, REPOSITORY, chain.authority(), policies)
+    assert rolled_back.ledger.records == ()
