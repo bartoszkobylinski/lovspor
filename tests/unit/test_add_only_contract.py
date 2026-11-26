@@ -301,18 +301,29 @@ _BOUNDARY_MARKERS = re.compile(
     r"LOVVERK_DEPLOY_KEY|LOVVERK_SEAL_SIGNING_KEY|lovverk-sync|lovverk-seal|"
     r"github\.com[:/]bartoszkobylinski/lovverk"
 )
-_PUSH = re.compile(r"\bgit\b(?:\s+-C\s+\S+)?\s+push\b")
+#: Ways to hand a job every secret at once, whatever their names.
+_ALL_SECRETS = re.compile(r"toJSON\(\s*secrets\s*\)|secrets:\s*inherit|secrets\[")
+_PUSH = re.compile(r"\bgit\b.*\bpush\b")
 SEAL_SCRIPT = ROOT / "scripts" / "seal" / "sign-and-tag.sh"
 
 
+def _workflow_files() -> list[Path]:
+    return sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")])
+
+
+def _logical_lines(text: str) -> list[str]:
+    """Lines with shell continuations joined, comments dropped."""
+    joined = re.sub(r"\\\n\s*", " ", text)
+    return [line.strip() for line in joined.splitlines() if not line.lstrip().startswith("#")]
+
+
 def _pushes(text: str) -> list[str]:
-    return sorted(
-        {
-            line.strip()
-            for line in text.splitlines()
-            if _PUSH.search(line) and not line.lstrip().startswith("#")
-        }
-    )
+    return sorted({line for line in _logical_lines(text) if _PUSH.search(line)})
+
+
+def _secrets(text: str) -> list[str]:
+    names = set(re.findall(r"secrets\.([A-Za-z0-9_]+)", text))
+    return sorted(names | ({"<all secrets>"} if _ALL_SECRETS.search(text) else set()))
 
 
 def _triggers(workflow: dict[Any, Any]) -> dict[str, Any]:
@@ -324,37 +335,43 @@ def _triggers(workflow: dict[Any, Any]) -> dict[str, Any]:
         spec = raw or {}
         if name == "schedule":
             found[name] = [entry["cron"] for entry in spec]
-        else:
-            inputs = spec.get("inputs") or {}
-            found[name] = {
-                key: {k: v for k, v in sorted(field.items()) if k != "description"}
-                for key, field in sorted(inputs.items())
-            }
+            continue
+        inputs = {
+            key: {k: v for k, v in sorted(field.items()) if k != "description"}
+            for key, field in sorted((spec.get("inputs") or {}).items())
+        }
+        found[name] = {**{k: v for k, v in sorted(spec.items()) if k != "inputs"}, "inputs": inputs}
     return found
+
+
+def _actions(steps: list[dict[str, Any]]) -> list[str]:
+    """Every action a job runs, without its version: a new one can act with the job's keys."""
+    return sorted({str(step["uses"]).split("@", 1)[0] for step in steps if step.get("uses")})
 
 
 def _job_boundary(job: dict[str, Any]) -> dict[str, Any]:
     steps = job.get("steps") or []
-    text = json.dumps(job, sort_keys=True)
+    text = yaml.safe_dump(job, sort_keys=True, width=10**9)
     runs = "\n".join(str(step.get("run", "")) for step in steps)
     return {
         "uses": job.get("uses"),
         "if": job.get("if"),
         "needs": job.get("needs"),
+        "runs-on": job.get("runs-on"),
+        "container": job.get("container"),
         "environment": job.get("environment"),
         "matrix": (job.get("strategy") or {}).get("matrix"),
         "permissions": job.get("permissions"),
+        "actions": _actions(steps),
         "checkouts": [
             step.get("with") or {}
             for step in steps
             if str(step.get("uses", "")).startswith("actions/checkout@")
         ],
-        "secrets": sorted(set(re.findall(r"secrets\.([A-Za-z0-9_]+)", text))),
+        "secrets": _secrets(text),
         "variables": sorted(set(re.findall(r"vars\.([A-Za-z0-9_]+)", text))),
         "pushes": _pushes(runs),
-        "scripts": sorted(
-            {line.strip() for line in runs.splitlines() if line.strip().startswith("scripts/")}
-        ),
+        "scripts": sorted({line for line in _logical_lines(runs) if "scripts/" in line}),
     }
 
 
@@ -362,13 +379,18 @@ def deployment_boundary() -> dict[str, Any]:
     """What decides which code reaches production, with which credentials, and where it writes.
 
     Every workflow that names the lovverk write key, the seal key, a protected
-    environment or the corpus remote, with its triggers, permissions and, per job,
-    the guard, environment, checkouts, secrets, variables, pushes and the scripts it
-    runs; and the pushes of the seal script, which runs outside the workflow text.
+    environment or the corpus remote: its triggers with their filters and inputs,
+    permissions, concurrency and defaults, every secret and push anywhere in its
+    text, and per job the guard, runner, environment, actions, checkouts, secrets,
+    variables, pushes and the scripts it runs. Then, for every workflow file, the
+    secrets it reads, so a new holder of a key shows here even without a marker;
+    and the pushes of the seal script, which runs outside the workflow text.
     """
-    workflows = {}
-    for path in sorted(WORKFLOWS.glob("*.yml")):
+    workflows, credentials = {}, {}
+    for path in _workflow_files():
         text = path.read_text(encoding="utf-8")
+        if found := _secrets(text):
+            credentials[path.name] = found
         if not _BOUNDARY_MARKERS.search(text):
             continue
         workflow = yaml.safe_load(text)
@@ -376,10 +398,15 @@ def deployment_boundary() -> dict[str, Any]:
             "triggers": _triggers(workflow),
             "permissions": workflow.get("permissions"),
             "concurrency": workflow.get("concurrency"),
+            "defaults": workflow.get("defaults"),
+            "env_secrets": _secrets(yaml.safe_dump(workflow.get("env") or {})),
+            "secrets": _secrets(text),
+            "pushes": _pushes(text),
             "jobs": {name: _job_boundary(job) for name, job in sorted(workflow["jobs"].items())},
         }
     return {
         "workflows": workflows,
+        "workflow_secrets": credentials,
         "seal_script_pushes": _pushes(SEAL_SCRIPT.read_text(encoding="utf-8")),
     }
 
@@ -406,7 +433,7 @@ _DESTRUCTIVE = re.compile(
 def test_g7_no_workflow_migrates_identity_or_rewrites_history() -> None:
     found = {
         path.name: _DESTRUCTIVE.findall(path.read_text(encoding="utf-8"))
-        for path in sorted(WORKFLOWS.glob("*.yml"))
+        for path in _workflow_files()
     }
     assert {name: hits for name, hits in found.items() if hits} == {}
 
